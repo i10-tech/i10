@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import { Plus } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import { EmailInput } from "@repo/ui/components/email-input"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { EmailInput } from "@repo/ui/components/i10/email-input"
 import { emailProblem, isEmailUsable } from "@repo/ui/checks"
 import { FormDialog } from "@/components/form-dialog"
 import { createContact } from "@/lib/actions"

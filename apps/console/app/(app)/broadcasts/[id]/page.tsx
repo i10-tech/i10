@@ -1,15 +1,14 @@
 import type { Metadata } from "next"
-import { BackButton } from "@/components/back-button"
 import { notFound } from "next/navigation"
 import { Megaphone } from "lucide-react"
-import { Page, PageBody, PageHeader } from "@repo/ui/components/page"
+import { Page, PageBody, PageHeader } from "@repo/ui/components/i10/page"
 import { DetailHero } from "@/components/detail-hero"
 import { Journey } from "@/components/journey"
 import { Status } from "@/components/status"
 import { BroadcastEditor } from "@/components/broadcast-editor"
-import { Stat, StatRow } from "@/components/stat"
+import { KpiRow, MetricCard, share } from "@/components/kpi-row"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { tryApi } from "@/lib/api"
-import { formatRate } from "@/lib/format"
 import { broadcastJourney } from "@/lib/journey"
 import { describeStatus } from "@/lib/status"
 import type { BroadcastDetail, DomainSummary, SegmentRow, TopicRow } from "@/lib/types"
@@ -70,7 +69,7 @@ export default async function BroadcastPage({
     <Page>
       <PageHeader>
         <DetailHero
-          back={<BackButton href="/broadcasts" label="Back to broadcasts" />}
+          crumbs={[{ label: "Broadcasts", href: "/broadcasts" }]}
           icon={<Megaphone />}
           tone={describeStatus(tone).tone}
           eyebrow="Broadcast"
@@ -86,39 +85,43 @@ export default async function BroadcastPage({
         <Journey title="Broadcast events" steps={broadcastJourney(broadcast.data)} />
 
         {sent && (
-          <StatRow>
-            <Stat label="Recipients" value={broadcast.data.stats.total} />
-            <Stat
-              label="Delivered"
-              value={broadcast.data.stats.delivered}
-              sub={formatRate(
-                broadcast.data.stats.delivered,
-                broadcast.data.stats.total,
-              )}
-            />
-            <Stat
-              label="Bounced"
-              value={broadcast.data.stats.bounced}
-              tone={broadcast.data.stats.bounced > 0 ? "warning" : undefined}
-              sub={formatRate(broadcast.data.stats.bounced, broadcast.data.stats.total)}
-            />
-            <Stat
-              label="Complained"
-              value={broadcast.data.stats.complained}
-              tone={broadcast.data.stats.complained > 0 ? "danger" : undefined}
-              sub={formatRate(
-                broadcast.data.stats.complained,
-                broadcast.data.stats.total,
-              )}
-            />
-            <Stat label="Failed" value={broadcast.data.stats.failed} />
-            <Stat
-              label="Messages"
-              value="View"
-              sub="in the delivery log"
+          <div className="grid gap-4">
+            <KpiRow>
+              <MetricCard
+                label="Recipients"
+                value={broadcast.data.stats.total}
+                context="In the segment when it went out"
+              />
+              <MetricCard
+                label="Delivered"
+                value={broadcast.data.stats.delivered}
+                context={`${share(broadcast.data.stats.delivered, broadcast.data.stats.total)}% of recipients`}
+              />
+              <MetricCard
+                label="Bounced"
+                value={broadcast.data.stats.bounced}
+                context={`${share(broadcast.data.stats.bounced, broadcast.data.stats.total)}% of recipients`}
+              />
+              <MetricCard
+                label="Complained"
+                value={broadcast.data.stats.complained}
+                context={`${share(broadcast.data.stats.complained, broadcast.data.stats.total)}% of recipients`}
+              />
+              <MetricCard
+                label="Failed"
+                value={broadcast.data.stats.failed}
+                context="Could not be sent"
+              />
+            </KpiRow>
+            <ButtonLink
               href={`/emails?broadcast_id=${broadcast.data.id}`}
-            />
-          </StatRow>
+              variant="secondary"
+              size="sm"
+              className="self-start"
+            >
+              View messages in the delivery log
+            </ButtonLink>
+          </div>
         )}
 
         <BroadcastEditor

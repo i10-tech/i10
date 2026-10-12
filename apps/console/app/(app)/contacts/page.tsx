@@ -7,13 +7,14 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { ContactsTable } from "@/components/contacts-table"
 import { ImportContactsButton } from "@/components/import-contacts"
 import { NewContactButton } from "@/components/new-contact"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import type { ContactRow, Page as ApiPage, SegmentRow } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Contacts" }
 
@@ -54,16 +55,13 @@ export default async function ContactsPage({
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Contacts</PageTitle>
+          <PageTitle>{PAGE_COPY.contacts.title}</PageTitle>
           <PageActions>
             <ImportContactsButton />
             <NewContactButton />
           </PageActions>
         </PageHeaderRow>
-        <PageDescription>
-          One row per person, however many segments they are in. Unsubscribing is
-          recorded once and honoured everywhere.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.contacts.description}</PageDescription>
       </PageHeader>
 
       <PageBody width="full">

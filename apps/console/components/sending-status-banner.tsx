@@ -2,7 +2,7 @@ import Link from "next/link"
 import { cache } from "react"
 import { AlertTriangle, ChevronRight, ShieldCheck } from "lucide-react"
 import { cn } from "cn"
-import { Alert, AlertDescription, AlertTitle } from "@repo/ui/components/alert"
+import { Alert } from "@repo/ui/components/alert/alert"
 import { findingReason } from "@/components/sending-health"
 import { tryApi } from "@/lib/api"
 import type { SendingStatus } from "@/lib/types"
@@ -45,30 +45,26 @@ export async function SendingStatusBanner() {
   if (health === "held" && hold) {
     return (
       <div>
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertTitle>Sending is on hold while we review this workspace</AlertTitle>
-          <AlertDescription>
-            <p>
-              Our automated review held sending because {hold.why}. Until it is lifted,
-              the API refuses new emails with a{" "}
-              <code className="font-mono text-xs">sending_held</code> error. Mailboxes,
-              domains and the rest of the console keep working.
-            </p>
-            {hold.canceled_messages > 0 ? (
-              <p>
-                {hold.canceled_messages === 1
-                  ? "One queued or scheduled email was"
-                  : `${hold.canceled_messages} queued or scheduled emails were`}{" "}
-                canceled so they would not go out during the review.
-              </p>
-            ) : null}
-            <p>
-              A person on our team reviews every hold within a day. Reply to the email
-              we sent the workspace owner to tell us what you send and to whom, or if
-              you think this is a mistake.
-            </p>
-          </AlertDescription>
+        <Alert tone="danger" title="Sending is on hold while we review this workspace">
+          <span className="block not-first:mt-1.5">
+            Our automated review held sending because {hold.why}. Until it is lifted,
+            the API refuses new emails with a{" "}
+            <code className="font-mono text-xs">sending_held</code> error. Mailboxes,
+            domains and the rest of the console keep working.
+          </span>
+          {hold.canceled_messages > 0 ? (
+            <span className="block not-first:mt-1.5">
+              {hold.canceled_messages === 1
+                ? "One queued or scheduled email was"
+                : `${hold.canceled_messages} queued or scheduled emails were`}{" "}
+              canceled so they would not go out during the review.
+            </span>
+          ) : null}
+          <span className="block not-first:mt-1.5">
+            A person on our team reviews every hold within a day. Reply to the email we
+            sent the workspace owner to tell us what you send and to whom, or if you
+            think this is a mistake.
+          </span>
         </Alert>
       </div>
     )
@@ -78,34 +74,34 @@ export async function SendingStatusBanner() {
     const worst = findings[0]
     return (
       <div>
-        <Alert variant="warning">
-          <AlertTriangle />
-          <AlertTitle>Sending is at risk of being paused</AlertTitle>
-          <AlertDescription>
-            <p>
-              {worst
-                ? findingReason(worst.type)
-                : "Our email provider flagged recent mail."}{" "}
-              Sending still works, but our email provider pauses it automatically if
-              this continues.
-            </p>
-            {worst?.description ? <p>What it found: {worst.description}</p> : null}
-            <p>
-              Look at{" "}
-              <Link
-                href="/emails?status=bounced"
-                className="underline underline-offset-4"
-              >
-                recent bounces
-              </Link>{" "}
-              and complaints, and stop sending to addresses that did not ask for your
-              mail. The{" "}
-              <Link href="/" className="underline underline-offset-4">
-                overview
-              </Link>{" "}
-              shows your rates.
-            </p>
-          </AlertDescription>
+        <Alert tone="warning" title="Sending is at risk of being paused">
+          <span className="block not-first:mt-1.5">
+            {worst
+              ? findingReason(worst.type)
+              : "Our email provider flagged recent mail."}{" "}
+            Sending still works, but our email provider pauses it automatically if this
+            continues.
+          </span>
+          {worst?.description ? (
+            <span className="block not-first:mt-1.5">
+              What it found: {worst.description}
+            </span>
+          ) : null}
+          <span className="block not-first:mt-1.5">
+            Look at{" "}
+            <Link
+              href="/emails?status=bounced"
+              className="underline underline-offset-4"
+            >
+              recent bounces
+            </Link>{" "}
+            and complaints, and stop sending to addresses that did not ask for your
+            mail. The{" "}
+            <Link href="/" className="underline underline-offset-4">
+              overview
+            </Link>{" "}
+            shows your rates.
+          </span>
         </Alert>
       </div>
     )
@@ -114,19 +110,15 @@ export async function SendingStatusBanner() {
   if (status === "reinstated") {
     return (
       <div>
-        <Alert>
-          <ShieldCheck />
-          <AlertTitle>Sending has resumed</AlertTitle>
-          <AlertDescription>
-            <p>
-              For a while, new bounces and complaints count against this workspace more
-              heavily. Keep an eye on the{" "}
-              <Link href="/suppressions" className="underline underline-offset-4">
-                suppression list
-              </Link>
-              .
-            </p>
-          </AlertDescription>
+        <Alert tone="success" title="Sending has resumed">
+          <span className="block not-first:mt-1.5">
+            For a while, new bounces and complaints count against this workspace more
+            heavily. Keep an eye on the{" "}
+            <Link href="/suppressions" className="underline underline-offset-4">
+              suppression list
+            </Link>
+            .
+          </span>
         </Alert>
       </div>
     )
@@ -134,33 +126,28 @@ export async function SendingStatusBanner() {
 
   return (
     <div>
-      <Alert variant="destructive">
-        <AlertTriangle />
-        <AlertTitle>Sending is paused for this workspace</AlertTitle>
-        <AlertDescription>
-          <p>
-            Our email provider paused sending, usually because too many recent messages
-            bounced or were marked as spam. Until it is lifted, the API refuses new
-            emails with a <code className="font-mono text-xs">sending_paused</code>{" "}
-            error. Mailboxes and domains keep working.
-          </p>
-          {cause ? <p>The reason given: {cause}</p> : null}
-          <p>
-            Review your{" "}
-            <Link href="/suppressions" className="underline underline-offset-4">
-              suppressions
-            </Link>{" "}
-            and{" "}
-            <Link
-              href="/emails?status=bounced"
-              className="underline underline-offset-4"
-            >
-              recent bounces
-            </Link>
-            , stop sending to addresses that did not ask for your mail, then reply to
-            the email we sent the workspace owner and we will review it with you.
-          </p>
-        </AlertDescription>
+      <Alert tone="danger" title="Sending is paused for this workspace">
+        <span className="block not-first:mt-1.5">
+          Our email provider paused sending, usually because too many recent messages
+          bounced or were marked as spam. Until it is lifted, the API refuses new emails
+          with a <code className="font-mono text-xs">sending_paused</code> error.
+          Mailboxes and domains keep working.
+        </span>
+        {cause ? (
+          <span className="block not-first:mt-1.5">The reason given: {cause}</span>
+        ) : null}
+        <span className="block not-first:mt-1.5">
+          Review your{" "}
+          <Link href="/suppressions" className="underline underline-offset-4">
+            suppressions
+          </Link>{" "}
+          and{" "}
+          <Link href="/emails?status=bounced" className="underline underline-offset-4">
+            recent bounces
+          </Link>
+          , stop sending to addresses that did not ask for your mail, then reply to the
+          email we sent the workspace owner and we will review it with you.
+        </span>
       </Alert>
     </div>
   )

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { CopyButton } from "@repo/ui/components/copy"
+import { CodeBlock } from "@repo/ui/components/code-block/code-block"
 import { cn } from "cn"
 import { templateVersion } from "@/lib/actions"
 import type { TemplateVersionDetail } from "@/lib/types"
@@ -77,14 +77,13 @@ export function TemplateFiles({
           </li>
         )}
       </ul>
-      <div className="min-w-0 overflow-hidden rounded-2xl border">
-        <div className="flex items-center justify-between border-b px-3 py-1.5">
-          <p className="truncate font-mono text-xs">{open}</p>
-          <CopyButton value={text} label="Copy" />
-        </div>
-        <pre className="max-h-[40rem] overflow-auto bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed">
-          {text}
-        </pre>
+      <div className="min-w-0">
+        <CodeBlock
+          code={text}
+          filename={open ?? undefined}
+          language={(open ?? "").split(".").pop() ?? "tsx"}
+          maxLines={40}
+        />
       </div>
     </div>
   )

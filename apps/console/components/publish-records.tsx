@@ -1,8 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Button } from "@repo/ui/components/button"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
 import { ProviderMark } from "@/components/provider-mark"
@@ -120,17 +119,13 @@ export function PublishRecords({
        * where they will go.
        */}
       <Button
-        variant="outline"
+        loading={pending}
+        variant="secondary"
         size="sm"
-        className="rounded-full"
         onClick={() => publish(false)}
         disabled={pending}
       >
-        {pending ? (
-          <Spinner />
-        ) : (
-          <ProviderMark slug={providerSlug} name={providerName} />
-        )}
+        <ProviderMark slug={providerSlug} name={providerName} />
         Publish records
       </Button>
 

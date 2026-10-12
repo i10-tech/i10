@@ -1,10 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
-import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
+import { ColorPicker } from "@repo/ui/components/color-picker/color-picker"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingInput, FloatingTextarea } from "@repo/ui/components/i10/floating-field"
 
 /**
  * ⚠ FIXTURE - THE FORM IS REAL AND THE PERSISTENCE IS NOT.
@@ -52,24 +51,12 @@ export function UnsubscribePageSettings() {
             rows={3}
           />
 
-          <div className="space-y-2">
-            <Label htmlFor="unsub-accent">Accent colour</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="unsub-accent"
-                type="color"
-                value={accent}
-                onChange={(event) => setAccent(event.target.value)}
-                className="h-9 w-14 p-1"
-              />
-              <Input
-                value={accent}
-                onChange={(event) => setAccent(event.target.value)}
-                className="max-w-[8rem] font-mono text-xs"
-                aria-label="Accent colour hex value"
-              />
-            </div>
-          </div>
+          <ColorPicker
+            label="Accent colour"
+            value={accent}
+            onValueChange={setAccent}
+            background="#FFFFFF"
+          />
 
           <Button disabled>Save</Button>
         </div>
@@ -82,7 +69,7 @@ export function UnsubscribePageSettings() {
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">Preview</p>
           <div className="rounded-lg border bg-background p-4">
-            <p className="text-sm font-semibold">{title || "Title"}</p>
+            <p className="text-sm font-medium">{title || "Title"}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {description || "Description"}
             </p>

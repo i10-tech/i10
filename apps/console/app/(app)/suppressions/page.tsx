@@ -7,9 +7,9 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { Download } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { AddSuppressionButton } from "@/components/add-suppression"
 import { ApiButton } from "@/components/list/api-button"
 import { SuppressionsTable } from "@/components/suppressions-table"
@@ -17,6 +17,7 @@ import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { SNIPPETS } from "@/lib/snippets"
 import type { Page as ApiPage, SuppressionRow } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Suppressions" }
 
@@ -60,27 +61,27 @@ export default async function SuppressionsPage({
          * a 375px screen, and the second one went off the edge.
          */}
         <PageHeaderRow className="flex-wrap gap-y-2">
-          <PageTitle>Suppressions</PageTitle>
+          <PageTitle>{PAGE_COPY.suppressions.title}</PageTitle>
           <PageActions>
             <ApiButton snippet={SNIPPETS.suppressions} />
             {/*
              * ⚠ A PLAIN ANCHOR, NOT A `Link`. The target is a file, and Next's
              * client router would try to render a CSV as a page.
              */}
-            <Button variant="outline" size="sm" asChild>
-              <a href="/suppressions/export" download>
-                <Download />
-                Export CSV
-              </a>
-            </Button>
+            <ButtonLink
+              href="/suppressions/export"
+              download
+              variant="secondary"
+              size="sm"
+              native
+            >
+              <Download />
+              Export CSV
+            </ButtonLink>
             <AddSuppressionButton />
           </PageActions>
         </PageHeaderRow>
-        <PageDescription>
-          Addresses that hard-bounced or complained, plus any you have added by hand. We
-          skip them rather than sending and damaging your reputation. This list is yours
-          alone: another workspace&apos;s bounces never land here.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.suppressions.description}</PageDescription>
       </PageHeader>
 
       <PageBody>

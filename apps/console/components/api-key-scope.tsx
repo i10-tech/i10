@@ -1,27 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { Checkbox } from "@repo/ui/components/checkbox"
-import { Label } from "@repo/ui/components/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { GrowHeight } from "@repo/ui/components/grow-height"
-import { Reveal } from "@repo/ui/components/reveal"
-import { Spinner } from "@repo/ui/components/spinner"
+import { MultiSelect } from "@repo/ui/components/multi-select/multi-select"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { GrowHeight } from "@repo/ui/components/i10/grow-height"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { updateApiKeyScope } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
 import { toastDone, toastError } from "@/lib/toast"
@@ -55,13 +41,11 @@ export const scopeComplete = (value: string[] | null): boolean =>
   value === null || value.length > 0
 
 export function ApiKeyScopeField({
-  id,
   value,
   onChange,
   domains,
   disabled,
 }: {
-  id: string
   /** `null` is every domain. */
   value: string[] | null
   onChange: (domains: string[] | null) => void
@@ -74,40 +58,26 @@ export function ApiKeyScopeField({
   // over a list of one reads like the list is missing something.
   const specific = domains.length > 1 ? "Specific domains" : "Specific domain"
 
-  function toggle(name: string, on: boolean) {
-    const next = new Set(chosen)
-    if (on) next.add(name)
-    else next.delete(name)
-    // ⚠ IN THE WORKSPACE'S ORDER, not click order, so the saved list and the
-    // list on screen read the same way round.
-    onChange(domains.map((d) => d.name).filter((n) => next.has(n)))
-  }
-
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>Sending domains</Label>
-      <Select
+      <MorphSelect
+        label="Sending domains"
         value={restricted ? "some" : "any"}
         onValueChange={(next) => onChange(next === "any" ? null : [...chosen])}
         disabled={disabled}
-      >
-        <SelectTrigger id={id} className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="any">Any domain</SelectItem>
-          {/*
-           * ⚠ GREYED RATHER THAN HIDDEN WHEN THERE IS NOTHING TO PICK. Hiding it
-           * would make the restriction look like a feature that does not exist;
-           * shown and disabled, it says what is missing.
-           */}
-          <SelectItem value="some" disabled={domains.length === 0}>
-            {domains.length === 0
-              ? "Specific domain - you have no domains added"
-              : specific}
-          </SelectItem>
-        </SelectContent>
-      </Select>
+        className="w-full"
+        items={[
+          { value: "any", label: "Any domain" },
+          // Greyed rather than hidden when there is nothing to pick: shown
+          // and disabled, it says what is missing.
+          {
+            value: "some",
+            label: specific,
+            meta: domains.length === 0 ? "No domains yet" : undefined,
+            disabled: domains.length === 0,
+          },
+        ]}
+      />
 
       {/*
        * ⚠ REVEALED, NOT SWAPPED IN, AND ONLY FOR "SPECIFIC". The list opens under
@@ -124,20 +94,19 @@ export function ApiKeyScopeField({
          * ABOVE, so the options read as controls of the same family rather than
          * a table dropped into a form.
          */}
-        <ul className="space-y-2">
-          {domains.map((domain) => (
-            <li key={domain.id}>
-              <label className="flex h-14 cursor-pointer items-center gap-3 rounded-pill border border-input px-6 transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-muted/30">
-                <Checkbox
-                  checked={chosen.has(domain.name)}
-                  onCheckedChange={(on) => toggle(domain.name, on === true)}
-                  disabled={disabled}
-                />
-                <span className="truncate font-mono text-sm">{domain.name}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
+        <MultiSelect
+          label="Domains this key may send from"
+          placeholder="Choose domains"
+          options={domains.map((d) => ({ value: d.name, label: d.name }))}
+          // In the workspace's order, not click order, so the saved list and
+          // the list on screen read the same way round.
+          value={domains.map((d) => d.name).filter((n) => chosen.has(n))}
+          onValueChange={(names) =>
+            onChange(domains.map((d) => d.name).filter((n) => names.includes(n)))
+          }
+          disabled={disabled}
+          maxVisible={3}
+        />
       </Reveal>
 
       {/*
@@ -232,18 +201,13 @@ export function ApiKeyScopeDialog({
 
   return (
     <Dialog open={apiKey !== null} onOpenChange={pending ? () => {} : onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Scope for {apiKey?.name}</DialogTitle>
-          <DialogDescription>
-            Restricting a key limits what a leak of it can do. The key itself does not
-            change, so nothing needs redeploying.
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent
+        title={`Scope for ${apiKey?.name ?? "this key"}`}
+        description="Restricting a key limits what a leak of it can do. The key itself does not change, so nothing needs redeploying."
+        style={{ width: "min(calc(100vw - 2rem), 448px)" }}
+      >
         <div className="py-2">
           <ApiKeyScopeField
-            id="scope-domain"
             value={scope}
             onChange={setScope}
             domains={domains}
@@ -261,13 +225,13 @@ export function ApiKeyScopeDialog({
             Cancel
           </Button>
           <Button
+            loading={pending}
             type="button"
             onClick={save}
             // ⚠ DISABLED WHEN NOTHING CHANGED, so the button cannot be a
             // no-op request that still fires a success toast.
             disabled={pending || unchanged || !scopeComplete(scope)}
           >
-            {pending && <Spinner />}
             Save scope
           </Button>
         </DialogFooter>

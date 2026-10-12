@@ -1,13 +1,25 @@
 "use client"
 
 import Link from "next/link"
-import { ChevronRight, SearchX, Send } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
+import * as React from "react"
+import { useRouter } from "next/navigation"
+import { ChevronRight, Copy, RotateCw, SearchX, Send } from "lucide-react"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
 import { Status, StatusDot } from "@/components/status"
 import { cn } from "cn"
 import { EmptyState } from "@/components/empty-state"
-import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
+import {
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListTable,
+  selectedRowClass,
+} from "@/components/list/table"
+import { BulkBar } from "@/components/list/bulk-bar"
+import { forEachPicked, useListSelection } from "@/components/list/selection"
+import { resendWebhookDelivery } from "@/lib/actions"
+import { toastDone, toastError } from "@/lib/toast"
 import { MotionBody, MotionRow } from "@/components/list/motion"
 import {
   ListToolbar,
@@ -161,6 +173,30 @@ function DeliveryRows({
 }) {
   const { params, commit } = useUrlList()
   const filtered = filters.some((f) => params.get(f))
+  const router = useRouter()
+  const selection = useListSelection(deliveries, (d) => d.id)
+  const { picked } = selection
+  const [resending, setResending] = React.useState(false)
+
+  /** Sends each ticked delivery again, as a new attempt, one at a time. */
+  async function resend() {
+    if (resending) return
+    setResending(true)
+    const { done, failed } = await forEachPicked(picked, (d) =>
+      resendWebhookDelivery(d.id),
+    )
+    setResending(false)
+    const noun = (n: number) => (n === 1 ? "delivery" : "deliveries")
+    if (done === 0) toastError(`Could not resend the ${noun(failed)}`)
+    else {
+      toastDone(
+        `Resent ${done} ${noun(done)}`,
+        failed > 0 ? `${failed} could not be resent` : undefined,
+      )
+      selection.clear()
+      router.refresh()
+    }
+  }
 
   if (deliveries.length === 0) {
     return (
@@ -176,7 +212,7 @@ function DeliveryRows({
           filtered ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               onClick={() => commit((p) => filters.forEach((f) => p.delete(f)))}
             >
               Clear filters
@@ -191,7 +227,10 @@ function DeliveryRows({
     <div className="space-y-4">
       <ListTable>
         <ListHeader>
-          <ListHead>Event</ListHead>
+          <th className="w-10 py-2.5 pl-4">
+            {selection.headerBox("Select all deliveries")}
+          </th>
+          <ListHead className="pl-0">Event</ListHead>
           <ListHead className="w-[8rem]">Status</ListHead>
           <ListHead className="w-[6rem]">Response</ListHead>
           {showEndpoint && (
@@ -207,10 +246,20 @@ function DeliveryRows({
           {deliveries.map((delivery) => {
             const href = `/webhooks/deliveries/${delivery.id}`
             return (
-              <MotionRow key={delivery.id} href={href}>
-                <ListCell>
+              <MotionRow
+                key={delivery.id}
+                href={href}
+                className={cn(selection.isTicked(delivery) && selectedRowClass)}
+              >
+                <td className="w-10 py-3 pl-4">
+                  {selection.rowBox(
+                    delivery,
+                    `Select this ${delivery.event_type} delivery`,
+                  )}
+                </td>
+                <ListCell className="pl-0">
                   <Link href={href} className="outline-none focus-visible:underline">
-                    <Badge variant="outline" className="font-mono text-2xs">
+                    <Badge size="sm" tone="neutral">
                       {delivery.event_type}
                     </Badge>
                   </Link>
@@ -249,6 +298,38 @@ function DeliveryRows({
       </ListTable>
 
       <LoadMore cursor={nextCursor} />
+
+      <BulkBar
+        count={picked.length}
+        onClear={selection.clear}
+        label="Selected deliveries"
+      >
+        <Button
+          variant="ghost"
+          size="sm"
+          loading={resending}
+          onClick={() => void resend()}
+        >
+          <RotateCw />
+          Resend
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            void navigator.clipboard.writeText(picked.map((d) => d.id).join("\n")).then(
+              () =>
+                toastDone(
+                  picked.length === 1 ? "Delivery ID copied" : "Delivery IDs copied",
+                ),
+              () => toastError("Could not copy the IDs"),
+            )
+          }
+        >
+          <Copy />
+          Copy IDs
+        </Button>
+      </BulkBar>
     </div>
   )
 }

@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { Trash2 } from "lucide-react"
-import { DropdownMenuItem } from "@repo/ui/components/dropdown-menu"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { deleteTopic } from "@/lib/actions"
 import type { TopicRow } from "@/lib/types"
 import { toastError } from "@/lib/toast"
@@ -35,7 +35,7 @@ export function TopicActions({ topic }: { topic: TopicRow }) {
         description="Every preference recorded against this topic is deleted with it - including the explicit opt-outs. You will have no record that those people asked not to receive it."
         confirmLabel="Delete topic"
         doneLabel="Deleted"
-        confirmWord={topic.name}
+        confirmWord={confirmWordFor([topic.name])}
         onConfirm={async () => {
           const result = await deleteTopic(topic.id)
           if (!result.ok) {

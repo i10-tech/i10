@@ -4,7 +4,7 @@ import {
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { UnsubscribePageSettings } from "@/components/unsubscribe-settings"
 
 export const metadata: Metadata = { title: "Unsubscribe page" }

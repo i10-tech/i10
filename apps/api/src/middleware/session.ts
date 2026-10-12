@@ -22,6 +22,11 @@ import { reverificationError } from "@clerk/backend/internal"
 export interface SessionContext {
   /** Clerk's `user_…`. The subject authd delegates binds for. */
   userId: string
+  /**
+   * The Clerk organization the console is acting in, when `requireTenant`
+   * resolved one. Absent for the personal workspace and on non-console routes.
+   */
+  orgId?: string
 }
 
 export type SessionOutcome =
@@ -319,14 +324,26 @@ export function clerkFreshAuth(
        * cannot disagree about what "fresh" means.
        */
       const auth = state.toAuth()
-      if (!auth.has({ reverification: FRESHNESS })) return { status: "stale" }
+      const fva = (auth.sessionClaims as { fva?: unknown } | null)?.fva
+      if (!auth.has({ reverification: FRESHNESS })) {
+        /*
+         * ⚠ A PASSKEY SHOULD PASS HERE BY CLERK'S OWN RULE, NOT OURS
+         * (2026-10-12). The instance sets passkeys to satisfy the second
+         * factor, so a passkey re-verification is expected to count as one
+         * and `strict` above to pass. We briefly inferred it instead, from a
+         * passkey's `last_used_at` landing in the same minute as `fva[0]` -
+         * a guess about WHICH factor was proved. Removed; if a 2FA account
+         * confirming with a passkey is refused here, Clerk is not counting
+         * it, and the fix is a signed proof, not a timestamp.
+         */
+        return { status: "stale" }
+      }
 
       /*
        * ⚠ ONLY WHEN NO SECOND FACTOR WAS EVER USED. A resumed session that went
        * on to pass TOTP proved something real, and `has()` already judged
        * that factor's age. This adds a refusal; it can never add a pass.
        */
-      const fva = (auth.sessionClaims as { fva?: unknown } | null)?.fva
       if (
         options.resumedNear &&
         auth.userId &&

@@ -11,9 +11,9 @@ import {
   MoreHorizontal,
   Trash2,
 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { Checkbox } from "@repo/ui/components/checkbox"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,14 +21,21 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { Kbd } from "@repo/ui/components/kbd"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+} from "@repo/ui/components/i10/menu"
+import { Kbd } from "@repo/ui/components/i10/kbd"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
-import { BULK_CONFIRM_WORD, ConfirmDialog } from "@/components/confirm-dialog"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { BulkBar } from "@/components/list/bulk-bar"
 import { MarqueeBox, useMarquee } from "@/components/list/marquee"
-import { rowMenuClass } from "@/components/list/table"
+import {
+  ListHead,
+  ListHeader,
+  ListTable,
+  rowClass,
+  rowMenuClass,
+  selectedRowClass,
+} from "@/components/list/table"
 import {
   FilterSelect,
   ListToolbar,
@@ -419,20 +426,16 @@ export function TemplateLibrary({
                   <li className="font-medium">{folder.name}</li>
                   <li>
                     <DropdownMenu modal={false}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="secondary"
-                              size="icon-sm"
-                              className="size-7 rounded-lg bg-background/90 shadow-sm backdrop-blur hover:bg-background"
-                              aria-label="Folder actions"
-                            >
-                              <MoreHorizontal />
-                            </Button>
-                          </DropdownMenuTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent>Folder actions</TooltipContent>
+                      <Tooltip content="Folder actions">
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            aria-label="Folder actions"
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
                       </Tooltip>
                       <DropdownMenuContent align="start">
                         <DropdownMenuItem
@@ -562,7 +565,7 @@ export function TemplateLibrary({
         {pickedTemplates.length > 0 && (
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="rounded-xl">
+              <Button variant="ghost" size="sm">
                 <FolderInput />
                 Move
               </Button>
@@ -603,9 +606,8 @@ export function TemplateLibrary({
           </DropdownMenu>
         )}
         <Button
-          variant="ghost"
+          variant="danger"
           size="sm"
-          className="rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() =>
             setDialog({
               kind: "delete",
@@ -739,224 +741,223 @@ function TemplateTable({
     folders.every((f) => selected.has(folderKey(f.id)))
   const [hoverFolder, setHoverFolder] = React.useState<string | null>(null)
   return (
-    <div className="overflow-hidden rounded-2xl border">
-      <table className="w-full text-sm">
-        <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-          <tr>
-            <th className="w-10 py-2.5 pl-4">
-              <Checkbox
-                checked={allTicked ? true : selecting ? "indeterminate" : false}
-                onCheckedChange={(c) => onSelectAll(c === true)}
-                aria-label="Select all"
-              />
-            </th>
-            <th className="py-2.5 font-medium">Name</th>
-            <th className="hidden py-2.5 font-medium md:table-cell">Status</th>
-            <th className="hidden py-2.5 font-medium lg:table-cell">Version</th>
-            <th className="py-2.5 font-medium">Edited</th>
-            <th className="w-12" />
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          <AnimatePresence initial={false}>
-            {folders.map((f) => {
-              const drop = dropTarget(f.id, f.id)
-              return (
-                <motion.tr
-                  key={`f-${f.id}`}
-                  data-select-key={folderKey(f.id)}
-                  layout
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onDragOver={drop.onDragOver}
-                  onDragLeave={drop.onDragLeave}
-                  onDrop={drop.onDrop}
-                  onClick={(e) => {
-                    // While picking, a click ticks rather than opens.
-                    if (selecting)
+    // Arc's table, like every other list: the same frame, heads and rows.
+    <ListTable>
+      <ListHeader>
+        <th className="w-10 py-2.5 pl-4">
+          <Checkbox
+            checked={allTicked ? true : selecting ? "indeterminate" : false}
+            onCheckedChange={(c) => onSelectAll(c === true)}
+            aria-label="Select all"
+          />
+        </th>
+        <ListHead className="pl-0">Name</ListHead>
+        <ListHead className="hidden w-[11rem] md:table-cell">Status</ListHead>
+        <ListHead className="hidden w-[8rem] lg:table-cell">Version</ListHead>
+        <ListHead className="w-[9rem]">Edited</ListHead>
+        <ListHead className="w-12">
+          <span className="sr-only">Actions</span>
+        </ListHead>
+      </ListHeader>
+      <tbody>
+        <AnimatePresence initial={false}>
+          {folders.map((f) => {
+            const drop = dropTarget(f.id, f.id)
+            return (
+              <motion.tr
+                key={`f-${f.id}`}
+                data-select-key={folderKey(f.id)}
+                layout
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onDragOver={drop.onDragOver}
+                onDragLeave={drop.onDragLeave}
+                onDrop={drop.onDrop}
+                onClick={(e) => {
+                  // Only a click in the row: a dialog or menu opened from it
+                  // bubbles its clicks here through React (see MotionRow).
+                  if (!e.currentTarget.contains(e.target as Node)) return
+                  // While picking, a click ticks rather than opens.
+                  if (selecting)
+                    onSelect(folderKey(f.id), {
+                      shiftKey: e.shiftKey,
+                      checked: !selected.has(folderKey(f.id)),
+                    })
+                  else router.push(`/templates/folder/${encodeURIComponent(f.id)}`)
+                }}
+                onPointerEnter={() => setHoverFolder(f.id)}
+                onPointerLeave={() => setHoverFolder((h) => (h === f.id ? null : h))}
+                className={cn(
+                  rowClass,
+                  "cursor-pointer",
+                  selected.has(folderKey(f.id)) && selectedRowClass,
+                  drop.over &&
+                    "bg-primary/[0.06] outline-2 -outline-offset-2 outline-primary/60",
+                )}
+              >
+                <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
+                  <Checkbox
+                    checked={selected.has(folderKey(f.id))}
+                    onClick={(e) =>
                       onSelect(folderKey(f.id), {
                         shiftKey: e.shiftKey,
                         checked: !selected.has(folderKey(f.id)),
                       })
-                    else router.push(`/templates/folder/${encodeURIComponent(f.id)}`)
-                  }}
-                  onPointerEnter={() => setHoverFolder(f.id)}
-                  onPointerLeave={() => setHoverFolder((h) => (h === f.id ? null : h))}
-                  className={cn(
-                    "group cursor-pointer transition-colors hover:bg-muted/40",
-                    selected.has(folderKey(f.id)) &&
-                      "bg-primary/[0.05] hover:bg-primary/[0.08]",
-                    drop.over &&
-                      "bg-primary/[0.06] outline-2 -outline-offset-2 outline-primary/60",
-                  )}
-                >
-                  <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
-                    <Checkbox
-                      checked={selected.has(folderKey(f.id))}
-                      onClick={(e) =>
-                        onSelect(folderKey(f.id), {
-                          shiftKey: e.shiftKey,
-                          checked: !selected.has(folderKey(f.id)),
-                        })
-                      }
-                      aria-label={`Select ${f.name}`}
-                    />
-                  </td>
-                  <td className="py-3">
-                    <div className="flex items-center gap-3">
-                      {/* The grid's folder, small: papers for what is inside,
+                    }
+                    aria-label={`Select ${f.name}`}
+                  />
+                </td>
+                <td className="max-w-0 pl-0">
+                  <div className="flex items-center gap-3">
+                    {/* The grid's folder, small: papers for what is inside,
                           lifting on hover and when a template is dragged on. */}
-                      {/* ⚠ THE GRID'S FOLDER, DRAWN AT ITS FULL 160px AND SCALED
+                    {/* ⚠ THE GRID'S FOLDER, DRAWN AT ITS FULL 160px AND SCALED
                           DOWN - not drawn small. Its edges, highlight, shadows
                           and corners are fixed sizes, so a folder drawn at 44px
                           wore them four times as heavy; scaled, every part
                           shrinks together and it is the same picture. */}
-                      <div className="relative h-[35px] w-[44px] shrink-0">
-                        <div className="absolute top-0 left-0 w-[160px] origin-top-left scale-[0.275]">
-                          <FolderArt
-                            count={f.templates}
-                            raised={hoverFolder === f.id || drop.over}
-                            over={drop.over}
-                            className="w-full"
-                          />
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{f.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {f.templates === 0
-                            ? "Empty"
-                            : `${f.templates} template${f.templates === 1 ? "" : "s"}`}
-                        </p>
+                    <div className="relative h-[35px] w-[44px] shrink-0">
+                      <div className="absolute top-0 left-0 w-[160px] origin-top-left scale-[0.275]">
+                        <FolderArt
+                          count={f.templates}
+                          raised={hoverFolder === f.id || drop.over}
+                          over={drop.over}
+                          className="w-full"
+                        />
                       </div>
                     </div>
-                  </td>
-                  <td className="hidden md:table-cell" />
-                  <td className="hidden lg:table-cell" />
-                  <td className="text-xs text-muted-foreground" title={f.updated_at}>
-                    {formatRelative(f.updated_at)}
-                  </td>
-                  <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <RowMenu label={f.name}>
-                      <DropdownMenuItem onSelect={() => onFolderRename(f)}>
-                        <RenameIcon />
-                        Rename folder
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() => onFolderDelete(f)}
-                      >
-                        <Trash2 />
-                        Delete folder
-                      </DropdownMenuItem>
-                    </RowMenu>
-                  </td>
-                </motion.tr>
-              )
-            })}
-            {templates.map((t) => {
-              const status = statusOf(t)
-              const ticked = selected.has(t.id)
-              return (
-                <motion.tr
-                  key={t.id}
-                  data-select-key={t.id}
-                  layout
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  draggable
-                  onDragStart={(e) =>
-                    onDragStart(t.id, e as unknown as React.DragEvent)
-                  }
-                  onDragEnd={onDragEnd}
-                  onMouseDown={(e) => e.shiftKey && e.preventDefault()}
-                  onClick={(e) => {
-                    if (selecting)
-                      onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
-                    else router.push(hrefOf(t))
-                  }}
-                  className={cn(
-                    "group cursor-pointer transition-colors hover:bg-muted/40",
-                    ticked && "bg-primary/[0.05] hover:bg-primary/[0.08]",
-                  )}
-                >
-                  <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
-                    <Checkbox
-                      checked={ticked}
-                      onClick={(e) =>
-                        onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
-                      }
-                      aria-label={`Select ${titleOf(t)}`}
-                    />
-                  </td>
-                  <td className="py-3">
-                    <Link
-                      href={hrefOf(t)}
-                      className="flex min-w-0 items-center gap-3 outline-none"
-                      onClick={(e) => e.stopPropagation()}
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{f.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {f.templates === 0
+                          ? "Empty"
+                          : `${f.templates} template${f.templates === 1 ? "" : "s"}`}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+                <td className="hidden md:table-cell" />
+                <td className="hidden lg:table-cell" />
+                <td className="text-xs text-muted-foreground" title={f.updated_at}>
+                  {formatRelative(f.updated_at)}
+                </td>
+                <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  <RowMenu label={f.name}>
+                    <DropdownMenuItem onSelect={() => onFolderRename(f)}>
+                      <RenameIcon />
+                      Rename folder
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => onFolderDelete(f)}
                     >
-                      <RowTile>
-                        <div className="absolute inset-x-[14%] top-[18%] -bottom-1 overflow-hidden rounded-t-[3px] shadow-[0_0_0_1px_rgb(0_0_0/0.06)]">
-                          <TemplateThumbnail
-                            templateId={t.id}
-                            stamp={t.updated_at}
-                            imagesFrom={imagesFrom}
-                            label={`${titleOf(t)} preview`}
-                          />
-                        </div>
-                      </RowTile>
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{titleOf(t)}</p>
-                        <p className="truncate font-mono text-xs text-muted-foreground">
-                          {t.name}
-                        </p>
-                      </div>
-                    </Link>
-                  </td>
-                  <td className="hidden md:table-cell">
-                    <Badge variant={status === "published" ? "default" : "secondary"}>
-                      {STATUS_LABEL[status]}
-                    </Badge>
-                  </td>
-                  <td className="tabular hidden font-mono text-xs text-muted-foreground lg:table-cell">
-                    {t.version > 0 ? `v${t.version}` : "-"}
-                    {!isEditable(t) && (
-                      <span className="ml-2 capitalize">{t.source}</span>
-                    )}
-                  </td>
-                  <td
-                    className="text-xs whitespace-nowrap text-muted-foreground"
-                    title={t.updated_at}
+                      <Trash2 />
+                      Delete folder
+                    </DropdownMenuItem>
+                  </RowMenu>
+                </td>
+              </motion.tr>
+            )
+          })}
+          {templates.map((t) => {
+            const status = statusOf(t)
+            const ticked = selected.has(t.id)
+            return (
+              <motion.tr
+                key={t.id}
+                data-select-key={t.id}
+                layout
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                draggable
+                onDragStart={(e) => onDragStart(t.id, e as unknown as React.DragEvent)}
+                onDragEnd={onDragEnd}
+                onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+                onClick={(e) => {
+                  // Only a click in the row - see the folder row above.
+                  if (!e.currentTarget.contains(e.target as Node)) return
+                  if (selecting)
+                    onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
+                  else router.push(hrefOf(t))
+                }}
+                className={cn(rowClass, "cursor-pointer", ticked && selectedRowClass)}
+              >
+                <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
+                  <Checkbox
+                    checked={ticked}
+                    onClick={(e) =>
+                      onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
+                    }
+                    aria-label={`Select ${titleOf(t)}`}
+                  />
+                </td>
+                <td className="max-w-0 pl-0">
+                  <Link
+                    href={hrefOf(t)}
+                    className="flex min-w-0 items-center gap-3 outline-none"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {formatRelative(t.updated_at)}
-                  </td>
-                  <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <TemplateMenu
-                      template={t}
-                      folders={allFolders}
-                      onAction={(a) => onAction(t, a)}
-                      trigger={
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className={rowMenuClass}
-                          aria-label={`Actions for ${titleOf(t)}`}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      }
-                    />
-                  </td>
-                </motion.tr>
-              )
-            })}
-          </AnimatePresence>
-        </tbody>
-      </table>
-    </div>
+                    <RowTile>
+                      <div className="absolute inset-x-[14%] top-[18%] -bottom-1 overflow-hidden rounded-t-[3px] shadow-[0_0_0_1px_rgb(0_0_0/0.06)]">
+                        <TemplateThumbnail
+                          templateId={t.id}
+                          stamp={t.updated_at}
+                          imagesFrom={imagesFrom}
+                          label={`${titleOf(t)} preview`}
+                        />
+                      </div>
+                    </RowTile>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{titleOf(t)}</p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">
+                        {t.name}
+                      </p>
+                    </div>
+                  </Link>
+                </td>
+                <td className="hidden md:table-cell">
+                  <Badge tone={status === "published" ? "info" : "neutral"}>
+                    {STATUS_LABEL[status]}
+                  </Badge>
+                </td>
+                <td className="tabular hidden font-mono text-xs text-muted-foreground lg:table-cell">
+                  {t.version > 0 ? `v${t.version}` : "-"}
+                  {!isEditable(t) && (
+                    <span className="ml-2 capitalize">{t.source}</span>
+                  )}
+                </td>
+                <td
+                  className="text-xs whitespace-nowrap text-muted-foreground"
+                  title={t.updated_at}
+                >
+                  {formatRelative(t.updated_at)}
+                </td>
+                <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  <TemplateMenu
+                    template={t}
+                    folders={allFolders}
+                    onAction={(a) => onAction(t, a)}
+                    trigger={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={rowMenuClass}
+                        aria-label={`Actions for ${titleOf(t)}`}
+                      >
+                        <MoreHorizontal />
+                      </Button>
+                    }
+                  />
+                </td>
+              </motion.tr>
+            )
+          })}
+        </AnimatePresence>
+      </tbody>
+    </ListTable>
   )
 }
 
@@ -1071,7 +1072,7 @@ function LibraryDialogs({
         }
         confirmLabel="Delete folder"
         doneLabel="Deleted"
-        confirmWord={d?.kind === "delete-folder" ? d.folder.name : undefined}
+        confirmWord={confirmWordFor(d?.kind === "delete-folder" ? [d.folder.name] : [])}
         onConfirm={async () => {
           if (d?.kind !== "delete-folder") return false
           const result = await deleteTemplateFolder(d.folder.id)
@@ -1109,13 +1110,10 @@ function LibraryDialogs({
         // proves you are on the right one; for a batch there is no single
         // name, but there is still a deliberate word between a stray ⌫ and
         // losing them.
-        confirmWord={
-          one
-            ? one.name
-            : deleting.length === 0 && deletingFolders.length === 1
-              ? deletingFolders[0]!.name
-              : BULK_CONFIRM_WORD
-        }
+        confirmWord={confirmWordFor([
+          ...deleting.map((t) => t.name),
+          ...deletingFolders.map((f) => f.name),
+        ])}
         onConfirm={async () => {
           const ids = deleting.map((t) => t.id)
           if (ids.length > 0) {

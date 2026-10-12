@@ -1,6 +1,5 @@
 import type { Metadata } from "next"
-import Link from "next/link"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 
 export const metadata: Metadata = { title: "Not found" }
 
@@ -37,7 +36,7 @@ export default function NotFound() {
       </p>
 
       <div className="space-y-2">
-        <h1 className="text-xl font-semibold tracking-tight">
+        <h1 className="text-xl font-medium tracking-tight">
           We could not find that page
         </h1>
         <p className="mx-auto max-w-sm text-sm text-muted-foreground">
@@ -47,14 +46,16 @@ export default function NotFound() {
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button asChild>
-          <Link href="/">Go to the dashboard</Link>
-        </Button>
-        <Button asChild variant="ghost">
-          <a href="https://docs.i10.tech" target="_blank" rel="noreferrer">
-            Read the docs
-          </a>
-        </Button>
+        <ButtonLink href="/">Go to the dashboard</ButtonLink>
+        <ButtonLink
+          href="https://docs.i10.tech"
+          target="_blank"
+          rel="noreferrer"
+          variant="ghost"
+          native
+        >
+          Read the docs
+        </ButtonLink>
       </div>
     </main>
   )

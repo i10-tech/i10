@@ -1,32 +1,19 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { useRouter } from "next/navigation"
 import { AlertTriangle, ArrowLeft, Inbox, Layers, Plus, Webhook } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Button } from "@repo/ui/components/button"
-import { CopyField } from "@repo/ui/components/copy"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
-import { StepStage } from "@repo/ui/components/step-stage"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { UrlInput } from "@/components/url-input"
 import { httpsUrlProblem } from "@repo/ui/checks"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { cn } from "cn"
 import { createWebhook, type CreateWebhookInput } from "@/lib/actions"
 import { EventPicker } from "@/components/webhooks/event-picker"
 import {
@@ -220,27 +207,40 @@ export function CreateWebhookButton({
         }}
       >
         <DialogContent
-          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
           onEscapeKeyDown={(event) => created && event.preventDefault()}
           onPointerDownOutside={(event) => created && event.preventDefault()}
-          showCloseButton={!created}
+          title={
+            step === "secret" && created
+              ? created.secret
+                ? "Copy your signing secret"
+                : "Copy your public key"
+              : step === "kind"
+                ? "Add a webhook endpoint"
+                : kind === "http"
+                  ? "Add an HTTP endpoint"
+                  : kind === "polling"
+                    ? "Add a polling endpoint"
+                    : "Add an SQS queue"
+          }
+          description={
+            step === "secret" && created
+              ? created.secret
+                ? "Use it to verify that a request came from us. It is stored encrypted and cannot be shown again, so rotate it if you lose it."
+                : "Verify Ed25519 signatures with it. It is not a secret: nothing you store can forge a webhook from us, and it stays visible on the endpoint."
+              : step === "kind"
+                ? "How should your events reach you?"
+                : kind === "http"
+                  ? "We POST a JSON body to this URL for every event you select."
+                  : kind === "polling"
+                    ? "Events wait for you. Fetch them with your API key and pass the cursor back to acknowledge them."
+                    : "We call SendMessage on this queue for every event you select."
+          }
+          style={{ width: "min(calc(100vw - 2rem), 576px)" }}
         >
           <StepStage step={step}>
             {step === "secret" && created ? (
               <>
-                <DialogHeader>
-                  <DialogTitle>
-                    {created.secret
-                      ? "Copy your signing secret"
-                      : "Copy your public key"}
-                  </DialogTitle>
-                  <DialogDescription>
-                    {created.secret
-                      ? "Use it to verify that a request came from us. It is stored encrypted and cannot be shown again - rotate it if you lose it."
-                      : "Verify Ed25519 signatures with it. It is not a secret: nothing you store can forge a webhook from us, and it stays visible on the endpoint."}
-                  </DialogDescription>
-                </DialogHeader>
-
                 <div className="space-y-3">
                   <CopyField
                     value={created.secret ?? created.public_key ?? ""}
@@ -264,49 +264,19 @@ export function CreateWebhookButton({
               </>
             ) : step === "kind" ? (
               <div className="grid gap-4">
-                <DialogHeader>
-                  <DialogTitle>Add a webhook endpoint</DialogTitle>
-                  <DialogDescription>
-                    How should your events reach you?
-                  </DialogDescription>
-                </DialogHeader>
-                <RadioGroup
+                <RadioCards
+                  aria-label="Endpoint kind"
+                  layout="list"
                   value={kind}
                   onValueChange={(v) => setKind(v as WebhookEndpointKind)}
-                  aria-label="Endpoint kind"
-                  className="gap-2"
-                >
-                  {KINDS.map((k) => (
-                    <label
-                      key={k.value}
-                      onDoubleClick={() => setStep("form")}
-                      className={cn(
-                        "flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors",
-                        kind === k.value
-                          ? "border-foreground/40 bg-muted/50"
-                          : "hover:bg-muted/30",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "grid size-9 shrink-0 place-items-center rounded-lg border bg-background [&_svg]:size-4",
-                          kind === k.value
-                            ? "text-foreground"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        {k.icon}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium">{k.label}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {k.description}
-                        </span>
-                      </span>
-                      <RadioGroupItem value={k.value} aria-label={k.label} />
-                    </label>
-                  ))}
-                </RadioGroup>
+                  options={KINDS.map((k) => ({
+                    value: k.value,
+                    label: k.label,
+                    description: k.description,
+                    icon: k.icon,
+                  }))}
+                  onDoubleClick={() => setStep("form")}
+                />
                 <DialogFooter>
                   <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
                     Cancel
@@ -318,34 +288,13 @@ export function CreateWebhookButton({
               </div>
             ) : (
               <form onSubmit={submit} {...outcome.formProps}>
-                <DialogHeader>
-                  <DialogTitle>
-                    {kind === "http"
-                      ? "Add an HTTP endpoint"
-                      : kind === "polling"
-                        ? "Add a polling endpoint"
-                        : "Add an SQS queue"}
-                  </DialogTitle>
-                  <DialogDescription>
-                    {kind === "http"
-                      ? "We POST a JSON body to this URL for every event you select."
-                      : kind === "polling"
-                        ? "Events wait for you. Fetch them with your API key and pass the cursor back to acknowledge them."
-                        : "We call SendMessage on this queue for every event you select."}
-                  </DialogDescription>
-                </DialogHeader>
-
                 <div className="space-y-4 py-4">
                   {kind === "http" && (
-                    <ValidatedInput
+                    <UrlInput
                       label="Endpoint URL"
                       id="webhook-url"
                       value={url}
-                      onChange={(event) => setUrl(event.target.value)}
-                      type="url"
-                      autoComplete="off"
-                      spellCheck={false}
-                      className="font-mono text-xs"
+                      onValueChange={setUrl}
                       check={httpsUrlProblem}
                       required="Enter the URL to post to."
                       autoFocus
@@ -355,15 +304,11 @@ export function CreateWebhookButton({
 
                   {kind === "sqs" && (
                     <>
-                      <ValidatedInput
+                      <UrlInput
                         label="Queue URL"
                         id="webhook-queue"
                         value={url}
-                        onChange={(event) => setUrl(event.target.value)}
-                        type="url"
-                        autoComplete="off"
-                        spellCheck={false}
-                        className="font-mono text-xs"
+                        onValueChange={setUrl}
                         check={sqsUrlProblem}
                         required="Enter the queue URL."
                         autoFocus
@@ -403,24 +348,23 @@ export function CreateWebhookButton({
                   />
 
                   {kind !== "polling" && (
-                    <div className="space-y-1.5">
-                      <span className="text-sm font-medium">Signing</span>
-                      <Select
+                    <div>
+                      <MorphSelect
+                        label="Signing"
                         value={scheme}
                         onValueChange={(v) => setScheme(v as WebhookSignatureScheme)}
-                      >
-                        <SelectTrigger className="w-full" aria-label="Signing scheme">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hmac_sha256">
-                            HMAC-SHA256 with a shared secret
-                          </SelectItem>
-                          <SelectItem value="ed25519">
-                            Ed25519, verified with a public key
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
+                        items={[
+                          {
+                            value: "hmac_sha256",
+                            label: "HMAC-SHA256 with a shared secret",
+                          },
+                          {
+                            value: "ed25519",
+                            label: "Ed25519, verified with a public key",
+                          },
+                        ]}
+                        panelWidth={320}
+                      />
                     </div>
                   )}
 
@@ -464,7 +408,7 @@ export function CreateWebhookButton({
                     <ArrowLeft />
                     Back
                   </Button>
-                  <ActionButton
+                  <StateButton
                     type="submit"
                     state={outcome.state}
                     pendingLabel="Add endpoint"
@@ -472,7 +416,7 @@ export function CreateWebhookButton({
                     disabled={!ready}
                   >
                     Add endpoint
-                  </ActionButton>
+                  </StateButton>
                 </DialogFooter>
               </form>
             )}

@@ -16,5 +16,8 @@
     "hooks": "@repo/ui/hooks",
     "ui": "@repo/ui/components"
   },
-  "iconLibrary": "lucide"
+  "iconLibrary": "lucide",
+  "registries": {
+    "@uiarc": "https://uiarc.dev/r/{name}.json"
+  }
 }

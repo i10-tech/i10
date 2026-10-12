@@ -1,25 +1,13 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { Info } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { CopyField } from "@repo/ui/components/copy"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
 import { Time } from "@/components/time"
 import { rotateWebhookSecret } from "@/lib/actions"
 import { useResetOnOpen, useRetained } from "@/lib/react"
@@ -102,94 +90,79 @@ export function RotateSecretDialog({
       onOpenChange={(open) => !rotated && !pending && onOpenChange(open)}
     >
       <DialogContent
-        className="sm:max-w-lg"
-        showCloseButton={!rotated}
         onEscapeKeyDown={(event) => rotated && event.preventDefault()}
         onPointerDownOutside={(event) => rotated && event.preventDefault()}
+        title={
+          !rotated
+            ? "Rotate signing secret"
+            : rotated.secret
+              ? "Your new signing secret"
+              : "Your new public key"
+        }
+        description={
+          !rotated
+            ? (shown?.url ?? undefined)
+            : rotated.secret
+              ? "Shown once. Store it before you close this."
+              : "Verify Ed25519 signatures with this key. It is not a secret and stays visible on the endpoint."
+        }
+        style={{ width: "min(calc(100vw - 2rem), 512px)" }}
       >
         {!rotated ? (
           <>
-            <DialogHeader>
-              <DialogTitle>Rotate signing secret</DialogTitle>
-              <DialogDescription className="break-all">{shown?.url}</DialogDescription>
-            </DialogHeader>
-
             <fieldset className="space-y-2">
               <legend className="mb-1.5 text-sm font-medium">
                 What should happen to the current secret?
               </legend>
-              <RadioGroup
-                value={choice ?? ""}
+              <RadioCards
+                aria-label="What should happen to the current secret?"
+                layout="list"
+                value={choice}
                 onValueChange={(v) => setChoice(v as Choice)}
-                className="gap-2"
-              >
-                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 hover:bg-muted/30">
-                  <RadioGroupItem value="revoke" className="mt-0.5" />
-                  <span className="space-y-0.5">
-                    <span className="block text-sm font-medium">Revoke it now</span>
-                    <span className="block text-xs text-muted-foreground">
-                      It stops working immediately. Choose this if it may have leaked.
-                      Events fail verification until your receiver has the new secret.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 hover:bg-muted/30">
-                  <RadioGroupItem value="expire" className="mt-0.5" />
-                  <span className="w-full space-y-2">
-                    <span className="block space-y-0.5">
-                      <span className="block text-sm font-medium">
-                        Keep it working for a while
-                      </span>
-                      <span className="block text-xs text-muted-foreground">
-                        Every event is signed with both secrets until then, so you can
-                        deploy the new one first.
-                      </span>
-                    </span>
-                    {choice === "expire" && (
-                      <Select value={grace} onValueChange={setGrace}>
-                        <SelectTrigger
-                          className="w-full"
-                          aria-label="Keep the current secret for"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {GRACE_OPTIONS.map((o) => (
-                            <SelectItem key={o.seconds} value={String(o.seconds)}>
-                              {o.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </span>
-                </label>
-              </RadioGroup>
+                options={[
+                  {
+                    value: "revoke",
+                    label: "Revoke it now",
+                    description:
+                      "It stops working immediately. Choose this if it may have leaked. Events fail verification until your receiver has the new secret.",
+                  },
+                  {
+                    value: "expire",
+                    label: "Keep it working for a while",
+                    description:
+                      "Every event is signed with both secrets until then, so you can deploy the new one first.",
+                  },
+                ]}
+              />
+              {choice === "expire" && (
+                <MorphSelect
+                  label="Keep the current secret for"
+                  value={grace}
+                  onValueChange={setGrace}
+                  items={GRACE_OPTIONS.map((o) => ({
+                    value: String(o.seconds),
+                    label: o.label,
+                  }))}
+                />
+              )}
             </fieldset>
 
-            <div className="space-y-1.5">
-              <span className="text-sm font-medium">Signing</span>
-              <Select
+            <div>
+              <MorphSelect
+                label="Signing"
                 value={scheme}
                 onValueChange={(v) => setScheme(v as typeof scheme)}
-              >
-                <SelectTrigger className="w-full" aria-label="Signing scheme">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="hmac_sha256">
-                    HMAC-SHA256 with a shared secret
-                  </SelectItem>
-                  <SelectItem value="ed25519">
-                    Ed25519, verified with a public key
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                items={[
+                  { value: "hmac_sha256", label: "HMAC-SHA256 with a shared secret" },
+                  { value: "ed25519", label: "Ed25519, verified with a public key" },
+                ]}
+                panelWidth={320}
+              />
             </div>
 
             <DialogFooter>
               <Button
-                variant="outline"
+                variant="secondary"
                 onClick={() => onOpenChange(false)}
                 disabled={pending}
               >
@@ -202,16 +175,6 @@ export function RotateSecretDialog({
           </>
         ) : (
           <>
-            <DialogHeader>
-              <DialogTitle>
-                {rotated.secret ? "Your new signing secret" : "Your new public key"}
-              </DialogTitle>
-              <DialogDescription>
-                {rotated.secret
-                  ? "Shown once. Store it before you close this."
-                  : "Verify Ed25519 signatures with this key. It is not a secret and stays visible on the endpoint."}
-              </DialogDescription>
-            </DialogHeader>
             <CopyField
               value={rotated.secret ?? rotated.public_key ?? ""}
               className="py-2"

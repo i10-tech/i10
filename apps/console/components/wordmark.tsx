@@ -1,4 +1,4 @@
-import { Mark } from "@repo/ui/components/mark"
+import { Mark } from "@repo/ui/components/i10/mark"
 
 /**
  * The mark in the corner: the slanted i10 ligature from i10.tech.

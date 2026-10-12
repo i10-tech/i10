@@ -2,28 +2,28 @@
 
 import { useEffect, useRef, useState } from "react"
 import { ArrowLeftIcon } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@repo/ui/components/i10/toasts"
 import { useClerk, useSignIn, useSignUp } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
-import { FieldDescription, FieldGroup } from "@repo/ui/components/field"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import { EmailInput } from "@repo/ui/components/email-input"
+import { Button } from "@repo/ui/components/button/button"
+import { FieldDescription, FieldGroup } from "@repo/ui/components/i10/field"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { EmailInput } from "@repo/ui/components/i10/email-input"
 import { emailProblem } from "@repo/ui/checks"
-import { Spinner } from "@repo/ui/components/spinner"
-import { StepProgress } from "@repo/ui/components/step-progress"
-import { StepStage } from "@repo/ui/components/step-stage"
-import { OtpField, OTP_LENGTH } from "@repo/ui/components/otp-field"
+import { Stepper } from "@repo/ui/components/stepper/stepper"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
+import { OtpField, OTP_LENGTH } from "@repo/ui/components/i10/otp-field"
 import { ResendButton } from "../_components/resend-button"
-import { PasswordInput } from "../_components/password-input"
+import { PasswordRules as PasswordChecklist } from "@repo/ui/components/i10/password-rules"
+import { PasswordInput } from "@repo/ui/components/i10/password-input"
 import { StepHeading } from "../_components/step-heading"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { freshenAfterSignUp } from "../_lib/devices"
-import { PasskeyCue } from "../_components/passkey-cue"
+import { PasskeyCue } from "@repo/ui/components/i10/passkey-cue"
 import { finalizeWithoutLeaving, holdSince, leaveFor } from "../_lib/finish"
 import { markSignInAttempt } from "../_lib/last-used"
 import { useResumable, useResumeLive } from "../_lib/resume"
 import type { PasswordRules, SignUpAbilities } from "../_lib/environment"
-import { describeRules, passwordProblem } from "../_lib/validate"
+import { checklistFor, passwordProblem } from "../_lib/validate"
 import type { SsoProvider } from "../_lib/providers"
 import {
   BackupCodesStep,
@@ -84,6 +84,17 @@ type Stage =
 
 /** The four that build the account. Always present, always in this order. */
 const ACCOUNT_STAGES = ["name", "surname", "credentials", "verify"] as const
+
+/** What each step is called by the progress stepper (read aloud; markers only on screen). */
+const STEP_LABEL: Partial<Record<Stage, string>> = {
+  name: "Your name",
+  surname: "Your surname",
+  credentials: "Email and password",
+  verify: "Verify your email",
+  passkey: "Passkey",
+  "totp-offer": "Two-factor",
+  connect: "Connect an account",
+}
 
 /**
  * ⚠ THE THREE TWO-FACTOR SCREENS COUNT AS ONE SEGMENT. The progress bar
@@ -600,7 +611,7 @@ export function SignUpForm({
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
+          size="sm"
           onClick={() => (leaving ? onSignIn() : back && goBack(back))}
           disabled={(!back && !leaving) || locked}
           // ⚠ `invisible`, NOT UNMOUNTED. Removing the button would let the
@@ -611,10 +622,12 @@ export function SignUpForm({
         >
           <ArrowLeftIcon aria-hidden="true" />
         </Button>
-        <StepProgress
-          total={order.length}
-          current={order.indexOf(segment) + 1}
+        <Stepper
+          compact
           label="Sign-up progress"
+          current={order.indexOf(segment)}
+          steps={order.map((id) => ({ id, label: STEP_LABEL[id] ?? id }))}
+          className="min-w-0 flex-1"
         />
         {/*
          * ⚠ AN EMPTY BOX THE WIDTH OF THE BACK BUTTON, AND IT IS NOT A HACK.
@@ -633,7 +646,7 @@ export function SignUpForm({
        * is asked to MAKE the passkey. Outside the stage so the step swap cannot
        * unmount it mid-prompt - see _components/passkey-cue.tsx.
        */}
-      {busy === "passkey" ? <PasskeyCue mode="create" /> : null}
+      <PasskeyCue open={busy === "passkey"} mode="create" />
 
       <StepStage step={stage} direction={direction}>
         {stage === "name" ? (
@@ -651,6 +664,7 @@ export function SignUpForm({
               </StepHeading>
               <FloatingInput
                 id="first-name"
+                data-carry="first-name"
                 name="first-name"
                 type="text"
                 label="First name"
@@ -661,7 +675,7 @@ export function SignUpForm({
                 autoFocus
                 required
               />
-              <Button type="submit" size="xl" disabled={locked || !firstName.trim()}>
+              <Button type="submit" size="lg" disabled={locked || !firstName.trim()}>
                 Continue
               </Button>
               <FieldDescription className="text-center">
@@ -687,7 +701,17 @@ export function SignUpForm({
             noValidate
           >
             <FieldGroup>
-              <StepHeading title={`Hello, ${firstName.trim()}.`}>
+              {/*
+               * ⚠ THE NAME JUST TYPED TRAVELS INTO THE GREETING, and back into
+               * the box on Back - the same word, moved. See `carryBetween`.
+               */}
+              <StepHeading
+                title={
+                  <>
+                    Hello, <span data-carry="first-name">{firstName.trim()}</span>.
+                  </>
+                }
+              >
                 And your last name, if you have one.
               </StepHeading>
               <FloatingInput
@@ -706,7 +730,7 @@ export function SignUpForm({
                 // completed truthfully by someone who has none - which is also
                 // why the button below says Continue rather than Skip.
               />
-              <Button type="submit" size="xl" disabled={locked}>
+              <Button type="submit" size="lg" disabled={locked}>
                 Continue
               </Button>
             </FieldGroup>
@@ -719,6 +743,7 @@ export function SignUpForm({
               </StepHeading>
               <EmailInput
                 id="email"
+                data-carry="email"
                 name="email"
                 /*
                  * ⚠ `EmailInput` IS STILL `type="email"` THOUGH THE FORM IS `noValidate` AND WE
@@ -765,21 +790,28 @@ export function SignUpForm({
                  * count ticks up as you type and the border only turns red
                  * once you have left the box.
                  */
-                hint={describeRules(passwordPolicy)}
-                reserveHint={false}
+                hint={undefined}
+                // ⚠ `"open"`, NOT OVERLAID: the strength meter sits right under
+                // this field, and a message hung in the gap landed on top of it.
+                // The row opens when there is something to say and pushes the
+                // meter down - see `reserveHint` in floating-field.
+                reserveHint="open"
                 autoComplete="new-password"
                 disabled={locked}
                 autoFocus={startOnPassword}
               />
-              <Button type="submit" size="xl" disabled={!signUp || locked}>
-                {busy === "credentials" ? (
-                  <>
-                    <Spinner aria-hidden="true" aria-label={undefined} />
-                    Creating your account…
-                  </>
-                ) : (
-                  "Create account"
-                )}
+              <PasswordChecklist
+                value={secret}
+                rules={checklistFor(passwordPolicy)}
+                className="-mt-4"
+              />
+              <Button
+                loading={busy === "credentials"}
+                type="submit"
+                size="lg"
+                disabled={!signUp || locked}
+              >
+                Create account
               </Button>
             </FieldGroup>
           </form>
@@ -809,7 +841,7 @@ export function SignUpForm({
                   disabled={locked}
                   className="max-w-full truncate rounded-pill border px-3 py-1 text-xs text-muted-foreground transition-colors duration-(--duration-instant) hover:bg-accent hover:text-foreground disabled:opacity-50"
                 >
-                  {email} · Change
+                  <span data-carry="email">{email}</span> · Change
                 </button>
               </div>
 
@@ -832,18 +864,12 @@ export function SignUpForm({
                 autoFocus
               />
               <Button
+                loading={busy === "verify"}
                 type="submit"
-                size="xl"
+                size="lg"
                 disabled={locked || code.length < OTP_LENGTH}
               >
-                {busy === "verify" ? (
-                  <>
-                    <Spinner aria-hidden="true" aria-label={undefined} />
-                    Verifying…
-                  </>
-                ) : (
-                  "Verify email"
-                )}
+                Verify email
               </Button>
               <ResendButton
                 onResend={async () => {

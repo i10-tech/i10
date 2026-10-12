@@ -2,17 +2,11 @@
 
 import * as React from "react"
 import { Plus } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { EmailInput } from "@repo/ui/components/email-input"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { EmailInput } from "@repo/ui/components/i10/email-input"
 import { emailProblem } from "@repo/ui/checks"
 import { addSuppression } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
@@ -62,7 +56,7 @@ export function AddSuppressionButton() {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         <Plus />
         Suppress an address
       </Button>
@@ -71,16 +65,12 @@ export function AddSuppressionButton() {
         open={open}
         onOpenChange={outcome.state === "pending" ? () => {} : setOpen}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          title="Suppress an address"
+          description="We will skip this address on every send from this workspace, transactional and marketing alike."
+          style={{ width: "min(calc(100vw - 2rem), 448px)" }}
+        >
           <form onSubmit={submit} {...outcome.formProps}>
-            <DialogHeader>
-              <DialogTitle>Suppress an address</DialogTitle>
-              <DialogDescription>
-                We will skip this address on every send from this workspace,
-                transactional and marketing alike.
-              </DialogDescription>
-            </DialogHeader>
-
             <div className="py-4">
               <EmailInput
                 id="suppress-address"
@@ -102,7 +92,7 @@ export function AddSuppressionButton() {
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <ActionButton
+              <StateButton
                 type="submit"
                 state={outcome.state}
                 pendingLabel="Suppress"
@@ -110,7 +100,7 @@ export function AddSuppressionButton() {
                 disabled={!address.includes("@")}
               >
                 Suppress
-              </ActionButton>
+              </StateButton>
             </DialogFooter>
           </form>
         </DialogContent>

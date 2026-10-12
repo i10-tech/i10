@@ -65,6 +65,23 @@ export async function resumeDevice(email: string): Promise<ResumeAnswer> {
   }
 }
 
+/**
+ * Which saved accounts no longer exist - deleted since they were saved here.
+ * Anything unexpected is "none", so a failure never clears a card.
+ */
+export async function goneAccounts(): Promise<string[]> {
+  try {
+    const response = await fetch("/api/devices/check", { method: "POST" })
+    if (!response.ok) return []
+    const answer = (await response.json()) as { gone?: unknown }
+    return Array.isArray(answer.gone)
+      ? answer.gone.filter((email): email is string => typeof email === "string")
+      : []
+  } catch {
+    return []
+  }
+}
+
 /** The card's ×. Fire and forget: the card is already gone from the page. */
 export function forgetDevice(email: string): void {
   void fetch("/api/devices/forget", {

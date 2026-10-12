@@ -7,8 +7,8 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
-import { TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
+} from "@repo/ui/components/i10/page"
+import { TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { CreateWebhookButton } from "@/components/create-webhook"
 import { DeliveriesTable } from "@/components/deliveries-table"
 import { ApiButton } from "@/components/list/api-button"
@@ -27,6 +27,7 @@ import type {
   WebhookStats,
 } from "@/lib/types"
 import { windowQuery } from "@/lib/webhooks"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Webhooks" }
 
@@ -90,17 +91,13 @@ export default async function WebhooksPage({
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Webhooks</PageTitle>
+          <PageTitle>{PAGE_COPY.webhooks.title}</PageTitle>
           <PageActions>
             <ApiButton snippet={SNIPPETS.webhooks} />
             <CreateWebhookButton autoOpen={params.new === "1"} catalog={types} />
           </PageActions>
         </PageHeaderRow>
-        <PageDescription>
-          Every event about your mail, signed so you can verify it came from us: posted
-          to your URL, sent to an SQS queue, or held for you to fetch. Failed deliveries
-          are retried with backoff.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.webhooks.description}</PageDescription>
       </PageHeader>
 
       <PageBody className="space-y-6">
@@ -109,7 +106,7 @@ export default async function WebhooksPage({
           value={params.tab === "deliveries" ? "deliveries" : undefined}
           fallback="endpoints"
         >
-          <TabsList className="mb-4">
+          <TabsList>
             <TabsTrigger value="endpoints">
               Endpoints
               {endpoints.ok && endpoints.data.data.length > 0 && (

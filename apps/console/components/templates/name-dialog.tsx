@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import type { ActionResult } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"

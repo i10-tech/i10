@@ -1,11 +1,10 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Spinner } from "@repo/ui/components/spinner"
+import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { finishDnsConnect, listDomains } from "@/lib/actions"
 import { activateDomain } from "@/lib/domain-activation"
 import { ARRIVAL, setArrival } from "@/lib/arrival"
@@ -198,12 +197,11 @@ export function CallbackHandler({
     <div className="mx-auto flex min-h-[60vh] w-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
       {(phase === "working" || phase === "publishing") && (
         <>
-          <Spinner className="size-6" />
-          <p className="text-sm text-muted-foreground">
+          <TextShimmer as="p" className="text-sm text-muted-foreground">
             {phase === "working"
-              ? `Finishing the connection with ${provider}…`
-              : "Publishing your records and checking them…"}
-          </p>
+              ? `Finishing the connection with ${provider}`
+              : "Publishing your records and checking them"}
+          </TextShimmer>
         </>
       )}
 
@@ -242,9 +240,7 @@ export function CallbackHandler({
               )}
             </p>
           </div>
-          <Button asChild>
-            <Link href="/domains">Back to domains</Link>
-          </Button>
+          <ButtonLink href="/domains">Back to domains</ButtonLink>
         </>
       )}
 
@@ -257,9 +253,9 @@ export function CallbackHandler({
               {message ?? "The authorisation could not be finished."}
             </p>
           </div>
-          <Button variant="outline" asChild>
-            <Link href="/domains">Back to domains</Link>
-          </Button>
+          <ButtonLink href="/domains" variant="secondary">
+            Back to domains
+          </ButtonLink>
         </>
       )}
     </div>

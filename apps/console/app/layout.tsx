@@ -2,11 +2,12 @@ import type { Metadata, Viewport } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
 import { GeistMono } from "geist/font/mono"
 import { GeistSans } from "geist/font/sans"
+import { inter } from "./fonts"
 import { clerkAppearance } from "@repo/ui/clerk"
-import { MotionProvider } from "@repo/ui/components/motion-provider"
-import { Theme } from "@repo/ui/components/theme"
-import { Toaster } from "@repo/ui/components/sonner"
-import { TooltipProvider } from "@repo/ui/components/tooltip"
+import { MotionProvider } from "@repo/ui/components/i10/motion-provider"
+import { Theme } from "@repo/ui/components/i10/theme"
+import { ToastHost } from "@repo/ui/components/i10/toasts"
+import { ArcNext } from "@repo/ui/components/i10/arc-next"
 import { ActivateWorkspace } from "@/components/activate-workspace"
 import { StepUpProvider } from "@/lib/step-up"
 import "./globals.css"
@@ -81,8 +82,8 @@ function Providers({ children }: { children: React.ReactNode }) {
       <ActivateWorkspace />
       {/*
        * ⚠ INSIDE THE PROVIDER, BECAUSE IT USES A CLERK HOOK THAT THROWS
-       * OUTSIDE ONE. It renders nothing; it supplies the "prove it is you"
-       * prompt that guards the deletions - see lib/step-up. The branch above
+       * OUTSIDE ONE. It renders our "prove it is you" dialog - no longer
+       * Clerk's - that guards the deletions - see lib/step-up. The branch above
        * with no Clerk key gets a fallback that cannot prompt and therefore
        * cannot delete anything the API would have refused.
        */}
@@ -145,9 +146,11 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      className={`${GeistSans.variable} ${GeistMono.variable} ${inter.variable}`}
     >
-      <body className="min-h-dvh antialiased">
+      {/* Extensions (Grammarly and the like) stamp attributes on <body>
+          before React hydrates; this silences that one element only. */}
+      <body className="min-h-dvh antialiased" suppressHydrationWarning>
         {/*
          * ⚠ `preconnect` FOR THE FONT ORIGIN, AND `crossOrigin` IS NOT OPTIONAL
          * ON IT. Fonts are fetched in CORS mode whatever the stylesheet says, so
@@ -176,11 +179,13 @@ export default function RootLayout({
            * a table of copy buttons feels broken.
            */}
           <MotionProvider>
-            <TooltipProvider delayDuration={300} skipDelayDuration={500}>
-              <Providers>{children}</Providers>
-            </TooltipProvider>
+            <>
+              <ArcNext>
+                <Providers>{children}</Providers>
+              </ArcNext>
+            </>
           </MotionProvider>
-          <Toaster />
+          <ToastHost />
         </Theme>
       </body>
     </html>

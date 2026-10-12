@@ -4,8 +4,7 @@ import * as React from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Check } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
 import { cn } from "cn"
 import { changePlan, resumeSubscription, startCheckout } from "@/lib/actions"
 import { openPolarCheckout, untilCheckoutReadable } from "@/lib/polar-embed"
@@ -614,6 +613,7 @@ export function PlanCards({
             </ul>
 
             <Button
+              loading={pending === plan.id || (resumable && pending === RESUMING)}
               /*
                * ⚠ "Subscribed" IS NOT DISABLED-LOOKING, THOUGH IT IS
                * DISABLED. A confirmation at half opacity reads as a control
@@ -629,12 +629,12 @@ export function PlanCards({
               )}
               variant={
                 isCurrent
-                  ? "outline"
+                  ? "secondary"
                   : leaving && confirming?.id === plan.id
-                    ? "destructive"
+                    ? "danger"
                     : isUpgrade
-                      ? "default"
-                      : "outline"
+                      ? "primary"
+                      : "secondary"
               }
               // ⚠ ALREADY-CANCELLING DISABLES THE FREE CARD RATHER THAN HIDING
               // IT. There is nothing left to ask for - the subscription ends on
@@ -654,9 +654,6 @@ export function PlanCards({
                 return void choose(plan)
               }}
             >
-              {(pending === plan.id || (resumable && pending === RESUMING)) && (
-                <Spinner />
-              )}
               {label({
                 /*
                  * ⚠ RESUMING OUTRANKS "Continue on Pro", because the two say

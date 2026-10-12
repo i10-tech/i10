@@ -3,26 +3,31 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { KeyRound } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { CopyField } from "@repo/ui/components/copy"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
 import {
   Field,
   FieldContent,
   FieldDescription,
   FieldLabel,
-} from "@repo/ui/components/field"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+} from "@repo/ui/components/i10/field"
+import { Input } from "@repo/ui/components/i10/input"
+import { Label } from "@repo/ui/components/i10/label"
 import {
   Section,
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
-import { Switch } from "@repo/ui/components/switch"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+} from "@repo/ui/components/i10/page"
+import { Switch } from "@repo/ui/components/i10/switch"
+import { Reveal } from "@repo/ui/components/i10/reveal"
+import { NumberField } from "@repo/ui/components/number-field/number-field"
+import { TagInput } from "@repo/ui/components/tag-input/tag-input"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { UrlInput } from "@/components/url-input"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { Time } from "@/components/time"
 import { RotateSecretDialog } from "@/components/webhook-rotate-dialog"
 import { EventPicker } from "@/components/webhooks/event-picker"
@@ -104,7 +109,7 @@ function SaveButton({
   done?: string
 }) {
   return (
-    <ActionButton
+    <StateButton
       type="submit"
       size="sm"
       state={outcome.state}
@@ -115,7 +120,7 @@ function SaveButton({
       disabled={outcome.state === "idle" && disabled}
     >
       {label}
-    </ActionButton>
+    </StateButton>
   )
 }
 
@@ -150,37 +155,27 @@ function EndpointSection({ endpoint }: { endpoint: WebhookEndpoint }) {
           }}
         >
           {endpoint.kind !== "polling" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="endpoint-url">
-                {endpoint.kind === "sqs" ? "Queue URL" : "URL"}
-              </Label>
-              <Input
-                id="endpoint-url"
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                className="font-mono text-xs"
-              />
-              <p className="text-xs text-muted-foreground">
-                {endpoint.kind === "sqs"
+            <UrlInput
+              id="endpoint-url"
+              label={endpoint.kind === "sqs" ? "Queue URL" : "URL"}
+              value={url}
+              onValueChange={setUrl}
+              hint={
+                endpoint.kind === "sqs"
                   ? "https://sqs.<region>.amazonaws.com/<account>/<queue>"
-                  : "HTTPS and publicly reachable. Changing it sends the next event to the new address."}
-              </p>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="endpoint-description">Description</Label>
-            <Input
-              id="endpoint-description"
-              value={description}
-              maxLength={255}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Production handler"
-              autoComplete="off"
+                  : "HTTPS and publicly reachable. Changing it sends the next event to the new address."
+              }
             />
-          </div>
+          )}
+          <FloatingInput
+            id="endpoint-description"
+            label="Description"
+            value={description}
+            maxLength={255}
+            onChange={(e) => setDescription(e.target.value)}
+            autoComplete="off"
+            hint="Optional, e.g. Production handler."
+          />
           <div className="flex justify-end">
             <SaveButton outcome={outcome} disabled={!changed} />
           </div>
@@ -280,17 +275,26 @@ function EventsSection({
  * filter can name a domain before it is added, and one that was removed
  * should not silently widen the filter by vanishing from a picker.
  */
+const NO_DOMAINS: string[] = []
+
 function FiltersSection({ endpoint }: { endpoint: WebhookEndpoint }) {
-  const [domains, setDomains] = useSyncedState(
-    (endpoint.filter_domains ?? []).join(", "),
+  // ⚠ A STABLE EMPTY LIST, NOT `?? []`: `useSyncedState` resets on a new
+  // value, and a fresh array every render resets it every render.
+  const [domains, setDomains] = useSyncedState<string[]>(
+    endpoint.filter_domains ?? NO_DOMAINS,
   )
-  const [tags, setTags] = useSyncedState<Pair[]>(recordToPairs(endpoint.filter_tags))
+  // ⚠ MEMOISED. `useSyncedState` resets whenever its input changes identity,
+  // and a fresh array every render reset it every render: "Too many
+  // re-renders" on the Settings tab. Keyed on the record, so a save (which
+  // brings a new endpoint) still resets it.
+  const savedTags = React.useMemo(
+    () => recordToPairs(endpoint.filter_tags),
+    [endpoint.filter_tags],
+  )
+  const [tags, setTags] = useSyncedState<Pair[]>(savedTags)
   const { outcome, save } = useSave(endpoint.id, "Could not save the filters")
 
-  const list = domains
-    .split(/[\s,]+/)
-    .map((d) => d.trim().toLowerCase())
-    .filter(Boolean)
+  const list = [...new Set(domains.map((d) => d.trim().toLowerCase()).filter(Boolean))]
   const before = endpoint.filter_domains ?? []
   const tagRecord = pairsToRecord(tags)
   const domainsChanged =
@@ -318,21 +322,15 @@ function FiltersSection({ endpoint }: { endpoint: WebhookEndpoint }) {
             })
           }}
         >
-          <div className="space-y-1.5">
-            <Label htmlFor="filter-domains">Sending domains</Label>
-            <Input
-              id="filter-domains"
-              value={domains}
-              onChange={(e) => setDomains(e.target.value)}
-              placeholder="acme.com, mail.acme.com"
-              autoComplete="off"
-              spellCheck={false}
-              className="font-mono text-xs"
-            />
-            <p className="text-xs text-muted-foreground">
-              Only mail sent from these domains. Separate them with commas.
-            </p>
-          </div>
+          {/* Arc's TagInput: each domain a chip, added with Enter or a comma. */}
+          <TagInput
+            id="filter-domains"
+            label="Sending domains"
+            value={domains}
+            onValueChange={setDomains}
+            placeholder="acme.com"
+            description="Only mail sent from these domains. Press Enter or a comma after each."
+          />
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium">Tags</legend>
             <p className="text-xs text-muted-foreground">
@@ -362,9 +360,12 @@ function FiltersSection({ endpoint }: { endpoint: WebhookEndpoint }) {
  * them.
  */
 function DeliverySection({ endpoint }: { endpoint: WebhookEndpoint }) {
-  const [rate, setRate] = useSyncedState(endpoint.rate_limit?.toString() ?? "")
+  // Off is "no limit"; on, Arc's NumberField holds the rate, kept between
+  // 1 and 1000 by its own min and max.
+  const [limited, setLimited] = useSyncedState(endpoint.rate_limit !== null)
+  const [rate, setRate] = useSyncedState(endpoint.rate_limit ?? 10)
   const rateSave = useSave(endpoint.id, "Could not save the rate limit")
-  const parsed = rate.trim() === "" ? null : Number(rate)
+  const parsed = limited ? rate : null
   const rateValid =
     parsed === null || (Number.isInteger(parsed) && parsed >= 1 && parsed <= 1000)
   const rateChanged = parsed !== endpoint.rate_limit
@@ -388,31 +389,36 @@ function DeliverySection({ endpoint }: { endpoint: WebhookEndpoint }) {
             void rateSave.save({ rate_limit: parsed })
           }}
         >
-          <Label htmlFor="rate-limit">Rate limit</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="rate-limit"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={1000}
-              value={rate}
-              onChange={(e) => setRate(e.target.value)}
-              placeholder="No limit"
-              aria-invalid={!rateValid || undefined}
-              className="tabular w-32"
-            />
-            <span className="text-sm text-muted-foreground">per second</span>
-            <span className="ml-auto">
+          <div className="flex items-center justify-between gap-4">
+            <label htmlFor="rate-limit-on" className="text-sm font-medium">
+              Limit the rate
+            </label>
+            <div className="flex items-center gap-3">
+              <Switch
+                id="rate-limit-on"
+                checked={limited}
+                onCheckedChange={setLimited}
+              />
               <SaveButton
                 outcome={rateSave.outcome}
                 disabled={!rateValid || !rateChanged}
               />
-            </span>
+            </div>
           </div>
+          <Reveal show={limited} spacing="pt-2">
+            <NumberField
+              id="rate-limit"
+              label="Events per second"
+              value={rate}
+              onValueChange={setRate}
+              min={1}
+              max={1000}
+              suffix=" per second"
+            />
+          </Reveal>
           <p className="text-xs text-muted-foreground">
-            1 to 1000, held across all of our workers. Events over it wait their turn;
-            none are dropped.
+            Off sends as fast as events happen. On, 1 to 1000 a second, held across all
+            of our workers; events over it wait their turn and none are dropped.
           </p>
         </form>
 
@@ -433,7 +439,7 @@ function DeliverySection({ endpoint }: { endpoint: WebhookEndpoint }) {
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   onClick={() => {
                     setHeaders(
                       endpoint.header_names.map((name) => ({ name, value: "" })),
@@ -454,7 +460,7 @@ function DeliverySection({ endpoint }: { endpoint: WebhookEndpoint }) {
               endpoint.header_names.length ? (
                 <div className="flex flex-wrap gap-1.5">
                   {endpoint.header_names.map((name) => (
-                    <Badge key={name} variant="outline" className="font-mono text-2xs">
+                    <Badge size="sm" key={name} tone="neutral">
                       {name}: ••••
                     </Badge>
                   ))}
@@ -582,7 +588,7 @@ function SigningSection({ endpoint }: { endpoint: WebhookEndpoint }) {
               : "HMAC-SHA256 (v1) with the shared secret you were shown once. Rotate it if it is lost or may have leaked."}
           </SectionDescription>
         </div>
-        <Button size="sm" variant="outline" onClick={() => setRotating(true)}>
+        <Button size="sm" variant="secondary" onClick={() => setRotating(true)}>
           <KeyRound />
           Rotate secret
         </Button>
@@ -598,9 +604,9 @@ function SigningSection({ endpoint }: { endpoint: WebhookEndpoint }) {
           <div className="space-y-2 rounded-xl border border-warning/25 bg-warning/5 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">Previous secrets still signing</p>
-              <ActionButton
+              <StateButton
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 state={revoke.state}
                 onReset={revoke.reset}
                 pendingLabel="Revoke now"
@@ -619,7 +625,7 @@ function SigningSection({ endpoint }: { endpoint: WebhookEndpoint }) {
                 }
               >
                 Revoke now
-              </ActionButton>
+              </StateButton>
             </div>
             <ul className="space-y-1">
               {endpoint.previous_secrets.map((p, i) => (
@@ -710,7 +716,7 @@ function DangerSection({ endpoint }: { endpoint: WebhookEndpoint }) {
               Events stop at once. Past deliveries stay in the log.
             </p>
           </div>
-          <Button variant="destructive" size="sm" onClick={() => setOpen(true)}>
+          <Button variant="danger" size="sm" onClick={() => setOpen(true)}>
             Delete endpoint
           </Button>
         </div>
@@ -722,9 +728,9 @@ function DangerSection({ endpoint }: { endpoint: WebhookEndpoint }) {
         description="Events stop being delivered to it immediately. Past deliveries stay in the log."
         confirmLabel="Delete endpoint"
         doneLabel="Deleted"
-        confirmWord={endpointName(endpoint)}
+        confirmWord={confirmWordFor([endpointName(endpoint)])}
         onConfirm={async () => {
-          const result = await deleteWebhook(endpoint.id)
+          const result = await deleteWebhook(endpoint.id, { leaving: true })
           if (!result.ok) {
             toastError("Could not delete the endpoint", { description: result.error })
             return false

@@ -1,4 +1,4 @@
-import { Section, SectionContent, SectionTitle } from "@repo/ui/components/page"
+import { Section, SectionContent, SectionTitle } from "@repo/ui/components/i10/page"
 import { Stat, StatRow } from "@/components/stat"
 import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
 import { StatsCharts } from "@/components/webhooks/stats-chart"

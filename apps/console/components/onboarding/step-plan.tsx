@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { ArrowRight, CheckCircle2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Reveal } from "@repo/ui/components/reveal"
+import { Button } from "@repo/ui/components/button/button"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { BillingBanner, CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
 import { onPaidPlan } from "@/lib/billing"
@@ -191,7 +191,7 @@ export function StepPlan({
            * that has finished asking - and for a new customer the two are
            * three minutes apart.
            */}
-          <Button size="xl" className="rounded-full" onClick={onDone}>
+          <Button size="lg" onClick={onDone}>
             Continue to dashboard
             <ArrowRight />
           </Button>

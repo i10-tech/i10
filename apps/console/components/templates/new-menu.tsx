@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Folder, LayoutTemplate, Loader2, Plus, Upload } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@repo/ui/components/button/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
+} from "@repo/ui/components/i10/menu"
 import { NameDialog } from "@/components/templates/name-dialog"
 import { UploadTemplatesDialog } from "@/components/upload-templates"
 import { createTemplate, createTemplateFolder } from "@/lib/actions"

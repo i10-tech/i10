@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation"
 import { useEffect, useRef } from "react"
-import { PageTransition } from "@repo/ui/components/page-transition"
+import { PageTransition } from "@repo/ui/components/i10/page-transition"
 import { forgetDraft } from "@/lib/add-domain-draft"
 
 /**

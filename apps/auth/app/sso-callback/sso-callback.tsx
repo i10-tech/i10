@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@repo/ui/components/i10/toasts"
+import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { useClerk, useSignIn, useSignUp } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
-import { FieldGroup } from "@repo/ui/components/field"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
+import { FieldGroup } from "@repo/ui/components/i10/field"
 import { messageFor, ssoFailureMessage, TRANSPORT_FAILURE } from "../_lib/errors"
 import { leaveFor, setActiveAndLeave } from "../_lib/finish"
 import {
@@ -402,10 +403,10 @@ export function SsoCallback({
 
     return (
       <main className="flex min-h-dvh items-center justify-center px-6 pt-24 pb-12">
-        <div className="w-full max-w-sm">
+        <StepStage step="offer" className="max-w-sm">
           <FieldGroup>
             <div className="flex flex-col items-center gap-2 text-center">
-              <h1 className="text-2xl font-bold text-balance">
+              <h1 className="text-2xl font-medium text-balance">
                 Create an i10 account?
               </h1>
               <p className="text-muted-foreground text-sm text-balance">
@@ -417,46 +418,49 @@ export function SsoCallback({
               {/* ⚠ `xl` FOR BOTH, like every other decision in this app. */}
               <Button
                 type="button"
-                variant="outline"
-                size="xl"
+                variant="secondary"
+                size="lg"
                 onClick={decline}
                 disabled={pending}
               >
                 Not now
               </Button>
               <Button
+                loading={pending}
                 type="button"
-                size="xl"
+                size="lg"
                 onClick={createAccount}
                 disabled={pending}
               >
-                {pending ? (
-                  <>
-                    <Spinner aria-hidden="true" aria-label={undefined} />
-                    Creating…
-                  </>
-                ) : (
-                  "Create my account"
-                )}
+                Create my account
               </Button>
             </div>
           </FieldGroup>
-        </div>
+        </StepStage>
       </main>
     )
   }
 
+  /*
+   * ⚠ THE SAME `main` AND THE SAME `StepStage` AS THE OFFER ABOVE, so the
+   * wait giving way to "Create an i10 account?" is the card changing, not the
+   * page being replaced (2026-10-12). One padding for both, or the wait's
+   * centre and the offer's would differ and the swap would jump.
+   */
   return (
-    <main className="flex min-h-dvh items-center justify-center px-6">
-      {/*
-       * ⚠ A SPINNER RATHER THAN A BARE SENTENCE, because this page is a pause of
-       * unknown length in the middle of a redirect chain. Static text on an
-       * empty page is indistinguishable from a page that has stopped.
-       */}
-      <p className="text-muted-foreground flex items-center gap-2 text-sm">
-        <Spinner aria-hidden="true" aria-label={undefined} />
-        Signing you in…
-      </p>
+    <main className="flex min-h-dvh items-center justify-center px-6 pt-24 pb-12">
+      <StepStage step="wait" className="max-w-sm">
+        {/*
+         * ⚠ A SPINNER RATHER THAN A BARE SENTENCE, because this page is a pause
+         * of unknown length in the middle of a redirect chain. Static text on
+         * an empty page is indistinguishable from a page that has stopped.
+         */}
+        <div className="flex justify-center">
+          <TextShimmer as="p" className="text-muted-foreground text-sm">
+            Signing you in
+          </TextShimmer>
+        </div>
+      </StepStage>
     </main>
   )
 }

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react"
 import { AlertTriangle, RotateCw } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@repo/ui/components/button/button"
 
 /**
  * When a page throws.
@@ -35,7 +35,7 @@ export default function ErrorBoundary({
     <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-4 px-6 text-center">
       <AlertTriangle className="size-5 text-warning" />
       <div className="space-y-1">
-        <h1 className="text-lg font-semibold tracking-tight">Something went wrong</h1>
+        <h1 className="text-lg font-medium tracking-tight">Something went wrong</h1>
         <p className="max-w-md text-sm text-muted-foreground">{error.message}</p>
         {error.digest && (
           <p className="pt-1 font-mono text-2xs text-muted-foreground">

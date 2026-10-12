@@ -3,16 +3,10 @@
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { Eye, History, Loader2, RotateCcw, Rocket, X } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmailFrame } from "@/components/email-frame"
 import { Time } from "@/components/time"
@@ -60,19 +54,15 @@ export function VersionsPanel({
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <p className="text-sm font-medium">Version history</p>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="size-7"
-              onClick={onClose}
-              aria-label="Close version history"
-            >
-              <X />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Close</TooltipContent>
+        <Tooltip content="Close">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            aria-label="Close version history"
+          >
+            <X />
+          </Button>
         </Tooltip>
       </div>
 
@@ -103,7 +93,7 @@ export function VersionsPanel({
                     <span
                       className={
                         v.live
-                          ? "mt-1.5 size-2 shrink-0 rounded-full bg-emerald-500 ring-4 ring-emerald-500/15"
+                          ? "mt-1.5 size-2 shrink-0 rounded-full bg-success"
                           : "mt-1.5 size-2 shrink-0 rounded-full bg-muted-foreground/40"
                       }
                       aria-hidden
@@ -126,50 +116,38 @@ export function VersionsPanel({
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="size-7"
-                            onClick={() => setPreviewing(v)}
-                            aria-label={`Preview v${v.number}`}
-                          >
-                            <Eye />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Preview</TooltipContent>
+                      <Tooltip content="Preview">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setPreviewing(v)}
+                          aria-label={`Preview v${v.number}`}
+                        >
+                          <Eye />
+                        </Button>
                       </Tooltip>
                       {editable && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="size-7"
-                              onClick={() => setRestoring(v)}
-                              aria-label={`Restore v${v.number} to the draft`}
-                            >
-                              <RotateCcw />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Restore to draft</TooltipContent>
+                        <Tooltip content="Restore to draft">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setRestoring(v)}
+                            aria-label={`Restore v${v.number} to the draft`}
+                          >
+                            <RotateCcw />
+                          </Button>
                         </Tooltip>
                       )}
                       {!v.live && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="size-7"
-                              onClick={() => setPromoting(v)}
-                              aria-label={`Make v${v.number} live`}
-                            >
-                              <Rocket />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Make live</TooltipContent>
+                        <Tooltip content="Make live">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPromoting(v)}
+                            aria-label={`Make v${v.number} live`}
+                          >
+                            <Rocket />
+                          </Button>
                         </Tooltip>
                       )}
                     </div>
@@ -267,22 +245,23 @@ function VersionPreviewDialog({
 
   return (
     <Dialog open={version !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>
-            v{shown?.number}
-            {shown?.live && <Badge className="ml-2 align-middle">Live</Badge>}
-          </DialogTitle>
-          <DialogDescription>
-            {preview?.subject || shown?.subject || "No subject"}
-            {shown && (
-              <>
-                {" · published "}
-                <Time iso={shown.created_at} mode="exact" />
-              </>
+      <DialogContent
+        title={`v${shown?.number ?? ""}`}
+        description={preview?.subject || shown?.subject || "No subject"}
+        style={{ width: "min(calc(100vw - 2rem), 768px)" }}
+      >
+        {shown && (
+          <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+            {shown.live && (
+              <Badge tone="success" size="sm">
+                Live
+              </Badge>
             )}
-          </DialogDescription>
-        </DialogHeader>
+            <span>
+              Published <Time iso={shown.created_at} mode="exact" />
+            </span>
+          </p>
+        )}
         <div className="h-[60vh] overflow-hidden rounded-lg border bg-white">
           {preview?.html ? (
             <EmailFrame

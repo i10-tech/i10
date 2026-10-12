@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Spinner } from "@repo/ui/components/spinner"
-import { Button } from "@repo/ui/components/button"
+import { Spinner } from "@repo/ui/components/i10/spinner"
+import { Button } from "@repo/ui/components/button/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 
 /**
  * The first ten seconds of a brand-new account.
@@ -48,7 +49,7 @@ export function TenantNotReady() {
     <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
       {!givenUp && <Spinner className="size-5 text-muted-foreground" />}
       <div className="space-y-1.5">
-        <h1 className="text-lg font-semibold tracking-tight">
+        <h1 className="text-lg font-medium tracking-tight">
           {givenUp
             ? "This is taking longer than it should"
             : "Setting up your workspace"}
@@ -62,9 +63,9 @@ export function TenantNotReady() {
       {givenUp && (
         <div className="flex gap-2">
           <Button onClick={() => router.refresh()}>Try again</Button>
-          <Button variant="outline" asChild>
-            <a href="mailto:support@i10.tech">Contact support</a>
-          </Button>
+          <ButtonLink href="mailto:support@i10.tech" variant="secondary" native>
+            Contact support
+          </ButtonLink>
         </div>
       )}
     </main>

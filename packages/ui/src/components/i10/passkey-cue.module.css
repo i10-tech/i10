@@ -1,0 +1,47 @@
+/*
+ * The passkey screen's tile and the rings that leave it - see ./passkey-cue.
+ * Moved from the auth app's globals.css (2026-10-12) so the console's
+ * re-verification dialog draws the same screen.
+ *
+ * ⚠ A SQUIRCLE WHERE THE BROWSER CAN DRAW ONE. `corner-shape: squircle` is the
+ * continuous curve Apple's icons use; a plain radius is the fallback, and the
+ * radius is larger under the squircle because that curve starts later and
+ * would otherwise look too square.
+ */
+.tile {
+  border-radius: 22px;
+}
+
+@supports (corner-shape: squircle) {
+  .tile {
+    border-radius: 32px;
+    corner-shape: squircle;
+  }
+}
+
+/*
+ * Two rings leave the icon and fade, staggered, so something is always moving
+ * while the operating system's prompt is open. Reduced motion stops them,
+ * which leaves the icon still: nothing is lost.
+ */
+.ring {
+  animation: ring 2.4s var(--ease-quint-out) infinite both;
+}
+
+@keyframes ring {
+  from {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    animation: none;
+    opacity: 0;
+  }
+}

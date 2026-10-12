@@ -13,15 +13,16 @@ import {
   Send,
   TriangleAlert,
 } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { AutoHeight } from "@repo/ui/components/auto-height"
-import { Button } from "@repo/ui/components/button"
-import { CopyButton, CopyField } from "@repo/ui/components/copy"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import { Spinner } from "@repo/ui/components/spinner"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
-import { cn } from "cn"
-import { EASE } from "@/components/steps"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { CodeBlock } from "@repo/ui/components/code-block/code-block"
+import { AutoHeight } from "@repo/ui/components/i10/auto-height"
+import { Reveal } from "@repo/ui/components/i10/reveal"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { Spinner } from "@repo/ui/components/i10/spinner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { createApiKey, emailStatus, sendFirstEmail } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import { toastError } from "@/lib/toast"
@@ -233,60 +234,54 @@ client.emails.send({
     <div className="space-y-6">
       {/* ── The key ── */}
       <section className="space-y-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
+        <h3 className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="size-4 text-muted-foreground" />
           API key
         </h3>
-        <AutoHeight grow="animate">
-          <div className="relative">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {key ? (
-                <motion.div
-                  key="key"
-                  initial={reduce ? false : { opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.3, ease: EASE, delay: 0.08 }}
-                  className="space-y-2"
-                >
-                  <CopyField value={key.secret} className="py-2" />
-                  <p className="text-xs text-warning">
-                    Shown once. It is already in the code below - copy that and you have
-                    both.
-                  </p>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="create"
-                  exit={{ opacity: 0, transition: { duration: 0.2 } }}
-                  className="flex flex-wrap items-center gap-3"
-                >
-                  <ActionButton
-                    className="rounded-full"
-                    variant={hasApiKey ? "outline" : "default"}
-                    onClick={mint}
-                    state={outcome.state}
-                    pendingLabel="Add API key"
-                    doneLabel="Added"
-                  >
-                    <Lock />
-                    {hasApiKey ? "Add another API key" : "Add API key"}
-                  </ActionButton>
-                  {hasApiKey && (
-                    <p className="text-xs text-muted-foreground">
-                      You already have one - use it, or add a new key for this.
-                    </p>
-                  )}
-                </motion.div>
+        {/*
+         * ⚠ TWO `Reveal`s ON ONE SPRING (2026-10-12): the button closes as the
+         * key opens, so the section changes height in one movement and the key
+         * settles in with Arc's panel motion. It used to swap inside a box that
+         * clipped while it grew, wiping the key in from the top.
+         */}
+        <div>
+          <Reveal show={!key} spacing="">
+            <div className="flex flex-wrap items-center gap-3">
+              <StateButton
+                variant={hasApiKey ? "secondary" : "primary"}
+                onClick={mint}
+                state={outcome.state}
+                pendingLabel="Add API key"
+                doneLabel="Added"
+              >
+                <Lock />
+                {hasApiKey ? "Add another API key" : "Add API key"}
+              </StateButton>
+              {hasApiKey && (
+                <p className="text-xs text-muted-foreground">
+                  You already have one - use it, or add a new key for this.
+                </p>
               )}
-            </AnimatePresence>
-          </div>
-        </AutoHeight>
+            </div>
+          </Reveal>
+          <Reveal show={key !== null} spacing="">
+            {key && (
+              <div className="space-y-2">
+                <CopyField value={key.secret} className="py-2" />
+                <p className="text-xs text-warning">
+                  Shown once. It is already in the code below - copy that and you have
+                  both.
+                </p>
+              </div>
+            )}
+          </Reveal>
+        </div>
       </section>
 
       {/* ── Where it goes, only when we cannot know ── */}
       {needsRecipient && (
         <section className="space-y-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <MailCheck className="size-4 text-muted-foreground" />
             Send it to
           </h3>
@@ -306,13 +301,13 @@ client.emails.send({
 
       {/* ── The code, and the button that runs it ── */}
       <section className="space-y-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
+        <h3 className="flex items-center gap-2 text-sm font-medium">
           <Send className="size-4 text-muted-foreground" />
           Send an email
         </h3>
         <Tabs defaultValue="node" className="overflow-hidden rounded-3xl border">
           <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-            <TabsList variant="pill">
+            <TabsList>
               {snippets.map((s) => (
                 <TabsTrigger key={s.value} value={s.value}>
                   {s.label}
@@ -332,23 +327,18 @@ client.emails.send({
                 value={s.value}
                 className="relative m-0 animate-in duration-300 fade-in-0"
               >
-                <CopyButton
-                  value={s.code}
-                  label="Copy code"
-                  className="absolute top-3 right-3 z-10"
+                <CodeBlock
+                  code={s.code}
+                  filename={s.label}
+                  language={
+                    s.label === "Python" ? "py" : s.label === "cURL" ? "bash" : "ts"
+                  }
                 />
-                <pre className="overflow-x-auto px-5 py-4 font-mono text-xs leading-relaxed text-muted-foreground">
-                  {s.code}
-                </pre>
               </TabsContent>
             ))}
           </AutoHeight>
           <div className="flex flex-wrap items-center gap-3 border-t bg-muted/20 px-4 py-3">
             <Button
-              className={cn(
-                "rounded-full transition-colors duration-500",
-                finished && "bg-emerald-500 text-white hover:bg-emerald-500",
-              )}
               disabled={!ready || delivery.phase !== "idle"}
               onClick={() => void send()}
             >
@@ -364,11 +354,17 @@ client.emails.send({
             <AnimatePresence mode="wait" initial={false}>
               <motion.p
                 key={delivery.phase + (why ?? "")}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="text-xs text-muted-foreground"
+                initial={
+                  reduce
+                    ? false
+                    : { opacity: 0, filter: `blur(${motionTokens.blur.subtle}px)` }
+                }
+                animate={{ opacity: 1, filter: "blur(0px)" }}
+                exit={{ opacity: 0, filter: `blur(${motionTokens.blur.subtle}px)` }}
+                transition={{
+                  duration: motionTokens.duration.fast,
+                  ease: [...motionTokens.ease.standard],
+                }}
               >
                 {delivery.phase === "watching"
                   ? `On its way to ${delivery.to} - waiting for their server to take it.`
@@ -389,53 +385,67 @@ client.emails.send({
        * Continue arrives with it - the step is finished at that moment and not
        * before.
        */}
-      <AutoHeight grow="animate">
-        <AnimatePresence initial={false}>
-          {(finished || delivery.phase === "failed") && (
-            <motion.div
-              key="outcome"
-              initial={reduce ? false : { opacity: 0, y: 8, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.6, ease: EASE }}
-              className="space-y-5"
-            >
-              {delivery.phase === "failed" ? (
-                <div className="flex items-start gap-3 rounded-3xl border border-danger/30 bg-danger/5 p-5">
-                  <TriangleAlert className="mt-0.5 size-5 shrink-0 text-danger" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">That one did not land</p>
-                    <p className="text-sm text-muted-foreground">
-                      The receiving server refused it. Your setup works - this is about
-                      the address. You can carry on and look at it in Emails.
-                    </p>
-                  </div>
+      {/*
+       * ⚠ A `Reveal`, NOT A FADE INSIDE A CLIPPING BOX (2026-10-12): the box
+       * sprang open around content already at full size, so Continue was cut by
+       * its edge on the way in. Continue follows the news a beat later.
+       */}
+      <Reveal show={finished || delivery.phase === "failed"} spacing="">
+        {(finished || delivery.phase === "failed") && (
+          <div className="space-y-5">
+            {delivery.phase === "failed" ? (
+              <div className="flex items-start gap-3 rounded-3xl border border-danger/30 bg-danger/5 p-5">
+                <TriangleAlert className="mt-0.5 size-5 shrink-0 text-danger" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">That one did not land</p>
+                  <p className="text-sm text-muted-foreground">
+                    The receiving server refused it. Your setup works - this is about
+                    the address. You can carry on and look at it in Emails.
+                  </p>
                 </div>
-              ) : (
-                <Congrats
-                  to={
-                    delivery.phase === "delivered" || delivery.phase === "late"
-                      ? delivery.to
-                      : ""
-                  }
-                  from={sender}
-                  delivered={delivery.phase === "delivered"}
-                  reduce={reduce}
-                />
-              )}
-              <motion.div
-                initial={reduce ? false : { opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, ease: EASE, delay: reduce ? 0 : 0.35 }}
-              >
-                <Button className="rounded-full" onClick={onDone}>
-                  Continue
-                  <ArrowRight />
-                </Button>
-              </motion.div>
+              </div>
+            ) : (
+              <Congrats
+                to={
+                  delivery.phase === "delivered" || delivery.phase === "late"
+                    ? delivery.to
+                    : ""
+                }
+                from={sender}
+                delivered={delivery.phase === "delivered"}
+                reduce={reduce}
+              />
+            )}
+            <motion.div
+              initial={
+                reduce
+                  ? false
+                  : { opacity: 0, y: -6, filter: `blur(${motionTokens.blur.subtle}px)` }
+              }
+              animate={{
+                opacity: 1,
+                y: 0,
+                filter: "blur(0px)",
+                transitionEnd: { filter: "none" },
+              }}
+              transition={{
+                ...motionTokens.spring.smooth,
+                opacity: {
+                  duration: motionTokens.duration.standard,
+                  ease: [...motionTokens.ease.enter],
+                  delay: reduce ? 0 : 0.18,
+                },
+                delay: reduce ? 0 : 0.18,
+              }}
+            >
+              <Button onClick={onDone}>
+                Continue
+                <ArrowRight />
+              </Button>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </AutoHeight>
+          </div>
+        )}
+      </Reveal>
     </div>
   )
 }
@@ -459,22 +469,18 @@ function Congrats({
   reduce: boolean
 }) {
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-emerald-500/30 bg-linear-to-br from-emerald-500/14 via-emerald-500/5 to-sky-500/8 p-6">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-16 -right-10 size-48 rounded-full bg-emerald-500/20 blur-3xl"
-      />
+    <div className="relative overflow-hidden rounded-3xl border border-success/30 p-6">
       <div className="relative flex items-start gap-4">
         <motion.span
           initial={reduce ? false : { scale: 0.6, rotate: -12, opacity: 0 }}
           animate={{ scale: 1, rotate: 0, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.1 }}
-          className="grid size-12 shrink-0 place-items-center rounded-2xl border border-emerald-500/30 bg-background/60 text-emerald-500 shadow-lg shadow-emerald-500/20"
+          transition={{ ...motionTokens.spring.morph, delay: 0.1 }}
+          className="grid size-12 shrink-0 place-items-center rounded-2xl border border-success/30 bg-background/60 text-success"
         >
           <PartyPopper className="size-6" />
         </motion.span>
         <div className="min-w-0 space-y-1">
-          <p className="font-display text-lg font-semibold tracking-tight">
+          <p className="font-display text-lg font-medium tracking-tight">
             {delivered ? "You sent your first email" : "Your first email is on its way"}
           </p>
           <p className="text-sm text-muted-foreground">

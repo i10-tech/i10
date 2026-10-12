@@ -1,6 +1,11 @@
 import type { ClerkClient } from "@clerk/backend"
 import { Hono } from "hono"
-import { freshAfterSignUp, resume, type ResumeClerk } from "../devices/resume.js"
+import {
+  freshAfterSignUp,
+  goneDevices,
+  resume,
+  type ResumeClerk,
+} from "../devices/resume.js"
 import {
   isPresentable,
   type DeviceStore,
@@ -16,6 +21,8 @@ import {
  *   POST /devices/remember  after a real sign-in. Session required.
  *   POST /devices/resume    a card was pressed. The secret is the credential.
  *   POST /devices/forget    the card's × was pressed. The secret is the proof.
+ *   POST /devices/check     which saved accounts no longer exist. The secrets
+ *                           are the proof; nothing rotates.
  *   POST /devices/fresh     just signed up: a fresh session, so adding a
  *                           passkey does not ask for the password just set.
  *
@@ -195,6 +202,21 @@ export function createDeviceRoutes(deps?: DeviceRouteDeps) {
        * anybody in either.
        */
       log?.warn({ err: String(error) }, "could not resume a remembered device")
+      return c.json(unavailable, 503)
+    }
+  })
+
+  app.post("/check", async (c) => {
+    const { store, clerk, log } = deps!
+    const body = (await readJson(c.req.raw)) as { devices?: unknown } | null
+    const devices: PresentedDevice[] = Array.isArray(body?.devices)
+      ? body.devices.filter(isPresentable).slice(0, MAX_PRIOR)
+      : []
+    try {
+      return c.json({ gone: await goneDevices(devices, { store, clerk }) }, 200)
+    } catch (error) {
+      // ⚠ 503 KEEPS EVERY CARD. See `goneDevices`.
+      log?.warn({ err: String(error) }, "could not check remembered devices")
       return c.json(unavailable, 503)
     }
   })

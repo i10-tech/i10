@@ -2,8 +2,7 @@
 
 import { useTransition } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Button } from "@repo/ui/components/button"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
 
 /**
  * The next page of a cursor-paginated list.
@@ -41,8 +40,13 @@ export function LoadMore({ cursor }: { cursor: string | null }) {
 
   return (
     <div className="flex justify-center">
-      <Button variant="outline" size="sm" onClick={next} disabled={pending}>
-        {pending && <Spinner />}
+      <Button
+        loading={pending}
+        variant="secondary"
+        size="sm"
+        onClick={next}
+        disabled={pending}
+      >
         Load more
       </Button>
     </div>

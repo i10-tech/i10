@@ -1,18 +1,13 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
+import { CodeBlock } from "@repo/ui/components/code-block/code-block"
 import { useRouter } from "next/navigation"
 import { diffLines, type Change } from "diff"
 import { ArrowRight, PenLine, Undo2 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { EmailFrame } from "@/components/email-frame"
 import { versionOrigin } from "@/components/template-source"
@@ -238,19 +233,17 @@ function VersionDiff({
   }, [templateId, from, to])
 
   const picker = (value: number, onChange: (n: number) => void, label: string) => (
-    <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-      <SelectTrigger className="w-32" aria-label={label}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {history.map((v) => (
-          <SelectItem key={v.number} value={String(v.number)}>
-            v{v.number}
-            {v.live ? " · live" : ""}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <MorphSelect
+      label={label}
+      hideLabel
+      value={String(value)}
+      onValueChange={(v) => onChange(Number(v))}
+      items={history.map((v) => ({
+        value: String(v.number),
+        label: `v${v.number}`,
+        meta: v.live ? "Live" : undefined,
+      }))}
+    />
   )
 
   const files = pair ? changedFiles(pair.a, pair.b) : []
@@ -301,9 +294,12 @@ function VersionDiff({
                     className="h-[28rem]"
                   />
                 ) : (
-                  <pre className="h-[28rem] overflow-auto bg-muted/30 px-3 py-2 font-mono text-xs whitespace-pre-wrap">
-                    {p?.text ?? ""}
-                  </pre>
+                  <CodeBlock
+                    code={p?.text ?? ""}
+                    filename={`v${n} plain text`}
+                    language="text"
+                    maxLines={24}
+                  />
                 )}
               </figure>
             ))}

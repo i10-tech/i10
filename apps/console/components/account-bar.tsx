@@ -15,8 +15,8 @@ import {
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useClerk, useUser } from "@clerk/nextjs"
-import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar"
-import { Badge } from "@repo/ui/components/badge"
+import { Avatar } from "@repo/ui/components/avatar/avatar"
+import { Badge } from "@repo/ui/components/badge/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,8 +24,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { Skeleton } from "@repo/ui/components/skeleton"
+} from "@repo/ui/components/i10/menu"
+import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-block"
 import { cn } from "cn"
 import type { PlanSummary } from "@/lib/types"
 import { useMounted } from "@/lib/react"
@@ -195,15 +195,14 @@ function AccountRow({
           )}
           aria-label={`Account menu for ${name}`}
         >
-          <Avatar className="size-6 shrink-0">
-            {imageUrl && <AvatarImage src={imageUrl} alt="" />}
-            {/* ⚠ A LETTER, NOT AN ICON. Two people at the same company with no
-                avatar are two identical grey circles; the initial is the only
-                thing that tells them apart at this size. */}
-            <AvatarFallback className="text-2xs">
-              {name.slice(0, 1).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
+          {/* Initials when there is no photo: two people with no avatar are
+              two identical circles otherwise. */}
+          <Avatar
+            name={name}
+            src={imageUrl || undefined}
+            size="sm"
+            className="shrink-0"
+          />
           <span className="min-w-0 truncate text-sm font-medium">{name}</span>
           {plan && (
             /*
@@ -213,12 +212,13 @@ function AccountRow({
              * ring sit together, the two halves of "your plan, your usage".
              */
             <Badge
-              variant="secondary"
+              size="sm"
+              tone="neutral"
               // ⚠ `bg-track`, NOT `secondary`: secondary is 0.97 on a
               // near-white rail and 0.20 on a black one, so the badge had no
               // visible ground in either theme. The track's translucent wash
               // reads on both, the same as the empty ring beside it.
-              className="ms-auto shrink-0 bg-track px-1.5 py-0 text-2xs text-foreground/80"
+              className="ms-auto shrink-0 bg-track px-1.5 py-0 text-foreground/80"
               title={`${plan.name} plan`}
             >
               {plan.name}

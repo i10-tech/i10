@@ -28,12 +28,11 @@ export const dynamic = "force-dynamic"
  * here again. It is not a local-only problem: the same redirect happens in
  * production for anybody Clerk raises a task for.
  *
- * ⚠ AND THE TASK UIs ARE CLERK'S OWN COMPONENTS RATHER THAN HAND-BUILT. That is
- * the same division as the rest of this app - identity is Clerk's job here, and
- * `TaskChooseOrganization` in particular would otherwise mean rebuilding
- * organization creation, invitation acceptance and membership selection against
- * an API whose states we do not control. They inherit our palette from the
- * provider's `appearance`, so they do not arrive wearing Clerk's.
+ * ⚠ CHOOSING A WORKSPACE IS OURS (2026-10-12), THE OTHER TASKS STILL CLERK'S.
+ * `choose-organization` is `ChooseWorkspace` - memberships, invitations and
+ * "Create a workspace", which asks no name because onboarding does. Resetting
+ * a password and setting up two-factor remain Clerk's components, wearing our
+ * palette through the provider's `appearance`.
  */
 export default async function Page({
   searchParams,

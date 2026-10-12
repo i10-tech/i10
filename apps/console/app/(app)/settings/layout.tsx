@@ -2,9 +2,11 @@ import {
   Page,
   PageBody,
   PageHeader,
+  PageActions,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
+import { SettingsWorkspace } from "@/components/settings-workspace"
 
 /**
  * The settings shell.
@@ -29,6 +31,16 @@ export default function SettingsLayout({
       <PageHeader>
         <PageHeaderRow>
           <PageTitle>Settings</PageTitle>
+          {/*
+           * Which workspace these are the settings of, for people in more than
+           * one. Clerk's hooks throw outside its provider, which is only
+           * mounted with a key - see WorkspaceBar.
+           */}
+          {process.env.CLERK_PUBLISHABLE_KEY && (
+            <PageActions>
+              <SettingsWorkspace />
+            </PageActions>
+          )}
         </PageHeaderRow>
       </PageHeader>
 

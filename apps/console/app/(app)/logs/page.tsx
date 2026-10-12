@@ -7,7 +7,7 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { ApiButton } from "@/components/list/api-button"
 import { LogsTable } from "@/components/logs-table"
 import { PanelError } from "@/components/panel-error"
@@ -15,6 +15,7 @@ import { tryApi } from "@/lib/api"
 import { rangeStart } from "@/lib/range"
 import { SNIPPETS } from "@/lib/snippets"
 import type { ApiKeyRow, Page as ApiPage, RequestRow } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Logs" }
 
@@ -68,15 +69,12 @@ export default async function LogsPage({
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Logs</PageTitle>
+          <PageTitle>{PAGE_COPY.logs.title}</PageTitle>
           <PageActions>
             <ApiButton snippet={SNIPPETS.logs} />
           </PageActions>
         </PageHeaderRow>
-        <PageDescription>
-          Requests your servers have made to the API, with what we answered. Bodies are
-          never recorded - they contain your customers&rsquo; mail.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.logs.description}</PageDescription>
       </PageHeader>
 
       <PageBody width="full">

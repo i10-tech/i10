@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@repo/ui/components/i10/toasts"
 import { useClerk, useSignIn } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
-import { Spinner } from "@repo/ui/components/spinner"
-import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
-import { OtpField } from "@repo/ui/components/otp-field"
+import { Button } from "@repo/ui/components/button/button"
+import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/i10/field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
+import { OtpField } from "@repo/ui/components/i10/otp-field"
 import { ResendButton } from "../_components/resend-button"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { finalizeAndLeave, isLeaving, leaveFor } from "../_lib/finish"
@@ -360,119 +360,120 @@ export function MfaForm({
 
   return (
     <form ref={formRef} className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
-      <FieldGroup>
-        <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-bold">Two-step verification</h1>
-          <p className="text-sm text-balance text-muted-foreground">{BLURB[active]}</p>
-        </div>
+      {/*
+       * ⚠ "VERIFY ANOTHER WAY" MOVES THE CARD ON, LIKE ANY OTHER STEP
+       * (2026-10-12). The blurb, the field and the links under it all change
+       * with the method; they used to cut, and now change as one pane.
+       */}
+      <StepStage step={active}>
+        <FieldGroup>
+          <div className="flex flex-col items-center gap-1 text-center">
+            <h1 className="text-2xl font-medium">Two-step verification</h1>
+            <p className="text-sm text-balance text-muted-foreground">
+              {BLURB[active]}
+            </p>
+          </div>
 
-        {active === "backup_code" ? (
-          <ValidatedInput
-            id="code"
-            name="code"
-            label="Backup code"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            autoComplete="one-time-code"
-            autoFocus
-            /*
-             * ⚠ NO `check`, BECAUSE ONLY CLERK KNOWS. A backup code has no
-             * shape worth asserting - they are issued, not composed - so the
-             * only thing this field can say for itself is that it is empty.
-             */
-            required="Enter one of your backup codes."
-          />
-        ) : (
-          <OtpField
-            value={code}
-            /*
-             * ⚠ THE VERDICT IS DROPPED ON THE FIRST KEYSTROKE OF THE NEXT
-             * ATTEMPT. A red border that survives into the code being typed to
-             * replace it is marking the wrong six digits.
-             */
-            onChange={(next) => {
-              setRejected(null)
-              setCode(next)
-            }}
-            onComplete={() => {
-              if (!pending) formRef.current?.requestSubmit()
-            }}
-            verified={accepted}
-            state={rejected ? "invalid" : "idle"}
-            hint={rejected}
-            autoFocus
-          />
-        )}
+          {active === "backup_code" ? (
+            <ValidatedInput
+              id="code"
+              name="code"
+              label="Backup code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoComplete="one-time-code"
+              autoFocus
+              /*
+               * ⚠ NO `check`, BECAUSE ONLY CLERK KNOWS. A backup code has no
+               * shape worth asserting - they are issued, not composed - so the
+               * only thing this field can say for itself is that it is empty.
+               */
+              required="Enter one of your backup codes."
+            />
+          ) : (
+            <OtpField
+              value={code}
+              /*
+               * ⚠ THE VERDICT IS DROPPED ON THE FIRST KEYSTROKE OF THE NEXT
+               * ATTEMPT. A red border that survives into the code being typed to
+               * replace it is marking the wrong six digits.
+               */
+              onChange={(next) => {
+                setRejected(null)
+                setCode(next)
+              }}
+              onComplete={() => {
+                if (!pending) formRef.current?.requestSubmit()
+              }}
+              verified={accepted}
+              state={rejected ? "invalid" : "idle"}
+              hint={rejected}
+              autoFocus
+            />
+          )}
 
-        <Field>
+          <Field>
+            {/*
+             * ⚠ `xl` LIKE EVERY OTHER PRIMARY ACTION IN THIS APP. See the size in
+             * @repo/ui/components/button: 56px is the field height, so a button
+             * under a field reads as the same object continuing. At the default
+             * 36px this page showed a visibly smaller button than the sign-in
+             * page it arrives from, one click apart.
+             */}
+            <Button
+              type="submit"
+              size="lg"
+              loading={pending}
+              disabled={!pending && !stuck && code.length === 0}
+            >
+              {stuck ? "Try again" : "Verify"}
+            </Button>
+          </Field>
+
           {/*
-           * ⚠ `xl` LIKE EVERY OTHER PRIMARY ACTION IN THIS APP. See the size in
-           * @repo/ui/components/button: 56px is the field height, so a button
-           * under a field reads as the same object continuing. At the default
-           * 36px this page showed a visibly smaller button than the sign-in
-           * page it arrives from, one click apart.
+           * ⚠ NO RESEND FOR TOTP OR A BACKUP CODE, because there is nothing to
+           * send. An authenticator generates its own code on the device and a
+           * backup code was printed once, months ago - offering "resend" for
+           * either would promise a mail that never arrives.
            */}
-          <Button
-            type="submit"
-            size="xl"
-            disabled={pending || (!stuck && code.length === 0)}
-          >
-            {pending ? (
-              <>
-                <Spinner aria-hidden="true" aria-label={undefined} />
-                Verifying…
-              </>
-            ) : stuck ? (
-              "Try again"
-            ) : (
-              "Verify"
-            )}
-          </Button>
-        </Field>
+          {active === "phone_code" || active === "email_code" ? (
+            <ResendButton
+              onResend={async () => {
+                const { error } =
+                  active === "phone_code"
+                    ? await signIn.mfa.sendPhoneCode()
+                    : await signIn.mfa.sendEmailCode()
+                if (error) {
+                  toast.error(messageFor(error))
+                  return
+                }
+                toast.success("We sent another code.")
+              }}
+            />
+          ) : null}
 
-        {/*
-         * ⚠ NO RESEND FOR TOTP OR A BACKUP CODE, because there is nothing to
-         * send. An authenticator generates its own code on the device and a
-         * backup code was printed once, months ago - offering "resend" for
-         * either would promise a mail that never arrives.
-         */}
-        {active === "phone_code" || active === "email_code" ? (
-          <ResendButton
-            onResend={async () => {
-              const { error } =
-                active === "phone_code"
-                  ? await signIn.mfa.sendPhoneCode()
-                  : await signIn.mfa.sendEmailCode()
-              if (error) {
-                toast.error(messageFor(error))
-                return
-              }
-              toast.success("We sent another code.")
-            }}
-          />
-        ) : null}
-
-        {others.length > 0 ? (
-          <FieldDescription className="text-center">
-            Or verify another way:{" "}
-            {others.map((m, i) => (
-              <span key={m}>
-                {i > 0 ? ", " : ""}
-                <button
-                  type="button"
-                  className="underline underline-offset-4"
-                  onClick={() => {
-                    setMethod(m)
-                    setCode("")
-                  }}
-                >
-                  {LABELS[m]}
-                </button>
-              </span>
-            ))}
-          </FieldDescription>
-        ) : null}
-      </FieldGroup>
+          {others.length > 0 ? (
+            <FieldDescription className="text-center">
+              Or verify another way:{" "}
+              {others.map((m, i) => (
+                <span key={m}>
+                  {i > 0 ? ", " : ""}
+                  <button
+                    type="button"
+                    className="underline underline-offset-4"
+                    onClick={() => {
+                      setMethod(m)
+                      setCode("")
+                    }}
+                  >
+                    {LABELS[m]}
+                  </button>
+                </span>
+              ))}
+            </FieldDescription>
+          ) : null}
+        </FieldGroup>
+      </StepStage>
     </form>
   )
 }

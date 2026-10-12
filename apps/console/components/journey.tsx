@@ -22,7 +22,7 @@ import {
   Send,
   TriangleAlert,
 } from "lucide-react"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import { formatExact } from "@/lib/format"
 import type { JourneyIcon, JourneyStep, JourneyTone } from "@/lib/journey"
@@ -49,36 +49,30 @@ const ICONS: Record<JourneyIcon, React.ComponentType<{ className?: string }>> = 
 }
 
 /** The pill's colours and the icon's, per tone; each works on both themes. */
-const TONE: Record<JourneyTone, { pill: string; icon: string; glow: string }> = {
+const TONE: Record<JourneyTone, { pill: string; icon: string }> = {
   neutral: {
     pill: "bg-muted text-foreground/80",
     icon: "text-foreground/80",
-    glow: "shadow-foreground/10",
   },
   info: {
-    pill: "bg-sky-500/12 text-sky-700 dark:text-sky-300",
-    icon: "text-sky-600 dark:text-sky-400",
-    glow: "shadow-sky-500/25",
+    pill: "bg-info/12 text-info",
+    icon: "text-info",
   },
   success: {
-    pill: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
-    icon: "text-emerald-600 dark:text-emerald-400",
-    glow: "shadow-emerald-500/25",
+    pill: "bg-success/12 text-success",
+    icon: "text-success",
   },
   warning: {
-    pill: "bg-amber-500/14 text-amber-800 dark:text-amber-300",
-    icon: "text-amber-600 dark:text-amber-400",
-    glow: "shadow-amber-500/25",
+    pill: "bg-warning/14 text-warning",
+    icon: "text-warning",
   },
   danger: {
-    pill: "bg-red-500/12 text-red-700 dark:text-red-300",
-    icon: "text-red-600 dark:text-red-400",
-    glow: "shadow-red-500/25",
+    pill: "bg-danger/12 text-danger",
+    icon: "text-danger",
   },
   violet: {
-    pill: "bg-violet-500/14 text-violet-700 dark:text-violet-300",
-    icon: "text-violet-600 dark:text-violet-400",
-    glow: "shadow-violet-500/25",
+    pill: "bg-info/14 text-info",
+    icon: "text-info",
   },
 }
 
@@ -122,16 +116,15 @@ export interface JourneyNotice {
 
 const NOTICE_TONE: Record<JourneyNotice["tone"], { strip: string; icon: string }> = {
   warning: {
-    strip:
-      "border-warning/30 bg-linear-to-r from-warning/15 via-warning/5 to-transparent",
+    strip: "border-warning/30",
     icon: "text-warning",
   },
   danger: {
-    strip: "border-danger/30 bg-linear-to-r from-danger/15 via-danger/5 to-transparent",
+    strip: "border-danger/30",
     icon: "text-danger",
   },
   neutral: {
-    strip: "bg-linear-to-r from-muted/70 to-transparent",
+    strip: "",
     icon: "text-muted-foreground",
   },
 }
@@ -150,9 +143,7 @@ export function Journey({
 
   return (
     <section aria-label={title}>
-      <h2 className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-        {title}
-      </h2>
+      <h2 className="text-xs text-muted-foreground">{title}</h2>
       {/*
        * ⚠ THE NOTICE IS ITS OWN BOX ABOVE THE STRIP, AND THE STRIP HAS NO
        * FRAME - Resend's layout, copied on purpose (2026-10-03). The dots are
@@ -272,7 +263,7 @@ function Connector({
            * it keeps its place when the tab is in the background.
            */}
           <div
-            className="absolute inset-y-0 w-1/3 animate-[journey-pulse_2s_ease-in-out_infinite] bg-linear-to-r from-transparent via-warning to-transparent"
+            className="absolute inset-y-0 w-1/3 animate-[journey-pulse_2s_ease-in-out_infinite]"
             style={{ animationDelay: `${delay + 0.45}s` }}
           />
         </div>
@@ -320,13 +311,13 @@ function Node({
           className={cn(
             // ⚠ IT DOES NOT MOVE ON HOVER (2026-10-03). The tooltip is the
             // answer to the pointer; a node that hops up is only motion.
-            "relative grid size-10 place-items-center rounded-xl border bg-linear-to-b from-muted/80 to-background",
+            "relative grid size-10 place-items-center rounded-xl border",
             pending
               ? // ⚠ A SOLID EDGE, DIMMED - NOT DASHED (2026-10-03). A dashed ring
                 // round a step not yet reached read as a second dotted pattern
                 // on top of the dots behind it.
                 "text-muted-foreground/40"
-              : cn("shadow-lg", tone.glow, tone.icon),
+              : tone.icon,
           )}
         >
           {/*
@@ -358,13 +349,14 @@ function Node({
 
   if (!step.at) return node
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="cursor-default">{node}</div>
-      </TooltipTrigger>
-      <TooltipContent>
-        <ExactTime iso={step.at} />
-      </TooltipContent>
+    <Tooltip
+      content={
+        <>
+          <ExactTime iso={step.at} />
+        </>
+      }
+    >
+      <div className="cursor-default">{node}</div>
     </Tooltip>
   )
 }

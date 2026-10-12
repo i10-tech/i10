@@ -220,7 +220,7 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
     scopes: [],
     mode: "live",
   })
-  c.set("user", { userId: outcome.userId })
+  c.set("user", { userId: outcome.userId, ...(orgId ? { orgId } : {}) })
 
   await next()
 }

@@ -7,8 +7,9 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { EmptyState } from "@/components/empty-state"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Mailboxes" }
 
@@ -36,12 +37,9 @@ export default function MailboxesPage() {
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Mailboxes</PageTitle>
+          <PageTitle>{PAGE_COPY.mailboxes.title}</PageTitle>
         </PageHeaderRow>
-        <PageDescription>
-          Real IMAP mailboxes on your own domains - one address, one password, the same
-          account you sign in with.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.mailboxes.description}</PageDescription>
       </PageHeader>
 
       <PageBody>

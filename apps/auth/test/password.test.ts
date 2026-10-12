@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { fieldVerdict } from "@repo/ui/components/validated-field"
+import { fieldVerdict } from "@repo/ui/components/i10/validated-field"
 import type { PasswordRules } from "../app/_lib/environment"
 import { describeRules, isPasswordUsable, passwordProblem } from "../app/_lib/validate"
 

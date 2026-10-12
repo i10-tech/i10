@@ -1,8 +1,9 @@
 "use client"
 
 import * as React from "react"
+import { Alert } from "@repo/ui/components/alert/alert"
 import { emailProblem } from "@repo/ui/checks"
-import { EmailInput } from "@repo/ui/components/email-input"
+import { EmailInput } from "@repo/ui/components/i10/email-input"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { offerTransfer } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -120,28 +121,25 @@ export function TransferDomainDialog({
       />
 
       {keys.length > 0 && (
-        <div className="space-y-2 rounded-md border border-warning/25 bg-warning/5 p-3">
-          <p className="text-sm font-medium">When they accept, your API keys change</p>
-          <ul className="space-y-1 text-xs text-muted-foreground">
-            {revoked.map((key) => (
-              <li key={key.id}>
-                <span className="font-medium text-foreground">{key.name}</span> is
-                revoked - it only sends from {name}.
-              </li>
-            ))}
-            {narrowed.map((key) => (
-              <li key={key.id}>
-                <span className="font-medium text-foreground">{key.name}</span> will
-                only send from <span className="font-mono">{key.keeps.join(", ")}</span>
-                , not <span className="font-mono">{name}</span>.
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs text-muted-foreground">
+        <Alert tone="warning" title="When they accept, your API keys change">
+          {revoked.map((key) => (
+            <span key={key.id} className="block not-first:mt-1.5">
+              <span className="font-medium text-foreground">{key.name}</span> is revoked
+              - it only sends from {name}.
+            </span>
+          ))}
+          {narrowed.map((key) => (
+            <span key={key.id} className="block not-first:mt-1.5">
+              <span className="font-medium text-foreground">{key.name}</span> will only
+              send from <span className="font-mono">{key.keeps.join(", ")}</span>, not{" "}
+              <span className="font-mono">{name}</span>.
+            </span>
+          ))}
+          <span className="block not-first:mt-1.5">
             Keys that can send from any domain keep working for your other domains. Keys
             never move with a domain.
-          </p>
-        </div>
+          </span>
+        </Alert>
       )}
     </ConfirmDialog>
   )

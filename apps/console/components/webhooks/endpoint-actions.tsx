@@ -1,22 +1,13 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { useRouter } from "next/navigation"
 import { Copy, FlaskConical, KeyRound, Pause, Play, Trash2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import {
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@repo/ui/components/dropdown-menu"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { Button } from "@repo/ui/components/button/button"
+import { DropdownMenuItem, DropdownMenuSeparator } from "@repo/ui/components/i10/menu"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { FormDialog } from "@/components/form-dialog"
 import { RowMenu } from "@/components/list/row-menu"
 import { RotateSecretDialog } from "@/components/webhook-rotate-dialog"
@@ -70,14 +61,11 @@ export function EndpointActions({
           </span>
         </Button>
       ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="sm" variant="outline" onClick={() => setTesting(true)}>
-              <FlaskConical />
-              <span className="hidden sm:inline">Send test event</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent className="sm:hidden">Send test event</TooltipContent>
+        <Tooltip content="Send test event">
+          <Button size="sm" variant="secondary" onClick={() => setTesting(true)}>
+            <FlaskConical />
+            <span className="hidden sm:inline">Send test event</span>
+          </Button>
         </Tooltip>
       )}
 
@@ -131,9 +119,9 @@ export function EndpointActions({
         description="Events stop being delivered to it immediately. Past deliveries stay in the log."
         confirmLabel="Delete endpoint"
         doneLabel="Deleted"
-        confirmWord={endpointName(endpoint)}
+        confirmWord={confirmWordFor([endpointName(endpoint)])}
         onConfirm={async () => {
-          const result = await deleteWebhook(endpoint.id)
+          const result = await deleteWebhook(endpoint.id, { leaving: true })
           if (!result.ok) {
             toastError("Could not delete the endpoint", { description: result.error })
             return false
@@ -186,23 +174,19 @@ function TestEventDialog({
       // "did my handler get it" is answered there, not by a toast.
       onSuccess={(data) => router.push(`/webhooks/deliveries/${data.delivery_id}`)}
     >
-      <Select value={type} onValueChange={setType}>
-        <SelectTrigger className="w-full font-mono text-xs" aria-label="Event type">
-          <SelectValue placeholder="Choose an event" />
-        </SelectTrigger>
-        <SelectContent>
-          {types.map((t) => (
-            <SelectItem key={t} value={t} className="font-mono text-xs">
-              {t}
-              {!endpoint.events.includes(t) && (
-                <span className="ml-2 font-sans text-2xs text-muted-foreground">
-                  not subscribed
-                </span>
-              )}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <MorphSelect
+        label="Event type"
+        hideLabel
+        value={type || null}
+        onValueChange={setType}
+        placeholder="Choose an event"
+        items={types.map((t) => ({
+          value: t,
+          label: t,
+          meta: endpoint.events.includes(t) ? undefined : "Not subscribed",
+        }))}
+        panelWidth={340}
+      />
     </FormDialog>
   )
 }

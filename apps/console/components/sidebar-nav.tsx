@@ -3,12 +3,11 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowLeft, Search, type LucideIcon } from "lucide-react"
+import { ArrowLeft, type LucideIcon } from "lucide-react"
 import { motion, type Transition, type Variants } from "motion/react"
 import { cn } from "cn"
-import { Kbd } from "@repo/ui/components/kbd"
-import { StatusDot } from "@repo/ui/components/status"
-import { OPEN_COMMAND_MENU } from "@/components/command-menu"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
+import { StatusDot } from "@repo/ui/components/i10/status"
 import type { Attention } from "@/lib/types"
 import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
@@ -85,25 +84,6 @@ export function SidebarNav({
       aria-label={settings ? "Settings" : "Primary"}
       onKeyDown={moveFocus}
     >
-      {/*
-       * The way into ⌘K from the rail, for anybody who does not know the
-       * shortcut is there. It opens the same menu the shortcut does.
-       */}
-      {scope === "rail" && !settings && (
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new Event(OPEN_COMMAND_MENU))}
-          className={cn(
-            "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-sm",
-            "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
-            "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-          )}
-        >
-          <Search className="size-4 shrink-0" />
-          <span className="flex-1 truncate text-left">Search</span>
-          <Kbd>⌘K</Kbd>
-        </button>
-      )}
       {settings && (
         /*
          * ⚠ "Back to the dashboard" RATHER THAN A BARE ARROW. An arrow alone in a
@@ -128,7 +108,7 @@ export function SidebarNav({
       {shown.map((group, i) => (
         <div key={group.label ?? `group-${i}`} className="flex flex-col gap-0.5">
           {group.label && (
-            <h2 className="px-2 pt-1 pb-1 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
+            <h2 className="px-2 pt-1 pb-1 text-xs text-muted-foreground">
               {group.label}
             </h2>
           )}
@@ -169,7 +149,7 @@ export function SidebarNav({
                     // SCROLLING (decided 2026-09-29). Thirteen rows at 32px
                     // overflowed a 700px-tall window by 40px; at 28 they fit
                     // with room, and still clear the 24px minimum target.
-                    "group relative isolate flex h-7 items-center gap-2.5 rounded-md px-2 text-sm",
+                    "group relative isolate flex h-[30px] items-center gap-2.5 rounded-[10px] px-2.5 text-sm",
                     // ⚠ COLOUR ONLY, SO `--ease-linear` IS CORRECT HERE. The
                     // motion rules reserve eased curves for things that MOVE;
                     // a linear ramp on a background is exactly what Base's
@@ -184,7 +164,7 @@ export function SidebarNav({
                     <motion.span
                       layoutId={`${scope}-active`}
                       aria-hidden
-                      className="absolute inset-0 -z-10 rounded-md bg-sidebar-accent"
+                      className="absolute inset-0 -z-10 rounded-[10px] bg-sidebar-accent"
                       transition={ACTIVE_SPRING}
                     />
                   )}
@@ -231,7 +211,8 @@ const ICON_SPRING: Transition = { type: "spring", stiffness: 500, damping: 30 }
  * long enough to follow with the eye, short enough that it has finished before
  * the new page's content arrives.
  */
-const ACTIVE_SPRING: Transition = { type: "spring", stiffness: 380, damping: 34 }
+/** Arc's shared-highlight spring (motion-tokens `spring.morph`). */
+const ACTIVE_SPRING: Transition = motionTokens.spring.morph
 
 /**
  * ⚠ NOTHING ON HOVER, A PRESS ON TAP (2026-10-03). The icon used to grow and

@@ -1,8 +1,7 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
-import { Page, PageBody, PageHeader } from "@repo/ui/components/page"
-import { TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
-import { BackButton } from "@/components/back-button"
+import { Page, PageBody, PageHeader } from "@repo/ui/components/i10/page"
+import { TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { DetailHero, MetaGrid } from "@/components/detail-hero"
 import { DeliveriesTable } from "@/components/deliveries-table"
 import { UrlTabs } from "@/components/list/url-tabs"
@@ -142,7 +141,7 @@ export default async function WebhookEndpointPage({
     <Page>
       <PageHeader>
         <DetailHero
-          back={<BackButton href="/webhooks" label="Back to webhooks" />}
+          crumbs={[{ label: "Webhooks", href: "/webhooks" }]}
           icon={<KindIcon kind={endpoint.kind} />}
           tone={STATE_TONE[state]}
           eyebrow={`${KIND_LABEL[endpoint.kind]} endpoint`}
@@ -199,7 +198,7 @@ export default async function WebhookEndpointPage({
 
         <UrlTabs value={tab} fallback="overview">
           <div className="-mx-4 mb-6 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:px-0">
-            <TabsList variant="pill">
+            <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
               <TabsTrigger value="replays">Replays</TabsTrigger>

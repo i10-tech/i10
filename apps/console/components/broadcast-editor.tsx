@@ -1,19 +1,13 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { Save } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { Swap } from "@repo/ui/components/swap"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Input } from "@repo/ui/components/i10/input"
+import { Label } from "@repo/ui/components/i10/label"
+import { Swap } from "@repo/ui/components/i10/swap"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { HtmlEditor } from "@/components/html-editor"
 import { updateBroadcast } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
@@ -126,30 +120,19 @@ export function BroadcastEditor({
         />
 
         <div className="space-y-2">
-          <Label htmlFor="broadcast-segment">Send to</Label>
-          <Select
-            value={segmentId}
+          <MorphSelect
+            label="Send to"
+            value={segmentId || null}
             onValueChange={setSegmentId}
             disabled={!editable || segments.length === 0}
-          >
-            <SelectTrigger id="broadcast-segment">
-              <SelectValue
-                placeholder={
-                  segments.length === 0 ? "No segments yet" : "Choose a segment"
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {segments.map((segment) => (
-                <SelectItem key={segment.id} value={segment.id}>
-                  {segment.name}
-                  <span className="ml-2 text-muted-foreground">
-                    {segment.contact_count}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder={segments.length === 0 ? "No segments yet" : "Choose a segment"}
+            items={segments.map((segment) => ({
+              value: segment.id,
+              label: segment.name,
+              meta: String(segment.contact_count),
+            }))}
+            className="w-full"
+          />
         </div>
       </div>
 
@@ -167,29 +150,17 @@ export function BroadcastEditor({
           <span className="border-y bg-muted px-2 py-1.5 font-mono text-xs text-muted-foreground">
             @
           </span>
-          <Select
-            value={domain}
+          <MorphSelect
+            label="From address, domain"
+            hideLabel
+            value={domain || null}
             onValueChange={setDomain}
             disabled={!editable || verified.length === 0}
-          >
-            <SelectTrigger
-              className="rounded-l-none font-mono text-xs"
-              aria-label="From address, domain"
-            >
-              <SelectValue
-                placeholder={
-                  verified.length === 0 ? "No verified domain" : "Choose a domain"
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {verified.map((d) => (
-                <SelectItem key={d.id} value={d.name}>
-                  {d.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder={
+              verified.length === 0 ? "No verified domain" : "Choose a domain"
+            }
+            items={verified.map((d) => ({ value: d.name, label: d.name }))}
+          />
         </div>
         {verified.length === 0 && (
           <p className="text-xs text-warning">
@@ -213,34 +184,25 @@ export function BroadcastEditor({
         value={previewText}
         onChange={(event) => setPreviewText(event.target.value)}
         disabled={!editable}
-        hint='{/* * ⚠ REAL ADVICE, NOT FILLER. Left empty, every mail client falls back * to the first words of the body - which for most templates is "View * this email in your browser". It is the most-read and least-edited * line in any marketing email. */} Left empty, clients show the first words of your body - usually the unsubscribe preamble.'
+        hint="Left empty, clients show the first words of your body - usually the unsubscribe preamble."
       />
 
       <div className="space-y-2">
-        <Label htmlFor="broadcast-topic">Topic</Label>
-        <Select
-          value={topicId}
+        <MorphSelect
+          label="Topic"
+          value={topicId || null}
           onValueChange={setTopicId}
           disabled={!editable || topics.length === 0}
-        >
-          <SelectTrigger id="broadcast-topic">
-            <SelectValue
-              placeholder={
-                topics.length === 0 ? "No topics yet" : "No topic - send to everyone"
-              }
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {topics.map((topic) => (
-              <SelectItem key={topic.id} value={topic.id}>
-                {topic.name}
-                <span className="ml-2 text-muted-foreground">
-                  {topic.subscriber_count}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder={
+            topics.length === 0 ? "No topics yet" : "No topic, send to everyone"
+          }
+          items={topics.map((topic) => ({
+            value: topic.id,
+            label: topic.name,
+            meta: String(topic.subscriber_count),
+          }))}
+          className="w-full"
+        />
         <p className="text-xs text-muted-foreground">
           With a topic, we skip anyone who opted out of it. Without one, we send to
           every subscribed contact in the segment.
@@ -267,7 +229,7 @@ export function BroadcastEditor({
 
       {editable && (
         <div className="sticky bottom-0 flex items-center gap-2 border-t bg-background py-3">
-          <ActionButton
+          <StateButton
             onClick={save}
             state={saving.state}
             onReset={saving.reset}
@@ -277,7 +239,7 @@ export function BroadcastEditor({
           >
             <Save />
             Save draft
-          </ActionButton>
+          </StateButton>
           <Swap
             id={dirty ? "dirty" : "clean"}
             className="text-xs text-muted-foreground"

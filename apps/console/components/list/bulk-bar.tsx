@@ -4,9 +4,11 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "motion/react"
 import { X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Kbd } from "@repo/ui/components/kbd"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { Button } from "@repo/ui/components/button/button"
+import { SlotText } from "@repo/ui/components/slot-text/slot-text"
+import { Kbd } from "@repo/ui/components/i10/kbd"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { useRetained } from "@/lib/react"
 
 /**
@@ -102,42 +104,37 @@ export function BulkBar({
                     opacity: 0,
                     y: 12,
                     scale: 0.98,
-                    transition: { duration: 0.15 },
+                    transition: {
+                      duration: motionTokens.duration.exit,
+                      ease: [...motionTokens.ease.exit],
+                    },
                   }}
-                  transition={{ type: "spring", stiffness: 500, damping: 36 }}
+                  transition={motionTokens.spring.smooth}
                   className="pointer-events-auto flex items-center gap-1 rounded-2xl border bg-popover/95 p-1.5 pl-3.5 text-sm shadow-xl backdrop-blur-md"
                   role="toolbar"
                   aria-label={label}
                 >
                   <span className="tabular pr-1 font-medium">
-                    <motion.span
-                      key={shown}
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="inline-block"
-                    >
-                      {shown}
-                    </motion.span>{" "}
-                    selected
+                    <SlotText value={shown} duration={0.5} /> selected
                     {note && (
                       <span className="font-normal text-muted-foreground"> {note}</span>
                     )}
                   </span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="size-7"
-                        onClick={onClear}
-                        aria-label="Clear selection"
-                      >
-                        <X />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      Clear <Kbd className="ml-1">Esc</Kbd>
-                    </TooltipContent>
+                  <Tooltip
+                    content={
+                      <>
+                        Clear <Kbd className="ml-1">Esc</Kbd>
+                      </>
+                    }
+                  >
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onClear}
+                      aria-label="Clear selection"
+                    >
+                      <X />
+                    </Button>
                   </Tooltip>
                   <div className="mx-1 h-5 w-px bg-border" />
                   {children}

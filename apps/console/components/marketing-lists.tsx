@@ -3,8 +3,8 @@
 import * as React from "react"
 import Link from "next/link"
 import { Layers, Megaphone, SearchX, Tag, Users } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
 import { EmptyState } from "@/components/empty-state"
 import { ListCard, ListGrid, MotionBody, MotionRow } from "@/components/list/motion"
 import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
@@ -37,7 +37,7 @@ function NoMatch({ onClear }: { onClear: () => void }) {
       title="Nothing matches"
       description="Try another search, or clear the filters."
       secondary={
-        <Button size="sm" variant="outline" onClick={onClear}>
+        <Button size="sm" variant="secondary" onClick={onClear}>
           Clear filters
         </Button>
       }
@@ -285,7 +285,7 @@ export function SegmentsList({ segments }: { segments: SegmentRow[] }) {
                 </div>
                 <div className="mt-auto flex items-end justify-between gap-2">
                   <p>
-                    <span className="tabular text-2xl font-semibold tracking-tight">
+                    <span className="tabular text-2xl font-medium tracking-tight">
                       {formatNumber(s.contact_count)}
                     </span>{" "}
                     <span className="text-xs text-muted-foreground">
@@ -421,9 +421,9 @@ export function TopicsList({ topics }: { topics: TopicRow[] }) {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="outline">{defaultLabel(t)}</Badge>
+                  <Badge tone="neutral">{defaultLabel(t)}</Badge>
                   <Badge
-                    variant={t.visibility === "public" ? "secondary" : "outline"}
+                    tone={t.visibility === "public" ? "info" : "neutral"}
                     className="capitalize"
                   >
                     {t.visibility}
@@ -462,11 +462,11 @@ export function TopicsList({ topics }: { topics: TopicRow[] }) {
                     )}
                   </ListCell>
                   <ListCell className="hidden md:table-cell">
-                    <Badge variant="outline">{defaultLabel(t)}</Badge>
+                    <Badge tone="neutral">{defaultLabel(t)}</Badge>
                   </ListCell>
                   <ListCell>
                     <Badge
-                      variant={t.visibility === "public" ? "secondary" : "outline"}
+                      tone={t.visibility === "public" ? "info" : "neutral"}
                       className="capitalize"
                     >
                       {t.visibility}

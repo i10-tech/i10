@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import { ShieldCheck, Undo2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { FloatingInput, FloatingTextarea } from "@repo/ui/components/floating-field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingInput, FloatingTextarea } from "@repo/ui/components/i10/floating-field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { FormDialog } from "@/components/form-dialog"
 import { submitTrustedTemplate, withdrawTrustedTemplate } from "@/lib/actions"
@@ -67,7 +67,7 @@ export function SubmitTrustedTemplateButton() {
       open={open}
       onOpenChange={setOpen}
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="secondary">
           <ShieldCheck />
           Submit for review
         </Button>
@@ -147,7 +147,7 @@ export function WithdrawTrustedTemplate({ id, name }: { id: string; name: string
     <>
       <Button
         variant="ghost"
-        size="icon-sm"
+        size="sm"
         aria-label={`Withdraw ${name}`}
         onClick={() => setConfirming(true)}
       >

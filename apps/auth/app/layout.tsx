@@ -1,13 +1,16 @@
 import type { Metadata } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
+import { GeistMono } from "geist/font/mono"
+import { GeistSans } from "geist/font/sans"
 import { clerkAppearance } from "@repo/ui/clerk"
-import { Toaster } from "@repo/ui/components/sonner"
-import { MotionProvider } from "@repo/ui/components/motion-provider"
-import { Theme } from "@repo/ui/components/theme"
-import { TooltipProvider } from "@repo/ui/components/tooltip"
+import { ToastHost } from "@repo/ui/components/i10/toasts"
+import { MotionProvider } from "@repo/ui/components/i10/motion-provider"
+import { Theme } from "@repo/ui/components/i10/theme"
+import { ArcNext } from "@repo/ui/components/i10/arc-next"
 import { NoCacheInvalidation } from "./_components/no-cache-invalidation"
 import { AuthMark } from "./_components/auth-mark"
 import { HIDE_WHILE_RESUMING } from "./_lib/resume-keys"
+import { inter } from "./fonts"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -100,8 +103,14 @@ export default function RootLayout({
        */
       appearance={clerkAppearance}
     >
-      <html lang="en" suppressHydrationWarning>
-        <body>
+      <html
+        lang="en"
+        suppressHydrationWarning
+        className={`${GeistSans.variable} ${GeistMono.variable} ${inter.variable}`}
+      >
+        {/* Extensions (Grammarly and the like) stamp attributes on <body>
+            before React hydrates; this silences that one element only. */}
+        <body suppressHydrationWarning>
           {/*
            * ⚠ BEFORE ANYTHING ELSE IN THE BODY, so it runs before a resumable
            * flow paints: it hides the flow while its stored step is restored
@@ -154,9 +163,11 @@ export default function RootLayout({
              */}
             {/* Where i10.tech's nav draws it - see _components/auth-mark.tsx. */}
             <AuthMark />
-            <TooltipProvider>
-              <MotionProvider>{children}</MotionProvider>
-            </TooltipProvider>
+            <>
+              <MotionProvider>
+                <ArcNext>{children}</ArcNext>
+              </MotionProvider>
+            </>
             {/*
              * ⚠ ONE TOASTER FOR THE WHOLE APP, MOUNTED HERE. `toast()` is a
              * module-level call that pushes onto whichever Toaster is mounted;
@@ -164,7 +175,7 @@ export default function RootLayout({
              * `toast()` a silent no-op - no error, no warning, just messages that
              * never appear.
              */}
-            <Toaster />
+            <ToastHost />
           </Theme>
         </body>
       </html>

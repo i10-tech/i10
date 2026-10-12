@@ -3,17 +3,10 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Menu, Search, X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@repo/ui/components/sheet"
+import { Search } from "lucide-react"
+import { Button } from "@repo/ui/components/button/button"
+import { MenuIcon } from "@repo/ui/components/icon-morph/icon-morph"
+import { Drawer, DrawerContent, DrawerTrigger } from "@repo/ui/components/drawer/drawer"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { AccountBar } from "@/components/account-bar"
 import { WorkspaceBar } from "@/components/workspace-bar"
@@ -63,79 +56,41 @@ export function MobileNav({
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background px-3 lg:hidden">
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="Open navigation">
-            <Menu />
+      <Drawer open={open} onOpenChange={setOpen}>
+        <DrawerTrigger asChild>
+          <Button variant="ghost" size="sm" aria-label="Open navigation">
+            <MenuIcon state={open} size={18} aria-hidden />
           </Button>
-        </SheetTrigger>
-        <SheetContent
+        </DrawerTrigger>
+        {/* Arc's drawer: its header is the title and the close button, so the
+            workspace leads the body, like the desktop rail. */}
+        <DrawerContent
           side="left"
-          // ⚠ OUR OWN CLOSE BUTTON, IN THE HEADER ROW. The sheet's built-in ×
-          // is absolutely placed in the top-right corner, which is exactly
-          // where the workspace switcher's up/down chevron sits - on a phone
-          // the two drew on top of each other as one crossed-out glyph, and a
-          // tap there could open either.
-          showCloseButton={false}
-          className="flex w-72 flex-col bg-sidebar p-0"
+          title="Navigation"
+          description="Move around the i10 dashboard."
         >
-          <SheetHeader className="h-14 flex-row items-center gap-1 border-b px-2">
-            {/* Named for screen readers; the drawer opens on the workspace,
-                like the desktop rail. */}
-            <SheetTitle className="sr-only">Navigation</SheetTitle>
-            <div className="min-w-0 flex-1">
-              <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
-            </div>
-            <SheetClose asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Close navigation"
-                className="shrink-0 text-muted-foreground hover:text-foreground"
-              >
-                <X />
-              </Button>
-            </SheetClose>
-            {/*
-             * ⚠ PRESENT BUT VISUALLY HIDDEN. Radix warns in the console when a
-             * Dialog has no description, and more importantly a screen reader
-             * announces the drawer with no context at all without one.
-             */}
-            <SheetDescription className="sr-only">
-              Navigate the i10 dashboard.
-            </SheetDescription>
-          </SheetHeader>
-
-          {/*
-           * ⚠ `flex-1` AND `min-h-0` SO THE ACCOUNT ROW CAN BE PINNED BELOW IT.
-           * Without `min-h-0` a flex child with overflow refuses to shrink past
-           * its content, so a long navigation pushes the account row off the
-           * bottom of the drawer rather than scrolling inside it.
-           */}
-          {/* ⚠ THE SAME FIT-FIRST RULE AS THE DESKTOP RAIL: it fits, and only
-              scrolls when the screen truly cannot hold it (app/(app)/layout.tsx). */}
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2">
+          <div className="flex min-h-full flex-col gap-2">
+            <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
             {/*
              * ⚠ ITS OWN `scope`, SO THE DRAWER'S ACTIVE HIGHLIGHT AND THE
              * DESKTOP RAIL'S ARE DIFFERENT OBJECTS. Both are mounted while the
              * drawer is open; sharing a `layoutId` would have Motion morph one
              * into the other across the screen every time either re-rendered.
              */}
-            <SidebarNav scope="drawer" attention={attention} />
+            <div className="flex-1">
+              <SidebarNav scope="drawer" attention={attention} />
+            </div>
+            <div className="border-t pt-2">
+              <AccountBar
+                clerkEnabled={clerkEnabled}
+                plan={plan}
+                fallbackEmail={fallbackEmail ?? null}
+                usage={usage}
+              />
+            </div>
           </div>
-
-          {/* The same reading order as the desktop rail: workspace, then where
-              to go, then who I am and what it is costing. */}
-          <div className="border-t p-2">
-            <AccountBar
-              clerkEnabled={clerkEnabled}
-              plan={plan}
-              fallbackEmail={fallbackEmail ?? null}
-              usage={usage}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
 
       <Link href="/" className="flex items-center">
         <Wordmark />
@@ -152,7 +107,7 @@ export function MobileNav({
          */}
         <Button
           variant="ghost"
-          size="icon"
+          size="sm"
           aria-label="Open the command menu"
           onClick={() =>
             document.dispatchEvent(

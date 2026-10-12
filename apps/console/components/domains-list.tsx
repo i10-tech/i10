@@ -3,9 +3,9 @@
 import * as React from "react"
 import Link from "next/link"
 import { Copy, Globe, RefreshCw, SearchX, Trash2 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { Checkbox } from "@repo/ui/components/checkbox"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
 import { cn } from "cn"
 import { DomainActions } from "@/components/domain-actions"
 import { DeleteDomainsDialog } from "@/components/delete-domain-dialog"
@@ -204,7 +204,7 @@ export function DomainsList({
                 : "No domain is in that state."
             }
             secondary={
-              <Button size="sm" variant="outline" onClick={clear}>
+              <Button size="sm" variant="secondary" onClick={clear}>
                 Clear filters
               </Button>
             }
@@ -268,7 +268,7 @@ export function DomainsList({
                       <Status status={d.status} label={label(d)} />
                     </ListCell>
                     <ListCell className="hidden sm:table-cell">
-                      <Badge variant={d.delegated ? "secondary" : "outline"}>
+                      <Badge tone={d.delegated ? "info" : "neutral"}>
                         {d.delegated ? "Delegated" : "Manual records"}
                       </Badge>
                     </ListCell>
@@ -300,7 +300,6 @@ export function DomainsList({
         <Button
           variant="ghost"
           size="sm"
-          className="rounded-xl"
           disabled={checking}
           onClick={() => void recheck()}
         >
@@ -310,7 +309,6 @@ export function DomainsList({
         <Button
           variant="ghost"
           size="sm"
-          className="rounded-xl"
           onClick={() =>
             void navigator.clipboard
               .writeText(picked.map((d) => d.name).join("\n"))
@@ -327,9 +325,8 @@ export function DomainsList({
           Copy names
         </Button>
         <Button
-          variant="ghost"
+          variant="danger"
           size="sm"
-          className="rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => {
             setDeletingDomains(picked)
             setDeleting(true)

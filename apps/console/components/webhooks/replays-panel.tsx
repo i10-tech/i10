@@ -1,25 +1,19 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { History, RotateCcw, Send, SkipForward } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Checkbox } from "@repo/ui/components/checkbox"
-import { Input } from "@repo/ui/components/input"
-import { Label } from "@repo/ui/components/label"
+import { Button } from "@repo/ui/components/button/button"
+import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
+import { Input } from "@repo/ui/components/i10/input"
+import { Label } from "@repo/ui/components/i10/label"
 import { motion } from "motion/react"
 import {
   Section,
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
+} from "@repo/ui/components/i10/page"
 import { EmptyState } from "@/components/empty-state"
 import { FormDialog } from "@/components/form-dialog"
 import { Status } from "@/components/status"
@@ -161,7 +155,7 @@ export function ReplaysPanel({
               .map((m) => (
                 <Button
                   key={m}
-                  variant={m === "recover" ? "default" : "outline"}
+                  variant={m === "recover" ? "primary" : "secondary"}
                   size="sm"
                   disabled={off}
                   onClick={() => setMode(m)}
@@ -326,19 +320,13 @@ function StartReplayDialog({
       }}
     >
       <div className="space-y-1.5">
-        <Label htmlFor="replay-window">Window</Label>
-        <Select value={preset} onValueChange={setPreset}>
-          <SelectTrigger id="replay-window" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PRESETS.map((p) => (
-              <SelectItem key={p.value} value={p.value}>
-                {p.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <MorphSelect
+          label="Window"
+          value={preset}
+          onValueChange={setPreset}
+          items={PRESETS.map((p) => ({ value: p.value, label: p.label }))}
+          className="w-full"
+        />
       </div>
 
       {custom && (
@@ -368,20 +356,16 @@ function StartReplayDialog({
       {mode === "replay" && (
         <>
           <div className="space-y-1.5">
-            <Label htmlFor="replay-event">Event</Label>
-            <Select value={eventType} onValueChange={setEventType}>
-              <SelectTrigger id="replay-event" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Every event</SelectItem>
-                {eventTypes.map((t) => (
-                  <SelectItem key={t} value={t} className="font-mono text-xs">
-                    {t}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MorphSelect
+              label="Event"
+              value={eventType}
+              onValueChange={setEventType}
+              items={[
+                { value: "all", label: "Every event" },
+                ...eventTypes.map((t) => ({ value: t, label: t })),
+              ]}
+              className="w-full"
+            />
           </div>
           <label className="flex cursor-pointer items-start gap-2.5">
             <Checkbox

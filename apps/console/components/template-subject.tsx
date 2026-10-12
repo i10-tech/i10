@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { Send } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { publishTemplate, updateTemplate } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import type { TemplateRow } from "@/lib/types"
@@ -54,8 +54,8 @@ export function TemplateSubject({ template }: { template: TemplateRow }) {
             : "Use {{{ name }}} for variables. Or export `subject` from the file."
         }
       />
-      <ActionButton
-        variant="outline"
+      <StateButton
+        variant="secondary"
         className="mt-1"
         onClick={publish}
         state={publishing.state}
@@ -66,7 +66,7 @@ export function TemplateSubject({ template }: { template: TemplateRow }) {
       >
         <Send />
         Publish
-      </ActionButton>
+      </StateButton>
     </div>
   )
 }

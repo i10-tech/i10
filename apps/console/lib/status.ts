@@ -1,4 +1,4 @@
-import type { Tone } from "@repo/ui/components/status"
+import type { Tone } from "@repo/ui/components/i10/status"
 
 /**
  * The one place state becomes colour.

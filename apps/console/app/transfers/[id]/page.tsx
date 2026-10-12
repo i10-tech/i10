@@ -1,6 +1,5 @@
 import type { Metadata } from "next"
-import Link from "next/link"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { AcceptTransfer } from "@/components/accept-transfer"
 import { Wordmark } from "@/components/wordmark"
 import { tryApi } from "@/lib/api"
@@ -39,7 +38,7 @@ export default async function TransferPage({
         {result.ok ? (
           <div className="space-y-6 rounded-xl border p-6">
             <div className="space-y-2">
-              <h1 className="text-lg font-semibold">
+              <h1 className="text-lg font-medium">
                 {result.data.offered_by} wants to transfer{" "}
                 <span className="font-mono">{result.data.domain_name}</span> to you
               </h1>
@@ -54,7 +53,7 @@ export default async function TransferPage({
           </div>
         ) : (
           <div className="space-y-4 rounded-xl border p-6">
-            <h1 className="text-lg font-semibold">
+            <h1 className="text-lg font-medium">
               {result.error.name === "tenant_not_ready"
                 ? "Your workspace is still being created"
                 : "This transfer is not available"}
@@ -64,9 +63,9 @@ export default async function TransferPage({
                 ? "This usually takes a moment. Reload the page in a few seconds."
                 : result.error.message}
             </p>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/domains">Go to your domains</Link>
-            </Button>
+            <ButtonLink href="/domains" variant="secondary" size="sm">
+              Go to your domains
+            </ButtonLink>
           </div>
         )}
       </div>

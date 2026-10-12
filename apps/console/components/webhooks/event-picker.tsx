@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { ChevronRight } from "lucide-react"
-import { Checkbox } from "@repo/ui/components/checkbox"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
+import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { cn } from "cn"
 import { CodeBlock } from "@/components/webhooks/code-block"
 import { prettyJson } from "@/lib/webhooks"
@@ -132,7 +132,7 @@ function EventDetail({ type }: { type: WebhookEventType }) {
       defaultValue="example"
       className="border-t bg-muted/20 px-3 pt-2 pb-3 animate-in fade-in-0"
     >
-      <TabsList variant="pill" className="mb-2">
+      <TabsList>
         <TabsTrigger value="example">Example</TabsTrigger>
         <TabsTrigger value="schema">Schema</TabsTrigger>
       </TabsList>

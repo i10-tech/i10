@@ -1,18 +1,20 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
 import Link from "next/link"
-import { toast } from "sonner"
+import { toast } from "@repo/ui/components/i10/toasts"
 import { useClerk, useSignIn } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
-import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
-import { EmailInput } from "@repo/ui/components/email-input"
+import { Button } from "@repo/ui/components/button/button"
+import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/i10/field"
+import { EmailInput } from "@repo/ui/components/i10/email-input"
 import { emailProblem } from "@repo/ui/checks"
-import { OtpField, OTP_LENGTH } from "@repo/ui/components/otp-field"
+import { OtpField, OTP_LENGTH } from "@repo/ui/components/i10/otp-field"
 import { ResendButton } from "../_components/resend-button"
-import { PasswordInput } from "../_components/password-input"
+import { PasswordRules as PasswordChecklist } from "@repo/ui/components/i10/password-rules"
+import { PasswordInput } from "@repo/ui/components/i10/password-input"
 import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
-import { describeRules, passwordProblem } from "../_lib/validate"
+import { checklistFor, passwordProblem } from "../_lib/validate"
 import type { PasswordRules } from "../_lib/environment"
 import { finalizeAndLeave } from "../_lib/finish"
 import { useResumable, useResumeLive } from "../_lib/resume"
@@ -208,125 +210,141 @@ export function ResetPasswordForm({
 
   if (stage === "reset") {
     return (
-      <form key="reset" className="flex flex-col gap-6" onSubmit={onReset} noValidate>
-        <FieldGroup>
-          <div className="flex flex-col items-center gap-1 text-center">
-            <h1 className="text-2xl font-bold">Choose a new password</h1>
-            <p className="text-sm text-balance text-muted-foreground">
-              Enter the code we emailed you, and the password you want instead.
-            </p>
-          </div>
-          {/*
-           * ⚠ NO `onComplete` HERE, UNLIKE THE OTHER TWO SCREENS. The boxes sit
-           * above two password fields, so auto-submitting the instant the sixth
-           * digit lands would send an empty password and burn the code.
-           */}
-          <OtpField
-            value={code}
-            onChange={(next) => {
-              setRejected(null)
-              setCode(next)
-            }}
-            state={rejected ? "invalid" : "idle"}
-            hint={rejected}
-            verified={accepted}
-            autoFocus
-          />
-          <PasswordInput
-            id="password"
-            name="password"
-            label="New password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            check={secretProblem}
-            required="Choose a password."
-            // ⚠ THE INSTANCE'S OWN RULE. This said "At least 8 characters."
-            // while Clerk required fifteen. See the page, which reads it.
-            hint={describeRules(passwordPolicy)}
-            autoComplete="new-password"
-          />
-          <PasswordInput
-            id="confirm-password"
-            name="confirm-password"
-            label="Confirm new password"
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
-            /*
-             * ⚠ THE RULE IS ABOUT ANOTHER FIELD, AND THAT IS FINE - a `Check`
-             * is an ordinary closure, so "matches the box above" is expressed
-             * the same way "is an email address" is. It does not repeat the
-             * policy: a confirmation that does not match is the only thing
-             * this box can be wrong about.
-             */
-            check={(value) =>
-              value === password ? null : "Those passwords do not match."
-            }
-            required="Type the password again."
-            autoComplete="new-password"
-          />
-          <Field>
-            <Button
-              type="submit"
-              size="xl"
-              disabled={pending || code.length < OTP_LENGTH}
-            >
-              {pending ? "Saving…" : "Set new password"}
-            </Button>
-          </Field>
-          <ResendButton
-            onResend={async () => {
-              const { error } = await signIn.resetPasswordEmailCode.sendCode()
-              if (error) {
-                toast.error(messageFor(error))
-                return
+      <StepStage step="reset">
+        <form className="flex flex-col gap-6" onSubmit={onReset} noValidate>
+          <FieldGroup>
+            <div className="flex flex-col items-center gap-1 text-center">
+              <h1 className="text-2xl font-medium">Choose a new password</h1>
+              <p className="text-sm text-balance text-muted-foreground">
+                Enter the code we emailed you, and the password you want instead.
+              </p>
+            </div>
+            {/*
+             * ⚠ NO `onComplete` HERE, UNLIKE THE OTHER TWO SCREENS. The boxes sit
+             * above two password fields, so auto-submitting the instant the sixth
+             * digit lands would send an empty password and burn the code.
+             */}
+            <OtpField
+              value={code}
+              onChange={(next) => {
+                setRejected(null)
+                setCode(next)
+              }}
+              state={rejected ? "invalid" : "idle"}
+              hint={rejected}
+              verified={accepted}
+              autoFocus
+            />
+            <PasswordInput
+              id="password"
+              name="password"
+              label="New password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              check={secretProblem}
+              required="Choose a password."
+              // ⚠ THE INSTANCE'S OWN RULE. This said "At least 8 characters."
+              // while Clerk required fifteen. See the page, which reads it.
+              hint={undefined}
+              // The meter sits under this field - see the sign-up form.
+              reserveHint="open"
+              autoComplete="new-password"
+            />
+            <PasswordChecklist
+              value={password}
+              rules={checklistFor(passwordPolicy)}
+              className="-mt-4"
+            />
+            <PasswordInput
+              id="confirm-password"
+              name="confirm-password"
+              label="Confirm new password"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              /*
+               * ⚠ THE RULE IS ABOUT ANOTHER FIELD, AND THAT IS FINE - a `Check`
+               * is an ordinary closure, so "matches the box above" is expressed
+               * the same way "is an email address" is. It does not repeat the
+               * policy: a confirmation that does not match is the only thing
+               * this box can be wrong about.
+               */
+              check={(value) =>
+                value === password ? null : "Those passwords do not match."
               }
-              toast.success("We sent another code.")
-            }}
-          />
-        </FieldGroup>
-      </form>
+              required="Type the password again."
+              autoComplete="new-password"
+            />
+            <Field>
+              <Button
+                type="submit"
+                size="lg"
+                disabled={pending || code.length < OTP_LENGTH}
+              >
+                {pending ? "Saving…" : "Set new password"}
+              </Button>
+            </Field>
+            <ResendButton
+              onResend={async () => {
+                const { error } = await signIn.resetPasswordEmailCode.sendCode()
+                if (error) {
+                  toast.error(messageFor(error))
+                  return
+                }
+                toast.success("We sent another code.")
+              }}
+            />
+          </FieldGroup>
+        </form>
+      </StepStage>
     )
   }
 
+  /*
+   * ⚠ BOTH STAGES RENDER IN ONE `StepStage` AT THE SAME PLACE IN THE TREE, so
+   * sending the code is the card moving on, the same way sign-in's and
+   * sign-up's steps do, rather than one form cut for another (2026-10-12).
+   */
   return (
-    <form key="email" className="flex flex-col gap-6" onSubmit={onEmail} noValidate>
-      <FieldGroup>
-        <div className="flex flex-col items-center gap-1 text-center">
-          <h1 className="text-2xl font-bold">Reset your password</h1>
-          <p className="text-sm text-balance text-muted-foreground">
-            Enter your email and we&apos;ll send you a code.
-          </p>
-        </div>
-        <EmailInput
-          id="email"
-          // The only field on the step: it is what somebody came here to fill.
-          autoFocus
-          name="email"
-          label="Email address"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          check={emailProblem}
-          required="Enter your email address."
-          autoComplete="email"
-        />
-        <Field>
-          {/*
-           * ⚠ `xl`, THE SAME AS THE "Continue" IT SITS ONE CLICK FROM. See the
-           * size in @repo/ui/components/button: 56px is the field height, so
-           * the button under a field reads as the same object continuing. This
-           * page was the default 36px, which is a different product.
-           */}
-          <Button type="submit" size="xl" disabled={!signIn || pending}>
-            {pending ? "Sending…" : "Send code"}
-          </Button>
-        </Field>
-        <FieldDescription className="text-center">
-          Remembered it?{" "}
-          <Link href={signInHref} className="underline underline-offset-4">
-            Sign in
-          </Link>
-        </FieldDescription>
-      </FieldGroup>
-    </form>
+    <StepStage step="email" direction="back">
+      <form className="flex flex-col gap-6" onSubmit={onEmail} noValidate>
+        <FieldGroup>
+          <div className="flex flex-col items-center gap-1 text-center">
+            <h1 className="text-2xl font-medium">Reset your password</h1>
+            <p className="text-sm text-balance text-muted-foreground">
+              Enter your email and we&apos;ll send you a code.
+            </p>
+          </div>
+          <EmailInput
+            id="email"
+            // The only field on the step: it is what somebody came here to fill.
+            autoFocus
+            name="email"
+            label="Email address"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            check={emailProblem}
+            required="Enter your email address."
+            autoComplete="email"
+          />
+          <Field>
+            {/*
+             * ⚠ `xl`, THE SAME AS THE "Continue" IT SITS ONE CLICK FROM. See the
+             * size in @repo/ui/components/button: 56px is the field height, so
+             * the button under a field reads as the same object continuing. This
+             * page was the default 36px, which is a different product.
+             */}
+            <Button type="submit" size="lg" disabled={!signIn || pending}>
+              {pending ? "Sending…" : "Send code"}
+            </Button>
+          </Field>
+          <FieldDescription className="text-center">
+            Remembered it?{" "}
+            <Link href={signInHref} className="underline underline-offset-4">
+              Sign in
+            </Link>
+          </FieldDescription>
+        </FieldGroup>
+      </form>
+    </StepStage>
   )
 }

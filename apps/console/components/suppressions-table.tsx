@@ -4,10 +4,10 @@ import * as React from "react"
 import Link from "next/link"
 import { SearchX, ShieldCheck, Undo2 } from "lucide-react"
 import { AnimatePresence, motion, type Transition } from "motion/react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import {
   ListCell,
   ListHead,
@@ -186,7 +186,7 @@ function SuppressionRows({
             filtered ? (
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 onClick={() =>
                   commit((p) => ["search", "reason"].forEach((f) => p.delete(f)))
                 }
@@ -240,16 +240,15 @@ function SuppressionRows({
                         </span>
                       </ListCell>
                       <ListCell>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge variant="outline" className="cursor-default">
+                        {reason.detail ? (
+                          <Tooltip content={reason.detail}>
+                            <Badge tone="neutral" tabIndex={0}>
                               {reason.label}
                             </Badge>
-                          </TooltipTrigger>
-                          {reason.detail && (
-                            <TooltipContent>{reason.detail}</TooltipContent>
-                          )}
-                        </Tooltip>
+                          </Tooltip>
+                        ) : (
+                          <Badge tone="neutral">{reason.label}</Badge>
+                        )}
                       </ListCell>
                       <ListCell className="hidden md:table-cell">
                         {row.message_id ? (
@@ -267,19 +266,15 @@ function SuppressionRows({
                         <Time iso={row.created_at} />
                       </ListCell>
                       <ListCell className="py-1.5 text-right">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="size-7"
-                              aria-label={`Remove ${row.address} from the suppression list`}
-                              onClick={() => setRemoving(row)}
-                            >
-                              <Undo2 />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Remove from the list</TooltipContent>
+                        <Tooltip content="Remove from the list">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Remove ${row.address} from the suppression list`}
+                            onClick={() => setRemoving(row)}
+                          >
+                            <Undo2 />
+                          </Button>
                         </Tooltip>
                       </ListCell>
                     </motion.tr>
@@ -305,7 +300,7 @@ function SuppressionRows({
             : "We will start sending to this address again. If it bounces again it is suppressed again automatically - removing it does not guarantee delivery."
         }
         confirmLabel="Remove"
-        confirmWord={removing?.address}
+        confirmWord={confirmWordFor([removing?.address])}
         destructive={false}
         onConfirm={async () => {
           if (!removing) return false

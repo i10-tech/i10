@@ -193,7 +193,7 @@ export function ProviderMark({
     <span
       aria-hidden="true"
       className={cn(
-        "grid size-4 shrink-0 place-items-center rounded-[3px] border text-[7px] leading-none font-semibold",
+        "grid size-4 shrink-0 place-items-center rounded-[3px] border text-[7px] leading-none font-medium",
         className,
       )}
     >

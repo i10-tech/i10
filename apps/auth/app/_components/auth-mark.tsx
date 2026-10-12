@@ -1,4 +1,4 @@
-import { Mark } from "@repo/ui/components/mark"
+import { Mark } from "@repo/ui/components/i10/mark"
 
 /**
  * The i10 mark, pinned exactly where i10.tech's nav draws it.

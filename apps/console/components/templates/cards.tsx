@@ -15,9 +15,9 @@ import {
   SquareArrowOutUpRight,
   Trash2,
 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { Checkbox } from "@repo/ui/components/checkbox"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,8 +27,8 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+} from "@repo/ui/components/i10/menu"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import { FolderArt } from "@/components/templates/folder-art"
 import { TemplateThumbnail } from "@/components/template-thumbnail"
@@ -153,7 +153,7 @@ export function TemplateCard({
             </p>
           </div>
           <Badge
-            variant={status === "published" ? "default" : "secondary"}
+            tone={status === "published" ? "info" : "neutral"}
             className="mt-0.5 shrink-0"
           >
             {status === "changes" ? "Changes" : STATUS_LABEL[status]}
@@ -199,9 +199,8 @@ export function TemplateCard({
           trigger={
             <Button
               variant="secondary"
-              size="icon-sm"
+              size="sm"
               aria-label={`Actions for ${titleOf(t)}`}
-              className="size-7 rounded-lg bg-background/90 shadow-sm backdrop-blur hover:bg-background"
             >
               <MoreHorizontal />
             </Button>
@@ -410,20 +409,16 @@ export function FolderCard({
         )}
       >
         <DropdownMenu open={menu} onOpenChange={setMenu} modal={false}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="secondary"
-                  size="icon-sm"
-                  aria-label={`Actions for ${folder.name}`}
-                  className="size-7 rounded-lg bg-background/90 shadow-sm backdrop-blur hover:bg-background"
-                >
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>Folder actions</TooltipContent>
+          <Tooltip content="Folder actions">
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label={`Actions for ${folder.name}`}
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-44">
             <DropdownMenuItem asChild>

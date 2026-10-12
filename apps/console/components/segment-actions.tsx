@@ -2,8 +2,8 @@
 
 import * as React from "react"
 import { Trash2 } from "lucide-react"
-import { DropdownMenuItem } from "@repo/ui/components/dropdown-menu"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { deleteSegment } from "@/lib/actions"
 import { toastError } from "@/lib/toast"
 import { RowMenu } from "@/components/list/row-menu"
@@ -33,7 +33,7 @@ export function SegmentActions({ id, name }: { id: string; name: string }) {
         description="The contacts in it are not deleted - only the grouping. Any broadcast already sent to this segment keeps its record."
         confirmLabel="Delete segment"
         doneLabel="Deleted"
-        confirmWord={name}
+        confirmWord={confirmWordFor([name])}
         onConfirm={async () => {
           const result = await deleteSegment(id)
           if (!result.ok) {

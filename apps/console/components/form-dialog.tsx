@@ -1,17 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@repo/ui/components/dialog"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent, DialogTrigger } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
 import type { ActionResult } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
@@ -123,13 +116,12 @@ export function FormDialog<T>({
     // is just an early close - the thing has been created either way.
     <Dialog open={open} onOpenChange={outcome.state === "pending" ? () => {} : setOpen}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        title={title}
+        description={description}
+        style={{ width: "min(calc(100vw - 2rem), 448px)" }}
+      >
         <form onSubmit={submit} {...outcome.formProps}>
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            {description && <DialogDescription>{description}</DialogDescription>}
-          </DialogHeader>
-
           <div className="space-y-4 py-4">{children}</div>
 
           <DialogFooter>
@@ -141,7 +133,7 @@ export function FormDialog<T>({
             >
               Cancel
             </Button>
-            <ActionButton
+            <StateButton
               type="submit"
               state={outcome.state}
               pendingLabel={submitLabel}
@@ -149,7 +141,7 @@ export function FormDialog<T>({
               disabled={!canSubmit}
             >
               {submitLabel}
-            </ActionButton>
+            </StateButton>
           </DialogFooter>
         </form>
       </DialogContent>

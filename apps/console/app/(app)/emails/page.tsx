@@ -8,7 +8,7 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { Status } from "@/components/status"
 import { EmailFilters } from "@/components/email-filters"
 import { ApiButton } from "@/components/list/api-button"
@@ -30,6 +30,7 @@ import { bareAddress, firstLine, formatRelative } from "@/lib/format"
 import { rangeStart } from "@/lib/range"
 import { SNIPPETS } from "@/lib/snippets"
 import type { ApiKeyRow, DomainSummary, EmailRow, Page as ApiPage } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Emails" }
 
@@ -119,14 +120,12 @@ export default async function EmailsPage({
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Emails</PageTitle>
+          <PageTitle>{PAGE_COPY.emails.title}</PageTitle>
           <PageActions>
             <ApiButton snippet={SNIPPETS.emails} />
           </PageActions>
         </PageHeaderRow>
-        <PageDescription>
-          Every message this workspace has sent, with what happened to it.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.emails.description}</PageDescription>
       </PageHeader>
 
       <PageBody width="full">

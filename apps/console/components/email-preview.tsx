@@ -19,7 +19,7 @@ export function EmailPreview({ domain }: { domain: string }) {
         </span>
         <div className="min-w-0 pt-0.5">
           <p className="flex min-w-0 items-center text-sm whitespace-nowrap">
-            <span className="font-semibold">Your Name</span>
+            <span className="font-medium">Your Name</span>
             <span className="ml-1.5 flex min-w-0 items-center text-muted-foreground">
               &lt;youremail@
               {domain ? (

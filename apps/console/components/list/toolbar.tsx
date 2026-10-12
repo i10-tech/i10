@@ -1,9 +1,12 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { AnimatePresence, motion } from "motion/react"
-import { ChevronDown, LayoutGrid, Search, Table2, X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Search, X } from "lucide-react"
+import { ChevronIcon } from "@repo/ui/components/icon-morph/icon-morph"
+import { TextMorph } from "@repo/ui/components/text-morph/text-morph"
+import { Button } from "@repo/ui/components/button/button"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -12,18 +15,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { Input } from "@repo/ui/components/input"
-import { Kbd } from "@repo/ui/components/kbd"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { ToggleGroup, ToggleGroupItem } from "@repo/ui/components/toggle-group"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+} from "@repo/ui/components/i10/menu"
+import { Input } from "@repo/ui/components/i10/input"
+import { Kbd } from "@repo/ui/components/i10/kbd"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
+import { SlotText } from "@repo/ui/components/slot-text/slot-text"
+import SegmentedControl from "@repo/ui/components/segmented-control/segmented-control"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import {
   useServerViews,
@@ -46,7 +44,9 @@ export function ListToolbar({
   className?: string
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center gap-2", className)}>{children}</div>
+    <div className={cn("relative z-20 flex flex-wrap items-center gap-2", className)}>
+      {children}
+    </div>
   )
 }
 
@@ -129,23 +129,24 @@ export function SearchField({
               transition={{ duration: 0.12 }}
               className="pointer-events-auto flex"
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onChange("")
-                      ref.current?.focus()
-                    }}
-                    className="grid size-5 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    aria-label="Clear search"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Clear <Kbd className="ml-1">Esc</Kbd>
-                </TooltipContent>
+              <Tooltip
+                content={
+                  <>
+                    Clear <Kbd className="ml-1">Esc</Kbd>
+                  </>
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange("")
+                    ref.current?.focus()
+                  }}
+                  className="grid size-5 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="size-3.5" />
+                </button>
               </Tooltip>
             </motion.div>
           ) : !focused ? (
@@ -210,45 +211,20 @@ export function FilterSelect({
   label: string
   className?: string
 }) {
-  const current = value ? options.find((o) => o.value === value) : undefined
-  const active = current !== undefined
+  const active = value !== "" && options.some((o) => o.value === value)
   return (
-    <Select
+    <MorphSelect
+      label={label}
+      hideLabel
+      align="end"
       value={active ? value : ALL}
       onValueChange={(v) => onValueChange(v === ALL ? "" : v)}
-    >
-      <SelectTrigger
-        className={cn(
-          "h-9 w-44 rounded-xl transition-colors hover:bg-muted/50",
-          active && "border-foreground/25",
-          className,
-        )}
-        aria-label={label}
-      >
-        {/*
-         * ⚠ THE TEXT IS GIVEN, NOT LOOKED UP. Radix reads the selected item's
-         * label from the open menu's items, which do not exist on the server,
-         * so the trigger rendered empty until hydration - a flash on every load.
-         */}
-        <SelectValue>
-          <span className="flex items-center gap-2">
-            {current?.icon}
-            {current?.label ?? allLabel}
-          </span>
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent align="end">
-        <SelectItem value={ALL}>{allLabel}</SelectItem>
-        {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            <span className="flex items-center gap-2">
-              {o.icon}
-              {o.label}
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      items={[
+        { value: ALL, label: allLabel },
+        ...options.map((o) => ({ value: o.value, label: o.label, icon: o.icon })),
+      ]}
+      className={className}
+    />
   )
 }
 
@@ -295,11 +271,12 @@ export function FilterMulti({
       : picked.length === 1
         ? picked[0]!.label
         : `${picked.length} ${noun}`
+  const [open, setOpen] = React.useState(false)
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="outline"
+          variant="secondary"
           aria-label={label}
           className={cn(
             "h-9 w-44 justify-between rounded-xl px-3 font-normal shadow-xs hover:bg-muted/50 data-[state=open]:bg-muted/50",
@@ -309,9 +286,9 @@ export function FilterMulti({
         >
           <span className="flex min-w-0 items-center gap-2 truncate">
             {picked.length === 1 && picked[0]!.icon}
-            <span className="truncate">{summary}</span>
+            <TextMorph className="truncate">{summary}</TextMorph>
           </span>
-          <ChevronDown className="size-4 opacity-50" />
+          <ChevronIcon state={open} size={16} className="opacity-50" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
@@ -404,7 +381,7 @@ export function UrlClearFilters({ params }: { params: string[] }) {
         >
           <Button
             variant="ghost"
-            className="h-9 rounded-xl text-muted-foreground"
+
             onClick={() => commit((p) => params.forEach((name) => p.delete(name)))}
           >
             <X />
@@ -428,53 +405,16 @@ export function ViewToggle({
   value: View
   onChange: (view: View) => void
 }) {
-  // One pill per toggle on the page, so two toggles never trade it.
-  const layoutId = React.useId()
   return (
-    <ToggleGroup
-      type="single"
+    <SegmentedControl
+      label="Layout"
       value={value}
-      onValueChange={(v) => v && onChange(v as View)}
-      className="h-9 rounded-xl border p-0.5"
-      aria-label="Layout"
-    >
-      {(
-        [
-          { v: "grid", label: "Grid", icon: <LayoutGrid /> },
-          { v: "table", label: "Table", icon: <Table2 /> },
-        ] as const
-      ).map(({ v, label, icon }) => (
-        <Tooltip key={v}>
-          <TooltipTrigger asChild>
-            <ToggleGroupItem
-              value={v}
-              aria-label={label}
-              // The chosen one is raised, on a pill that slides between them.
-              // ⚠ BY `value`, NOT `data-state`: the tooltip around it sets
-              // its own `data-state="closed"` over the toggle's "on", which
-              // is why the chosen view never looked chosen.
-              className={cn(
-                "relative size-8 rounded-lg hover:bg-transparent data-[state=on]:bg-transparent",
-                value === v
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {value === v && (
-                <motion.span
-                  layoutId={`${layoutId}-view`}
-                  aria-hidden
-                  className="absolute inset-0 rounded-lg bg-foreground/[0.09] shadow-sm ring-1 ring-foreground/[0.06] ring-inset"
-                  transition={{ type: "spring", stiffness: 500, damping: 38 }}
-                />
-              )}
-              <span className="relative">{icon}</span>
-            </ToggleGroupItem>
-          </TooltipTrigger>
-          <TooltipContent>{label}</TooltipContent>
-        </Tooltip>
-      ))}
-    </ToggleGroup>
+      onValueChange={(v) => onChange(v as View)}
+      options={[
+        { value: "grid", label: "Grid" },
+        { value: "table", label: "Table" },
+      ]}
+    />
   )
 }
 
@@ -558,19 +498,16 @@ export function ResultsLine({
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: "auto" }}
           exit={{ opacity: 0, height: 0 }}
-          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="overflow-hidden"
+          transition={motionTokens.spring.smooth}
+          className="[overflow-y:clip]"
         >
           <p className="flex items-center gap-2 pt-4 text-sm text-muted-foreground">
             <span className="tabular">
-              <motion.span
-                key={count}
-                initial={{ opacity: 0, y: -3 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="inline-block font-medium text-foreground"
-              >
-                {count}
-              </motion.span>{" "}
+              <SlotText
+                value={count}
+                duration={0.5}
+                className="font-medium text-foreground"
+              />{" "}
               {count === 1 ? noun[0] : noun[1]}
               {query.trim() && <> for “{query.trim()}”</>}
             </span>

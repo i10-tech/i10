@@ -1,13 +1,13 @@
 import type { Metadata } from "next"
-import Link from "next/link"
-import { Button } from "@repo/ui/components/button"
-import { Meter, MeterRow } from "@repo/ui/components/meter"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
+import { Progress } from "@repo/ui/components/progress/progress"
+import { UsageMeter } from "@repo/ui/components/usage-meter/usage-meter"
 import {
   Section,
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { cn } from "cn"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
@@ -107,18 +107,54 @@ export default async function UsagePage() {
               )
             }
 
+            // A zero allowance is not a quota that is full: the plan has none.
+            if (feature.allowance === 0) {
+              return (
+                <div
+                  key={feature.feature_id}
+                  className="flex items-baseline justify-between"
+                >
+                  <span className="text-sm font-medium">{feature.label}</span>
+                  <span className="text-sm text-muted-foreground">
+                    Not on your plan
+                  </span>
+                </div>
+              )
+            }
+
+            // No allowance means no ceiling: show the amount, not a bar.
+            if (feature.allowance === null) {
+              return (
+                <div
+                  key={feature.feature_id}
+                  className="flex items-baseline justify-between"
+                >
+                  <span className="text-sm font-medium">{feature.label}</span>
+                  <span className="tabular text-sm text-muted-foreground">
+                    {feature.unit === "bytes"
+                      ? formatBytes(feature.used)
+                      : formatNumber(feature.used)}{" "}
+                    used, no limit
+                  </span>
+                </div>
+              )
+            }
+            const allowance = feature.allowance
+
             return (
-              <MeterRow
+              <UsageMeter
                 key={feature.feature_id}
                 label={feature.label}
-                used={feature.used}
-                limit={feature.allowance}
-                overage={feature.overage}
-                format={
-                  feature.unit === "bytes"
-                    ? (n) => formatBytes(n)
-                    : (n) => formatNumber(n)
-                }
+                limit={feature.unit === "bytes" ? allowance / 1e9 : allowance}
+                unit={feature.unit === "bytes" ? "GB" : ""}
+                decimals={feature.unit === "bytes" ? 1 : 0}
+                segments={[
+                  {
+                    id: "used",
+                    label: "Used",
+                    value: feature.unit === "bytes" ? feature.used / 1e9 : feature.used,
+                  },
+                ]}
               />
             )
           })}
@@ -128,9 +164,7 @@ export default async function UsagePage() {
       <Section>
         <SectionTitle>Need more?</SectionTitle>
         <SectionContent>
-          <Button asChild>
-            <Link href="/settings/billing">See plans</Link>
-          </Button>
+          <ButtonLink href="/settings/billing">See plans</ButtonLink>
         </SectionContent>
       </Section>
     </div>
@@ -201,7 +235,11 @@ function LimitRow({ limit }: { limit: SendingLimit }) {
         </span>
       ) : (
         <>
-          <Meter used={limit.used} limit={allowance} overage={limit.overage} />
+          <Progress
+            value={limit.used}
+            max={allowance}
+            aria-label={`${label}: ${pct}% used`}
+          />
           <div className="tabular text-sm sm:text-right">
             <p className={cn(over && !limit.overage && "text-danger")}>{pct}% used</p>
             <p className="text-xs text-muted-foreground">

@@ -2,9 +2,11 @@
 
 import * as React from "react"
 import { motion } from "motion/react"
-import { Check } from "lucide-react"
-import { AutoHeight } from "@repo/ui/components/auto-height"
+import { AutoHeight } from "@repo/ui/components/i10/auto-height"
+import { carryBetween } from "@repo/ui/components/i10/carry"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { cn } from "cn"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 
 /**
  * The vertical rail of steps that adding a domain and set-up both walk down
@@ -45,6 +47,7 @@ export function StepItem({
   tone = "success",
   badge,
   reduce,
+  enter = true,
   children,
 }: {
   state: "done" | "current" | "next"
@@ -60,8 +63,20 @@ export function StepItem({
   /** A word beside an answered step's title - "Skipped". */
   badge?: string
   reduce: boolean
+  /**
+   * Whether this step settles in when it joins a rail already on screen. Off
+   * for a step that REPLACES one with the same title (set-up's Domain step
+   * swapping to the add-domain steps and back): the title is already there,
+   * and fading it in again would read as a different step arriving.
+   */
+  enter?: boolean
   children: React.ReactNode
 }) {
+  const ref = React.useRef<HTMLLIElement>(null)
+  useCarry(ref, state, reduce)
+  const rail = React.useContext(RailReady)
+  // Decided once, at mount: joining a rail that was already drawn.
+  const [joining] = React.useState(() => rail.current && enter && !reduce)
   const done = state === "done"
   const current = state === "current"
   const warn = done && tone === "warning"
@@ -70,8 +85,25 @@ export function StepItem({
   if (current && !opened) setOpened(true)
   return (
     <motion.li
+      ref={ref}
       layout={reduce ? false : "position"}
-      transition={{ duration: 0.45, ease: EASE }}
+      initial={
+        joining ? { opacity: 0, filter: `blur(${motionTokens.blur.subtle}px)` } : false
+      }
+      // ⚠ `none` ONCE SETTLED: any filter, even blur(0), makes the step a
+      // containing block for fixed descendants and a new stacking context.
+      animate={{ opacity: 1, filter: "blur(0px)", transitionEnd: { filter: "none" } }}
+      transition={{
+        layout: { duration: 0.45, ease: EASE },
+        opacity: {
+          duration: motionTokens.duration.standard,
+          ease: [...motionTokens.ease.enter],
+        },
+        filter: {
+          duration: motionTokens.duration.standard,
+          ease: [...motionTokens.ease.enter],
+        },
+      }}
       data-step-state={state}
       // ⚠ WHERE "SCROLL TO THE NEW STEP" STOPS: a little below the top edge.
       className="relative scroll-mt-6 pb-6 pl-10 last:pb-0"
@@ -89,19 +121,11 @@ export function StepItem({
           className={cn(
             "absolute top-[40px] -bottom-[31px] left-[6.5px] w-0.5 transition-colors duration-500",
             // ⚠ THE RINGS' OWN INK, NOT A FADED ONE - same colour, same weight.
-            warn ? "bg-amber-500" : done ? "bg-emerald-500" : "bg-muted-foreground/40",
+            warn ? "bg-warning" : done ? "bg-success" : "bg-muted-foreground/40",
           )}
         />
       )}
-      <span
-        aria-hidden
-        className={cn(
-          "absolute top-7 left-0 size-[15px] rounded-full border-2 bg-background transition-colors duration-300",
-          warn ? "border-amber-500" : done && "border-emerald-500",
-          state === "current" && "border-foreground",
-          state === "next" && "border-muted-foreground/40",
-        )}
-      />
+      <StepMarker state={warn ? "warn" : state} reduce={reduce} />
 
       {/*
        * ⚠ THE SAME FRAME IN EVERY STATE, ONLY ITS BORDER AND TINT CHANGE, so
@@ -112,15 +136,15 @@ export function StepItem({
         className={cn(
           "-ml-4 rounded-3xl border p-5 pl-4 transition-[background-color,border-color] duration-500",
           warn
-            ? "border-amber-500/30 bg-linear-to-br from-amber-500/12 via-amber-500/4 to-transparent"
+            ? "border-warning/30"
             : done
-              ? "border-emerald-500/30 bg-linear-to-br from-emerald-500/12 via-emerald-500/4 to-transparent"
+              ? "border-success/30"
               : "border-transparent",
         )}
       >
         <h2
           className={cn(
-            "flex items-center gap-2 font-display text-xl font-semibold tracking-tight transition-colors",
+            "flex items-center gap-2.5 font-display text-xl font-normal tracking-[-0.02em] transition-colors",
             state === "next" && "text-muted-foreground/50",
           )}
         >
@@ -128,11 +152,11 @@ export function StepItem({
             <span
               aria-hidden
               className={cn(
-                "grid size-7 shrink-0 place-items-center rounded-lg border bg-linear-to-b from-muted/80 to-background transition-colors duration-300 [&_svg]:size-3.5",
+                "inline-flex shrink-0 transition-colors duration-300 [&_svg]:size-4.5",
                 warn
-                  ? "border-amber-500/30 text-amber-500"
+                  ? "text-warning"
                   : done
-                    ? "border-emerald-500/30 text-emerald-500"
+                    ? "text-success"
                     : state === "current"
                       ? "text-foreground"
                       : "text-muted-foreground/50",
@@ -142,14 +166,11 @@ export function StepItem({
             </span>
           )}
           {title}
-          {done && !warn && <Check aria-hidden className="size-4 text-emerald-500" />}
           {done && badge && (
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 font-sans text-xs font-medium tracking-normal",
-                warn
-                  ? "bg-amber-500/14 text-amber-700 dark:text-amber-300"
-                  : "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+                warn ? "bg-warning/14 text-warning" : "bg-success/12 text-success",
               )}
             >
               {badge}
@@ -162,26 +183,35 @@ export function StepItem({
          * HIDE (2026-10-04). They used to unmount whenever the step stopped
          * being current, so going back to an earlier step threw away whatever
          * a later one held - a key just created, an address typed, a domain
-         * half set up. Now the inactive layer is taken out of the flow and
-         * faded to invisible and inert; the box's height follows whichever
-         * layer is showing, still in one movement.
+         * half set up.
+         *
+         * ⚠ EACH FACE IS A `Reveal`, ARC'S PANEL MOTION (2026-10-12). The two
+         * faces used to crossfade inside a box that sprang between their
+         * heights and clipped while it grew, so the question's buttons were
+         * sliced by the box's edge on the way in - the Advanced options bug
+         * again, on every step. Now one face closes as the other opens on the
+         * same spring, so their heights add up to one straight movement from
+         * one height to the other, and each face settles into place with
+         * Arc's small drop and focus pull instead of being wiped in.
+         *
+         * ⚠ THE ANSWER IS ABOVE THE QUESTION, so the answer never moves while
+         * it opens or closes: the value carried into it (see `useCarry`) lands
+         * on a target that is standing still.
          */}
         <AutoHeight grow="animate">
-          <div className="relative">
+          {summary && (
+            <Reveal show={done} spacing="pt-3" keepMounted>
+              <div data-face="answer">{summary}</div>
+            </Reveal>
+          )}
+          <Reveal show={current} spacing="pt-1" keepMounted>
             {opened && (
-              <Layer shown={current} reduce={reduce}>
-                <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-                  {description}
-                </p>
+              <div data-face="question">
+                <p className="max-w-xl text-sm text-muted-foreground">{description}</p>
                 <div className="pt-5">{children}</div>
-              </Layer>
+              </div>
             )}
-            {summary && (
-              <Layer shown={done} reduce={reduce}>
-                <div className="pt-3">{summary}</div>
-              </Layer>
-            )}
-          </div>
+          </Reveal>
         </AutoHeight>
       </div>
     </motion.li>
@@ -189,36 +219,43 @@ export function StepItem({
 }
 
 /**
- * One of a step's two faces - its question or its answer.
- *
- * ⚠ HIDDEN, NOT REMOVED. Out of the flow (so the box measures only the face
- * that is showing), faded, `invisible` once faded and `inert` throughout, so a
- * hidden question can neither be seen nor tabbed into nor read out.
+ * Carries a value from one face of a step to the other: the domain typed in
+ * the box travels to where the answer shows it, and back on "Change". Mark
+ * both ends with the same `data-carry` key - see @repo/ui's `carryBetween`.
  */
-function Layer({
-  shown,
-  reduce,
-  children,
-}: {
-  shown: boolean
-  reduce: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      inert={!shown}
-      aria-hidden={!shown}
-      className={cn(
-        reduce ? "" : "transition-[opacity,visibility] duration-300 ease-out",
-        shown
-          ? "visible relative opacity-100 delay-75"
-          : "invisible absolute inset-x-0 top-0 opacity-0",
-      )}
-    >
-      {children}
-    </div>
-  )
+function useCarry(
+  ref: React.RefObject<HTMLElement | null>,
+  state: "done" | "current" | "next",
+  reduce: boolean,
+) {
+  const previous = React.useRef(state)
+  React.useLayoutEffect(() => {
+    const from = previous.current
+    previous.current = state
+    const item = ref.current
+    if (reduce || !item || from === state) return
+    const turn =
+      from === "current" && state === "done"
+        ? (["question", "answer"] as const)
+        : from === "done" && state === "current"
+          ? (["answer", "question"] as const)
+          : null
+    if (!turn) return
+    const face = (name: string) => item.querySelector(`[data-face=${name}]`)
+    const source = face(turn[0])
+    const target = face(turn[1])
+    if (!source || !target) return
+    return carryBetween(item, source, target)
+  }, [ref, state, reduce])
 }
+
+/**
+ * A step that joins the rail after it was first drawn - the records step when
+ * somebody chooses to add a domain, the publish step after Manual setup -
+ * settles in with Arc's enter (a fade and a brief focus pull) while the steps
+ * below it slide down to make room. On the first render nothing enters.
+ */
+const RailReady = React.createContext<{ readonly current: boolean }>({ current: false })
 
 /**
  * The list the items sit in.
@@ -240,6 +277,12 @@ export function StepRail({
   children: React.ReactNode
 }) {
   const ref = React.useRef<HTMLOListElement>(null)
+  // ⚠ A BOX, NOT STATE: steps read it once as they mount, and flipping it
+  // must not re-render every step on the rail.
+  const drawn = React.useRef(false)
+  React.useEffect(() => {
+    drawn.current = true
+  }, [])
 
   React.useEffect(() => {
     const list = ref.current
@@ -279,7 +322,90 @@ export function StepRail({
 
   return (
     <ol ref={ref} className={cn("min-w-0", className)}>
-      {children}
+      <RailReady.Provider value={drawn}>{children}</RailReady.Provider>
     </ol>
+  )
+}
+
+/**
+ * The dot on the rail, Arc's stepper marker: a finished step fills with the
+ * status colour and a check draws itself in; the current one is a solid ring;
+ * those still to come are faint. Fill and check move on Arc's tokens, and
+ * reduced motion lands on the final state.
+ */
+function StepMarker({
+  state,
+  reduce,
+}: {
+  state: "done" | "warn" | "current" | "next"
+  reduce: boolean
+}) {
+  const filled = state === "done" || state === "warn"
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "absolute top-7 left-0 grid size-[15px] place-items-center rounded-full border-2 bg-background",
+        "transition-colors duration-(--duration-standard) ease-(--ease-standard)",
+        state === "done" && "border-success",
+        state === "warn" && "border-warning",
+        state === "current" && "border-foreground",
+        state === "next" && "border-muted-foreground/40",
+      )}
+    >
+      <motion.span
+        className={cn(
+          "absolute -inset-[2px] rounded-full",
+          state === "warn" ? "bg-warning" : "bg-success",
+        )}
+        initial={false}
+        animate={{ scale: filled ? 1 : 0.4, opacity: filled ? 1 : 0 }}
+        transition={reduce ? { duration: 0 } : motionTokens.spring.snappy}
+      />
+      <svg
+        viewBox="0 0 16 16"
+        className="relative size-[11px] text-[var(--background)]"
+        fill="none"
+      >
+        {state === "warn" ? (
+          <motion.path
+            d="M8 4.5v4.25M8 11.25v.25"
+            stroke="currentColor"
+            strokeWidth={2.25}
+            strokeLinecap="round"
+            initial={false}
+            animate={{ pathLength: filled ? 1 : 0, opacity: filled ? 1 : 0 }}
+            transition={
+              reduce
+                ? { duration: 0 }
+                : {
+                    duration: motionTokens.duration.standard,
+                    ease: [...motionTokens.ease.enter],
+                    delay: 0.06,
+                  }
+            }
+          />
+        ) : (
+          <motion.path
+            d="M4.25 8.25 6.75 10.75l5-5.5"
+            stroke="currentColor"
+            strokeWidth={2.25}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            initial={false}
+            animate={{ pathLength: filled ? 1 : 0, opacity: filled ? 1 : 0 }}
+            transition={
+              reduce
+                ? { duration: 0 }
+                : {
+                    duration: motionTokens.duration.standard,
+                    ease: [...motionTokens.ease.enter],
+                    delay: 0.06,
+                  }
+            }
+          />
+        )}
+      </svg>
+    </span>
   )
 }

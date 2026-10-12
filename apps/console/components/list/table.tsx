@@ -1,6 +1,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { cn } from "cn"
+import arc from "@repo/ui/components/sortable-data-table/sortable-data-table.module.css"
 
 /**
  * The table every list draws, the templates table's shape: a rounded frame, a
@@ -18,41 +19,40 @@ export function ListTable({
   className?: string
 }) {
   return (
-    <div className={cn("overflow-x-auto rounded-2xl border bg-background", className)}>
-      <table className="w-full text-sm">{children}</table>
+    <div className={cn(arc.wrapper, className)}>
+      <div className={arc.scroller}>
+        <table className={arc.table}>{children}</table>
+      </div>
     </div>
   )
 }
 
 export function ListHeader({ children }: { children: React.ReactNode }) {
   return (
-    <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+    <thead>
       <tr>{children}</tr>
     </thead>
   )
 }
 
+/** Arc right-aligns a column through `data-numeric`; a `text-right` head opts in. */
+const rightAligned = (className?: string) =>
+  /(^|\s)text-right(\s|$)/.test(className ?? "") || undefined
+
 export function ListHead({ className, ...props }: React.ComponentProps<"th">) {
-  return (
-    <th
-      className={cn(
-        "px-3 py-2.5 font-medium whitespace-nowrap first:pl-4 last:pr-4",
-        className,
-      )}
-      {...props}
-    />
-  )
+  return <th data-numeric={rightAligned(className)} className={className} {...props} />
 }
 
 export function ListBody({ className, ...props }: React.ComponentProps<"tbody">) {
-  return <tbody className={cn("divide-y", className)} {...props} />
+  return <tbody className={className} {...props} />
 }
 
 /** Hover, and the entrance every new page of rows gets. */
-export const rowClass = "group transition-colors duration-150 hover:bg-muted/40"
+/** Hover and selection paint Arc's cell fill; see `.i10-row` in styles/arc.css. */
+export const rowClass = "i10-row group"
 
 /** A ticked row, the same faint wash on every list that has checkboxes. */
-export const selectedRowClass = "bg-primary/[0.05] hover:bg-primary/[0.08]"
+export const selectedRowClass = "i10-row-selected"
 
 /**
  * The picture at the start of a row - an icon in a quiet tile, the shape the
@@ -90,7 +90,7 @@ export function ListRow({ className, ...props }: React.ComponentProps<"tr">) {
 }
 
 export function ListCell({ className, ...props }: React.ComponentProps<"td">) {
-  return <td className={cn("px-3 py-3 first:pl-4 last:pr-4", className)} {...props} />
+  return <td data-numeric={rightAligned(className)} className={className} {...props} />
 }
 
 /**
@@ -114,7 +114,9 @@ export function CellLink({
       href={href}
       title={title}
       className={cn(
-        "block px-3 py-3 outline-none focus-visible:bg-muted/60",
+        // The whole cell is the link: it cancels the cell's 16px padding and
+        // fills its height, so a click anywhere on the cell opens the record.
+        "-mx-4 flex min-h-[52px] items-center px-4 outline-none focus-visible:bg-muted",
         className,
       )}
     >

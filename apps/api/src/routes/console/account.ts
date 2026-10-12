@@ -3,6 +3,9 @@ import type { Step } from "../../console/onboarding.js"
 import { STEPS } from "../../console/onboarding.js"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
+import { checkPassword } from "../../console/password-check.js"
+import { PURPOSE } from "../../console/code-cooldown.js"
+import { claimTeamDomain } from "../../console/team-domains.js"
 
 /**
  * Who this workspace is, what it has used, and what it is paying for.
@@ -53,6 +56,111 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       billing,
       onboarding: onboardingState,
     })
+  })
+
+  /*
+   * ⚠ ALWAYS 200 WITH A VERDICT, EXCEPT THE TWO THAT ARE NOT ABOUT THE
+   * PASSWORD. "Wrong" is an answer, not an error - the form says it under the
+   * field - while a limit (429) and a Clerk outage (503) say "try again" and
+   * must never read as a wrong password. See console/password-check.ts.
+   */
+  app.post("/me/verify-password", async (c) => {
+    if (!d.passwords) return c.json(notWired("Password checks"), 501)
+    const { userId } = c.get("user")
+    const body = await readJson(c)
+    const password = typeof body?.password === "string" ? body.password : ""
+    if (!password) return c.json(validation("password is required."), 422)
+    const verdict = await checkPassword(d.passwords, userId, password)
+    if (verdict === "limited")
+      return c.json(
+        {
+          statusCode: 429,
+          name: "rate_limit_exceeded",
+          message: "Too many tries. Wait a few minutes, then try again.",
+        },
+        429,
+      )
+    if (verdict === "unavailable")
+      return c.json(
+        {
+          statusCode: 503,
+          name: "service_unavailable",
+          message: "We could not check that just now. You can still save.",
+        },
+        503,
+      )
+    return c.json({ verified: verdict === "verified", no_password: verdict === "none" })
+  })
+
+  /*
+   * ⚠ ASKED BEFORE EVERY CODE THE CONSOLE SENDS, and 429 carries how long is
+   * left so the button counts down from it. See console/code-cooldown.ts.
+   */
+  app.post("/me/code-sends", async (c) => {
+    if (!d.codeSends) return c.json(notWired("Code cooldowns"), 501)
+    const { userId } = c.get("user")
+    const body = await readJson(c)
+    const purpose = typeof body?.purpose === "string" ? body.purpose : ""
+    if (!PURPOSE.test(purpose)) return c.json(validation("purpose is invalid."), 422)
+    const reserved = await d.codeSends(userId, purpose)
+    c.header("Retry-After", String(reserved.retryAfter))
+    if (!reserved.ok)
+      return c.json(
+        {
+          statusCode: 429,
+          name: "rate_limit_exceeded",
+          message: `A code was sent a moment ago. You can send another in ${reserved.retryAfter}s.`,
+          retry_after: reserved.retryAfter,
+        },
+        429,
+      )
+    return c.json({ retry_after: reserved.retryAfter })
+  })
+
+  /*
+   * The workspace's DNS-verified sending domains, for the Team page to offer
+   * as join suggestions. See console/team-domains.ts.
+   */
+  app.get("/team/domain-suggestions", async (c) => {
+    if (!d.teamDomains) return c.json({ data: [] })
+    const { tenantId } = c.get("auth")
+    return c.json({ data: await d.teamDomains.verified(tenantId) })
+  })
+
+  app.post("/team/domains", async (c) => {
+    if (!d.teamDomains) return c.json(notWired("Team domains"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId, orgId } = c.get("user")
+    const body = await readJson(c)
+    const name = typeof body?.name === "string" ? body.name : ""
+    const outcome = await claimTeamDomain(d.teamDomains, {
+      tenantId,
+      userId,
+      orgId,
+      name,
+    })
+    if (outcome === "created") return c.json({ name: name.trim().toLowerCase() }, 201)
+    if (outcome === "forbidden")
+      return c.json(
+        {
+          statusCode: 403,
+          name: "forbidden",
+          message: "Only an admin can turn on join suggestions.",
+        },
+        403,
+      )
+    if (outcome === "exists")
+      return c.json(
+        {
+          statusCode: 409,
+          name: "conflict",
+          message: "That domain is already on this workspace or another one.",
+        },
+        409,
+      )
+    if (outcome === "no_org")
+      return c.json(validation("Join suggestions need a team workspace."), 422)
+    return c.json(validation("Verify that domain on the Domains page first."), 422)
   })
 
   app.patch("/me/tenant", async (c) => {

@@ -1,5 +1,4 @@
 import type { Metadata } from "next"
-import { BackButton } from "@/components/back-button"
 import { notFound } from "next/navigation"
 import { Globe } from "lucide-react"
 import {
@@ -10,7 +9,7 @@ import {
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { MetaGrid } from "@/components/detail-hero"
 import {
   DomainLiveProvider,
@@ -23,7 +22,7 @@ import {
 import { ApiButton } from "@/components/list/api-button"
 import { ProviderMark } from "@/components/provider-mark"
 import { Time } from "@/components/time"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { DomainDangerZone } from "@/components/domain-danger-zone"
 import { DomainTracking } from "@/components/domain-tracking"
 import { DelegationNote } from "@/components/delegation-note"
@@ -169,9 +168,9 @@ export default async function DomainDetailPage({
       <Page>
         <PageHeader>
           <LiveDomainHero
-            back={<BackButton href="/domains" label="Back to domains" />}
+            crumbs={[{ label: "Domains", href: "/domains" }]}
             icon={<Globe />}
-            eyebrow="Domain"
+            eyebrow={domain.name}
             title={<span className="font-mono">{domain.name}</span>}
             // ⚠ NO ••• MENU (2026-10-03). Resend's holds only Delete, which
             // lives with Transfer in the Configuration tab's danger zone; verify
@@ -254,7 +253,7 @@ export default async function DomainDetailPage({
           <Tabs
             defaultValue={domain.status === "verified" ? "configuration" : "records"}
           >
-            <TabsList variant="pill" className="mb-6">
+            <TabsList>
               <TabsTrigger value="records">Records</TabsTrigger>
               <TabsTrigger value="configuration">Configuration</TabsTrigger>
             </TabsList>

@@ -3,10 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Copy, SquareArrowOutUpRight, Trash2 } from "lucide-react"
-import {
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@repo/ui/components/dropdown-menu"
+import { DropdownMenuItem, DropdownMenuSeparator } from "@repo/ui/components/i10/menu"
 import { DeleteDomainDialog } from "@/components/delete-domain-dialog"
 import { toastDone, toastError } from "@/lib/toast"
 import { RowMenu } from "@/components/list/row-menu"

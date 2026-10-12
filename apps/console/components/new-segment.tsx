@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import { Plus } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { FloatingTextarea } from "@repo/ui/components/floating-field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingTextarea } from "@repo/ui/components/i10/floating-field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createSegment } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"

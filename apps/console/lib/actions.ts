@@ -239,13 +239,20 @@ export async function refreshDomain(id: string) {
   )
 }
 
-export async function deleteDomain(id: string) {
+/**
+ * ⚠ `leaving` WHEN THE CALLER IS THE RECORD'S OWN PAGE. Any revalidation in a
+ * Server Action makes Next send back a fresh render of the page on screen,
+ * and the page on screen is the record that was just deleted: its 404 showed
+ * for a frame before the caller moved to the list. A caller that is leaving
+ * revalidates nothing; the list it goes to is dynamic and renders fresh.
+ */
+export async function deleteDomain(id: string, { leaving = false } = {}) {
   return run(
     () =>
       api<{ deleted: true }>(`/console/domains/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
-    ["/domains", "/"],
+    leaving ? [] : ["/domains", "/"],
     { refreshCaller: false },
   )
 }
@@ -489,6 +496,60 @@ export async function stepUp() {
   return run(() => api<undefined>("/console/step-up"))
 }
 
+/**
+ * Whether the signed-in person's current password is this one, asked as they
+ * leave the field on the change-password form. Rate limited by the API; Clerk
+ * still checks it again at save. See apps/api/src/console/password-check.ts.
+ */
+export async function verifyPassword(password: string) {
+  return run(
+    () =>
+      api<{ verified: boolean; no_password: boolean }>("/console/me/verify-password", {
+        method: "POST",
+        body: { password },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * Holds the next minute for a code the console is about to send. 429 carries
+ * `retry_after`, which the button counts down from. See
+ * apps/api/src/console/code-cooldown.ts.
+ */
+export async function reserveCodeSend(purpose: string) {
+  return run(
+    () =>
+      api<{ retry_after: number }>("/console/me/code-sends", {
+        method: "POST",
+        body: { purpose },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** This workspace's DNS-verified domains, for the Team page's suggestion. */
+export async function teamDomainSuggestions() {
+  return run(() => api<{ data: string[] }>("/console/team/domain-suggestions"), [], {
+    refreshCaller: false,
+  })
+}
+
+/** Turns a verified sending domain on as a Clerk verified domain. */
+export async function enableTeamDomain(name: string) {
+  return run(
+    () =>
+      api<{ name: string }>("/console/team/domains", {
+        method: "POST",
+        body: { name },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
 // ── API keys ────────────────────────────────────────────────────────────────
 
 export async function createApiKey(input: {
@@ -702,13 +763,14 @@ export async function listWebhookReplays(id: string) {
   )
 }
 
-export async function deleteWebhook(id: string) {
+/** See `deleteDomain` on `leaving`. */
+export async function deleteWebhook(id: string, { leaving = false } = {}) {
   return run(
     () =>
       api<{ deleted: true }>(`/console/webhook-endpoints/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
-    ["/webhooks"],
+    leaving ? [] : ["/webhooks"],
     { refreshCaller: false },
   )
 }
@@ -1271,13 +1333,14 @@ export async function publishTemplate(id: string) {
   )
 }
 
-export async function deleteTemplate(id: string) {
+/** See `deleteDomain` on `leaving`: the editor deletes and goes back. */
+export async function deleteTemplate(id: string, { leaving = false } = {}) {
   return run(
     () =>
       api<{ deleted: true }>(`/console/templates/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
-    TEMPLATE_LISTS,
+    leaving ? [] : TEMPLATE_LISTS,
     { refreshCaller: false },
   )
 }

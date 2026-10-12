@@ -47,10 +47,6 @@ export function Stage({ scene }: { scene: StageScene }) {
         className="pointer-events-none absolute inset-0 bg-border [mask-image:radial-gradient(ellipse_at_center,#000_30%,transparent_75%)]"
         style={DOTS}
       />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute top-1/3 left-1/2 size-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500/6 blur-3xl"
-      />
       <div className="relative grid h-full place-items-center p-10">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -101,9 +97,7 @@ function InvoicePreview({ name }: { name: string }) {
       <div className="flex items-start justify-between">
         <Wordmark />
         <div className="text-right">
-          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-            Invoice
-          </p>
+          <p className="text-xs text-muted-foreground">Invoice</p>
           <p className="mt-1 font-mono text-xs text-muted-foreground">INV-0001</p>
         </div>
       </div>
@@ -118,7 +112,7 @@ function InvoicePreview({ name }: { name: string }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="truncate font-display text-xl font-semibold tracking-tight"
+              className="truncate font-display text-xl font-medium tracking-tight"
             >
               {name || <Blank className="w-40 align-middle" />}
             </motion.p>
@@ -181,9 +175,7 @@ function ChecksPreview() {
 
   return (
     <div className="rounded-3xl border bg-background/80 p-6 shadow-2xl shadow-black/20 backdrop-blur">
-      <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-        What inboxes check
-      </p>
+      <p className="text-xs text-muted-foreground">What inboxes check</p>
       <p className="mt-1 truncate font-mono text-sm">
         {live?.domain.name ?? (
           <span className="text-muted-foreground">No domain yet</span>
@@ -197,13 +189,13 @@ function ChecksPreview() {
               key={kind}
               className={cn(
                 "flex items-center gap-3 rounded-2xl border px-4 py-3 transition-colors duration-500",
-                ok && "border-emerald-500/30 bg-emerald-500/8",
+                ok && "border-success/30 bg-success/8",
               )}
             >
               <span
                 className={cn(
-                  "grid size-9 place-items-center rounded-xl border bg-linear-to-b from-muted/80 to-background transition-colors duration-500",
-                  ok ? "text-emerald-500" : "text-muted-foreground",
+                  "grid size-9 place-items-center rounded-xl border transition-colors duration-500",
+                  ok ? "text-success" : "text-muted-foreground",
                 )}
               >
                 <Icon className="size-4" />
@@ -213,7 +205,7 @@ function ChecksPreview() {
                 <span className="block text-xs text-muted-foreground">{what}</span>
               </span>
               {ok ? (
-                <BadgeCheck aria-label="Found" className="size-4 text-emerald-500" />
+                <BadgeCheck aria-label="Found" className="size-4 text-success" />
               ) : live ? (
                 <LoaderCircle
                   aria-label="Looking"
@@ -274,10 +266,10 @@ function InboxPreview({ sent, from, to }: { sent: boolean; from: string; to: str
               transition={{ duration: 0.45, ease: EASE }}
               className="overflow-hidden"
             >
-              <div className="flex items-start gap-3 bg-emerald-500/6 px-5 py-4">
-                <span className="mt-1.5 size-2 shrink-0 rounded-full bg-sky-500" />
+              <div className="flex items-start gap-3 bg-success/6 px-5 py-4">
+                <span className="mt-1.5 size-2 shrink-0 rounded-full bg-info" />
                 <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 text-sm font-semibold">
+                  <p className="flex items-center gap-2 text-sm font-medium">
                     <span className="truncate">{from}</span>
                     <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground">
                       now

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { ArrowRightLeft, Trash2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@repo/ui/components/button/button"
 import { DeleteDomainDialog } from "@/components/delete-domain-dialog"
 import { TransferDomainDialog } from "@/components/transfer-domain-dialog"
 import { cancelTransfer } from "@/lib/actions"
@@ -104,7 +104,7 @@ export function DomainDangerZone({
                 </p>
               </div>
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="shrink-0 self-start sm:self-auto"
                 onClick={withdraw}
@@ -125,7 +125,7 @@ export function DomainDangerZone({
                 </p>
               </div>
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="shrink-0 self-start sm:self-auto"
                 onClick={() => setTransferring(true)}
@@ -148,7 +148,7 @@ export function DomainDangerZone({
             </p>
           </div>
           <Button
-            variant="destructive"
+            variant="danger"
             size="sm"
             className="shrink-0 self-start sm:self-auto"
             onClick={() => setConfirming(true)}

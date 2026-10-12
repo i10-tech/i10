@@ -1,31 +1,23 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { Play } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Button } from "@repo/ui/components/button"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Button } from "@repo/ui/components/button/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { Label } from "@repo/ui/components/label"
+} from "@repo/ui/components/i10/menu"
 import {
   Section,
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { Spinner } from "@repo/ui/components/spinner"
-import { Switch } from "@repo/ui/components/switch"
+} from "@repo/ui/components/i10/page"
+import { Switch } from "@repo/ui/components/i10/switch"
 import { CodeEditor } from "@/components/template-editor/code-editor"
 import { CodeBlock, HeaderList } from "@/components/webhooks/code-block"
 import { tryWebhookTransformation, updateWebhook } from "@/lib/actions"
@@ -161,7 +153,7 @@ export function TransformationPanel({ endpoint }: { endpoint: WebhookEndpoint })
 
           <div className="flex flex-wrap items-center justify-end gap-2">
             {saved && (
-              <ActionButton
+              <StateButton
                 variant="ghost"
                 state={remove.state}
                 onReset={remove.reset}
@@ -181,9 +173,9 @@ export function TransformationPanel({ endpoint }: { endpoint: WebhookEndpoint })
                 }
               >
                 Remove
-              </ActionButton>
+              </StateButton>
             )}
-            <ActionButton
+            <StateButton
               state={save.state}
               onReset={save.reset}
               pendingLabel="Save"
@@ -205,7 +197,7 @@ export function TransformationPanel({ endpoint }: { endpoint: WebhookEndpoint })
               }
             >
               Save
-            </ActionButton>
+            </StateButton>
           </div>
         </SectionContent>
       </Section>
@@ -219,25 +211,20 @@ export function TransformationPanel({ endpoint }: { endpoint: WebhookEndpoint })
         <SectionContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-56 flex-1 space-y-1.5 sm:max-w-xs">
-              <Label htmlFor="transform-event">Example event</Label>
-              <Select value={eventType} onValueChange={setEventType}>
-                <SelectTrigger
-                  id="transform-event"
-                  className="w-full font-mono text-xs"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {endpoint.events.map((t) => (
-                    <SelectItem key={t} value={t} className="font-mono text-xs">
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <MorphSelect
+                label="Example event"
+                value={eventType}
+                onValueChange={setEventType}
+                items={endpoint.events.map((t) => ({ value: t, label: t }))}
+                className="w-full"
+              />
             </div>
-            <Button onClick={tryIt} disabled={trying || code.trim() === ""}>
-              {trying ? <Spinner /> : <Play />}
+            <Button
+              loading={trying}
+              onClick={tryIt}
+              disabled={trying || code.trim() === ""}
+            >
+              <Play />
               Try it
             </Button>
           </div>

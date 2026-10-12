@@ -1,4 +1,6 @@
 import { createClerkClient } from "@clerk/backend"
+import { passwordAttempts } from "./console/password-check.js"
+import { codeCooldown } from "./console/code-cooldown.js"
 import { createHmac } from "node:crypto"
 import pino from "pino"
 import { createApp } from "./app.js"
@@ -1193,6 +1195,38 @@ const app = createApp({
      * transfer targets rather than a paginated picker for a case that does not
      * exist.
      */
+    passwords: {
+      verify: (userId: string, password: string) =>
+        clerk.users.verifyPassword({ userId, password }),
+      allow: passwordAttempts(cache),
+    },
+    codeSends: codeCooldown(cache),
+    ...(domains
+      ? {
+          teamDomains: {
+            verified: async (tenantId: string) =>
+              (await domains.list(tenantId))
+                .filter((domain) => domain.status === "verified")
+                .map((domain) => domain.name),
+            canManage: async (userId: string, orgId: string) => {
+              const { data } = await clerk.users.getOrganizationMembershipList({
+                userId,
+                limit: 100,
+              })
+              const membership = data.find((m) => m.organization.id === orgId)
+              return membership?.permissions.includes("org:sys_domains:manage") ?? false
+            },
+            create: async (orgId: string, name: string) => {
+              await clerk.organizations.createOrganizationDomain({
+                organizationId: orgId,
+                name,
+                enrollmentMode: "automatic_suggestion",
+                verified: true,
+              })
+            },
+          },
+        }
+      : {}),
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {

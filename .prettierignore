@@ -37,3 +37,11 @@ apps/api/drizzle/meta/
 # a diff against every upstream update for no benefit, and `.claude/skills`
 # only symlinks into here.
 .agents/
+
+# Arc UI components, vendored from its registry (uiarc.dev) in Arc's own
+# compact style. Reformatting them would turn every re-sync with upstream into
+# a whitespace diff. Our own pieces (i10/) and the old shadcn ones stay checked.
+packages/ui/src/components/*/
+!packages/ui/src/components/i10/
+!packages/ui/src/components/deprecated/
+packages/ui/src/components/motion-tokens.ts

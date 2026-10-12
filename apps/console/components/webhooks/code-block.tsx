@@ -1,4 +1,8 @@
-import { CopyButton } from "@repo/ui/components/copy"
+"use client"
+
+import * as React from "react"
+import { CodeBlock as ArcCodeBlock } from "@repo/ui/components/code-block/code-block"
+import { JsonViewer } from "@repo/ui/components/json-viewer/json-viewer"
 import { cn } from "cn"
 
 /**
@@ -10,6 +14,12 @@ import { cn } from "cn"
  * ⚠ CAPPED IN HEIGHT AND SCROLLED INSIDE. A 20KB response body would
  * otherwise push the attempts below it off the page.
  */
+/**
+ * A payload, a schema or a receiver's answer. JSON (the common case) opens in
+ * Arc's JsonViewer: collapsible, searchable, copy a value or its path. Anything
+ * else is shown verbatim in Arc's CodeBlock. Both render text as text, never
+ * as markup, which matters for a receiver's response body.
+ */
 export function CodeBlock({
   value,
   label,
@@ -17,11 +27,20 @@ export function CodeBlock({
   empty = "Empty",
 }: {
   value: string
-  /** What is being copied, for the button's name. */
   label: string
   className?: string
   empty?: string
 }) {
+  const parsed = React.useMemo(() => {
+    const text = value.trim()
+    if (!text.startsWith("{") && !text.startsWith("[")) return undefined
+    try {
+      return { data: JSON.parse(text) as unknown }
+    } catch {
+      return undefined
+    }
+  }, [value])
+
   if (!value) {
     return (
       <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
@@ -30,25 +49,16 @@ export function CodeBlock({
     )
   }
   return (
-    <div
-      className={cn(
-        "group/code relative min-w-0 rounded-lg border bg-muted/30",
-        className,
+    <div className={cn("min-w-0", className)}>
+      {parsed ? (
+        <JsonViewer data={parsed.data} label={label} rootName={label} maxHeight={384} />
+      ) : (
+        <ArcCodeBlock code={value} filename={label} language="text" maxLines={24} />
       )}
-    >
-      <pre className="max-h-96 overflow-auto px-3 py-2.5 pr-10 font-mono text-2xs leading-relaxed whitespace-pre-wrap break-all">
-        {value}
-      </pre>
-      <CopyButton
-        value={value}
-        label={`Copy ${label}`}
-        className="absolute top-1.5 right-1.5"
-      />
     </div>
   )
 }
 
-/** Header names and values, one per line, the way they went over the wire. */
 export function HeaderList({
   headers,
   empty = "No headers",
