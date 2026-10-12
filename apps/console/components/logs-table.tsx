@@ -3,7 +3,7 @@
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { ChevronRight, ScrollText, SearchX } from "lucide-react"
-import { CopyButton } from "@repo/ui/components/copy"
+import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
 import { cn } from "cn"
 import { EmptyState } from "@/components/empty-state"
 import {
@@ -229,7 +229,8 @@ function Rows({
                                 <CopyButton
                                   value={row.id}
                                   label="Copy request ID"
-                                  className="size-6"
+                                  iconOnly
+                                  variant="plain"
                                 />
                               </span>
                             </Detail>

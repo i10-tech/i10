@@ -1,18 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { FileUp, Upload } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { Spinner } from "@repo/ui/components/spinner"
-import { StepStage } from "@repo/ui/components/step-stage"
+import { FileDropzone } from "@repo/ui/components/file-dropzone/file-dropzone"
+import { Upload } from "lucide-react"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { cn } from "cn"
 import { importContacts } from "@/lib/actions"
 import { formatNumber } from "@/lib/format"
@@ -44,7 +38,8 @@ const MAX_BYTES = 20 * 1024 * 1024
 export function ImportContactsButton() {
   const [open, setOpen] = React.useState(false)
   const [file, setFile] = React.useState<File | null>(null)
-  const [dragging, setDragging] = React.useState(false)
+  // Bumped on each opening, to give the drop zone a fresh start.
+  const [round, setRound] = React.useState(0)
   const [pending, setPending] = React.useState(false)
   const [result, setResult] = React.useState<{
     parsed: number
@@ -53,28 +48,14 @@ export function ImportContactsButton() {
     invalid: number
   } | null>(null)
 
-  const inputRef = React.useRef<HTMLInputElement>(null)
-
   // ⚠ ON OPEN, NOT ON CLOSE. Cleared on close, the figures vanished and the
   // drop zone snapped back while "Done" was still fading out. See
   // `useResetOnOpen`.
   useResetOnOpen(open, () => {
     setFile(null)
     setResult(null)
-    setDragging(false)
+    setRound((n) => n + 1)
   })
-
-  function accept(next: File | null | undefined) {
-    if (!next) return
-    if (next.size > MAX_BYTES) {
-      toastError("That file is too large", {
-        description: "The limit is 20 MB. Split it and import in parts.",
-      })
-      return
-    }
-    setFile(next)
-    setResult(null)
-  }
 
   async function submit() {
     if (!file || pending) return
@@ -105,7 +86,7 @@ export function ImportContactsButton() {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         <Upload />
         Import
       </Button>
@@ -117,15 +98,11 @@ export function ImportContactsButton() {
           setOpen(next)
         }}
       >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Import contacts</DialogTitle>
-            <DialogDescription>
-              A CSV with an email column. Anything else becomes a merge field you can
-              use in a broadcast.
-            </DialogDescription>
-          </DialogHeader>
-
+        <DialogContent
+          title="Import contacts"
+          description="A CSV with an email column. Anything else becomes a merge field you can use in a broadcast."
+          style={{ width: "min(calc(100vw - 2rem), 512px)" }}
+        >
           {/*
            * ⚠ THE DROP ZONE SLIDES ON TO THE FIGURES RATHER THAN BEING SWAPPED
            * FOR THEM. They are different heights; a hard swap resized the
@@ -164,52 +141,24 @@ export function ImportContactsButton() {
             ) : (
               <div className="space-y-3 py-2">
                 {/*
-                 * ⚠ A LABEL WRAPPING A HIDDEN INPUT, NOT A DIV WITH AN onClick.
-                 * The label gives keyboard activation and a real focus ring for
-                 * free; a clickable div gives neither, and file pickers are
-                 * exactly the control somebody reaches for with the keyboard.
+                 * Arc's FileDropzone: drop or choose one CSV, shown as a file
+                 * row with its size and a remove. Keyed per opening, so a new
+                 * import never starts with the last one's file in it.
                  */}
-                <label
-                  onDragOver={(event) => {
-                    event.preventDefault()
-                    setDragging(true)
+                <FileDropzone
+                  key={round}
+                  accept=".csv,text/csv"
+                  multiple={false}
+                  maxFiles={1}
+                  maxSize={MAX_BYTES}
+                  label="Contacts CSV"
+                  description="Drop a CSV here, or choose one."
+                  note="CSV, up to 20 MB"
+                  onFilesChange={(files) => {
+                    setFile(files[0] ?? null)
+                    setResult(null)
                   }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={(event) => {
-                    event.preventDefault()
-                    setDragging(false)
-                    accept(event.dataTransfer.files?.[0])
-                  }}
-                  className={cn(
-                    "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-10 text-center transition-colors",
-                    "duration-(--duration-instant) ease-(--ease-linear)",
-                    dragging ? "border-foreground/40 bg-muted/40" : "hover:bg-muted/20",
-                  )}
-                >
-                  <input
-                    ref={inputRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="sr-only"
-                    onChange={(event) => accept(event.target.files?.[0])}
-                  />
-                  <FileUp className="size-5 text-muted-foreground" />
-                  {file ? (
-                    <>
-                      <span className="text-sm font-medium">{file.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {(file.size / 1024).toFixed(0)} KB - choose another to replace
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-sm font-medium">
-                        Drop a CSV here, or click to choose
-                      </span>
-                      <span className="text-xs text-muted-foreground">Up to 20 MB</span>
-                    </>
-                  )}
-                </label>
+                />
 
                 <p className="text-xs text-muted-foreground">
                   Re-importing is safe: existing contacts are updated rather than
@@ -233,8 +182,7 @@ export function ImportContactsButton() {
                 >
                   Cancel
                 </Button>
-                <Button onClick={submit} disabled={!file || pending}>
-                  {pending && <Spinner />}
+                <Button loading={pending} onClick={submit} disabled={!file || pending}>
                   Import
                 </Button>
               </>
@@ -260,7 +208,7 @@ function Figure({
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
         className={cn(
-          "tabular mt-0.5 text-xl font-semibold",
+          "tabular mt-0.5 text-xl font-medium",
           tone === "warning" && value > 0 && "text-warning",
         )}
       >

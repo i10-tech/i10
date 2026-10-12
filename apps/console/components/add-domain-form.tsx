@@ -3,19 +3,14 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react"
-import {
-  Check,
-  ChevronDown,
-  CircleCheck,
-  Globe,
-  ListChecks,
-  Network,
-} from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
-import { Reveal } from "@repo/ui/components/reveal"
-import { Spinner } from "@repo/ui/components/spinner"
+import { FileText, CircleCheck, Globe, ListChecks, Network } from "lucide-react"
+import { ChevronIcon } from "@repo/ui/components/icon-morph/icon-morph"
+import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
+import { Reveal } from "@repo/ui/components/i10/reveal"
+import { Spinner } from "@repo/ui/components/i10/spinner"
 import { cn } from "cn"
 import { DetectionPanel } from "@/components/detection-panel"
 import { EmailPreview } from "@/components/email-preview"
@@ -591,11 +586,14 @@ export function AddDomainSteps({
         icon={icons ? <Globe /> : undefined}
         description="The domain you send from, and the subdomain bounces return to."
         reduce={reduce}
+        enter={false}
         summary={
           <div className="flex items-center gap-2">
-            <span className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-emerald-500/20 bg-background/40 px-3 py-2 font-mono text-sm">
+            <span className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-success/20 bg-background/40 px-3 py-2 font-mono text-sm">
               <Globe aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{candidate}</span>
+              <span data-carry="domain" className="truncate">
+                {candidate}
+              </span>
               {returnPath.trim() && (
                 <span className="truncate text-xs text-muted-foreground">
                   return path {returnPath.trim()}
@@ -633,6 +631,7 @@ export function AddDomainSteps({
            */}
           <ValidatedInput
             id="domain"
+            data-carry="domain"
             autoFocus
             label="Domain"
             value={name}
@@ -670,11 +669,12 @@ export function AddDomainSteps({
               aria-expanded={advanced}
               className="flex cursor-pointer items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
-              <ChevronDown
-                className={cn(
-                  "size-3.5 transition-transform duration-(--duration-spring) ease-(--ease-spring)",
-                  !advanced && "-rotate-90",
-                )}
+              <ChevronIcon
+                state={advanced}
+                pointing="right"
+                turn={90}
+                size={14}
+                aria-hidden
               />
               Advanced options
             </button>
@@ -708,7 +708,6 @@ export function AddDomainSteps({
              */}
             <Button
               type="submit"
-              className="rounded-full"
               disabled={looking || refusedHere !== undefined || candidate === ""}
             >
               Continue
@@ -717,7 +716,6 @@ export function AddDomainSteps({
               <Button
                 type="button"
                 variant="ghost"
-                className="rounded-full"
                 onClick={() => {
                   forget()
                   exits.onCancel?.()
@@ -764,25 +762,30 @@ export function AddDomainSteps({
             <legend className="mb-2 text-sm font-medium">
               Which records should exist?
             </legend>
-            <ModeCard
-              selected={mode === "delegate"}
-              disabled={delegationBlocked}
-              onSelect={() => setChosenMode("delegate")}
-              icon={<Network className="size-4" />}
-              title="Delegate to i10"
-              recommended
-              description={
-                delegationBlocked
-                  ? `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`
-                  : "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever - including when they change."
-              }
-            />
-            <ModeCard
-              selected={mode === "manual"}
-              onSelect={() => setChosenMode("manual")}
-              icon={<Check className="size-4" />}
-              title="Keep the records in my zone"
-              description="Four ordinary records - the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain."
+            <RadioCards
+              aria-label="Which records should exist?"
+              layout="list"
+              value={mode}
+              onValueChange={(v) => setChosenMode(v as "delegate" | "manual")}
+              options={[
+                {
+                  value: "delegate",
+                  label: "Delegate to i10",
+                  meta: "Recommended",
+                  icon: <Network />,
+                  description:
+                    "Delegate three names to us once. We serve the mail subdomains ourselves, so SPF, DKIM, DMARC and MX stay correct forever, including when they change.",
+                  disabled: delegationBlocked,
+                  disabledReason: `${provider?.name ?? "This provider"}'s DNS editor does not offer NS records, so delegation is not possible there.`,
+                },
+                {
+                  value: "manual",
+                  label: "Keep the records in my zone",
+                  icon: <FileText />,
+                  description:
+                    "Four ordinary records: the return path's MX and SPF, DKIM and DMARC. Nothing is delegated, and they stay yours to maintain.",
+                },
+              ]}
             />
           </fieldset>
 
@@ -794,16 +797,13 @@ export function AddDomainSteps({
              */}
             {canAutomate && provider && (
               <Button
+                loading={submitting}
                 type="button"
-                className="rounded-full border-neutral-200 bg-white text-neutral-950 hover:bg-neutral-100 dark:border-neutral-200 dark:bg-white dark:hover:bg-neutral-100"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => void autoConfigure()}
               >
-                {submitting ? (
-                  <Spinner />
-                ) : (
-                  <ProviderMark slug={provider.slug} name={provider.name} />
-                )}
+                <ProviderMark slug={provider.slug} name={provider.name} />
                 {/*
                  * ⚠ "CONNECT" UNTIL IT IS CONNECTED, THEN "PUBLISH RECORDS"
                  * (2026-10-03). The step offers two things - our way or by
@@ -815,13 +815,12 @@ export function AddDomainSteps({
               </Button>
             )}
             <Button
+              loading={submitting && !canAutomate}
               type="button"
-              variant={canAutomate ? "outline" : "default"}
-              className="rounded-full"
+              variant={canAutomate ? "secondary" : "primary"}
               disabled={busy}
               onClick={() => void manualSetup()}
             >
-              {submitting && !canAutomate && <Spinner />}
               Manual setup
             </Button>
           </div>
@@ -855,13 +854,13 @@ export function AddDomainSteps({
                * just answered.
                */}
               <Button
+                loading={checking}
                 type="button"
-                variant="outline"
-                className="rounded-full"
+                variant="secondary"
                 disabled={checking || !created}
                 onClick={() => void addedThem()}
               >
-                {checking ? <Spinner /> : <CircleCheck />}
+                <CircleCheck />
                 I&rsquo;ve added the records
               </Button>
             </div>
@@ -951,86 +950,5 @@ function RecordsPlaceholder() {
         </div>
       ))}
     </div>
-  )
-}
-
-function ModeCard({
-  selected,
-  disabled,
-  onSelect,
-  icon,
-  title,
-  description,
-  recommended,
-}: {
-  selected: boolean
-  disabled?: boolean
-  onSelect: () => void
-  icon: React.ReactNode
-  title: string
-  description: string
-  recommended?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      /*
-       * ⚠ `aria-pressed` RATHER THAN A HIDDEN RADIO INPUT. A visually hidden
-       * radio with a label wrapping a card is the usual trick and it breaks the
-       * moment the card contains its own interactive element - which this one
-       * will, as soon as "Connect" moves inside it. A toggle button announces
-       * its state correctly and has no such constraint.
-       */
-      aria-pressed={selected}
-      className={cn(
-        "group relative flex w-full cursor-pointer items-start gap-3 overflow-hidden rounded-2xl border p-4 text-left transition-[background-color,border-color,box-shadow] duration-300",
-        /*
-         * ⚠ THE RECOMMENDED CARD IS THE SHINY ONE, ON PURPOSE (2026-10-03).
-         * Delegating is the setup we want people on - records that cannot drift
-         * - so it carries a quiet green-to-blue wash and a light across its top
-         * edge whether or not it is picked; picked, the wash deepens.
-         */
-        recommended && !disabled
-          ? selected
-            ? "border-emerald-500/50 bg-linear-to-br from-emerald-500/16 via-sky-500/8 to-violet-500/10 shadow-[0_0_0_1px_rgb(16_185_129/0.15),0_12px_32px_-16px_rgb(16_185_129/0.45)]"
-            : "border-emerald-500/25 bg-linear-to-br from-emerald-500/8 via-sky-500/4 to-violet-500/6 hover:border-emerald-500/40"
-          : selected
-            ? "border-foreground/40 bg-muted/40"
-            : "hover:bg-muted/30",
-        disabled && "cursor-not-allowed opacity-50",
-      )}
-    >
-      {recommended && !disabled && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-6 top-0 h-px bg-linear-to-r from-transparent via-emerald-300/70 to-transparent"
-        />
-      )}
-      <span
-        className={cn(
-          "mt-0.5 shrink-0",
-          recommended && !disabled
-            ? "text-emerald-500"
-            : selected
-              ? "text-foreground"
-              : "text-muted-foreground",
-        )}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 space-y-1">
-        <span className="flex items-center gap-2">
-          <span className="text-sm font-medium">{title}</span>
-          {recommended && !disabled && (
-            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-2xs font-medium text-emerald-700 dark:text-emerald-300">
-              Recommended
-            </span>
-          )}
-        </span>
-        <span className="block text-xs text-muted-foreground">{description}</span>
-      </span>
-    </button>
   )
 }

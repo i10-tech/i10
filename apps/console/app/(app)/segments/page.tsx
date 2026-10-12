@@ -8,13 +8,14 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { NewSegmentButton } from "@/components/new-segment"
 import { SegmentsList } from "@/components/marketing-lists"
 import { EmptyState } from "@/components/empty-state"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import type { SegmentRow } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Segments" }
 
@@ -42,7 +43,7 @@ export default async function SegmentsPage() {
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Segments</PageTitle>
+          <PageTitle>{PAGE_COPY.segments.title}</PageTitle>
           {/*
            * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
            * CARRIES THIS ACTION. Two buttons for one action, eight inches
@@ -57,10 +58,7 @@ export default async function SegmentsPage() {
             </PageActions>
           )}
         </PageHeaderRow>
-        <PageDescription>
-          Groups you target a broadcast at. Recipients never see them - that is what
-          topics are for.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.segments.description}</PageDescription>
       </PageHeader>
 
       <PageBody>

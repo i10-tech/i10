@@ -1,18 +1,18 @@
 "use client"
 
 import { useCallback, useEffect, useRef } from "react"
-import { toast } from "sonner"
+import { toast } from "@repo/ui/components/i10/toasts"
 import { useClerk } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@repo/ui/components/button/button"
 
-import { Spinner } from "@repo/ui/components/spinner"
+import { Spinner } from "@repo/ui/components/i10/spinner"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
 import type { SsoStrategy } from "../_lib/clerk-types"
 import type { SsoProvider } from "../_lib/providers"
 import { consentPromptFor } from "../_lib/oidc"
 import { markSignInAttempt } from "../_lib/last-used"
 import { LastUsedBadge } from "./last-used-badge"
-import { AppleIcon, GitHubIcon, GoogleIcon } from "./provider-icons"
+import { AppleIcon, GitHubIcon, GoogleIcon } from "@repo/ui/components/i10/provider-icons"
 
 /**
  * The SSO buttons, on both pages.
@@ -304,8 +304,8 @@ export function OAuthButtons({
         return (
           <Button
             key={strategy}
-            variant="outline"
-            size="xl"
+            variant="secondary"
+            size="lg"
             type="button"
             // ⚠ THE POSITIONING CONTEXT FOR THE "Last used" CHIP, which is
             // absolutely positioned on this button's top edge. Without it the

@@ -7,7 +7,7 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { ApiKeysTable } from "@/components/api-keys-table"
 import { CreateApiKeyButton } from "@/components/create-api-key"
 import { ApiButton } from "@/components/list/api-button"
@@ -15,6 +15,7 @@ import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { SNIPPETS } from "@/lib/snippets"
 import type { ApiKeyRow, DomainSummary } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "API keys" }
 
@@ -60,7 +61,7 @@ export default async function ApiKeysPage({
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>API keys</PageTitle>
+          <PageTitle>{PAGE_COPY.apiKeys.title}</PageTitle>
           <PageActions>
             {/*
              * ⚠ `?new=1` OPENS THE DIALOG, SO THE COMMAND MENU CAN LINK TO IT.
@@ -73,10 +74,7 @@ export default async function ApiKeysPage({
             <CreateApiKeyButton autoOpen={params.new === "1"} domains={scopeDomains} />
           </PageActions>
         </PageHeaderRow>
-        <PageDescription>
-          Keys authenticate your servers. They are shown once when created and stored
-          only as a hash - if you lose one, rotate it rather than looking for it.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.apiKeys.description}</PageDescription>
       </PageHeader>
 
       <PageBody>

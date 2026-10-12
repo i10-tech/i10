@@ -1,9 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { Badge } from "@repo/ui/components/badge"
-import { CopyField } from "@repo/ui/components/copy"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { CodeBlock } from "@repo/ui/components/code-block/code-block"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { Time } from "@/components/time"
 import { updateTemplate } from "@/lib/actions"
@@ -141,7 +142,7 @@ export function TemplateDetailsDialog({
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
         <dt className="text-muted-foreground">Status</dt>
         <dd>
-          <Badge variant={status === "published" ? "default" : "secondary"}>
+          <Badge tone={status === "published" ? "info" : "neutral"}>
             {STATUS_LABEL[status]}
           </Badge>
           {template.version > 0 && (
@@ -162,12 +163,7 @@ export function TemplateDetailsDialog({
         </dd>
       </dl>
 
-      <div className="space-y-1.5">
-        <p className="text-xs text-muted-foreground">Send it</p>
-        <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
-          {snippet}
-        </pre>
-      </div>
+      <CodeBlock code={snippet} filename="Send it" language="ts" />
     </FormDialog>
   )
 }

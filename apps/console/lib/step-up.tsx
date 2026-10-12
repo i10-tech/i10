@@ -1,10 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { useReverification } from "@clerk/nextjs"
-import { isReverificationCancelledError } from "@clerk/nextjs/errors"
+import { isClerkAPIResponseError } from "@clerk/nextjs/errors"
 import { isReverificationHint } from "@clerk/shared/authorization-errors"
+import type { SessionVerificationLevel } from "@clerk/shared/types"
+import { PasskeyCue } from "@repo/ui/components/i10/passkey-cue"
+import { StepUpDialog, type StepUpRequest } from "@/components/step-up-dialog"
 import { stepUp } from "@/lib/actions"
+import { toastError } from "@/lib/toast"
 
 /**
  * "Prove it is you" in front of something that cannot be undone.
@@ -14,18 +17,15 @@ import { stepUp } from "@/lib/actions"
  * verified domain or revoking the key production sends with is not, and those
  * are the two things worth one more question.
  *
- * ⚠ THE DIALOG IS CLERK'S, DELIBERATELY. It offers the strongest factor the
- * person actually has - a passkey where one is enrolled, otherwise TOTP, an
- * emailed code or a password - and handles every failure state of each. Ours
- * would be a worse copy of it, against the same API, and it would go stale the
- * first time somebody enrolled a factor we had not thought about.
+ * ⚠ THE DIALOG IS OURS SINCE 2026-10-12, NOT CLERK'S. It was Clerk's modal,
+ * through `useReverification`, chosen because it covered every factor - and it
+ * failed more often than it worked. See components/step-up-dialog.tsx, which
+ * walks the same session-verification API with our own fields.
  *
- * ⚠ WHAT MAKES IT OPEN AT ALL IS THE SHAPE OF THE VALUE WE RETURN. Clerk
- * inspects the fetcher's RESULT for `clerk_error.reason === "reverification-error"`
- * - it is not reading a status code and it cannot see a thrown error. Our
- * server actions never throw across the boundary; they return
- * `{ ok: false, body }`, so the hint arrives nested and has to be handed back
- * up before Clerk will act on it. That unwrapping is the whole of this file.
+ * ⚠ WHAT OPENS IT IS STILL CLERK'S HINT. The API refuses a stale session with
+ * `clerk_error.reason === "reverification-error"` (see `requireFreshAuth`);
+ * our server actions return `{ ok: false, body }`, so the hint arrives nested
+ * and is read here.
  *
  * ⚠ AND IT IS A CONTEXT RATHER THAN A BARE HOOK, BECAUSE CLERK IS NOT ALWAYS
  * MOUNTED. `<ClerkProvider>` is conditional in the root layout - see the note
@@ -43,6 +43,13 @@ type StepUp = () => Promise<boolean>
 const StepUpContext = React.createContext<StepUp | null>(null)
 
 /**
+ * Open the dialog by itself - for Clerk's own account actions, which refuse
+ * with "re-verify first" from Clerk's API rather than from ours.
+ */
+type Ask = (level: SessionVerificationLevel) => Promise<boolean>
+const AskContext = React.createContext<Ask | null>(null)
+
+/**
  * ⚠ WITH NO CLERK THERE IS NO WAY TO ASK, SO THIS ASKS THE API AND BELIEVES IT.
  * It cannot open a prompt, so a stale session simply fails the action with the
  * API's own refusal - which is the fail-CLOSED direction. Returning `true` here
@@ -52,36 +59,124 @@ const StepUpContext = React.createContext<StepUp | null>(null)
 const withoutClerk: StepUp = async () => (await stepUp()).ok
 
 export function StepUpProvider({ children }: { children: React.ReactNode }) {
-  const prove = useReverification(async () => {
-    const result = await stepUp()
+  const [request, setRequest] = React.useState<StepUpRequest | null>(null)
+  const [passkey, setPasskey] = React.useState(false)
+  const pending = React.useRef<((proved: boolean) => void) | null>(null)
+  const asked = React.useRef(0)
 
-    /*
-     * ⚠ THE HINT IS RETURNED, NOT THROWN, AND NOT FLATTENED TO A BOOLEAN.
-     * Returning it is what hands control to Clerk: it opens the dialog, waits
-     * for the person, and then calls this function again from the top. The
-     * second call finds a fresh session and falls through.
-     */
-    if (!result.ok && isReverificationHint(result.body)) return result.body
-
-    return result
-  })
+  const ask = React.useCallback<Ask>(
+    (level) =>
+      new Promise<boolean>((resolve) => {
+        pending.current?.(false)
+        pending.current = resolve
+        asked.current += 1
+        setRequest({ id: asked.current, level })
+      }),
+    [],
+  )
 
   const value = React.useCallback<StepUp>(async () => {
-    try {
-      return (await prove()).ok
-    } catch (error) {
-      /*
-       * ⚠ DISMISSING THE PROMPT IS AN ANSWER, NOT A FAULT. Somebody who closes
-       * the verification dialog has decided not to do the thing; an error toast
-       * on top of that is the interface arguing with a decision it just asked
-       * them to make.
-       */
-      if (isReverificationCancelledError(error)) return false
-      throw error
-    }
-  }, [prove])
+    const first = await stepUp()
+    if (first.ok) return true
+    // Not "prove it again" but some other refusal: the action says why.
+    if (!isReverificationHint(first.body)) return false
 
-  return <StepUpContext.Provider value={value}>{children}</StepUpContext.Provider>
+    /*
+     * ⚠ THE DIALOG IS OURS NOW, AND THE API'S HINT IS WHAT OPENS IT - the same
+     * hint `useReverification` read for Clerk's modal. It says what level to
+     * ask for; the dialog asks, and resolves once Clerk calls it complete.
+     */
+    const proved = await ask(levelOf(first.body))
+    if (!proved) return false
+
+    /*
+     * ⚠ AND THE API IS ASKED AGAIN, BECAUSE IT IS THE ONE THAT DECIDES. Clerk
+     * saying "complete" is the browser's view; the refusal lives server-side
+     * (see `requireFreshAuth`), and a session that still reads stale there -
+     * a saved-account resume moments ago, say - must not be waved through.
+     */
+    const again = await stepUp()
+    if (again.ok) return true
+    toastError(
+      "Could not confirm it is you",
+      "The check went through, but it was not accepted yet. Try again in a minute.",
+    )
+    return false
+  }, [ask])
+
+  return (
+    <AskContext.Provider value={ask}>
+      <StepUpContext.Provider value={value}>
+        {children}
+        <StepUpDialog
+          request={request}
+          onDone={(proved) => {
+            pending.current?.(proved)
+            pending.current = null
+            setRequest(null)
+          }}
+          onPasskey={setPasskey}
+        />
+        {/* The sign-in page's passkey screen, over everything - see the dialog. */}
+        <PasskeyCue open={passkey} mode="verify" />
+      </StepUpContext.Provider>
+    </AskContext.Provider>
+  )
+}
+
+/** Whether Clerk refused a user action until the session is verified again. */
+function needsReverification(error: unknown): boolean {
+  if (isReverificationHint(error)) return true
+  return (
+    isClerkAPIResponseError(error) &&
+    error.errors.some((entry) => entry.code === "session_reverification_required")
+  )
+}
+
+/**
+ * Run one of Clerk's sensitive account actions - changing the password, adding
+ * a passkey, deleting the account - and prove it is you first if Clerk asks.
+ *
+ * ⚠ WHAT `useReverification` DID INSIDE CLERK'S `<UserProfile />`, WITH OUR
+ * DIALOG. Clerk's API refuses such an action with
+ * `session_reverification_required`; this opens the dialog, and on success
+ * runs the action again once. Closing the dialog is an answer, not a fault:
+ * it resolves `null` and the caller leaves things as they were.
+ */
+export function useReverify() {
+  const ask = React.useContext(AskContext)
+  return React.useCallback(
+    async <T,>(action: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await action()
+      } catch (error) {
+        if (!ask || !needsReverification(error)) throw error
+        if (!(await ask("second_factor"))) return null
+        return await action()
+      }
+    },
+    [ask],
+  )
+}
+
+/**
+ * The level the API's hint asks for. Clerk's presets, spelled out: `strict`,
+ * `moderate` and `lax` all want a second factor (falling back to the first
+ * for accounts without one); `strict_mfa` wants both.
+ */
+function levelOf(hint: unknown): SessionVerificationLevel {
+  const config = (hint as { clerk_error?: { metadata?: { reverification?: unknown } } })
+    ?.clerk_error?.metadata?.reverification
+  if (config && typeof config === "object" && "level" in config) {
+    const level = (config as { level?: unknown }).level
+    if (
+      level === "first_factor" ||
+      level === "second_factor" ||
+      level === "multi_factor"
+    )
+      return level
+  }
+  return config === "strict_mfa" ? "multi_factor" : "second_factor"
 }
 
 /**
@@ -92,4 +187,13 @@ export function StepUpProvider({ children }: { children: React.ReactNode }) {
  */
 export function useStepUp(): StepUp {
   return React.useContext(StepUpContext) ?? withoutClerk
+}
+
+/**
+ * Open the dialog unconditionally, whatever the session's freshness - for the
+ * reference page, which walks every method on purpose. Resolves whether the
+ * person finished it.
+ */
+export function useOpenStepUp() {
+  return React.useContext(AskContext)
 }

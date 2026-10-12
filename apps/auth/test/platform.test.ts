@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { computeEnvironment } from "../app/_lib/platform"
+import { computeEnvironment } from "@repo/ui/components/i10/passkey-platform"
 
 /**
  * Which glyph the passkey screen draws, by platform.

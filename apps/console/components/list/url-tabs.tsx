@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
-import { Tabs } from "@repo/ui/components/tabs"
+import { Tabs } from "@repo/ui/components/tabs/tabs"
 
 /**
  * Tabs whose choice is `?tab=`, so a filter inside one tab - itself a URL

@@ -1,6 +1,6 @@
 "use client"
 
-import { ACCEPTED_HOLD_MS } from "@repo/ui/components/otp-field"
+import { ACCEPTED_HOLD_MS } from "@repo/ui/components/i10/otp-field"
 import type { SignInFlow } from "./clerk-types"
 import { rememberDevice } from "./devices"
 import { confirmSignIn } from "./last-used"

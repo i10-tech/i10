@@ -7,7 +7,8 @@ import {
   TaskSetupMFA,
   useSession,
 } from "@clerk/nextjs"
-import { Spinner } from "@repo/ui/components/spinner"
+import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { leaveFor } from "../../_lib/finish"
 
 /**
@@ -49,21 +50,46 @@ export function TasksPanel({ afterAuthUrl }: { afterAuthUrl: string }) {
     leaveFor(afterAuthUrl)
   }, [isLoaded, task, afterAuthUrl])
 
-  if (!isLoaded || !task) {
-    return (
-      <div
-        className="flex min-h-40 items-center justify-center"
-        // ⚠ THE SPINNER CARRIES THE LABEL BECAUSE THERE IS NO OTHER TEXT. On
-        // every other screen a heading says what is happening; here the whole
-        // panel is a wait, so a bare spinner would announce nothing at all.
-        aria-live="polite"
-      >
-        <Spinner aria-label="Finishing sign-in" />
-      </div>
-    )
-  }
+  /*
+   * ⚠ THE WAIT AND EACH TASK ARE PANES OF ONE `StepStage` (2026-10-12), so
+   * "Finishing sign-in" giving way to a task - and one task to the next, on
+   * this same URL - moves the card on like every other step in this app.
+   */
+  return (
+    <StepStage step={isLoaded && task ? task.key : "wait"}>
+      {!isLoaded || !task ? (
+        <Waiting />
+      ) : (
+        <TaskView taskKey={task.key} afterAuthUrl={afterAuthUrl} />
+      )}
+    </StepStage>
+  )
+}
 
-  switch (task.key) {
+function Waiting() {
+  return (
+    <div
+      className="flex min-h-40 items-center justify-center"
+      // ⚠ THE SPINNER CARRIES THE LABEL BECAUSE THERE IS NO OTHER TEXT. On
+      // every other screen a heading says what is happening; here the whole
+      // panel is a wait, so a bare spinner would announce nothing at all.
+      aria-live="polite"
+    >
+      <TextShimmer className="text-sm text-muted-foreground">
+        Finishing sign-in
+      </TextShimmer>
+    </div>
+  )
+}
+
+function TaskView({
+  taskKey,
+  afterAuthUrl,
+}: {
+  taskKey: string
+  afterAuthUrl: string
+}) {
+  switch (taskKey) {
     case "choose-organization":
       return <TaskChooseOrganization redirectUrlComplete={afterAuthUrl} />
     case "reset-password":
@@ -80,11 +106,11 @@ export function TasksPanel({ afterAuthUrl }: { afterAuthUrl: string }) {
        */
       return (
         <div className="space-y-2 text-center">
-          <h1 className="text-lg font-semibold tracking-tight">
+          <h1 className="text-lg font-medium tracking-tight">
             This account needs a step we do not support yet
           </h1>
           <p className="text-sm text-muted-foreground">
-            Contact support and quote <code className="font-mono">{task.key}</code>.
+            Contact support and quote <code className="font-mono">{taskKey}</code>.
           </p>
         </div>
       )

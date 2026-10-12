@@ -3,11 +3,12 @@
 import * as React from "react"
 import { useOrganization } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Input } from "@repo/ui/components/input"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Input } from "@repo/ui/components/i10/input"
 import { renameWorkspace } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import { useSyncedState } from "@/lib/react"
+import { announceWorkspaceName } from "@/lib/workspace-name"
 import { toastError } from "@/lib/toast"
 
 /**
@@ -18,9 +19,9 @@ import { toastError } from "@/lib/toast"
  * - all re-fetched and reconciled a beat after Save, which reads as the page
  * blinking. The action no longer revalidates either; see `renameWorkspace`.
  *
- * ⚠ AND THE NAME IN THE RAIL IS CLERK'S, NOT OURS, SO A REFRESH WOULD NOT HAVE
- * FIXED IT ANYWAY. `WorkspaceBar` renders Clerk's `<OrganizationSwitcher>`,
- * which reads its own client-side store - re-rendering our server tree leaves
+ * ⚠ AND THE NAME IN THE RAIL COMES FROM CLERK'S CLIENT, SO A REFRESH WOULD NOT
+ * HAVE FIXED IT ANYWAY. The switcher (ours since 2026-10-12, but reading
+ * `useOrganization`) reads Clerk's client-side store - re-rendering our server tree leaves
  * it showing the old name until Clerk happens to refetch. The rename reaches
  * Clerk on the server (`clerk.organizations.updateOrganization`), so the fix
  * is to tell Clerk's client to re-read the organization it already has.
@@ -106,6 +107,8 @@ export function RenameWorkspace({
        * client and it is the only thing left to do.
        */
       setSaved(name.trim())
+      // The breadcrumb's copy of the name (lib/workspace-name).
+      announceWorkspaceName(name.trim())
       await reloadOrganization.current?.()
 
       /*
@@ -133,7 +136,7 @@ export function RenameWorkspace({
           maxLength={120}
           aria-label="Workspace name"
         />
-        <ActionButton
+        <StateButton
           type="submit"
           state={outcome.state}
           onReset={outcome.reset}
@@ -144,7 +147,7 @@ export function RenameWorkspace({
           disabled={outcome.state === "idle" && (!name.trim() || name.trim() === saved)}
         >
           Save
-        </ActionButton>
+        </StateButton>
       </form>
 
       {clerkEnabled && <OrganizationReload onReady={holdReload} />}

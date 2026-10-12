@@ -51,10 +51,16 @@ import {
   setGlobalCssInjected,
   useEmailTheming,
 } from "@react-email/editor/plugins"
-import { Button } from "@repo/ui/components/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@repo/ui/components/popover"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Button } from "@repo/ui/components/button/button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@repo/ui/components/popover/popover"
+import { Textarea } from "@repo/ui/components/i10/textarea"
 import { cn } from "cn"
+import { InspectorColors } from "@/components/template-editor/inspector-colors"
+import { HttpsPrefix, shownUrl, toUrl, useFocusWithin } from "@/components/url-input"
 import {
   blockMoves,
   deleteBlock,
@@ -299,7 +305,7 @@ function ToolMenu({
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
           aria-label={label}
           onPointerEnter={(e) => e.pointerType === "mouse" && menus.enter(label)}
           onPointerLeave={(e) => e.pointerType === "mouse" && menus.leave()}
@@ -406,6 +412,45 @@ function ItemList({
 
 const HTTPS = /^https:\/\/[^\s]+$/i
 
+/**
+ * The image's address, with the console's `https://` prefix (see
+ * components/url-input): drawn in while the field is in use, stripped from
+ * a pasted address, and part of the value either way.
+ */
+function ImageAddress({
+  value,
+  onValueChange,
+}: {
+  value: string
+  onValueChange: (url: string) => void
+}) {
+  const text = shownUrl(value)
+  const { focused, props: focus } = useFocusWithin()
+  const affix = !/^[a-z][a-z0-9+.-]*:\/\//i.test(text) && (focused || text !== "")
+  return (
+    <div {...focus} className="relative">
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 start-2 flex items-center font-mono text-xs whitespace-pre text-muted-foreground"
+      >
+        <HttpsPrefix show={affix} />
+      </span>
+      <input
+        value={text}
+        onChange={(e) => onValueChange(toUrl(e.target.value))}
+        placeholder={affix ? undefined : "Image address"}
+        inputMode="url"
+        autoCapitalize="none"
+        autoComplete="off"
+        spellCheck={false}
+        style={affix ? { paddingInlineStart: "calc(0.5rem + 8ch)" } : undefined}
+        className="h-8 w-full rounded-lg border bg-background px-2 font-mono text-xs transition-[padding] duration-(--duration-dismiss) ease-(--ease-quad-out) outline-none placeholder:font-sans focus:border-foreground/30"
+        aria-label="Image address"
+      />
+    </div>
+  )
+}
+
 function ImageMenu({
   onUpload,
   onUrl,
@@ -443,13 +488,7 @@ function ImageMenu({
         <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
           <Link2 className="size-3" /> Or by address
         </p>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://…"
-          className="h-8 w-full rounded-lg border bg-background px-2 text-xs outline-none focus:border-foreground/30"
-          aria-label="Image address"
-        />
+        <ImageAddress value={url} onValueChange={setUrl} />
         {url.trim() !== "" && !valid && (
           <p className="text-[11px] text-destructive">
             An https:// address, so it loads in every inbox.
@@ -462,7 +501,7 @@ function ImageMenu({
           className="h-8 w-full rounded-lg border bg-background px-2 text-xs outline-none focus:border-foreground/30"
           aria-label="Alt text"
         />
-        <Button type="submit" size="xs" disabled={!valid} className="w-full">
+        <Button type="submit" size="sm" disabled={!valid} className="w-full">
           Insert image
         </Button>
       </form>
@@ -476,6 +515,7 @@ function ImageMenu({
  * Inspector, with the email theme and global CSS added under page style.
  */
 export function InspectorPanel({ editor }: { editor: Editor }) {
+  const scroll = React.useRef<HTMLDivElement>(null)
   return (
     <Inspector.Root className="i10-inspector flex h-full flex-col">
       <div className="border-b px-4 py-3">
@@ -511,7 +551,8 @@ export function InspectorPanel({ editor }: { editor: Editor }) {
           )}
         </Inspector.Breadcrumb>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+      <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+        <InspectorColors root={scroll} editor={editor} />
         <Inspector.Document />
         <Inspector.Document>
           {() => <ThemeSettings editor={editor} />}

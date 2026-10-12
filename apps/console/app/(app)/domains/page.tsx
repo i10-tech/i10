@@ -1,15 +1,15 @@
 import type { Metadata } from "next"
-import Link from "next/link"
 import { Globe, Plus } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import {
   Page,
   PageActions,
   PageBody,
   PageDescription,
   PageHeader,
+  PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { DomainsList } from "@/components/domains-list"
 import { ApiButton } from "@/components/list/api-button"
 import { EmptyState } from "@/components/empty-state"
@@ -18,6 +18,7 @@ import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { SNIPPETS } from "@/lib/snippets"
 import type { ApiKeyRow, DomainSummary, TransferOffer } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Domains" }
 
@@ -68,47 +69,33 @@ export default async function DomainsPage() {
   return (
     <Page>
       {/*
-       * ⚠ THE HEADER IS A ROW HERE, NOT THE USUAL TITLE-ROW-THEN-DESCRIPTION
-       * STACK, AND THAT IS THE ONLY WAY THE BUTTON CENTRES. `PageHeader`
-       * stacks a `PageHeaderRow` above the description, so an action inside
-       * that row lines up with the TITLE and sits visibly high against a
-       * two-line description beneath it. Laying the header out as one row puts
-       * the button on the centre line of the whole block - title and
-       * description together - which is where the eye expects it.
-       *
-       * ⚠ AND IT IS DONE AT THE CALL SITE RATHER THAN IN `PageHeader`. Every
-       * other screen in the console stacks, and changing the primitive would
-       * move all of their buttons at once for a preference expressed about
-       * this page.
+       * The same header as every page: actions on the title's row, the
+       * description under both. (It used to centre its button on title and
+       * description together, which put it at a different height from every
+       * other page's.)
        */}
-      <PageHeader className="flex-row items-center justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-1">
-          <PageTitle>Domains</PageTitle>
-          <PageDescription>
-            Mail leaves from a domain you control. Publish the records we issue, or
-            delegate three subdomains to us and never think about them again.
-          </PageDescription>
-        </div>
-
-        {/*
-         * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
-         * CARRIES THIS ACTION. Two buttons for one action, eight inches apart,
-         * reads as two different things - and the one in the header is the
-         * smaller and less explained of the two, so it wins attention it has
-         * not earned. The empty state's version says what will happen; this
-         * one just says a noun.
-         */}
-        <PageActions>
-          <ApiButton snippet={SNIPPETS.domains} />
-          {hasRows && (
-            <Button size="sm" asChild>
-              <Link href="/domains/new">
+      <PageHeader>
+        <PageHeaderRow>
+          <PageTitle>{PAGE_COPY.domains.title}</PageTitle>
+          {/*
+           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
+           * CARRIES THIS ACTION. Two buttons for one action, eight inches apart,
+           * reads as two different things - and the one in the header is the
+           * smaller and less explained of the two, so it wins attention it has
+           * not earned. The empty state's version says what will happen; this
+           * one just says a noun.
+           */}
+          <PageActions>
+            <ApiButton snippet={SNIPPETS.domains} />
+            {hasRows && (
+              <ButtonLink href="/domains/new" size="sm">
                 <Plus />
                 Add domain
-              </Link>
-            </Button>
-          )}
-        </PageActions>
+              </ButtonLink>
+            )}
+          </PageActions>
+        </PageHeaderRow>
+        <PageDescription>{PAGE_COPY.domains.description}</PageDescription>
       </PageHeader>
 
       <PageBody>

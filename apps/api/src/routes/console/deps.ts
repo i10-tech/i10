@@ -32,6 +32,9 @@ import type { DnsPublisher } from "../../dns/publish.js"
 import type { TenantProfileStore } from "../../console/tenant.js"
 import type { PolarClient } from "../../billing/polar.js"
 import type { PlanChange } from "../../billing/plan-change.js"
+import type { PasswordCheckDeps } from "../../console/password-check.js"
+import type { TeamDomainDeps } from "../../console/team-domains.js"
+import type { Reservation } from "../../console/code-cooldown.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -162,6 +165,21 @@ export interface ConsoleDeps extends TenantAuthDeps {
       userId: string,
     ): Promise<{ name: string; primaryEmail: string | null; verifiedEmails: string[] }>
   }
+  /**
+   * Checks the signed-in person's current password, rate limited (2026-10-12).
+   * Optional; without it the route answers 501 and the form checks at save.
+   */
+  passwords?: PasswordCheckDeps
+  /**
+   * Sending domains offered to the Team page as Clerk verified domains
+   * (2026-10-12). Optional; without it the suggestion never shows.
+   */
+  teamDomains?: TeamDomainDeps
+  /**
+   * The minute between two codes the console sends (2026-10-12). Optional;
+   * without it the route answers 501 and the buttons keep a local timer.
+   */
+  codeSends?: (userId: string, purpose: string) => Promise<Reservation>
   transfers?: DomainTransfers
   /**
    * Emails the recipient of an offer.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { emailProblem, httpsUrlProblem } from "../src/checks"
-import { fieldBlocks, fieldVerdict } from "../src/components/validated-field"
+import { fieldBlocks, fieldVerdict } from "../src/components/i10/validated-field"
 
 /**
  * The rules every field in the product is judged by.

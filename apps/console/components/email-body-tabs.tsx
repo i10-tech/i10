@@ -1,8 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
-import { CopyButton } from "@repo/ui/components/copy"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
+import { CodeBlock } from "@repo/ui/components/code-block/code-block"
+import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
 import { EmailFrame } from "@/components/email-frame"
 
 /**
@@ -65,7 +66,7 @@ export function EmailBodyTabs({
     <section className="overflow-hidden rounded-2xl border">
       <Tabs value={tab} onValueChange={setTab}>
         <div className="flex items-center justify-between gap-2 border-b px-2 py-1.5">
-          <TabsList className="bg-transparent p-0">
+          <TabsList>
             <TabsTrigger value="preview" disabled={!html}>
               Preview
             </TabsTrigger>
@@ -80,10 +81,19 @@ export function EmailBodyTabs({
             </TabsTrigger>
           </TabsList>
 
-          {tab === "html" && html && <CopyButton value={html} label="Copy HTML" />}
-          {tab === "text" && text && <CopyButton value={text} label="Copy text" />}
+          {tab === "html" && html && (
+            <CopyButton value={html} label="Copy HTML" iconOnly variant="plain" />
+          )}
+          {tab === "text" && text && (
+            <CopyButton value={text} label="Copy text" iconOnly variant="plain" />
+          )}
           {tab === "headers" && headerLines && (
-            <CopyButton value={headerLines} label="Copy headers" />
+            <CopyButton
+              value={headerLines}
+              label="Copy headers"
+              iconOnly
+              variant="plain"
+            />
           )}
         </div>
 
@@ -129,17 +139,23 @@ export function EmailBodyTabs({
   )
 }
 
-function Source({ children }: { children: string }) {
+function Source({
+  children,
+  filename = "Source",
+  language = "html",
+}: {
+  children: string
+  filename?: string
+  language?: string
+}) {
   return (
     /*
-     * ⚠ `<pre>` WITH THE CONTENT AS A TEXT CHILD, WHICH IS THE SAFE WAY TO SHOW
+     * ⚠ ARC'S CODE BLOCK RENDERS THE SOURCE AS A TEXT CHILD, WHICH IS THE SAFE WAY TO SHOW
      * SOURCE. React escapes it; the browser renders `<script>` as four visible
      * characters rather than as a tag. This is the difference between showing
      * somebody their HTML and running it.
      */
-    <pre className="max-h-[36rem] overflow-auto bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-      {children}
-    </pre>
+    <CodeBlock code={children} filename={filename} language={language} maxLines={40} />
   )
 }
 

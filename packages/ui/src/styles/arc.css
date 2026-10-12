@@ -1,0 +1,377 @@
+/*
+ * The product stylesheet: Arc (uiarc.dev) is the design system, and this file
+ * makes everything that predates it speak Arc.
+ *
+ * Order matters and is the whole mechanism:
+ *   1. tokens.css   - Tailwind, the font faces, and the shadcn token NAMES that
+ *                     the deprecated components and the apps' utilities read.
+ *   2. foundation   - Arc's tokens, installed verbatim from the registry. It is
+ *                     unlayered, so where a name exists in both (--background,
+ *                     --border, --accent, --text-*, --ease-spring) Arc wins.
+ *   3. the bridge   - every shadcn and Tailwind name pointed at an Arc value, so
+ *                     a page still built from old pieces already looks like Arc.
+ *
+ * ⚠ The marketing site keeps importing tokens.css alone. This file is for the
+ * product (console and auth).
+ *
+ * ⚠ When Arc and an older decision disagree, Arc wins. Exceptions are listed
+ * where they are made.
+ */
+@import "./tokens.css";
+@import "../components/foundation.css";
+
+/*
+ * ⚠ `:root.dark` AND NOT `.dark`. tokens.css declares the same names under
+ * `.dark` (0,1,0); this has to outrank it in dark mode, and Arc's own dark
+ * values sit on `:root[data-theme="dark"]` (0,2,0), which next-themes sets
+ * alongside the class (see components/deprecated/theme.tsx).
+ */
+:root,
+:root.dark {
+  /* Arc's faces: Geist for display, Inter for everything else. */
+  --font-geist: var(--font-geist-sans);
+
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface-raised);
+  --popover-foreground: var(--foreground);
+  /* Arc's primary button is ink on paper: foreground fill, background label. */
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
+  --secondary: var(--surface-muted);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--text-secondary);
+  --track: var(--control-track);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--background);
+  --input: var(--border-strong);
+  /* Arc fields show focus by taking the foreground as their border. */
+  --ring: var(--foreground);
+
+  --success-foreground: var(--background);
+  --warning-foreground: var(--background);
+  --danger-foreground: var(--background);
+  /* Arc has no info hue: info is the accent. */
+  --info: var(--accent);
+  --info-foreground: var(--accent-foreground);
+  --neutral: var(--text-muted);
+  --neutral-foreground: var(--background);
+
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--foreground);
+  --sidebar-primary-foreground: var(--background);
+  --sidebar-accent: var(--surface-muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--foreground);
+
+  /* Arc: shadows belong to floating layers only. Cards rest on a border. */
+  --elevate-1: 0 0 #0000;
+  --elevate-2: var(--shadow-raised);
+  --elevate-3: var(--shadow-floating);
+
+  /* Arc's corners (inner = outer - padding) as the shadcn base. */
+  --radius: var(--radius-control);
+}
+
+/*
+ * Console density. Arc's defaults are tuned for marketing-grade product
+ * pages (44px controls, a 36px page title, 34px card corners); the console is
+ * a dense data surface and read oversized at those values. Arc exposes size as
+ * tokens precisely so a product can set its density, so these are tuned here
+ * rather than in any component. Proportions are kept: radii stay concentric
+ * (surface - padding = panel), and the type scale keeps Arc's ratios a step down.
+ */
+:root {
+  --control-height-sm: 2rem;
+  --control-height-md: 2.25rem;
+  --control-height-lg: 2.75rem;
+
+  /* Arc's corners, scaled with the controls: Arc pairs an 18px corner with a
+   * 44px control, so a 36px control takes 15px. Still concentric. */
+  --radius-control: 0.9375rem;
+  --radius-panel: 1.375rem;
+  --radius-surface: 1.75rem;
+
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.5rem;
+  --text-5xl: 3.5rem;
+}
+
+/*
+ * What a field sits on, for the floating label's patch (i10/floating-field).
+ * The page, a card, or a floating layer: each declares its own colour.
+ */
+:root {
+  --field-on: var(--background);
+}
+.bg-card,
+.i10-surface,
+[data-slot="card"] {
+  --field-on: var(--surface);
+}
+[role="dialog"],
+[role="alertdialog"],
+[data-radix-popper-content-wrapper] {
+  --field-on: var(--surface-raised);
+}
+
+/*
+ * An InlineEdit set in running text (the template editor's breadcrumb):
+ * the title variant's 20px stood out among 14px crumbs. Doubled class to
+ * outrank the module's `.root[data-variant]` without !important.
+ */
+.i10-inline-crumb.i10-inline-crumb[data-variant] {
+  --size: var(--text-sm);
+  --leading: 20px;
+  --weight: 500;
+  --pad-y: 2px;
+  --ink: var(--foreground);
+}
+/* No room reserved for the save/cancel buttons: they float past the end of
+   the text, so the crumb is as wide as its words and centres on them. */
+.i10-inline-crumb [class$="__line"] {
+  padding-inline-end: 0;
+}
+
+/*
+ * A trend card's headline (apps/console/components/trend-card): label and
+ * number share a line while they fit, and the number drops under the label
+ * when they do not, rather than the label being cut to "Deliv…" on a phone.
+ */
+.i10-trend [class$="__caption"] {
+  flex-wrap: wrap;
+  row-gap: 0.125rem;
+}
+/* Arc lets the label shrink to nothing, so it was cut before the row ever
+   needed to wrap. Held at its width, the number wraps instead. */
+.i10-trend [class$="__label"] {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/*
+ * Arc's Sparkline draws its line as a <polyline pathLength="1"> with a
+ * "1 1" dash, so the dash is a fraction of the line. Chromium honours
+ * `pathLength` on <path> only; on a polyline the dash was read as 1px on,
+ * 1px off, and the trend showed as a dot. Solid instead: the line is still
+ * revealed by Arc's clip, so only the draw-on stroke is lost.
+ */
+[class*="sparkline-module"] polyline[pathLength] {
+  stroke-dasharray: none;
+}
+
+/* Pointer focus never draws a ring, even where Chrome guesses keyboard (i10/arc-next). */
+:root[data-input="pointer"] {
+  --focus-outline: transparent;
+}
+
+/* Touch keeps Arc's 44px targets. */
+@media (pointer: coarse) {
+  :root {
+    --control-height-sm: 2.25rem;
+    --control-height-md: 2.75rem;
+    --control-height-lg: 3.125rem;
+  }
+}
+
+/*
+ * ⚠ THE ONE PLACE THE TWO SYSTEMS USE ONE NAME FOR OPPOSITE THINGS. shadcn's
+ * `--accent` is the faint hover fill behind a menu item; Arc's `--accent` is
+ * the ink of the active, the selected and the emphasised. Arc keeps the
+ * variable, and the Tailwind utilities `bg-accent` / `text-accent-foreground`
+ * keep shadcn's meaning by pointing at Arc's hover surface instead.
+ */
+@theme inline {
+  --color-accent: var(--surface-muted);
+  --color-accent-foreground: var(--foreground);
+
+  /* Arc's chart series, which follow the accent. */
+  --color-chart-1: var(--series-1);
+  --color-chart-2: var(--series-2);
+  --color-chart-3: var(--series-3);
+  --color-chart-4: var(--series-4);
+  --color-chart-5: var(--text-muted);
+
+  /* Arc's concentric radii, from the smallest chip to a page surface. */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: var(--radius-control);
+  --radius-xl: var(--radius-panel);
+  --radius-2xl: var(--radius-surface);
+  --radius-3xl: var(--radius-surface);
+
+  --shadow-2xs: var(--elevate-1);
+  --shadow-xs: var(--elevate-1);
+  --shadow-sm: var(--elevate-1);
+  --shadow-md: var(--elevate-2);
+  --shadow-lg: var(--elevate-3);
+  --shadow-xl: var(--elevate-3);
+
+  /* Inter for the body, Geist for display, Geist Mono for values. */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display:
+    var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+
+  /* Arc's type scale at console density (see the density block above). */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl: 2.5rem;
+  --text-4xl--line-height: 2.75rem;
+  --text-5xl: 3.5rem;
+  --text-5xl--line-height: 3.75rem;
+
+  /* Arc: weights 400 and 500 only. Old markup asking for more gets medium. */
+  --font-weight-semibold: 500;
+  --font-weight-bold: 500;
+  --font-weight-extrabold: 500;
+
+  --tracking-tight: -0.03em;
+  --tracking-normal: -0.01em;
+
+  /*
+   * Arc's motion, mirrored from foundation.css so Tailwind's `ease-*` and
+   * `duration-*` utilities inline the same values Arc's own modules read.
+   * The older names stay as aliases for the code that still uses them.
+   */
+  --ease-spring: linear(
+    0,
+    0.0258,
+    0.09,
+    0.1763,
+    0.2732,
+    0.3724,
+    0.4683,
+    0.5573,
+    0.6376,
+    0.7082,
+    0.7689,
+    0.8202,
+    0.8628,
+    0.8976,
+    0.9256,
+    0.9476,
+    0.9648,
+    0.9778,
+    0.9875,
+    0.9945,
+    0.9994,
+    1.0026,
+    1.0047,
+    1.0058,
+    1.0062,
+    1.0062,
+    1.0059,
+    1.0055,
+    1.0049,
+    1.0043,
+    1.0036,
+    1.0031,
+    1.0025,
+    1.002,
+    1.0016,
+    1.0013,
+    1
+  );
+  --ease-spring-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-quint-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-quint-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-quint-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-quad-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-quad-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --duration-instant: 120ms;
+  --duration-fast: 160ms;
+  --duration-dismiss: 180ms;
+  --duration-exit: 180ms;
+  --duration-standard: 240ms;
+  --duration-base: 240ms;
+  --duration-considered: 480ms;
+  --duration-move: 480ms;
+  --duration-slow: 480ms;
+  --duration-spring: 580ms;
+}
+
+@layer base {
+  /*
+   * Icons default to 16px with Arc's 1.75 stroke. lucide draws 24px when no
+   * size is given, and most call sites here pass none (the old Button sized
+   * its icons for them). In `base`, so any `size-*` utility still wins, and
+   * scoped to the 24px default so icons Arc sizes itself keep their size.
+   */
+  svg.lucide[width="24"]:not([class*="size-"]) {
+    width: 1rem;
+    height: 1rem;
+  }
+  svg.lucide[stroke-width="2"] {
+    stroke-width: 1.75;
+  }
+  /*
+   * A bare `<svg>` (no width, no size class) inside a control: the provider
+   * marks on the sign-in buttons, the passkey glyph. The old Button sized
+   * these; Arc's does not, and an unsized inline svg is 300x150.
+   */
+  :where(button, a, [role="button"]) svg:not([width]):not([class*="size-"]) {
+    width: 1.125rem;
+    height: 1.125rem;
+    flex: none;
+  }
+
+  body {
+    font-family: var(--font-body);
+    letter-spacing: var(--tracking-body);
+  }
+}
+
+/*
+ * Rows of the console's lists, rendered on Arc's table stylesheet (see
+ * apps/console/components/list/table.tsx). Arc paints each cell through
+ * `--cell-fill`, so hover and selection set that rather than a row background.
+ */
+.i10-row > td {
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+@media (hover: hover) and (pointer: fine) {
+  .i10-row:hover > td {
+    --cell-fill: var(--surface-muted);
+  }
+}
+.i10-row.i10-row-selected > td {
+  --cell-fill: color-mix(in oklab, var(--accent) 8%, var(--cell-base));
+}
+/*
+ * A truncating column (`max-w-0` on its cell) takes the table's free width, so
+ * a long name is cut at the column's edge rather than collapsed to a letter.
+ */
+.i10-row > td.max-w-0 {
+  width: 100%;
+}
+/* Every other cell keeps its value on one line; only the truncating column gives way. */
+.i10-row > td:not(.max-w-0) {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}

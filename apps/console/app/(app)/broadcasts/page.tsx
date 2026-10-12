@@ -8,13 +8,14 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { BroadcastsList } from "@/components/marketing-lists"
 import { NewBroadcastButton } from "@/components/new-broadcast"
 import { EmptyState } from "@/components/empty-state"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import type { BroadcastSummary } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Broadcasts" }
 
@@ -36,7 +37,7 @@ export default async function BroadcastsPage() {
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Broadcasts</PageTitle>
+          <PageTitle>{PAGE_COPY.broadcasts.title}</PageTitle>
           {/*
            * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
            * CARRIES THIS ACTION. Two buttons for one action, eight inches
@@ -51,10 +52,7 @@ export default async function BroadcastsPage() {
             </PageActions>
           )}
         </PageHeaderRow>
-        <PageDescription>
-          One email to a segment. Delivery, bounces and complaints are reported the same
-          way as any other send.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.broadcasts.description}</PageDescription>
       </PageHeader>
 
       <PageBody>

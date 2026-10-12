@@ -45,6 +45,9 @@ export function ListCard({
   href,
   menu,
   muted = false,
+  select,
+  selected = false,
+  selecting = false,
   children,
 }: {
   id: string
@@ -52,6 +55,15 @@ export function ListCard({
   menu?: React.ReactNode
   /** Revoked, disabled: still listed, quieter. */
   muted?: boolean
+  /**
+   * The card's tick box for the bulk bar (see list/selection). It shows on
+   * hover, and stays on every card once anything is ticked, so ticking a
+   * second card is one click rather than a hunt.
+   */
+  select?: React.ReactNode
+  selected?: boolean
+  /** Something in the list is ticked. */
+  selecting?: boolean
   children: React.ReactNode
 }) {
   const body = <div className="flex h-full flex-col gap-3 p-4">{children}</div>
@@ -63,6 +75,8 @@ export function ListCard({
     "hover:border-foreground/15 hover:shadow-[0_8px_24px_-12px_rgb(0_0_0/0.18)]",
     "focus-visible:ring-2 focus-visible:ring-ring",
     muted && "opacity-60",
+    selected &&
+      "border-[color-mix(in_oklab,var(--accent)_45%,var(--border))] bg-[color-mix(in_oklab,var(--accent)_5%,var(--background))]",
   )
   return (
     <motion.li
@@ -80,6 +94,19 @@ export function ListCard({
         </Link>
       ) : (
         <div className={surface}>{body}</div>
+      )}
+      {select && (
+        <div
+          className={cn(
+            "absolute top-3 flex size-8 items-center justify-center transition-opacity duration-(--duration-fast) ease-(--ease-standard)",
+            menu ? "right-11" : "right-3",
+            selected || selecting
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+          )}
+        >
+          {select}
+        </div>
       )}
       {menu && <div className="absolute top-3 right-3">{menu}</div>}
     </motion.li>
@@ -113,6 +140,13 @@ export function MotionRow({
       exit={{ opacity: 0, transition: { duration: 0.12 } }}
       transition={{ type: "spring", stiffness: 550, damping: 45, mass: 0.8 }}
       onClick={(event) => {
+        /*
+         * ⚠ ONLY A CLICK THAT HAPPENED IN THE ROW. React bubbles events from a
+         * portal up the component tree, so a dialog or menu opened from this
+         * row sent its own clicks here - and the row followed its link under
+         * the open dialog (2026-10-12).
+         */
+        if (!event.currentTarget.contains(event.target as Node)) return
         if (onClick) return onClick(event)
         if (!href) return
         const target = event.target as HTMLElement

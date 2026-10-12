@@ -1,13 +1,14 @@
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
-import { Skeleton } from "@repo/ui/components/skeleton"
+import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-block"
 import { PageFrame } from "@/components/page-frame"
 import { RememberedViewsProvider, type View } from "@/components/list/remembered-views"
 import { Rail } from "@/components/rail"
 import { SendingStatusNotice } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
 import { SidebarNav } from "@/components/sidebar-nav"
+import { ShellBar } from "@/components/shell-bar"
 import { CommandMenu } from "@/components/command-menu"
 import { MobileNav } from "@/components/mobile-nav"
 import { UsageRail } from "@/components/usage-rail"
@@ -127,13 +128,13 @@ export default async function AppLayout({
      * the rail lifts off the top edge and drops back - which is precisely the
      * movement this layout is meant to remove.
      */
-    <div className="flex h-dvh overflow-hidden">
+    <div className="flex h-dvh overflow-hidden bg-background">
       {/*
        * ⚠ NO HEIGHT OF ITS OWN: `h-full` DEFERS TO THE SHELL. A rail that
        * declared `h-dvh` a second time would be two numbers that have to agree
        * - and they stop agreeing the first time the shell grows a header.
        */}
-      <Rail className="hidden h-full w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
+      <Rail className="hidden h-full w-60 shrink-0 flex-col lg:flex">
         {/*
          * ⚠ THE RAIL STARTS WITH THE WORKSPACE, NOT A LOGO (decided
          * 2026-10-01). Which workspace you are in is the first thing worth
@@ -190,7 +191,7 @@ export default async function AppLayout({
           <SendingStatusNotice className="mx-2 mb-2" />
         </Suspense>
 
-        <div className="mt-auto border-t p-2">
+        <div className="mt-auto p-2">
           <AccountBar
             clerkEnabled={clerkEnabled}
             plan={me.data.billing.plan}
@@ -211,38 +212,48 @@ export default async function AppLayout({
        * stretch to its content instead, and then the shell overflows and
        * nothing scrolls anywhere.
        */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <MobileNav
-          tenant={me.data.tenant}
-          plan={me.data.billing.plan}
-          fallbackEmail={me.data.user.email}
-          clerkEnabled={clerkEnabled}
-          attention={attention}
-          usage={
-            <Suspense fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}>
-              <UsageRail side="top" />
-            </Suspense>
-          }
-        />
-        {/*
-         * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,
-         * the workspace bar and the mobile header stay perfectly still while the
-         * content changes. A transition that moved the chrome as well would be a
-         * page load with extra steps - the whole value of an app shell is that
-         * most of the screen does not go anywhere.
-         */}
-        {/*
-         * ⚠ BELOW THE LARGE BREAKPOINT THERE IS NO RAIL, so the same one-line
-         * notice sits under the mobile header instead. Its own boundary with
-         * no fallback: it is absent for almost everybody.
-         */}
-        <Suspense fallback={null}>
-          <SendingStatusNotice className="mx-4 mt-3 lg:hidden" />
-        </Suspense>
-        <ClientContext />
-        <PageFrame>
-          <RememberedViewsProvider views={views}>{children}</RememberedViewsProvider>
-        </PageFrame>
+      {/*
+       * Arc's app shell: the page is one raised, rounded surface inset from
+       * the window, beside a quiet rail on the background. On phones the
+       * surface fills the screen.
+       */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden lg:py-2 lg:pr-2">
+        <div className="i10-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface)] lg:rounded-[var(--radius-surface)] lg:border lg:border-[var(--border)]">
+          <MobileNav
+            tenant={me.data.tenant}
+            plan={me.data.billing.plan}
+            fallbackEmail={me.data.user.email}
+            clerkEnabled={clerkEnabled}
+            attention={attention}
+            usage={
+              <Suspense fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}>
+                <UsageRail side="top" />
+              </Suspense>
+            }
+          />
+          {/*
+           * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,
+           * the workspace bar and the mobile header stay perfectly still while the
+           * content changes. A transition that moved the chrome as well would be a
+           * page load with extra steps - the whole value of an app shell is that
+           * most of the screen does not go anywhere.
+           */}
+          {/*
+           * ⚠ BELOW THE LARGE BREAKPOINT THERE IS NO RAIL, so the same one-line
+           * notice sits under the mobile header instead. Its own boundary with
+           * no fallback: it is absent for almost everybody.
+           */}
+          <Suspense fallback={null}>
+            <SendingStatusNotice className="mx-4 mt-3 lg:hidden" />
+          </Suspense>
+          <ClientContext />
+          <div className="hidden lg:block">
+            <ShellBar workspace={me.data.tenant?.name ?? "Workspace"} />
+          </div>
+          <PageFrame>
+            <RememberedViewsProvider views={views}>{children}</RememberedViewsProvider>
+          </PageFrame>
+        </div>
       </div>
 
       {/*

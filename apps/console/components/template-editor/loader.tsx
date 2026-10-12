@@ -17,7 +17,7 @@ export const TemplateEditorLoader = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex h-dvh flex-col bg-sidebar">
-        <div className="h-14 shrink-0" />
+        <div className="h-12 shrink-0" />
         <div className="flex min-h-0 flex-1">
           <div className="w-14 shrink-0" />
           <div className="mr-3 mb-3 grid flex-1 place-items-center rounded-2xl bg-white ring-1 ring-black/5 dark:ring-white/10">

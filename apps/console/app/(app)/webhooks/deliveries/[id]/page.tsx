@@ -10,9 +10,8 @@ import {
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
-import { BackButton } from "@/components/back-button"
+} from "@repo/ui/components/i10/page"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { DetailHero, MetaGrid, type HeroTone } from "@/components/detail-hero"
 import { DeliveryStatus, ResponseCode } from "@/components/deliveries-table"
 import { Time } from "@/components/time"
@@ -81,7 +80,7 @@ export default async function DeliveryPage({
     <Page>
       <PageHeader>
         <DetailHero
-          back={<BackButton href={back} label="Back to deliveries" />}
+          crumbs={[{ label: "Deliveries", href: back }]}
           icon={<Send />}
           tone={TONE[delivery.status]}
           eyebrow="Webhook delivery"
@@ -174,7 +173,7 @@ export default async function DeliveryPage({
               </p>
             ) : delivery.transformed ? (
               <Tabs defaultValue="sent">
-                <TabsList variant="pill" className="mb-3">
+                <TabsList>
                   <TabsTrigger value="sent">Sent</TabsTrigger>
                   <TabsTrigger value="event">Event</TabsTrigger>
                 </TabsList>

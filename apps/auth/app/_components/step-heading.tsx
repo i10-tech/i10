@@ -18,13 +18,13 @@ export function StepHeading({
   title,
   children,
 }: {
-  title: string
+  title: React.ReactNode
   /** One sentence. Anything longer belongs in the step's own body. */
   children?: React.ReactNode
 }) {
   return (
     <div className="flex flex-col items-center gap-1 text-center">
-      <h1 className="font-display text-2xl font-bold">{title}</h1>
+      <h1 className="font-display text-2xl font-medium">{title}</h1>
       {children ? (
         <p className="text-sm text-balance text-muted-foreground">{children}</p>
       ) : null}

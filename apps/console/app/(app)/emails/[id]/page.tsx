@@ -1,10 +1,10 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { BackButton } from "@/components/back-button"
 import { notFound } from "next/navigation"
-import { CopyField } from "@repo/ui/components/copy"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { Alert } from "@repo/ui/components/alert/alert"
 import { Mail } from "lucide-react"
-import { Page, PageBody, PageHeader } from "@repo/ui/components/page"
+import { Page, PageBody, PageHeader } from "@repo/ui/components/i10/page"
 import { DetailHero, MetaGrid } from "@/components/detail-hero"
 import { Journey } from "@/components/journey"
 import { Status } from "@/components/status"
@@ -62,7 +62,7 @@ export default async function EmailDetailPage({
     <Page>
       <PageHeader>
         <DetailHero
-          back={<BackButton href="/emails" label="Back to emails" />}
+          crumbs={[{ label: "Emails", href: "/emails" }]}
           icon={<Mail />}
           tone={describeStatus(email.last_event).tone}
           eyebrow="Email"
@@ -204,14 +204,11 @@ export default async function EmailDetailPage({
              * pastes into a support ticket or a search engine, and the log
              * table's one-line summary deliberately cuts it.
              */
-            <section className="rounded-2xl border border-danger/25 bg-danger/5">
-              <h2 className="border-b border-danger/25 px-4 py-2.5 text-sm font-medium text-danger">
-                Last error
-              </h2>
-              <pre className="overflow-x-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap">
+            <Alert tone="danger" title="Last error">
+              <span className="block font-mono text-xs break-all whitespace-pre-wrap">
                 {email.last_error}
-              </pre>
-            </section>
+              </span>
+            </Alert>
           )}
 
           {email.tags && Object.keys(email.tags).length > 0 && (

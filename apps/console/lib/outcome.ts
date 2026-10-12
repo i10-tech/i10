@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import type { ActionState } from "@repo/ui/components/action-button"
+import type { ActionState } from "@repo/ui/components/i10/state-button"
 
 /**
  * How every form in the console answers a submit: in place, and once.

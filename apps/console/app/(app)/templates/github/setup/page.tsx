@@ -1,14 +1,13 @@
 import type { Metadata } from "next"
-import Link from "next/link"
 import { redirect } from "next/navigation"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import {
   Page,
   PageBody,
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 
@@ -55,9 +54,9 @@ export default async function GithubSetupPage({
       </PageHeader>
       <PageBody className="max-w-xl space-y-4">
         <PanelError title="GitHub is not connected" message={error} />
-        <Button asChild variant="outline" size="sm">
-          <Link href="/templates">Back to templates</Link>
-        </Button>
+        <ButtonLink href="/templates" variant="secondary" size="sm">
+          Back to templates
+        </ButtonLink>
       </PageBody>
     </Page>
   )

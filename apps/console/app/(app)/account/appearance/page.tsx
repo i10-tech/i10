@@ -4,7 +4,7 @@ import {
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { ThemePicker } from "@/components/theme-picker"
 
 export const metadata: Metadata = { title: "Appearance" }

@@ -1,11 +1,11 @@
 import type { Metadata } from "next"
-import { Badge } from "@repo/ui/components/badge"
+import { Badge } from "@repo/ui/components/badge/badge"
 import {
   Section,
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { Status } from "@/components/status"
 import { CheckoutOutcome } from "@/components/checkout-outcome"
 import { PlanCards } from "@/components/plan-cards"
@@ -101,7 +101,7 @@ export default async function BillingPage({
               <p className="text-sm font-medium">
                 {billing.plan?.name ?? "No plan assigned"}
                 {billing.plan?.source === "custom" && (
-                  <Badge variant="outline" className="ml-2">
+                  <Badge tone="neutral" className="ml-2">
                     Custom
                   </Badge>
                 )}

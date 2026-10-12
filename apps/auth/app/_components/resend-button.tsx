@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { FieldDescription } from "@repo/ui/components/field"
+import { FieldDescription } from "@repo/ui/components/i10/field"
 
 /** How long somebody has to wait before asking for another code. */
 const COOLDOWN_SECONDS = 60

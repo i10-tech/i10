@@ -1,3 +1,7 @@
+import {
+  createPasswordRules,
+  type PasswordRule,
+} from "@repo/ui/components/password-strength/password-strength"
 import type { Check } from "@repo/ui/checks"
 import type { PasswordRules } from "./environment"
 
@@ -106,6 +110,21 @@ export function describeRules(rules: PasswordRules): string {
 
   const last = extras[extras.length - 1]
   return `${length}, including ${extras.slice(0, -1).join(", ")} and ${last}.`
+}
+
+/**
+ * The policy as Arc's checklist rules (i10/password-rules), so the list under
+ * the field shows exactly what this Clerk instance enforces and nothing more.
+ */
+export function checklistFor(rules: PasswordRules): PasswordRule[] {
+  const all = createPasswordRules({ minLength: rules.minLength })
+  return all.filter(
+    (rule) =>
+      rule.id === "length" ||
+      (rule.id === "case" && (rules.requireLowercase || rules.requireUppercase)) ||
+      (rule.id === "number" && rules.requireNumbers) ||
+      (rule.id === "symbol" && rules.requireSpecial),
+  )
 }
 
 /** Whether the field would be accepted, ignoring whether it is showing an error. */

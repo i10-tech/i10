@@ -1,12 +1,11 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Kbd } from "@repo/ui/components/kbd"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
+import { Kbd } from "@repo/ui/components/i10/kbd"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 
 /**
  * The arrow before a detail page's title: back to the list it came from, with
@@ -39,23 +38,22 @@ export function BackButton({ href, label }: { href: string; label: string }) {
   }, [href, router])
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          asChild
-          aria-label={label}
-          className="group/back shrink-0"
-        >
-          <Link href={href}>
-            <ArrowLeft className="transition-transform duration-200 ease-out group-hover/back:-translate-x-0.5" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {label} <Kbd className="ml-1">Esc</Kbd>
-      </TooltipContent>
+    <Tooltip
+      content={
+        <>
+          {label} <Kbd className="ml-1">Esc</Kbd>
+        </>
+      }
+    >
+      <ButtonLink
+        href={href}
+        variant="ghost"
+        size="sm"
+        aria-label={label}
+        className="group/back shrink-0"
+      >
+        <ArrowLeft className="transition-transform duration-200 ease-out group-hover/back:-translate-x-0.5" />
+      </ButtonLink>
     </Tooltip>
   )
 }

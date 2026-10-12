@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Checkbox } from "@repo/ui/components/checkbox"
-import { BULK_CONFIRM_WORD, ConfirmDialog } from "@/components/confirm-dialog"
+import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { deleteDomain, revokeApiKey } from "@/lib/actions"
 import { OUTCOME_HOLD_MS } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
@@ -120,7 +120,7 @@ export function DeleteDomainsDialog({
        * requires reading which domain you are actually on. Several at once
        * have no single name, so they take the word every bulk delete takes.
        */
-      confirmWord={one ? one.name : BULK_CONFIRM_WORD}
+      confirmWord={confirmWordFor(domains.map((d) => d.name))}
       onConfirm={async () => {
         /*
          * ⚠ PROVED ONCE, BEFORE ANY OF IT, RATHER THAN PER CALL. The prompt
@@ -156,7 +156,9 @@ export function DeleteDomainsDialog({
             }
           }
 
-          const result = await deleteDomain(domain.id)
+          const result = await deleteDomain(domain.id, {
+            leaving: onDeleted !== undefined,
+          })
           if (!result.ok) {
             toastError(`Could not delete ${domain.name}`, result.error)
             return false

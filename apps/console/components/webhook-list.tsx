@@ -12,15 +12,20 @@ import {
   Trash2,
   Webhook,
 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import {
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@repo/ui/components/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { DropdownMenuItem, DropdownMenuSeparator } from "@repo/ui/components/i10/menu"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { ListCard, ListGrid, MotionBody, MotionRow } from "@/components/list/motion"
-import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
+import {
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListTable,
+  selectedRowClass,
+} from "@/components/list/table"
+import { BulkBar } from "@/components/list/bulk-bar"
+import { forEachPicked, useListSelection } from "@/components/list/selection"
 import {
   FilterSelect,
   ListToolbar,
@@ -30,7 +35,7 @@ import {
   useRememberedView,
 } from "@/components/list/toolbar"
 import { Status } from "@/components/status"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import {
   deleteWebhook,
@@ -87,6 +92,20 @@ export function WebhookList({
   const [state, setState] = React.useState("")
   const [view, setView] = useRememberedView("webhooks", "grid")
 
+  const q = query.trim().toLowerCase()
+  const shown = endpoints.filter(
+    (e) =>
+      (!q ||
+        endpointName(e).toLowerCase().includes(q) ||
+        (e.description ?? "").toLowerCase().includes(q) ||
+        e.events.some((event) => event.includes(q))) &&
+      (!state || endpointState(e) === state),
+  )
+  const selection = useListSelection(shown, (e) => e.id)
+  const { picked } = selection
+  const [bulkDeleting, setBulkDeleting] = React.useState<WebhookEndpoint[] | null>(null)
+  const [bulkBusy, setBulkBusy] = React.useState(false)
+
   if (endpoints.length === 0) {
     return (
       <EmptyState
@@ -104,15 +123,6 @@ export function WebhookList({
     ]),
   )
 
-  const q = query.trim().toLowerCase()
-  const shown = endpoints.filter(
-    (e) =>
-      (!q ||
-        endpointName(e).toLowerCase().includes(q) ||
-        (e.description ?? "").toLowerCase().includes(q) ||
-        e.events.some((event) => event.includes(q))) &&
-      (!state || endpointState(e) === state),
-  )
   const clear = () => {
     setQuery("")
     setState("")
@@ -130,6 +140,27 @@ export function WebhookList({
       return
     }
     toastDone(enabled ? "Endpoint resumed" : "Endpoint paused")
+  }
+
+  /** Pause or resume every ticked endpoint that is not already that way. */
+  async function bulkEnable(enabled: boolean) {
+    const targets = picked.filter((e) => e.enabled !== enabled)
+    if (bulkBusy || targets.length === 0) return
+    setBulkBusy(true)
+    const { done, failed } = await forEachPicked(targets, (e) =>
+      updateWebhook(e.id, { enabled }),
+    )
+    setBulkBusy(false)
+    const noun = (n: number) => (n === 1 ? "endpoint" : "endpoints")
+    if (done === 0)
+      toastError(
+        enabled ? "Could not resume the endpoints" : "Could not pause the endpoints",
+      )
+    else
+      toastDone(
+        `${enabled ? "Resumed" : "Paused"} ${done} ${noun(done)}`,
+        failed > 0 ? `${failed} could not be changed` : undefined,
+      )
   }
 
   const menu = (endpoint: WebhookEndpoint) => (
@@ -235,7 +266,7 @@ export function WebhookList({
             title="No endpoint matches"
             description="Try another address or event, or clear the filters."
             secondary={
-              <Button size="sm" variant="outline" onClick={clear}>
+              <Button size="sm" variant="secondary" onClick={clear}>
                 Clear filters
               </Button>
             }
@@ -249,8 +280,11 @@ export function WebhookList({
                 href={`/webhooks/${endpoint.id}`}
                 menu={menu(endpoint)}
                 muted={!endpoint.enabled && endpoint.health !== "disabled"}
+                select={selection.rowBox(endpoint, `Select ${endpointName(endpoint)}`)}
+                selected={selection.isTicked(endpoint)}
+                selecting={picked.length > 0}
               >
-                <div className="flex min-w-0 items-center gap-3 pr-8">
+                <div className="flex min-w-0 items-center gap-3 pr-20">
                   <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
                     <KindIcon kind={endpoint.kind} />
                   </span>
@@ -284,7 +318,10 @@ export function WebhookList({
         ) : (
           <ListTable>
             <ListHeader>
-              <ListHead>Endpoint</ListHead>
+              <th className="w-10 py-2.5 pl-4">
+                {selection.headerBox("Select all endpoints")}
+              </th>
+              <ListHead className="pl-0">Endpoint</ListHead>
               <ListHead className="w-[9rem]">Status</ListHead>
               <ListHead className="hidden w-[7rem] sm:table-cell">Kind</ListHead>
               <ListHead className="hidden md:table-cell">Events</ListHead>
@@ -298,13 +335,15 @@ export function WebhookList({
                 <MotionRow
                   key={endpoint.id}
                   href={`/webhooks/${endpoint.id}`}
-                  className={
-                    !endpoint.enabled && endpoint.health !== "disabled"
-                      ? "opacity-60"
-                      : undefined
-                  }
+                  className={cn(
+                    !endpoint.enabled && endpoint.health !== "disabled" && "opacity-60",
+                    selection.isTicked(endpoint) && selectedRowClass,
+                  )}
                 >
-                  <ListCell className="max-w-0">
+                  <td className="w-10 py-3 pl-4">
+                    {selection.rowBox(endpoint, `Select ${endpointName(endpoint)}`)}
+                  </td>
+                  <ListCell className="max-w-0 pl-0">
                     <Link
                       href={`/webhooks/${endpoint.id}`}
                       className="block truncate font-mono text-xs outline-none hover:underline focus-visible:underline"
@@ -338,6 +377,89 @@ export function WebhookList({
         )}
       </div>
 
+      <BulkBar
+        count={picked.length}
+        onClear={selection.clear}
+        label="Selected endpoints"
+      >
+        {picked.some((e) => e.enabled) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={bulkBusy}
+            onClick={() => void bulkEnable(false)}
+          >
+            <Pause />
+            Pause
+          </Button>
+        )}
+        {picked.some((e) => !e.enabled) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={bulkBusy}
+            onClick={() => void bulkEnable(true)}
+          >
+            <Play />
+            Resume
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            void navigator.clipboard
+              .writeText(picked.map((e) => endpointName(e)).join("\n"))
+              .then(
+                () =>
+                  toastDone(
+                    picked.length === 1
+                      ? "Endpoint address copied"
+                      : "Endpoint addresses copied",
+                  ),
+                () => toastError("Could not copy the addresses"),
+              )
+          }
+        >
+          <Copy />
+          Copy addresses
+        </Button>
+        <Button variant="danger" size="sm" onClick={() => setBulkDeleting(picked)}>
+          <Trash2 />
+          Delete
+        </Button>
+      </BulkBar>
+
+      <ConfirmDialog
+        open={bulkDeleting !== null}
+        onOpenChange={(open) => !open && setBulkDeleting(null)}
+        title={
+          (bulkDeleting?.length ?? 0) === 1
+            ? "Delete this endpoint?"
+            : `Delete ${bulkDeleting?.length ?? 0} endpoints?`
+        }
+        description="Events stop being delivered to them immediately. Past delivery attempts stay in the log."
+        confirmLabel={
+          (bulkDeleting?.length ?? 0) === 1 ? "Delete endpoint" : "Delete endpoints"
+        }
+        doneLabel="Deleted"
+        confirmWord={confirmWordFor((bulkDeleting ?? []).map(endpointName))}
+        onConfirm={async () => {
+          if (!bulkDeleting) return false
+          const { done, failed } = await forEachPicked(bulkDeleting, (e) =>
+            deleteWebhook(e.id),
+          )
+          if (failed > 0)
+            toastError(
+              done === 0
+                ? "Could not delete the endpoints"
+                : `Deleted ${done}, ${failed} could not be deleted`,
+            )
+          selection.clear()
+          return done > 0
+        }}
+      />
+
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
@@ -345,7 +467,7 @@ export function WebhookList({
         description="Events stop being delivered to it immediately. Past delivery attempts stay in the log."
         confirmLabel="Delete endpoint"
         doneLabel="Deleted"
-        confirmWord={deleting ? endpointName(deleting) : undefined}
+        confirmWord={confirmWordFor(deleting ? [endpointName(deleting)] : [])}
         onConfirm={async () => {
           if (!deleting) return false
           const result = await deleteWebhook(deleting.id)
@@ -422,22 +544,22 @@ function Events({ events, compact = false }: { events: string[]; compact?: boole
   const shown = compact ? events.slice(0, 2) : events
   const rest = events.length - shown.length
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    // ⚠ ONE LINE IN A ROW. A wrapping list's minimum width is its widest
+    // chip, so beside a column that takes the free width it stacked the
+    // chips three high.
+    <div
+      className={cn("flex items-center gap-1", compact ? "flex-nowrap" : "flex-wrap")}
+    >
       {shown.map((event) => (
-        <Badge key={event} variant="outline" className="font-mono text-2xs">
+        <Badge size="sm" key={event} tone="neutral">
           {event}
         </Badge>
       ))}
       {rest > 0 && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge variant="secondary" className="cursor-default text-2xs">
-              +{rest}
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs font-mono text-2xs">
-            {events.slice(2).join(", ")}
-          </TooltipContent>
+        <Tooltip content={events.slice(2).join(", ")}>
+          <Badge size="sm" tone="neutral">
+            +{rest}
+          </Badge>
         </Tooltip>
       )}
     </div>

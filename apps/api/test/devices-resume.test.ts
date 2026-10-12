@@ -3,6 +3,7 @@ import { createApp } from "../src/app.js"
 import {
   FRESH_AFTER_SIGN_UP_MS,
   freshAfterSignUp,
+  goneDevices,
   resume,
   type ResumeClerk,
   type ResumeUser,
@@ -302,5 +303,39 @@ describe("a fresh session right after sign-up", () => {
       now: () => NOW,
     })
     expect(out).toEqual({ outcome: "refused" })
+  })
+})
+
+describe("goneDevices", () => {
+  it("a deleted user's device is gone, and revoked", async () => {
+    const h = harness({ user: null })
+    expect(await goneDevices([PRESENTED], h)).toEqual([PRESENTED.id])
+    expect(h.calls.revoked).toEqual([ROW.id])
+  })
+
+  it("a device the store does not know is gone", async () => {
+    const h = harness({ found: { kind: "none" } })
+    expect(await goneDevices([PRESENTED], h)).toEqual([PRESENTED.id])
+  })
+
+  it("a live account stays, and looking rotates nothing", async () => {
+    const h = harness({})
+    expect(await goneDevices([PRESENTED], h)).toEqual([])
+    expect(h.calls.rotated).toEqual([])
+    expect(h.calls.tickets).toBe(0)
+  })
+
+  it("a copied cookie is not settled by looking", async () => {
+    const h = harness({ found: { kind: "copied", row: ROW } })
+    expect(await goneDevices([PRESENTED], h)).toEqual([])
+    expect(h.calls.revoked).toEqual([])
+  })
+
+  it("Clerk failing throws, so the caller keeps every card", async () => {
+    const h = harness({})
+    h.clerk.user = async () => {
+      throw new Error("clerk down")
+    }
+    await expect(goneDevices([PRESENTED], h)).rejects.toThrow("clerk down")
   })
 })

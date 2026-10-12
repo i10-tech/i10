@@ -1,11 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Reveal } from "@repo/ui/components/reveal"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { useRouter } from "next/navigation"
 import { CheckCircle2, Clock, XCircle } from "lucide-react"
 import { cn } from "cn"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Spinner } from "@repo/ui/components/i10/spinner"
 import { isStatus, keepPolling, present, type Result } from "@/lib/checkout-outcome"
 
 /*

@@ -1,5 +1,5 @@
 import { FileCode2, GitBranch, PenLine } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
+import { Badge } from "@repo/ui/components/badge/badge"
 import type { TemplateSource, TemplateVersionSummary } from "@/lib/types"
 
 /**
@@ -18,7 +18,7 @@ export const SOURCE: Record<TemplateSource, { label: string; icon: typeof PenLin
 export function SourceBadge({ source }: { source: TemplateSource }) {
   const { label, icon: Icon } = SOURCE[source]
   return (
-    <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
+    <Badge tone="neutral">
       <Icon className="size-3" />
       {label}
     </Badge>

@@ -1,27 +1,13 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { AlertTriangle, Plus } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { CopyField } from "@repo/ui/components/copy"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { Label } from "@repo/ui/components/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { Spinner } from "@repo/ui/components/spinner"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import {
   ApiKeyScopeField,
   scopeComplete,
@@ -114,23 +100,20 @@ export function CreateApiKeyButton({
         }}
       >
         <DialogContent
-          className="sm:max-w-lg"
           // Escape and outside-click are the two paths the guard above cannot
           // see, because Radix handles them before `onOpenChange`.
           onEscapeKeyDown={(event) => created && event.preventDefault()}
           onPointerDownOutside={(event) => created && event.preventDefault()}
-          showCloseButton={!created}
+          title={created ? "Copy your key now" : "Create an API key"}
+          description={
+            created
+              ? "This is the only time it will ever be shown. We store a hash of it, not the key itself, so there is nothing to reveal later."
+              : "Name it after where it will live, so you know what you are revoking later."
+          }
+          style={{ width: "min(calc(100vw - 2rem), 512px)" }}
         >
           {created ? (
             <>
-              <DialogHeader>
-                <DialogTitle>Copy your key now</DialogTitle>
-                <DialogDescription>
-                  This is the only time it will ever be shown. We store a hash of it,
-                  not the key itself - there is nothing to reveal later.
-                </DialogDescription>
-              </DialogHeader>
-
               <div className="space-y-3">
                 <CopyField value={created.secret} className="py-2" />
 
@@ -156,14 +139,6 @@ export function CreateApiKeyButton({
             </>
           ) : (
             <form onSubmit={submit}>
-              <DialogHeader>
-                <DialogTitle>Create an API key</DialogTitle>
-                <DialogDescription>
-                  Name it after where it will live, so you know what you are revoking
-                  later.
-                </DialogDescription>
-              </DialogHeader>
-
               <div className="space-y-4 py-4">
                 <ValidatedInput
                   label="Name"
@@ -178,20 +153,17 @@ export function CreateApiKeyButton({
                 />
 
                 <div className="space-y-2">
-                  <Label htmlFor="key-mode">Mode</Label>
-                  <Select
+                  <MorphSelect
+                    label="Mode"
                     value={mode}
                     onValueChange={(value) => setMode(value as "live" | "test")}
                     disabled={pending}
-                  >
-                    <SelectTrigger id="key-mode" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="live">Live</SelectItem>
-                      <SelectItem value="test">Test</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    items={[
+                      { value: "live", label: "Live" },
+                      { value: "test", label: "Test" },
+                    ]}
+                    className="w-full"
+                  />
                   {/*
                    * ⚠ WHAT THE CHOICE MEANS, UNDER IT, FOR WHICHEVER IS PICKED.
                    * The dropdown closes over its options, so the explanation
@@ -213,7 +185,6 @@ export function CreateApiKeyButton({
                 </div>
 
                 <ApiKeyScopeField
-                  id="key-domain"
                   value={scope}
                   onChange={setScope}
                   domains={domains}
@@ -231,10 +202,10 @@ export function CreateApiKeyButton({
                   Cancel
                 </Button>
                 <Button
+                  loading={pending}
                   type="submit"
                   disabled={pending || !name.trim() || !scopeComplete(scope)}
                 >
-                  {pending && <Spinner />}
                   Create key
                 </Button>
               </DialogFooter>

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { useRouter } from "next/navigation"
 import {
   AlertCircle,
@@ -12,16 +13,9 @@ import {
   Settings2,
   Unplug,
 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { FormDialog } from "@/components/form-dialog"
 import { Time } from "@/components/time"
@@ -112,7 +106,7 @@ function InstallButton({ installed }: { installed: boolean }) {
   return (
     <Button
       size="sm"
-      variant={installed ? "ghost" : "outline"}
+      variant={installed ? "ghost" : "secondary"}
       disabled={pending}
       onClick={async () => {
         setPending(true)
@@ -137,7 +131,7 @@ function InstallButton({ installed }: { installed: boolean }) {
 function SyncStatus({ repo }: { repo: GithubRepository }) {
   const s = repo.last_sync
   if (repo.removed) {
-    return <Badge variant="destructive">No access</Badge>
+    return <Badge tone="danger">No access</Badge>
   }
   if (!s) return <span className="text-xs text-muted-foreground">Not synced yet</span>
   const commit = (
@@ -217,7 +211,7 @@ function RepositoryRow({ repo }: { repo: GithubRepository }) {
           <SyncStatus repo={repo} />
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             aria-label="Sync now"
             disabled={syncing || repo.removed}
             onClick={async () => {
@@ -233,7 +227,7 @@ function RepositoryRow({ repo }: { repo: GithubRepository }) {
           </Button>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             aria-label="Branch and directory"
             onClick={() => setEditing(true)}
           >
@@ -241,7 +235,7 @@ function RepositoryRow({ repo }: { repo: GithubRepository }) {
           </Button>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             aria-label="Disconnect"
             onClick={() => setDisconnecting(true)}
           >
@@ -378,7 +372,7 @@ function ConnectRepositoryButton({ state }: { state: GithubState }) {
       open={open}
       onOpenChange={setOpen}
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="secondary">
           <Plus />
           Connect a repository
         </Button>
@@ -398,42 +392,32 @@ function ConnectRepositoryButton({ state }: { state: GithubState }) {
       }
     >
       {state.installations.length > 1 && (
-        <Select
+        <MorphSelect
+          label="GitHub account"
+          hideLabel
           value={String(installation)}
           onValueChange={(v) => setInstallation(Number(v))}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {state.installations.map((i) => (
-              <SelectItem key={i.installation_id} value={String(i.installation_id)}>
-                {i.account_login}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          items={state.installations.map((i) => ({
+            value: String(i.installation_id),
+            label: i.account_login,
+          }))}
+        />
       )}
-      <Select value={repo} onValueChange={setRepo} disabled={!repos}>
-        <SelectTrigger className="w-full font-mono text-xs">
-          <SelectValue
-            placeholder={repos ? "Choose a repository" : "Loading repositories"}
-          />
-        </SelectTrigger>
-        <SelectContent>
-          {(repos ?? []).map((r) => (
-            <SelectItem
-              key={r.id}
-              value={r.full_name}
-              disabled={connected.has(r.full_name)}
-              className="font-mono text-xs"
-            >
-              {r.full_name}
-              {connected.has(r.full_name) ? " (connected)" : ""}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <MorphSelect
+        label="Repository"
+        hideLabel
+        value={repo || null}
+        onValueChange={setRepo}
+        disabled={!repos}
+        placeholder={repos ? "Choose a repository" : "Loading repositories"}
+        items={(repos ?? []).map((r) => ({
+          value: r.full_name,
+          label: r.full_name,
+          meta: connected.has(r.full_name) ? "Connected" : undefined,
+          disabled: connected.has(r.full_name),
+        }))}
+        panelWidth={360}
+      />
       {repos?.length === 0 && (
         <p className="text-xs text-muted-foreground">
           The app cannot see any repositories yet. Grant it access on GitHub, then try

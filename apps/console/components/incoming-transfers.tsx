@@ -1,6 +1,5 @@
-import Link from "next/link"
 import { ArrowRight } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { formatExact } from "@/lib/format"
 import type { TransferOffer } from "@/lib/types"
 
@@ -36,12 +35,14 @@ export function IncomingTransfers({ offers }: { offers: TransferOffer[] }) {
               . Expires {formatExact(offer.expires_at)}.
             </p>
           </div>
-          <Button size="sm" asChild className="shrink-0 self-start sm:self-auto">
-            <Link href={`/transfers/${offer.id}`}>
-              Review
-              <ArrowRight aria-hidden="true" />
-            </Link>
-          </Button>
+          <ButtonLink
+            href={`/transfers/${offer.id}`}
+            size="sm"
+            className="shrink-0 self-start sm:self-auto"
+          >
+            Review
+            <ArrowRight aria-hidden="true" />
+          </ButtonLink>
         </div>
       ))}
     </div>

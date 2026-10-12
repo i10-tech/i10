@@ -4,8 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { CreditCard } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
 import { paymentMethodSession } from "@/lib/actions"
 import { toastDone, toastError } from "@/lib/toast"
 
@@ -149,8 +148,14 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
   if (!hasSubscription) return null
 
   return (
-    <Button variant="outline" size="sm" onClick={open} disabled={pending}>
-      {pending ? <Spinner /> : <CreditCard />}
+    <Button
+      loading={pending}
+      variant="secondary"
+      size="sm"
+      onClick={open}
+      disabled={pending}
+    >
+      <CreditCard />
       Update payment method
     </Button>
   )

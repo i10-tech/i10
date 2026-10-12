@@ -1,6 +1,6 @@
 "use client"
 
-import { StepStage } from "@repo/ui/components/step-stage"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
 import type { SsoProvider } from "../_lib/providers"
 import { forgetFlow, useResumable } from "../_lib/resume"
 import { stepBack, useStepHistory } from "../_lib/step-history"

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { AnimatePresence, motion } from "motion/react"
 import {
   CornerDownLeft,
@@ -10,16 +11,9 @@ import {
   Variable as VariableIcon,
   X,
 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import { FormDialog } from "@/components/form-dialog"
 import { useResetOnOpen } from "@/lib/react"
@@ -169,17 +163,16 @@ export function VariableDialog({
           "Used as {{{ NAME }}} in the subject, the body and links, e.g. PRODUCT_NAME."
         }
       />
-      <div className="space-y-1.5">
-        <p className="text-sm font-medium">Type</p>
-        <Select value={type} onValueChange={(v) => setType(v as "string" | "number")}>
-          <SelectTrigger className="w-full" aria-label="Type">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="string">String</SelectItem>
-            <SelectItem value="number">Number</SelectItem>
-          </SelectContent>
-        </Select>
+      <div>
+        <MorphSelect
+          label="Type"
+          value={type}
+          onValueChange={(v) => setType(v as "string" | "number")}
+          items={[
+            { value: "string", label: "String" },
+            { value: "number", label: "Number" },
+          ]}
+        />
       </div>
       <FloatingInput
         label="Fallback value"
@@ -231,35 +224,27 @@ export function VariablesPanel({
         <p className="text-sm font-medium">Variables</p>
         <div className="flex items-center gap-1">
           {(variables.length > 0 || undeclared.length > 0) && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-7"
-                  onClick={onCreate}
-                  disabled={variables.length >= MAX_VARIABLES}
-                  aria-label="Create variable"
-                >
-                  <Plus />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Create variable</TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
+            <Tooltip content="Create variable">
               <Button
                 variant="ghost"
-                size="icon-sm"
-                className="size-7"
-                onClick={onClose}
-                aria-label="Close variables"
+                size="sm"
+                onClick={onCreate}
+                disabled={variables.length >= MAX_VARIABLES}
+                aria-label="Create variable"
               >
-                <X />
+                <Plus />
               </Button>
-            </TooltipTrigger>
-            <TooltipContent>Close</TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip content="Close">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              aria-label="Close variables"
+            >
+              <X />
+            </Button>
           </Tooltip>
         </div>
       </div>
@@ -279,7 +264,7 @@ export function VariablesPanel({
               Create a variable to personalise your template, then insert it anywhere in
               your content.
             </p>
-            <Button size="sm" variant="outline" className="mt-5" onClick={onCreate}>
+            <Button size="sm" variant="secondary" className="mt-5" onClick={onCreate}>
               <Plus />
               Create variable
             </Button>
@@ -317,48 +302,37 @@ export function VariablesPanel({
                     </button>
                     <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                       {canInsert && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="size-7"
-                              onClick={() => onInsert(v.name)}
-                              aria-label={`Insert ${v.name}`}
-                            >
-                              <CornerDownLeft />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Insert</TooltipContent>
+                        <Tooltip content="Insert">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onInsert(v.name)}
+                            aria-label={`Insert ${v.name}`}
+                          >
+                            <CornerDownLeft />
+                          </Button>
                         </Tooltip>
                       )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="size-7"
-                            onClick={() => onEdit(v)}
-                            aria-label={`Edit ${v.name}`}
-                          >
-                            <Pencil />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Edit</TooltipContent>
+                      <Tooltip content="Edit">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onEdit(v)}
+                          aria-label={`Edit ${v.name}`}
+                        >
+                          <Pencil />
+                        </Button>
                       </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="size-7 hover:text-destructive"
-                            onClick={() => onRemove(v.name)}
-                            aria-label={`Remove ${v.name}`}
-                          >
-                            <Trash2 />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Remove</TooltipContent>
+                      <Tooltip content="Remove">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+
+                          onClick={() => onRemove(v.name)}
+                          aria-label={`Remove ${v.name}`}
+                        >
+                          <Trash2 />
+                        </Button>
                       </Tooltip>
                     </div>
                   </div>
@@ -382,7 +356,7 @@ export function VariablesPanel({
                 )}
               >
                 <span className="truncate font-mono text-xs">{`{{{ ${name} }}}`}</span>
-                <Button variant="ghost" size="xs" onClick={() => onDeclare(name)}>
+                <Button variant="ghost" size="sm" onClick={() => onDeclare(name)}>
                   Declare
                 </Button>
               </div>

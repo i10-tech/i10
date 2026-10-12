@@ -4,16 +4,11 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { ExternalLink, Moon, Plus, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
 import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-  CommandShortcut,
-} from "@repo/ui/components/command"
+  CommandPalette,
+  type CommandItem,
+} from "@repo/ui/components/command-palette/command-palette"
 import { allDestinations } from "@/lib/nav"
 
 /**
@@ -84,96 +79,86 @@ export function CommandMenu() {
 
   const destinations = React.useMemo(() => allDestinations(), [])
 
+  const dark = resolvedTheme === "dark"
+  const items = React.useMemo<CommandItem[]>(
+    () => [
+      {
+        id: "/domains/new",
+        label: "Add a domain",
+        group: "Create",
+        icon: <Plus />,
+        keywords: ["new", "sending"],
+      },
+      {
+        id: "/api-keys?new=1",
+        label: "Create an API key",
+        group: "Create",
+        icon: <Plus />,
+        keywords: ["new", "token"],
+      },
+      {
+        id: "/webhooks?new=1",
+        label: "Add a webhook endpoint",
+        group: "Create",
+        icon: <Plus />,
+        keywords: ["new"],
+      },
+      {
+        id: "/broadcasts/new",
+        label: "Write a broadcast",
+        group: "Create",
+        icon: <Plus />,
+        keywords: ["new", "campaign"],
+      },
+      ...destinations.map((item) => ({
+        id: item.href,
+        label: item.label,
+        group: "Go to",
+        icon: <item.icon />,
+        keywords: item.keywords ?? [],
+      })),
+      {
+        id: "theme",
+        label: `Switch to ${dark ? "light" : "dark"} theme`,
+        group: "Preferences",
+        icon: dark ? <Sun /> : <Moon />,
+        keywords: ["appearance", "dark", "light"],
+      },
+      {
+        id: "docs",
+        label: "Documentation",
+        description: "docs.i10.tech",
+        group: "Preferences",
+        icon: <ExternalLink />,
+        keywords: ["api", "reference", "help"],
+      },
+    ],
+    [destinations, dark],
+  )
+
   return (
-    <CommandDialog
-      open={open}
-      onOpenChange={setOpen}
-      title="Command menu"
-      description="Jump to a page or start something new."
-    >
-      <CommandInput placeholder="Jump to, or create…" />
-      <CommandList>
-        <CommandEmpty>Nothing matches that.</CommandEmpty>
-
-        <CommandGroup heading="Create">
-          <CommandItem
-            value="new domain add sending"
-            onSelect={() => go("/domains/new")}
-          >
-            <Plus />
-            Add a domain
-          </CommandItem>
-          <CommandItem value="new api key token" onSelect={() => go("/api-keys?new=1")}>
-            <Plus />
-            Create an API key
-          </CommandItem>
-          <CommandItem
-            value="new webhook endpoint"
-            onSelect={() => go("/webhooks?new=1")}
-          >
-            <Plus />
-            Add a webhook endpoint
-          </CommandItem>
-          <CommandItem
-            value="new broadcast campaign"
-            onSelect={() => go("/broadcasts/new")}
-          >
-            <Plus />
-            Write a broadcast
-          </CommandItem>
-        </CommandGroup>
-
-        <CommandSeparator />
-
-        <CommandGroup heading="Go to">
-          {destinations.map((item) => (
-            <CommandItem
-              key={item.href}
-              /*
-               * ⚠ THE KEYWORDS ARE IN `value`, WHICH IS WHAT cmdk MATCHES ON.
-               * Putting them in a hidden span would make them visible to the
-               * matcher only by accident of text extraction, and invisible to
-               * it entirely once the label is wrapped in another element. This
-               * is why "dkim" finds Domains and "token" finds API keys.
-               */
-              value={`${item.label} ${(item.keywords ?? []).join(" ")}`}
-              onSelect={() => go(item.href)}
-            >
-              <item.icon />
-              {item.label}
-            </CommandItem>
-          ))}
-        </CommandGroup>
-
-        <CommandSeparator />
-
-        <CommandGroup heading="Preferences">
-          <CommandItem
-            value="theme dark light appearance toggle"
-            onSelect={() => {
-              setTheme(resolvedTheme === "dark" ? "light" : "dark")
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent
+        title="Command menu"
+        description="Jump to a page or start something new."
+        style={{ width: "min(calc(100vw - 2rem), 560px)" }}
+      >
+        <CommandPalette
+          items={items}
+          autoFocus
+          placeholder="Jump to, or create"
+          onClose={() => setOpen(false)}
+          onSelect={(item) => {
+            if (item.id === "theme") {
+              setTheme(dark ? "light" : "dark")
               setOpen(false)
-            }}
-          >
-            {resolvedTheme === "dark" ? <Sun /> : <Moon />}
-            Switch to {resolvedTheme === "dark" ? "light" : "dark"} theme
-          </CommandItem>
-          <CommandItem
-            value="documentation docs api reference help"
-            onSelect={() => {
-              // ⚠ A FULL NAVIGATION, NOT `router.push`. The docs are a separate
-              // origin; the Next router would try to resolve it as a route and
-              // 404 in the client.
+            } else if (item.id === "docs") {
               window.open("https://docs.i10.tech", "_blank", "noopener,noreferrer")
               setOpen(false)
-            }}
-          >
-            <ExternalLink />
-            Documentation
-            <CommandShortcut>↗</CommandShortcut>
-          </CommandItem>
-        </CommandGroup>
-      </CommandList>
-    </CommandDialog>
+            } else go(item.id)
+          }}
+        />
+      </DialogContent>
+    </Dialog>
   )
 }

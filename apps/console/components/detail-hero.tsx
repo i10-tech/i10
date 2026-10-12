@@ -1,4 +1,6 @@
 import * as React from "react"
+import { TextReveal } from "@repo/ui/components/text-reveal/text-reveal"
+import { Breadcrumb } from "@repo/ui/components/breadcrumb/breadcrumb"
 import { cn } from "cn"
 
 /**
@@ -12,71 +14,87 @@ import { cn } from "cn"
  */
 export type HeroTone = "neutral" | "success" | "warning" | "danger" | "info"
 
-const TILE: Record<HeroTone, string> = {
-  neutral: "from-muted to-background text-foreground/80 ring-border",
-  success:
-    "from-emerald-500/25 to-emerald-500/5 text-emerald-600 ring-emerald-500/30 dark:text-emerald-300",
-  warning:
-    "from-amber-500/25 to-amber-500/5 text-amber-600 ring-amber-500/30 dark:text-amber-300",
-  danger: "from-red-500/25 to-red-500/5 text-red-600 ring-red-500/30 dark:text-red-300",
-  info: "from-sky-500/25 to-sky-500/5 text-sky-600 ring-sky-500/30 dark:text-sky-300",
+export interface Crumb {
+  label: string
+  href: string
 }
 
+/**
+ * The head of a record page, Arc's way: a breadcrumb path back to the list
+ * (Arc's Breadcrumb, which slides new crumbs in), then the record's name in
+ * the display face with a plain icon beside it, and the page's actions on the
+ * right. No eyebrow over the title and no icon tile: Arc's rules for both.
+ *
+ * `tone` is kept for callers but no longer colours anything; a record's status
+ * is shown where it is labelled (the meta row's badge).
+ */
 export function DetailHero({
-  back,
+  crumbs = [],
   icon,
-  tone = "neutral",
   eyebrow,
   title,
   subtitle,
   description,
   actions,
 }: {
-  back?: React.ReactNode
-  icon: React.ReactNode
+  crumbs?: Crumb[]
+  icon?: React.ReactNode
   tone?: HeroTone
+  /** The breadcrumb's last item when the title is not plain text. */
   eyebrow?: string
   title: React.ReactNode
   subtitle?: React.ReactNode
-  /** A sentence under the title, at reading size - "Add domain" uses it. */
   description?: React.ReactNode
   actions?: React.ReactNode
 }) {
+  const current = typeof title === "string" ? title : eyebrow
   return (
-    <div className="flex min-h-12 items-center justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-3">
-        {back}
-        <div
-          className={cn(
-            "grid size-14 shrink-0 place-items-center rounded-2xl bg-linear-to-b shadow-sm ring-1 ring-inset",
-            "animate-in fade-in-0 zoom-in-95 duration-300 [&_svg]:size-7",
-            TILE[tone],
-          )}
-          aria-hidden
-        >
-          {icon}
+    <div className="grid gap-3">
+      {/* The shell's bar carries the path on wide screens (components/shell-bar). */}
+      {crumbs.length > 0 && (
+        <div className="lg:hidden">
+          <Breadcrumb items={[...crumbs, ...(current ? [{ label: current }] : [])]} />
         </div>
-        <div className="min-w-0">
-          {eyebrow && <p className="text-xs text-muted-foreground">{eyebrow}</p>}
-          <h1 className="truncate font-display text-2xl font-semibold tracking-tight">
-            {title}
-          </h1>
-          {subtitle && (
-            <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+      )}
+      <div className="flex min-h-10 flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          {icon && (
+            <span
+              className="shrink-0 text-muted-foreground [&_svg]:size-6 [&_svg]:[stroke-width:1.75]"
+              aria-hidden
+            >
+              {icon}
+            </span>
           )}
-          {description && (
-            <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
-          )}
+          <div className="min-w-0">
+            {typeof title === "string" ? (
+              <TextReveal
+                as="h1"
+                text={title}
+                className="truncate font-display text-3xl leading-[1.1] font-normal tracking-[-0.03em]"
+              />
+            ) : (
+              <h1 className="truncate font-display text-3xl leading-[1.1] font-normal tracking-[-0.03em]">
+                {title}
+              </h1>
+            )}
+            {subtitle && (
+              <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+            )}
+            {description && (
+              <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+            )}
+          </div>
         </div>
+        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
   )
 }
 
 /**
- * The row of facts under the hero: CREATED, STATUS, PROVIDER, REGION - small
- * capitals over the value, as Resend lays them out.
+ * The row of facts under the hero: created, status, provider, region. A
+ * quiet label over each value.
  */
 export function MetaGrid({
   items,
@@ -89,9 +107,7 @@ export function MetaGrid({
     <dl className={cn("grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-4", className)}>
       {items.map((item) => (
         <div key={item.label} className="min-w-0">
-          <dt className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-            {item.label}
-          </dt>
+          <dt className="text-xs text-muted-foreground">{item.label}</dt>
           <dd className="mt-1.5 min-w-0 truncate text-sm">{item.value}</dd>
         </div>
       ))}

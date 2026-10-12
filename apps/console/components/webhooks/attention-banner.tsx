@@ -1,6 +1,5 @@
 import Link from "next/link"
-import { AlertTriangle } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@repo/ui/components/alert"
+import { Alert } from "@repo/ui/components/alert/alert"
 import { Time } from "@/components/time"
 import { shortName } from "@/lib/webhooks"
 import type { WebhookEndpoint } from "@/lib/types"
@@ -25,9 +24,9 @@ export function WebhookAttentionBanner({
   if (disabled.length === 0 && failing.length === 0) return null
 
   const list = (rows: WebhookEndpoint[]) => (
-    <ul className="space-y-0.5">
+    <span role="list" className="mt-1.5 block space-y-0.5">
       {rows.slice(0, 3).map((e) => (
-        <li key={e.id}>
+        <span role="listitem" key={e.id} className="block">
           <Link
             href={`/webhooks/${e.id}`}
             className="font-mono text-xs underline-offset-4 hover:underline"
@@ -40,57 +39,57 @@ export function WebhookAttentionBanner({
               since <Time iso={e.health_changed_at} />
             </span>
           )}
-        </li>
+        </span>
       ))}
       {rows.length > 3 && (
-        <li className="text-xs text-muted-foreground">and {rows.length - 3} more</li>
+        <span role="listitem" className="block text-xs text-muted-foreground">
+          and {rows.length - 3} more
+        </span>
       )}
-    </ul>
+    </span>
   )
 
   if (disabled.length > 0) {
     return (
-      <Alert variant="destructive">
-        <AlertTriangle />
-        <AlertTitle>
-          {disabled.length === 1
+      <Alert
+        tone="danger"
+        title={
+          disabled.length === 1
             ? "i10 switched off an endpoint"
-            : `i10 switched off ${disabled.length} endpoints`}
-        </AlertTitle>
-        <AlertDescription>
-          <p>
-            Nothing is sent to {disabled.length === 1 ? "it" : "them"} until you turn{" "}
-            {disabled.length === 1 ? "it" : "them"} back on. Fix the receiver, turn it
-            on, then recover what failed from its Replays tab.
-          </p>
-          {list(disabled)}
-          {failing.length > 0 && (
-            <p>
-              {failing.length === 1
-                ? "Another endpoint is failing."
-                : `${failing.length} more are failing.`}
-            </p>
-          )}
-        </AlertDescription>
+            : `i10 switched off ${disabled.length} endpoints`
+        }
+      >
+        <span className="block not-first:mt-1.5">
+          Nothing is sent to {disabled.length === 1 ? "it" : "them"} until you turn{" "}
+          {disabled.length === 1 ? "it" : "them"} back on. Fix the receiver, turn it on,
+          then recover what failed from its Replays tab.
+        </span>
+        {list(disabled)}
+        {failing.length > 0 && (
+          <span className="block not-first:mt-1.5">
+            {failing.length === 1
+              ? "Another endpoint is failing."
+              : `${failing.length} more are failing.`}
+          </span>
+        )}
       </Alert>
     )
   }
 
   return (
-    <Alert variant="warning">
-      <AlertTriangle />
-      <AlertTitle>
-        {failing.length === 1
+    <Alert
+      tone="warning"
+      title={
+        failing.length === 1
           ? "An endpoint is failing"
-          : `${failing.length} endpoints are failing`}
-      </AlertTitle>
-      <AlertDescription>
-        <p>
-          Nothing has been delivered for at least 15 minutes. We keep retrying, and
-          switch an endpoint off if it goes days without a success.
-        </p>
-        {list(failing)}
-      </AlertDescription>
+          : `${failing.length} endpoints are failing`
+      }
+    >
+      <span className="block not-first:mt-1.5">
+        Nothing has been delivered for at least 15 minutes. We keep retrying, and switch
+        an endpoint off if it goes days without a success.
+      </span>
+      {list(failing)}
     </Alert>
   )
 }

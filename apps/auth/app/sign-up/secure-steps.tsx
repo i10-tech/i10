@@ -2,18 +2,18 @@
 
 import { useRef, useState } from "react"
 import { ShieldCheckIcon } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@repo/ui/components/i10/toasts"
 import { useReverification, useUser } from "@clerk/nextjs"
 import {
   isClerkAPIResponseError,
   isReverificationCancelledError,
 } from "@clerk/nextjs/errors"
-import { Button } from "@repo/ui/components/button"
-import { CopyButton } from "@repo/ui/components/copy"
-import { Field, FieldGroup } from "@repo/ui/components/field"
-import { QrCode } from "@repo/ui/components/qr-code"
-import { Spinner } from "@repo/ui/components/spinner"
-import { OtpField, OTP_LENGTH } from "@repo/ui/components/otp-field"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
+import { Field, FieldGroup } from "@repo/ui/components/i10/field"
+import { QrCode } from "@repo/ui/components/i10/qr-code"
+import { Spinner } from "@repo/ui/components/i10/spinner"
+import { OtpField, OTP_LENGTH } from "@repo/ui/components/i10/otp-field"
 import { StepHeading } from "../_components/step-heading"
 import { holdSince } from "../_lib/finish"
 import { TRANSPORT_FAILURE } from "../_lib/errors"
@@ -25,7 +25,7 @@ import {
   GitHubIcon,
   GoogleIcon,
   PasskeyIcon,
-} from "../_components/provider-icons"
+} from "@repo/ui/components/i10/provider-icons"
 
 /*
  * The three steps that come AFTER the account exists.
@@ -167,20 +167,17 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
       </StepHeading>
 
       <Field>
-        <Button type="button" size="xl" onClick={add} disabled={!user || locked}>
-          {busy === "passkey" ? (
-            <>
-              <Spinner aria-hidden="true" aria-label={undefined} />
-              Waiting for your device…
-            </>
-          ) : (
-            <>
-              {/* ⚠ THE SAME MARK THE SIGN-IN BUTTON USES. One glyph for one
+        <Button
+          loading={busy === "passkey"}
+          type="button"
+          size="lg"
+          onClick={add}
+          disabled={!user || locked}
+        >
+          {/* ⚠ THE SAME MARK THE SIGN-IN BUTTON USES. One glyph for one
                   concept: see PasskeyIcon on why it is not a plain key. */}
-              <PasskeyIcon aria-hidden="true" />
-              Add a passkey
-            </>
-          )}
+          <PasskeyIcon aria-hidden="true" />
+          Add a passkey
         </Button>
         <SkipButton locked={locked} onNext={onNext} label={skipLabel} />
       </Field>
@@ -240,18 +237,15 @@ export function TwoFactorOfferStep({
       </StepHeading>
 
       <Field>
-        <Button type="button" size="xl" onClick={begin} disabled={!user || locked}>
-          {busy === "totp" ? (
-            <>
-              <Spinner aria-hidden="true" aria-label={undefined} />
-              Setting up…
-            </>
-          ) : (
-            <>
-              <ShieldCheckIcon aria-hidden="true" />
-              Turn on two-factor
-            </>
-          )}
+        <Button
+          loading={busy === "totp"}
+          type="button"
+          size="lg"
+          onClick={begin}
+          disabled={!user || locked}
+        >
+          <ShieldCheckIcon aria-hidden="true" />
+          Turn on two-factor
         </Button>
         <SkipButton locked={locked} onNext={onNext} label={skipLabel} />
       </Field>
@@ -369,7 +363,12 @@ export function TwoFactorScanStep({
             <code className="rounded-pill bg-muted px-3 py-1 font-mono text-xs tracking-wider break-all select-all">
               {totp.secret}
             </code>
-            <CopyButton value={totp.secret} label="Copy setup key" />
+            <CopyButton
+              value={totp.secret}
+              label="Copy setup key"
+              iconOnly
+              variant="plain"
+            />
           </div>
         </div>
 
@@ -391,18 +390,12 @@ export function TwoFactorScanStep({
 
         <Field>
           <Button
+            loading={busy === "totp-verify"}
             type="submit"
-            size="xl"
+            size="lg"
             disabled={!user || locked || code.length < OTP_LENGTH}
           >
-            {busy === "totp-verify" ? (
-              <>
-                <Spinner aria-hidden="true" aria-label={undefined} />
-                Checking…
-              </>
-            ) : (
-              "Turn on two-factor"
-            )}
+            Turn on two-factor
           </Button>
           <Button
             type="button"
@@ -457,11 +450,11 @@ export function BackupCodesStep({
         <CopyButton
           value={codes.join("\n")}
           label="Copy all codes"
-          variant="outline"
-          size="xl"
           className="w-full text-foreground"
+          iconOnly
+          variant="plain"
         />
-        <Button type="button" size="xl" onClick={onNext} disabled={locked}>
+        <Button type="button" size="lg" onClick={onNext} disabled={locked}>
           I have saved them
         </Button>
       </Field>
@@ -597,8 +590,8 @@ export function ConnectStep({
             <Button
               key={strategy}
               type="button"
-              variant="outline"
-              size="xl"
+              variant="secondary"
+              size="lg"
               disabled={!user || locked || isLinked}
               onClick={() => void connect(strategy)}
             >
@@ -611,7 +604,7 @@ export function ConnectStep({
             </Button>
           )
         })}
-        <Button type="button" size="xl" onClick={onNext} disabled={locked}>
+        <Button type="button" size="lg" onClick={onNext} disabled={locked}>
           {finishLabel}
         </Button>
       </Field>

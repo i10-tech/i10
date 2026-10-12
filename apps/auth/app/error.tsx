@@ -41,7 +41,7 @@ export default function AuthError({
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-6 px-6 text-center">
       <div className="space-y-2">
-        <h1 className="text-lg font-semibold tracking-tight">
+        <h1 className="text-lg font-medium tracking-tight">
           Something on this page broke
         </h1>
         <p className="max-w-sm text-sm text-muted-foreground">

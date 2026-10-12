@@ -1,9 +1,8 @@
 import type { Metadata } from "next"
 import { cookies } from "next/headers"
 import { Globe } from "lucide-react"
-import { Page, PageBody, PageHeader } from "@repo/ui/components/page"
+import { Page, PageBody, PageHeader } from "@repo/ui/components/i10/page"
 import { AddDomainForm } from "@/components/add-domain-form"
-import { BackButton } from "@/components/back-button"
 import { DetailHero } from "@/components/detail-hero"
 import { ADD_DOMAIN_DRAFT_COOKIE, draftFor } from "@/lib/add-domain-draft"
 import { restoreDraft } from "@/lib/add-domain-restore"
@@ -32,7 +31,7 @@ export default async function NewDomainPage() {
     <Page>
       <PageHeader>
         <DetailHero
-          back={<BackButton href="/domains" label="Back to domains" />}
+          crumbs={[{ label: "Domains", href: "/domains" }]}
           icon={<Globe />}
           title="Add domain"
           description="Use a domain you own to send email from i10."

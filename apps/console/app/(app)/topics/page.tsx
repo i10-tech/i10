@@ -8,13 +8,14 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { NewTopicButton } from "@/components/new-topic"
 import { TopicsList } from "@/components/marketing-lists"
 import { EmptyState } from "@/components/empty-state"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import type { TopicRow } from "@/lib/types"
+import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Topics" }
 
@@ -41,7 +42,7 @@ export default async function TopicsPage() {
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Topics</PageTitle>
+          <PageTitle>{PAGE_COPY.topics.title}</PageTitle>
           {/*
            * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
            * CARRIES THIS ACTION. Two buttons for one action, eight inches
@@ -56,10 +57,7 @@ export default async function TopicsPage() {
             </PageActions>
           )}
         </PageHeaderRow>
-        <PageDescription>
-          The choices a recipient gets on their preference page. Their answer here is
-          binding on every broadcast that names the topic.
-        </PageDescription>
+        <PageDescription>{PAGE_COPY.topics.description}</PageDescription>
       </PageHeader>
 
       <PageBody>

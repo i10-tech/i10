@@ -1,17 +1,10 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { useRouter } from "next/navigation"
 import { useOrganizationList } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
 import { acceptTransfer, declineTransfer } from "@/lib/actions"
 import type { IncomingTransfer } from "@/lib/types"
 import { toastDone, toastError, toastNote } from "@/lib/toast"
@@ -86,32 +79,35 @@ export function AcceptTransfer({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <label htmlFor="transfer-destination" className="text-sm font-medium">
-          Add it to
-        </label>
-        <Select value={workspace} onValueChange={setWorkspace} disabled={busy !== null}>
-          <SelectTrigger id="transfer-destination" className="w-full">
-            <SelectValue placeholder="Choose a workspace" />
-          </SelectTrigger>
-          <SelectContent>
-            {offer.workspaces.map((w) => (
-              <SelectItem key={w.id} value={w.id}>
-                {w.name}
-                {w.current ? " (current)" : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div>
+        <MorphSelect
+          label="Add it to"
+          value={workspace || null}
+          onValueChange={setWorkspace}
+          disabled={busy !== null}
+          placeholder="Choose a workspace"
+          items={offer.workspaces.map((w) => ({
+            value: w.id,
+            label: w.name,
+            meta: w.current ? "Current" : undefined,
+          }))}
+        />
       </div>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button variant="ghost" onClick={decline} disabled={busy !== null}>
-          {busy === "decline" && <Spinner />}
+        <Button
+          loading={busy === "decline"}
+          variant="ghost"
+          onClick={decline}
+          disabled={busy !== null}
+        >
           Decline
         </Button>
-        <Button onClick={accept} disabled={!chosen || busy !== null}>
-          {busy === "accept" && <Spinner />}
+        <Button
+          loading={busy === "accept"}
+          onClick={accept}
+          disabled={!chosen || busy !== null}
+        >
           Accept domain
         </Button>
       </div>

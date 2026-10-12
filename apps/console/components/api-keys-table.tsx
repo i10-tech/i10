@@ -1,24 +1,24 @@
 "use client"
 
 import * as React from "react"
+import { cn } from "cn"
 import { Copy, Globe, KeyRound, RefreshCw, SearchX, Trash2 } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { CopyField } from "@repo/ui/components/copy"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import {
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@repo/ui/components/dropdown-menu"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { DropdownMenuItem, DropdownMenuSeparator } from "@repo/ui/components/i10/menu"
 import { MotionBody, MotionRow } from "@/components/list/motion"
-import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
+import {
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListTable,
+  selectedRowClass,
+} from "@/components/list/table"
+import { BulkBar } from "@/components/list/bulk-bar"
+import { forEachPicked, useListSelection } from "@/components/list/selection"
 import {
   FilterSelect,
   ListToolbar,
@@ -27,7 +27,7 @@ import {
 } from "@/components/list/toolbar"
 import { ApiKeyScopeDialog, type ScopeDomain } from "@/components/api-key-scope"
 import { useStepUp } from "@/lib/step-up"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import { revokeApiKey, rotateApiKey } from "@/lib/actions"
 import { useRetained } from "@/lib/react"
@@ -94,6 +94,14 @@ export function ApiKeysTable({
     setState("")
   }
 
+  // Only a live key can be acted on; a revoked one stays listed, untickable.
+  const selection = useListSelection(
+    shown.filter((k) => k.revoked_at === null),
+    (k) => k.id,
+  )
+  const { picked } = selection
+  const [bulkRevoking, setBulkRevoking] = React.useState<ApiKeyRow[] | null>(null)
+
   if (keys.length === 0) {
     return (
       <EmptyState
@@ -150,7 +158,7 @@ export function ApiKeysTable({
             title="No key matches"
             description="Try another name, or clear the filters."
             secondary={
-              <Button size="sm" variant="outline" onClick={clear}>
+              <Button size="sm" variant="secondary" onClick={clear}>
                 Clear filters
               </Button>
             }
@@ -158,7 +166,10 @@ export function ApiKeysTable({
         ) : (
           <ListTable>
             <ListHeader>
-              <ListHead>Name</ListHead>
+              <th className="w-10 py-2.5 pl-4">
+                {selection.headerBox("Select all live keys")}
+              </th>
+              <ListHead className="pl-0">Name</ListHead>
               <ListHead className="w-[10rem]">Key</ListHead>
               <ListHead className="w-[6rem]">Mode</ListHead>
               {/*
@@ -180,12 +191,18 @@ export function ApiKeysTable({
                 return (
                   <MotionRow
                     key={key.id}
-                    className={revoked ? "opacity-50" : undefined}
+                    className={cn(
+                      revoked && "opacity-50",
+                      selection.isTicked(key) && selectedRowClass,
+                    )}
                   >
-                    <ListCell className="font-medium">
+                    <td className="w-10 py-3 pl-4">
+                      {!revoked && selection.rowBox(key, `Select ${key.name}`)}
+                    </td>
+                    <ListCell className="pl-0 font-medium">
                       {key.name}
                       {revoked && (
-                        <Badge variant="outline" className="ml-2">
+                        <Badge tone="neutral" className="ml-2">
                           Revoked
                         </Badge>
                       )}
@@ -202,7 +219,7 @@ export function ApiKeysTable({
                       </span>
                     </ListCell>
                     <ListCell>
-                      <Badge variant={key.mode === "live" ? "secondary" : "outline"}>
+                      <Badge tone={key.mode === "live" ? "info" : "neutral"}>
                         {key.mode}
                       </Badge>
                     </ListCell>
@@ -281,6 +298,64 @@ export function ApiKeysTable({
         onOpenChange={(open) => !open && setScoping(null)}
       />
 
+      <BulkBar count={picked.length} onClear={selection.clear} label="Selected keys">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            void navigator.clipboard
+              .writeText(picked.map((k) => k.name).join("\n"))
+              .then(
+                () =>
+                  toastDone(
+                    picked.length === 1 ? "Key name copied" : "Key names copied",
+                  ),
+                () => toastError("Could not copy the names"),
+              )
+          }
+        >
+          <Copy />
+          Copy names
+        </Button>
+        <Button variant="danger" size="sm" onClick={() => setBulkRevoking(picked)}>
+          <Trash2 />
+          Revoke
+        </Button>
+      </BulkBar>
+
+      <ConfirmDialog
+        open={bulkRevoking !== null}
+        onOpenChange={(open) => !open && setBulkRevoking(null)}
+        title={
+          (bulkRevoking?.length ?? 0) === 1
+            ? `Revoke ${bulkRevoking?.[0]?.name ?? "this key"}?`
+            : `Revoke ${bulkRevoking?.length ?? 0} keys?`
+        }
+        description="Anything using them stops sending immediately - not at the end of a cache window. This cannot be undone; create new keys instead."
+        confirmLabel={(bulkRevoking?.length ?? 0) === 1 ? "Revoke key" : "Revoke keys"}
+        doneLabel="Revoked"
+        confirmWord={confirmWordFor(
+          (bulkRevoking ?? []).map((k) => k.name),
+          "Revoke",
+        )}
+        onConfirm={async () => {
+          if (!bulkRevoking) return false
+          // One recent sign-in covers the batch; see the single revoke below.
+          if (!(await stepUp())) return false
+          const { done, failed } = await forEachPicked(bulkRevoking, (k) =>
+            revokeApiKey(k.id),
+          )
+          if (failed > 0)
+            toastError(
+              done === 0
+                ? "Could not revoke the keys"
+                : `Revoked ${done}, ${failed} could not be revoked`,
+            )
+          selection.clear()
+          return done > 0
+        }}
+      />
+
       <ConfirmDialog
         open={revoking !== null}
         onOpenChange={(open) => !open && setRevoking(null)}
@@ -288,7 +363,7 @@ export function ApiKeysTable({
         description="Anything using it stops sending immediately - not at the end of a cache window. This cannot be undone; create a new key instead."
         confirmLabel="Revoke key"
         doneLabel="Revoked"
-        confirmWord={revoking?.name}
+        confirmWord={confirmWordFor([revoking?.name], "Revoke")}
         onConfirm={async () => {
           if (!revoking) return false
           /*
@@ -351,18 +426,12 @@ export function ApiKeysTable({
         }}
       >
         <DialogContent
-          className="sm:max-w-lg"
-          showCloseButton={false}
           onEscapeKeyDown={(event) => event.preventDefault()}
           onPointerDownOutside={(event) => event.preventDefault()}
+          title="Your new key"
+          description="The previous key stopped working the moment this one was issued. Copy it now - it will not be shown again."
+          style={{ width: "min(calc(100vw - 2rem), 512px)" }}
         >
-          <DialogHeader>
-            <DialogTitle>Your new key</DialogTitle>
-            <DialogDescription>
-              The previous key stopped working the moment this one was issued. Copy it
-              now - it will not be shown again.
-            </DialogDescription>
-          </DialogHeader>
           {shownRotated && <CopyField value={shownRotated.secret} className="py-2" />}
           <DialogFooter>
             <Button onClick={() => setRotated(null)}>I have copied it</Button>

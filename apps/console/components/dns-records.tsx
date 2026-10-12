@@ -1,10 +1,12 @@
 "use client"
 
+import { CopyCheckIcon } from "@repo/ui/components/icon-morph/icon-morph"
 import * as React from "react"
-import { Check, Copy, Download } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { CopyButton, useCopy } from "@repo/ui/components/copy"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { Download } from "lucide-react"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
+import { useCopy } from "@repo/ui/components/i10/use-copy"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import { Status } from "@/components/status"
 import type { DnsRecord } from "@/lib/types"
@@ -97,29 +99,23 @@ export function DnsRecordsCard({
   return (
     <section className="rounded-3xl border p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-xl font-semibold tracking-tight">
-          DNS Records
-        </h2>
+        <h2 className="font-display text-xl font-medium tracking-tight">DNS Records</h2>
         <div className="flex items-center gap-2">
           {actions}
           {records.length > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  className="rounded-full"
-                  aria-label="Copy as zone file"
-                  onClick={() =>
-                    void copy(zoneFile(records)).then(
-                      (ok) => ok && toastDone("Zone file copied"),
-                    )
-                  }
-                >
-                  <Download />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Copy as zone file</TooltipContent>
+            <Tooltip content="Copy as zone file">
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Copy as zone file"
+                onClick={() =>
+                  void copy(zoneFile(records)).then(
+                    (ok) => ok && toastDone("Zone file copied"),
+                  )
+                }
+              >
+                <Download />
+              </Button>
             </Tooltip>
           )}
         </div>
@@ -169,7 +165,7 @@ export function DnsRecordGroups({
     <div className={cn("divide-y", className)}>
       {groups.map((group) => (
         <div key={group.record} className="py-6 last:pb-0">
-          <h3 className="flex items-center gap-2 font-semibold">
+          <h3 className="flex items-center gap-2 font-medium">
             {group.title}
             {group.note && (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
@@ -178,7 +174,7 @@ export function DnsRecordGroups({
             )}
           </h3>
           {group.record !== "other" && group.record !== group.title && (
-            <p className="mt-3 text-sm font-semibold">{group.record}</p>
+            <p className="mt-3 text-sm font-medium">{group.record}</p>
           )}
           <div className="mt-3">
             <RecordsTable records={group.rows} status={status} />
@@ -555,14 +551,17 @@ function CopyValue({
       className="group/copy -mx-1 flex max-w-full min-w-0 cursor-pointer flex-nowrap items-center gap-1.5 overflow-hidden rounded-md px-1 py-0.5 text-left font-mono text-xs transition-colors duration-(--duration-instant) ease-(--ease-linear) outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
     >
       {children}
-      {copied ? (
-        <Check aria-hidden className="size-3 shrink-0 text-success" />
-      ) : (
-        <Copy
-          aria-hidden
-          className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/copy:opacity-100 group-focus-visible/copy:opacity-100"
-        />
-      )}
+      <CopyCheckIcon
+        state={copied}
+        size={12}
+        aria-hidden
+        className={cn(
+          "shrink-0 transition-opacity",
+          copied
+            ? "text-success opacity-100"
+            : "text-muted-foreground opacity-0 group-hover/copy:opacity-100 group-focus-visible/copy:opacity-100",
+        )}
+      />
     </button>
   )
 }
@@ -575,7 +574,7 @@ function Row({ label, value }: { label: string; value: string }) {
         <span className="min-w-0 flex-1 overflow-x-auto font-mono text-2xs whitespace-nowrap select-all">
           {value}
         </span>
-        <CopyButton value={value} size="icon-xs" />
+        <CopyButton value={value} iconOnly variant="plain" />
       </div>
     </div>
   )

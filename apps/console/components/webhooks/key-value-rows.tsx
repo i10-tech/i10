@@ -1,8 +1,8 @@
 "use client"
 
 import { Plus, X } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { Input } from "@repo/ui/components/input"
+import { Button } from "@repo/ui/components/button/button"
+import { Input } from "@repo/ui/components/i10/input"
 
 export type Pair = { name: string; value: string }
 
@@ -77,7 +77,7 @@ export function KeyValueRows({
           <Button
             type="button"
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             aria-label={`Remove ${nameLabel.toLowerCase()} ${i + 1}`}
             disabled={disabled || (rows.length === 1 && !row.name && !row.value)}
             onClick={() => onChange(rows.filter((_, j) => j !== i))}

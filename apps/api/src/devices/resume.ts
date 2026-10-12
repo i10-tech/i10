@@ -202,3 +202,40 @@ export async function freshAfterSignUp(
   }
   return { outcome: "ticket", ticket: await deps.clerk.signInToken(who.userId) }
 }
+
+/**
+ * Which of these saved accounts no longer exist, for the sign-in page to
+ * clear their cards (2026-10-12). Somebody who deletes their account in the
+ * console is signed out onto the sign-in page - where their card was still
+ * waiting, for an account that is gone.
+ *
+ * ⚠ IT ANSWERS ONLY FOR DEVICES WHOSE SECRET WAS PRESENTED, so it is no
+ * oracle: nobody can ask it whether an address has an account. And it never
+ * rotates a secret - looking is not resuming.
+ *
+ * ⚠ "GONE" ONLY ON A DEFINITE ANSWER. A device the store does not know, or a
+ * user Clerk answers 404 for (or has banned - resume drops those too). Clerk
+ * or the database failing throws, and the caller keeps every card: an outage
+ * must never wipe the saved accounts off everybody's sign-in page.
+ */
+export async function goneDevices(
+  presented: readonly PresentedDevice[],
+  deps: { store: DeviceStore; clerk: ResumeClerk },
+): Promise<string[]> {
+  const gone: string[] = []
+  for (const device of presented) {
+    const found = await deps.store.find(device)
+    if (found.kind === "none") {
+      gone.push(device.id)
+      continue
+    }
+    // A copied cookie is resume's business; looking settles nothing about it.
+    if (found.kind !== "ok") continue
+    const user = await deps.clerk.user(found.row.userId)
+    if (!user || user.banned) {
+      await deps.store.revoke(found.row.id)
+      gone.push(device.id)
+    }
+  }
+  return gone
+}

@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
-import { Textarea } from "@repo/ui/components/textarea"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
+import { Textarea } from "@repo/ui/components/i10/textarea"
 
 /**
  * Writing the body of an email.
@@ -46,61 +46,67 @@ export function HtmlEditor({
   }, [html])
 
   return (
-    <Tabs defaultValue="html" className="overflow-hidden rounded-lg border">
-      <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2 py-1.5">
+    <Tabs defaultValue="html">
+      <TabsList>
         <TabsTrigger value="html">HTML</TabsTrigger>
         <TabsTrigger value="text">Plain text</TabsTrigger>
         <TabsTrigger value="preview">Preview</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="html" className="m-0">
-        <Textarea
-          value={html}
-          onChange={(event) => onHtmlChange(event.target.value)}
-          disabled={disabled}
-          placeholder="<p>Hello {{first_name}},</p>"
-          // ⚠ `spellCheck` OFF. A spell-checker underlining every tag name and
-          // every attribute makes a template unreadable, and none of the red
-          // squiggles are about anything the author can fix.
-          spellCheck={false}
-          className="max-h-[48rem] min-h-[24rem] rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
-        />
-      </TabsContent>
-
-      <TabsContent value="text" className="m-0">
-        <Textarea
-          value={text}
-          onChange={(event) => onTextChange(event.target.value)}
-          disabled={disabled}
-          placeholder={"Hello {{first_name}},\n\n…"}
-          className="max-h-[48rem] min-h-[24rem] rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
-        />
-        <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-          {/*
-           * ⚠ NOT DECORATION. Several spam filters score a message with no
-           * text/plain part higher, and a recipient on a text-only client sees
-           * nothing at all. Left empty, the send path derives one from the HTML
-           * - which is better than nothing and worse than one somebody wrote.
-           */}
-          Left empty, we generate one from the HTML. A hand-written version reads better
-          and scores better with spam filters.
-        </p>
-      </TabsContent>
-
-      <TabsContent value="preview" className="m-0">
-        {preview.trim() ? (
-          <iframe
-            sandbox=""
-            srcDoc={preview}
-            title="Body preview"
-            className="h-[24rem] w-full bg-white"
-            referrerPolicy="no-referrer"
+      <TabsContent value="html">
+        <div className="overflow-hidden rounded-[var(--radius-panel)] border">
+          <Textarea
+            value={html}
+            onChange={(event) => onHtmlChange(event.target.value)}
+            disabled={disabled}
+            placeholder="<p>Hello {{first_name}},</p>"
+            // ⚠ `spellCheck` OFF. A spell-checker underlining every tag name and
+            // every attribute makes a template unreadable, and none of the red
+            // squiggles are about anything the author can fix.
+            spellCheck={false}
+            className="max-h-[48rem] min-h-[24rem] rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
           />
-        ) : (
-          <p className="px-4 py-24 text-center text-sm text-muted-foreground">
-            Nothing to preview yet.
+        </div>
+      </TabsContent>
+
+      <TabsContent value="text">
+        <div className="overflow-hidden rounded-[var(--radius-panel)] border">
+          <Textarea
+            value={text}
+            onChange={(event) => onTextChange(event.target.value)}
+            disabled={disabled}
+            placeholder={"Hello {{first_name}},\n\n…"}
+            className="max-h-[48rem] min-h-[24rem] rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0"
+          />
+          <p className="border-t px-3 py-2 text-xs text-muted-foreground">
+            {/*
+             * ⚠ NOT DECORATION. Several spam filters score a message with no
+             * text/plain part higher, and a recipient on a text-only client sees
+             * nothing at all. Left empty, the send path derives one from the HTML
+             * - which is better than nothing and worse than one somebody wrote.
+             */}
+            Left empty, we generate one from the HTML. A hand-written version reads
+            better and scores better with spam filters.
           </p>
-        )}
+        </div>
+      </TabsContent>
+
+      <TabsContent value="preview">
+        <div className="overflow-hidden rounded-[var(--radius-panel)] border">
+          {preview.trim() ? (
+            <iframe
+              sandbox=""
+              srcDoc={preview}
+              title="Body preview"
+              className="h-[24rem] w-full bg-white"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <p className="px-4 py-24 text-center text-sm text-muted-foreground">
+              Nothing to preview yet.
+            </p>
+          )}
+        </div>
       </TabsContent>
     </Tabs>
   )

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { ChevronRight } from "lucide-react"
-import { Badge } from "@repo/ui/components/badge"
+import { Badge } from "@repo/ui/components/badge/badge"
 import { cn } from "cn"
 import { ResponseCode } from "@/components/deliveries-table"
 import { Time } from "@/components/time"
@@ -82,7 +82,8 @@ export function AttemptLog({
               </span>
               {a.error_kind && (
                 <Badge
-                  variant="outline"
+                  size="sm"
+                  tone="neutral"
                   className={cn(
                     "text-2xs",
                     a.error_kind === "transform" ? "text-warning" : "text-danger",
@@ -92,12 +93,12 @@ export function AttemptLog({
                 </Badge>
               )}
               {a.trigger !== "scheduled" && (
-                <Badge variant="secondary" className="text-2xs">
+                <Badge size="sm" tone="neutral">
                   {TRIGGER_LABEL[a.trigger]}
                 </Badge>
               )}
               {a.lane === "retry" && (
-                <Badge variant="secondary" className="text-2xs">
+                <Badge size="sm" tone="neutral">
                   Retried aside
                 </Badge>
               )}

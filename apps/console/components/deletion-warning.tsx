@@ -1,5 +1,4 @@
-import { AlertTriangle } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@repo/ui/components/alert"
+import { Alert } from "@repo/ui/components/alert/alert"
 import { formatExact } from "@/lib/format"
 import type { BillingState } from "@/lib/types"
 
@@ -39,53 +38,51 @@ export function DeletionWarning({
   const endsAt = paid?.current_period_end
 
   return (
-    <Alert variant="destructive">
-      <AlertTriangle />
-      <AlertTitle>
-        {paid
+    <Alert
+      tone="danger"
+      title={
+        paid
           ? "Deleting ends your subscription immediately"
-          : "Deleting cannot be undone"}
-      </AlertTitle>
-      <AlertDescription>
-        {paid ? (
-          <p>
-            Your {billing?.plan?.name ?? "paid"} subscription is cancelled the moment
-            this workspace is deleted - not at the end of the period.{" "}
-            {endsAt
-              ? `You lose the time you have already paid for, through to ${formatExact(endsAt)}, and it is not refunded.`
-              : "You lose the remainder of the period you have already paid for, and it is not refunded."}{" "}
-            Sending, mailboxes and allowances stop at the same moment.
-          </p>
-        ) : (
-          <p>
-            There is no subscription to cancel - you are on the included allowance.
-            Deleting still removes the workspace, its domains and its mailboxes for
-            good.
-          </p>
-        )}
+          : "Deleting cannot be undone"
+      }
+    >
+      {paid ? (
+        <span className="block not-first:mt-1.5">
+          Your {billing?.plan?.name ?? "paid"} subscription is cancelled the moment this
+          workspace is deleted - not at the end of the period.{" "}
+          {endsAt
+            ? `You lose the time you have already paid for, through to ${formatExact(endsAt)}, and it is not refunded.`
+            : "You lose the remainder of the period you have already paid for, and it is not refunded."}{" "}
+          Sending, mailboxes and allowances stop at the same moment.
+        </span>
+      ) : (
+        <span className="block not-first:mt-1.5">
+          There is no subscription to cancel - you are on the included allowance.
+          Deleting still removes the workspace, its domains and its mailboxes for good.
+        </span>
+      )}
 
-        {/*
-         * ⚠ THE WAY OUT IS NAMED, BECAUSE MOST PEOPLE HERE WANT THE OTHER
-         * THING. Somebody who means "stop charging me" is one page away from
-         * cancelling, which keeps their plan to the end of the period they paid
-         * for and keeps their data. Deleting to achieve that costs them both.
-         */}
-        {paid && (
-          <p>
-            To stop being charged without losing any of this, cancel the subscription on
-            the billing page instead - it runs to{" "}
-            {endsAt ? formatExact(endsAt) : "the end of the period"} and then drops to
-            the free allowance.
-          </p>
-        )}
+      {/*
+       * ⚠ THE WAY OUT IS NAMED, BECAUSE MOST PEOPLE HERE WANT THE OTHER
+       * THING. Somebody who means "stop charging me" is one page away from
+       * cancelling, which keeps their plan to the end of the period they paid
+       * for and keeps their data. Deleting to achieve that costs them both.
+       */}
+      {paid && (
+        <span className="block not-first:mt-1.5">
+          To stop being charged without losing any of this, cancel the subscription on
+          the billing page instead - it runs to{" "}
+          {endsAt ? formatExact(endsAt) : "the end of the period"} and then drops to the
+          free allowance.
+        </span>
+      )}
 
-        {scope === "account" && (
-          <p>
-            Deleting your account also deletes any workspace you are the only member of.
-            A workspace with other people in it is left alone.
-          </p>
-        )}
-      </AlertDescription>
+      {scope === "account" && (
+        <span className="block not-first:mt-1.5">
+          Deleting your account also deletes any workspace you are the only member of. A
+          workspace with other people in it is left alone.
+        </span>
+      )}
     </Alert>
   )
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { usageTone } from "../src/components/usage-ring"
+import { usageTone } from "../src/components/i10/usage-ring"
 
 /** The one colour rule the ring, the popover and the usage page share (#153). */
 describe("usageTone", () => {

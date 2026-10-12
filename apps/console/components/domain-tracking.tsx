@@ -7,8 +7,8 @@ import {
   FieldDescription,
   FieldGroup,
   FieldLabel,
-} from "@repo/ui/components/field"
-import { Switch } from "@repo/ui/components/switch"
+} from "@repo/ui/components/i10/field"
+import { Switch } from "@repo/ui/components/i10/switch"
 import { updateDomainTracking } from "@/lib/actions"
 import { toastError } from "@/lib/toast"
 

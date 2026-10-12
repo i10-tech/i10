@@ -1,17 +1,12 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
+import { CodeBlock } from "@repo/ui/components/code-block/code-block"
 import { RotateCcw } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs"
+import { Button } from "@repo/ui/components/button/button"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { EmailFrame } from "@/components/email-frame"
 import { previewTemplateVersion } from "@/lib/actions"
 import { nest } from "@/lib/template-variables"
@@ -88,19 +83,17 @@ export function TemplatePreviewPanel({
   return (
     <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
       <aside className="space-y-4">
-        <Select value={String(number)} onValueChange={(v) => setNumber(Number(v))}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {history.map((v) => (
-              <SelectItem key={v.number} value={String(v.number)}>
-                v{v.number}
-                {v.live ? " · live" : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <MorphSelect
+          label="Version"
+          hideLabel
+          value={String(number)}
+          onValueChange={(v) => setNumber(Number(v))}
+          items={history.map((v) => ({
+            value: String(v.number),
+            label: `v${v.number}`,
+            meta: v.live ? "Live" : undefined,
+          }))}
+        />
 
         {version.variables.length === 0 ? (
           <p className="text-xs text-muted-foreground">
@@ -113,7 +106,7 @@ export function TemplatePreviewPanel({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs text-muted-foreground"
+
                 onClick={() => setValues(samples)}
                 disabled={!edited}
               >
@@ -156,7 +149,7 @@ export function TemplatePreviewPanel({
             }
           >
             <div className="border-b px-2 py-1.5">
-              <TabsList className="bg-transparent p-0">
+              <TabsList>
                 <TabsTrigger value="preview" disabled={!preview?.html}>
                   Preview
                 </TabsTrigger>
@@ -178,9 +171,12 @@ export function TemplatePreviewPanel({
               )}
             </TabsContent>
             <TabsContent value="text" className="m-0">
-              <pre className="max-h-[36rem] overflow-auto bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-                {preview?.text ?? ""}
-              </pre>
+              <CodeBlock
+                code={preview?.text ?? ""}
+                filename="Plain text"
+                language="text"
+                maxLines={40}
+              />
             </TabsContent>
           </Tabs>
         )}

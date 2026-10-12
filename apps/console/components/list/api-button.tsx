@@ -3,10 +3,14 @@
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { ArrowUpRight, Code2 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { CopyButton } from "@repo/ui/components/copy"
-import { Popover, PopoverContent, PopoverTrigger } from "@repo/ui/components/popover"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { Button } from "@repo/ui/components/button/button"
+import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@repo/ui/components/popover/popover"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import type { ApiSnippet } from "@/lib/snippets"
 
@@ -23,20 +27,17 @@ export function ApiButton({ snippet }: { snippet: ApiSnippet }) {
 
   return (
     <Popover onOpenChange={(open) => open && setLang(0)}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={snippet.tooltip}
-              className="transition-colors data-[state=open]:bg-muted"
-            >
-              <Code2 />
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent>{snippet.tooltip}</TooltipContent>
+      <Tooltip content={snippet.tooltip}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label={snippet.tooltip}
+            className="transition-colors data-[state=open]:bg-muted"
+          >
+            <Code2 />
+          </Button>
+        </PopoverTrigger>
       </Tooltip>
       <PopoverContent
         align="end"
@@ -79,7 +80,12 @@ export function ApiButton({ snippet }: { snippet: ApiSnippet }) {
                 </button>
               ))}
             </div>
-            <CopyButton value={current.code} label="Copy code" className="size-7" />
+            <CopyButton
+              value={current.code}
+              label="Copy code"
+              iconOnly
+              variant="plain"
+            />
           </div>
           <AnimatePresence mode="wait" initial={false}>
             <motion.pre
@@ -130,8 +136,8 @@ function Highlighted({ code }: { code: string }) {
           comment
             ? "text-muted-foreground italic"
             : string
-              ? "text-emerald-700 dark:text-emerald-400"
-              : "text-violet-700 dark:text-violet-400"
+              ? "text-success"
+              : "text-info"
         }
       >
         {text}

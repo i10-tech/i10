@@ -45,31 +45,30 @@ import {
   Trash2,
   Upload,
 } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { InlineEdit } from "@repo/ui/components/inline-edit/inline-edit"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { Kbd } from "@repo/ui/components/kbd"
-import { Switch } from "@repo/ui/components/switch"
-import { Popover, PopoverContent, PopoverTrigger } from "@repo/ui/components/popover"
-import { Swap } from "@repo/ui/components/swap"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+} from "@repo/ui/components/i10/menu"
+import { Kbd } from "@repo/ui/components/i10/kbd"
+import { Switch } from "@repo/ui/components/i10/switch"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@repo/ui/components/popover/popover"
+import { Swap } from "@repo/ui/components/i10/swap"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { EmailFrame } from "@/components/email-frame"
 import { CodeEditor } from "@/components/template-editor/code-editor"
 import { FolderGlyph } from "@/components/templates/folder-art"
@@ -689,6 +688,7 @@ export function TemplateEditorApp({
   // "outside" it: the panel left, the tab came back under the pointer, and
   // the two took turns for as long as the pointer stayed.
   const hiddenTab = view === "write" && panel === "inspector" && !docked
+  const centre = useHeldCentre()
 
   return (
     <EditorContext.Provider value={{ editor }}>
@@ -697,11 +697,15 @@ export function TemplateEditorApp({
         {/* ⚠ THREE COLUMNS, THE MIDDLE ONE CENTRED ON ITS OWN. The breadcrumb
             stays put whatever the right side says - "Auto-save", "Unsaved
             changes", "Saving…" - and the two can never overlap. */}
-        <header className="relative z-20 grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3">
-          <div />
+        <header
+          ref={centre.header}
+          className="relative z-20 flex h-12 shrink-0 items-center justify-between gap-3 px-3"
+        >
           <nav
+            ref={centre.nav}
             aria-label="Breadcrumb"
-            className="flex min-w-0 items-center justify-center gap-2 text-sm"
+            style={centre.style}
+            className="absolute top-1/2 flex min-w-0 -translate-y-1/2 items-center gap-2 text-sm"
           >
             <Link
               href="/templates"
@@ -744,14 +748,16 @@ export function TemplateEditorApp({
                 markDirty()
               }}
             />
+          </nav>
+
+          <div ref={centre.side} className="ml-auto flex min-w-0 items-center gap-2">
+            {/* The draft's standing, beside how it is being saved: the two
+                answer the same question ("is what I see live?"). */}
             <Swap id={status} className="shrink-0">
-              <Badge variant={status === "published" ? "default" : "secondary"}>
+              <Badge size="sm" tone={status === "published" ? "info" : "neutral"}>
                 {STATUS_LABEL[status]}
               </Badge>
             </Swap>
-          </nav>
-
-          <div className="flex min-w-0 items-center justify-self-end gap-2">
             <SaveIndicator
               state={save}
               autosave={autosave}
@@ -759,12 +765,7 @@ export function TemplateEditorApp({
             />
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  className="rounded-xl"
-                  aria-label="More actions"
-                >
+                <Button variant="secondary" size="sm" aria-label="More actions">
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
@@ -800,7 +801,6 @@ export function TemplateEditorApp({
                   <Save />
                   Auto-save
                   <Switch
-                    size="sm"
                     checked={autosave}
                     tabIndex={-1}
                     aria-hidden
@@ -829,34 +829,34 @@ export function TemplateEditorApp({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <ActionButton
-                    size="sm"
-                    className="rounded-xl"
-                    state={publishing.state}
-                    onReset={publishing.reset}
-                    pendingLabel="Publish"
-                    doneLabel="Published"
-                    disabled={!canPublish && publishing.state === "idle"}
-                    onClick={() => void publish()}
-                  >
-                    Publish
-                  </ActionButton>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {!hasContent ? (
-                  "Write something to publish"
-                ) : status === "published" ? (
-                  `v${tpl.version} is live and up to date`
-                ) : (
-                  <>
-                    Make this draft live <Kbd className="ml-1">⌘↵</Kbd>
-                  </>
-                )}
-              </TooltipContent>
+            <Tooltip
+              content={
+                <>
+                  {!hasContent ? (
+                    "Write something to publish"
+                  ) : status === "published" ? (
+                    `v${tpl.version} is live and up to date`
+                  ) : (
+                    <>
+                      Make this draft live <Kbd className="ml-1">⌘↵</Kbd>
+                    </>
+                  )}
+                </>
+              }
+            >
+              <span>
+                <StateButton
+                  size="sm"
+                  state={publishing.state}
+                  onReset={publishing.reset}
+                  pendingLabel="Publish"
+                  doneLabel="Published"
+                  disabled={!canPublish && publishing.state === "idle"}
+                  onClick={() => void publish()}
+                >
+                  Publish
+                </StateButton>
+              </span>
             </Tooltip>
           </div>
         </header>
@@ -1040,27 +1040,25 @@ export function TemplateEditorApp({
                       <div className="relative h-full" data-i10-inspector>
                         <InspectorPanel editor={editor} />
                         <div className="absolute top-2 right-2">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="size-7"
-                                onClick={() => setPinned(!docked)}
-                                aria-label={docked ? "Hide inspector" : "Pin inspector"}
-                              >
-                                <Swap id={docked ? "close" : "pin"}>
-                                  {docked ? <PanelRightClose /> : <Pin />}
-                                </Swap>
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {docked
+                          <Tooltip
+                            content={
+                              docked
                                 ? "Hide inspector"
                                 : narrow
                                   ? "Pin when there is room"
-                                  : "Pin inspector"}
-                            </TooltipContent>
+                                  : "Pin inspector"
+                            }
+                          >
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPinned(!docked)}
+                              aria-label={docked ? "Hide inspector" : "Pin inspector"}
+                            >
+                              <Swap id={docked ? "close" : "pin"}>
+                                {docked ? <PanelRightClose /> : <Pin />}
+                              </Swap>
+                            </Button>
                           </Tooltip>
                         </div>
                       </div>
@@ -1239,11 +1237,11 @@ export function TemplateEditorApp({
         description={`Any send naming ${tpl.name} or its id will start failing. Check your code first.`}
         confirmLabel="Delete template"
         doneLabel="Deleted"
-        confirmWord={tpl.name}
+        confirmWord={confirmWordFor([tpl.name])}
         onConfirm={async () => {
           if (timer.current) clearTimeout(timer.current)
           dirty.current = false
-          const result = await deleteTemplate(tpl.id)
+          const result = await deleteTemplate(tpl.id, { leaving: true })
           if (!result.ok) {
             toastFailure(result)
             return false
@@ -1327,7 +1325,11 @@ export function TemplateEditorApp({
   )
 }
 
-/** The template's title, edited in place in the top bar. */
+/**
+ * The template's title, edited in place in the top bar: Arc's InlineEdit,
+ * which keeps the text's metrics as it turns into a field and confirms the
+ * save in place.
+ */
 function TitleField({
   value,
   onChange,
@@ -1335,82 +1337,21 @@ function TitleField({
   value: string
   onChange: (value: string) => void
 }) {
-  const [editing, setEditing] = React.useState(false)
-  const [draft, setDraft] = React.useState(value)
-  const input = React.useRef<HTMLInputElement>(null)
-  React.useEffect(() => {
-    if (editing) input.current?.select()
-  }, [editing])
-
-  const start = () => {
-    if (editing) return
-    setDraft(value)
-    setEditing(true)
-  }
-  const commit = () => {
-    const next = draft.trim()
-    setEditing(false)
-    if (next && next !== value) onChange(next.slice(0, 200))
-  }
-  // ⚠ ANIMATED ON THE WAY IN AND OUT, STILL IN BETWEEN. Clicking widens the
-  // name into a field of a fixed width and fades its background and ring in;
-  // typing never moves it; finishing narrows it back to the name and fades
-  // them out. The name keeps the same inset throughout, so it never shifts.
-  const [editWidth, setEditWidth] = React.useState(288)
-  const begin = () => {
-    // 18rem, or 40% of a narrow screen.
-    setEditWidth(Math.round(Math.min(288, window.innerWidth * 0.4)))
-    start()
-  }
-
   return (
-    <Tooltip open={editing ? false : undefined}>
-      <TooltipTrigger asChild>
-        <motion.div
-          initial={false}
-          animate={{ width: editing ? editWidth : "auto" }}
-          transition={{ type: "spring", stiffness: 420, damping: 38, mass: 0.7 }}
-          role={editing ? undefined : "button"}
-          tabIndex={editing ? undefined : 0}
-          aria-label={editing ? undefined : `Rename ${value || "Untitled Template"}`}
-          onClick={editing ? undefined : begin}
-          onKeyDown={(e) => {
-            if (!editing && (e.key === "Enter" || e.key === " ")) {
-              e.preventDefault()
-              begin()
-            }
-          }}
-          className={cn(
-            "relative flex h-7 max-w-[min(40vw,18rem)] min-w-0 items-center overflow-hidden rounded-md px-2 text-sm font-medium outline-none",
-            "transition-[background-color,box-shadow] duration-200 ease-(--ease-quad-out)",
-            editing
-              ? "bg-background shadow-[0_0_0_1px_var(--border),0_0_0_4px_color-mix(in_oklch,var(--ring)_14%,transparent)]"
-              : "cursor-text hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-          )}
-        >
-          {editing ? (
-            <input
-              ref={input}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commit()
-                if (e.key === "Escape") setEditing(false)
-              }}
-              maxLength={200}
-              aria-label="Template name"
-              className="w-full min-w-0 bg-transparent outline-none"
-            />
-          ) : (
-            <span className="truncate whitespace-pre">
-              {value || "Untitled Template"}
-            </span>
-          )}
-        </motion.div>
-      </TooltipTrigger>
-      <TooltipContent>Rename</TooltipContent>
-    </Tooltip>
+    <InlineEdit
+      label="Template name"
+      value={value}
+      placeholder="Untitled Template"
+      validate={(next) =>
+        !next.trim()
+          ? "Give the template a name"
+          : next.trim().length > 200
+            ? "Keep the name under 200 characters"
+            : null
+      }
+      onSave={(next) => onChange(next.trim())}
+      className="i10-inline-crumb min-w-0"
+    />
   )
 }
 
@@ -1503,13 +1444,18 @@ function SaveIndicator({
   // only the "Unsaved changes" state rebuilt the box on the way in and out of
   // it, so that one state appeared without animating.
   const hint = !autosave && state === "dirty"
-  return (
-    <Tooltip open={hint ? undefined : false}>
-      <TooltipTrigger asChild>{box}</TooltipTrigger>
-      <TooltipContent className="flex items-center gap-1.5">
-        Press <Kbd>⌘S</Kbd> to save
-      </TooltipContent>
+  return hint ? (
+    <Tooltip
+      content={
+        <>
+          Press <Kbd>⌘S</Kbd> to save
+        </>
+      }
+    >
+      {box}
     </Tooltip>
+  ) : (
+    box
   )
 }
 
@@ -1525,29 +1471,26 @@ function RailButton({
   children: React.ReactNode
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={label}
-          aria-pressed={active}
-          className={cn(
-            "relative grid size-10 place-items-center rounded-xl text-muted-foreground transition-colors hover:text-foreground [&_svg]:size-[18px]",
-            active && "text-foreground",
-          )}
-        >
-          {active && (
-            <motion.span
-              layoutId="rail-active"
-              className="absolute inset-0 rounded-xl bg-accent"
-              transition={{ type: "spring", stiffness: 500, damping: 38 }}
-            />
-          )}
-          <span className="relative">{children}</span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
+    <Tooltip content={label} side="right">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        aria-pressed={active}
+        className={cn(
+          "relative grid size-10 place-items-center rounded-xl text-muted-foreground transition-colors hover:text-foreground [&_svg]:size-[18px]",
+          active && "text-foreground",
+        )}
+      >
+        {active && (
+          <motion.span
+            layoutId="rail-active"
+            className="absolute inset-0 rounded-xl bg-accent"
+            transition={{ type: "spring", stiffness: 500, damping: 38 }}
+          />
+        )}
+        <span className="relative">{children}</span>
+      </button>
     </Tooltip>
   )
 }
@@ -1656,15 +1599,11 @@ function ImportDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Open {name || "this HTML"}</DialogTitle>
-          <DialogDescription>
-            Keep the HTML exactly as written and edit it as code, or convert it into
-            blocks for the visual editor. Converting simplifies layout the editor cannot
-            express.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent
+        title={`Open ${name || "this HTML"}`}
+        description="Keep the HTML exactly as written and edit it as code, or convert it into blocks for the visual editor. Converting simplifies layout the editor cannot express."
+        style={{ width: "min(calc(100vw - 2rem), 448px)" }}
+      >
         <div className="grid gap-2 py-2">
           <button
             type="button"
@@ -1884,5 +1823,102 @@ function pasteHandler(extensions: Extensions) {
     const node = view.state.schema.nodeFromJSON(json)
     view.dispatch(view.state.tr.replaceSelectionWith(node, false))
     return true
+  }
+}
+
+/**
+ * Centres the breadcrumb in the bar by measuring it, and holds it still while
+ * the name is being edited.
+ *
+ * ⚠ CENTRED BY MEASUREMENT, NOT BY LAYOUT, BECAUSE LAYOUT RE-CENTRES ON EVERY
+ * WIDTH CHANGE. The name grows as it is typed and its field gains room for
+ * the caret when editing starts; a crumb centred by flexbox moved half of
+ * every change to the left, so the text jumped under the caret. While focus is
+ * inside it the left edge is frozen and the name grows to the right; when
+ * focus leaves, it glides back to the centre.
+ */
+function useHeldCentre() {
+  const header = React.useRef<HTMLElement>(null)
+  const nav = React.useRef<HTMLElement>(null)
+  /** The controls on the right, which the crumb must never run into. */
+  const side = React.useRef<HTMLDivElement>(null)
+  const held = React.useRef(false)
+  const leftNow = React.useRef<number | null>(null)
+  const [left, setLeft] = React.useState<number | null>(null)
+  const [room, setRoom] = React.useState<number | null>(null)
+  // Only the return to the centre after a rename glides; placing it on load
+  // or on a resize does not.
+  const [glide, setGlide] = React.useState(false)
+
+  const measure = React.useCallback(() => {
+    if (held.current || !header.current || !nav.current) return
+    const width = header.current.clientWidth
+    // Centred, it may use the middle of the bar: the width that stays clear of
+    // the right-hand controls on both sides of the centre line.
+    const clear = width - 2 * ((side.current?.offsetWidth ?? 0) + 24)
+    const fits = Math.max(160, clear)
+    const next = Math.round((width - Math.min(nav.current.scrollWidth, fits)) / 2)
+    leftNow.current = next
+    setRoom(fits)
+    setLeft(next)
+  }, [])
+
+  React.useLayoutEffect(() => {
+    const crumb = nav.current
+    measure()
+    if (!crumb) return
+    const resize = new ResizeObserver(measure)
+    if (header.current) resize.observe(header.current)
+    resize.observe(crumb)
+    if (side.current) resize.observe(side.current)
+
+    /*
+     * ⚠ HELD WHILE ARC'S FIELD SAYS IT IS EDITING (`data-editing`), NOT WHILE
+     * FOCUS IS INSIDE. Turning the name into a field moves focus through the
+     * page for a moment, which read as "left the crumb": the hold dropped and
+     * the crumb re-centred under the caret, the jump this exists to stop.
+     */
+    const watch = new MutationObserver(() => {
+      const editing = crumb.querySelector("[data-editing]") !== null
+      if (editing === held.current) return
+      held.current = editing
+      if (editing) {
+        // The name now grows rightward from a fixed left edge, so its limit is
+        // the gap to the controls, less room for the field's save and cancel
+        // buttons that float just past its end.
+        const controls = side.current?.offsetLeft
+        if (controls !== undefined && leftNow.current !== null)
+          setRoom(Math.max(160, controls - leftNow.current - 84))
+        setGlide(false)
+      } else {
+        setGlide(true)
+        // After the field has turned back into text, so the width is final.
+        requestAnimationFrame(measure)
+      }
+    })
+    watch.observe(crumb, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-editing"],
+    })
+    return () => {
+      resize.disconnect()
+      watch.disconnect()
+    }
+  }, [measure])
+
+  return {
+    header,
+    nav,
+    side,
+    style: {
+      ...(left === null
+        ? ({ left: "50%", transform: "translateX(-50%)" } as const)
+        : { left }),
+      ...(glide
+        ? { transition: "left var(--duration-standard) var(--ease-standard)" }
+        : {}),
+      maxWidth: room ?? "50%",
+    },
   }
 }

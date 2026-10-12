@@ -3,17 +3,17 @@
 import * as React from "react"
 import { Layers, SearchX, Trash2, Users } from "lucide-react"
 import { cn } from "cn"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import { Checkbox } from "@repo/ui/components/checkbox"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
-import { BULK_CONFIRM_WORD, ConfirmDialog } from "@/components/confirm-dialog"
+} from "@repo/ui/components/i10/menu"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/empty-state"
 import { BulkBar } from "@/components/list/bulk-bar"
 import {
@@ -166,7 +166,7 @@ function ContactRows({
             filtered ? (
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 onClick={() => commit((p) => FILTERS.forEach((f) => p.delete(f)))}
               >
                 Clear filters
@@ -239,9 +239,9 @@ function ContactRows({
                     </ListCell>
                     <ListCell>
                       {contact.unsubscribed ? (
-                        <Badge variant="outline">Unsubscribed</Badge>
+                        <Badge tone="neutral">Unsubscribed</Badge>
                       ) : (
-                        <Badge variant="secondary">Subscribed</Badge>
+                        <Badge tone="neutral">Subscribed</Badge>
                       )}
                     </ListCell>
                     <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
@@ -270,7 +270,7 @@ function ContactRows({
         {segments.length > 0 && (
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="rounded-xl">
+              <Button variant="ghost" size="sm">
                 <Layers />
                 Add to segment
               </Button>
@@ -312,12 +312,7 @@ function ContactRows({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => setDeleting(true)}
-        >
+        <Button variant="danger" size="sm" onClick={() => setDeleting(true)}>
           <Trash2 />
           Delete
         </Button>
@@ -339,9 +334,10 @@ function ContactRows({
         description="They are removed from every segment and their topic preferences go with them. If any of them had unsubscribed, that record is lost - re-importing the same address would start sending to them again."
         confirmLabel="Delete"
         doneLabel="Deleted"
-        // ⚠ `DELETE` FOR EVERY BULK DELETE. There is no single name to type, and
-        // the count is already in the title where it is read.
-        confirmWord={BULK_CONFIRM_WORD}
+        // One contact: its address. Several: the bulk word (confirmWordFor).
+        confirmWord={confirmWordFor(
+          contacts.filter((c) => selected.has(c.id)).map((c) => c.email),
+        )}
         onConfirm={async () => {
           const result = await deleteContacts([...selected])
           if (!result.ok) {

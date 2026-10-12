@@ -2,10 +2,10 @@
 
 import * as React from "react"
 import { Info, Plus } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group"
-import { FloatingTextarea } from "@repo/ui/components/floating-field"
-import { ValidatedInput } from "@repo/ui/components/validated-field"
+import { Button } from "@repo/ui/components/button/button"
+import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
+import { FloatingTextarea } from "@repo/ui/components/i10/floating-field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import { FormDialog } from "@/components/form-dialog"
 import { createTopic } from "@/lib/actions"
 import { useResetOnOpen } from "@/lib/react"
@@ -82,34 +82,28 @@ export function NewTopicButton() {
 
       <fieldset className="space-y-2">
         <legend className="mb-1.5 text-sm font-medium">Default</legend>
-        <RadioGroup
+        <RadioCards
+          aria-label="Default"
+          layout="list"
           value={defaultSubscription}
           onValueChange={(value) =>
             setDefaultSubscription(value as "opt_in" | "opt_out")
           }
-          className="gap-2"
-        >
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 hover:bg-muted/30">
-            <RadioGroupItem value="opt_in" className="mt-0.5" />
-            <span className="space-y-0.5">
-              <span className="block text-sm font-medium">Subscribed by default</span>
-              <span className="block text-xs text-muted-foreground">
-                Everyone receives it unless they opt out. Right for things people
-                expect, like product updates.
-              </span>
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border p-3 hover:bg-muted/30">
-            <RadioGroupItem value="opt_out" className="mt-0.5" />
-            <span className="space-y-0.5">
-              <span className="block text-sm font-medium">Opt in required</span>
-              <span className="block text-xs text-muted-foreground">
-                Nobody receives it until they say yes. Right for anything you would
-                hesitate to send unasked.
-              </span>
-            </span>
-          </label>
-        </RadioGroup>
+          options={[
+            {
+              value: "opt_in",
+              label: "Subscribed by default",
+              description:
+                "Everyone receives it unless they opt out. Right for things people expect, like product updates.",
+            },
+            {
+              value: "opt_out",
+              label: "Opt in required",
+              description:
+                "Nobody receives it until they say yes. Right for anything you would hesitate to send unasked.",
+            },
+          ]}
+        />
 
         <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
@@ -122,30 +116,24 @@ export function NewTopicButton() {
 
       <fieldset className="space-y-2">
         <legend className="mb-1.5 text-sm font-medium">Visibility</legend>
-        <RadioGroup
+        <RadioCards
+          aria-label="Visibility"
+          layout="list"
           value={visibility}
           onValueChange={(value) => setVisibility(value as "public" | "private")}
-          className="gap-2"
-        >
-          <label className="flex cursor-pointer items-center gap-2.5 rounded-md border p-2.5 hover:bg-muted/30">
-            <RadioGroupItem value="public" />
-            <span className="text-sm">
-              Public
-              <span className="ml-1.5 text-xs text-muted-foreground">
-                listed on every preference page
-              </span>
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-center gap-2.5 rounded-md border p-2.5 hover:bg-muted/30">
-            <RadioGroupItem value="private" />
-            <span className="text-sm">
-              Private
-              <span className="ml-1.5 text-xs text-muted-foreground">
-                only shown to people already subscribed
-              </span>
-            </span>
-          </label>
-        </RadioGroup>
+          options={[
+            {
+              value: "public",
+              label: "Public",
+              description: "Listed on every preference page.",
+            },
+            {
+              value: "private",
+              label: "Private",
+              description: "Only shown to people already subscribed.",
+            },
+          ]}
+        />
       </fieldset>
     </FormDialog>
   )

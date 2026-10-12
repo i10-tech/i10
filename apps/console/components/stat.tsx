@@ -1,6 +1,5 @@
 import Link from "next/link"
 import { cn } from "cn"
-import { PointerGlow } from "@repo/ui/components/pointer-glow"
 import { formatNumber } from "@/lib/format"
 
 /**
@@ -38,7 +37,7 @@ export function Stat({
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <p
         className={cn(
-          "tabular mt-1 text-2xl font-semibold tracking-tight",
+          "tabular mt-1 font-display text-2xl font-medium tracking-tight",
           tone === "danger" && "text-danger",
           tone === "warning" && "text-warning",
           tone === "success" && "text-success",
@@ -84,10 +83,10 @@ export function StatRow({ children }: { children: React.ReactNode }) {
      * divider. See @repo/ui/components/pointer-glow: it sets two CSS variables
      * and never calls setState, so following the cursor costs no React renders.
      */
-    <PointerGlow className="overflow-hidden rounded-2xl border">
+    <div className="overflow-hidden rounded-2xl border bg-card">
       <div className="grid grid-cols-2 divide-x divide-y md:grid-cols-3 lg:grid-cols-6">
         {children}
       </div>
-    </PointerGlow>
+    </div>
   )
 }

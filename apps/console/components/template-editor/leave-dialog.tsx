@@ -2,17 +2,11 @@
 
 import * as React from "react"
 import { LogOut, Redo2 } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { Kbd } from "@repo/ui/components/kbd"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { Kbd } from "@repo/ui/components/i10/kbd"
 import { KBD_ON_BUTTON } from "@/components/confirm-dialog"
 import { useOutcome } from "@/lib/outcome"
 
@@ -42,7 +36,6 @@ export function LeaveDialog({
   return (
     <Dialog open={open} onOpenChange={pending ? () => {} : onOpenChange}>
       <DialogContent
-        className="sm:max-w-md"
         onKeyDown={(event) => {
           if (pending) return
           if (event.key === "Backspace" && (event.metaKey || event.ctrlKey)) {
@@ -54,21 +47,17 @@ export function LeaveDialog({
             void outcome.run(onSave)
           }
         }}
+        title="Leave with unsaved changes?"
+        description="Your latest changes to this template have not been saved. Save them before you go, or leave them behind."
+        style={{ width: "min(calc(100vw - 2rem), 448px)" }}
       >
-        <DialogHeader>
-          <DialogTitle>Leave with unsaved changes?</DialogTitle>
-          <DialogDescription>
-            Your latest changes to this template have not been saved. Save them before
-            you go, or leave them behind.
-          </DialogDescription>
-        </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={onDiscard} disabled={pending}>
+          <Button variant="secondary" onClick={onDiscard} disabled={pending}>
             <LogOut />
             Leave without saving
             <Kbd>⌘⌫</Kbd>
           </Button>
-          <ActionButton
+          <StateButton
             onClick={() => void outcome.run(onSave)}
             state={outcome.state}
             pendingLabel="Saving"
@@ -78,7 +67,7 @@ export function LeaveDialog({
             <Kbd className={KBD_ON_BUTTON.default}>
               <Redo2 aria-hidden="true" className="size-2.5 rotate-180" />
             </Kbd>
-          </ActionButton>
+          </StateButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

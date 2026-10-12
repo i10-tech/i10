@@ -4,8 +4,9 @@ import {
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
-import { CopyField } from "@repo/ui/components/copy"
+} from "@repo/ui/components/i10/page"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
+import { WorkspaceGeneral } from "@/components/workspace-general"
 import { RenameWorkspace } from "@/components/rename-workspace"
 import { DeletionWarning } from "@/components/deletion-warning"
 import { PanelError } from "@/components/panel-error"
@@ -40,6 +41,15 @@ export default async function GeneralSettingsPage() {
   }
 
   const tenant = me.data.tenant
+
+  /*
+   * ⚠ DRAWN LIKE THE ACCOUNT PAGE WHEN CLERK IS HERE (2026-10-12): the
+   * workspace's logo and name in one card, the identifiers, and the delete
+   * button itself in the danger zone. The page below is the no-Clerk preview.
+   */
+  if (process.env.CLERK_PUBLISHABLE_KEY) {
+    return <WorkspaceGeneral tenant={tenant} billing={me.data.billing} />
+  }
 
   return (
     <div>

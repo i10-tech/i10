@@ -2,12 +2,12 @@
 
 import * as React from "react"
 import { MoreHorizontal } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@repo/ui/components/button/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from "@repo/ui/components/dropdown-menu"
+} from "@repo/ui/components/i10/menu"
 import { rowMenuClass } from "@/components/list/table"
 
 /**
@@ -30,18 +30,24 @@ import { rowMenuClass } from "@/components/list/table"
 export function RowMenu({
   label,
   children,
+  visible = false,
 }: {
   /** What the row is called - "acme.com", "production-api". */
   label: string
   children: React.ReactNode
+  /**
+   * Always shown, rather than on the row's hover. For lists outside a table
+   * - the account page's, which show their "⋯" all the time as Clerk's did.
+   */
+  visible?: boolean
 }) {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="icon-sm"
-          className={rowMenuClass}
+          size="sm"
+          className={visible ? "size-7" : rowMenuClass}
           aria-label={`Actions for ${label}`}
         >
           <MoreHorizontal />

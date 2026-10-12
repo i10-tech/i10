@@ -158,6 +158,15 @@ export function forgetAccount(email: string): void {
   forgetDevice(email)
 }
 
+/**
+ * Cards for accounts that no longer exist. Their device entries are already
+ * gone - the check that found them dropped those - so only the cards remain.
+ */
+export function dropAccounts(emails: readonly string[]): void {
+  const dead = new Set(emails.map((email) => email.toLowerCase()))
+  save(parse(readRaw()).filter((account) => !dead.has(account.email.toLowerCase())))
+}
+
 /*
  * ⚠ THE SNAPSHOT IS CACHED BY ITS RAW STRING. `useSyncExternalStore` compares
  * snapshots with `Object.is`, and parsing on every call returns a new array

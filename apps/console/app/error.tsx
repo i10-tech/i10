@@ -35,7 +35,7 @@ export default function RootError({
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
       <div className="space-y-1">
-        <h1 className="text-lg font-semibold tracking-tight">
+        <h1 className="text-lg font-medium tracking-tight">
           The dashboard could not load
         </h1>
         <p className="max-w-md text-sm text-muted-foreground">

@@ -120,6 +120,63 @@ html.dark {
   color: var(--foreground);
 }
 
+/*
+ * Arc's colour picker in each colour field (inspector-colors.tsx).
+ *
+ * ⚠ THE ROW BECOMES ARC'S TRIGGER, STARTING AT THE ROW'S LEFT EDGE. Arc's
+ * panel unfolds from the trigger's top-left corner and folds back into it;
+ * a trigger at the right of the row left no room to the right, and pinning
+ * the panel to the right broke that morph - it grew out of, and shrank back
+ * to, a point left of the trigger. So the row's own label is hidden (the
+ * trigger names the colour) and the trigger leads the row, where the panel
+ * has the inspector's width to open into.
+ *
+ * React Email's two native inputs stay in the DOM, to be typed into, but out
+ * of sight, and its bordered box is gone.
+ */
+.i10-inspector [data-re-inspector-prop-row]:has([data-re-inspector-color-control]) {
+  justify-content: flex-start;
+}
+.i10-inspector
+  [data-re-inspector-prop-row]:has([data-re-inspector-color-control])
+  > [data-re-inspector-label] {
+  display: none;
+}
+.i10-inspector [data-re-inspector-color-control] {
+  position: relative;
+  display: inline-flex;
+  height: auto;
+  align-items: center;
+  border: 0;
+  padding: 0;
+  background: none;
+}
+.i10-inspector [data-re-inspector-color-control] > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+/* `$=`, not `*=`: `__trigger` would also match Arc's `__triggerText`. */
+.i10-inspector-color [class$="__root"] {
+  --picker-width: 18rem;
+}
+.i10-inspector-color [class$="__trigger"],
+.i10-inspector-color [class$="__head"] {
+  height: 2.5rem;
+  gap: 0.625rem;
+  padding: 0.3125rem 0.875rem 0.3125rem 0.3125rem;
+}
+.i10-inspector-color [class$="__trigger"] {
+  border-radius: 1.25rem;
+  box-shadow: none;
+}
+.i10-inspector-color [class$="__chip"] {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
 /* ── The email canvas. ────────────────────────────────────────────────────── */
 
 /*

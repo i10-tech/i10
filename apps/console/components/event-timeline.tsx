@@ -3,6 +3,7 @@
 import * as React from "react"
 import { ChevronRight } from "lucide-react"
 import { StatusDot, describeStatus } from "@/components/status"
+import { JsonViewer } from "@repo/ui/components/json-viewer/json-viewer"
 import { cn } from "cn"
 import { Time } from "@/components/time"
 
@@ -147,9 +148,14 @@ export function EventTimeline({
                 </button>
 
                 {open === index && expandable && (
-                  <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted/40 p-2 font-mono text-2xs leading-relaxed whitespace-pre-wrap">
-                    {safeStringify(step.payload)}
-                  </pre>
+                  <JsonViewer
+                    data={step.payload}
+                    label={`${step.label ?? "Event"} payload`}
+                    rootName="payload"
+                    maxHeight={256}
+                    searchable={false}
+                    className="mt-2"
+                  />
                 )}
               </div>
             </div>
@@ -200,17 +206,4 @@ function foldEngagement(
       ? { ...row, payload: (row.payload as unknown[])[0] }
       : row,
   )
-}
-
-/**
- * ⚠ GUARDED, BECAUSE THE PAYLOAD IS SOMEBODY ELSE'S JSON. `JSON.stringify`
- * throws on a circular reference and on a BigInt; either would take the whole
- * detail page down over a field nobody reads.
- */
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value)
-  } catch {
-    return "(could not display this payload)"
-  }
 }

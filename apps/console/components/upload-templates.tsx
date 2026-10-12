@@ -1,29 +1,16 @@
 "use client"
 
 import * as React from "react"
+import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { FileCode2, FolderUp, Upload } from "lucide-react"
 import { cn } from "cn"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Badge } from "@repo/ui/components/badge"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@repo/ui/components/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Badge } from "@repo/ui/components/badge/badge"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent, DialogTrigger } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
 import { uploadTemplates, uploadTemplateVersion } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
@@ -58,7 +45,7 @@ export function UploadTemplatesButton() {
     <UploadDialog
       mode={{ kind: "folder" }}
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="secondary">
           <Upload />
           Upload
         </Button>
@@ -94,7 +81,7 @@ export function UploadVersionButton({
     <UploadDialog
       mode={{ kind: "version", templateId, name }}
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="secondary">
           <Upload />
           Upload new version
         </Button>
@@ -186,20 +173,19 @@ function UploadDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
-            {mode.kind === "version"
-              ? `Upload a new version of ${mode.name}`
-              : "Upload templates"}
-          </DialogTitle>
-          <DialogDescription>
-            {mode.kind === "version"
-              ? "The template file and anything it imports. It goes live as soon as it is accepted, and the version before it stays one click away."
-              : "React Email .tsx files, or a folder of them. Each template goes live as soon as it is accepted; shared components are picked up from the imports."}
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent
+        title={
+          mode.kind === "version"
+            ? `Upload a new version of ${mode.name}`
+            : "Upload templates"
+        }
+        description={
+          mode.kind === "version"
+            ? "The template file and anything it imports. It goes live as soon as it is accepted, and the version before it stays one click away."
+            : "React Email .tsx files, or a folder of them. Each template goes live as soon as it is accepted; shared components are picked up from the imports."
+        }
+        style={{ width: "min(calc(100vw - 2rem), 576px)" }}
+      >
         {results ? (
           <Results results={results} problems={problems} />
         ) : (
@@ -255,20 +241,14 @@ function UploadDialog({
             )}
 
             {mode.kind === "version" && entries.length > 1 && (
-              <div className="space-y-1.5">
-                <p className="text-xs text-muted-foreground">The template file</p>
-                <Select value={entry} onValueChange={setEntry}>
-                  <SelectTrigger className="w-full font-mono text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {entries.map((path) => (
-                      <SelectItem key={path} value={path} className="font-mono text-xs">
-                        {path}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div>
+                <MorphSelect
+                  label="The template file"
+                  value={entry}
+                  onValueChange={setEntry}
+                  items={entries.map((path) => ({ value: path, label: path }))}
+                  panelWidth={360}
+                />
               </div>
             )}
 
@@ -291,7 +271,7 @@ function UploadDialog({
               <Button variant="ghost" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <ActionButton
+              <StateButton
                 onClick={submit}
                 state={uploading.state}
                 onReset={uploading.reset}
@@ -307,7 +287,7 @@ function UploadDialog({
               >
                 <Upload />
                 Upload
-              </ActionButton>
+              </StateButton>
             </>
           )}
         </DialogFooter>
@@ -333,7 +313,7 @@ function PickButton({
       <Button
         type="button"
         size="sm"
-        variant="outline"
+        variant="secondary"
         onClick={() => input.current?.click()}
       >
         {children}
@@ -362,13 +342,13 @@ function PickButton({
 
 const OUTCOME: Record<
   TemplateUploadOutcome["outcome"],
-  { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
+  { label: string; tone: "neutral" | "success" | "info" | "warning" | "danger" }
 > = {
-  created: { label: "Created", variant: "default" },
-  versioned: { label: "New version", variant: "default" },
-  unchanged: { label: "Unchanged", variant: "secondary" },
-  refused: { label: "Not accepted", variant: "destructive" },
-  unavailable: { label: "Try again", variant: "outline" },
+  created: { label: "Created", tone: "success" },
+  versioned: { label: "New version", tone: "info" },
+  unchanged: { label: "Unchanged", tone: "neutral" },
+  refused: { label: "Not accepted", tone: "danger" },
+  unavailable: { label: "Try again", tone: "warning" },
 }
 
 function Results({
@@ -405,9 +385,7 @@ function Results({
                   v{r.version}
                 </span>
               )}
-              <Badge variant={OUTCOME[r.outcome].variant}>
-                {OUTCOME[r.outcome].label}
-              </Badge>
+              <Badge tone={OUTCOME[r.outcome].tone}>{OUTCOME[r.outcome].label}</Badge>
             </div>
             {r.outcome === "refused" && <ProblemList problems={r.problems} />}
             {r.outcome === "unavailable" && (

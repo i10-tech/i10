@@ -1,82 +1,47 @@
 "use client"
 
-import { useTransition } from "react"
+import { useState, useTransition } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { motion } from "motion/react"
-import { cn } from "cn"
+import SegmentedControl from "@repo/ui/components/segmented-control/segmented-control"
 
-/**
- * 7 / 14 / 30 / 90 days.
- *
- * ⚠ THE RANGE LIVES IN THE URL, NOT IN COMPONENT STATE, AND THAT IS THE WHOLE
- * DESIGN. The page is a server component that queries by `days`; holding the
- * range in React would mean fetching on the client, which means a loading
- * spinner where there is currently server-rendered HTML. In the URL it is also
- * shareable, bookmarkable and survives a reload - somebody looking at a bad
- * week can send the link.
- *
- * ⚠ AND IT PRESERVES THE OTHER PARAMETERS. Building the query from scratch
- * would silently drop the status filter and the search term the moment somebody
- * changed the date range, which is the exact combination they are most likely
- * to want.
- */
 const OPTIONS = [7, 14, 30, 90] as const
 
+/**
+ * The date range a page is narrowed to, as `?days=`. Arc's segmented control:
+ * a view of the same data, so the pill slides at once and the page follows
+ * when the server has the new range.
+ */
 export function RangePicker({ value }: { value: number }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [pending, start] = useTransition()
+  const [chosen, setChosen] = useState(value)
+  const [seen, setSeen] = useState(value)
+  if (value !== seen) {
+    setSeen(value)
+    setChosen(value)
+  }
 
   function select(days: number) {
+    setChosen(days)
     const next = new URLSearchParams(searchParams.toString())
     next.set("days", String(days))
-    // ⚠ THE CURSOR GOES, FOR THE SAME REASON IT DOES IN `EmailFilters`. A
-    // cursor points into the PREVIOUS result set; carrying one across a range
-    // change starts the new list part-way down, so a fresh view silently begins
-    // in the middle and reads as missing rows. The overview has no cursor today
-    // - this is here so that the first paginated page to reuse this control
-    // does not have to rediscover the rule.
     next.delete("cursor")
-    // ⚠ `scroll: false`, because this is a filter and not a navigation. Jumping
-    // to the top of the page when somebody changes the range moves the chart
-    // they were looking at out from under the cursor.
     start(() => router.push(`${pathname}?${next.toString()}`, { scroll: false }))
   }
 
   return (
-    <div
-      className={cn(
-        "inline-flex h-9 items-center gap-0.5 rounded-xl border p-0.5 transition-opacity",
-        pending && "opacity-70",
-      )}
-      role="group"
-      aria-label="Date range"
-      aria-busy={pending || undefined}
-    >
-      {OPTIONS.map((days) => (
-        <button
-          key={days}
-          type="button"
-          onClick={() => select(days)}
-          aria-pressed={days === value}
-          className={cn(
-            "relative h-8 cursor-pointer rounded-lg px-2.5 text-xs font-medium transition-colors",
-            days === value
-              ? "text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {days === value && (
-            <motion.span
-              layoutId="range-picker-active"
-              className="absolute inset-0 rounded-lg bg-muted shadow-xs ring-1 ring-border"
-              transition={{ type: "spring", stiffness: 500, damping: 38 }}
-            />
-          )}
-          <span className="relative">{days}d</span>
-        </button>
-      ))}
+    <div aria-busy={pending || undefined}>
+      <SegmentedControl
+        label="Date range"
+        value={String(chosen)}
+        onValueChange={(v) => select(Number(v))}
+        options={OPTIONS.map((days) => ({
+          value: String(days),
+          label: `${days} days`,
+        }))}
+      />
     </div>
   )
 }

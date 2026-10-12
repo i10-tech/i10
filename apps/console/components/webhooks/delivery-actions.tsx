@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import { Eraser, RotateCcw } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Button } from "@repo/ui/components/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@repo/ui/components/tooltip"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Button } from "@repo/ui/components/button/button"
+import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { expungeWebhookPayload, resendWebhookDelivery } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
@@ -43,7 +43,7 @@ export function DeliveryActions({
       : null
 
   const resendButton = (
-    <ActionButton
+    <StateButton
       size="sm"
       state={resend.state}
       onReset={resend.reset}
@@ -65,23 +65,20 @@ export function DeliveryActions({
     >
       <RotateCcw />
       Resend
-    </ActionButton>
+    </StateButton>
   )
 
   return (
     <>
       {polling ? null : why ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={0}>{resendButton}</span>
-          </TooltipTrigger>
-          <TooltipContent>{why}</TooltipContent>
+        <Tooltip content={why}>
+          <span tabIndex={0}>{resendButton}</span>
         </Tooltip>
       ) : (
         resendButton
       )}
       {!expunged && !pending && (
-        <Button size="sm" variant="outline" onClick={() => setExpunging(true)}>
+        <Button size="sm" variant="secondary" onClick={() => setExpunging(true)}>
           <Eraser />
           <span className="hidden sm:inline">Expunge payload</span>
         </Button>

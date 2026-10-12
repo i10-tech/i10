@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { BackButton } from "@/components/back-button"
 import { notFound, redirect } from "next/navigation"
-import { CopyField } from "@repo/ui/components/copy"
+import { CopyField } from "@repo/ui/components/i10/copy-field"
 import {
   Page,
   PageActions,
@@ -9,7 +9,7 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { TemplateFiles } from "@/components/template-files"
 import { TemplatePreviewPanel } from "@/components/template-preview"
 import { SourceBadge } from "@/components/template-source"

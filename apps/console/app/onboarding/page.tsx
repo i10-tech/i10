@@ -1,9 +1,10 @@
 import type { Metadata } from "next"
 import { cookies } from "next/headers"
 import Link from "next/link"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { Onboarding } from "@/components/onboarding/onboarding"
 import { Wordmark } from "@/components/wordmark"
+import { JoinSuggestions } from "@/components/join-suggestions"
 import { tryApi } from "@/lib/api"
 import { DRAFT_COOKIES, draftFor } from "@/lib/add-domain-draft"
 import { restoreDraft } from "@/lib/add-domain-restore"
@@ -92,9 +93,9 @@ export default async function OnboardingPage({
             ? "Your workspace is still being created. Give it a moment and reload."
             : me.error.message}
         </p>
-        <Button variant="outline" asChild>
-          <Link href="/onboarding">Try again</Link>
-        </Button>
+        <ButtonLink href="/onboarding" variant="secondary">
+          Try again
+        </ButtonLink>
       </main>
     )
   }
@@ -162,12 +163,20 @@ export default async function OnboardingPage({
          * and applies the cookie on the way through. `next/link` is for pages;
          * this is not one.
          */}
-        <Button variant="ghost" size="sm" asChild>
-          <a href="/onboarding/skip">Skip to the dashboard</a>
-        </Button>
+        <ButtonLink href="/onboarding/skip" variant="ghost" size="sm" native>
+          Skip to the dashboard
+        </ButtonLink>
       </header>
 
       <ArrivalQuery names={[ARRIVAL.checkout, ARRIVAL.published]} />
+      {/*
+       * ⚠ FIRST, ABOVE SET-UP (2026-10-12). Somebody who signed up with an
+       * @acme.com address may be setting up a workspace they do not need:
+       * Acme's is already here, one request away.
+       */}
+      {process.env.CLERK_PUBLISHABLE_KEY && (
+        <JoinSuggestions className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
+      )}
       <Onboarding
         state={me.data.onboarding}
         workspaceName={me.data.tenant?.name ?? ""}

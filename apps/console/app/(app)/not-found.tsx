@@ -1,5 +1,4 @@
-import Link from "next/link"
-import { Button } from "@repo/ui/components/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
 
 /**
  * ⚠ THE COPY IS DELIBERATELY AMBIGUOUS ABOUT WHY, AND THAT IS A PRIVACY
@@ -13,16 +12,14 @@ export default function NotFound() {
     <div className="flex min-h-[60dvh] flex-col items-center justify-center gap-4 px-6 text-center">
       <p className="font-mono text-sm text-muted-foreground">404</p>
       <div className="space-y-1">
-        <h1 className="text-lg font-semibold tracking-tight">Not found</h1>
+        <h1 className="text-lg font-medium tracking-tight">Not found</h1>
         <p className="max-w-md text-sm text-muted-foreground">
           That page does not exist, or it belongs to a different workspace. If you were
           switching organizations, the thing you were looking at may live in the other
           one.
         </p>
       </div>
-      <Button asChild>
-        <Link href="/">Back to the overview</Link>
-      </Button>
+      <ButtonLink href="/">Back to the overview</ButtonLink>
     </div>
   )
 }

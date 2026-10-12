@@ -3,9 +3,13 @@
 import * as React from "react"
 import Link from "next/link"
 import { ArrowUpRight } from "lucide-react"
-import { Meter } from "@repo/ui/components/meter"
-import { Popover, PopoverContent, PopoverTrigger } from "@repo/ui/components/popover"
-import { UsageRing } from "@repo/ui/components/usage-ring"
+import { Progress } from "@repo/ui/components/progress/progress"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@repo/ui/components/popover/popover"
+import { UsageRing } from "@repo/ui/components/i10/usage-ring"
 import { cn } from "cn"
 
 /** One limit, already worded by the server (see usage-rail.tsx). */
@@ -89,12 +93,7 @@ export function UsageRingButton({
                 </span>
               </div>
               {row.limit !== null && (
-                <Meter
-                  used={row.used}
-                  limit={row.limit}
-                  overage={row.overage}
-                  className="h-1"
-                />
+                <Progress value={row.used} max={row.limit} aria-label={row.label} />
               )}
               {row.detail && (
                 <p className="text-2xs text-muted-foreground">{row.detail}</p>

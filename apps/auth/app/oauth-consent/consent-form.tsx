@@ -2,9 +2,10 @@
 
 import Link from "next/link"
 import { useAuth, useClerk, useOAuthConsent, useUser } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
-import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/field"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
+import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
+import { Field, FieldDescription, FieldGroup } from "@repo/ui/components/i10/field"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
 
 /*
  * The consent screen, as a custom flow.
@@ -50,19 +51,24 @@ export function ConsentForm({
   // A link that arrives with no client_id is not an authorization request.
   if (!clientId) {
     return (
-      <Notice title="That link is not complete">
-        This page finishes signing in to another application, and the request it needs
-        is missing. Start again from the application that sent you here.
-      </Notice>
+      <StepStage step="incomplete">
+        <Notice title="That link is not complete">
+          This page finishes signing in to another application, and the request it needs
+          is missing. Start again from the application that sent you here.
+        </Notice>
+      </StepStage>
     )
   }
 
   if (!userLoaded || isLoading || !clerk.loaded) {
     return (
-      <div className="flex items-center justify-center gap-2 py-12">
-        <Spinner aria-hidden="true" aria-label={undefined} />
-        <p className="text-muted-foreground text-sm">Loading…</p>
-      </div>
+      <StepStage step="loading">
+        <div className="flex items-center justify-center gap-2 py-12">
+          <TextShimmer as="p" className="text-muted-foreground text-sm">
+            Loading
+          </TextShimmer>
+        </div>
+      </StepStage>
     )
   }
 
@@ -76,27 +82,31 @@ export function ConsentForm({
    */
   if (!isSignedIn) {
     return (
-      <Notice title="Sign in to continue">
-        <p>
-          You need to be signed in to i10 before you can give another application access
-          to your account.
-        </p>
-        <Link
-          href={`/sign-in?redirect_url=${encodeURIComponent(window.location.href)}`}
-          className="underline underline-offset-4"
-        >
-          Sign in
-        </Link>
-      </Notice>
+      <StepStage step="signed-out">
+        <Notice title="Sign in to continue">
+          <p>
+            You need to be signed in to i10 before you can give another application
+            access to your account.
+          </p>
+          <Link
+            href={`/sign-in?redirect_url=${encodeURIComponent(window.location.href)}`}
+            className="underline underline-offset-4"
+          >
+            Sign in
+          </Link>
+        </Notice>
+      </StepStage>
     )
   }
 
   if (error || !data) {
     return (
-      <Notice title="We could not load this request">
-        {error?.errors?.[0]?.longMessage ??
-          "Something went wrong. Start again from the application that sent you here."}
-      </Notice>
+      <StepStage step="failed">
+        <Notice title="We could not load this request">
+          {error?.errors?.[0]?.longMessage ??
+            "Something went wrong. Start again from the application that sent you here."}
+        </Notice>
+      </StepStage>
     )
   }
 
@@ -123,100 +133,109 @@ export function ConsentForm({
    */
   const includeOrganization = permissions.some((s) => s.scope === "user:org:read")
 
+  /*
+   * ⚠ EVERY STATE OF THIS PAGE RENDERS IN THE SAME `StepStage`, at the same
+   * place in the tree, so "Loading" giving way to the request is one card
+   * changing its contents on Arc's motion rather than a cut (2026-10-12).
+   */
   return (
-    <form
-      method="POST"
-      action={clerk.oauthApplication.buildConsentActionUrl({ clientId })}
-    >
-      <FieldGroup>
-        <div className="flex flex-col items-center gap-3 text-center">
-          {data.oauthApplicationLogoUrl ? (
-            /*
-             * ⚠ A PLAIN <img> - the application's own logo, on whatever host
-             * uploaded it. Routing a third party's arbitrary image through the
-             * Next optimiser would mean allowing arbitrary remote patterns,
-             * which is a far larger surface than one 48px mark.
-             */
-            // eslint-disable-next-line @next/next/no-img-element -- see above
-            <img
-              src={data.oauthApplicationLogoUrl}
-              alt=""
-              aria-hidden="true"
-              className="size-12 rounded-lg"
-            />
+    <StepStage step="request">
+      <form
+        method="POST"
+        action={clerk.oauthApplication.buildConsentActionUrl({ clientId })}
+      >
+        <FieldGroup>
+          <div className="flex flex-col items-center gap-3 text-center">
+            {data.oauthApplicationLogoUrl ? (
+              /*
+               * ⚠ A PLAIN <img> - the application's own logo, on whatever host
+               * uploaded it. Routing a third party's arbitrary image through the
+               * Next optimiser would mean allowing arbitrary remote patterns,
+               * which is a far larger surface than one 48px mark.
+               */
+              // eslint-disable-next-line @next/next/no-img-element -- see above
+              <img
+                src={data.oauthApplicationLogoUrl}
+                alt=""
+                aria-hidden="true"
+                className="size-12 rounded-lg"
+              />
+            ) : null}
+            <h1 className="text-2xl font-medium text-balance">
+              {data.oauthApplicationName} wants access to your account
+            </h1>
+            <p className="text-muted-foreground text-sm text-balance">
+              Signed in as {user?.primaryEmailAddress?.emailAddress ?? "your account"}.
+            </p>
+          </div>
+
+          {permissions.length > 0 ? (
+            <Field>
+              <p className="text-sm font-medium">It will be able to:</p>
+              <ul className="text-muted-foreground flex list-disc flex-col gap-2 pl-5 text-sm">
+                {permissions.map((permission) => (
+                  <li key={permission.scope}>
+                    {permission.description ?? permission.scope}
+                  </li>
+                ))}
+              </ul>
+            </Field>
           ) : null}
-          <h1 className="text-2xl font-bold text-balance">
-            {data.oauthApplicationName} wants access to your account
-          </h1>
-          <p className="text-muted-foreground text-sm text-balance">
-            Signed in as {user?.primaryEmailAddress?.emailAddress ?? "your account"}.
-          </p>
-        </div>
 
-        {permissions.length > 0 ? (
-          <Field>
-            <p className="text-sm font-medium">It will be able to:</p>
-            <ul className="text-muted-foreground flex list-disc flex-col gap-2 pl-5 text-sm">
-              {permissions.map((permission) => (
-                <li key={permission.scope}>
-                  {permission.description ?? permission.scope}
-                </li>
-              ))}
-            </ul>
-          </Field>
-        ) : null}
+          {wantsOfflineAccess ? (
+            <FieldDescription>
+              It will keep this access until you revoke it, including while you are not
+              using i10.
+            </FieldDescription>
+          ) : null}
 
-        {wantsOfflineAccess ? (
+          {/*
+           * ⚠ THE DESTINATION IS SHOWN, AND ITS ABSENCE IS SHOWN TOO. This is the
+           * one fact that makes the screen safe to act on: an application is only
+           * as trustworthy as where it sends the code. `redirectDomain` is null
+           * when the URI is not registered to the application, or points at an IP
+           * or localhost - so a missing domain is exactly when somebody should be
+           * told, rather than when the line should quietly disappear.
+           */}
           <FieldDescription>
-            It will keep this access until you revoke it, including while you are not
-            using i10.
+            {data.redirectDomain ? (
+              <>
+                You will be returned to{" "}
+                <span className="text-foreground font-medium">
+                  {data.redirectDomain}
+                </span>
+                .
+              </>
+            ) : (
+              "We could not confirm where this will send you. Only continue if you trust this application."
+            )}
           </FieldDescription>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* ⚠ `xl` FOR BOTH, like every other decision in this app. */}
+            <Button
+              type="submit"
+              name="consented"
+              value="false"
+              variant="secondary"
+              size="lg"
+            >
+              Deny
+            </Button>
+            <Button type="submit" name="consented" value="true" size="lg">
+              Allow
+            </Button>
+          </div>
+        </FieldGroup>
+
+        {forwarded.map(([name, value]) => (
+          <input key={`${name}:${value}`} type="hidden" name={name} value={value} />
+        ))}
+        {includeOrganization && orgId ? (
+          <input type="hidden" name="organization_id" value={orgId} />
         ) : null}
-
-        {/*
-         * ⚠ THE DESTINATION IS SHOWN, AND ITS ABSENCE IS SHOWN TOO. This is the
-         * one fact that makes the screen safe to act on: an application is only
-         * as trustworthy as where it sends the code. `redirectDomain` is null
-         * when the URI is not registered to the application, or points at an IP
-         * or localhost - so a missing domain is exactly when somebody should be
-         * told, rather than when the line should quietly disappear.
-         */}
-        <FieldDescription>
-          {data.redirectDomain ? (
-            <>
-              You will be returned to{" "}
-              <span className="text-foreground font-medium">{data.redirectDomain}</span>
-              .
-            </>
-          ) : (
-            "We could not confirm where this will send you. Only continue if you trust this application."
-          )}
-        </FieldDescription>
-
-        <div className="grid grid-cols-2 gap-3">
-          {/* ⚠ `xl` FOR BOTH, like every other decision in this app. */}
-          <Button
-            type="submit"
-            name="consented"
-            value="false"
-            variant="outline"
-            size="xl"
-          >
-            Deny
-          </Button>
-          <Button type="submit" name="consented" value="true" size="xl">
-            Allow
-          </Button>
-        </div>
-      </FieldGroup>
-
-      {forwarded.map(([name, value]) => (
-        <input key={`${name}:${value}`} type="hidden" name={name} value={value} />
-      ))}
-      {includeOrganization && orgId ? (
-        <input type="hidden" name="organization_id" value={orgId} />
-      ) : null}
-    </form>
+      </form>
+    </StepStage>
   )
 }
 
@@ -225,7 +244,7 @@ function Notice({ title, children }: { title: string; children: React.ReactNode 
   return (
     <FieldGroup>
       <div className="flex flex-col items-center gap-2 text-center">
-        <h1 className="text-2xl font-bold text-balance">{title}</h1>
+        <h1 className="text-2xl font-medium text-balance">{title}</h1>
         <div className="text-muted-foreground flex flex-col gap-2 text-sm text-balance">
           {children}
         </div>

@@ -3,7 +3,7 @@ import {
   SectionContent,
   SectionDescription,
   SectionTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
 import { StatusDot } from "@/components/status"
 import { Time } from "@/components/time"
 import type { WebhookHealthEvent } from "@/lib/types"

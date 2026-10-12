@@ -3,15 +3,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@repo/ui/components/i10/toasts"
 import { useAuth, useSignIn } from "@clerk/nextjs"
-import { Button } from "@repo/ui/components/button"
-import { Field, FieldGroup, FieldSeparator } from "@repo/ui/components/field"
-import { EmailInput } from "@repo/ui/components/email-input"
+import { Button } from "@repo/ui/components/button/button"
+import { Field, FieldGroup, FieldSeparator } from "@repo/ui/components/i10/field"
+import { EmailInput } from "@repo/ui/components/i10/email-input"
 import { emailProblem } from "@repo/ui/checks"
-import { Spinner } from "@repo/ui/components/spinner"
-import { StepStage } from "@repo/ui/components/step-stage"
-import { PasswordInput } from "../_components/password-input"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
+import { PasswordInput } from "@repo/ui/components/i10/password-input"
 import { OAuthButtons, useSsoStart } from "../_components/oauth-buttons"
 import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
@@ -28,8 +27,8 @@ import {
 import { installAbortableWebAuthn, onConditionalArmed } from "../_lib/webauthn"
 import { useResumable } from "../_lib/resume"
 import { LastUsedBadge } from "../_components/last-used-badge"
-import { PasskeyCue } from "../_components/passkey-cue"
-import { PasskeyIcon } from "../_components/provider-icons"
+import { PasskeyCue } from "@repo/ui/components/i10/passkey-cue"
+import { PasskeyIcon } from "@repo/ui/components/i10/provider-icons"
 import type { SsoProvider } from "../_lib/providers"
 
 /*
@@ -777,7 +776,7 @@ export function SignInForm({
        * covers the page while the operating system's own dialog is open - see
        * _components/passkey-cue.tsx, which came off the deleted `/passkey` page.
        */}
-      {busy === "passkey" ? <PasskeyCue /> : null}
+      <PasskeyCue open={busy === "passkey"} />
 
       <StepStage step={stage} direction={direction}>
         {stage === "identifier" ? (
@@ -799,7 +798,7 @@ export function SignInForm({
                * different heights, so the header moved when the lookup did.
                */}
               <div className="flex flex-col items-center gap-1 text-center">
-                <h1 className="text-2xl font-bold">
+                <h1 className="text-2xl font-medium">
                   {onUnknownIdentifier ? "Log in or sign up" : "Login to your account"}
                 </h1>
                 {!onUnknownIdentifier && (
@@ -830,6 +829,7 @@ export function SignInForm({
               <div className="relative">
                 <EmailInput
                   id="email"
+                  data-carry="email"
                   readOnly={held}
                   /*
                    * ⚠ A TAP HAS TO BE THE THING THAT FOCUSES THE BOX, OR iOS
@@ -878,18 +878,12 @@ export function SignInForm({
               </div>
 
               <Button
+                loading={busy === "identifier"}
                 type="submit"
-                size="xl"
+                size="lg"
                 disabled={!signIn || locked || identifier.trim().length === 0}
               >
-                {busy === "identifier" ? (
-                  <>
-                    <Spinner aria-hidden="true" aria-label={undefined} />
-                    Checking…
-                  </>
-                ) : (
-                  "Continue"
-                )}
+                Continue
               </Button>
 
               <FieldSeparator>Or continue with</FieldSeparator>
@@ -922,9 +916,10 @@ export function SignInForm({
                  * button on the page that does nothing for a first-time visitor.
                  */}
                 <Button
+                  loading={busy === "passkey"}
                   type="button"
-                  variant="outline"
-                  size="xl"
+                  variant="secondary"
+                  size="lg"
                   // The positioning context for the chip below - see
                   // oauth-buttons, which carries the same class for the same
                   // reason.
@@ -932,28 +927,19 @@ export function SignInForm({
                   onClick={() => void provePasskey()}
                   disabled={!signIn || locked}
                 >
-                  {busy === "passkey" ? (
-                    <>
-                      <Spinner aria-hidden="true" aria-label={undefined} />
-                      Waiting for your device…
-                    </>
-                  ) : (
-                    <>
-                      <PasskeyIcon aria-hidden="true" />
-                      Continue with Passkey
-                      {/*
-                       * ⚠ THE PASSKEY PATH RECORDS ITSELF NOW, so it can carry
-                       * the badge like every other method. `provePasskey` calls
-                       * `markSignInAttempt("passkey")` on success - without
-                       * that this button was the one way in that never became
-                       * "last used", which is the worst one to forget: somebody
-                       * who signs in with a passkey has no password to fall
-                       * back on and most needs reminding which button it was.
-                       */}
-                      {lastUsed === "passkey" && (
-                        <LastUsedBadge className="absolute end-4 top-1/2 -translate-y-1/2" />
-                      )}
-                    </>
+                  <PasskeyIcon aria-hidden="true" />
+                  Continue with Passkey
+                  {/*
+                   * ⚠ THE PASSKEY PATH RECORDS ITSELF NOW, so it can carry
+                   * the badge like every other method. `provePasskey` calls
+                   * `markSignInAttempt("passkey")` on success - without
+                   * that this button was the one way in that never became
+                   * "last used", which is the worst one to forget: somebody
+                   * who signs in with a passkey has no password to fall
+                   * back on and most needs reminding which button it was.
+                   */}
+                  {lastUsed === "passkey" && (
+                    <LastUsedBadge className="absolute end-4 top-1/2 -translate-y-1/2" />
                   )}
                 </Button>
               </Field>
@@ -971,7 +957,7 @@ export function SignInForm({
           <form className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
             <FieldGroup>
               <div className="flex flex-col items-center gap-2 text-center">
-                <h1 className="text-2xl font-bold">Enter your password</h1>
+                <h1 className="text-2xl font-medium">Enter your password</h1>
                 {/*
                  * ⚠ THE ADDRESS IS A BUTTON, NOT A LINE OF TEXT. Somebody who
                  * mistyped their email on the previous step has no other way
@@ -986,7 +972,8 @@ export function SignInForm({
                   disabled={locked}
                   className="max-w-full truncate rounded-pill border px-3 py-1 text-xs text-muted-foreground transition-colors duration-(--duration-instant) hover:bg-accent hover:text-foreground disabled:opacity-50"
                 >
-                  {identifier} · Change
+                  {/* ⚠ THE ADDRESS TYPED ONE STEP AGO TRAVELS HERE - see `carryBetween`. */}
+                  <span data-carry="email">{identifier}</span> · Change
                 </button>
               </div>
 
@@ -1041,21 +1028,13 @@ export function SignInForm({
                * arriving next to a password field invites "last used… what,
                * this password?", which is not what it records.
                */}
-              <Button type="submit" size="xl" disabled={!signIn || locked}>
-                {busy === "password" ? (
-                  <>
-                    {/*
-                     * ⚠ `aria-hidden`, AND THE LABEL CARRIES THE STATE. The
-                     * Spinner ships with `role="status"`; leaving that on next to
-                     * text that already says "Signing in…" makes a screen reader
-                     * announce the same thing twice.
-                     */}
-                    <Spinner aria-hidden="true" aria-label={undefined} />
-                    Signing in…
-                  </>
-                ) : (
-                  "Login"
-                )}
+              <Button
+                type="submit"
+                size="lg"
+                loading={busy === "password"}
+                disabled={!signIn || locked}
+              >
+                Login
               </Button>
 
               {/*
@@ -1067,8 +1046,8 @@ export function SignInForm({
               {accountHasPasskey && (
                 <Button
                   type="button"
-                  variant="outline"
-                  size="xl"
+                  variant="secondary"
+                  size="lg"
                   onClick={() => void passkeyFirst(true)}
                   disabled={!signIn || locked}
                 >

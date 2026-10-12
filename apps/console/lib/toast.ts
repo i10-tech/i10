@@ -1,6 +1,9 @@
 "use client"
 
-import { toast, type ExternalToast } from "sonner"
+import {
+  toast,
+  type ToastDetail as ExternalToast,
+} from "@repo/ui/components/i10/toasts"
 
 /**
  * Every failure the console shows a person, said the same way.

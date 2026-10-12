@@ -1,4 +1,4 @@
-import { Badge } from "@repo/ui/components/badge"
+import { Badge } from "@repo/ui/components/badge/badge"
 import {
   Page,
   PageActions,
@@ -7,7 +7,8 @@ import {
   PageHeader,
   PageHeaderRow,
   PageTitle,
-} from "@repo/ui/components/page"
+} from "@repo/ui/components/i10/page"
+import { PAGE_COPY } from "@/lib/page-copy"
 import { GithubPanel } from "@/components/github-panel"
 import { TemplateLibrary } from "@/components/templates/library"
 import { NewTemplateMenu } from "@/components/templates/new-menu"
@@ -48,18 +49,14 @@ export async function TemplatesScreen({ folderId }: { folderId: string | null })
     <Page>
       <PageHeader>
         <PageHeaderRow>
-          <PageTitle>Templates</PageTitle>
+          <PageTitle>{PAGE_COPY.templates.title}</PageTitle>
           <PageActions>
             <ApiButton snippet={SNIPPETS.templates} />
             <NewTemplateMenu folderId={folderId} />
           </PageActions>
         </PageHeaderRow>
         {folderId === null && (
-          <PageDescription>
-            Write emails in the editor or upload React Email files, then send them by id
-            or alias. Nothing changes what is going out until it is published, and any
-            earlier version can be made live again.
-          </PageDescription>
+          <PageDescription>{PAGE_COPY.templates.description}</PageDescription>
         )}
       </PageHeader>
 
@@ -94,13 +91,13 @@ export async function TemplatesScreen({ folderId }: { folderId: string | null })
 
 const STATUS: Record<
   TrustedTemplateRow["status"],
-  { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
+  { label: string; tone: "neutral" | "success" | "info" | "warning" | "danger" }
 > = {
-  pending: { label: "Waiting for review", variant: "outline" },
-  approved: { label: "Approved", variant: "default" },
-  rejected: { label: "Not approved", variant: "secondary" },
-  revoked: { label: "Approval withdrawn", variant: "destructive" },
-  withdrawn: { label: "Withdrawn", variant: "secondary" },
+  pending: { label: "Waiting for review", tone: "neutral" },
+  approved: { label: "Approved", tone: "success" },
+  rejected: { label: "Not approved", tone: "warning" },
+  revoked: { label: "Approval withdrawn", tone: "danger" },
+  withdrawn: { label: "Withdrawn", tone: "neutral" },
 }
 
 /**
@@ -157,7 +154,7 @@ function ReviewedTemplates({
                   {t.decision_reason ? ` - ${t.decision_reason}` : ""}
                 </p>
               </div>
-              <Badge variant={STATUS[t.status].variant}>{STATUS[t.status].label}</Badge>
+              <Badge tone={STATUS[t.status].tone}>{STATUS[t.status].label}</Badge>
               {t.status === "approved" && (
                 <span className="tabular shrink-0 font-mono text-2xs text-muted-foreground">
                   {t.matched.toLocaleString("en")} matched

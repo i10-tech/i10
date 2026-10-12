@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { ImageOff, Image as ImageIcon } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
+import { Button } from "@repo/ui/components/button/button"
 import { cn } from "cn"
 
 /**
@@ -92,7 +92,7 @@ export function EmailFrame({
       {hasRemote && (
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           className="absolute top-2 right-2 bg-background/90 backdrop-blur-sm"
           onClick={() => setRemote((on) => !on)}

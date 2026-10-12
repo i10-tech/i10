@@ -15,9 +15,10 @@ import {
   Send,
   ShieldCheck,
 } from "lucide-react"
-import { Button } from "@repo/ui/components/button"
-import { FloatingInput } from "@repo/ui/components/floating-field"
-import { Spinner } from "@repo/ui/components/spinner"
+import { Button } from "@repo/ui/components/button/button"
+import { ButtonLink } from "@repo/ui/components/i10/button-link"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { Stepper } from "@repo/ui/components/stepper/stepper"
 import { cn } from "cn"
 import {
   AddDomainSteps,
@@ -239,16 +240,20 @@ export function Onboarding({
                 plan ? "max-w-5xl" : "max-w-3xl",
               )}
             >
-              <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-                Step {index + 1} of {STEPS.length}
-              </p>
-              <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
+              <h1 className="font-display text-3xl font-medium tracking-[-0.03em]">
                 Set up i10
               </h1>
               <p className="mt-2 max-w-lg text-sm text-muted-foreground">
                 Name your workspace, add the domain you send from, verify it, and send
                 your first email. Nothing here is permanent.
               </p>
+              <Stepper
+                className="mt-6"
+                label="Set-up progress"
+                current={index}
+                details="current"
+                steps={STEPS.map((step) => ({ id: step.id, label: step.label }))}
+              />
 
               <LayoutGroup>
                 <StepRail className="mt-10" follow>
@@ -263,7 +268,9 @@ export function Onboarding({
                     summary={
                       <Answer onChange={() => go("workspace")}>
                         <Building2 className="size-4 text-muted-foreground" />
-                        <span className="truncate">{name || workspaceName}</span>
+                        <span data-carry="value" className="truncate">
+                          {name || workspaceName}
+                        </span>
                       </Answer>
                     }
                   >
@@ -380,7 +387,6 @@ export function Onboarding({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="rounded-full"
                     onClick={() => go(STEPS[index + 1]!.id)}
                   >
                     Skip this step
@@ -448,13 +454,7 @@ function Answer({
       <span className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-current/10 bg-background/40 px-3 py-2 text-sm">
         {children}
       </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="rounded-full"
-        onClick={onChange}
-      >
+      <Button type="button" variant="ghost" size="sm" onClick={onChange}>
         Change
       </Button>
     </div>
@@ -510,12 +510,11 @@ function WorkspaceForm({
         id="workspace-name"
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        data-carry="value"
         maxLength={120}
         autoFocus
       />
-      <Button type="submit" className="rounded-full">
-        Continue
-      </Button>
+      <Button type="submit">Continue</Button>
     </form>
   )
 }
@@ -552,6 +551,15 @@ function DomainSection({
   onLeaveForProvider: () => void
 }) {
   const router = useRouter()
+  /*
+   * ⚠ THE DOMAIN JUST ADDED, UNTIL THE SERVER'S LIST HAS IT (2026-10-12).
+   * Finishing swaps the add steps for this card at once, but the list arrives
+   * with the refresh a moment later - so the card said "No domain yet", amber
+   * and Skipped, over a domain that had just been added, then corrected itself.
+   */
+  const [added, setAdded] = React.useState<DomainSummary | null>(null)
+  const listed =
+    added && !domains.some((d) => d.id === added.id) ? [...domains, added] : domains
   const [adding, setAdding] = React.useState(
     restored !== null || (domains.length === 0 && offers.length === 0),
   )
@@ -575,7 +583,8 @@ function DomainSection({
         onLeaveForProvider()
         return "/onboarding"
       },
-      onFinish: () => {
+      onFinish: (domain) => {
+        setAdded(domain)
         setAdding(false)
         // ⚠ THE NEW DOMAIN HAS TO REACH THE VERIFY STEP, and it lives in the
         // server's render - this is the one refresh set-up asks for.
@@ -627,25 +636,29 @@ function DomainSection({
       title="Domain"
       icon={<Globe />}
       description="The domain you send from. Add one, or carry on with one you have."
-      tone={domains.length === 0 ? "warning" : "success"}
-      badge={domains.length === 0 ? "Skipped" : undefined}
+      tone={listed.length === 0 ? "warning" : "success"}
+      badge={listed.length === 0 ? "Skipped" : undefined}
       reduce={reduce}
+      enter={false}
       summary={
         <Answer onChange={onChange}>
           <Globe className="size-4 text-muted-foreground" />
-          <span className="truncate font-mono">
-            {domains.length === 0
+          <span
+            data-carry={listed.length === 1 ? "value" : undefined}
+            className="truncate font-mono"
+          >
+            {listed.length === 0
               ? "No domain yet"
-              : domains.map((d) => d.name).join(", ")}
+              : listed.map((d) => d.name).join(", ")}
           </span>
         </Answer>
       }
     >
       <div className="space-y-4">
         <OfferedDomains offers={offers} onAccepted={() => router.refresh()} />
-        {domains.length > 0 && (
+        {listed.length > 0 && (
           <ul className="divide-y overflow-hidden rounded-2xl border">
-            {domains.map((domain) => (
+            {listed.map((domain) => (
               <li
                 key={domain.id}
                 className="flex items-center justify-between gap-3 px-4 py-3"
@@ -654,7 +667,12 @@ function DomainSection({
                   <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border/60 ring-inset">
                     <Globe className="size-4" />
                   </span>
-                  <span className="truncate font-mono text-sm">{domain.name}</span>
+                  <span
+                    data-carry={listed.length === 1 ? "value" : undefined}
+                    className="truncate font-mono text-sm"
+                  >
+                    {domain.name}
+                  </span>
                 </span>
                 <Status status={domain.status} variant="pill" />
               </li>
@@ -662,18 +680,13 @@ function DomainSection({
           </ul>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          {domains.length > 0 && (
-            <Button className="rounded-full" onClick={onDone}>
-              Continue
-            </Button>
-          )}
+          {listed.length > 0 && <Button onClick={onDone}>Continue</Button>}
           <Button
-            variant={domains.length > 0 ? "outline" : "default"}
-            className="rounded-full"
+            variant={listed.length > 0 ? "secondary" : "primary"}
             onClick={() => setAdding(true)}
           >
             <Plus />
-            {domains.length > 0 ? "Add another domain" : "Add a domain"}
+            {listed.length > 0 ? "Add another domain" : "Add a domain"}
           </Button>
         </div>
       </div>
@@ -708,7 +721,7 @@ function OfferedDomains({
   }
 
   return (
-    <ul className="divide-y overflow-hidden rounded-2xl border border-sky-500/25 bg-sky-500/5">
+    <ul className="divide-y overflow-hidden rounded-2xl border border-info/25 bg-info/5">
       {offers.map((offer) => (
         <li
           key={offer.id}
@@ -721,12 +734,12 @@ function OfferedDomains({
             </p>
           </div>
           <Button
+            loading={busy === offer.id}
             size="sm"
-            className="shrink-0 self-start rounded-full sm:self-auto"
+            className="shrink-0 self-start sm:self-auto"
             onClick={() => accept(offer)}
             disabled={busy !== null}
           >
-            {busy === offer.id && <Spinner />}
             Accept
           </Button>
         </li>
@@ -824,7 +837,7 @@ function VerifyStep({
         <p className="text-sm text-muted-foreground">
           Add a domain first - then this checks it.
         </p>
-        <Button variant="outline" className="rounded-full" onClick={onAddDomain}>
+        <Button variant="secondary" onClick={onAddDomain}>
           <Plus />
           Add a domain
         </Button>
@@ -836,11 +849,8 @@ function VerifyStep({
   return (
     <div className="space-y-6">
       {published > 0 && (
-        <div className="flex items-start gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-          <CheckCircle2
-            aria-hidden
-            className="mt-0.5 size-5 shrink-0 text-emerald-500"
-          />
+        <div className="flex items-start gap-3 rounded-2xl border border-success/30 bg-success/5 p-4">
+          <CheckCircle2 aria-hidden className="mt-0.5 size-5 shrink-0 text-success" />
           <div className="space-y-1">
             <p className="text-sm font-medium">
               {published === 1
@@ -857,19 +867,19 @@ function VerifyStep({
       <LiveDomainJourney quiet={false} />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button className="rounded-full" disabled={!verified} onClick={onDone}>
+        <Button disabled={!verified} onClick={onDone}>
           {verified ? `Continue with ${live.domain.name}` : "Waiting for verification"}
         </Button>
         {/* ⚠ A PLAIN ANCHOR THROUGH THE SKIP ROUTE - the console bounces back to
             set-up otherwise. See app/onboarding/page.tsx. */}
-        <Button variant="ghost" className="rounded-full" asChild>
-          <a
-            href={`/onboarding/skip?to=${encodeURIComponent(`/domains/${live.domain.id}`)}`}
-          >
-            See its records
-            <ArrowUpRight />
-          </a>
-        </Button>
+        <ButtonLink
+          href={`/onboarding/skip?to=${encodeURIComponent(`/domains/${live.domain.id}`)}`}
+          variant="ghost"
+          native
+        >
+          See its records
+          <ArrowUpRight />
+        </ButtonLink>
       </div>
     </div>
   )

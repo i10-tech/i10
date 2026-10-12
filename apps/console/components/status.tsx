@@ -1,9 +1,10 @@
 import * as React from "react"
-import { Status as StatusChrome } from "@repo/ui/components/status"
+import { Status as StatusChrome } from "@repo/ui/components/i10/status"
+import { VerifiedSeal } from "@repo/ui/components/i10/verified-seal"
 import { describeStatus } from "@/lib/status"
 
-export { StatusDot } from "@repo/ui/components/status"
-export type { Tone } from "@repo/ui/components/status"
+export { StatusDot } from "@repo/ui/components/i10/status"
+export type { Tone } from "@repo/ui/components/i10/status"
 export { describeStatus }
 
 /**
@@ -46,6 +47,8 @@ export function Status({
       data-status={status}
       tone={described.tone}
       label={label ?? described.label}
+      // ⚠ PROVEN THINGS WEAR THE SEAL, as verified emails do (2026-10-12).
+      mark={status === "verified" ? <VerifiedSeal className="size-3.5" /> : undefined}
       {...props}
     />
   )

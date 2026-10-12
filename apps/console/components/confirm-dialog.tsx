@@ -1,20 +1,15 @@
 "use client"
 
+import { CopyCheckIcon } from "@repo/ui/components/icon-morph/icon-morph"
 import * as React from "react"
-import { Check, Copy, Redo2 } from "lucide-react"
-import { ActionButton } from "@repo/ui/components/action-button"
-import { Button } from "@repo/ui/components/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@repo/ui/components/dialog"
-import { useCopy } from "@repo/ui/components/copy"
-import { Kbd } from "@repo/ui/components/kbd"
-import { FloatingInput } from "@repo/ui/components/floating-field"
+import { Redo2 } from "lucide-react"
+import { StateButton } from "@repo/ui/components/i10/state-button"
+import { Button } from "@repo/ui/components/button/button"
+import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
+import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { useCopy } from "@repo/ui/components/i10/use-copy"
+import { Kbd } from "@repo/ui/components/i10/kbd"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { useOutcome } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
 
@@ -67,11 +62,12 @@ function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void })
         className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-muted px-1.5 py-0.5 align-baseline font-mono text-xs text-foreground transition-colors duration-(--duration-instant) ease-(--ease-linear) hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         {word}
-        {copied ? (
-          <Check aria-hidden="true" className="size-3 text-success" />
-        ) : (
-          <Copy aria-hidden="true" className="size-3 text-muted-foreground" />
-        )}
+        <CopyCheckIcon
+          state={copied}
+          size={12}
+          aria-hidden="true"
+          className={copied ? "text-success" : "text-muted-foreground"}
+        />
       </button>{" "}
       to confirm.
     </p>
@@ -83,7 +79,21 @@ function ConfirmWord({ word, onCopied }: { word: string; onCopied: () => void })
  * type, but there is still a deliberate word between a stray click and losing
  * them - and it is the same word on every list, so nobody has to read which.
  */
-export const BULK_CONFIRM_WORD = "DELETE"
+export const BULK_CONFIRM_WORD = "Delete"
+
+/**
+ * What a delete asks to have typed, the same rule everywhere: ONE thing is
+ * confirmed by its own name - from its page, its row menu, or ticked alone in
+ * the bulk bar - because typing the name is what proves it is the right one.
+ * Several things, or one whose name is missing, take the bulk word.
+ */
+export function confirmWordFor(
+  names: ReadonlyArray<string | null | undefined>,
+  fallback: string = BULK_CONFIRM_WORD,
+): string {
+  const only = names.length === 1 ? names[0]?.trim() : undefined
+  return only || fallback
+}
 
 /**
  * A keyboard chip sitting ON a filled button, per button variant.
@@ -204,10 +214,13 @@ export function ConfirmDialog({
     await outcome.run(onConfirm, () => onOpenChange(false))
   }
 
+  const hasBody =
+    (children !== undefined && children !== null && children !== false) ||
+    confirmWord !== undefined
+
   return (
     <Dialog open={open} onOpenChange={pending ? () => {} : onOpenChange}>
       <DialogContent
-        className="sm:max-w-md"
         /*
          * ⚠ THE FIELD TAKES FOCUS, NOT WHATEVER HAPPENS TO BE FIRST. Radix
          * focuses the first tabbable element in the dialog, and since the word
@@ -255,69 +268,84 @@ export function ConfirmDialog({
           event.preventDefault()
           void confirm()
         }}
+        title={title}
+        description={description}
+        style={{ width: "min(calc(100vw - 2rem), 448px)" }}
       >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-
         {/*
          * ⚠ ABOVE THE TYPE-THE-NAME FIELD, WHICH IS THE ONLY ORDER THAT WORKS.
          * The field is the last thing before the button and the thing that arms
          * it; a question underneath it would be answered after somebody has
          * already committed to the action.
          */}
-        {children}
-
         {/*
-         * ⚠ `space-y-5` - 20px, from 8. The line inside is a sentence ABOUT
-         * the field rather than its label, and the field now carries the name
-         * as its own floating label, so the two were saying related things
-         * eight pixels apart and reading as one block. 12px was tried first
-         * and was not perceptible; this is the step that separates them.
+         * ⚠ ONE RHYTHM FOR THE WHOLE BODY: 24px between its blocks (a field, a
+         * notice, the type-the-name pair), so nothing sits tight against one
+         * neighbour and loose against the next. Each block used to bring its
+         * own margins, and a field's hint ended up touching the notice under it.
          */}
-        {confirmWord !== undefined && (
-          <div className="space-y-5">
-            <ConfirmWord word={confirmWord} onCopied={focusField} />
+        {/*
+         * ⚠ ONLY WHEN THERE IS SOMETHING TO SAY (2026-10-12). A plain "remove
+         * this?" has nothing between the sentence and the buttons; rendering
+         * the empty block anyway stacked the body's padding and the footer's
+         * margin into a blank band above Cancel and Remove.
+         */}
+        {hasBody && (
+          <div className="flex flex-col gap-6">
+            {children}
+
             {/*
-             * ⚠ THE LABEL IS THE NAME ITSELF, NOT AN INSTRUCTION. The line
-             * above already says what to do with it, and a field labelled
-             * "Type mail.acme.dev to confirm" says it a second time in a
-             * smaller size - two sentences for one requirement. As the
-             * floating label it also does the work a placeholder would: the
-             * word to match is in the empty field, and it rises out of the
-             * way rather than vanishing the moment somebody starts typing,
-             * which is the failure every placeholder-as-label has.
-             *
-             * ⚠ AND IT IS PLAIN TEXT, NOT MONO. A floating label animates
-             * `font-size`, so a nested element with its own family shifts at
-             * a different rate and lands a pixel out. The chip above is the
-             * monospace copy, where it can be compared character by
-             * character.
+             * ⚠ `space-y-4` - 16px between the sentence and its field: close
+             * enough to read as one block, apart from everything else's 24. The line inside is a sentence ABOUT
+             * the field rather than its label, and the field now carries the name
+             * as its own floating label, so the two were saying related things
+             * eight pixels apart and reading as one block. 12px was tried first
+             * and was not perceptible; this is the step that separates them.
              */}
-            <FloatingInput
-              id="confirm-word"
-              ref={field}
-              label={confirmWord}
-              value={typed}
-              onChange={(event) => setTyped(event.target.value)}
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              className="font-mono"
-              /*
-               * ⚠ IT GOES GREEN ONLY ON AN EXACT MATCH, AND STAYS NEUTRAL WHILE
-               * EMPTY RATHER THAN GOING RED. A field that turns red the moment
-               * you focus it is scolding somebody for not having typed yet;
-               * red here means "this is not the word", which is only true once
-               * there is something to compare.
-               */
-              state={typed.length === 0 ? "idle" : matches ? "valid" : "invalid"}
-            />
+            {confirmWord !== undefined && (
+              <div className="space-y-4">
+                <ConfirmWord word={confirmWord} onCopied={focusField} />
+                {/*
+                 * ⚠ THE LABEL IS THE NAME ITSELF, NOT AN INSTRUCTION. The line
+                 * above already says what to do with it, and a field labelled
+                 * "Type mail.acme.dev to confirm" says it a second time in a
+                 * smaller size - two sentences for one requirement. As the
+                 * floating label it also does the work a placeholder would: the
+                 * word to match is in the empty field, and it rises out of the
+                 * way rather than vanishing the moment somebody starts typing,
+                 * which is the failure every placeholder-as-label has.
+                 *
+                 * ⚠ AND IT IS PLAIN TEXT, NOT MONO. A floating label animates
+                 * `font-size`, so a nested element with its own family shifts at
+                 * a different rate and lands a pixel out. The chip above is the
+                 * monospace copy, where it can be compared character by
+                 * character.
+                 */}
+                <FloatingInput
+                  id="confirm-word"
+                  ref={field}
+                  label={confirmWord}
+                  value={typed}
+                  onChange={(event) => setTyped(event.target.value)}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  className="font-mono"
+                  /*
+                   * ⚠ IT GOES GREEN ONLY ON AN EXACT MATCH, AND STAYS NEUTRAL WHILE
+                   * EMPTY RATHER THAN GOING RED. A field that turns red the moment
+                   * you focus it is scolding somebody for not having typed yet;
+                   * red here means "this is not the word", which is only true once
+                   * there is something to compare.
+                   */
+                  state={typed.length === 0 ? "idle" : matches ? "valid" : "invalid"}
+                />
+              </div>
+            )}
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className={hasBody ? undefined : "mt-0"}>
           {/*
            * ⚠ BOTH HINTS DESCRIBE KEYS THAT ACTUALLY WORK. `Esc` is Radix's,
            * and it is correct here for the same reason the close button is:
@@ -332,8 +360,8 @@ export function ConfirmDialog({
             Cancel
             <Kbd>Esc</Kbd>
           </Button>
-          <ActionButton
-            variant={destructive ? "destructive" : "default"}
+          <StateButton
+            variant={destructive ? "danger" : "primary"}
             onClick={confirm}
             state={outcome.state}
             pendingLabel={confirmLabel}
@@ -368,7 +396,7 @@ export function ConfirmDialog({
             <Kbd className={KBD_ON_BUTTON[destructive ? "destructive" : "default"]}>
               <Redo2 aria-hidden="true" className="size-2.5 rotate-180" />
             </Kbd>
-          </ActionButton>
+          </StateButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>
