@@ -1,13 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { useClerk, useOrganization, useOrganizationList } from "@clerk/nextjs"
+import { useOrganization, useOrganizationList } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import { ChevronsUpDown, Plus, Settings } from "lucide-react"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
-import { Button } from "@repo/ui/components/button/button"
-import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
-import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +17,7 @@ import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-bloc
 import { TextMorph } from "@repo/ui/components/text-morph/text-morph"
 import { clerkReason } from "@/components/account/shared"
 import { afterSwitch } from "@/lib/after-switch"
+import { useCreateWorkspace } from "@/lib/create-workspace"
 import { toastDone, toastError } from "@/lib/toast"
 
 /**
@@ -51,7 +49,7 @@ export function WorkspaceSwitcher() {
       userInvitations: { status: "pending" },
       userSuggestions: { status: "pending" },
     })
-  const [creating, setCreating] = React.useState(false)
+  const { creating, create } = useCreateWorkspace()
   const [busy, setBusy] = React.useState<string | null>(null)
 
   if (!isLoaded) {
@@ -220,78 +218,20 @@ export function WorkspaceSwitcher() {
           )}
 
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setCreating(true)}>
+          {/* No naming dialog: onboarding's first step is the name. */}
+          <DropdownMenuItem
+            disabled={creating}
+            onSelect={() =>
+              void create().catch((error: unknown) =>
+                toastError("Could not create a workspace", clerkReason(error)),
+              )
+            }
+          >
             <Plus aria-hidden />
             Create workspace
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <CreateWorkspaceDialog open={creating} onOpenChange={setCreating} />
     </>
-  )
-}
-
-/** Clerk's create-organization screen, ours: a name, then set-up. */
-function CreateWorkspaceDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const clerk = useClerk()
-  const router = useRouter()
-  const [name, setName] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  async function create(event: React.FormEvent) {
-    event.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      const created = await clerk.createOrganization({ name: name.trim() })
-      await clerk.setActive({ organization: created.id })
-      onOpenChange(false)
-      setName("")
-      router.push("/onboarding")
-      router.refresh()
-    } catch (error) {
-      setError(clerkReason(error))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        title="Create workspace"
-        description="A workspace has its own domains, keys, contacts and bill. You can invite people to it next."
-      >
-        <form noValidate onSubmit={create} className="flex flex-col gap-7">
-          <FloatingInput
-            id="create-workspace-name"
-            label="Workspace name"
-            value={name}
-            onChange={(event) => {
-              setError(null)
-              setName(event.target.value)
-            }}
-            hint={error ?? undefined}
-            autoFocus
-          />
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={busy} disabled={!name.trim()}>
-              Create workspace
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }

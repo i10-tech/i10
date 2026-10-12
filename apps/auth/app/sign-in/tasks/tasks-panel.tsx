@@ -1,15 +1,11 @@
 "use client"
 
 import { useEffect } from "react"
-import {
-  TaskChooseOrganization,
-  TaskResetPassword,
-  TaskSetupMFA,
-  useSession,
-} from "@clerk/nextjs"
+import { TaskResetPassword, TaskSetupMFA, useSession } from "@clerk/nextjs"
 import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
 import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { leaveFor } from "../../_lib/finish"
+import { ChooseWorkspace } from "./choose-workspace"
 
 /**
  * Whichever step Clerk is holding this session on.
@@ -18,8 +14,8 @@ import { leaveFor } from "../../_lib/finish"
  * COMPONENT, because a session can owe more than one thing and Clerk resolves
  * them in order - finishing `choose-organization` leaves the session pending on
  * `setup-mfa`, still on this URL. Each component re-reads the session when it
- * completes, so the switch simply renders the next one; hard-coding
- * `TaskChooseOrganization` would leave the second task with nowhere to go.
+ * completes, so the switch simply renders the next one; hard-coding one task's
+ * screen would leave the second with nowhere to go.
  *
  * ⚠ AND EVERY BRANCH GETS THE SAME `redirectUrlComplete`. That prop fires only
  * once ALL tasks are resolved, not after each one - see its type in
@@ -91,7 +87,8 @@ function TaskView({
 }) {
   switch (taskKey) {
     case "choose-organization":
-      return <TaskChooseOrganization redirectUrlComplete={afterAuthUrl} />
+      // Ours since 2026-10-12: see choose-workspace.tsx.
+      return <ChooseWorkspace />
     case "reset-password":
       return <TaskResetPassword redirectUrlComplete={afterAuthUrl} />
     case "setup-mfa":

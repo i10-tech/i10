@@ -14,7 +14,6 @@ import { Avatar } from "@repo/ui/components/avatar/avatar"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
-import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { VerifiedSeal } from "@repo/ui/components/i10/verified-seal"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
@@ -34,6 +33,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
 import { enableTeamDomain, teamDomainSuggestions } from "@/lib/actions"
+import { useCreateWorkspace } from "@/lib/create-workspace"
 import { useReverify } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 
@@ -741,53 +741,28 @@ function Leave({ organization }: { organization: OrganizationResource }) {
 // ── Create ───────────────────────────────────────────────────────────────────
 
 /**
- * Clerk's `<CreateOrganization />`, ours: a name. Clerk offered an invite step
- * next; here the panel becomes the new workspace's, and its Invitations row is
- * that step, already in place.
+ * Clerk's `<CreateOrganization />`, ours: one button. No name is asked here -
+ * onboarding's first step is the name, so the new workspace goes straight
+ * there. See lib/create-workspace.ts.
  */
 function CreateWorkspace() {
-  const clerk = useClerk()
-  const [name, setName] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  async function create(event: React.FormEvent) {
-    event.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      const created = await clerk.createOrganization({ name: name.trim() })
-      await clerk.setActive({ organization: created.id })
-      // The panel re-renders as this workspace; its Invitations row is the next step.
-    } catch (error) {
-      setError(clerkReason(error))
-      setBusy(false)
-    }
-  }
-
+  const { creating, create } = useCreateWorkspace()
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         You are signed in to a personal account, so there is no team to show yet. Create
         a workspace to invite people and share domains, keys and billing.
       </p>
-      <form noValidate onSubmit={create} className="flex max-w-md flex-col gap-7">
-        <FloatingInput
-          id="new-workspace"
-          label="Workspace name"
-          value={name}
-          onChange={(event) => {
-            setError(null)
-            setName(event.target.value)
-          }}
-          hint={error ?? undefined}
-        />
-        <div>
-          <Button type="submit" loading={busy} disabled={!name.trim()}>
-            Create workspace
-          </Button>
-        </div>
-      </form>
+      <Button
+        loading={creating}
+        onClick={() =>
+          void create().catch((error: unknown) =>
+            toastError("Could not create a workspace", clerkReason(error)),
+          )
+        }
+      >
+        Create workspace
+      </Button>
     </div>
   )
 }
