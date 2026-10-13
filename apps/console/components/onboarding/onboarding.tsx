@@ -402,6 +402,7 @@ export function Onboarding({
                       hasApiKey={state.facts.has_api_key}
                       recipient={userEmail}
                       firstName={firstName}
+                      workspaceName={name || workspaceName}
                       onSent={(to) => setSentTo(to)}
                       onDone={() => advance("send")}
                     />
@@ -1094,6 +1095,7 @@ function SendStep({
   hasApiKey,
   recipient,
   firstName,
+  workspaceName,
   onSent,
   onDone,
 }: {
@@ -1102,6 +1104,7 @@ function SendStep({
   hasApiKey: boolean
   recipient: string | null
   firstName: string | null
+  workspaceName: string
   onSent: (to: string) => void
   onDone: () => void
 }) {
@@ -1117,6 +1120,7 @@ function SendStep({
       hasApiKey={hasApiKey}
       recipient={recipient}
       firstName={firstName}
+      workspaceName={workspaceName}
       already={already}
       onSent={({ to }) => onSent(to)}
       onDone={onDone}

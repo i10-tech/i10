@@ -645,7 +645,13 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     const outcome = await d.sendTest(
       tenantId,
       {
-        from: `i10 <hello@${domain}>`,
+        /*
+         * ⚠ THE WORKSPACE'S NAME, NOT OURS (2026-10-14). This mail goes from the
+         * customer's own domain, so "i10" in the inbox was the wrong name on
+         * it. Characters that would break the header or read as an address are
+         * dropped; "i10" only when nothing is left.
+         */
+        from: `${senderName(profile?.name)} <hello@${domain}>`,
         to: [to],
         template: { id: "welcome", variables },
         tags: [{ name: "onboarding_test", value: "true" }],
@@ -739,4 +745,14 @@ async function memberUsage(
     d.log.warn({ err: error, tenantId }, "could not read member usage")
     return null
   }
+}
+
+/** A workspace name fit for a `From` display name, or "i10". */
+export function senderName(raw: string | null | undefined): string {
+  const clean = (raw ?? "")
+    .replace(/[<>"'\\`$@,;:]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 64)
+  return clean || "i10"
 }
