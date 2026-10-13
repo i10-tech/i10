@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
+import { ReverifyProvider } from "./_lib/reverify"
 import { GeistMono } from "geist/font/mono"
 import { GeistSans } from "geist/font/sans"
 import { clerkAppearance } from "@repo/ui/clerk"
@@ -165,7 +166,9 @@ export default function RootLayout({
             <AuthMark />
             <>
               <MotionProvider>
-                <ArcNext>{children}</ArcNext>
+                <ArcNext>
+                  <ReverifyProvider>{children}</ReverifyProvider>
+                </ArcNext>
               </MotionProvider>
             </>
             {/*

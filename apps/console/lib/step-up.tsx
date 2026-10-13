@@ -5,8 +5,12 @@ import { isClerkAPIResponseError } from "@clerk/nextjs/errors"
 import { isReverificationHint } from "@clerk/shared/authorization-errors"
 import type { SessionVerificationLevel } from "@clerk/shared/types"
 import { PasskeyCue } from "@repo/ui/components/i10/passkey-cue"
-import { StepUpDialog, type StepUpRequest } from "@/components/step-up-dialog"
-import { stepUp } from "@/lib/actions"
+import {
+  StepUpDialog,
+  type StepUpRequest,
+} from "@repo/ui/components/i10/step-up-dialog"
+import { CodeReservationContext } from "@repo/ui/components/i10/code-send"
+import { reserveCodeSend, stepUp } from "@/lib/actions"
 import { toastError } from "@/lib/toast"
 
 /**
@@ -105,22 +109,24 @@ export function StepUpProvider({ children }: { children: React.ReactNode }) {
   }, [ask])
 
   return (
-    <AskContext.Provider value={ask}>
-      <StepUpContext.Provider value={value}>
-        {children}
-        <StepUpDialog
-          request={request}
-          onDone={(proved) => {
-            pending.current?.(proved)
-            pending.current = null
-            setRequest(null)
-          }}
-          onPasskey={setPasskey}
-        />
-        {/* The sign-in page's passkey screen, over everything - see the dialog. */}
-        <PasskeyCue open={passkey} mode="verify" />
-      </StepUpContext.Provider>
-    </AskContext.Provider>
+    <CodeReservationContext.Provider value={reserveCodeSend}>
+      <AskContext.Provider value={ask}>
+        <StepUpContext.Provider value={value}>
+          {children}
+          <StepUpDialog
+            request={request}
+            onDone={(proved) => {
+              pending.current?.(proved)
+              pending.current = null
+              setRequest(null)
+            }}
+            onPasskey={setPasskey}
+          />
+          {/* The sign-in page's passkey screen, over everything - see the dialog. */}
+          <PasskeyCue open={passkey} mode="verify" />
+        </StepUpContext.Provider>
+      </AskContext.Provider>
+    </CodeReservationContext.Provider>
   )
 }
 

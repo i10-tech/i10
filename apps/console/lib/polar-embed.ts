@@ -101,6 +101,9 @@ const POLL_FOR_MS = 5 * 60_000
 /** How long to let Polar's own close button turn up before drawing one. */
 const THEIRS_SHOULD_HAVE_LOADED_MS = 6_000
 
+/** How much the page behind the checkout is softened: enough to recede, not to vanish. */
+const BACKDROP_BLUR = "blur(6px)"
+
 export async function openPolarCheckout(
   url: string,
   { theme, onSuccess, onClose, checkoutId }: OpenCheckoutOptions,
@@ -123,13 +126,44 @@ export async function openPolarCheckout(
    * Chrome filled the whole overlay with its dark canvas grey and hid the
    * console. Giving the frame the scheme its document uses keeps the canvas
    * transparent, and only Polar's card is drawn over our background.
+   *
+   * ⚠ AND THAT SCHEME IS THE `theme` WE PASS, NOT ALWAYS LIGHT (2026-10-13).
+   * Polar's page now applies `?theme=` as its own `color-scheme` once it
+   * loads, so a dark console asking for the dark checkout got a dark
+   * document in a frame we had pinned to light - the same mismatch the other
+   * way round, and the whole screen went black behind the card. The SDK's
+   * own `rgba(0,0,0,.5)` sheet is cleared below for the same reason: the
+   * checkout sits on the page, with no backdrop.
    */
   const origin = new URL(url).origin
+  /*
+   * ⚠ A LIGHT BLUR OF THE PAGE BEHIND, ON THE FRAME ITSELF (2026-10-13). The
+   * frame is transparent and covers the screen, so its `backdrop-filter`
+   * softens exactly what is behind the checkout and goes when the frame
+   * does - no element of ours to add, or to forget to remove. It eases in
+   * once, unless motion is reduced.
+   */
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  const blur = (frame: HTMLIFrameElement) => {
+    if (frame.dataset.i10Blur) return
+    frame.dataset.i10Blur = "1"
+    const set = (value: string) => {
+      frame.style.backdropFilter = value
+      frame.style.setProperty("-webkit-backdrop-filter", value)
+    }
+    if (reduced) return set(BACKDROP_BLUR)
+    set("blur(0px)")
+    frame.style.transition =
+      "backdrop-filter 220ms cubic-bezier(0.22, 1, 0.36, 1), -webkit-backdrop-filter 220ms cubic-bezier(0.22, 1, 0.36, 1)"
+    requestAnimationFrame(() => requestAnimationFrame(() => set(BACKDROP_BLUR)))
+  }
   const clearFrames = () => {
     for (const frame of document.querySelectorAll<HTMLIFrameElement>("iframe")) {
       if (!frame.src.startsWith(origin)) continue
-      frame.style.colorScheme = "light"
+      // The scheme Polar's page takes from `theme` - see the note above.
+      frame.style.colorScheme = theme
       frame.style.background = "transparent"
+      blur(frame)
     }
   }
   clearFrames()

@@ -23,8 +23,10 @@ import {
   dnsConnections,
   lookupDns,
   startDnsConnect,
-  verifyDomain,
+  recordsAdded,
 } from "@/lib/actions"
+import { useAdoptDomain } from "@/components/domain-live"
+import { rememberLeaving } from "@/lib/dns-connect"
 import { activateDomain } from "@/lib/domain-activation"
 import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
 import { toastDone, toastError, toastFailure, toastPending } from "@/lib/toast"
@@ -165,6 +167,8 @@ export function AddDomainSteps({
   /** The row, once the second step has made it. The flow cannot go back after. */
   const [created, setCreated] = React.useState<Domain | null>(restored?.created ?? null)
   const [checking, setChecking] = React.useState(false)
+  // Set-up's live domain, to hand "I've added the records" to at once.
+  const adopt = useAdoptDomain()
 
   const [name, setName] = React.useState(restored?.name ?? "")
   const [chosenMode, setChosenMode] = React.useState<Mode>(restored?.mode ?? "delegate")
@@ -458,7 +462,8 @@ export function AddDomainSteps({
     if (!domain) return setSubmitting(false)
 
     if (!connected) {
-      const start = await startDnsConnect(provider.slug, exits.returnTo(domain.id))
+      const returnTo = exits.returnTo(domain.id)
+      const start = await startDnsConnect(provider.slug, returnTo)
       if (!start.ok) {
         // The row exists; where it is finished offers the same button.
         toastError(`Could not connect ${provider.name}`, start.error)
@@ -466,6 +471,8 @@ export function AddDomainSteps({
         return
       }
       forget()
+      // Set-up finishes the connection itself when the provider sends us back.
+      rememberLeaving({ name: provider.name, returnTo })
       window.location.assign(start.data.url)
       return
     }
@@ -546,7 +553,13 @@ export function AddDomainSteps({
   async function addedThem() {
     if (!created || checking) return
     setChecking(true)
-    await verifyDomain(created.id)
+    // Their word is recorded: the domain page then waits on DNS, not on them.
+    const answer = await recordsAdded(created.id)
+    // In set-up, the verify step next on screen has it at once.
+    adopt?.({
+      ...(answer.ok && typeof answer.data?.status === "string" ? answer.data : created),
+      records_added_at: new Date().toISOString(),
+    })
     finish(created)
   }
 

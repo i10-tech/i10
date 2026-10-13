@@ -202,6 +202,22 @@ export async function verifyDomain(id: string) {
 }
 
 /**
+ * "I've added the records": the same verify, with the person's word recorded
+ * on the domain (`records_added_at`), so the page stops asking them to publish
+ * what they have published while DNS catches up (2026-10-13).
+ */
+export async function recordsAdded(id: string) {
+  return run(
+    () =>
+      api<VerifiedDomain>(`/console/domains/${encodeURIComponent(id)}/verify`, {
+        method: "POST",
+        body: { added: true },
+      }),
+    [`/domains/${encodeURIComponent(id)}`, "/domains"],
+  )
+}
+
+/**
  * The same verify, without re-rendering the page (2026-10-03).
  *
  * ⚠ FOR THE DOMAIN PAGE, WHICH UPDATES ITSELF FROM THE ANSWER. `verifyDomain`
@@ -1755,4 +1771,16 @@ export async function resumeSubscription() {
     () => api<{ status: string }>("/console/billing/resume", { method: "POST" }),
     ["/settings/billing", "/settings/usage", "/"],
   )
+}
+
+/**
+ * Whether the workspace just created is ready: Clerk has made the organization,
+ * and its webhook has provisioned our tenant for it. Asked by set-up after
+ * "Create workspace", as the new organization's session. A read.
+ */
+export async function workspaceReady(orgId: string) {
+  const me = await run(() => api<import("@/lib/types").Me>("/console/me"), [], {
+    refreshCaller: false,
+  })
+  return me.ok && me.data.tenant?.clerk_org_id === orgId ? me.data.tenant.id : null
 }

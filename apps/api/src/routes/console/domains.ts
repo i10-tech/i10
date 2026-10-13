@@ -78,14 +78,17 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   app.get("/domains", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
-    const [list, displaced] = await Promise.all([
+    const [list, displaced, onboardingEmails] = await Promise.all([
       d.domains.list(tenantId),
       d.domains.displaced(tenantId),
+      d.domains.onboardingEmails(tenantId),
     ])
     return c.json({
       data: list.map((domain) => ({
         ...domain,
         displaced_at: displaced[domain.id] ?? null,
+        // Console only: set-up's one send from this domain, if it has had it.
+        onboarding_email: onboardingEmails[domain.id] ?? null,
       })),
     })
   })
@@ -167,6 +170,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
           displaced_at: displaced[domain.id] ?? null,
           verified_at: checks?.verified_at ?? null,
           dns_checked_at: checks?.dns_checked_at ?? null,
+          records_added_at: checks?.records_added_at ?? null,
         })
       : c.json(notFound("No domain with that id."), 404)
   })
@@ -190,6 +194,15 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   app.post("/domains/:id/verify", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
+    /*
+     * ⚠ `{ "added": true }` IS THE PERSON SAYING THEY PUBLISHED THE RECORDS
+     * ("I've added the records"), as opposed to the console's own watch
+     * asking. It is noted on the row before the check, whatever the check
+     * finds - see `records_added_at`.
+     */
+    const body = await readJson(c)
+    if (body?.added === true)
+      await d.domains.markRecordsAdded(tenantId, c.req.param("id"))
     const outcome = await d.domains.verify(tenantId, c.req.param("id"))
 
     switch (outcome.status) {

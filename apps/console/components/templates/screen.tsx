@@ -1,4 +1,5 @@
 import { Badge } from "@repo/ui/components/badge/badge"
+import { RememberCount } from "@/components/list/remembered-counts"
 import {
   Page,
   PageActions,
@@ -85,6 +86,16 @@ export async function TemplatesScreen({ folderId }: { folderId: string | null })
 
         {trusted && <ReviewedTemplates result={trusted} />}
       </PageBody>
+      {result.ok && (
+        <RememberCount
+          // Each folder is its own list: what it holds, and at the top its folders too.
+          list={folderId === null ? "templates" : `templates-${folderId}`}
+          count={
+            result.data.data.filter((t) => t.folder_id === folderId).length +
+            (folderId === null ? (result.data.folders ?? []).length : 0)
+          }
+        />
+      )}
     </Page>
   )
 }

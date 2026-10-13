@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import { Layers } from "lucide-react"
 import {
   Page,
@@ -75,6 +76,7 @@ export default async function SegmentsPage() {
           <SegmentsList segments={result.data.data} />
         )}
       </PageBody>
+      {result.ok && <RememberCount list="segments" count={result.data.data.length} />}
     </Page>
   )
 }

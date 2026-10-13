@@ -160,13 +160,41 @@ export interface DomainStore {
    */
   displaced(tenantId: string): Promise<Record<string, string>>
   /**
+   * Set-up's one "Send email" per domain row - console only. Keyed by domain id.
+   */
+  onboardingEmails(tenantId: string): Promise<Record<string, OnboardingEmail>>
+  /** The row behind a name this workspace can send from, with its set-up send. */
+  onboardingEmailFor(
+    tenantId: string,
+    name: string,
+  ): Promise<{ domainId: string; sent: OnboardingEmail | null } | null>
+  /** Records set-up's send against the domain row. The first one stays. */
+  markOnboardingEmail(
+    tenantId: string,
+    domainId: string,
+    sent: OnboardingEmail,
+  ): Promise<void>
+  /**
    * When a domain was first verified and last looked up in DNS - console only,
    * for its events strip. Null when there is no such domain.
    */
   checks(
     tenantId: string,
     id: string,
-  ): Promise<{ verified_at: string | null; dns_checked_at: string | null } | null>
+  ): Promise<{
+    verified_at: string | null
+    dns_checked_at: string | null
+    records_added_at: string | null
+  } | null>
+  /** "I've added the records" was pressed - see `records_added_at`. The first press stays. */
+  markRecordsAdded(tenantId: string, id: string): Promise<void>
+}
+
+/** Set-up's send from a domain: the message id, its recipient, and when. */
+export interface OnboardingEmail {
+  id: string
+  to: string
+  at: string
 }
 
 /**
@@ -978,12 +1006,80 @@ export function domainStore({
       )
     },
 
+    async onboardingEmails(tenantId) {
+      const rows = await withTenant(db, tenantId, async (tx) =>
+        tx
+          .select({
+            id: domains.id,
+            emailId: domains.onboardingEmailId,
+            to: domains.onboardingEmailTo,
+            at: domains.onboardingEmailAt,
+          })
+          .from(domains)
+          .where(
+            and(eq(domains.tenantId, tenantId), isNotNull(domains.onboardingEmailId)),
+          ),
+      )
+      return Object.fromEntries(
+        rows.flatMap((r) =>
+          r.emailId && r.at
+            ? [[r.id, { id: r.emailId, to: r.to ?? "", at: r.at.toISOString() }]]
+            : [],
+        ),
+      )
+    },
+
+    async onboardingEmailFor(tenantId, name) {
+      const rows = await withTenant(db, tenantId, async (tx) =>
+        tx
+          .select({
+            id: domains.id,
+            status: domains.status,
+            emailId: domains.onboardingEmailId,
+            to: domains.onboardingEmailTo,
+            at: domains.onboardingEmailAt,
+          })
+          .from(domains)
+          .where(and(eq(domains.tenantId, tenantId), eq(domains.name, name))),
+      )
+      // A name can sit on more than one row here; the verified one is the sender.
+      const row = rows.find((r) => r.status === "verified") ?? rows[0]
+      if (!row) return null
+      return {
+        domainId: row.id,
+        sent:
+          row.emailId && row.at
+            ? { id: row.emailId, to: row.to ?? "", at: row.at.toISOString() }
+            : null,
+      }
+    },
+
+    async markOnboardingEmail(tenantId, domainId, sent) {
+      await withTenant(db, tenantId, async (tx) =>
+        tx
+          .update(domains)
+          .set({
+            onboardingEmailId: sent.id,
+            onboardingEmailTo: sent.to,
+            onboardingEmailAt: new Date(sent.at),
+          })
+          .where(
+            and(
+              eq(domains.tenantId, tenantId),
+              eq(domains.id, domainId),
+              isNull(domains.onboardingEmailId),
+            ),
+          ),
+      )
+    },
+
     async checks(tenantId, id) {
       const [row] = await withTenant(db, tenantId, async (tx) =>
         tx
           .select({
             verifiedAt: domains.verifiedAt,
             dnsCheckedAt: domains.dnsCheckedAt,
+            recordsAddedAt: domains.recordsAddedAt,
           })
           .from(domains)
           .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id))),
@@ -992,8 +1088,24 @@ export function domainStore({
         ? {
             verified_at: row.verifiedAt?.toISOString() ?? null,
             dns_checked_at: row.dnsCheckedAt?.toISOString() ?? null,
+            records_added_at: row.recordsAddedAt?.toISOString() ?? null,
           }
         : null
+    },
+
+    async markRecordsAdded(tenantId, id) {
+      await withTenant(db, tenantId, async (tx) =>
+        tx
+          .update(domains)
+          .set({ recordsAddedAt: new Date() })
+          .where(
+            and(
+              eq(domains.tenantId, tenantId),
+              eq(domains.id, id),
+              isNull(domains.recordsAddedAt),
+            ),
+          ),
+      )
     },
 
     async get(tenantId, id) {

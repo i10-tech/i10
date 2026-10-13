@@ -3,11 +3,9 @@
 import { useRef, useState } from "react"
 import { ShieldCheckIcon } from "lucide-react"
 import { toast } from "@repo/ui/components/i10/toasts"
-import { useReverification, useUser } from "@clerk/nextjs"
-import {
-  isClerkAPIResponseError,
-  isReverificationCancelledError,
-} from "@clerk/nextjs/errors"
+import { useUser } from "@clerk/nextjs"
+import { isClerkAPIResponseError } from "@clerk/nextjs/errors"
+import { ReverifyCancelled, useReverify } from "../_lib/reverify"
 import { Button } from "@repo/ui/components/button/button"
 import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
 import { Field, FieldGroup } from "@repo/ui/components/i10/field"
@@ -91,7 +89,8 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
    * three places, because `createExternalAccount` below needs exactly the same
    * treatment.
    */
-  const addPasskey = useReverification(() => user?.createPasskey())
+  const reverify = useReverify()
+  const addPasskey = () => reverify(async () => user?.createPasskey())
 
   async function add() {
     if (!user || locked) return
@@ -138,7 +137,7 @@ export function PasskeyStep({ locked, onBusy, busy, onNext, skipLabel }: StepPro
       // ⚠ CANCELLING THE REVERIFICATION PROMPT IS THE SAME KIND OF ANSWER AS
       // dismissing the platform's own sheet: the person said no, and saying
       // anything back is the interface arguing with them.
-      if (isReverificationCancelledError(error)) {
+      if (error instanceof ReverifyCancelled) {
         onBusy(null)
         return
       }
@@ -202,13 +201,14 @@ export function TwoFactorOfferStep({
   onEnrolled,
 }: StepProps & { onEnrolled: (totp: TotpEnrolment) => void }) {
   const { user } = useUser()
+  const reverify = useReverify()
 
   async function begin() {
     if (!user || locked) return
     onBusy("totp")
 
     try {
-      const totp = await user.createTOTP()
+      const totp = await reverify(() => user.createTOTP())
 
       // ⚠ BOTH FIELDS ARE OPTIONAL ON THE RESOURCE AND THE STEP IS USELESS
       // WITHOUT THEM. Clerk types `secret` and `uri` as `string | undefined`
@@ -223,8 +223,8 @@ export function TwoFactorOfferStep({
 
       onEnrolled({ uri: totp.uri, secret: totp.secret })
       onBusy(null)
-    } catch {
-      toast.error(TRANSPORT_FAILURE)
+    } catch (error) {
+      if (!(error instanceof ReverifyCancelled)) toast.error(TRANSPORT_FAILURE)
       onBusy(null)
     }
   }
@@ -503,10 +503,10 @@ export function ConnectStep({
    * ordinary rejection - reported as "we could not start that connection",
    * which is both untrue and unactionable.
    */
-  const startConnection = useReverification(
-    (params: Parameters<NonNullable<typeof user>["createExternalAccount"]>[0]) =>
-      user?.createExternalAccount(params),
-  )
+  const reverify = useReverify()
+  const startConnection = (
+    params: Parameters<NonNullable<typeof user>["createExternalAccount"]>[0],
+  ) => reverify(async () => user?.createExternalAccount(params))
 
   async function connect(strategy: string) {
     if (!user || locked) return
@@ -565,7 +565,7 @@ export function ConnectStep({
        * provider that is enabled for sign-in but not for linking. None of them
        * are the network, and none of them improve by trying again.
        */
-      if (isReverificationCancelledError(error)) {
+      if (error instanceof ReverifyCancelled) {
         onBusy(null)
         return
       }

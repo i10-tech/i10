@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import {
   Page,
   PageActions,
@@ -84,6 +85,7 @@ export default async function ApiKeysPage({
           <ApiKeysTable keys={result.data.data} domains={scopeDomains} />
         )}
       </PageBody>
+      {result.ok && <RememberCount list="api-keys" count={result.data.data.length} />}
     </Page>
   )
 }

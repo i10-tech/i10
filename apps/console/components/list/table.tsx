@@ -14,14 +14,24 @@ import arc from "@repo/ui/components/sortable-data-table/sortable-data-table.mod
 export function ListTable({
   children,
   className,
+  fixed,
 }: {
   children: React.ReactNode
   className?: string
+  /**
+   * Fixed table layout: the header widths are the column widths, and the one
+   * column without a width takes everything left. Without it, truncating cells
+   * (`max-w-0`) let the browser hand the spare width to whichever column it
+   * liked - the emails log gave it all to To and squeezed Subject to "Welc...".
+   */
+  fixed?: boolean
 }) {
   return (
     <div className={cn(arc.wrapper, className)}>
       <div className={arc.scroller}>
-        <table className={arc.table}>{children}</table>
+        <table className={arc.table} data-fixed={fixed || undefined}>
+          {children}
+        </table>
       </div>
     </div>
   )

@@ -133,10 +133,13 @@ export function Journey({
   title,
   steps,
   notice,
+  footer,
 }: {
   title: string
   steps: JourneyStep[]
   notice?: JourneyNotice | null
+  /** Under the strip: what is happening to it right now (set-up's connection). */
+  footer?: React.ReactNode
 }) {
   const reduce = useReducedMotion()
   const delay = (i: number) => (reduce ? 0 : 0.08 + i * 0.12)
@@ -218,6 +221,7 @@ export function Journey({
           })}
         </ol>
       </div>
+      {footer}
     </section>
   )
 }

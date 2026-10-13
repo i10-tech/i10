@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import {
   Page,
   PageActions,
@@ -97,6 +98,13 @@ export default async function SuppressionsPage({
           />
         )}
       </PageBody>
+      {result.ok && (
+        <RememberCount
+          list="suppressions"
+          count={result.data.data.length}
+          filtered={Object.values(params).some(Boolean)}
+        />
+      )}
     </Page>
   )
 }

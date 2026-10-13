@@ -35,7 +35,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
 import { PhotoField } from "@/components/photo-field"
-import { ResendCode, useCodeSend } from "@/lib/code-send"
+import { ResendCode, useCodeSend } from "@repo/ui/components/i10/code-send"
 import { useReverify } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 

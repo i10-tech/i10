@@ -26,7 +26,7 @@ import { Reveal } from "@repo/ui/components/i10/reveal"
 import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
-import { ResendCode, useCodeSend } from "@/lib/code-send"
+import { ResendCode, useCodeSend } from "@repo/ui/components/i10/code-send"
 
 /**
  * "Prove it is you", ours (2026-10-12) - the replacement for Clerk's

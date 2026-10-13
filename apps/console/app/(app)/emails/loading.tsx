@@ -11,13 +11,15 @@ export default function Loading() {
     >
       <ToolbarSkeleton range filters={3} />
       <TableSkeleton
+        list="emails"
+        fixed
         rows={8}
         columns={[
           { head: "Status", className: "w-[9rem]", kind: "status" },
-          { head: "To", className: "w-[16rem]" },
+          { head: "To", className: "w-[13rem] xl:w-[16rem]" },
           { head: "Subject" },
-          { head: "From", className: "hidden w-[16rem] lg:table-cell" },
-          { head: "Sent", className: "w-[9rem] text-right" },
+          { head: "From", className: "hidden w-[13rem] lg:table-cell xl:w-[16rem]" },
+          { head: "Sent", className: "w-[8rem] text-right" },
         ]}
       />
     </PageSkeleton>

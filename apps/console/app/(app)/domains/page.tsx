@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import { Globe, Plus } from "lucide-react"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import {
@@ -120,6 +121,7 @@ export default async function DomainsPage() {
           />
         )}
       </PageBody>
+      {result.ok && <RememberCount list="domains" count={result.data.data.length} />}
     </Page>
   )
 }

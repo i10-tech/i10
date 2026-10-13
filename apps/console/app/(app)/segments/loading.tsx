@@ -21,6 +21,7 @@ export default function Loading() {
         fallback="grid"
         table={
           <TableSkeleton
+            list="segments"
             columns={[
               { head: "Name" },
               { head: "Contacts", className: "w-[9rem] text-right", kind: "number" },
@@ -29,7 +30,7 @@ export default function Loading() {
             ]}
           />
         }
-        grid={<CardGridSkeleton className="lg:grid-cols-3" lines={0} />}
+        grid={<CardGridSkeleton list="segments" className="lg:grid-cols-3" lines={0} />}
       />
     </PageSkeleton>
   )

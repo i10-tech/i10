@@ -62,6 +62,15 @@ export function EmailBodyTabs({
     [headers],
   )
 
+  const copyable =
+    tab === "html"
+      ? html
+      : tab === "text"
+        ? text
+        : tab === "headers"
+          ? headerLines
+          : null
+
   return (
     <section className="overflow-hidden rounded-2xl border">
       <Tabs value={tab} onValueChange={setTab}>
@@ -81,19 +90,9 @@ export function EmailBodyTabs({
             </TabsTrigger>
           </TabsList>
 
-          {tab === "html" && html && (
-            <CopyButton value={html} label="Copy HTML" iconOnly variant="plain" />
-          )}
-          {tab === "text" && text && (
-            <CopyButton value={text} label="Copy text" iconOnly variant="plain" />
-          )}
-          {tab === "headers" && headerLines && (
-            <CopyButton
-              value={headerLines}
-              label="Copy headers"
-              iconOnly
-              variant="plain"
-            />
+          {/* One button for every source tab, so it stays put while the tab changes. */}
+          {copyable && (
+            <CopyButton value={copyable} label="Copy" iconOnly variant="plain" />
           )}
         </div>
 
@@ -155,7 +154,14 @@ function Source({
      * characters rather than as a tag. This is the difference between showing
      * somebody their HTML and running it.
      */
-    <CodeBlock code={children} filename={filename} language={language} maxLines={40} />
+    // Embedded: the tab bar above owns the one copy button (2026-10-13).
+    <CodeBlock
+      code={children}
+      filename={filename}
+      language={language}
+      maxLines={40}
+      embedded
+    />
   )
 }
 

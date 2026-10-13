@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
 import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
-import { finishDnsConnect, listDomains } from "@/lib/actions"
-import { activateDomain } from "@/lib/domain-activation"
+import { handOverPath, runDnsConnect } from "@/lib/dns-connect"
 import { ARRIVAL, setArrival } from "@/lib/arrival"
 
 /**
@@ -74,121 +73,47 @@ export function CallbackHandler({
     if (!code || !state || providerError) return
     started.current = true
 
+    /*
+     * ⚠ STARTED FROM THE ADD-DOMAIN STEPS, IT IS FINISHED WHERE THEY RETURN
+     * (2026-10-13) - set-up's verify step or the new domain's page. This page
+     * used to shimmer "Finishing the connection" and "Publishing your records"
+     * on an empty screen and then jump; now the code is handed over at once
+     * and that page runs the same phases under the domain's events.
+     */
+    const back = handOverPath(provider, code, state)
+    if (back) {
+      router.replace(back)
+      return
+    }
+
     void (async () => {
-      const connected = await finishDnsConnect({ provider, code, state })
-      if (!connected.ok) {
+      const outcome = await runDnsConnect({
+        provider,
+        code,
+        state,
+        onPhase: (next) => {
+          if (next === "checking") setPhase("publishing")
+        },
+      })
+      if (!outcome.ok) {
         setPhase("failed")
-        /*
-         * ⚠ THE PROVIDER'S OWN WORDS, WHERE THE API SENT THEM. Every token
-         * exchange that fails reads "X did not complete the authorisation",
-         * which is true of an expired code, a rejected secret, a PKCE mismatch
-         * and a bot-protection page alike - four failures with four different
-         * next steps and one sentence between them. `detail` is the provider's
-         * `error_description`, and the person reading it is the administrator
-         * who authorised the account a moment ago.
-         */
-        const detail =
-          typeof connected.body?.detail === "string" ? connected.body.detail : null
-        setMessage(detail ? `${connected.error} (${detail})` : connected.error)
+        setMessage(outcome.error ?? null)
         return
       }
 
-      setPhase("publishing")
-
-      /*
-       * ⚠ EVERY UNVERIFIED DOMAIN, NOT THE ONE THEY CAME FROM. The flow does
-       * not carry a domain - somebody can reach this from onboarding, from the
-       * add form or from a domain page - and a credential for a provider is a
-       * credential for every zone in that account. Publishing for all of them
-       * is what the customer asked for by connecting; a domain hosted
-       * elsewhere answers `zone_not_found` and is skipped without comment.
-       */
-      const domains = await listDomains()
-      const pending = domains.ok
-        ? domains.data.data.filter((domain) => domain.status !== "verified")
-        : []
-
-      let wrote = 0
-      const wroteIds: string[] = []
-      const inTheWay: string[] = []
-      const notChecked: string[] = []
-
-      /*
-       * ⚠ THE SAME SEQUENCE THE ADD FORM AND THE ONBOARDING FLOW RUN, FROM THE
-       * SAME FILE. Publishing and then checking was written out three times,
-       * once per surface, and the three had drifted on what a 409 meant. See
-       * lib/domain-activation.ts.
-       *
-       * ⚠ AND A "not yet" FROM THE CHECK IS NOT A FAILURE. The records were
-       * written seconds ago; the check is a head start rather than the verdict,
-       * and the domain page watches from here on.
-       */
-      for (const domain of pending) {
-        const outcome = await activateDomain({ domainId: domain.id, provider })
-
-        if (outcome.kind === "conflicts") {
-          inTheWay.push(domain.name)
-          continue
-        }
-        if (outcome.kind === "failed") continue
-
-        wrote += 1
-        wroteIds.push(domain.id)
-        // ⚠ PUBLISHED AND CHECKED ARE COUNTED SEPARATELY - see `unchecked`.
-        if (outcome.kind === "published" && !outcome.checked) {
-          notChecked.push(domain.name)
-        }
-      }
-
-      setPublished(wrote)
-      setBlocked(inTheWay)
-      setUnchecked(notChecked)
+      setPublished(outcome.publishedIds.length)
+      setBlocked(outcome.blocked)
+      setUnchecked(outcome.unchecked)
       router.refresh()
 
-      /*
-       * ⚠ BACK WHERE THEY STARTED, IF THEY STARTED SOMEWHERE. The path came out
-       * of the signed `state` and the API re-checked that it is a path on this
-       * console. Without it, onboarding lost people here: the callback lands in
-       * the console shell and the flow they were half-way through is not in it.
-       *
-       * ⚠ AND ONLY WHEN NOTHING NEEDS SAYING. A conflict is a decision waiting
-       * for them; navigating away from it would hide the one thing on this page
-       * that is not automatic.
-       */
-      /*
-       * ⚠ THE SUCCESS SCREEN IS SKIPPED ENTIRELY WHEN THERE IS SOMEWHERE TO GO
-       * BACK TO, AND SHOWING IT FIRST WAS THE BLIP. This used to set `done`,
-       * paint "Connected and published" with its green tick, and THEN navigate
-       * - so the reward for connecting was a confirmation that appeared for a
-       * few hundred milliseconds and was snatched away, which reads as the
-       * screen glitching rather than as the step completing.
-       *
-       * ⚠ THE CONFIRMATION IS NOT LOST, IT IS MOVED. `published` rides back in
-       * a cookie and the step it lands on says it there - one screen, arrived at
-       * once, already carrying the news. See `VerifyStep` in components/onboarding/onboarding.tsx.
-       */
-      const returnTo = connected.data.return_to
-      if (returnTo && inTheWay.length === 0 && notChecked.length === 0) {
-        // ⚠ THE COUNT GOES IN A COOKIE FOR THAT PAGE, NOT ON ITS URL; the
-        // page shows it once and deletes it. See lib/arrival.ts.
+      const returnTo = outcome.returnTo
+      if (returnTo && outcome.blocked.length === 0 && outcome.unchecked.length === 0) {
         const [path = "/"] = returnTo.split("?")
-        /*
-         * ⚠ THE DOMAIN IDS, NOT A COUNT, BECAUSE A COOKIE BELONGS TO THE
-         * BROWSER AND NOT TO WHOEVER IS SIGNED IN. A bare "2" was announced as
-         * "Your records were added" to any account that reached onboarding in
-         * this browser within ten minutes - the checkout-id bug again, where a
-         * second account was told about the first one's purchase. The page now
-         * counts only the ids that appear in its own workspace's domain list,
-         * which the API has already scoped, so somebody else's publish counts
-         * as nothing.
-         */
-        setArrival(ARRIVAL.published, wroteIds.join(","), path)
+        setArrival(ARRIVAL.published, outcome.publishedIds.join(","), path)
         router.replace(returnTo)
         return
       }
 
-      // Nothing to go back to, or something needs saying: this page is the
-      // place that says it.
       setPhase("done")
     })()
   }, [code, state, provider, providerError, router])

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown, FileCode2 } from "lucide-react";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from "motion/react";
 import { motionTokens } from "../lib/motion-tokens";
@@ -16,6 +16,12 @@ export interface CodeBlockProps {
   language?: string;
   /** Collapse longer sources to this many lines, with a toggle that expands the rest in place. */
   maxLines?: number;
+  /**
+   * No border, no header, no copy button: the block sits inside a card that already has them (tabs of
+   * snippets, an email's HTML tab). One copy button per card, owned by the card, so it stays put while
+   * the code under it changes.
+   */
+  embedded?: boolean;
 }
 
 type TokenKind = "comment" | "string" | "number" | "keyword" | "type" | "function" | "property" | "tag" | "punctuation";
@@ -103,7 +109,7 @@ function FileName({ name, reduced }: { name: string; reduced: boolean }) {
   </motion.span>;
 }
 
-export function CodeBlock({ code, filename, language = "tsx", maxLines }: CodeBlockProps) {
+export function CodeBlock({ code, filename, language = "tsx", maxLines, embedded = false }: CodeBlockProps) {
   const displayLanguage = normaliseLanguage(language);
   const reduced = useReducedMotion() ?? false;
   const preId = useId();
@@ -112,52 +118,66 @@ export function CodeBlock({ code, filename, language = "tsx", maxLines }: CodeBl
   const [expanded, setExpanded] = useState(false);
   const open = !collapsible || expanded;
   const preRef = useRef<HTMLPreElement>(null);
-  const measured = useRef<{ full: number; collapsed: number } | null>(null);
   // Before the first measurement the clip height comes from CSS, so the server render is already collapsed.
   const height = useMotionValue<number | string>(open ? "auto" : "var(--code-collapsed)");
-  const target = useRef({ open, reduced });
-  const settleRef = useRef<(instant: boolean) => void>(() => {});
+  const openRef = useRef(open);
+  const first = useRef(true);
 
-  // The source area follows its content on a spring: expanding, collapsing, and new code all resize smoothly.
-  useLayoutEffect(() => {
+  /*
+   * The source area follows its content on a spring: expanding, collapsing and new code all resize smoothly.
+   * ⚠ MEASURED AT THE MOMENT IT MOVES, NOT CACHED (2026-10-13). The old version cached sizes from a
+   * ResizeObserver on the <pre>, which never fires while the block is clipped and its content unchanged -
+   * a block first measured inside a hidden tab kept a stale "full" height, and "Show all lines" animated
+   * to the height it already had. Now every change reads the <pre> fresh and rests on "auto" when open.
+   */
+  const settle = useCallback((instant: boolean) => {
     const pre = preRef.current;
     if (!pre) return;
-    const settle = (instant: boolean) => {
-      const sizes = measured.current;
-      if (!sizes) return;
-      const next = target.current.open ? sizes.full : sizes.collapsed;
-      if (instant || target.current.reduced || typeof height.get() !== "number") height.jump(next);
-      else animate(height, next, motionTokens.spring.smooth);
-    };
-    const observer = new ResizeObserver(() => {
-      const style = getComputedStyle(pre);
-      const full = pre.offsetHeight;
-      const collapsed = maxLines ? Math.min(full, Math.round(maxLines * parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom))) : full;
-      const first = !measured.current;
-      measured.current = { full, collapsed };
-      settle(first);
-    });
+    const style = getComputedStyle(pre);
+    const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    // The code in flow, not the one leaving: a swap pops the old code out absolutely while it fades.
+    const entering = Array.from(pre.children).filter(child => getComputedStyle(child).position !== "absolute").pop() as HTMLElement | undefined;
+    const full = (entering?.offsetHeight ?? pre.scrollHeight - padding) + padding;
+    const collapsed = maxLines ? Math.min(full, Math.round(maxLines * parseFloat(style.lineHeight) + padding)) : full;
+    const next = openRef.current ? full : collapsed;
+    const current = height.get();
+    const from = typeof current === "number" ? current : pre.parentElement?.offsetHeight ?? next;
+    const rest = () => height.jump(openRef.current ? "auto" : collapsed);
+    if (instant || reduced || Math.abs(from - next) < 1) { rest(); return; }
+    height.jump(from);
+    animate(height, next, { ...motionTokens.spring.smooth, onComplete: rest });
+  }, [height, maxLines, reduced]);
+
+  useLayoutEffect(() => {
+    openRef.current = open;
+    settle(first.current);
+    first.current = false;
+  }, [open, code, settle]);
+
+  // The page around it can change the wrap width; a collapsed block re-measures, an open one is already "auto".
+  useEffect(() => {
+    const pre = preRef.current;
+    if (!pre) return;
+    const observer = new ResizeObserver(() => { if (!openRef.current) settle(true); });
     observer.observe(pre);
-    settleRef.current = settle;
     return () => observer.disconnect();
-  }, [height, maxLines]);
-  useLayoutEffect(() => { target.current = { open, reduced }; settleRef.current(false); }, [open, reduced]);
+  }, [settle]);
   const expandLabels = [`Show all ${lineCount} lines`, "Show fewer lines"] as const;
 
   return (
-    <section className={styles.block} aria-label={filename ? `${filename} source code` : `${displayLanguage} source code`} style={maxLines ? { "--code-lines": maxLines } as CSSProperties : undefined}>
-      <header className={styles.header}>
+    <section className={embedded ? styles.embedded : styles.block} aria-label={filename ? `${filename} source code` : `${displayLanguage} source code`} style={maxLines ? { "--code-lines": maxLines } as CSSProperties : undefined}>
+      {!embedded && <header className={styles.header}>
         <div className={styles.file}>
           <FileCode2 size={16} strokeWidth={1.75} aria-hidden="true" />
           <FileName name={filename ?? "Source code"} reduced={reduced} />
           <span className={styles.language}>{displayLanguage}</span>
         </div>
         <CopyButton value={code} label="Copy code" />
-      </header>
+      </header>}
       <motion.div className={styles.viewport} style={{ height }}>
         <pre ref={preRef} id={preId} className={styles.pre} tabIndex={0} aria-label="Selectable source code">
           <AnimatePresence initial={false} mode="popLayout">
-            <motion.code key={code} className={styles.code} initial={reduced ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={reduced ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, transition: textExit }} transition={reduced ? { duration: 0 } : textEnter}>{highlight(code, displayLanguage)}</motion.code>
+            <motion.code key={code} className={styles.code} initial={reduced ? false : { opacity: 0, y: 4, filter: `blur(${motionTokens.blur.subtle}px)` }} animate={{ opacity: 1, y: 0, filter: "blur(0px)", transitionEnd: { filter: "none" } }} exit={reduced ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, transition: textExit }} transition={reduced ? { duration: 0 } : textEnter}>{highlight(code, displayLanguage)}</motion.code>
           </AnimatePresence>
         </pre>
       </motion.div>

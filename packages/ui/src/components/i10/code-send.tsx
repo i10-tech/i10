@@ -3,9 +3,22 @@
 import * as React from "react"
 import { AnimatedCounter } from "@repo/ui/components/animated-counter/animated-counter"
 import { Button } from "@repo/ui/components/button/button"
-import { reserveCodeSend } from "@/lib/actions"
 
 const COOLDOWN_SECONDS = 60
+
+/** The server's answer to "may this purpose send a code now". */
+export type CodeReservation =
+  | { ok: true; data: { retry_after: number } }
+  | { ok: false; status?: number; body?: { retry_after?: unknown } | null }
+
+/**
+ * Where the minute is held. The console provides the API's reservation
+ * (`/console/me/code-sends`); an app without one (auth, where the person has
+ * only just signed up) keeps the minute in this tab alone.
+ */
+export const CodeReservationContext = React.createContext<
+  ((purpose: string) => Promise<CodeReservation>) | null
+>(null)
 
 /**
  * Sending a verification code, at most once a minute (2026-10-12).
@@ -26,6 +39,7 @@ export function useCodeSend(purpose: string | null) {
   const [untils, setUntils] = React.useState<Record<string, number>>({})
   const [now, setNow] = React.useState(() => Date.now())
   const [sending, setSending] = React.useState(false)
+  const reserve = React.useContext(CodeReservationContext)
   const until = purpose ? (untils[purpose] ?? 0) : 0
   const remaining = Math.max(0, Math.ceil((until - now) / 1000))
 
@@ -53,7 +67,9 @@ export function useCodeSend(purpose: string | null) {
     if (!as || sending || (untils[as] ?? 0) > Date.now()) return false
     setSending(true)
     try {
-      const reserved = await reserveCodeSend(as)
+      const reserved: CodeReservation = reserve
+        ? await reserve(as)
+        : { ok: true, data: { retry_after: COOLDOWN_SECONDS } }
       if (!reserved.ok && reserved.status === 429) {
         const wait = reserved.body?.retry_after
         hold(as, typeof wait === "number" && wait > 0 ? wait : COOLDOWN_SECONDS)

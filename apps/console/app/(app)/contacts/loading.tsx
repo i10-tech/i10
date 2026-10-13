@@ -11,6 +11,7 @@ export default function Loading() {
     >
       <ToolbarSkeleton filters={2} />
       <TableSkeleton
+        list="contacts"
         rows={8}
         columns={[
           { kind: "box" },

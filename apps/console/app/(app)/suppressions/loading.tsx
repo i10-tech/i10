@@ -11,6 +11,7 @@ export default function Loading() {
     >
       <ToolbarSkeleton filters={1} />
       <TableSkeleton
+        list="suppressions"
         rows={8}
         columns={[
           { head: "Address" },
