@@ -18,6 +18,8 @@ import {
   setAccessRules,
   verifyAccessDomain,
 } from "../../console/team-domains.js"
+import { seats } from "../../console/members.js"
+import { mountMembers } from "./members.js"
 
 /**
  * Team access (#326): access domains and their rules, requests to join, the
@@ -39,6 +41,8 @@ const noTeam = validation("Team access needs a team workspace.")
 const ARRIVAL_WINDOW_MS = 24 * 60 * 60 * 1000
 
 export function mountTeam(app: Hono, d: ConsoleDeps): void {
+  mountMembers(app, d)
+
   // ── Access domains ─────────────────────────────────────────────────────────
 
   /** This workspace's access domains, and the /domains names it could add. */
@@ -207,16 +211,23 @@ export function mountTeam(app: Hono, d: ConsoleDeps): void {
       block: body?.block === true,
     })
     if (outcome === "ok") return c.json({ ok: true })
-    if (outcome === "full")
+    if (outcome === "full") {
+      // What would make room, naming only what applies (#327).
+      const room =
+        d.members && orgId
+          ? await seats(d.members, tenantId, orgId).catch(() => null)
+          : null
       return c.json(
         {
           statusCode: 409,
           name: "workspace_full",
           message:
             "This workspace is full. Remove a member or withdraw an invitation first.",
+          reasons: room?.reasons ?? ["Remove a member"],
         },
         409,
       )
+    }
     if (outcome === "forbidden")
       return c.json(forbidden("Only an admin can answer requests to join."), 403)
     if (outcome === "no_org") return c.json(noTeam, 422)

@@ -53,6 +53,17 @@ export interface ClerkWebhookDeps {
    * time. Absent, nobody is auto-joined and suggestions still work.
    */
   autoJoin?: (data: unknown) => Promise<string | null>
+  /**
+   * Member limits and invitations (#327): a new organization gets its plan's
+   * limit; an invitation accepted after we expired it is undone; members
+   * moving re-check the capacity alerts. Outside the dedupe and idempotent,
+   * like the two above.
+   *
+   * ⚠ NEEDS THESE EVENTS SUBSCRIBED ON CLERK'S WEBHOOK ENDPOINT:
+   * `organizationInvitation.accepted`, `organizationInvitation.revoked`,
+   * `organizationMembership.created` and `organizationMembership.deleted`.
+   */
+  members?: (type: string, data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -142,6 +153,8 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // the only chance to fix it, and swallowing that leaves somebody with an
       // account that can never send. Both halves are idempotent on their own.
       const provisioned = await provision(deps, event.type, event.data)
+      // After provisioning, so a new organization's tenant exists to read.
+      const members = (await deps.members?.(event.type, event.data)) ?? null
 
       // ⚠ OUTSIDE THE DEDUPE FOR THE SAME REASON PROVISIONING IS, and safe for
       // a different one. `applyClerkEvent` claims the Svix id and answers
@@ -160,6 +173,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
           type: event.type,
           outcome: result.outcome,
           ...(provisioned ? { provisioned } : {}),
+          ...(members ? { members } : {}),
           ...(emailed ? { emailed } : {}),
         },
         "clerk webhook applied",

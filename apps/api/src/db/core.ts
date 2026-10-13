@@ -1061,6 +1061,106 @@ export const joinDismissals = core.table(
 )
 
 /**
+ * Our record of every invitation sent through the API (#327): the exact
+ * expiry the admin picked, and how to say it.
+ *
+ * ⚠ THE INVITATION ITSELF IS CLERK'S; THIS IS ITS CLOCK. Clerk only takes
+ * whole days (`expiresInDays`), so it is given the period rounded up as an
+ * outer bound and a delayed job revokes it at `expires_at` to the second.
+ * Expired invitations are also revoked before every seat use, and the Clerk
+ * webhook removes a membership that came through one we had already expired.
+ *
+ * ⚠ ONE UTC INSTANT. `zone` and `country` only say how to word it - "3:00 PM
+ * Paris time" - never when it is.
+ *
+ * ⚠ THREE AUDIENCES. The workspace reads and writes its own. The auth mail
+ * path reads the newest pending one for an address (`app.invitee_email`) to
+ * put the expiry in the email. And whoever opens the link in that email
+ * reads the one row it names (`app.invitation_id`) - an id only that email
+ * carries.
+ */
+export const memberInvitations = core.table(
+  "member_invitations",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkOrgId: text("clerk_org_id").notNull(),
+    /** Null for the moment between our row and Clerk's answer. */
+    clerkInvitationId: text("clerk_invitation_id"),
+    /** Lowercased. */
+    email: text("email").notNull(),
+    role: text("role").notNull(),
+    inviterUserId: text("inviter_user_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** The IANA zone the expiry is worded in. */
+    zone: text("zone").notNull(),
+    /** ISO country, when the admin picked a country rather than a zone. */
+    country: text("country"),
+    /** Clerk's accept link, kept when our email is rendered; ours points here. */
+    actionUrl: text("action_url"),
+    /** `pending`, `accepted`, `withdrawn` or `expired`. */
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("member_invitations_tenant_idx").on(t.tenantId, t.status),
+    index("member_invitations_email_idx").on(t.email),
+    uniqueIndex("member_invitations_clerk_unique").on(t.clerkInvitationId),
+    pgPolicy("member_invitations_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("member_invitations_invitee_read", {
+      for: "select",
+      using: sql`${t.email} = nullif(current_setting('app.invitee_email', true), '')`,
+    }),
+    pgPolicy("member_invitations_invitee_link", {
+      for: "update",
+      using: sql`${t.email} = nullif(current_setting('app.invitee_email', true), '')`,
+      withCheck: sql`${t.email} = nullif(current_setting('app.invitee_email', true), '')`,
+    }),
+    pgPolicy("member_invitations_link_read", {
+      for: "select",
+      using: sql`${t.id}::text = nullif(current_setting('app.invitation_id', true), '')`,
+    }),
+  ],
+)
+
+/**
+ * The capacity alert's armed state, per workspace (#327).
+ *
+ * ⚠ ONCE PER CROSSING. `level` is the highest alert sent since the
+ * workspace was last under 80% of its member limit: 0 (armed), 80 or 100.
+ * Each crossing upward emails the admins once; dropping below 80% re-arms
+ * both. Members only - pending invitations never raise an alert.
+ */
+export const memberAlerts = core.table(
+  "member_alerts",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    level: integer("level").notNull().default(0),
+    /** When the current level was reached; the banner's dismissal keys on it. */
+    alertedAt: timestamp("alerted_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy("member_alerts_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
  * Every API key i10 has issued. This table IS the credential store.
  *
  * ⚠ IT USED TO BE A THIN INDEX OF KEYS CLERK HELD, AND THE COMMENT HERE ARGUED
@@ -2610,6 +2710,19 @@ export const plans = core.table(
      * turns every expired message into a false surplus. The job clamps it.
      */
     retentionDays: integer("retention_days").notNull().default(30),
+
+    /**
+     * How many people a team workspace on this plan may hold (#327). Free 3,
+     * Pro 20 (the default, and Clerk's own cap without its add-on); a custom
+     * plan sets its own. A Personal workspace is 1 whatever its plan says.
+     *
+     * ⚠ MEMBERS PLUS PENDING INVITATIONS COUNT AGAINST IT, because that is
+     * what Clerk counts: it refuses a membership with
+     * `organization_membership_quota_exceeded` once both together reach the
+     * organization's `max_allowed_memberships`, which every plan change syncs
+     * to this number (see console/member-limits.ts).
+     */
+    memberLimit: integer("member_limit").notNull().default(20),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

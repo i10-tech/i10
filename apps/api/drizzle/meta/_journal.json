@@ -890,6 +890,20 @@
       "when": 1791922362444,
       "tag": "0126_team_access_domains",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1791924553378,
+      "tag": "0127_member_limits_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1791924563222,
+      "tag": "0128_free_member_limit",
+      "breakpoints": true
     }
   ]
 }

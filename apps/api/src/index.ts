@@ -24,6 +24,20 @@ import {
 } from "./observability.js"
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
+import { createInvitationQueue, invitationScheduler } from "./queue/invitation-queue.js"
+import { memberStore } from "./console/members-db.js"
+import { clerkMembers } from "./console/clerk-members.js"
+import { memberMail } from "./console/member-mail.js"
+import {
+  DAY_MS,
+  beforeSeatUse,
+  invitationEmail,
+  notifyAccepted,
+  onClerkEvent,
+  sendInvitations,
+  withMemberLimitSync,
+  type MembersDeps,
+} from "./console/members.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
 import { acceptSend } from "./send/accept.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
@@ -422,10 +436,16 @@ const entitlements = postgresEntitlements({
   freePlanId: env.METERING_FREE_PLAN_ID,
 })
 
-const grants = subscriptionGrants({ subscriptions, entitlements, log })
-
-/** Members a team workspace allows, until limits per plan land (#327). */
-const TEAM_MEMBER_LIMIT = 20
+/*
+ * ⚠ EVERY PLAN CHANGE SYNCS CLERK'S MEMBER LIMIT (#327), by wrapping the one
+ * port that changes plans. `members` is built further down, once our sender
+ * exists; the grant path only runs after boot.
+ */
+const grants = subscriptionGrants({
+  subscriptions,
+  entitlements: withMemberLimitSync(entitlements, () => members),
+  log,
+})
 
 /**
  * A Clerk organization becomes a tenant. Nobody is given one at sign-up any
@@ -751,6 +771,28 @@ if (systemSender && consoleUrl) {
   }, 30_000).unref()
 }
 
+/**
+ * Member limits per plan, invitations with a chosen expiry, and capacity
+ * alerts (#327). See console/members.ts.
+ *
+ * ⚠ THE EXPIRY JOBS RUN IN THE WORKER (worker.ts); this process only adds and
+ * removes them. Without our sender there are no alert emails and the
+ * invitation email keeps Clerk's own link.
+ */
+const invitationQueue = createInvitationQueue({ redis: queueRedis })
+const members: MembersDeps = {
+  store: memberStore(db),
+  clerk: clerkMembers(clerk),
+  expiry: invitationScheduler(invitationQueue),
+  ...(systemSender && consoleUrl
+    ? {
+        mail: memberMail({ sender: systemSender, consoleUrl }),
+        inviteLink: (id: string) => `${consoleUrl.replace(/\/$/, "")}/invite/${id}`,
+      }
+    : {}),
+  log,
+}
+
 const sesStatusChanges = sesStatusService({
   store: sesStatus,
   ...(sesNotice ? { notice: sesNotice } : {}),
@@ -978,18 +1020,29 @@ const teamDomains: TeamDomainDeps | null = domains
        * invitation raises `email.created` and the auth mail path sends ours
        * (packages/emails organization-invitation), as for every other invite.
        */
+      /*
+       * ⚠ "ALLOW AND INVITE" GOES THROUGH OUR INVITATIONS TOO (#327), so it is
+       * counted, scheduled and worded like every other: seven days, the
+       * longest an admin can pick, stated in UTC since nobody chose a zone.
+       */
       invite: async (
         orgId: string,
         inviterUserId: string,
         email: string,
         role: string,
+        tenantId: string,
       ) => {
-        await clerk.organizations.createOrganizationInvitation({
-          organizationId: orgId,
-          inviterUserId,
-          emailAddress: email,
+        const sent = await sendInvitations(members, {
+          tenantId,
+          orgId,
+          userId: inviterUserId,
+          emails: [email],
           role,
+          expiresAt: new Date(Date.now() + 7 * DAY_MS).toISOString(),
+          zone: "UTC",
         })
+        if (sent.outcome !== "ok" || sent.sent.length === 0)
+          throw new Error(`could not invite ${email}: ${sent.outcome}`)
       },
       emailsOf: async (userId: string) => {
         try {
@@ -1008,6 +1061,17 @@ const teamDomains: TeamDomainDeps | null = domains
         return org.publicMetadata?.kind === "personal"
       },
       txt: nodeTxtLookup(),
+      // Member limits per plan (#327): checked before every seat use.
+      seats: {
+        beforeSeatUse: (tenantId: string, orgId: string) =>
+          beforeSeatUse(members, tenantId, orgId),
+        accepted: (input: {
+          tenantId: string
+          requestId: string
+          email: string
+          waited: boolean
+        }) => notifyAccepted(members, input),
+      },
     }
   : null
 
@@ -1041,6 +1105,8 @@ const app = createApp({
       : {}),
     log,
   },
+  // The link in our invitation email (#327).
+  invitationLinks: members,
   clerkWebhooks: {
     db,
     signingSecret: env.CLERK_WEBHOOK_SECRET,
@@ -1051,6 +1117,8 @@ const app = createApp({
     // plan assignment on Pro, and Polar charging a card for a workspace nobody
     // could sign in to. See tenants/lifecycle.ts.
     lifecycle,
+    // Member limits, late acceptances and capacity alerts (#327).
+    members: (type: string, data: unknown) => onClerkEvent(members, type, data),
     // Auto-join at sign-up (#326): verified addresses only, idempotent.
     ...(teamDomains
       ? {
@@ -1065,6 +1133,9 @@ const app = createApp({
       ? {
           authEmail: authEmailDelivery({
             sender: systemSender,
+            // The expiry, and our link, in the invitation email (#327).
+            invitation: (input: { to: string; actionUrl: string | null }) =>
+              invitationEmail(members, input),
             log,
           }),
         }
@@ -1353,8 +1424,8 @@ const app = createApp({
        * creator are both checked, so nobody can lift the limit on a workspace
        * that is not theirs by calling this on it.
        *
-       * ⚠ THE LIMIT IS CLERK'S INSTANCE DEFAULT FOR NOW. Limits per plan are
-       * #327, which replaces this number with the workspace plan's.
+       * ⚠ THE LIMIT IS THE PLAN'S, SET BY THE ROUTE ONCE THE MARK HAS CHANGED
+       * (#327) - `syncMemberLimit` reads the organization as a team.
        */
       makeTeam: async (clerkOrgId: string, userId: string, name: string) => {
         const org = await clerk.organizations.getOrganization({
@@ -1363,10 +1434,7 @@ const app = createApp({
         if (org.publicMetadata?.kind !== "personal" || org.createdBy !== userId) {
           return "not_personal" as const
         }
-        await clerk.organizations.updateOrganization(clerkOrgId, {
-          name,
-          maxAllowedMemberships: TEAM_MEMBER_LIMIT,
-        })
+        await clerk.organizations.updateOrganization(clerkOrgId, { name })
         await clerk.organizations.updateOrganizationMetadata(clerkOrgId, {
           publicMetadata: { kind: "team" },
         })
@@ -1386,6 +1454,7 @@ const app = createApp({
     },
     codeSends: codeCooldown(cache),
     ...(teamDomains ? { teamDomains } : {}),
+    members,
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {

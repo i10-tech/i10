@@ -31,6 +31,14 @@ import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
 import { objectStoreFrom } from "./content/object-store.js"
 import { handleBatch } from "./worker/handle-batch.js"
+import { createClerkClient } from "@clerk/backend"
+import {
+  createInvitationQueue,
+  startInvitationWorker,
+} from "./queue/invitation-queue.js"
+import { memberStore } from "./console/members-db.js"
+import { clerkMembers } from "./console/clerk-members.js"
+import { expireInvitation } from "./console/members.js"
 
 /**
  * The send worker.
@@ -361,9 +369,34 @@ function startWebhookWorker() {
   return engine
 }
 
+/**
+ * Invitation expiry (#327): one delayed job per invitation, revoking it in
+ * Clerk at the second the admin chose. The API adds and cancels the jobs;
+ * this process runs them. See queue/invitation-queue.ts.
+ *
+ * ⚠ IN THE WORKER BECAUSE THE WORKER ALWAYS RUNS (KEDA's minimum is one), so
+ * a delayed job is never left waiting for a replica that does not exist.
+ */
+function startInvitationExpiry() {
+  const members = {
+    store: memberStore(db),
+    clerk: clerkMembers(createClerkClient({ secretKey: env.CLERK_SECRET_KEY })),
+    log,
+  }
+  const worker = startInvitationWorker({
+    queue: createInvitationQueue({ redis: queueRedis }),
+    name: `${workerId}:invitations`,
+    expire: (job) => expireInvitation(members, job),
+    log,
+  })
+  log.info({}, "invitation expiry worker started")
+  return worker
+}
+
 const workers = [
   ...(["transactional", "bulk"] as const).map(startWorker),
   startWebhookWorker(),
+  startInvitationExpiry(),
 ].filter((w) => w !== null)
 
 /**

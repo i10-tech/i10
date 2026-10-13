@@ -59,6 +59,7 @@ export interface TeamDomainDeps {
     inviterUserId: string,
     email: string,
     role: string,
+    tenantId: string,
   ): Promise<void>
   /** A person's VERIFIED addresses, from Clerk. */
   emailsOf?(userId: string): Promise<string[]>
@@ -66,6 +67,28 @@ export interface TeamDomainDeps {
   isPersonal?(orgId: string): Promise<boolean>
   /** For the access-only TXT proof. */
   txt?: TxtLookup
+  /**
+   * Member limits per plan (#327). Absent, Clerk's own refusal is the only
+   * check, as it was in #326.
+   */
+  seats?: SeatChecks
+}
+
+/**
+ * ⚠ ASKED BEFORE EVERY SEAT USE, NOT ONLY CLERK. Clerk's maximum is never set
+ * below the members a downgraded workspace already holds, so the plan's limit
+ * is ours to enforce - and an expired invitation still holds a spot in Clerk
+ * until it is revoked, which `beforeSeatUse` does first. See console/members.ts.
+ */
+export interface SeatChecks {
+  beforeSeatUse(tenantId: string, orgId: string): Promise<{ full: boolean }>
+  /** "A spot opened up, you're in" (or "you're in") to an accepted request. */
+  accepted?(input: {
+    tenantId: string
+    requestId: string
+    email: string
+    waited: boolean
+  }): Promise<void>
 }
 
 /** Changing access domains needs the same permission Clerk's domains did. */
@@ -312,7 +335,10 @@ async function admit(
   offer: Offer,
   how: "auto" | "join",
 ): Promise<{ outcome: "joined"; orgId: string } | { outcome: "full" }> {
-  const added = await d.addMember(offer.clerkOrgId, userId, offer.role)
+  const room = await d.seats?.beforeSeatUse(offer.tenantId, offer.clerkOrgId)
+  const added = room?.full
+    ? "full"
+    : await d.addMember(offer.clerkOrgId, userId, offer.role)
   if (added === "full") {
     await d.store.fileRequest(offer.tenantId, {
       userId,
@@ -390,6 +416,8 @@ export async function answerJoinRequest(
   const request = (await d.store.pending(input.tenantId)).find((r) => r.id === input.id)
   if (!request) return "missing"
   if (input.accept) {
+    const room = await d.seats?.beforeSeatUse(input.tenantId, input.orgId!)
+    if (room?.full) return "full"
     const role = roleFor(await d.store.accessDomains(input.tenantId), request.email)
     const added = await d.addMember(input.orgId!, request.user_id, role)
     if (added === "full") return "full"
@@ -414,6 +442,19 @@ export async function answerJoinRequest(
       how: "request",
       via: request.via,
     })
+    /*
+     * ⚠ ACCEPT AND NOTIFY IS ONE FLOW (#327). Everybody accepted is told they
+     * are in; somebody who waited for room is told a spot opened up. The
+     * membership is already made, so a mail failure is not the admin's error.
+     */
+    await d.seats
+      ?.accepted?.({
+        tenantId: input.tenantId,
+        requestId: request.id,
+        email: request.email,
+        waited: request.full,
+      })
+      .catch(() => {})
   } else if (input.block) {
     await d.store.exclude(input.tenantId, addresses, "blocked")
   }
@@ -480,7 +521,13 @@ export async function allowAddress(
   const email = input.email.trim().toLowerCase()
   await d.store.allow(input.tenantId, [email])
   if (input.invite)
-    await d.invite!(input.orgId!, input.userId, email, input.role ?? DEFAULT_ROLE)
+    await d.invite!(
+      input.orgId!,
+      input.userId,
+      email,
+      input.role ?? DEFAULT_ROLE,
+      input.tenantId,
+    )
   return "ok"
 }
 

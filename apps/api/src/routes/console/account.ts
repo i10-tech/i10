@@ -5,6 +5,7 @@ import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
 import { checkPassword } from "../../console/password-check.js"
 import { PURPOSE } from "../../console/code-cooldown.js"
+import { revokeExpired, seats, syncMemberLimit } from "../../console/members.js"
 
 /**
  * Who this workspace is, what it has used, and what it is paying for.
@@ -152,6 +153,19 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
         422,
       )
     await d.profile.rename(tenantId, name)
+    /*
+     * ⚠ THE LIMIT COMES FROM THE PLAN NOW (#327), set after the mark changed
+     * so the sync reads a team. A Clerk failure here leaves it at one member
+     * until the next seat use corrects it (see `beforeSeatUse`).
+     */
+    if (d.members) {
+      await syncMemberLimit(d.members, tenantId).catch((error: unknown) =>
+        d.log.error(
+          { err: error, tenantId },
+          "could not set the new team's member limit",
+        ),
+      )
+    }
     return c.json({ ok: true })
   })
 
@@ -212,12 +226,14 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
 
   app.get("/usage", async (c) => {
     const { tenantId } = c.get("auth")
-    const [usage, limits, billing] = await Promise.all([
+    const { orgId } = c.get("user")
+    const [usage, limits, billing, members] = await Promise.all([
       d.usage.usage(tenantId),
       d.usage.limits(tenantId),
       d.usage.billing(tenantId),
+      memberUsage(d, tenantId, orgId),
     ])
-    return c.json({ usage, limits, billing })
+    return c.json({ usage, limits, billing, members })
   })
 
   app.get("/plans", async (c) => {
@@ -695,3 +711,32 @@ function returnTo(
 
 /** A plain address, for the one recipient a person may type in set-up. */
 const EMAIL = /^[^\s@<>,;"]+@[^\s@<>.,;"]+(?:\.[^\s@<>.,;"]+)*\.[A-Za-z]{2,}$/
+
+/**
+ * The member meter on /usage (#327): members, pending invitations and free
+ * spots against the plan's limit.
+ *
+ * ⚠ EXPIRED INVITATIONS ARE REVOKED FIRST, so the meter never counts a spot
+ * nobody holds. A Clerk failure leaves the meter out rather than the page.
+ */
+async function memberUsage(
+  d: ConsoleDeps,
+  tenantId: string,
+  orgId: string | undefined,
+) {
+  if (!d.members || !orgId) return null
+  try {
+    await revokeExpired(d.members, tenantId)
+    const room = await seats(d.members, tenantId, orgId)
+    if (room.personal) return null
+    return {
+      members: room.members,
+      invitations: room.invitations,
+      limit: room.limit,
+      free: room.free,
+    }
+  } catch (error) {
+    d.log.warn({ err: error, tenantId }, "could not read member usage")
+    return null
+  }
+}

@@ -35,6 +35,7 @@ import type { PlanChange } from "../../billing/plan-change.js"
 import type { PasswordCheckDeps } from "../../console/password-check.js"
 import type { TeamDomainDeps } from "../../console/team-domains.js"
 import type { Reservation } from "../../console/code-cooldown.js"
+import type { MembersDeps } from "../../console/members.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -196,6 +197,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * stay empty.
    */
   teamDomains?: TeamDomainDeps
+  /**
+   * Member limits per plan, invitations with a chosen expiry and capacity
+   * alerts (#327). Optional; without it invitations answer 501 and the Team
+   * page and /usage show no member counts.
+   */
+  members?: MembersDeps
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.
