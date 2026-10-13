@@ -110,10 +110,8 @@ export interface OrganizationLiveness {
   /**
    * Deletes an organization nobody is left in.
    *
-   * ⚠ THE SYMMETRIC HALF OF `onUserCreated`, WHICH CREATES ONE. A person who
-   * signs up with no organization gets a personal one made for them so they
-   * have a tenant to send from - see provision.ts. Nothing ever removed it
-   * again, so an account deleted in Clerk left the organization standing with
+   * ⚠ NOTHING ELSE EVER REMOVES ONE. Until #325 every sign-up was given a
+   * personal organization (see provision.ts), and nothing removed it again, so an account deleted in Clerk left the organization standing with
    * zero members: unreachable by anybody, counting toward the instance, and
    * still holding its slug. Measured 2026-09-20, two of them already.
    *

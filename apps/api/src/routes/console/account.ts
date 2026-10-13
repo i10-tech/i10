@@ -258,6 +258,43 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     return c.json({ requested: true }, outcome === "created" ? 201 : 200)
   })
 
+  /**
+   * The person's Personal workspace (#325), made the first time they pick it
+   * on onboarding. Answers with the Clerk organization to activate; the tenant
+   * follows through `organization.created` like any other workspace.
+   */
+  app.post("/workspaces/personal", async (c) => {
+    const createPersonal = d.organizations?.createPersonal
+    if (!createPersonal) return c.json(notWired("Personal workspaces"), 501)
+    const { userId } = c.get("user")
+    const made = await createPersonal(userId)
+    return c.json({ organization_id: made.id }, made.created ? 201 : 200)
+  })
+
+  /**
+   * Turns the active Personal workspace into a team workspace (#325): a name,
+   * and room for more than one member. The tenant keeps everything it has.
+   */
+  app.post("/workspace/team", async (c) => {
+    const makeTeam = d.organizations?.makeTeam
+    if (!makeTeam) return c.json(notWired("Team workspaces"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId, orgId } = c.get("user")
+    const body = await readJson(c)
+    const name = typeof body?.name === "string" ? body.name.trim() : ""
+    if (!name) return c.json(validation("`name` is required."), 422)
+    if (name.length > 120) return c.json(validation("`name` is too long."), 422)
+    if (!orgId) return c.json(validation("Open your Personal workspace first."), 422)
+    const outcome = await makeTeam(orgId, userId, name)
+    if (outcome === "not_personal")
+      return c.json(
+        validation("Only your Personal workspace can be turned into a team."),
+        422,
+      )
+    await d.profile.rename(tenantId, name)
+    return c.json({ ok: true })
+  })
+
   app.patch("/me/tenant", async (c) => {
     const { tenantId } = c.get("auth")
     const body = await readJson(c)

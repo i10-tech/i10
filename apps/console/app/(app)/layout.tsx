@@ -16,6 +16,7 @@ import { MobileNav } from "@/components/mobile-nav"
 import { UsageRail } from "@/components/usage-rail"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { AccountBar } from "@/components/account-bar"
+import { NoWorkspace } from "@/components/no-workspace"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { tryApi } from "@/lib/api"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
@@ -62,6 +63,11 @@ export default async function AppLayout({
    */
   if (!me.ok && me.error.name === "tenant_not_ready") {
     return <TenantNotReady />
+  }
+
+  // Signed in with no workspace active - see components/no-workspace.tsx.
+  if (!me.ok && me.error.name === "no_workspace") {
+    return <NoWorkspace />
   }
 
   if (!me.ok) {

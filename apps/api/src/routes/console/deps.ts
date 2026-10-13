@@ -145,7 +145,23 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * this endpoint did before - the two names simply drift, which is the
    * complaint rather than a crash.
    */
-  organizations?: { rename(clerkOrgId: string, name: string): Promise<void> }
+  organizations?: {
+    rename(clerkOrgId: string, name: string): Promise<void>
+    /**
+     * This person's Personal workspace, made if they have none (#325): named
+     * "Personal", limited to one member. `created` is false when it existed.
+     */
+    createPersonal?(userId: string): Promise<{ id: string; created: boolean }>
+    /**
+     * Turns this person's Personal workspace into a team one: renamed, its
+     * member limit raised, its mark changed. `not_personal` for anything else.
+     */
+    makeTeam?(
+      clerkOrgId: string,
+      userId: string,
+      name: string,
+    ): Promise<"ok" | "not_personal">
+  }
   /**
    * The Clerk organizations a person belongs to - where an accepted domain may
    * land.

@@ -191,8 +191,6 @@ async function provision(
   data: unknown,
 ): Promise<string | null> {
   switch (type) {
-    case "user.created":
-      return deps.provisioning?.onUserCreated(data) ?? null
     case "organization.created":
       return deps.provisioning?.onOrganizationCreated(data) ?? null
 

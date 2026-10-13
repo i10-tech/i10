@@ -1873,6 +1873,33 @@ export async function resumeSubscription() {
 }
 
 /**
+ * Makes this person's Personal workspace, or finds the one they have (#325).
+ * Answers the Clerk organization to activate.
+ */
+export async function createPersonalWorkspace() {
+  return run(
+    () =>
+      api<{ organization_id: string }>("/console/workspaces/personal", {
+        method: "POST",
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** Turns the active Personal workspace into a team workspace (#325). */
+export async function makeTeamWorkspace(name: string) {
+  return run(
+    () =>
+      api<{ ok: true }>("/console/workspace/team", {
+        method: "POST",
+        body: { name },
+      }),
+    [],
+  )
+}
+
+/**
  * Whether the workspace just created is ready: Clerk has made the organization,
  * and its webhook has provisioned our tenant for it. Asked by set-up after
  * "Create workspace", as the new organization's session. A read.

@@ -74,8 +74,8 @@ request could not have authenticated without the row it names.
 This is a narrowing, not a migration away.
 
 Clerk remains the identity provider for **sessions, MFA, organizations, the
-tenant provisioning chain** (`user.created` → org → `organization.created` →
-tenant → free plan) **and the LDAP bind delegation `services/authd` depends on** -
+tenant provisioning chain** (an org named on onboarding or picked as Personal →
+`organization.created` → tenant → free plan; nothing is made at sign-up since #325) **and the LDAP bind delegation `services/authd` depends on** -
 one email, one password. None of those are on a per-request path, and none of
 them are cheaper to do ourselves.
 

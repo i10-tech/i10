@@ -422,19 +422,14 @@ const entitlements = postgresEntitlements({
 
 const grants = subscriptionGrants({ subscriptions, entitlements, log })
 
+/** Members a team workspace allows, until limits per plan land (#327). */
+const TEAM_MEMBER_LIMIT = 20
+
 /**
- * Sign-up: a Clerk organization becomes a tenant, and a user with no
- * organization gets one made for them. See tenants/provision.ts.
+ * A Clerk organization becomes a tenant. Nobody is given one at sign-up any
+ * more (#325). See tenants/provision.ts.
  */
 const provisioning = tenantProvisioning({
-  organizations: {
-    membershipCount: async (userId) =>
-      (await clerk.users.getOrganizationMembershipList({ userId, limit: 1 }))
-        .totalCount,
-    create: async ({ name, slug, createdBy }) => {
-      await clerk.organizations.createOrganization({ name, slug, createdBy })
-    },
-  },
   tenants: tenantStore(db),
   entitlements,
   log,
@@ -1188,6 +1183,61 @@ const app = createApp({
     organizations: {
       rename: async (clerkOrgId: string, name: string) => {
         await clerk.organizations.updateOrganization(clerkOrgId, { name })
+      },
+      /*
+       * ⚠ ONE PER PERSON, FOUND BY ITS MARK RATHER THAN ITS NAME. Somebody may
+       * well call a team "Personal"; only the one we made carries
+       * `kind: "personal"` and was created by them. A second press, or a
+       * retry after a timeout, finds it instead of making another.
+       *
+       * ⚠ LIMITED TO ONE MEMBER IN CLERK ITSELF, so nothing - an invitation, a
+       * join request - can put a second person in it. Single-member
+       * organizations are free on Clerk's plan, which is the point of it.
+       */
+      createPersonal: async (userId: string) => {
+        const { data } = await clerk.users.getOrganizationMembershipList({
+          userId,
+          limit: 100,
+        })
+        const existing = data.find(
+          (m) =>
+            m.organization.publicMetadata?.kind === "personal" &&
+            m.organization.createdBy === userId,
+        )
+        if (existing) return { id: existing.organization.id, created: false }
+        const made = await clerk.organizations.createOrganization({
+          name: "Personal",
+          // Clerk slugs are unique across the instance; the user id makes it so.
+          slug: `personal-${userId.replace(/^user_/, "").toLowerCase()}`,
+          createdBy: userId,
+          maxAllowedMemberships: 1,
+          publicMetadata: { kind: "personal" },
+        })
+        return { id: made.id, created: true }
+      },
+      /*
+       * ⚠ ONLY THE PERSONAL WORKSPACE OF THE PERSON ASKING. The mark and the
+       * creator are both checked, so nobody can lift the limit on a workspace
+       * that is not theirs by calling this on it.
+       *
+       * ⚠ THE LIMIT IS CLERK'S INSTANCE DEFAULT FOR NOW. Limits per plan are
+       * #327, which replaces this number with the workspace plan's.
+       */
+      makeTeam: async (clerkOrgId: string, userId: string, name: string) => {
+        const org = await clerk.organizations.getOrganization({
+          organizationId: clerkOrgId,
+        })
+        if (org.publicMetadata?.kind !== "personal" || org.createdBy !== userId) {
+          return "not_personal" as const
+        }
+        await clerk.organizations.updateOrganization(clerkOrgId, {
+          name,
+          maxAllowedMemberships: TEAM_MEMBER_LIMIT,
+        })
+        await clerk.organizations.updateOrganizationMetadata(clerkOrgId, {
+          publicMetadata: { kind: "team" },
+        })
+        return "ok" as const
       },
     },
     /*

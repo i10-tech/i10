@@ -33,12 +33,15 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
 import {
   answerJoinRequest,
+  makeTeamWorkspace,
   setTeamDomain,
   teamDomainSuggestions,
   teamJoinRequests,
   type JoinRequest,
 } from "@/lib/actions"
 import { useCreateWorkspace } from "@/lib/create-workspace"
+import { announceWorkspacesChanged } from "@/lib/workspace-name"
+import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { useReverify } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 
@@ -67,7 +70,66 @@ export function TeamPanel() {
     )
   }
   if (!organization || !membership) return <CreateWorkspace />
+  if (organization.publicMetadata?.kind === "personal") {
+    return <PersonalWorkspace organization={organization} />
+  }
   return <Team organization={organization} membership={membership} />
+}
+
+/**
+ * A Personal workspace's team page (#325): there is no team, only the way to
+ * make one of it.
+ *
+ * ⚠ IT KEEPS EVERYTHING. The domains, keys, templates and plan stay where they
+ * are; only the name changes and the one-member limit is lifted. Somebody who
+ * would rather keep Personal and start fresh creates a workspace instead.
+ */
+function PersonalWorkspace({ organization }: { organization: OrganizationResource }) {
+  const router = useRouter()
+  const [name, setName] = React.useState("")
+  const [saving, setSaving] = React.useState(false)
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    const next = name.trim()
+    if (!next || saving) return
+    setSaving(true)
+    const made = await makeTeamWorkspace(next)
+    if (!made.ok) {
+      toastError("Could not turn it into a team workspace", made.error)
+      setSaving(false)
+      return
+    }
+    await organization.reload()
+    announceWorkspacesChanged()
+    toastDone(`${next} is a team workspace now`)
+    router.refresh()
+    setSaving(false)
+  }
+
+  return (
+    <ProfileBlock title="Personal workspace">
+      <ProfileRow label="Team">
+        <form onSubmit={submit} className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            This workspace is just for you. Name it to turn it into a team workspace you
+            can invite people to. Your domains, keys and plan stay as they are.
+          </p>
+          <FloatingInput
+            label="Team name"
+            id="team-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={120}
+            disabled={saving}
+          />
+          <Button type="submit" loading={saving} disabled={!name.trim()}>
+            Turn into a team workspace
+          </Button>
+        </form>
+      </ProfileRow>
+    </ProfileBlock>
+  )
 }
 
 function Team({

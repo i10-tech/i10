@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test"
 import { Hono } from "hono"
-import { requireTenant, type TenantResolver } from "../src/middleware/tenant.js"
+import {
+  NO_TENANT,
+  requireTenant,
+  type TenantResolver,
+} from "../src/middleware/tenant.js"
 import type {
   ActiveOrgReader,
   SessionOutcome,
@@ -41,6 +45,7 @@ function appWith(deps?: {
   sessions: SessionVerifier
   tenants: TenantResolver
   activeOrg?: ActiveOrgReader
+  workspaceOptional?: boolean
 }) {
   const app = new Hono()
 
@@ -231,6 +236,64 @@ describe("requireTenant", () => {
     // Anything else here would silently change which account a solo developer
     // sees.
     expect(seen).toEqual([{ userId: "user_1", orgId: null }])
+  })
+
+  /**
+   * ⚠ NO ACTIVE ORGANIZATION IS "NO WORKSPACE" ONCE ORGANIZATIONS ARE ON (#325).
+   * Nobody is given a workspace at sign-up any more, so falling back to the
+   * oldest one they own would show a workspace Clerk says is not active.
+   */
+  it("answers 409 no_workspace when no organization is active", async () => {
+    const seen: unknown[] = []
+    const app = appWith({
+      sessions: sessions({ status: "signed-in", userId: "user_1" }),
+      tenants: {
+        resolve: async (principal) => {
+          seen.push(principal)
+          return "22222222-2222-4222-8222-222222222222"
+        },
+      },
+      activeOrg: async () => ({ status: "personal" }),
+    })
+
+    const response = await app.request("/whoami", { headers: BEARER })
+
+    expect(response.status).toBe(409)
+    expect(((await response.json()) as { name: string }).name).toBe("no_workspace")
+    expect(seen).toEqual([])
+  })
+
+  it("lets a person-level route through with no workspace, on the nil tenant", async () => {
+    const app = appWith({
+      sessions: sessions({ status: "signed-in", userId: "user_1" }),
+      tenants: resolver("22222222-2222-4222-8222-222222222222"),
+      activeOrg: async () => ({ status: "personal" }),
+      workspaceOptional: true,
+    })
+
+    const response = await app.request("/whoami", { headers: BEARER })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      tenantId: NO_TENANT,
+      userId: "user_1",
+      mode: "live",
+    })
+  })
+
+  it("still resolves the active workspace on a person-level route", async () => {
+    const app = appWith({
+      sessions: sessions({ status: "signed-in", userId: "user_1" }),
+      tenants: resolver("22222222-2222-4222-8222-222222222222"),
+      activeOrg: async () => ({ status: "org", orgId: "org_acme" }),
+      workspaceOptional: true,
+    })
+
+    const response = await app.request("/whoami", { headers: BEARER })
+
+    expect(((await response.json()) as { tenantId: string }).tenantId).toBe(
+      "22222222-2222-4222-8222-222222222222",
+    )
   })
 
   /**

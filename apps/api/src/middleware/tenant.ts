@@ -76,7 +76,22 @@ export interface TenantAuthDeps {
    * `unknown` rather than null, and why `requireTenant` turns that into a 503.
    */
   activeOrg?: ActiveOrgReader
+  /**
+   * Whether this route is about the PERSON and works without a workspace -
+   * join suggestions, asking to join, creating a Personal workspace (#325).
+   * Such a request with no active organization passes with `NO_TENANT`.
+   */
+  workspaceOptional?: boolean
 }
+
+/**
+ * The tenant id a person-level request carries when they have no workspace.
+ *
+ * ⚠ THE NIL UUID, WHICH NO TENANT HAS. Every policy compares
+ * `app.tenant_id` to a real tenant, so a transaction opened with it sees
+ * nothing of any workspace and only what the seeker policies grant.
+ */
+export const NO_TENANT = "00000000-0000-0000-0000-000000000000"
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -182,6 +197,31 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
       )
     }
     orgId = active.status === "org" ? active.orgId : null
+
+    /*
+     * ⚠ NO ACTIVE ORGANIZATION IS "NO WORKSPACE", NOT "YOUR PERSONAL ONE"
+     * (#325). Nobody is given a workspace at sign-up any more and Clerk no
+     * longer requires one, so a session can be signed in with none active.
+     * Falling back to the oldest tenant they own would show a workspace the
+     * switcher says is not active. The console answers this by activating one
+     * of their workspaces, or by onboarding when they have none.
+     */
+    if (!orgId) {
+      if (deps.workspaceOptional) {
+        c.set("auth", { apiKeyId: "", tenantId: NO_TENANT, scopes: [], mode: "live" })
+        c.set("user", { userId: outcome.userId })
+        await next()
+        return
+      }
+      return c.json(
+        {
+          statusCode: 409,
+          name: "no_workspace",
+          message: "Choose a workspace or create one to continue.",
+        },
+        409,
+      )
+    }
   }
 
   const tenantId = await deps.tenants.resolve({ userId: outcome.userId, orgId })
