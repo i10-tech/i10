@@ -18,6 +18,8 @@
 .secondary:disabled, .danger:disabled { opacity: 1; color: var(--text-muted); background: var(--surface-muted); border-color: var(--border); }
 .danger:disabled { color: color-mix(in oklab, var(--danger) 55%, var(--surface-muted)); }
 .ghost:disabled { opacity: 1; color: var(--text-muted); }
+/* A ghost button at work keeps its hover fill, so the spinner sits on a button rather than floating in empty space. */
+.ghost[aria-busy="true"] { color: var(--foreground); background: var(--surface-muted); }
 @media (hover: hover) and (pointer: fine) {
   .primary:hover:not(:disabled) { opacity: .91; box-shadow: var(--shadow-resting); }
   .secondary:hover:not(:disabled) { background: var(--surface-muted); box-shadow: var(--shadow-resting); }
