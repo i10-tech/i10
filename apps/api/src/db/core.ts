@@ -830,8 +830,9 @@ export const domainTransfers = core.table(
  * A person looking for a workspace reads rows whose name is one of
  * `app.seeker_domains`, which the API sets only from the domains (and their
  * parents) of that person's VERIFIED addresses - read-only. And the nightly
- * re-check reads every row with `app.join_recheck` on, read-only, writing
- * back through each row's own tenant.
+ * re-check, which asks `core.join_domains_due` (0130) - a definer that answers
+ * only the rows due a check, never a setting any connection could turn on -
+ * and writes back through each row's own tenant.
  */
 export const joinDomains = core.table(
   "join_domains",
@@ -873,10 +874,6 @@ export const joinDomains = core.table(
     pgPolicy("join_domains_seeker_read", {
       for: "select",
       using: sql`${t.name} = any(string_to_array(nullif(current_setting('app.seeker_domains', true), ''), ','))`,
-    }),
-    pgPolicy("join_domains_recheck_read", {
-      for: "select",
-      using: sql`current_setting('app.join_recheck', true) = 'on'`,
     }),
   ],
 )

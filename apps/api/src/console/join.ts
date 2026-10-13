@@ -1,15 +1,4 @@
-import {
-  and,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  or,
-  sql,
-} from "drizzle-orm"
+import { and, desc, eq, gte, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import {
   domains,
@@ -703,22 +692,30 @@ export async function recheckAccessDomains({
 }> {
   const summary = { checked: 0, lapsed: 0, restored: 0, unreachable: 0 }
   const before = new Date(now().getTime() - intervalMs)
-  const due = await withTenant(db, NO_TENANT, async (tx) => {
-    await tx.execute(sql`select set_config('app.join_recheck', 'on', true)`)
-    return tx
-      .select()
-      .from(joinDomains)
-      .where(
-        and(
-          // /domains entries from before #326 have no `verified_at` until synced.
-          or(isNotNull(joinDomains.verifiedAt), eq(joinDomains.source, "domains")),
-          isNull(joinDomains.displacedAt),
-          or(isNull(joinDomains.checkedAt), lt(joinDomains.checkedAt, before)),
-        ),
-      )
-      .orderBy(joinDomains.checkedAt)
-      .limit(batch)
-  })
+  /*
+   * ⚠ A DEFINER, NOT A SETTING (2026-10-14). The rows due a check come from
+   * `core.join_domains_due` (0130), which answers those rows and nothing
+   * else; the policy this replaced let any connection that turned on
+   * `app.join_recheck` read every workspace's access domains.
+   */
+  const raw = (await db.execute(
+    sql`select * from core.join_domains_due(${before.toISOString()}::timestamptz, ${batch})`,
+  )) as unknown as {
+    id: string
+    tenant_id: string
+    name: string
+    source: string
+    token: string
+    lapsed_at: Date | string | null
+  }[]
+  const due = raw.map((r) => ({
+    id: r.id,
+    tenantId: r.tenant_id,
+    name: r.name,
+    source: r.source,
+    token: r.token,
+    lapsedAt: r.lapsed_at === null ? null : new Date(r.lapsed_at),
+  }))
   const tenants = new Set<string>()
   for (const row of due) {
     if (row.source === "domains") {

@@ -1,0 +1,1 @@
+DROP POLICY "join_domains_recheck_read" ON "core"."join_domains" CASCADE;
