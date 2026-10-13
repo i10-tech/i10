@@ -289,6 +289,7 @@ export function TwoFactorScanStep({
    * one immediately after it.
    */
   const formRef = useRef<HTMLFormElement>(null)
+  const secretRow = useRef<HTMLDivElement>(null)
 
   async function verify(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -359,10 +360,26 @@ export function TwoFactorScanStep({
            * password manager pastes rather than scans. Without the text, both
            * of them are stuck looking at a picture.
            */}
-          <div className="flex items-center gap-1">
-            <code className="rounded-pill bg-muted px-3 py-1 font-mono text-xs tracking-wider break-all select-all">
+          <div ref={secretRow} className="flex items-center gap-1">
+            {/*
+             * ⚠ THE KEY ITSELF COPIES TOO, BY PRESSING THE COPY BUTTON BESIDE
+             * IT, so both show the same "Copied" and nothing is copied twice
+             * over. Out of the tab order and hidden from screen readers: the
+             * button is the control, this is a bigger place to hit it.
+             */}
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-hidden
+              onClick={() =>
+                secretRow.current
+                  ?.querySelector<HTMLButtonElement>("button[aria-label]")
+                  ?.click()
+              }
+              className="cursor-pointer rounded-pill bg-muted px-3 py-1 font-mono text-xs tracking-wider break-all transition-colors duration-(--duration-fast) hover:bg-muted/70"
+            >
               {totp.secret}
-            </code>
+            </button>
             <CopyButton
               value={totp.secret}
               label="Copy setup key"
