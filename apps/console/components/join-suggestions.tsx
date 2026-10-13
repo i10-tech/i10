@@ -9,6 +9,7 @@ import { Button } from "@repo/ui/components/button/button"
 import { TextMorph } from "@repo/ui/components/text-morph/text-morph"
 import { MotionItem, MotionList, clerkReason } from "@/components/account/shared"
 import { toastError } from "@/lib/toast"
+import { useJoinSuggestions } from "@/lib/join-suggestions"
 
 const DISMISSED = "i10.join-suggestions.dismissed"
 
@@ -55,18 +56,17 @@ function parse(raw: string): string[] {
  */
 export function JoinSuggestions({ className }: { className?: string }) {
   const router = useRouter()
-  const { isLoaded, setActive, userSuggestions, userInvitations } = useOrganizationList(
-    {
-      userSuggestions: { status: ["pending", "accepted"], keepPreviousData: true },
-      userInvitations: { status: "pending", keepPreviousData: true },
-    },
-  )
+  // Invitations are Clerk's; suggestions are ours (see lib/join-suggestions).
+  const { isLoaded, setActive, userInvitations } = useOrganizationList({
+    userInvitations: { status: "pending", keepPreviousData: true },
+  })
+  const suggestions = useJoinSuggestions()
   const raw = React.useSyncExternalStore(subscribe, snapshot, () => "[]")
   const dismissed = React.useMemo(() => parse(raw), [raw])
   const [hidden, setHidden] = React.useState<string[]>([])
   const [busy, setBusy] = React.useState<string | null>(null)
 
-  if (!isLoaded) return null
+  if (!isLoaded || suggestions.list === null) return null
 
   type Row = {
     id: string
@@ -92,17 +92,15 @@ export function JoinSuggestions({ className }: { className?: string }) {
         router.refresh()
       },
     })),
-    ...(userSuggestions.data ?? []).map((suggestion) => ({
-      id: suggestion.id,
-      name: suggestion.publicOrganizationData.name,
-      image: suggestion.publicOrganizationData.hasImage
-        ? suggestion.publicOrganizationData.imageUrl
-        : undefined,
+    ...suggestions.list.map((suggestion) => ({
+      id: `suggest:${suggestion.tenant_id}`,
+      name: suggestion.name,
+      image: suggestion.image_url ?? undefined,
       kind: "suggestion" as const,
-      requested: suggestion.status === "accepted",
+      requested: suggestion.requested,
       act: async () => {
-        await suggestion.accept()
-        await userSuggestions.revalidate?.()
+        const result = await suggestions.ask(suggestion.tenant_id)
+        if (!result.ok) throw new Error(result.error)
       },
     })),
   ].filter((row) => !dismissed.includes(row.id) && !hidden.includes(row.id))
@@ -127,7 +125,8 @@ export function JoinSuggestions({ className }: { className?: string }) {
     } catch (error) {
       toastError(
         row.kind === "invitation" ? "Could not join" : "Could not ask to join",
-        clerkReason(error),
+        // Clerk's reason for an invitation; ours (the API's message) for a request.
+        clerkReason(error, error instanceof Error ? error.message : undefined),
       )
     } finally {
       setBusy(null)

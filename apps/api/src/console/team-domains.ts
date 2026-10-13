@@ -1,58 +1,92 @@
+import type { JoinStore } from "./join.js"
+
 /**
- * The workspace's sending domains, offered to the Team page as Clerk
- * "verified domains" (2026-10-12).
+ * Join suggestions, run by us (2026-10-13): a workspace switches on one of its
+ * verified sending domains; anybody signed in with a verified address at it
+ * is suggested the workspace and can ask to join; an admin approves, and only
+ * then is Clerk asked for anything - an ordinary membership.
  *
- * A domain verified on /domains has already proved ownership through DNS - a
- * stronger proof than Clerk's own, which emails a code to one address at it.
- * So an admin can turn one on for join suggestions in one press, and we
- * create it in Clerk as already verified, with `automatic_suggestion`:
- * people who sign up with an address there are suggested to request to join.
+ * ⚠ THIS REPLACED CLERK'S "VERIFIED ORGANIZATION DOMAINS", WHICH IS NOT ON OUR
+ * CLERK PLAN FOR PRODUCTION (it answered 403 `organization_domain_enrollment_
+ * mode_not_enabled`). The proof was always ours anyway: a domain verified on
+ * /domains has proved ownership through DNS, a stronger proof than Clerk's
+ * code emailed to one address at it.
  *
  * ⚠ ONLY A DOMAIN THIS WORKSPACE VERIFIED, AND ONLY FOR AN ADMIN OF THE
- * ORGANIZATION IT IS ACTING IN. Both are checked here rather than trusted from
- * the browser: Clerk's backend call skips its own verification, so this is
- * the whole of the proof.
+ * ORGANIZATION IT IS ACTING IN - both checked here, never trusted from the
+ * browser. A seeker's domains come from Clerk's VERIFIED addresses only.
  */
 
 export interface TeamDomainDeps {
   /** Names of this workspace's domains whose DNS is verified. */
   verified(tenantId: string): Promise<string[]>
-  /** Whether this person may manage the organization's verified domains. */
-  canManage(userId: string, orgId: string): Promise<boolean>
-  /** Clerk's backend `createOrganizationDomain`, verified, suggestions on. */
-  create(orgId: string, name: string): Promise<void>
+  /** Whether this person holds `permission` in the organization. */
+  can(userId: string, orgId: string, permission: string): Promise<boolean>
+  store: JoinStore
+  /** Clerk organizations this person already belongs to. */
+  memberOrgIds(userId: string): Promise<string[]>
+  /** Each organization's public face, for a suggestion card. */
+  describe(
+    orgIds: string[],
+  ): Promise<Record<string, { name: string; imageUrl: string | null }>>
+  /** Adds an approved person to the organization, as a member. */
+  addMember(orgId: string, userId: string): Promise<void>
 }
 
-export type ClaimOutcome =
-  "created" | "not_verified" | "forbidden" | "no_org" | "exists" | "unavailable"
+/** Turning suggestions on needs the same permission Clerk's domains did. */
+export const MANAGE_DOMAINS = "org:sys_domains:manage"
+/** Answering requests needs the permission that manages members. */
+export const MANAGE_MEMBERS = "org:sys_memberships:manage"
 
-export async function claimTeamDomain(
+export type SetOutcome = "ok" | "not_verified" | "forbidden" | "no_org"
+
+export async function setTeamDomain(
   d: TeamDomainDeps,
-  input: { tenantId: string; userId: string; orgId?: string; name: string },
-): Promise<ClaimOutcome> {
+  input: {
+    tenantId: string
+    userId: string
+    orgId?: string
+    name: string
+    on: boolean
+  },
+): Promise<SetOutcome> {
   if (!input.orgId) return "no_org"
   const name = input.name.trim().toLowerCase()
-  const verified = (await d.verified(input.tenantId)).map((n) => n.toLowerCase())
-  if (!verified.includes(name)) return "not_verified"
-  if (!(await d.canManage(input.userId, input.orgId))) return "forbidden"
-  try {
-    await d.create(input.orgId, name)
-    return "created"
-  } catch (error) {
-    // Clerk refuses a domain the organization already has, or one another uses.
-    const status = (error as { status?: number } | null)?.status
-    /*
-     * ⚠ THE INSTANCE HAS AUTOMATIC SUGGESTIONS SWITCHED OFF (2026-10-13). Clerk
-     * answers 403 `organization_domain_enrollment_mode_not_enabled` until
-     * Organizations -> Verified domains -> Automatic suggestion is on in its
-     * dashboard; it surfaced as "Something went wrong" from an unhandled 500.
-     */
-    const codes = (
-      (error as { errors?: { code?: string }[] } | null)?.errors ?? []
-    ).map((entry) => entry.code)
-    if (codes.includes("organization_domain_enrollment_mode_not_enabled"))
-      return "unavailable"
-    if (status === 422 || status === 409) return "exists"
-    throw error
+  if (!(await d.can(input.userId, input.orgId, MANAGE_DOMAINS))) return "forbidden"
+  if (input.on) {
+    const verified = (await d.verified(input.tenantId)).map((n) => n.toLowerCase())
+    if (!verified.includes(name)) return "not_verified"
   }
+  const outcome = await d.store.set(input.tenantId, {
+    name,
+    on: input.on,
+    clerkOrgId: input.orgId,
+  })
+  return outcome === "missing" ? "not_verified" : "ok"
+}
+
+export type AnswerOutcome = "ok" | "forbidden" | "missing" | "no_org"
+
+/**
+ * Accepting adds the member in Clerk FIRST and marks the request answered
+ * after, so a Clerk failure leaves the request open to try again rather than
+ * "accepted" with nobody added.
+ */
+export async function answerJoinRequest(
+  d: TeamDomainDeps,
+  input: {
+    tenantId: string
+    userId: string
+    orgId?: string
+    id: string
+    accept: boolean
+  },
+): Promise<AnswerOutcome> {
+  if (!input.orgId) return "no_org"
+  if (!(await d.can(input.userId, input.orgId, MANAGE_MEMBERS))) return "forbidden"
+  const request = (await d.store.pending(input.tenantId)).find((r) => r.id === input.id)
+  if (!request) return "missing"
+  if (input.accept) await d.addMember(input.orgId, request.user_id)
+  const answered = await d.store.answer(input.tenantId, input.id, input.accept)
+  return answered ? "ok" : "missing"
 }

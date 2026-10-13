@@ -309,6 +309,39 @@ export async function offerTransfer(id: string, email: string) {
   )
 }
 
+/** The other workspaces this person is in, where a domain could move. */
+export async function domainMoveTargets(id: string) {
+  return run(
+    () =>
+      api<{ data: { id: string; name: string }[] }>(
+        `/console/domains/${encodeURIComponent(id)}/move-targets`,
+      ),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * Moves a domain into another workspace the person is in (2026-10-13) - the
+ * transfer, offered to themselves and accepted at once.
+ */
+export async function moveDomain(id: string, workspace: string) {
+  return run(
+    () =>
+      api<{
+        domain_id: string
+        domain_name: string
+        workspace: { id: string; name: string } | null
+      }>(`/console/domains/${encodeURIComponent(id)}/move`, {
+        method: "POST",
+        body: { workspace },
+      }),
+    ["/domains"],
+    // The page is about a domain that just left; the caller navigates away.
+    { refreshCaller: false },
+  )
+}
+
 export async function cancelTransfer(id: string) {
   return run(
     () =>
@@ -546,20 +579,86 @@ export async function reserveCodeSend(purpose: string) {
   )
 }
 
-/** This workspace's DNS-verified domains, for the Team page's suggestion. */
+/**
+ * This workspace's DNS-verified domains, and which of them suggest it - join
+ * suggestions run by us since 2026-10-13 (Clerk's are not on our plan).
+ */
 export async function teamDomainSuggestions() {
-  return run(() => api<{ data: string[] }>("/console/team/domain-suggestions"), [], {
+  return run(
+    () =>
+      api<{ data: string[]; enabled: string[] }>("/console/team/domain-suggestions"),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** Switches join suggestions for one verified domain on or off. */
+export async function setTeamDomain(name: string, on: boolean) {
+  return run(
+    () =>
+      api<{ name: string; on: boolean }>("/console/team/domains", {
+        method: "PUT",
+        body: { name, on },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export interface JoinRequest {
+  id: string
+  user_id: string
+  email: string
+  created_at: string
+}
+
+/** Unanswered requests to join this workspace. */
+export async function teamJoinRequests() {
+  return run(() => api<{ data: JoinRequest[] }>("/console/team/join-requests"), [], {
     refreshCaller: false,
   })
 }
 
-/** Turns a verified sending domain on as a Clerk verified domain. */
-export async function enableTeamDomain(name: string) {
+/** Accepts (adds them as a member) or declines a request to join. */
+export async function answerJoinRequest(id: string, accept: boolean) {
   return run(
     () =>
-      api<{ name: string }>("/console/team/domains", {
+      api<{ ok: true }>(`/console/team/join-requests/${encodeURIComponent(id)}`, {
         method: "POST",
-        body: { name },
+        body: { accept },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export interface JoinSuggestion {
+  tenant_id: string
+  name: string
+  image_url: string | null
+  domain: string
+  /** Asked, and not answered yet. */
+  requested: boolean
+}
+
+/** Workspaces suggested to the signed-in person by their verified addresses. */
+export async function myJoinSuggestions() {
+  return run(
+    () => api<{ data: JoinSuggestion[] }>("/console/me/join-suggestions"),
+    [],
+    {
+      refreshCaller: false,
+    },
+  )
+}
+
+/** Asks to join a suggested workspace; an admin there approves. */
+export async function requestToJoin(tenantId: string) {
+  return run(
+    () =>
+      api<{ requested: true }>("/console/me/join-requests", {
+        method: "POST",
+        body: { tenant_id: tenantId },
       }),
     [],
     { refreshCaller: false },

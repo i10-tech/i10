@@ -4,7 +4,6 @@ import * as React from "react"
 import { useAuth, useClerk, useOrganization, useSession, useUser } from "@clerk/nextjs"
 import type {
   OrganizationInvitationResource,
-  OrganizationMembershipRequestResource,
   OrganizationMembershipResource,
   OrganizationResource,
 } from "@clerk/shared/types"
@@ -32,7 +31,13 @@ import {
 } from "@/components/account/shared"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
-import { enableTeamDomain, teamDomainSuggestions } from "@/lib/actions"
+import {
+  answerJoinRequest,
+  setTeamDomain,
+  teamDomainSuggestions,
+  teamJoinRequests,
+  type JoinRequest,
+} from "@/lib/actions"
 import { useCreateWorkspace } from "@/lib/create-workspace"
 import { useReverify } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
@@ -472,41 +477,34 @@ function Invitations({
 // ── Requests ─────────────────────────────────────────────────────────────────
 
 /**
- * Clerk's membership requests - people who asked to join through a verified
- * domain - each to accept or decline.
+ * People who asked to join through a join suggestion, each to accept or
+ * decline - ours since 2026-10-13 (Clerk's membership requests need a Clerk
+ * plan we do not have). Accepting adds them to the workspace as a member.
  */
 function Requests() {
   const [busy, setBusy] = React.useState<string | null>(null)
-  const { membershipRequests, domains } = useOrganization({
-    membershipRequests: { status: "pending", pageSize: 50, keepPreviousData: true },
-    domains: { pageSize: 50, keepPreviousData: true },
-  })
-  /*
-   * Which of this workspace's domains suggested them: the part after the @
-   * of their address, when it is one of ours. A request can come from an
-   * invitation's link too, and then there is no domain to name.
-   */
-  const via = (identifier: string) => {
-    const at = identifier.split("@")[1]?.toLowerCase()
-    return at && domains?.data?.some((d) => d.name.toLowerCase() === at) ? at : null
-  }
-  const requests = membershipRequests?.isLoading
-    ? null
-    : (membershipRequests?.data ?? [])
+  const [requests, setRequests] = React.useState<JoinRequest[] | null>(null)
+  const { memberships } = useOrganization({ memberships: { pageSize: 50 } })
 
-  async function answer(
-    request: OrganizationMembershipRequestResource,
-    accept: boolean,
-  ) {
+  const load = React.useCallback(() => {
+    void teamJoinRequests().then((result) =>
+      setRequests(result.ok ? result.data.data : []),
+    )
+  }, [])
+  React.useEffect(load, [load])
+
+  async function answer(request: JoinRequest, accept: boolean) {
     setBusy(request.id)
-    try {
-      await (accept ? request.accept() : request.reject())
-      void membershipRequests?.revalidate?.()
-      if (accept) toastDone(`${request.publicUserData.identifier} joined`)
-    } catch (error) {
-      toastError("Could not answer that request", clerkReason(error))
-    } finally {
-      setBusy(null)
+    const result = await answerJoinRequest(request.id, accept)
+    setBusy(null)
+    if (!result.ok) {
+      toastError("Could not answer that request", { description: result.error })
+      return
+    }
+    setRequests((list) => (list ?? []).filter((r) => r.id !== request.id))
+    if (accept) {
+      toastDone(`${request.email} joined`)
+      void memberships?.revalidate?.()
     }
   }
 
@@ -521,14 +519,10 @@ function Requests() {
         <MotionItem key={request.id}>
           <div className="flex items-center justify-between gap-3">
             <span className="min-w-0">
-              <span className="block truncate text-sm">
-                {request.publicUserData.identifier}
-              </span>
+              <span className="block truncate text-sm">{request.email}</span>
               <span className="block text-xs text-muted-foreground">
-                Asked {shortDate(request.createdAt)}
-                {via(request.publicUserData.identifier)
-                  ? ` · suggested by ${via(request.publicUserData.identifier)}`
-                  : ""}
+                Asked {shortDate(new Date(request.created_at))} · suggested by{" "}
+                {request.email.split("@")[1]}
               </span>
             </span>
             <span className="flex gap-1">
@@ -564,95 +558,64 @@ const ENROLLMENT = [
 ]
 
 /**
- * Join suggestions, one picker per domain (2026-10-12).
+ * Join suggestions, one picker per verified domain - run by us since
+ * 2026-10-13, because Clerk's verified organization domains are not on our
+ * Clerk plan.
  *
  * ⚠ THE LIST IS THE DOMAINS VERIFIED ON /domains, SO THERE IS NOTHING TO
- * LOSE. Each has one picker: on, and people who sign up with an address there
- * are suggested this workspace (they request, an admin accepts); off, and they
- * are not. Off keeps the domain in Clerk with suggestions stopped rather than
- * deleting it, and either way the row stays here to switch back on. Removing
- * a domain is done on /domains, which takes it off this list with it.
+ * LOSE. On: people signed in with a verified address there are suggested this
+ * workspace, ask to join, and an admin accepts. Off: they are not. Removing a
+ * domain on /domains takes its suggestions with it.
  *
- * ⚠ DNS IS THE PROOF, AN ADMIN IS THE ONLY ONE WHO SEES THIS, AND THE API
- * CHECKS BOTH AGAIN. Clerk's own flow - a code emailed to one address at the
- * domain - is not offered: one mailbox at acme.com must not be able to pull
- * every acme.com sign-up towards its workspace. Joining with no request is
- * SSO's job (i10-tech/i10#319).
+ * ⚠ DNS IS THE PROOF, AND THE API CHECKS IT AND THE ADMIN AGAIN. Joining with
+ * no request is SSO's job (i10-tech/i10#319).
  */
 function Domains() {
-  const { domains: domainList } = useOrganization({
-    domains: { pageSize: 50, keepPreviousData: true },
-  })
-  const clerkDomains = domainList?.isLoading ? null : (domainList?.data ?? [])
-  /** Names verified on /domains; `false` when the API could not say. */
-  const [ours, setOurs] = React.useState<string[] | false | null>(null)
+  /** Verified names and the ones suggesting; `false` when the API could not say. */
+  const [state, setState] = React.useState<
+    { names: string[]; enabled: string[] } | false | null
+  >(null)
   const [busy, setBusy] = React.useState<string | null>(null)
-  const load = () => void domainList?.revalidate?.()
 
   React.useEffect(() => {
     void teamDomainSuggestions().then((result) =>
-      setOurs(result.ok ? result.data.data : false),
+      setState(
+        result.ok
+          ? { names: result.data.data, enabled: result.data.enabled ?? [] }
+          : false,
+      ),
     )
   }, [])
 
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
-  const inClerk = (name: string) => clerkDomains?.find((d) => same(d.name, name))
-  /*
-   * ⚠ EVERY DOMAIN STAYS, AND THERE IS NO REMOVE (2026-10-12). The rows are
-   * the domains verified on /domains plus any Clerk already holds; each has
-   * the one picker, and "Off" is how a domain stops suggesting - so there is
-   * never a domain that is gone from here with no way to bring it back.
-   * Removing a domain for good is done on /domains.
-   *
-   * ⚠ AND AN UNANSWERED /domains IS NOT "UNVERIFIED". When the API cannot
-   * say (`false`), Clerk's own domains are shown as they are rather than
-   * flagged, which is what made a perfectly good domain look like a stray.
-   */
-  const names = [
-    ...(ours || []),
-    ...(clerkDomains ?? [])
-      .map((d) => d.name)
-      .filter((name) => !(ours || []).some((own) => same(own, name))),
-  ]
-  const proved = (name: string) =>
-    ours === false || (ours ?? []).some((own) => same(own, name))
 
   async function choose(name: string, on: boolean) {
-    const existing = inClerk(name)
-    if (on && !existing && !proved(name)) return
-    if (on && !proved(name)) {
-      toastError(`Verify ${name} on Domains first`, {
-        description: "Join suggestions need the domain's DNS to be verified.",
-      })
+    if (!state) return
+    setBusy(name)
+    const result = await setTeamDomain(name, on)
+    setBusy(null)
+    if (!result.ok) {
+      toastError(`Could not change ${name}`, { description: result.error })
       return
     }
-    setBusy(name)
-    try {
-      if (!existing) {
-        if (!on) return
-        // First time on: the API adds it to Clerk, verified, suggesting.
-        const result = await enableTeamDomain(name)
-        if (!result.ok) {
-          toastError(`Could not turn on ${name}`, { description: result.error })
-          return
-        }
-      } else {
-        await existing.updateEnrollmentMode({
-          enrollmentMode: on ? "automatic_suggestion" : "manual_invitation",
-        })
-      }
-      load()
-    } catch (error) {
-      toastError(`Could not change ${name}`, clerkReason(error))
-    } finally {
-      setBusy(null)
-    }
+    setState({
+      ...state,
+      enabled: on
+        ? [...state.enabled.filter((n) => !same(n, name)), name.toLowerCase()]
+        : state.enabled.filter((n) => !same(n, name)),
+    })
   }
 
-  if (ours === null || !clerkDomains)
+  if (state === null)
     return <p className="pt-1.5 text-sm text-muted-foreground">Loading domains…</p>
+  if (state === false)
+    return (
+      <p className="pt-1.5 text-sm text-muted-foreground">
+        Could not load this workspace&rsquo;s domains. Reload to try again.
+      </p>
+    )
 
-  if (names.length === 0)
+  if (state.names.length === 0)
     return (
       <p className="pt-1.5 text-sm text-muted-foreground">
         Verify a domain on{" "}
@@ -666,29 +629,20 @@ function Domains() {
 
   return (
     <MotionList>
-      {names.map((name) => {
-        const on = inClerk(name)?.enrollmentMode === "automatic_suggestion"
-        const ok = proved(name)
+      {state.names.map((name) => {
+        const on = state.enabled.some((n) => same(n, name))
         return (
           <MotionItem key={name}>
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0">
                 <span className="flex items-center gap-2 text-sm">
                   <span className="truncate font-mono">{name}</span>
-                  {ok ? (
-                    <VerifiedSeal />
-                  ) : (
-                    <Badge size="sm" tone="warning">
-                      Not verified on Domains
-                    </Badge>
-                  )}
+                  <VerifiedSeal />
                 </span>
                 <span className="block text-xs text-muted-foreground">
                   {on
-                    ? `People who sign up with an @${name} address are suggested to join.`
-                    : ok
-                      ? `We recommend turning this on: people who sign up with an @${name} address can then ask to join, and you approve each one.`
-                      : "Verify it on Domains to turn suggestions on."}
+                    ? `People signed in with an @${name} address are suggested to join.`
+                    : `We recommend turning this on: people with an @${name} address can then ask to join, and you approve each one.`}
                 </span>
               </span>
               <MorphSelect

@@ -800,6 +800,108 @@ export const domainTransfers = core.table(
 )
 
 /**
+ * Join suggestions, ours (2026-10-13): a workspace's verified sending domain,
+ * switched on so that people signed in with an address there are suggested
+ * the workspace and can ask to join.
+ *
+ * ⚠ OURS BECAUSE CLERK'S IS A PAID FEATURE. "Verified organization domains"
+ * is not on our Clerk plan for production, so suggestions and requests live
+ * here and only the last step - adding the member once an admin approves -
+ * goes to Clerk, as an ordinary membership.
+ *
+ * ⚠ DNS IS THE PROOF. Only a domain verified on /domains can be switched on,
+ * which is why this points at the domain row and goes with it: delete the
+ * domain and its suggestions stop.
+ *
+ * ⚠ TWO AUDIENCES, AS WITH `domain_transfers`. The workspace manages its own
+ * rows by `app.tenant_id`. A person looking for a workspace reads rows whose
+ * name is one of `app.seeker_domains`, which the API sets only from the
+ * domains of that person's VERIFIED addresses - read-only, and nothing else
+ * about the workspace travels with it beyond its Clerk organization id.
+ */
+export const joinDomains = core.table(
+  "join_domains",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    domainId: uuid("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+    /** Lowercased. What a seeker's address is matched against. */
+    name: text("name").notNull(),
+    /** The Clerk organization a seeker is suggested and an approval adds them to. */
+    clerkOrgId: text("clerk_org_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("join_domains_tenant_name_unique").on(t.tenantId, t.name),
+    index("join_domains_name_idx").on(t.name),
+    pgPolicy("join_domains_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("join_domains_seeker_read", {
+      for: "select",
+      using: sql`${t.name} = any(string_to_array(nullif(current_setting('app.seeker_domains', true), ''), ','))`,
+    }),
+  ],
+)
+
+/**
+ * Somebody asking to join a workspace they were suggested (2026-10-13).
+ *
+ * ⚠ THE SEEKER WRITES IT UNDER THE WORKSPACE'S TENANT, SO THE POLICY CHECKS
+ * THE SUGGESTION. A request may only be made as yourself (`app.user_id`, set
+ * from the session) and only to a workspace that suggests one of your
+ * verified domains - the check reads `join_domains` through the seeker policy
+ * above. The workspace reads and answers its own; the seeker reads theirs.
+ */
+export const joinRequests = core.table(
+  "join_requests",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Clerk's user id. */
+    userId: text("user_id").notNull(),
+    /** The verified address that matched, shown to the admin. */
+    email: text("email").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    accepted: boolean("accepted"),
+  },
+  (t) => [
+    index("join_requests_tenant_idx").on(t.tenantId),
+    index("join_requests_user_idx").on(t.userId),
+    /** One open request per person per workspace. */
+    uniqueIndex("join_requests_open_unique")
+      .on(t.tenantId, t.userId)
+      .where(sql`${t.answeredAt} is null`),
+    pgPolicy("join_requests_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("join_requests_seeker_read", {
+      for: "select",
+      using: sql`${t.userId} = nullif(current_setting('app.user_id', true), '')`,
+    }),
+    pgPolicy("join_requests_seeker_ask", {
+      for: "insert",
+      withCheck: sql`${t.userId} = nullif(current_setting('app.user_id', true), '') and exists (select 1 from core.join_domains d where d.tenant_id = ${t.tenantId} and d.name = any(string_to_array(nullif(current_setting('app.seeker_domains', true), ''), ',')))`,
+    }),
+  ],
+)
+
+/**
  * Every API key i10 has issued. This table IS the credential store.
  *
  * ⚠ IT USED TO BE A THIN INDEX OF KEYS CLERK HELD, AND THE COMMENT HERE ARGUED

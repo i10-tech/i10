@@ -72,6 +72,7 @@ import { riskTrigger } from "./risk/trigger.js"
 import { riskSystem, systemTenantIds } from "./risk/wire.js"
 import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
+import { joinStore } from "./console/join.js"
 import { domainTransferStore } from "./domains/transfers.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
@@ -1208,21 +1209,58 @@ const app = createApp({
               (await domains.list(tenantId))
                 .filter((domain) => domain.status === "verified")
                 .map((domain) => domain.name),
-            canManage: async (userId: string, orgId: string) => {
+            can: async (userId: string, orgId: string, permission: string) => {
               const { data } = await clerk.users.getOrganizationMembershipList({
                 userId,
                 limit: 100,
               })
               const membership = data.find((m) => m.organization.id === orgId)
-              return membership?.permissions.includes("org:sys_domains:manage") ?? false
+              return membership?.permissions.includes(permission) ?? false
             },
-            create: async (orgId: string, name: string) => {
-              await clerk.organizations.createOrganizationDomain({
-                organizationId: orgId,
-                name,
-                enrollmentMode: "automatic_suggestion",
-                verified: true,
+            // Ours since 2026-10-13: Clerk's verified domains are not on our plan.
+            store: joinStore(db),
+            memberOrgIds: async (userId: string) => {
+              const { data } = await clerk.users.getOrganizationMembershipList({
+                userId,
+                limit: 100,
               })
+              return data.map((m) => m.organization.id)
+            },
+            describe: async (orgIds: string[]) => {
+              const found = await Promise.all(
+                [...new Set(orgIds)].map((organizationId) =>
+                  clerk.organizations
+                    .getOrganization({ organizationId })
+                    .then(
+                      (org) =>
+                        [
+                          organizationId,
+                          {
+                            name: org.name,
+                            imageUrl: org.hasImage ? org.imageUrl : null,
+                          },
+                        ] as const,
+                    )
+                    // A workspace Clerk no longer has is not suggested.
+                    .catch(() => null),
+                ),
+              )
+              return Object.fromEntries(found.filter((f) => f !== null))
+            },
+            addMember: async (orgId: string, userId: string) => {
+              try {
+                await clerk.organizations.createOrganizationMembership({
+                  organizationId: orgId,
+                  userId,
+                  role: "org:member",
+                })
+              } catch (error) {
+                // Already a member (an invitation got there first) is done.
+                const codes = (
+                  (error as { errors?: { code?: string }[] }).errors ?? []
+                ).map((e) => e.code)
+                if (!codes.includes("already_a_member_in_organization")) throw error
+              }
             },
           },
         }

@@ -1,0 +1,6 @@
+# Bun settings for this package's tests only. Install settings live in the
+# repository's root bunfig.toml.
+
+[test]
+# The OpenAPI extension before any Zod schema exists - see test/setup-openapi.ts.
+preload = ["./test/setup-openapi.ts"]
