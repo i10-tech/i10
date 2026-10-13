@@ -20,6 +20,8 @@ import SendingHeld, { sendingHeldSubject } from "./templates/sending-held.js"
 import SecurityAlert, { securityAlertSubject } from "./templates/security-alert.js"
 import TemplateReview, { templateReviewSubject } from "./templates/template-review.js"
 import WebhookHealth, { webhookHealthSubject } from "./templates/webhook-health.js"
+import MemberCapacity, { memberCapacitySubject } from "./templates/member-capacity.js"
+import JoinAccepted, { joinAcceptedSubject } from "./templates/join-accepted.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -226,6 +228,8 @@ function templateFor(payload: ClerkEmailPayload) {
             url,
             organizationName: str(d, "org.name"),
             inviterName: str(d, "inviter_name"),
+            // Ours, from the API (#327): "15 March at 3:00 PM Paris time".
+            expires: str(d, "i10_expires"),
           })
         : null
     }
@@ -383,6 +387,33 @@ export async function renderWebhookHealth(
   const element = WebhookHealth(props)
   return {
     subject: webhookHealthSubject(props.worst, props.lines.length, props.workspace),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * The 80% and 100% member alerts, to a workspace's admins (#327). Sent by the
+ * API; see apps/api/src/console/members.ts.
+ */
+export async function renderMemberCapacity(
+  props: React.ComponentProps<typeof MemberCapacity>,
+): Promise<RenderedEmail> {
+  const element = MemberCapacity(props)
+  return {
+    subject: memberCapacitySubject(props.level, props.workspace),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/** "A spot opened up, you're in" - an accepted request to join (#327). */
+export async function renderJoinAccepted(
+  props: React.ComponentProps<typeof JoinAccepted>,
+): Promise<RenderedEmail> {
+  const element = JoinAccepted(props)
+  return {
+    subject: joinAcceptedSubject(props.workspace, props.waited),
     html: await render(element),
     text: await render(element, { plainText: true }),
   }
