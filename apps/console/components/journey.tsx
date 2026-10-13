@@ -303,7 +303,33 @@ function Node({
   const pending = step.state === "pending"
   const current = step.state === "current"
 
-  const node = (
+  /*
+   * ⚠ THE NODE IS THE SAME ELEMENT WITH OR WITHOUT A TIME (2026-10-13). The
+   * tooltip used to wrap the whole node only once the step had a time, so the
+   * first DNS check - which gives "Checking DNS" its "Last checked" - changed
+   * the tree, React mounted a new node and its entrance played again: the
+   * step flashed out and back a second or two after the page loaded. Now the
+   * animated node and its icon never change shape; only the label and time
+   * take the tooltip.
+   */
+  const label = (
+    <div className="flex flex-col items-center">
+      <span
+        className={cn(
+          "mt-3 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+          pending ? "bg-muted/60 text-muted-foreground/70" : tone.pill,
+        )}
+      >
+        {step.label}
+        {step.count && step.count > 1 && (
+          <span className="tabular opacity-70">×{step.count}</span>
+        )}
+      </span>
+      <StepTime step={step} />
+    </div>
+  )
+
+  return (
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6, scale: 0.92 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -336,32 +362,14 @@ function Node({
           )}
         </div>
       </div>
-      <span
-        className={cn(
-          "mt-3 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap",
-          pending ? "bg-muted/60 text-muted-foreground/70" : tone.pill,
-        )}
-      >
-        {step.label}
-        {step.count && step.count > 1 && (
-          <span className="tabular opacity-70">×{step.count}</span>
-        )}
-      </span>
-      <StepTime step={step} />
+      {step.at ? (
+        <Tooltip content={<ExactTime iso={step.at} />}>
+          <div className="cursor-default">{label}</div>
+        </Tooltip>
+      ) : (
+        <div>{label}</div>
+      )}
     </motion.div>
-  )
-
-  if (!step.at) return node
-  return (
-    <Tooltip
-      content={
-        <>
-          <ExactTime iso={step.at} />
-        </>
-      }
-    >
-      <div className="cursor-default">{node}</div>
-    </Tooltip>
   )
 }
 
