@@ -20,6 +20,7 @@ import { afterSwitch } from "@/lib/after-switch"
 import { useCreateWorkspace } from "@/lib/create-workspace"
 import { toastDone, toastError } from "@/lib/toast"
 import { useWorkspacesChanged } from "@/lib/workspace-name"
+import { useJoinSuggestions } from "@/lib/join-suggestions"
 
 /**
  * The workspace switcher, ours (2026-10-12) - what Clerk's
@@ -44,12 +45,14 @@ import { useWorkspacesChanged } from "@/lib/workspace-name"
 export function WorkspaceSwitcher() {
   const router = useRouter()
   const { organization, membership } = useOrganization()
-  const { isLoaded, setActive, userMemberships, userInvitations, userSuggestions } =
-    useOrganizationList({
+  const { isLoaded, setActive, userMemberships, userInvitations } = useOrganizationList(
+    {
       userMemberships: { pageSize: 50 },
       userInvitations: { status: "pending" },
-      userSuggestions: { status: "pending" },
-    })
+    },
+  )
+  // Ours, not Clerk's `userSuggestions` - see lib/join-suggestions.
+  const joinable = useJoinSuggestions()
   const { creating, create } = useCreateWorkspace()
   const [busy, setBusy] = React.useState<string | null>(null)
   /** A switch closed the menu: focus is not handed back to the trigger. */
@@ -82,7 +85,7 @@ export function WorkspaceSwitcher() {
     (m) => m.organization.id !== organization?.id,
   )
   const invitations = userInvitations.data ?? []
-  const suggestions = (userSuggestions.data ?? []).filter((s) => s.status === "pending")
+  const suggestions = (joinable.list ?? []).filter((s) => !s.requested)
   const name = organization?.name ?? "Workspace"
 
   return (
@@ -200,34 +203,27 @@ export function WorkspaceSwitcher() {
               ))}
               {suggestions.map((suggestion) => (
                 <DropdownMenuItem
-                  key={suggestion.id}
+                  key={suggestion.tenant_id}
                   disabled={busy !== null}
                   onSelect={async () => {
-                    try {
-                      await suggestion.accept()
-                      await userSuggestions.revalidate?.()
-                      toastDone(
-                        `Asked to join ${suggestion.publicOrganizationData.name}`,
-                        "An admin there will let you in.",
-                      )
-                    } catch (error) {
-                      toastError("Could not ask to join", clerkReason(error))
+                    const result = await joinable.ask(suggestion.tenant_id)
+                    if (!result.ok) {
+                      toastError("Could not ask to join", { description: result.error })
+                      return
                     }
+                    toastDone(
+                      `Asked to join ${suggestion.name}`,
+                      "An admin there will let you in.",
+                    )
                   }}
                 >
                   <Avatar
-                    name={suggestion.publicOrganizationData.name}
-                    src={
-                      suggestion.publicOrganizationData.hasImage
-                        ? suggestion.publicOrganizationData.imageUrl
-                        : undefined
-                    }
+                    name={suggestion.name}
+                    src={suggestion.image_url ?? undefined}
                     size="sm"
                     className="rounded-md"
                   />
-                  <span className="min-w-0 flex-1 truncate">
-                    {suggestion.publicOrganizationData.name}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate">{suggestion.name}</span>
                   <span className="text-xs text-muted-foreground">Request to join</span>
                 </DropdownMenuItem>
               ))}

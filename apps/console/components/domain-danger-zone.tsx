@@ -6,7 +6,8 @@ import { ArrowRightLeft, Trash2 } from "lucide-react"
 import { Button } from "@repo/ui/components/button/button"
 import { DeleteDomainDialog } from "@/components/delete-domain-dialog"
 import { TransferDomainDialog } from "@/components/transfer-domain-dialog"
-import { cancelTransfer } from "@/lib/actions"
+import { cancelTransfer, domainMoveTargets } from "@/lib/actions"
+import { MoveDomainDialog } from "@/components/move-domain-dialog"
 import { formatExact } from "@/lib/format"
 import type { TransferOffer } from "@/lib/types"
 import type { KeyImpact } from "@/components/transfer-domain-dialog"
@@ -56,6 +57,15 @@ export function DomainDangerZone({
   const [confirming, setConfirming] = React.useState(false)
   const [transferring, setTransferring] = React.useState(false)
   const [withdrawing, setWithdrawing] = React.useState(false)
+  const [moving, setMoving] = React.useState(false)
+  /** The other workspaces this person is in; the move row shows only with one. */
+  const [targets, setTargets] = React.useState<{ id: string; name: string }[]>([])
+  React.useEffect(() => {
+    void domainMoveTargets(id).then((result) => {
+      // An answer without a list (the local preview's fake API) means none.
+      if (result.ok && Array.isArray(result.data?.data)) setTargets(result.data.data)
+    })
+  }, [id])
 
   async function withdraw() {
     setWithdrawing(true)
@@ -137,6 +147,35 @@ export function DomainDangerZone({
           )}
         </div>
 
+        {/*
+         * ⚠ ONLY FOR SOMEBODY IN ANOTHER WORKSPACE, AND NOT WHILE AN OFFER IS
+         * OPEN - a move would withdraw it without saying so (2026-10-13).
+         */}
+        {targets.length > 0 && !offer && (
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Move to another workspace</p>
+              <p className="text-sm text-muted-foreground">
+                Move <span className="font-mono text-foreground">{name}</span> into{" "}
+                {targets.length === 1
+                  ? targets[0]!.name
+                  : "another workspace you are in"}
+                , at once. Its records and verification go with it, so your DNS does not
+                change.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0 self-start sm:self-auto"
+              onClick={() => setMoving(true)}
+            >
+              <ArrowRightLeft aria-hidden="true" />
+              Move
+            </Button>
+          </div>
+        )}
+
         <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <p className="text-sm font-medium">Delete this domain</p>
@@ -169,6 +208,17 @@ export function DomainDangerZone({
         // ⚠ THE PAGE STAYS. Nothing has moved yet; it re-reads to show the
         // pending offer in place of the button.
         onOffered={() => router.refresh()}
+      />
+
+      <MoveDomainDialog
+        id={id}
+        name={name}
+        targets={targets}
+        keys={keyImpact}
+        open={moving}
+        onOpenChange={setMoving}
+        // ⚠ THE PAGE HAS TO LEAVE, as after a delete: the domain is not here now.
+        onMoved={() => router.push("/domains")}
       />
 
       <DeleteDomainDialog

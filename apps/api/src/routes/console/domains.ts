@@ -1,4 +1,4 @@
-import type { Hono } from "hono"
+import type { Context, Hono } from "hono"
 import { updateDomainSchema } from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
 import { requireFreshAuth } from "../../middleware/session.js"
@@ -636,6 +636,107 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       toTenantId: target.tenantId,
     })
 
+    return answerAccept(c, accepted, target)
+  })
+
+  /**
+   * The workspaces a domain can move to: the signed-in person's others
+   * (2026-10-13). A move needs nobody else - both ends are theirs.
+   */
+  app.get("/domains/:id/move-targets", async (c) => {
+    if (!d.memberships) return c.json({ data: [] })
+    const { tenantId } = c.get("auth")
+    const targets = (await workspacesOf(c.get("user").userId))
+      .filter((w) => w.tenantId !== tenantId)
+      .map((w) => ({ id: w.id, name: w.name }))
+    return c.json({ data: targets })
+  })
+
+  /**
+   * Moves a domain into another workspace the signed-in person is in
+   * (2026-10-13): the transfer, offered and accepted in one step.
+   *
+   * ⚠ THE SAME MACHINERY AS A TRANSFER, NOT A SECOND ONE. The offer is made to
+   * the person's own verified address and accepted at once into the chosen
+   * workspace - the same move, the same key narrowing, the same plan limits.
+   * Offering to yourself stays refused on the transfer route; this is the
+   * route for it.
+   *
+   * ⚠ STEP-UP, LIKE A TRANSFER: the domain leaves this workspace.
+   *
+   * ⚠ A MOVE THAT CANNOT LAND IS WITHDRAWN. If accepting is refused (a plan
+   * limit, a name already there), the offer is cancelled so nothing is left
+   * waiting in anyone's inbox.
+   */
+  app.post("/domains/:id/move", requireFreshAuth, async (c) => {
+    if (!d.transfers || !d.people || !d.memberships)
+      return c.json(notWired("Moving domains"), 501)
+    const { tenantId } = c.get("auth")
+    const userId = c.get("user").userId
+    const body = await readJson(c)
+    const workspace = typeof body?.workspace === "string" ? body.workspace : ""
+    const target = (await workspacesOf(userId)).find(
+      (w) => w.id === workspace && w.tenantId !== tenantId,
+    )
+    if (!target)
+      return c.json(validation("You are not a member of that workspace."), 422)
+
+    const [person, profile] = await Promise.all([
+      d.people.get(userId),
+      d.profile.get(tenantId),
+    ])
+    const own =
+      person.primaryEmail && person.verifiedEmails.includes(person.primaryEmail)
+        ? person.primaryEmail
+        : person.verifiedEmails[0]
+    if (!own)
+      return c.json(validation("Verify an email address on your account first."), 422)
+
+    const domainId = c.req.param("id")
+    const offered = await d.transfers.offer(tenantId, domainId, {
+      email: own,
+      offeredBy: person.name,
+      fromWorkspace: profile?.name ?? "another",
+    })
+    if (offered.status === "missing")
+      return c.json(notFound("No domain with that id."), 404)
+    if (offered.status === "rejected") return c.json(validation(offered.reason), 422)
+
+    const accepted = await d.transfers.accept({
+      tenantId,
+      emails: person.verifiedEmails,
+      id: offered.offer.id,
+      toTenantId: target.tenantId,
+    })
+    if (accepted.status !== "accepted") {
+      await d.transfers.cancel(tenantId, domainId).catch(() => false)
+    }
+    return answerAccept(c, accepted, target)
+  })
+
+  app.post("/transfers/:id/decline", async (c) => {
+    if (!d.transfers || !d.people) return c.json(notWired("Transfers"), 501)
+    const { tenantId } = c.get("auth")
+    const { verifiedEmails } = await d.people.get(c.get("user").userId)
+    const declined = await d.transfers.decline(
+      tenantId,
+      verifiedEmails,
+      c.req.param("id"),
+    )
+    return declined
+      ? c.json({ declined: true })
+      : c.json(notFound("That transfer is no longer open."), 404)
+  })
+
+  /**
+   * The answer to an accepted transfer, or to a move (2026-10-13): evicts the
+   * keys it narrowed and says where the domain landed, or why it did not.
+   */
+  async function answerAccept(
+    c: Context,
+    accepted: Awaited<ReturnType<NonNullable<ConsoleDeps["transfers"]>["accept"]>>,
+    target: { id: string; name: string },
+  ) {
     switch (accepted.status) {
       case "accepted":
         /*
@@ -686,21 +787,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
           403,
         )
     }
-  })
-
-  app.post("/transfers/:id/decline", async (c) => {
-    if (!d.transfers || !d.people) return c.json(notWired("Transfers"), 501)
-    const { tenantId } = c.get("auth")
-    const { verifiedEmails } = await d.people.get(c.get("user").userId)
-    const declined = await d.transfers.decline(
-      tenantId,
-      verifiedEmails,
-      c.req.param("id"),
-    )
-    return declined
-      ? c.json({ declined: true })
-      : c.json(notFound("That transfer is no longer open."), 404)
-  })
+  }
 
   /**
    * Every workspace this person belongs to, with the tenant behind each.

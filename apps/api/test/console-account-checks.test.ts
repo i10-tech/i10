@@ -6,7 +6,13 @@ import {
   passwordAttempts,
 } from "../src/console/password-check.js"
 import { codeCooldown } from "../src/console/code-cooldown.js"
-import { claimTeamDomain } from "../src/console/team-domains.js"
+import {
+  MANAGE_DOMAINS,
+  answerJoinRequest,
+  setTeamDomain,
+  type TeamDomainDeps,
+} from "../src/console/team-domains.js"
+import { domainsOf, type JoinStore } from "../src/console/join.js"
 
 describe("classify", () => {
   test("422 is a wrong password", () => {
@@ -97,56 +103,135 @@ describe("codeCooldown", () => {
   })
 })
 
-describe("claimTeamDomain", () => {
-  const base = {
+describe("setTeamDomain", () => {
+  const calls: { name: string; on: boolean; clerkOrgId: string }[] = []
+  const base: TeamDomainDeps = {
     verified: async () => ["acme.com"],
-    canManage: async () => true,
-    create: async () => {},
+    can: async () => true,
+    store: {
+      set: async (
+        _t: string,
+        input: { name: string; on: boolean; clerkOrgId: string },
+      ) => {
+        calls.push(input)
+        return "ok"
+      },
+    } as unknown as JoinStore,
+    memberOrgIds: async () => [],
+    describe: async () => ({}),
+    addMember: async () => {},
   }
-  test("only a domain this workspace verified", async () => {
-    const outcome = await claimTeamDomain(base, {
-      tenantId: "t",
-      userId: "u",
-      orgId: "org_1",
-      name: "evil.com",
-    })
-    expect(outcome).toBe("not_verified")
+  const input = {
+    tenantId: "t",
+    userId: "u",
+    orgId: "org_1",
+    name: " ACME.com ",
+    on: true,
+  }
+
+  test("turns on a verified domain, lowercased, for the session's organization", async () => {
+    calls.length = 0
+    expect(await setTeamDomain(base, input)).toBe("ok")
+    expect(calls[0]).toEqual({ name: "acme.com", on: true, clerkOrgId: "org_1" })
   })
-  test("only an admin", async () => {
-    const outcome = await claimTeamDomain(
-      { ...base, canManage: async () => false },
-      { tenantId: "t", userId: "u", orgId: "org_1", name: "ACME.com" },
+  test("refuses a domain this workspace has not verified", async () => {
+    expect(await setTeamDomain(base, { ...input, name: "evil.com" })).toBe(
+      "not_verified",
     )
-    expect(outcome).toBe("forbidden")
   })
-  test("created, case-insensitively", async () => {
-    let made = ""
-    const outcome = await claimTeamDomain(
-      { ...base, create: async (_org, name) => void (made = name) },
-      { tenantId: "t", userId: "u", orgId: "org_1", name: " Acme.com " },
-    )
-    expect(outcome).toBe("created")
-    expect(made).toBe("acme.com")
-  })
-  // Clerk's 403 when the instance has automatic suggestions switched off.
-  test("an instance without automatic suggestions says so", async () => {
-    const outcome = await claimTeamDomain(
+  test("only for somebody who can manage the organization's domains", async () => {
+    let asked = ""
+    const outcome = await setTeamDomain(
       {
         ...base,
-        create: async () => {
-          throw Object.assign(new Error("Forbidden"), {
-            status: 403,
-            errors: [{ code: "organization_domain_enrollment_mode_not_enabled" }],
-          })
+        can: async (_u, _o, permission) => {
+          asked = permission
+          return false
         },
       },
-      { tenantId: "t", userId: "u", orgId: "org_1", name: "acme.com" },
+      input,
     )
-    expect(outcome).toBe("unavailable")
+    expect(outcome).toBe("forbidden")
+    expect(asked).toBe(MANAGE_DOMAINS)
+  })
+  test("turning off needs no verified domain", async () => {
+    expect(await setTeamDomain(base, { ...input, name: "gone.com", on: false })).toBe(
+      "ok",
+    )
   })
   test("a personal workspace has no organization", async () => {
-    expect(
-      await claimTeamDomain(base, { tenantId: "t", userId: "u", name: "acme.com" }),
-    ).toBe("no_org")
+    expect(await setTeamDomain(base, { ...input, orgId: undefined })).toBe("no_org")
+  })
+})
+
+describe("answerJoinRequest", () => {
+  const pending = [
+    { id: "req_1", user_id: "user_9", email: "b@acme.com", created_at: "x" },
+  ]
+  function deps(over: Partial<TeamDomainDeps> = {}) {
+    const added: string[] = []
+    const answered: boolean[] = []
+    const d: TeamDomainDeps = {
+      verified: async () => [],
+      can: async () => true,
+      store: {
+        pending: async () => pending,
+        answer: async (_t: string, _id: string, accept: boolean) => {
+          answered.push(accept)
+          return pending[0]!
+        },
+      } as unknown as JoinStore,
+      memberOrgIds: async () => [],
+      describe: async () => ({}),
+      addMember: async (_org, userId) => void added.push(userId),
+      ...over,
+    }
+    return { d, added, answered }
+  }
+  const input = {
+    tenantId: "t",
+    userId: "u",
+    orgId: "org_1",
+    id: "req_1",
+    accept: true,
+  }
+
+  test("accepting adds the member in Clerk, then marks it answered", async () => {
+    const { d, added, answered } = deps()
+    expect(await answerJoinRequest(d, input)).toBe("ok")
+    expect(added).toEqual(["user_9"])
+    expect(answered).toEqual([true])
+  })
+  test("declining adds nobody", async () => {
+    const { d, added, answered } = deps()
+    expect(await answerJoinRequest(d, { ...input, accept: false })).toBe("ok")
+    expect(added).toEqual([])
+    expect(answered).toEqual([false])
+  })
+  test("a Clerk failure leaves the request open", async () => {
+    const { d, answered } = deps({
+      addMember: async () => {
+        throw new Error("clerk down")
+      },
+    })
+    await expect(answerJoinRequest(d, input)).rejects.toThrow("clerk down")
+    expect(answered).toEqual([])
+  })
+  test("only for somebody who can manage members", async () => {
+    const { d, added } = deps({ can: async () => false })
+    expect(await answerJoinRequest(d, input)).toBe("forbidden")
+    expect(added).toEqual([])
+  })
+  test("another workspace's request is not found", async () => {
+    const { d } = deps()
+    expect(await answerJoinRequest(d, { ...input, id: "req_other" })).toBe("missing")
+  })
+})
+
+describe("domainsOf", () => {
+  test("the domain of each address, lowercased, once, and never with a comma", () => {
+    expect(domainsOf(["A@Acme.com", "b@acme.com", "c@x,y.com", "nope"])).toEqual([
+      "acme.com",
+    ])
   })
 })

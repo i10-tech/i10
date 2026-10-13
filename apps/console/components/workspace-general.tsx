@@ -47,8 +47,17 @@ export function WorkspaceGeneral({
     <div>
       <ProfileBlock title="Workspace">
         <ProfileRow label="Profile">
+          {/*
+           * ⚠ ONE CARD PER WORKSPACE (2026-10-13). The card keeps the name as
+           * last saved in its own state, so switching workspace from the
+           * header left the old name - and the old initials, when the new
+           * one has no logo - while everything around it changed. Keyed by
+           * the active organization, it starts over with the new one, from
+           * Clerk's copy, which the switch updates before the server does.
+           */}
           <WorkspaceProfile
-            current={tenant?.name ?? organization?.name ?? ""}
+            key={organization?.id ?? tenant?.id}
+            current={organization?.name ?? tenant?.name ?? ""}
             editable={canEdit}
           />
         </ProfileRow>
