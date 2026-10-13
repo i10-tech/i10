@@ -30,6 +30,7 @@ import { assertRlsSubject, createDb } from "./db/client.js"
 import { sesIdentity } from "./domains/identity.js"
 import { configurationSetsFor } from "./send/configuration-sets.js"
 import { recheckDomains } from "./domains/recheck.js"
+import { recheckAccessDomains } from "./console/join.js"
 import { ensureSesTenant } from "./domains/ses-tenant.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
 import { readDelegation } from "./domains/referral.js"
@@ -130,6 +131,19 @@ await withMonitor(
           ),
           { phase: "recheck-tenancy" },
         )
+      }
+
+      /*
+       * ⚠ TEAM ACCESS PROOFS RIDE ON THE SAME NIGHTLY PASS (#326), and a
+       * failure here is reported without failing the domain re-check above,
+       * which has already written what it found.
+       */
+      try {
+        const access = await recheckAccessDomains({ db, lookup: nodeTxtLookup() })
+        log.info(access, "access domain re-check complete")
+      } catch (error) {
+        log.error({ err: error }, "access domain re-check failed")
+        captureError(error, { phase: "recheck-access" })
       }
 
       if (env.SES_ENABLED) await pollSesStatuses(db, sql)

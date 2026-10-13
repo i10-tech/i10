@@ -177,9 +177,13 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * matched against.
    */
   people?: {
-    get(
-      userId: string,
-    ): Promise<{ name: string; primaryEmail: string | null; verifiedEmails: string[] }>
+    get(userId: string): Promise<{
+      name: string
+      primaryEmail: string | null
+      verifiedEmails: string[]
+      /** When they signed up, in ms - auto-join runs only for the newly arrived (#326). */
+      createdAt?: number
+    }>
   }
   /**
    * Checks the signed-in person's current password, rate limited (2026-10-12).
@@ -187,8 +191,9 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   passwords?: PasswordCheckDeps
   /**
-   * Sending domains offered to the Team page as Clerk verified domains
-   * (2026-10-12). Optional; without it the suggestion never shows.
+   * Team access domains, requests and the removed and block lists (#326).
+   * Optional; without it the Team page's access block and every suggestion
+   * stay empty.
    */
   teamDomains?: TeamDomainDeps
   /**

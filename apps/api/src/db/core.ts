@@ -800,24 +800,38 @@ export const domainTransfers = core.table(
 )
 
 /**
- * Join suggestions, ours (2026-10-13): a workspace's verified sending domain,
- * switched on so that people signed in with an address there are suggested
- * the workspace and can ask to join.
+ * A workspace's team access domains (#326): the names whose people may find
+ * and join it by email address, each with its own rules - off, suggest or
+ * auto-join, per address pattern. It started (2026-10-13) as an on/off switch
+ * on a verified sending domain; the switch is gone and `rules` decides.
  *
  * ⚠ OURS BECAUSE CLERK'S IS A PAID FEATURE. "Verified organization domains"
- * is not on our Clerk plan for production, so suggestions and requests live
- * here and only the last step - adding the member once an admin approves -
- * goes to Clerk, as an ordinary membership.
+ * is not on our Clerk plan for production, so domains, rules, requests and
+ * the removed and block lists live here and only the last step - adding the
+ * member - goes to Clerk, as an ordinary membership.
  *
- * ⚠ DNS IS THE PROOF. Only a domain verified on /domains can be switched on,
- * which is why this points at the domain row and goes with it: delete the
- * domain and its suggestions stop.
+ * ⚠ SEPARATE FROM SENDING DOMAINS, AND A NAME MAY BE IN BOTH. Two ways in: a
+ * domain verified on /domains (`source = 'domains'`, `domain_id` set), or a
+ * TXT record at `_i10-access.<name>` carrying `token` (`source = 'txt'`), for
+ * a name that never sends. A proof covers the name and its subdomains, never
+ * its parent - `notifications.pslhq.app` proves nothing about `pslhq.app`.
  *
- * ⚠ TWO AUDIENCES, AS WITH `domain_transfers`. The workspace manages its own
- * rows by `app.tenant_id`. A person looking for a workspace reads rows whose
- * name is one of `app.seeker_domains`, which the API sets only from the
- * domains of that person's VERIFIED addresses - read-only, and nothing else
- * about the workspace travels with it beyond its Clerk organization id.
+ * ⚠ A /domains ENTRY OUTLIVES ITS DOMAIN, WHICH IS WHY THE KEY IS `set null`.
+ * Deleting the sending domain must not quietly delete who may join; the row
+ * stays, stops matching (the seeker query requires `domain_id` for that
+ * source), and the Team page asks for its own TXT record.
+ *
+ * ⚠ ACTIVE MEANS PROVEN AND NOT SINCE LOST: `verified_at` set, `lapsed_at`
+ * and `displaced_at` null. A re-check that finds the proof gone stamps
+ * `lapsed_at`; another workspace proving the same name later stamps
+ * `displaced_at` here - latest proof wins, as on /domains.
+ *
+ * ⚠ THREE AUDIENCES. The workspace manages its own rows by `app.tenant_id`.
+ * A person looking for a workspace reads rows whose name is one of
+ * `app.seeker_domains`, which the API sets only from the domains (and their
+ * parents) of that person's VERIFIED addresses - read-only. And the nightly
+ * re-check reads every row with `app.join_recheck` on, read-only, writing
+ * back through each row's own tenant.
  */
 export const joinDomains = core.table(
   "join_domains",
@@ -828,13 +842,24 @@ export const joinDomains = core.table(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    domainId: uuid("domain_id")
-      .notNull()
-      .references(() => domains.id, { onDelete: "cascade" }),
+    /** The /domains row it came from; null for a TXT entry, or once that row is gone. */
+    domainId: uuid("domain_id").references(() => domains.id, { onDelete: "set null" }),
     /** Lowercased. What a seeker's address is matched against. */
     name: text("name").notNull(),
     /** The Clerk organization a seeker is suggested and an approval adds them to. */
     clerkOrgId: text("clerk_org_id").notNull(),
+    /** `domains` (proved on /domains) or `txt` (proved for access only). */
+    source: text("source").notNull().default("domains"),
+    /** The value of the `_i10-access.<name>` TXT record that proves it. */
+    token: text("token")
+      .notNull()
+      .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+    /** Pattern -> mode -> role, most specific first wins. See console/access-rules.ts. */
+    rules: jsonb("rules").$type<JoinRule[]>().notNull().default([]),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    lapsedAt: timestamp("lapsed_at", { withTimezone: true }),
+    displacedAt: timestamp("displaced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -849,17 +874,31 @@ export const joinDomains = core.table(
       for: "select",
       using: sql`${t.name} = any(string_to_array(nullif(current_setting('app.seeker_domains', true), ''), ','))`,
     }),
+    pgPolicy("join_domains_recheck_read", {
+      for: "select",
+      using: sql`current_setting('app.join_recheck', true) = 'on'`,
+    }),
   ],
 )
 
+/** One rule on an access domain (#326). */
+export interface JoinRule {
+  /** `pslhq.app`, `dev.pslhq.app`, or `*.pslhq.app` (any depth). */
+  pattern: string
+  mode: "off" | "suggest" | "auto"
+  /** The Clerk role given on joining by this rule - auto-join, or approval. */
+  role: string
+}
+
 /**
- * Somebody asking to join a workspace they were suggested (2026-10-13).
+ * Somebody asking to join a workspace they were suggested (2026-10-13), or
+ * whose auto-join found the workspace full (#326).
  *
- * ⚠ THE SEEKER WRITES IT UNDER THE WORKSPACE'S TENANT, SO THE POLICY CHECKS
- * THE SUGGESTION. A request may only be made as yourself (`app.user_id`, set
- * from the session) and only to a workspace that suggests one of your
- * verified domains - the check reads `join_domains` through the seeker policy
- * above. The workspace reads and answers its own; the seeker reads theirs.
+ * ⚠ THE WORKSPACE WRITES IT, AFTER THE API HAS CHECKED THE RULES. Since #326
+ * a request is filed under the target workspace's tenant once the seeker's
+ * verified address has matched a rule there and is on neither its removed
+ * nor its block list - checks that need the workspace's own rows. The seeker
+ * policies stay as the bound on what a seeker's own session can read and ask.
  */
 export const joinRequests = core.table(
   "join_requests",
@@ -874,6 +913,10 @@ export const joinRequests = core.table(
     userId: text("user_id").notNull(),
     /** The verified address that matched, shown to the admin. */
     email: text("email").notNull(),
+    /** The rule pattern that matched, when one did. */
+    via: text("via"),
+    /** Filed because an auto-join found the workspace full. */
+    full: boolean("full").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     answeredAt: timestamp("answered_at", { withTimezone: true }),
     accepted: boolean("accepted"),
@@ -897,6 +940,122 @@ export const joinRequests = core.table(
     pgPolicy("join_requests_seeker_ask", {
       for: "insert",
       withCheck: sql`${t.userId} = nullif(current_setting('app.user_id', true), '') and exists (select 1 from core.join_domains d where d.tenant_id = ${t.tenantId} and d.name = any(string_to_array(nullif(current_setting('app.seeker_domains', true), ''), ',')))`,
+    }),
+  ],
+)
+
+/**
+ * A workspace's removed and block lists (#326), one row per address.
+ *
+ * ⚠ KEYED BY EMAIL ADDRESS, NEVER BY CLERK USER ID. Deleting the account and
+ * signing up again makes a new user id and the same address; a list keyed by
+ * user id would forget them, which is the one way round this must not fail.
+ *
+ * ⚠ `removed`: may still ask, never auto-join or instant-join; approving a
+ * later request deletes the row. `blocked`: no suggestion, no request, no
+ * auto-join, until an admin allows them again. One row per address, so
+ * blocking somebody removed replaces the weaker kind.
+ *
+ * ⚠ THE WORKSPACE'S OWN ROWS ONLY. A seeker never reads this; the API checks
+ * it under the target workspace's tenant before offering anything.
+ */
+export const joinExclusions = core.table(
+  "join_exclusions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Lowercased. */
+    email: text("email").notNull(),
+    /** `removed` or `blocked`. */
+    kind: text("kind").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("join_exclusions_tenant_email_unique").on(t.tenantId, t.email),
+    pgPolicy("join_exclusions_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * How each member got in through an access domain (#326): "Joined
+ * automatically via @dev.pslhq.app" on the Team page.
+ *
+ * ⚠ ALSO WHAT MAKES AUTO-JOIN IDEMPOTENT. Svix redelivers `user.created`, and
+ * onboarding asks again in case the webhook is late; a person already
+ * recorded here for a workspace is not added to it a second time - which
+ * also means somebody who left on their own is not pulled back in.
+ *
+ * ⚠ TWO AUDIENCES. The workspace reads its own; a person reads their own
+ * rows (`app.user_id`) to be told "You joined Acme" on onboarding.
+ */
+export const joinMemberships = core.table(
+  "join_memberships",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Clerk's user id. */
+    userId: text("user_id").notNull(),
+    /** The verified address that matched. */
+    email: text("email").notNull(),
+    /** `auto` (at sign-up), `join` (pressed Join), or `request` (approved). */
+    how: text("how").notNull(),
+    /** The rule pattern that matched. */
+    via: text("via"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("join_memberships_tenant_user_unique").on(t.tenantId, t.userId),
+    index("join_memberships_user_idx").on(t.userId),
+    pgPolicy("join_memberships_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("join_memberships_member_read", {
+      for: "select",
+      using: sql`${t.userId} = nullif(current_setting('app.user_id', true), '')`,
+    }),
+  ],
+)
+
+/**
+ * Domains verified on /domains that a workspace said "not now" to on the
+ * Team page's access-domain suggestion (#326).
+ *
+ * ⚠ ON THE SERVER, PER WORKSPACE, NOT IN A BROWSER: one admin dismissing it
+ * dismisses it for the team. "Add" can still pick the name later.
+ */
+export const joinDismissals = core.table(
+  "join_dismissals",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Lowercased. */
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("join_dismissals_tenant_name_unique").on(t.tenantId, t.name),
+    pgPolicy("join_dismissals_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
     }),
   ],
 )

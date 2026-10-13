@@ -43,6 +43,16 @@ export interface ClerkWebhookDeps {
    * still switched on per template, remains the only sender.
    */
   authEmail?: ReturnType<typeof authEmailDelivery>
+  /**
+   * Auto-join at sign-up (#326): `user.created` adds the new person to every
+   * workspace whose access rule for one of their VERIFIED addresses is
+   * auto-join, or files a request where the workspace is full.
+   *
+   * ⚠ OUTSIDE THE SVIX DEDUPE, LIKE PROVISIONING, AND IDEMPOTENT FOR THE SAME
+   * REASON: a retry is the only repair for a Clerk call that failed the first
+   * time. Absent, nobody is auto-joined and suggestions still work.
+   */
+  autoJoin?: (data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -222,6 +232,13 @@ async function provision(
       return deps.lifecycle?.onOrganizationUpdated(data) ?? null
     case "user.deleted":
       return deps.lifecycle?.onUserDeleted(data) ?? null
+
+    /*
+     * ⚠ NO WORKSPACE IS MADE HERE ANY MORE (#325); a new person is only ever
+     * added to workspaces that asked for people at their address (#326).
+     */
+    case "user.created":
+      return deps.autoJoin?.(data) ?? null
 
     default:
       return null

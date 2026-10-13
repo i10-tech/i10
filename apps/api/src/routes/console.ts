@@ -7,6 +7,7 @@ import { requireFreshAuth } from "../middleware/session.js"
 import type { ConsoleDeps } from "./console/deps.js"
 import { notWired } from "./console/http.js"
 import { mountAccount } from "./console/account.js"
+import { mountTeam } from "./console/team.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountTemplates } from "./console/templates.js"
@@ -59,12 +60,15 @@ declare module "hono" {
 
 /**
  * Routes about the PERSON, which answer for somebody with no workspace (#325):
- * what they are suggested, asking to join, and making a Personal workspace.
- * Everything else needs an active organization.
+ * what they are suggested, asking to join, joining at once where a rule says
+ * auto-join, what happened at sign-up (#326), and making a Personal
+ * workspace. Everything else needs an active organization.
  */
 const WITHOUT_WORKSPACE = new Set([
   "/me/join-suggestions",
   "/me/join-requests",
+  "/me/joins",
+  "/me/arrivals",
   "/workspaces/personal",
 ])
 
@@ -232,6 +236,7 @@ export function createConsole(deps?: ConsoleDeps) {
    * is no second router with its own lifecycle to reason about.
    */
   mountAccount(app, d)
+  mountTeam(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)
