@@ -225,14 +225,8 @@ export function SignUpForm({
   /** The steps this instance can offer, in the order they were asked for. */
   const optional: Stage[] = [
     abilities.passkey ? ("passkey" as const) : null,
-    /*
-     * ⚠ PROVIDERS BEFORE TWO-FACTOR, ON PURPOSE (2026-10-13). Linking an
-     * account is a protected operation; with no second factor yet the fresh
-     * sign-up satisfies it, but once two-factor is on Clerk asks for the code
-     * the person set up a minute ago - the prompt nobody should see here.
-     */
-    providers.length > 0 ? ("connect" as const) : null,
     abilities.totp ? ("totp-offer" as const) : null,
+    providers.length > 0 ? ("connect" as const) : null,
   ].filter((step) => step !== null)
 
   const order: Stage[] = [...ACCOUNT_STAGES, ...optional]
