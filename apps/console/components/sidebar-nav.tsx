@@ -4,11 +4,19 @@ import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ArrowLeft, type LucideIcon } from "lucide-react"
-import { motion, type Transition, type Variants } from "motion/react"
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type Transition,
+  type Variants,
+} from "motion/react"
 import { cn } from "cn"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { StatusDot } from "@repo/ui/components/i10/status"
 import type { Attention } from "@/lib/types"
+import { readDomainAttention } from "@/lib/attention"
+import { useResetWhen } from "@/lib/react"
 import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
 /**
@@ -283,32 +291,93 @@ function moveFocus(event: React.KeyboardEvent<HTMLElement>) {
  *
  * ⚠ THE WORDS ARE IN THE DOM. A dot alone is invisible to a screen reader and
  * to anybody who cannot tell amber from grey.
+ *
+ * ⚠ IT ASKS AGAIN ON EVERY PAGE CHANGE (2026-10-13). The layout's answer is
+ * read once: Next keeps the layout across navigations, so deleting a pending
+ * domain and landing on /domains left the dot lit until a full reload. The
+ * layout's answer still wins whenever the layout does re-render.
  */
 function AttentionMark({
   attention,
 }: {
   attention: Promise<Attention["domains"] | null>
 }) {
-  const a = React.use(attention)
-  if (!a || a.total === 0) return null
-  const reasons = [
-    a.unverified > 0 && `${a.unverified} not verified`,
-    a.proof_missing > 0 && `${a.proof_missing} losing verification`,
-    a.transfers > 0 &&
-      `${a.transfers} transfer ${a.transfers === 1 ? "offer" : "offers"}`,
-    a.reputation === "held" && "sending on hold",
-    a.reputation === "paused" && "sending paused",
-    a.reputation === "at_risk" && "sending at risk",
-  ].filter(Boolean)
+  const initial = React.use(attention)
+  const [a, setA] = React.useState(initial)
+  useResetWhen(initial, () => setA(initial))
+
+  /*
+   * ⚠ ON MOUNT TOO, NOT ONLY ON A CHANGE. Settings swaps the rail for its own
+   * list, so the mark unmounts there and comes back with the layout's old
+   * answer; asking on mount is what keeps that answer from being shown again.
+   */
+  const pathname = usePathname()
+  React.useEffect(() => {
+    let stale = false
+    void readDomainAttention()
+      .then((next) => {
+        if (!stale && next) setA(next)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [pathname])
+
+  /*
+   * ⚠ IT COMES AND GOES WITH MOTION (2026-10-13), now that it can change
+   * while the page is open: a dot that blinked out after a delete read as a
+   * glitch rather than as the thing being resolved. Opacity only with reduced
+   * motion.
+   */
+  const reduce = useReducedMotion()
+  const shown = a !== null && a.total > 0
+  const reasons = a
+    ? [
+        a.unverified > 0 && `${a.unverified} not verified`,
+        a.proof_missing > 0 && `${a.proof_missing} losing verification`,
+        a.transfers > 0 &&
+          `${a.transfers} transfer ${a.transfers === 1 ? "offer" : "offers"}`,
+        a.reputation === "held" && "sending on hold",
+        a.reputation === "paused" && "sending paused",
+        a.reputation === "at_risk" && "sending at risk",
+      ].filter(Boolean)
+    : []
   return (
-    <span className="ml-auto flex items-center" title={reasons.join(", ")}>
-      <StatusDot
-        tone={
-          a.reputation === "paused" || a.reputation === "held" ? "danger" : "warning"
-        }
-        className="size-2"
-      />
-      <span className="sr-only">Needs attention: {reasons.join(", ")}</span>
-    </span>
+    <AnimatePresence>
+      {shown && (
+        <motion.span
+          key="attention"
+          className="ml-auto flex items-center"
+          title={reasons.join(", ")}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.4 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={
+            reduce
+              ? { opacity: 0, transition: { duration: motionTokens.duration.exit } }
+              : {
+                  opacity: 0,
+                  scale: 0.4,
+                  transition: { duration: motionTokens.duration.exit },
+                }
+          }
+          transition={
+            reduce
+              ? { duration: motionTokens.duration.fast }
+              : motionTokens.spring.snappy
+          }
+        >
+          <StatusDot
+            tone={
+              a?.reputation === "paused" || a?.reputation === "held"
+                ? "danger"
+                : "warning"
+            }
+            className="size-2"
+          />
+          <span className="sr-only">Needs attention: {reasons.join(", ")}</span>
+        </motion.span>
+      )}
+    </AnimatePresence>
   )
 }
