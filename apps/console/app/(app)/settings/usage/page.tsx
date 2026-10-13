@@ -13,6 +13,7 @@ import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
 import { formatBytes, formatNumber, formatUntil } from "@/lib/format"
 import type { BillingState, FeatureUsage, SendingLimit } from "@/lib/types"
+import { seatsLine } from "@/lib/invitations"
 
 export const metadata: Metadata = { title: "Usage" }
 
@@ -40,6 +41,13 @@ export default async function UsagePage() {
     usage: FeatureUsage[]
     limits: SendingLimit[]
     billing: BillingState
+    /** Members, pending invitations and free spots (#327); null without a team. */
+    members: {
+      members: number
+      invitations: number
+      limit: number
+      free: number
+    } | null
   }>("/console/usage")
 
   if (!result.ok) {
@@ -48,7 +56,7 @@ export default async function UsagePage() {
     )
   }
 
-  const { usage, limits, billing } = result.data
+  const { usage, limits, billing, members } = result.data
   // Emails are the limits above; the rest are what the workspace holds.
   const held = usage.filter((feature) => feature.feature_id !== "emails")
 
@@ -75,6 +83,33 @@ export default async function UsagePage() {
       <Section>
         <SectionTitle>Workspace</SectionTitle>
         <SectionContent className="max-w-2xl space-y-6">
+          {/*
+           * ⚠ MEMBERS AND INVITATIONS SHARE ONE BAR (#327), because both hold
+           * a spot: Clerk counts pending invitations against the limit, so a
+           * workspace with room for members can still be full.
+           */}
+          {members && (
+            <div className="space-y-1.5">
+              <UsageMeter
+                label="Members"
+                limit={members.limit}
+                decimals={0}
+                freeLabel="Free spots"
+                warnAt={0.8}
+                segments={[
+                  { id: "members", label: "Members", value: members.members },
+                  {
+                    id: "invitations",
+                    label: "Invitations",
+                    value: members.invitations,
+                  },
+                ]}
+              />
+              <p className="tabular text-xs text-muted-foreground">
+                {seatsLine(members)}
+              </p>
+            </div>
+          )}
           {held.map((feature) => {
             if (feature.status === "unreadable") {
               return (

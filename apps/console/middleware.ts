@@ -42,6 +42,8 @@ const isPublic = createRouteMatcher([
   "/healthz",
   "/billing(.*)",
   "/api/checkout-status(.*)",
+  // The invitation email's link (#327): the invitee may have no account yet.
+  "/invite(.*)",
 ])
 
 /**

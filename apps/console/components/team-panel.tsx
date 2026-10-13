@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useAuth, useClerk, useOrganization, useSession, useUser } from "@clerk/nextjs"
 import type {
-  OrganizationInvitationResource,
   OrganizationMembershipResource,
   OrganizationResource,
 } from "@clerk/shared/types"
@@ -33,13 +32,27 @@ import {
   answerJoinRequest,
   makeTeamWorkspace,
   removeTeamMember,
+  sendInvitations,
   teamAccessDomains,
+  teamCapacity,
+  teamInvitations,
   teamJoinRequests,
   teamJoins,
+  withdrawInvitation,
   type AccessDomain,
   type JoinRecord,
   type JoinRequest,
+  type PendingInvitation,
+  type TeamCapacity,
 } from "@/lib/actions"
+import { InviteExpiry, defaultExpiry, type Expiry } from "@/components/invite-expiry"
+import {
+  expiresLine,
+  expiryProblem,
+  lastSpotWarning,
+  roomText,
+  seatsLine,
+} from "@/lib/invitations"
 import { AccessDomains, Exclusions, type AccessState } from "@/components/team-access"
 import { atDomain, ruleForAddress } from "@/lib/access-match"
 import { useCreateWorkspace } from "@/lib/create-workspace"
@@ -160,6 +173,19 @@ function Team({
 
   // Invitations are listed beside the members; sending one refreshes both.
   const [invitesVersion, setInvitesVersion] = React.useState(0)
+
+  /*
+   * ⚠ ONE READ OF THE WORKSPACE'S SEATS FOR THE WHOLE PAGE (#327): the
+   * invitation form warns on the last spot and refuses past it, and Accept
+   * says what would make room. Re-read after anything that moves a seat.
+   */
+  const [capacity, setCapacity] = React.useState<TeamCapacity | null>(null)
+  const loadCapacity = React.useCallback(() => {
+    void teamCapacity().then((result) =>
+      setCapacity(result.ok ? (result.data.data ?? null) : null),
+    )
+  }, [])
+  React.useEffect(loadCapacity, [loadCapacity])
   // Removing somebody adds them to a list; the lists block reloads.
   const [listsVersion, setListsVersion] = React.useState(0)
 
@@ -192,16 +218,22 @@ function Team({
             manage={manage}
             roles={roles}
             access={access ? access.domains : []}
-            onRemoved={() => setListsVersion((v) => v + 1)}
+            onRemoved={() => {
+              setListsVersion((v) => v + 1)
+              loadCapacity()
+            }}
           />
         </ProfileRow>
         {manage && (
           <ProfileRow label="Invitations">
             <Invitations
-              organization={organization}
               roles={roles}
+              capacity={capacity}
               version={invitesVersion}
-              onSent={() => setInvitesVersion((v) => v + 1)}
+              onChanged={() => {
+                setInvitesVersion((v) => v + 1)
+                loadCapacity()
+              }}
             />
           </ProfileRow>
         )}
@@ -209,6 +241,8 @@ function Team({
           <ProfileRow label="Requests">
             <Requests
               organization={organization}
+              capacity={capacity}
+              onAccepted={loadCapacity}
               onBlocked={() => setListsVersion((v) => v + 1)}
             />
           </ProfileRow>
@@ -486,97 +520,143 @@ function removeCopy(
 // ── Invitations ──────────────────────────────────────────────────────────────
 
 /**
- * Clerk's invitations: "+ Invite" opening the form in place - addresses (as
- * many as you like) and a role - and the pending invitations under it, each
- * with a menu to revoke it.
+ * Invitations, through our API since #327: "+ Invite" opens the form in place
+ * - addresses, a role, and when it expires, in the invitee's time - and the
+ * pending invitations sit under it, each with its expiry and a way to
+ * withdraw it. The expiry cannot be changed after sending.
+ *
+ * ⚠ THE FORM KNOWS THE SPOTS LEFT. The invitation that takes the last one
+ * says who it shuts out; more addresses than spots is refused before it is
+ * sent, with what would make room - the API refuses it too.
  */
 function Invitations({
-  organization,
   roles,
+  capacity,
   version,
-  onSent,
+  onChanged,
 }: {
-  organization: OrganizationResource
   roles: { value: string; label: string }[]
+  capacity: TeamCapacity | null
   version: number
-  onSent: () => void
+  onChanged: () => void
 }) {
-  const reverify = useReverify()
-  const { invitations } = useOrganization({
-    invitations: { status: ["pending"], pageSize: 50, keepPreviousData: true },
-  })
-  const pending = invitations?.isLoading ? null : (invitations?.data ?? [])
+  const [pending, setPending] = React.useState<PendingInvitation[] | null>(null)
   const [open, setOpen] = React.useState(false)
   const [emails, setEmails] = React.useState<string[]>([])
   const [role, setRole] = React.useState<string | null>(null)
+  const [expiry, setExpiry] = React.useState<Expiry>(() => defaultExpiry())
   const [sending, setSending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [withdrawing, setWithdrawing] = React.useState<PendingInvitation | null>(null)
   const follow = useFollowOpen<HTMLFormElement>(open)
 
-  // A send elsewhere on the page refreshes this list.
-  const revalidateInvitations = invitations?.revalidate
-  React.useEffect(() => {
-    if (version > 0) void revalidateInvitations?.()
-  }, [version, revalidateInvitations])
+  const load = React.useCallback(() => {
+    void teamInvitations().then((result) =>
+      setPending(result.ok ? result.data.data : []),
+    )
+  }, [])
+  React.useEffect(load, [load, version])
 
   const chosenRole =
     role ??
     roles.find((r) => r.value === "org:member")?.value ??
     roles[0]?.value ??
     null
+  const roleName = (key: string) => roles.find((r) => r.value === key)?.label ?? key
+
+  const free = capacity?.free ?? null
+  const tooMany = free !== null && emails.length > free
+  const warning =
+    capacity && !tooMany
+      ? lastSpotWarning({
+          free: capacity.free,
+          adding: emails.length,
+          patterns: capacity.patterns,
+        })
+      : null
+
+  function openForm() {
+    // A fresh form starts at seven days from now, not from when the page loaded.
+    setExpiry((current) => ({
+      ...defaultExpiry(),
+      zone: current.zone,
+      country: current.country,
+    }))
+    setOpen(true)
+  }
 
   async function send(event: React.FormEvent) {
     event.preventDefault()
-    if (!chosenRole || emails.length === 0) return
+    if (!chosenRole || emails.length === 0 || tooMany) return
+    const problem = expiryProblem(expiry.at, new Date())
+    if (problem || !expiry.at) {
+      setError(problem)
+      return
+    }
     setSending(true)
     setError(null)
-    try {
-      const sent = await reverify(() =>
-        organization.inviteMembers({ emailAddresses: emails, role: chosenRole }),
+    const result = await sendInvitations({
+      emails,
+      role: chosenRole,
+      expires_at: expiry.at.toISOString(),
+      zone: expiry.zone,
+      country: expiry.country,
+    })
+    setSending(false)
+    if (!result.ok) {
+      const reasons = Array.isArray(result.body?.reasons)
+        ? (result.body.reasons as string[])
+        : []
+      setError(
+        reasons.length > 0
+          ? `${result.error} To make room, ${roomText(reasons)}.`
+          : result.error,
       )
-      if (!sent) return
+      onChanged()
+      return
+    }
+    const { sent, failed } = result.data
+    if (sent.length > 0)
       toastDone(
         sent.length === 1 ? "Invitation sent" : `${sent.length} invitations sent`,
       )
+    if (failed.length > 0) {
+      // What failed stays in the box with why; what went out leaves it.
+      setEmails(failed.map((f) => f.email))
+      setError(failed.map((f) => `${f.email}: ${f.reason}`).join(" "))
+    } else {
       setEmails([])
       setOpen(false)
-      onSent()
-    } catch (error) {
-      setError(clerkReason(error))
-    } finally {
-      setSending(false)
     }
+    onChanged()
   }
 
-  async function revoke(invitation: OrganizationInvitationResource) {
-    try {
-      await reverify(() => invitation.revoke())
-      void invitations?.revalidate?.()
-    } catch (error) {
-      toastError("Could not revoke that invitation", clerkReason(error))
-    }
-  }
+  const now = new Date()
 
   return (
     <div className="flex flex-col gap-1">
+      {capacity && (
+        <p className="pb-1 text-xs text-muted-foreground tabular">
+          {seatsLine(capacity)}
+        </p>
+      )}
       <MotionList>
         {(pending ?? []).map((invitation) => (
           <MotionItem key={invitation.id}>
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0">
-                <span className="block truncate text-sm">
-                  {invitation.emailAddress}
-                </span>
+                <span className="block truncate text-sm">{invitation.email}</span>
                 <span className="block text-xs text-muted-foreground">
-                  Invited {shortDate(invitation.createdAt)} · {invitation.roleName}
+                  {expiresLine(new Date(invitation.expires_at), now)} ·{" "}
+                  {roleName(invitation.role)}
                 </span>
               </span>
-              <RowMenu visible label={invitation.emailAddress}>
+              <RowMenu visible label={invitation.email}>
                 <DropdownMenuItem
                   className="text-danger"
-                  onSelect={() => void revoke(invitation)}
+                  onSelect={() => setWithdrawing(invitation)}
                 >
-                  Revoke invitation
+                  Withdraw invitation
                 </DropdownMenuItem>
               </RowMenu>
             </div>
@@ -619,22 +699,68 @@ function Invitations({
               onValueChange={(value) => setRole(value)}
             />
           )}
+          <InviteExpiry
+            value={expiry}
+            onChange={(next) => {
+              setError(null)
+              setExpiry(next)
+            }}
+          />
+          {tooMany && capacity && (
+            <p className="-mt-3 text-xs text-danger">
+              {capacity.free === 0
+                ? "This workspace is full."
+                : `Only ${capacity.free} ${capacity.free === 1 ? "spot is" : "spots are"} free.`}{" "}
+              To make room, {roomText(capacity.reasons)}.
+            </p>
+          )}
+          {warning && <p className="-mt-3 text-xs text-warning">{warning}</p>}
           {error && <p className="-mt-3 text-xs text-danger">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" loading={sending} disabled={emails.length === 0}>
+            <Button
+              type="submit"
+              loading={sending}
+              disabled={emails.length === 0 || tooMany}
+            >
               Send invitations
             </Button>
           </div>
         </form>
       </Reveal>
-      {!open && (
+      {!open && !capacity?.personal && (
         <div>
-          <AddAction onClick={() => setOpen(true)}>Invite</AddAction>
+          <AddAction onClick={openForm}>Invite</AddAction>
         </div>
       )}
+
+      <ConfirmDialog
+        open={withdrawing !== null}
+        onOpenChange={(next) => !next && setWithdrawing(null)}
+        title="Withdraw invitation"
+        description={
+          withdrawing
+            ? `The link sent to ${withdrawing.email} stops working now, and the spot it held frees up.`
+            : ""
+        }
+        confirmLabel="Withdraw"
+        doneLabel="Withdrawn"
+        onConfirm={async () => {
+          if (!withdrawing) return false
+          const result = await withdrawInvitation(withdrawing.id)
+          if (!result.ok && result.status !== 404) {
+            toastError("Could not withdraw that invitation", {
+              description: result.error,
+            })
+            return false
+          }
+          setPending((list) => (list ?? []).filter((i) => i.id !== withdrawing.id))
+          onChanged()
+          return true
+        }}
+      />
     </div>
   )
 }
@@ -646,15 +772,24 @@ function Invitations({
  * the workspace full (#326) - ours since 2026-10-13. Accepting adds them with
  * their rule's role and clears them from the removed list.
  *
- * ⚠ WHILE THE WORKSPACE IS FULL, ACCEPT IS OFF AND SAYS WHY. Clerk counts
- * members plus pending invitations against the limit, so the way to make room
- * is one of those two - and only the ones that apply are named.
+ * ⚠ WHILE THE WORKSPACE IS FULL, ACCEPT IS OFF AND SAYS WHY. Members plus
+ * pending invitations count against the plan's limit (#327), so the way to
+ * make room is one of those, or a bigger plan - and only what applies is
+ * named: withdrawing needs a pending invitation, upgrading a higher plan.
+ *
+ * ⚠ ACCEPT AND NOTIFY IS THE ONE FLOW. Requests never expire; whoever is
+ * accepted is emailed that they are in, and somebody who waited because the
+ * workspace was full is told a spot opened up.
  */
 function Requests({
   organization,
+  capacity,
+  onAccepted,
   onBlocked,
 }: {
   organization: OrganizationResource
+  capacity: TeamCapacity | null
+  onAccepted: () => void
   onBlocked: () => void
 }) {
   const [busy, setBusy] = React.useState<string | null>(null)
@@ -668,14 +803,8 @@ function Requests({
   }, [])
   React.useEffect(load, [load])
 
-  const limit = organization.maxAllowedMemberships
-  const full =
-    limit > 0 &&
-    organization.membersCount + organization.pendingInvitationsCount >= limit
-  const room = [
-    "remove a member",
-    ...(organization.pendingInvitationsCount > 0 ? ["withdraw an invitation"] : []),
-  ].join(" or ")
+  const full = capacity?.full ?? false
+  const room = roomText(capacity?.reasons ?? [])
 
   async function answer(request: JoinRequest, accept: boolean, block = false) {
     setBusy(request.id)
@@ -686,13 +815,18 @@ function Requests({
         accept ? "Could not accept that request" : "Could not answer that request",
         { description: result.error },
       )
+      // Full since the page loaded: show what would make room.
+      if (result.name === "workspace_full") onAccepted()
       return
     }
     setRequests((list) => (list ?? []).filter((r) => r.id !== request.id))
     if (accept) {
-      toastDone(`${request.email} joined`)
+      toastDone(`${request.email} joined`, {
+        description: "We emailed them to say they're in.",
+      })
       void memberships?.revalidate?.()
       void organization.reload()
+      onAccepted()
     }
     if (block) {
       toastDone(`${request.email} is blocked`)
@@ -746,7 +880,7 @@ function Requests({
                   disabled={busy !== null || full}
                   onClick={() => void answer(request, true)}
                 >
-                  Accept
+                  Accept and notify
                 </Button>
                 <RowMenu visible label={request.email}>
                   <DropdownMenuItem

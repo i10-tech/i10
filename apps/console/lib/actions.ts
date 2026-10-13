@@ -771,6 +771,103 @@ export async function allowAddress(email: string, invite: boolean) {
   )
 }
 
+// ── Members, invitations and capacity (#327) ───────────────────────────────
+
+export interface TeamCapacity {
+  members: number
+  invitations: number
+  limit: number
+  free: number
+  full: boolean
+  /** What would make room, when full: only what applies. */
+  reasons: string[]
+  can_upgrade: boolean
+  personal: boolean
+  /** Access-rule patterns that let people in, for the last-spot warning. */
+  patterns: string[]
+  /** The capacity alert's state; null for somebody who is not an admin. */
+  alert: { level: 0 | 80 | 100; alerted_at: string | null } | null
+}
+
+/** Members, invitations and the plan's limit; null without a team workspace. */
+export async function teamCapacity() {
+  return run(() => api<{ data: TeamCapacity | null }>("/console/team/capacity"), [], {
+    refreshCaller: false,
+  })
+}
+
+export interface PendingInvitation {
+  id: string
+  email: string
+  role: string
+  expires_at: string
+  /** The zone the expiry was worded in, and the country when one was picked. */
+  zone: string
+  country: string | null
+  created_at: string
+}
+
+/** Pending invitations we sent, soonest to expire first. */
+export async function teamInvitations() {
+  return run(
+    () => api<{ data: PendingInvitation[] }>("/console/team/invitations"),
+    [],
+    {
+      refreshCaller: false,
+    },
+  )
+}
+
+/**
+ * Sends invitations that expire at `expires_at` (1 hour to 7 days ahead),
+ * worded in `zone` - and `country`, when one was picked. 409
+ * `workspace_full` with `free` and `reasons` when there are too few spots.
+ */
+export async function sendInvitations(input: {
+  emails: string[]
+  role: string
+  expires_at: string
+  zone: string
+  country: string | null
+}) {
+  return run(
+    () =>
+      api<{
+        sent: { id: string; email: string; expires_at: string }[]
+        failed: { email: string; reason: string }[]
+      }>("/console/team/invitations", {
+        method: "POST",
+        body: input.country ? input : { ...input, country: undefined },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** Withdraws a pending invitation. Its expiry cannot be edited, only this. */
+export async function withdrawInvitation(id: string) {
+  return run(
+    () =>
+      api<undefined>(`/console/team/invitations/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export interface ZoneCatalog {
+  countries: { code: string; name: string; zones: { id: string; city: string }[] }[]
+  zones: { id: string; city: string }[]
+}
+
+/** Countries and their zones, from the API's runtime (some browsers lack them). */
+export async function timeZones() {
+  return run(() => api<ZoneCatalog>("/console/team/time-zones"), [], {
+    refreshCaller: false,
+  })
+}
+
 export interface JoinSuggestion {
   tenant_id: string
   name: string
