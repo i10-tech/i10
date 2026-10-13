@@ -6,6 +6,7 @@ import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { Onboarding } from "@/components/onboarding/onboarding"
 import { Wordmark } from "@/components/wordmark"
 import { JoinSuggestions } from "@/components/join-suggestions"
+import { Arrivals } from "@/components/arrivals"
 import { tryApi } from "@/lib/api"
 import { DRAFT_COOKIES, draftFor } from "@/lib/add-domain-draft"
 import { restoreDraft } from "@/lib/add-domain-restore"
@@ -204,6 +205,13 @@ export default async function OnboardingPage({
        * @acme.com address may be setting up a workspace they do not need:
        * Acme's is already here, one request away.
        */}
+      {/*
+       * ⚠ "You joined Acme" COMES BEFORE EVERYTHING (#326): somebody auto-joined
+       * at sign-up has a workspace already, and only needs to be told.
+       */}
+      {noWorkspace && (
+        <Arrivals className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
+      )}
       {process.env.CLERK_PUBLISHABLE_KEY && (
         <JoinSuggestions className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
       )}

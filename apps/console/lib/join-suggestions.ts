@@ -1,7 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { myJoinSuggestions, requestToJoin, type JoinSuggestion } from "@/lib/actions"
+import {
+  joinWorkspace,
+  myJoinSuggestions,
+  requestToJoin,
+  type JoinSuggestion,
+} from "@/lib/actions"
 
 /**
  * The workspaces suggested to the signed-in person (2026-10-13) - ours, not
@@ -37,5 +42,12 @@ export function useJoinSuggestions() {
     return result
   }, [])
 
-  return { list, ask }
+  /** Joins at once where the workspace's rule is auto-join (#326). */
+  const join = React.useCallback(async (tenantId: string) => {
+    const result = await joinWorkspace(tenantId)
+    if (result.ok) window.dispatchEvent(new Event(CHANGED))
+    return result
+  }, [])
+
+  return { list, ask, join }
 }

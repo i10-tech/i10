@@ -7,14 +7,12 @@ import type {
   OrganizationMembershipResource,
   OrganizationResource,
 } from "@clerk/shared/types"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
 import { Reveal } from "@repo/ui/components/i10/reveal"
-import { VerifiedSeal } from "@repo/ui/components/i10/verified-seal"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { Skeleton } from "@repo/ui/components/skeleton/skeleton"
 import { TagInput } from "@repo/ui/components/tag-input/tag-input"
@@ -34,15 +32,20 @@ import { RowMenu } from "@/components/list/row-menu"
 import {
   answerJoinRequest,
   makeTeamWorkspace,
-  setTeamDomain,
-  teamDomainSuggestions,
+  removeTeamMember,
+  teamAccessDomains,
   teamJoinRequests,
+  teamJoins,
+  type AccessDomain,
+  type JoinRecord,
   type JoinRequest,
 } from "@/lib/actions"
+import { AccessDomains, Exclusions, type AccessState } from "@/components/team-access"
+import { atDomain, ruleForAddress } from "@/lib/access-match"
 import { useCreateWorkspace } from "@/lib/create-workspace"
 import { announceWorkspacesChanged } from "@/lib/workspace-name"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
-import { useReverify } from "@/lib/step-up"
+import { useReverify, useStepUp } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 
 /**
@@ -157,12 +160,40 @@ function Team({
 
   // Invitations are listed beside the members; sending one refreshes both.
   const [invitesVersion, setInvitesVersion] = React.useState(0)
+  // Removing somebody adds them to a list; the lists block reloads.
+  const [listsVersion, setListsVersion] = React.useState(0)
+
+  /*
+   * ⚠ ONE READ OF THE ACCESS DOMAINS FOR THE WHOLE PAGE (#326): the access
+   * block shows them, and the remove dialog needs them to say whether
+   * auto-join covers the person being removed.
+   */
+  const [access, setAccess] = React.useState<AccessState | false | null>(null)
+  const loadAccess = React.useCallback(() => {
+    void teamAccessDomains().then((result) =>
+      setAccess(
+        result.ok
+          ? {
+              domains: result.data.data,
+              verified: result.data.verified ?? [],
+              suggested: result.data.suggested ?? [],
+            }
+          : false,
+      ),
+    )
+  }, [])
+  React.useEffect(loadAccess, [loadAccess])
 
   return (
     <div>
       <ProfileBlock title="Members">
         <ProfileRow label="Members">
-          <Members manage={manage} roles={roles} />
+          <Members
+            manage={manage}
+            roles={roles}
+            access={access ? access.domains : []}
+            onRemoved={() => setListsVersion((v) => v + 1)}
+          />
         </ProfileRow>
         {manage && (
           <ProfileRow label="Invitations">
@@ -176,14 +207,24 @@ function Team({
         )}
         {manage && (
           <ProfileRow label="Requests">
-            <Requests />
+            <Requests
+              organization={organization}
+              onBlocked={() => setListsVersion((v) => v + 1)}
+            />
           </ProfileRow>
         )}
       </ProfileBlock>
       {domains && (
-        <ProfileBlock title="Verified domains">
+        <ProfileBlock title="Team access">
           <ProfileRow label="Domains">
-            <Domains />
+            <AccessDomains state={access} roles={roles} onChange={loadAccess} />
+          </ProfileRow>
+        </ProfileBlock>
+      )}
+      {manage && (
+        <ProfileBlock title="Removed and blocked">
+          <ProfileRow label="People">
+            <Exclusions version={listsVersion} />
           </ProfileRow>
         </ProfileBlock>
       )}
@@ -215,14 +256,31 @@ function who(data: OrganizationMembershipResource["publicUserData"]) {
 function Members({
   manage,
   roles,
+  access,
+  onRemoved,
 }: {
   manage: boolean
   roles: { value: string; label: string }[]
+  access: AccessDomain[]
+  onRemoved: () => void
 }) {
-  const [removing, setRemoving] = React.useState<OrganizationMembershipResource | null>(
-    null,
-  )
+  const [removing, setRemoving] = React.useState<{
+    member: OrganizationMembershipResource
+    block: boolean
+  } | null>(null)
   const reverify = useReverify()
+  const stepUp = useStepUp()
+  /** How each member got in through an access domain (#326), by user id. */
+  const [joins, setJoins] = React.useState<Record<string, JoinRecord>>({})
+  React.useEffect(() => {
+    void teamJoins().then((result) =>
+      setJoins(
+        result.ok
+          ? Object.fromEntries(result.data.data.map((j) => [j.user_id, j]))
+          : {},
+      ),
+    )
+  }, [])
   const { user } = useUser()
   const { session } = useSession()
   /*
@@ -316,7 +374,10 @@ function Members({
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {identifier}
-                      {` · Joined ${shortDate(member.createdAt)}`}
+                      {` · ${joinedLine(
+                        joins[member.publicUserData?.userId ?? ""],
+                        member.createdAt,
+                      )}`}
                     </span>
                   </span>
                 </span>
@@ -342,9 +403,15 @@ function Members({
                     <RowMenu visible label={name}>
                       <DropdownMenuItem
                         className="text-danger"
-                        onSelect={() => setRemoving(member)}
+                        onSelect={() => setRemoving({ member, block: false })}
                       >
                         Remove member
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-danger"
+                        onSelect={() => setRemoving({ member, block: true })}
+                      >
+                        Remove and block
                       </DropdownMenuItem>
                     </RowMenu>
                   )}
@@ -360,24 +427,60 @@ function Members({
       <ConfirmDialog
         open={removing !== null}
         onOpenChange={(open) => !open && setRemoving(null)}
-        title="Remove member"
-        description={`${removing ? who(removing.publicUserData).name : "This member"} will lose access to this workspace - its domains, keys and contacts.`}
-        confirmLabel="Remove"
-        doneLabel="Removed"
+        title={removing?.block ? "Remove and block" : "Remove member"}
+        description={removeCopy(removing, access)}
+        confirmLabel={removing?.block ? "Remove and block" : "Remove"}
+        doneLabel={removing?.block ? "Blocked" : "Removed"}
         onConfirm={async () => {
-          if (!removing) return false
-          try {
-            const done = await reverify(() => removing.destroy())
-            if (done) load()
-            return done !== null
-          } catch (error) {
-            toastError("Could not remove that member", clerkReason(error))
+          const target = removing?.member.publicUserData?.userId
+          if (!removing || !target) return false
+          /*
+           * ⚠ THROUGH OUR API, NOT `membership.destroy()` (#326): the person's
+           * addresses go on the removed or block list BEFORE Clerk removes
+           * them, or auto-join would let them straight back in.
+           */
+          if (!(await stepUp())) return false
+          const result = await removeTeamMember(target, removing.block)
+          if (!result.ok) {
+            toastError("Could not remove that member", { description: result.error })
             return false
           }
+          load()
+          onRemoved()
+          return true
         }}
       />
     </div>
   )
+}
+
+/** "Joined 3 Oct", or how they came in through an access domain. */
+function joinedLine(join: JoinRecord | undefined, at: Date | null | undefined) {
+  const when = shortDate(at)
+  if (!join) return `Joined ${when}`
+  const via = atDomain(join.email)
+  if (join.how === "auto") return `Joined automatically via ${via} · ${when}`
+  if (join.how === "join") return `Joined via ${via} · ${when}`
+  return `Approved request via ${via} · ${when}`
+}
+
+/**
+ * What removing somebody does, said plainly - and, when an access rule would
+ * otherwise let them back in, that it no longer will.
+ */
+function removeCopy(
+  removing: { member: OrganizationMembershipResource; block: boolean } | null,
+  access: AccessDomain[],
+) {
+  if (!removing) return ""
+  const { name, identifier } = who(removing.member.publicUserData)
+  const base = `${name} will lose access to this workspace - its domains, keys and contacts.`
+  if (removing.block)
+    return `${base} They won't be suggested this workspace, can't ask to join, and won't be added automatically.`
+  const rule = identifier ? ruleForAddress(access, identifier) : null
+  if (rule?.mode === "auto")
+    return `${base} Auto-join covers ${atDomain(identifier)}, but once removed they can only ask to join again.`
+  return `${base} They can still ask to join again.`
 }
 
 // ── Invitations ──────────────────────────────────────────────────────────────
@@ -539,11 +642,21 @@ function Invitations({
 // ── Requests ─────────────────────────────────────────────────────────────────
 
 /**
- * People who asked to join through a join suggestion, each to accept or
- * decline - ours since 2026-10-13 (Clerk's membership requests need a Clerk
- * plan we do not have). Accepting adds them to the workspace as a member.
+ * People who asked to join through an access domain, or whose auto-join found
+ * the workspace full (#326) - ours since 2026-10-13. Accepting adds them with
+ * their rule's role and clears them from the removed list.
+ *
+ * ⚠ WHILE THE WORKSPACE IS FULL, ACCEPT IS OFF AND SAYS WHY. Clerk counts
+ * members plus pending invitations against the limit, so the way to make room
+ * is one of those two - and only the ones that apply are named.
  */
-function Requests() {
+function Requests({
+  organization,
+  onBlocked,
+}: {
+  organization: OrganizationResource
+  onBlocked: () => void
+}) {
   const [busy, setBusy] = React.useState<string | null>(null)
   const [requests, setRequests] = React.useState<JoinRequest[] | null>(null)
   const { memberships } = useOrganization({ memberships: { pageSize: 50 } })
@@ -555,18 +668,35 @@ function Requests() {
   }, [])
   React.useEffect(load, [load])
 
-  async function answer(request: JoinRequest, accept: boolean) {
+  const limit = organization.maxAllowedMemberships
+  const full =
+    limit > 0 &&
+    organization.membersCount + organization.pendingInvitationsCount >= limit
+  const room = [
+    "remove a member",
+    ...(organization.pendingInvitationsCount > 0 ? ["withdraw an invitation"] : []),
+  ].join(" or ")
+
+  async function answer(request: JoinRequest, accept: boolean, block = false) {
     setBusy(request.id)
-    const result = await answerJoinRequest(request.id, accept)
+    const result = await answerJoinRequest(request.id, accept, block)
     setBusy(null)
     if (!result.ok) {
-      toastError("Could not answer that request", { description: result.error })
+      toastError(
+        accept ? "Could not accept that request" : "Could not answer that request",
+        { description: result.error },
+      )
       return
     }
     setRequests((list) => (list ?? []).filter((r) => r.id !== request.id))
     if (accept) {
       toastDone(`${request.email} joined`)
       void memberships?.revalidate?.()
+      void organization.reload()
+    }
+    if (block) {
+      toastDone(`${request.email} is blocked`)
+      onBlocked()
     }
   }
 
@@ -576,151 +706,63 @@ function Requests() {
     return <p className="pt-1.5 text-sm text-muted-foreground">No requests to join.</p>
 
   return (
-    <MotionList>
-      {requests.map((request) => (
-        <MotionItem key={request.id}>
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-0">
-              <span className="block truncate text-sm">{request.email}</span>
-              <span className="block text-xs text-muted-foreground">
-                Asked {shortDate(new Date(request.created_at))} · suggested by{" "}
-                {request.email.split("@")[1]}
-              </span>
-            </span>
-            <span className="flex gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() => void answer(request, false)}
-              >
-                Decline
-              </Button>
-              <Button
-                size="sm"
-                loading={busy === request.id}
-                disabled={busy !== null}
-                onClick={() => void answer(request, true)}
-              >
-                Accept
-              </Button>
-            </span>
-          </div>
-        </MotionItem>
-      ))}
-    </MotionList>
-  )
-}
-
-// ── Verified domains ─────────────────────────────────────────────────────────
-
-const ENROLLMENT = [
-  { value: "on", label: "Suggest to join" },
-  { value: "off", label: "Off" },
-]
-
-/**
- * Join suggestions, one picker per verified domain - run by us since
- * 2026-10-13, because Clerk's verified organization domains are not on our
- * Clerk plan.
- *
- * ⚠ THE LIST IS THE DOMAINS VERIFIED ON /domains, SO THERE IS NOTHING TO
- * LOSE. On: people signed in with a verified address there are suggested this
- * workspace, ask to join, and an admin accepts. Off: they are not. Removing a
- * domain on /domains takes its suggestions with it.
- *
- * ⚠ DNS IS THE PROOF, AND THE API CHECKS IT AND THE ADMIN AGAIN. Joining with
- * no request is SSO's job (i10-tech/i10#319).
- */
-function Domains() {
-  /** Verified names and the ones suggesting; `false` when the API could not say. */
-  const [state, setState] = React.useState<
-    { names: string[]; enabled: string[] } | false | null
-  >(null)
-  const [busy, setBusy] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    void teamDomainSuggestions().then((result) =>
-      setState(
-        result.ok
-          ? { names: result.data.data, enabled: result.data.enabled ?? [] }
-          : false,
-      ),
-    )
-  }, [])
-
-  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
-
-  async function choose(name: string, on: boolean) {
-    if (!state) return
-    setBusy(name)
-    const result = await setTeamDomain(name, on)
-    setBusy(null)
-    if (!result.ok) {
-      toastError(`Could not change ${name}`, { description: result.error })
-      return
-    }
-    setState({
-      ...state,
-      enabled: on
-        ? [...state.enabled.filter((n) => !same(n, name)), name.toLowerCase()]
-        : state.enabled.filter((n) => !same(n, name)),
-    })
-  }
-
-  if (state === null)
-    return <p className="pt-1.5 text-sm text-muted-foreground">Loading domains…</p>
-  if (state === false)
-    return (
-      <p className="pt-1.5 text-sm text-muted-foreground">
-        Could not load this workspace&rsquo;s domains. Reload to try again.
-      </p>
-    )
-
-  if (state.names.length === 0)
-    return (
-      <p className="pt-1.5 text-sm text-muted-foreground">
-        Verify a domain on{" "}
-        <Link href="/domains" className="text-foreground underline underline-offset-4">
-          Domains
-        </Link>{" "}
-        and it shows up here, ready to suggest this workspace to people with an address
-        at it.
-      </p>
-    )
-
-  return (
-    <MotionList>
-      {state.names.map((name) => {
-        const on = state.enabled.some((n) => same(n, name))
-        return (
-          <MotionItem key={name}>
+    <div className="flex flex-col gap-2">
+      {full && (
+        <p className="text-xs text-muted-foreground">
+          {organization.name} is full. To accept a request, {room} first.
+        </p>
+      )}
+      <MotionList>
+        {requests.map((request) => (
+          <MotionItem key={request.id}>
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0">
                 <span className="flex items-center gap-2 text-sm">
-                  <span className="truncate font-mono">{name}</span>
-                  <VerifiedSeal />
+                  <span className="truncate">{request.email}</span>
+                  {request.full && (
+                    <Badge size="sm" tone="warning">
+                      Waiting for room
+                    </Badge>
+                  )}
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  {on
-                    ? `People signed in with an @${name} address are suggested to join.`
-                    : `We recommend turning this on: people with an @${name} address can then ask to join, and you approve each one.`}
+                  {request.full
+                    ? `Tried to join automatically ${shortDate(new Date(request.created_at))} while the workspace was full`
+                    : `Asked ${shortDate(new Date(request.created_at))} · via ${request.via ? `@${request.via}` : atDomain(request.email)}`}
                 </span>
               </span>
-              <MorphSelect
-                label={`Join suggestions for ${name}`}
-                hideLabel
-                className="shrink-0"
-                items={ENROLLMENT}
-                value={on ? "on" : "off"}
-                disabled={busy !== null}
-                onValueChange={(value) => void choose(name, value === "on")}
-              />
+              <span className="flex shrink-0 items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() => void answer(request, false)}
+                >
+                  Decline
+                </Button>
+                <Button
+                  size="sm"
+                  loading={busy === request.id}
+                  disabled={busy !== null || full}
+                  onClick={() => void answer(request, true)}
+                >
+                  Accept
+                </Button>
+                <RowMenu visible label={request.email}>
+                  <DropdownMenuItem
+                    className="text-danger"
+                    disabled={busy !== null}
+                    onSelect={() => void answer(request, false, true)}
+                  >
+                    Decline and block
+                  </DropdownMenuItem>
+                </RowMenu>
+              </span>
             </div>
           </MotionItem>
-        )
-      })}
-    </MotionList>
+        ))}
+      </MotionList>
+    </div>
   )
 }
 
