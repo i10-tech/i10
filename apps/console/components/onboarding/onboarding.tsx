@@ -683,7 +683,7 @@ function CreateWorkspaceForm({
         </Button>
         <Button
           type="button"
-          variant="ghost"
+          variant="secondary"
           loading={creating === "personal"}
           disabled={creating !== null}
           onClick={() => void personal()}
