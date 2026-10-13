@@ -318,6 +318,52 @@ describe("a sign-up arriving from Clerk", () => {
   })
 })
 
+/**
+ * Member limits and invitations (#327): accepted and revoked invitations and
+ * membership changes reach the members hook, outside the dedupe, and a
+ * failure is a 500 so Svix retries.
+ */
+describe("membership events arriving from Clerk", () => {
+  const members = mock(async (type: string) => `seen:${type}` as string | null)
+  const accepted = JSON.stringify({
+    type: "organizationInvitation.accepted",
+    data: { id: "orginv_1", organization_id: "org_acme", user_id: "user_late" },
+  })
+  const send = (id: string) =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        members,
+      },
+    }).request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(accepted, id),
+      body: accepted,
+    })
+
+  beforeEach(() => {
+    members.mockClear()
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+  })
+
+  it("hands the event to the members hook even as a duplicate", async () => {
+    const res = await send("msg_accept")
+    expect(res.status).toBe(200)
+    expect(members).toHaveBeenCalledWith("organizationInvitation.accepted", {
+      id: "orginv_1",
+      organization_id: "org_acme",
+      user_id: "user_late",
+    })
+  })
+
+  it("answers 500 when the hook fails, so Svix retries", async () => {
+    members.mockRejectedValueOnce(new Error("clerk down"))
+    expect((await send("msg_accept")).status).toBe(500)
+  })
+})
+
 describe("GET /readyz", () => {
   it("reports ok when the database answers", async () => {
     const res = await createApp({ pingDb: async () => {} }).request("/readyz")
