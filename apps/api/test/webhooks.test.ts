@@ -271,6 +271,53 @@ describe("a deletion arriving from Clerk", () => {
   })
 })
 
+/**
+ * Auto-join at sign-up (#326): `user.created` reaches the hook even when the
+ * projection has seen the message before, and a failure is a 500 so Svix
+ * retries - the hook itself is idempotent.
+ */
+describe("a sign-up arriving from Clerk", () => {
+  const autoJoin = mock(async () => "joined:org_acme" as string | null)
+  const hooked = () =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        autoJoin,
+      },
+    })
+  const send = (body: string, id: string) =>
+    hooked().request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(body, id),
+      body,
+    })
+
+  beforeEach(() => {
+    autoJoin.mockClear()
+    applyClerkEvent.mockResolvedValue({ outcome: "upserted", email: "a@i10.tech" })
+  })
+
+  it("hands user.created to auto-join and reports what it did", async () => {
+    const res = await send(event, "msg_signup")
+    expect(res.status).toBe(200)
+    expect(autoJoin).toHaveBeenCalledTimes(1)
+    expect(await res.json()).toMatchObject({ provisioned: "joined:org_acme" })
+  })
+
+  it("runs again on a redelivery the projection discards as a duplicate", async () => {
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+    await send(event, "msg_signup")
+    expect(autoJoin).toHaveBeenCalledTimes(1)
+  })
+
+  it("answers 500 when Clerk could not be reached, so Svix retries", async () => {
+    autoJoin.mockRejectedValueOnce(new Error("clerk down"))
+    expect((await send(event, "msg_signup")).status).toBe(500)
+  })
+})
+
 describe("GET /readyz", () => {
   it("reports ok when the database answers", async () => {
     const res = await createApp({ pingDb: async () => {} }).request("/readyz")
