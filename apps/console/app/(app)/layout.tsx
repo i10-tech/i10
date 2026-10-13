@@ -4,6 +4,8 @@ import { Suspense } from "react"
 import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-block"
 import { PageFrame } from "@/components/page-frame"
 import { RememberedViewsProvider, type View } from "@/components/list/remembered-views"
+import { RememberedCountsProvider } from "@/components/list/remembered-counts"
+import { parseCounts } from "@/lib/list-counts"
 import { Rail } from "@/components/rail"
 import { SendingStatusNotice } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
@@ -98,6 +100,11 @@ export default async function AppLayout({
       )
       .map((c) => [c.name.slice("i10-view-".length), c.value as View]),
   )
+
+  // How many rows each list had last time, in this workspace: loading pages
+  // draw that many, or the empty state. See components/list/remembered-counts.
+  const tenantId = me.data.tenant?.id ?? ""
+  const counts = parseCounts((await cookies()).getAll(), tenantId)
 
   // See WorkspaceBar: Clerk's hooks throw outside a provider, and the provider
   // is only mounted when a key exists.
@@ -251,7 +258,11 @@ export default async function AppLayout({
             <ShellBar workspace={me.data.tenant?.name ?? "Workspace"} />
           </div>
           <PageFrame>
-            <RememberedViewsProvider views={views}>{children}</RememberedViewsProvider>
+            <RememberedViewsProvider views={views}>
+              <RememberedCountsProvider tenantId={tenantId} counts={counts}>
+                {children}
+              </RememberedCountsProvider>
+            </RememberedViewsProvider>
           </PageFrame>
         </div>
       </div>

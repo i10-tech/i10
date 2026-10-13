@@ -11,14 +11,16 @@ export default function Loading() {
     >
       <ToolbarSkeleton range filters={3} />
       <TableSkeleton
+        list="logs"
+        fixed
         rows={8}
         columns={[
-          { className: "w-8 pr-0", kind: "chevron" },
-          { head: "Method", className: "w-[5rem]", kind: "badge" },
+          { className: "w-10 pr-0", kind: "chevron" },
+          { head: "Method", className: "w-[6rem]", kind: "badge" },
           { head: "Endpoint", kind: "mono" },
-          { head: "Status", className: "w-[5rem]", kind: "badge" },
-          { head: "Duration", className: "w-[6rem] text-right", kind: "number" },
-          { head: "Client", className: "hidden lg:table-cell" },
+          { head: "Status", className: "w-[6rem]", kind: "badge" },
+          { head: "Duration", className: "w-[7rem] text-right", kind: "number" },
+          { head: "Client", className: "hidden w-[12rem] lg:table-cell" },
           { head: "When", className: "w-[9rem] text-right" },
         ]}
       />

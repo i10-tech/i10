@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import { Megaphone } from "lucide-react"
 import {
   Page,
@@ -72,6 +73,7 @@ export default async function BroadcastsPage() {
           <BroadcastsList broadcasts={result.data.data} />
         )}
       </PageBody>
+      {result.ok && <RememberCount list="broadcasts" count={result.data.data.length} />}
     </Page>
   )
 }

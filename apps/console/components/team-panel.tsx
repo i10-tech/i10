@@ -168,7 +168,19 @@ function Members({
   const { memberships } = useOrganization({
     memberships: { pageSize: 50, keepPreviousData: true },
   })
-  const members = memberships?.isLoading ? null : (memberships?.data ?? [])
+  /*
+   * ⚠ WHAT IS ON SCREEN STAYS WHILE ANOTHER WORKSPACE LOADS (2026-10-13).
+   * Switching workspace showed "Loading members…" and drew the list again, so
+   * the reader - first in both lists - was taken out and put back. The
+   * previous page is kept until the next one arrives, and rows are keyed by
+   * person, so whoever is in both stays where they are.
+   */
+  const members =
+    memberships?.data && memberships.data.length > 0
+      ? memberships.data
+      : memberships?.isLoading
+        ? null
+        : (memberships?.data ?? [])
   const load = () => void memberships?.revalidate?.()
 
   async function changeRole(member: OrganizationMembershipResource, role: string) {
@@ -215,7 +227,7 @@ function Members({
           // and gave the reader a role picker - and a Remove - on themselves.
           const mine = member.publicUserData?.userId === user?.id
           return (
-            <MotionItem key={member.id}>
+            <MotionItem key={member.publicUserData?.userId ?? member.id}>
               <div className="flex items-center justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-3">
                   <Avatar

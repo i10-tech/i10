@@ -21,6 +21,7 @@ export default function Loading() {
         fallback="table"
         table={
           <TableSkeleton
+            list="topics"
             columns={[
               { head: "Name" },
               {
@@ -34,7 +35,7 @@ export default function Loading() {
             ]}
           />
         }
-        grid={<CardGridSkeleton className="lg:grid-cols-3" lines={0} />}
+        grid={<CardGridSkeleton list="topics" className="lg:grid-cols-3" lines={0} />}
       />
     </PageSkeleton>
   )

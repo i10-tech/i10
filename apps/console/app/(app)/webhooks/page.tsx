@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import {
   Page,
   PageActions,
@@ -149,6 +150,9 @@ export default async function WebhooksPage({
           </TabsContent>
         </UrlTabs>
       </PageBody>
+      {endpoints.ok && (
+        <RememberCount list="webhooks" count={endpoints.data.data.length} />
+      )}
     </Page>
   )
 }

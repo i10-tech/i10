@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
+import { useClerk } from "@clerk/nextjs"
 import Link from "next/link"
 import { LayoutGroup, motion, useReducedMotion } from "motion/react"
 import {
@@ -35,7 +36,14 @@ import { Stage, type StageScene } from "@/components/onboarding/stage"
 import { StepPlan } from "@/components/onboarding/step-plan"
 import { Status } from "@/components/status"
 import { EASE, StepItem, StepRail } from "@/components/steps"
-import { acceptTransfer, renameWorkspace, updateOnboarding } from "@/lib/actions"
+import {
+  acceptTransfer,
+  renameWorkspace,
+  updateOnboarding,
+  workspaceReady,
+} from "@/lib/actions"
+import { clerkReason } from "@/components/account/shared"
+import { announceWorkspacesChanged } from "@/lib/workspace-name"
 import { onPaidPlan } from "@/lib/billing"
 import { ARRIVAL, clearArrival } from "@/lib/arrival"
 import { rememberDraft } from "@/lib/add-domain-draft"
@@ -81,6 +89,7 @@ const STEPS = [
 type StepId = (typeof STEPS)[number]["id"]
 
 export function Onboarding({
+  creating = false,
   state,
   workspaceName,
   tenantId,
@@ -88,6 +97,7 @@ export function Onboarding({
   focus = null,
   offers = [],
   userEmail = null,
+  firstName = null,
   plans,
   billing,
   checkoutId,
@@ -95,6 +105,11 @@ export function Onboarding({
   justPublished,
   domainDraft = null,
 }: {
+  /**
+   * Set-up for a workspace that does not exist yet (`/onboarding?new=1`): the
+   * workspace step creates it, then the flow carries on in place.
+   */
+  creating?: boolean
   state: OnboardingState
   workspaceName: string
   /** Keys the remembered step, so it never crosses workspaces. */
@@ -109,6 +124,8 @@ export function Onboarding({
   offers?: TransferOffer[]
   /** The signed-in person's address - the test email goes to them. */
   userEmail?: string | null
+  /** For the send step's snippet. */
+  firstName?: string | null
   plans: PlanSummary[]
   billing: BillingState
   /** From the checkout cookie (see lib/arrival.ts), for the plan step's outcome banner. */
@@ -216,11 +233,41 @@ export function Onboarding({
   // ── What the stage shows ──────────────────────────────────────────────────
   const [name, setName] = React.useState(workspaceName)
   const [domainPreview, setDomainPreview] = React.useState({ name: "", naming: true })
-  const [sentTo, setSentTo] = React.useState<string | null>(null)
+  /*
+   * ⚠ SEEDED FROM THE DOMAIN ROW, so a reload after sending keeps the step
+   * green with the address it went to instead of "Skipped" (2026-10-13).
+   */
+  const [sentTo, setSentTo] = React.useState<string | null>(
+    () =>
+      domains.find((d) => d.status === "verified" && d.onboarding_email)
+        ?.onboarding_email?.to ?? null,
+  )
 
   const firstVerified = domains.find((d) => d.status === "verified") ?? null
   const plan = step === "plan"
   const column = React.useRef<HTMLDivElement>(null)
+  const stage = React.useRef<HTMLElement>(null)
+
+  /*
+   * ⚠ A NATIVE, NON-PASSIVE WHEEL LISTENER, SO THE STAGE ITSELF NEVER MOVES
+   * (2026-10-13). React's `onWheel` is passive: it scrolled the steps, but the
+   * browser still ran its own default for the wheel over the stage - an
+   * elastic overscroll that tugged the whole page, header included. Taking
+   * the default away hands every wheel tick to the steps column and nothing
+   * else.
+   */
+  React.useEffect(() => {
+    const node = stage.current
+    if (!node) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const scale =
+        event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1
+      column.current?.scrollBy({ top: event.deltaY * scale, left: 0 })
+    }
+    node.addEventListener("wheel", onWheel, { passive: false })
+    return () => node.removeEventListener("wheel", onWheel)
+  }, [])
 
   const body =
     (
@@ -274,13 +321,28 @@ export function Onboarding({
                       </Answer>
                     }
                   >
-                    <WorkspaceForm
-                      initial={workspaceName}
-                      value={name}
-                      onChange={setName}
-                      onDone={() => advance("workspace")}
-                      onFailed={() => go("workspace")}
-                    />
+                    {creating ? (
+                      <CreateWorkspaceForm
+                        value={name}
+                        onChange={setName}
+                        onCreated={(newTenantId) => {
+                          // The new workspace's own step, from here on.
+                          rememberStep(newTenantId, "domain")
+                          void updateOnboarding({ step: "domain" })
+                          setStep("domain")
+                          // Its data, into the same page: nothing remounts.
+                          router.replace("/onboarding")
+                        }}
+                      />
+                    ) : (
+                      <WorkspaceForm
+                        initial={workspaceName}
+                        value={name}
+                        onChange={setName}
+                        onDone={() => advance("workspace")}
+                        onFailed={() => go("workspace")}
+                      />
+                    )}
                   </StepItem>
 
                   {/* ── Domain ── */}
@@ -334,8 +396,10 @@ export function Onboarding({
                   >
                     <SendStep
                       firstVerified={firstVerified}
+                      domains={domains}
                       hasApiKey={state.facts.has_api_key}
                       recipient={userEmail}
+                      firstName={firstName}
                       onSent={(to) => setSentTo(to)}
                       onDone={() => advance("send")}
                     />
@@ -383,7 +447,8 @@ export function Onboarding({
                 ) : (
                   <span />
                 )}
-                {index < STEPS.length - 1 && (
+                {/* Nothing to skip to before the workspace exists. */}
+                {index < STEPS.length - 1 && !(creating && step === "workspace") && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -410,7 +475,7 @@ export function Onboarding({
            * read as the page being stuck. The stage stays where it is and the
            * column beside it moves, as if the pointer were over it.
            */
-          onWheel={(event) => column.current?.scrollBy({ top: event.deltaY, left: 0 })}
+          ref={stage}
           initial={false}
           animate={plan ? { width: "0%", opacity: 0 } : { width: "40%", opacity: 1 }}
           transition={{ duration: reduce ? 0 : 0.9, ease: EASE }}
@@ -515,6 +580,72 @@ function WorkspaceForm({
         autoFocus
       />
       <Button type="submit">Continue</Button>
+    </form>
+  )
+}
+
+/**
+ * The workspace step for a workspace that does not exist yet (2026-10-13):
+ * Continue creates it with the typed name, makes it active, waits until our
+ * side has provisioned it, and hands back its tenant id. It replaced a
+ * separate page that only looked like set-up.
+ *
+ * ⚠ IT WAITS FOR THE TENANT, NOT JUST FOR CLERK. The organization exists the
+ * moment Clerk answers, but our tenant is made by its webhook a moment
+ * later; carrying on before that would render set-up as "still being
+ * created". The button stays busy for those seconds instead.
+ */
+function CreateWorkspaceForm({
+  value,
+  onChange,
+  onCreated,
+}: {
+  value: string
+  onChange: (value: string) => void
+  onCreated: (tenantId: string) => void
+}) {
+  const clerk = useClerk()
+  const [creating, setCreating] = React.useState(false)
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    const next = value.trim()
+    if (!next || creating) return
+    setCreating(true)
+    try {
+      const made = await clerk.createOrganization({ name: next })
+      await clerk.setActive({ organization: made.id })
+      announceWorkspacesChanged()
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const tenantId = await workspaceReady(made.id)
+        if (tenantId) return onCreated(tenantId)
+        await new Promise((resolve) => setTimeout(resolve, 750))
+      }
+      toastError(
+        "The workspace is still being set up",
+        "It was created. Reload in a moment to carry on.",
+      )
+    } catch (error) {
+      toastError("Could not create the workspace", clerkReason(error))
+    }
+    setCreating(false)
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-5">
+      <FloatingInput
+        label="Workspace name"
+        id="workspace-name"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        data-carry="value"
+        maxLength={120}
+        autoFocus
+        disabled={creating}
+      />
+      <Button type="submit" loading={creating} disabled={!value.trim()}>
+        Continue
+      </Button>
     </form>
   )
 }
@@ -846,9 +977,13 @@ function VerifyStep({
   }
 
   const verified = live.domain.status === "verified"
+  // A connection finished here (see DomainLiveProvider) or on the callback
+  // page: records we wrote at their provider, nothing for them to publish.
+  const connect = live.connect
+  const publishedByUs = published > 0 || connect !== null
   return (
     <div className="space-y-6">
-      {published > 0 && (
+      {published > 0 && !connect && (
         <div className="flex items-start gap-3 rounded-2xl border border-success/30 bg-success/5 p-4">
           <CheckCircle2 aria-hidden className="mt-0.5 size-5 shrink-0 text-success" />
           <div className="space-y-1">
@@ -864,7 +999,12 @@ function VerifyStep({
         </div>
       )}
 
-      <LiveDomainJourney quiet={false} />
+      {/* The same events, notice and connection progress as the domain page. */}
+      <LiveDomainJourney
+        quiet={false}
+        publishedByUs={publishedByUs}
+        recordsBelow={false}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={!verified} onClick={onDone}>
@@ -901,24 +1041,34 @@ function useSendFrom(firstVerified: DomainSummary | null) {
 
 function SendStep({
   firstVerified,
+  domains,
   hasApiKey,
   recipient,
+  firstName,
   onSent,
   onDone,
 }: {
   firstVerified: DomainSummary | null
+  domains: DomainSummary[]
   hasApiKey: boolean
   recipient: string | null
+  firstName: string | null
   onSent: (to: string) => void
   onDone: () => void
 }) {
   const { from, verified } = useSendFrom(firstVerified)
+  // The send this domain has had, if any: each added domain gets exactly one.
+  const already =
+    domains.find((d) => d.name === from && d.status === "verified")?.onboarding_email ??
+    null
   return (
     <SendFirstEmail
       from={from}
       verified={verified}
       hasApiKey={hasApiKey}
       recipient={recipient}
+      firstName={firstName}
+      already={already}
       onSent={({ to }) => onSent(to)}
       onDone={onDone}
     />

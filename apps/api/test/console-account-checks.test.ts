@@ -128,6 +128,22 @@ describe("claimTeamDomain", () => {
     expect(outcome).toBe("created")
     expect(made).toBe("acme.com")
   })
+  // Clerk's 403 when the instance has automatic suggestions switched off.
+  test("an instance without automatic suggestions says so", async () => {
+    const outcome = await claimTeamDomain(
+      {
+        ...base,
+        create: async () => {
+          throw Object.assign(new Error("Forbidden"), {
+            status: 403,
+            errors: [{ code: "organization_domain_enrollment_mode_not_enabled" }],
+          })
+        },
+      },
+      { tenantId: "t", userId: "u", orgId: "org_1", name: "acme.com" },
+    )
+    expect(outcome).toBe("unavailable")
+  })
   test("a personal workspace has no organization", async () => {
     expect(
       await claimTeamDomain(base, { tenantId: "t", userId: "u", name: "acme.com" }),

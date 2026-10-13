@@ -158,6 +158,20 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
         },
         409,
       )
+    if (outcome === "unavailable") {
+      d.log.error(
+        { tenantId },
+        "Clerk has automatic suggestions off: turn on Organizations > Verified domains > Automatic suggestion",
+      )
+      return c.json(
+        {
+          statusCode: 503,
+          name: "feature_unavailable",
+          message: "Join suggestions are not switched on for this account system yet.",
+        },
+        503,
+      )
+    }
     if (outcome === "no_org")
       return c.json(validation("Join suggestions need a team workspace."), 422)
     return c.json(validation("Verify that domain on the Domains page first."), 422)
@@ -254,11 +268,27 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     if (!productId)
       return c.json(validation(`No such plan: ${plan || "(missing)"}.`), 422)
 
+    /*
+     * ⚠ THE FORM OPENS WITH THEIR ADDRESS FILLED IN (2026-10-13): the signed-in
+     * person's own verified one, read from the identity provider - never from
+     * the request. Cosmetic only: they can change it on Polar's page, and
+     * attribution runs off the checkout row below, not the email. A lookup
+     * that fails leaves the field empty rather than failing the checkout.
+     */
+    const { userId } = c.get("user")
+    const person = d.people ? await d.people.get(userId).catch(() => null) : null
+    const verified = person?.verifiedEmails ?? []
+    const email =
+      person?.primaryEmail && verified.includes(person.primaryEmail)
+        ? person.primaryEmail
+        : verified[0]
+
     try {
       const checkout = await d.billing.polar.createCheckout({
         productId,
         tenantId,
         successUrl: returnTo(d.billing.successUrl, body?.return_to),
+        ...(email ? { email } : {}),
       })
 
       /*
@@ -564,6 +594,20 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       return c.json(validation(`${domain} is not verified for sending yet.`), 422)
     }
 
+    /*
+     * ⚠ ONCE PER DOMAIN ROW, RECORDED ON THE ROW (2026-10-13). A domain that
+     * has had its set-up send answers with that send - same id, same recipient
+     * - so a reload, another tab or a second visit to set-up shows it rather
+     * than offering another. See `onboarding_email_id` in db/core.ts.
+     */
+    const row = d.domains ? await d.domains.onboardingEmailFor(tenantId, domain) : null
+    if (row?.sent) {
+      return c.json(
+        { id: row.sent.id, to: row.sent.to, at: row.sent.at, replayed: true },
+        200,
+      )
+    }
+
     const billing = await d.usage.billing(tenantId)
     const state = await d.onboarding.get(tenantId, billing.plan?.id ?? null)
     if (!state.facts.has_api_key) {
@@ -612,12 +656,21 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
         template: { id: "welcome", variables },
         tags: [{ name: "onboarding_test", value: "true" }],
       },
-      { idempotencyKey: `onboarding-test-email:${tenantId}` },
+      // Per domain row: a double press replays, another domain gets its own.
+      {
+        idempotencyKey: `onboarding-test-email:${row?.domainId ?? `${tenantId}:${domain}`}`,
+      },
     )
-    if (outcome.status === "accepted")
-      return c.json({ id: outcome.ids[0] ?? null, to, replayed: false }, 201)
-    if (outcome.status === "replayed")
-      return c.json({ id: outcome.ids[0] ?? null, to, replayed: true }, 200)
+    if (outcome.status === "accepted" || outcome.status === "replayed") {
+      const id = outcome.ids[0] ?? null
+      const at = new Date().toISOString()
+      if (row && id)
+        await d.domains?.markOnboardingEmail(tenantId, row.domainId, { id, to, at })
+      return c.json(
+        { id, to, at, replayed: outcome.status === "replayed" },
+        outcome.status === "accepted" ? 201 : 200,
+      )
+    }
     return c.json(
       validation(
         "message" in outcome ? outcome.message : "The email could not be sent.",

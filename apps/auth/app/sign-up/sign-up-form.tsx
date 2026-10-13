@@ -225,8 +225,14 @@ export function SignUpForm({
   /** The steps this instance can offer, in the order they were asked for. */
   const optional: Stage[] = [
     abilities.passkey ? ("passkey" as const) : null,
-    abilities.totp ? ("totp-offer" as const) : null,
+    /*
+     * ⚠ PROVIDERS BEFORE TWO-FACTOR, ON PURPOSE (2026-10-13). Linking an
+     * account is a protected operation; with no second factor yet the fresh
+     * sign-up satisfies it, but once two-factor is on Clerk asks for the code
+     * the person set up a minute ago - the prompt nobody should see here.
+     */
     providers.length > 0 ? ("connect" as const) : null,
+    abilities.totp ? ("totp-offer" as const) : null,
   ].filter((step) => step !== null)
 
   const order: Stage[] = [...ACCOUNT_STAGES, ...optional]
@@ -809,7 +815,8 @@ export function SignUpForm({
                 loading={busy === "credentials"}
                 type="submit"
                 size="lg"
-                disabled={!signUp || locked}
+                // Pressable only once every rule in the checklist above is met.
+                disabled={!signUp || locked || secretProblem(secret) !== null}
               >
                 Create account
               </Button>
@@ -940,7 +947,7 @@ export function SignUpForm({
             busy={busy}
             onBusy={setBusy}
             onNext={() => advance("connect")}
-            finishLabel="Take me in"
+            finishLabel={isLastStep ? "Take me in" : "Continue"}
           />
         )}
       </StepStage>

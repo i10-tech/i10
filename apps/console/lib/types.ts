@@ -172,6 +172,8 @@ export interface DomainSummary {
    * public API's domain says nothing about our other customers.
    */
   displaced_at?: string | null
+  /** Console only: set-up's one "Send email" from this domain, once it has had it. */
+  onboarding_email?: { id: string; to: string; at: string } | null
 }
 
 export interface Domain extends DomainSummary {
@@ -179,6 +181,8 @@ export interface Domain extends DomainSummary {
   /** Console only: when it was first verified, and last looked up in DNS. */
   verified_at?: string | null
   dns_checked_at?: string | null
+  /** Console only: when "I've added the records" was pressed, by hand-publishers. */
+  records_added_at?: string | null
   /** Open and click tracking (#154). Off unless the owner turned it on. */
   open_tracking: boolean
   click_tracking: boolean

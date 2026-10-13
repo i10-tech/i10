@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import { Mail, SearchX } from "lucide-react"
 import {
   Page,
@@ -181,13 +182,15 @@ export default async function EmailsPage({
               />
             ) : (
               <div className="space-y-4">
-                <ListTable>
+                <ListTable fixed className="[&_table]:min-w-[640px]">
                   <ListHeader>
                     <ListHead className="w-[9rem]">Status</ListHead>
-                    <ListHead className="w-[16rem]">To</ListHead>
+                    <ListHead className="w-[13rem] xl:w-[16rem]">To</ListHead>
                     <ListHead>Subject</ListHead>
-                    <ListHead className="hidden w-[16rem] lg:table-cell">From</ListHead>
-                    <ListHead className="w-[9rem] text-right">Sent</ListHead>
+                    <ListHead className="hidden w-[13rem] lg:table-cell xl:w-[16rem]">
+                      From
+                    </ListHead>
+                    <ListHead className="w-[8rem] text-right">Sent</ListHead>
                   </ListHeader>
                   <ListBody>
                     {rows.map((email) => {
@@ -277,6 +280,13 @@ export default async function EmailsPage({
           </ListRegion>
         </UrlList>
       </PageBody>
+      {result.ok && (
+        <RememberCount
+          list="emails"
+          count={rows.length}
+          filtered={filtered || Boolean(params.cursor)}
+        />
+      )}
     </Page>
   )
 }

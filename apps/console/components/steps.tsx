@@ -295,6 +295,13 @@ export function StepRail({
       if (!next || next === current) return
       const first = current === null
       current = next
+      /*
+       * ⚠ OPENING ON THE FIRST STEP, THE PAGE STAYS AT THE TOP (2026-10-13).
+       * Jumping to it hid the heading and the progress above it, so set-up for
+       * a new workspace opened mid-page; a resumed flow on a later step still
+       * opens on that step.
+       */
+      if (first && next === list.querySelector("[data-step-state]")) return
       clearTimeout(timer)
       timer = setTimeout(
         () =>

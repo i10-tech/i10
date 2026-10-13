@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { RememberCount } from "@/components/list/remembered-counts"
 import { Tag } from "lucide-react"
 import {
   Page,
@@ -74,6 +75,7 @@ export default async function TopicsPage() {
           <TopicsList topics={result.data.data} />
         )}
       </PageBody>
+      {result.ok && <RememberCount list="topics" count={result.data.data.length} />}
     </Page>
   )
 }

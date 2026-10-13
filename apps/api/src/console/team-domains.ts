@@ -24,7 +24,7 @@ export interface TeamDomainDeps {
 }
 
 export type ClaimOutcome =
-  "created" | "not_verified" | "forbidden" | "no_org" | "exists"
+  "created" | "not_verified" | "forbidden" | "no_org" | "exists" | "unavailable"
 
 export async function claimTeamDomain(
   d: TeamDomainDeps,
@@ -41,6 +41,17 @@ export async function claimTeamDomain(
   } catch (error) {
     // Clerk refuses a domain the organization already has, or one another uses.
     const status = (error as { status?: number } | null)?.status
+    /*
+     * ⚠ THE INSTANCE HAS AUTOMATIC SUGGESTIONS SWITCHED OFF (2026-10-13). Clerk
+     * answers 403 `organization_domain_enrollment_mode_not_enabled` until
+     * Organizations -> Verified domains -> Automatic suggestion is on in its
+     * dashboard; it surfaced as "Something went wrong" from an unhandled 500.
+     */
+    const codes = (
+      (error as { errors?: { code?: string }[] } | null)?.errors ?? []
+    ).map((entry) => entry.code)
+    if (codes.includes("organization_domain_enrollment_mode_not_enabled"))
+      return "unavailable"
     if (status === 422 || status === 409) return "exists"
     throw error
   }

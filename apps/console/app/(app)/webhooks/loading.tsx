@@ -23,6 +23,7 @@ export default function Loading() {
         fallback="grid"
         table={
           <TableSkeleton
+            list="webhooks"
             rows={4}
             columns={[
               { kind: "box" },
@@ -35,7 +36,13 @@ export default function Loading() {
             ]}
           />
         }
-        grid={<CardGridSkeleton count={4} className="lg:grid-cols-2 2xl:grid-cols-3" />}
+        grid={
+          <CardGridSkeleton
+            list="webhooks"
+            count={4}
+            className="lg:grid-cols-2 2xl:grid-cols-3"
+          />
+        }
       />
     </PageSkeleton>
   )

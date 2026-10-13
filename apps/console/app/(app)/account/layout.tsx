@@ -10,8 +10,8 @@ import {
  * The account shell.
  *
  * ⚠ THIS FILE DID NOT EXIST, AND ITS ABSENCE IS THE BUG IT FIXES. `/account`
- * and `/account/appearance` are listed in `SETTINGS_NAV` and look like settings
- * pages, but they sit outside the `settings` segment - so they inherited no
+ * is listed in `SETTINGS_NAV` and looks like a settings
+ * page, but it sits outside the `settings` segment - so it inherited no
  * `Page` wrapper at all and rendered flush against the left edge of the
  * viewport, with no padding and no heading, while every neighbouring page had
  * both. It read as a broken stylesheet rather than a missing layout.

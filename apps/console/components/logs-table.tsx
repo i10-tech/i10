@@ -140,14 +140,14 @@ function Rows({
 
   return (
     <div className="space-y-4">
-      <ListTable>
+      <ListTable fixed className="[&_table]:min-w-[640px]">
         <ListHeader>
-          <ListHead className="w-8 pr-0" />
-          <ListHead className="w-[5rem]">Method</ListHead>
+          <ListHead className="w-10 pr-0" />
+          <ListHead className="w-[6rem]">Method</ListHead>
           <ListHead>Endpoint</ListHead>
-          <ListHead className="w-[5rem]">Status</ListHead>
-          <ListHead className="w-[6rem] text-right">Duration</ListHead>
-          <ListHead className="hidden lg:table-cell">Client</ListHead>
+          <ListHead className="w-[6rem]">Status</ListHead>
+          <ListHead className="w-[7rem] text-right">Duration</ListHead>
+          <ListHead className="hidden w-[12rem] lg:table-cell">Client</ListHead>
           <ListHead className="w-[9rem] text-right">When</ListHead>
         </ListHeader>
         {/* No `divide-y`: the folded detail rows would each draw a second line. */}
@@ -159,19 +159,29 @@ function Rows({
                 <tr
                   className={cn(
                     rowClass,
-                    "cursor-pointer border-t animate-in fade-in-0 duration-300 first:border-t-0",
-                    expanded && "bg-muted/40",
+                    "cursor-pointer animate-in fade-in-0 duration-300",
+                    // Open, the row and its details read as one block: one
+                    // fill, and no rule between them.
+                    expanded &&
+                      "[&>td]:border-b-0 [&>td]:[--cell-fill:var(--surface-muted)]",
                   )}
                   onClick={() => setOpen(expanded ? null : row.id)}
                   aria-expanded={expanded}
                 >
                   <ListCell className="pr-0">
-                    <ChevronRight
-                      className={cn(
-                        "size-3.5 text-muted-foreground transition-transform duration-200",
-                        expanded && "rotate-90",
-                      )}
-                    />
+                    <motion.span
+                      className="grid size-4 place-items-center"
+                      initial={false}
+                      animate={{ rotate: expanded ? 90 : 0 }}
+                      transition={{ type: "spring", stiffness: 520, damping: 34 }}
+                    >
+                      <ChevronRight
+                        className={cn(
+                          "size-3.5 text-muted-foreground transition-colors",
+                          expanded && "text-foreground",
+                        )}
+                      />
+                    </motion.span>
                   </ListCell>
                   <ListCell>
                     <span className="font-mono text-2xs font-medium text-muted-foreground">
@@ -211,21 +221,48 @@ function Rows({
                     <Time iso={row.occurred_at} />
                   </ListCell>
                 </tr>
-                <tr>
-                  <td colSpan={7} className="p-0">
+                {/*
+                 * ⚠ THE DETAIL ROW HAS NO HEIGHT OF ITS OWN WHEN CLOSED
+                 * (2026-10-13). The table gives every cell 52px and a rule, so
+                 * a closed one was a blank band under each request; it is
+                 * zero-height and borderless until it opens.
+                 */}
+                <tr aria-hidden={!expanded}>
+                  <td
+                    colSpan={7}
+                    className={cn(
+                      "!h-0 !p-0",
+                      expanded ? "[--cell-fill:var(--surface-muted)]" : "!border-b-0",
+                    )}
+                  >
                     <AnimatePresence initial={false}>
                       {expanded && (
                         <motion.div
                           initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                          className="overflow-hidden bg-muted/20"
+                          animate={{
+                            height: "auto",
+                            opacity: 1,
+                            transition: {
+                              height: { type: "spring", stiffness: 420, damping: 40 },
+                              opacity: { duration: 0.18, delay: 0.04 },
+                            },
+                          }}
+                          exit={{
+                            height: 0,
+                            opacity: 0,
+                            transition: {
+                              height: { type: "spring", stiffness: 520, damping: 44 },
+                              opacity: { duration: 0.1 },
+                            },
+                          }}
+                          className="overflow-hidden"
                         >
-                          <dl className="grid gap-3 px-4 py-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                          <dl className="grid gap-x-6 gap-y-4 pt-1 pr-4 pb-5 pl-14 text-sm sm:grid-cols-2 lg:grid-cols-4">
                             <Detail label="Request ID">
                               <span className="flex items-center gap-1">
-                                <span className="truncate font-mono">{row.id}</span>
+                                <span className="truncate font-mono text-xs">
+                                  {row.id}
+                                </span>
                                 <CopyButton
                                   value={row.id}
                                   label="Copy request ID"
@@ -242,7 +279,7 @@ function Rows({
                                 : "None (refused before a key resolved)"}
                             </Detail>
                             <Detail label="Time">
-                              <span className="font-mono">
+                              <span className="font-mono text-xs">
                                 <Time iso={row.occurred_at} mode="exact" />
                               </span>
                             </Detail>
@@ -251,7 +288,7 @@ function Rows({
                             </Detail>
                             <div className="sm:col-span-2 lg:col-span-4">
                               <Detail label="Client">
-                                <span className="font-mono break-all">
+                                <span className="font-mono text-xs break-all">
                                   {row.user_agent ?? "Not sent"}
                                 </span>
                               </Detail>
@@ -276,8 +313,8 @@ function Rows({
 function Detail({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5">{children}</dd>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 min-h-5">{children}</dd>
     </div>
   )
 }

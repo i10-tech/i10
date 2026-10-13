@@ -530,6 +530,18 @@ export const domains = core.table(
     dnsCheckedAt: timestamp("dns_checked_at", { withTimezone: true }),
 
     /**
+     * When somebody publishing by hand pressed "I've added the records"
+     * (2026-10-13).
+     *
+     * ⚠ NOT `dns_checked_at`, WHICH CANNOT SAY IT. The console's own watch and
+     * the background sweeps ask DNS on their own, so a check having happened
+     * says nothing about whether the person has done their part. This does:
+     * once it is set, an unregistered domain is waiting on propagation, not on
+     * them, and the console stops telling them to publish what they published.
+     */
+    recordsAddedAt: timestamp("records_added_at", { withTimezone: true }),
+
+    /**
      * When we first handed this domain to SES, after proving ownership.
      *
      * ⚠ IT EXISTS TO MEASURE AMAZON, NOT TO DECIDE ANYTHING. Ownership is proved
@@ -556,6 +568,20 @@ export const domains = core.table(
      * `refresh`. Cleared by this row's own successful verify.
      */
     displacedAt: timestamp("displaced_at", { withTimezone: true }),
+
+    /**
+     * Set-up's "Send email" from this domain: the message, who it went to, when
+     * (2026-10-13).
+     *
+     * ⚠ ON THE ROW, SO IT IS EXACTLY ONCE PER ADDED DOMAIN AND FOR GOOD. It was
+     * an idempotency key per workspace, which expires - so set-up forgot the
+     * send after a while and offered it again, and a second domain could never
+     * have one. A domain deleted and added again is a new row, and gets a new
+     * one.
+     */
+    onboardingEmailId: uuid("onboarding_email_id"),
+    onboardingEmailTo: text("onboarding_email_to"),
+    onboardingEmailAt: timestamp("onboarding_email_at", { withTimezone: true }),
 
     /**
      * When the registrable domain was registered, from RDAP (#170).

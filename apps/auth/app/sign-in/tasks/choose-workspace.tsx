@@ -5,6 +5,7 @@ import { useClerk, useOrganizationList, useUser } from "@clerk/nextjs"
 import { ChevronRight, Plus } from "lucide-react"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
 import { Spinner } from "@repo/ui/components/i10/spinner"
+import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
 import { StepHeading } from "../../_components/step-heading"
 
 /**
@@ -61,6 +62,38 @@ export function ChooseWorkspace() {
 
   const memberships = userMemberships.data ?? []
   const invitations = userInvitations.data ?? []
+
+  /*
+   * ⚠ ONE WORKSPACE AND NOTHING TO ACCEPT IS NOT A CHOICE (2026-10-13). The
+   * list would hold a single row to press, so it is pressed for them and the
+   * panel reads as the sign-in finishing. A failure falls back to the list.
+   */
+  const only =
+    isLoaded &&
+    !userMemberships.isLoading &&
+    !userInvitations.isLoading &&
+    !userMemberships.hasNextPage &&
+    memberships.length === 1 &&
+    invitations.length === 0
+      ? memberships[0]!.organization.id
+      : null
+  const autoChosen = React.useRef(false)
+  React.useEffect(() => {
+    if (!only || autoChosen.current) return
+    autoChosen.current = true
+    void choose(only)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the one workspace
+  }, [only])
+
+  if (only && error === null) {
+    return (
+      <div className="flex min-h-40 items-center justify-center" aria-live="polite">
+        <TextShimmer className="text-sm text-muted-foreground">
+          Finishing sign-in
+        </TextShimmer>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-6">

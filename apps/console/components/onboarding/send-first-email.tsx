@@ -15,14 +15,14 @@ import {
 } from "lucide-react"
 import { StateButton } from "@repo/ui/components/i10/state-button"
 import { CodeBlock } from "@repo/ui/components/code-block/code-block"
-import { AutoHeight } from "@repo/ui/components/i10/auto-height"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { Button } from "@repo/ui/components/button/button"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { Spinner } from "@repo/ui/components/i10/spinner"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
+import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
 import { createApiKey, emailStatus, sendFirstEmail } from "@/lib/actions"
 import { useOutcome } from "@/lib/outcome"
 import { toastError } from "@/lib/toast"
@@ -48,7 +48,7 @@ type Delivery =
   | { phase: "idle" }
   | { phase: "sending" }
   | { phase: "watching"; id: string; to: string }
-  | { phase: "delivered"; to: string; at: Date }
+  | { phase: "delivered"; to: string; at: Date; restored?: boolean }
   | { phase: "late"; to: string }
   | { phase: "failed"; to: string; status: string }
 
@@ -61,6 +61,8 @@ export function SendFirstEmail({
   verified,
   hasApiKey,
   recipient,
+  firstName,
+  already,
   onSent,
   onDone,
 }: {
@@ -70,6 +72,10 @@ export function SendFirstEmail({
   hasApiKey: boolean
   /** The signed-in person's verified address, or null if they have none. */
   recipient: string | null
+  /** For the snippet's `name` variable; Ada when there is none. */
+  firstName?: string | null
+  /** This domain's set-up send, if it has had it - it gets exactly one. */
+  already?: { id: string; to: string; at: string } | null
   /** Once it is delivered (or very nearly certainly on its way). */
   onSent: (sent: { to: string }) => void
   onDone: () => void
@@ -78,13 +84,46 @@ export function SendFirstEmail({
   const [key, setKey] = React.useState<CreatedApiKey | null>(null)
   const outcome = useOutcome()
   const [typed, setTyped] = React.useState("")
-  const [delivery, setDelivery] = React.useState<Delivery>({ phase: "idle" })
+  /*
+   * ⚠ A DOMAIN THAT HAS HAD ITS SEND STARTS FINISHED (2026-10-13). After a
+   * reload the step came back amber, "Skipped", with the button live again -
+   * for an email that was already in the inbox. The send is recorded on the
+   * domain row now (one per domain, for good), and read back here.
+   */
+  const [delivery, setDelivery] = React.useState<Delivery>(() =>
+    already
+      ? { phase: "delivered", to: already.to, at: new Date(already.at), restored: true }
+      : { phase: "idle" },
+  )
+  const [lastAlready, setLastAlready] = React.useState(already?.id ?? null)
+  if ((already?.id ?? null) !== lastAlready) {
+    setLastAlready(already?.id ?? null)
+    if (already)
+      setDelivery({
+        phase: "delivered",
+        to: already.to,
+        at: new Date(already.at),
+        restored: true,
+      })
+  }
+
+  /*
+   * ⚠ WHETHER THERE WAS A KEY *BEFORE* THIS STEP, FIXED AT MOUNT (2026-10-13).
+   * Creating one refreshes the page's facts, so the live prop turned true
+   * under the "Added" button and "You already have one" flashed beside the key
+   * that had just been made. The live prop still decides `issued` below.
+   */
+  const [hadKey] = React.useState(hasApiKey)
+  const [lang, setLang] = React.useState("node")
+  const congrats = React.useRef<HTMLDivElement>(null)
 
   const issued = key !== null || hasApiKey
   const sender = from ? `hello@${from}` : "hello@yourdomain.com"
   const typedOk = EMAIL.test(typed.trim())
   const to = recipient ?? (typed.trim() || "you@example.com")
   const secret = key?.secret ?? "i10_live_xxxxxxxxxxxxxxxx"
+  // Quotes, backslashes and `$` would break the snippet in one language or another.
+  const name = firstName?.trim().replace(/["'\\`$]/g, "") || "Ada"
 
   async function mint() {
     if (outcome.state !== "idle") return
@@ -150,6 +189,26 @@ export function SendFirstEmail({
     if (settledTo) onSent({ to: settledTo })
   }, [settledTo, onSent])
 
+  /*
+   * ⚠ THE NEWS IS SCROLLED INTO VIEW (2026-10-13). It opens under the button,
+   * usually below the fold of the steps column; once the reveal has opened it
+   * brings the card up. Not for a send restored on load.
+   */
+  const live =
+    (delivery.phase === "delivered" && !delivery.restored) || delivery.phase === "late"
+  React.useEffect(() => {
+    if (!live) return
+    const timer = window.setTimeout(
+      () =>
+        congrats.current?.scrollIntoView({
+          behavior: reduce ? "auto" : "smooth",
+          block: "nearest",
+        }),
+      reduce ? 0 : 420,
+    )
+    return () => window.clearTimeout(timer)
+  }, [live, reduce])
+
   async function send() {
     if (!from || delivery.phase !== "idle") return
     setDelivery({ phase: "sending" })
@@ -181,6 +240,7 @@ export function SendFirstEmail({
     {
       value: "node",
       label: "Node.js",
+      language: "ts",
       code: `import { I10 } from "@i10/node"
 
 const i10 = new I10("${secret}")
@@ -190,13 +250,14 @@ await i10.emails.send({
   to: ["${to}"],
   template: {
     id: "welcome",
-    variables: { name: "Ada" },
+    variables: { name: "${name}" },
   },
 })`,
     },
     {
       value: "python",
       label: "Python",
+      language: "py",
       code: `import i10
 
 client = i10.Client(api_key="${secret}")
@@ -206,13 +267,14 @@ client.emails.send({
     "to": ["${to}"],
     "template": {
         "id": "welcome",
-        "variables": {"name": "Ada"},
+        "variables": {"name": "${name}"},
     },
 })`,
     },
     {
       value: "curl",
       label: "cURL",
+      language: "bash",
       code: `curl -X POST https://api.i10.tech/emails \\
   -H "Authorization: Bearer ${secret}" \\
   -H "Content-Type: application/json" \\
@@ -221,11 +283,13 @@ client.emails.send({
     "to": ["${to}"],
     "template": {
       "id": "welcome",
-      "variables": { "name": "Ada" }
+      "variables": { "name": "${name}" }
     }
   }'`,
     },
   ]
+
+  const active = snippets.find((s) => s.value === lang) ?? snippets[0]!
 
   const busy = delivery.phase === "sending" || delivery.phase === "watching"
   const finished = delivery.phase === "delivered" || delivery.phase === "late"
@@ -248,16 +312,16 @@ client.emails.send({
           <Reveal show={!key} spacing="">
             <div className="flex flex-wrap items-center gap-3">
               <StateButton
-                variant={hasApiKey ? "secondary" : "primary"}
+                variant={hadKey ? "secondary" : "primary"}
                 onClick={mint}
                 state={outcome.state}
                 pendingLabel="Add API key"
                 doneLabel="Added"
               >
                 <Lock />
-                {hasApiKey ? "Add another API key" : "Add API key"}
+                {hadKey ? "Add another API key" : "Add API key"}
               </StateButton>
-              {hasApiKey && (
+              {hadKey && (
                 <p className="text-xs text-muted-foreground">
                   You already have one - use it, or add a new key for this.
                 </p>
@@ -305,38 +369,33 @@ client.emails.send({
           <Send className="size-4 text-muted-foreground" />
           Send an email
         </h3>
-        <Tabs defaultValue="node" className="overflow-hidden rounded-3xl border">
+        {/*
+         * ⚠ ONE CARD, ONE HEADER, ONE CODE BLOCK (2026-10-13). Each language
+         * used to be its own tab panel with its own code block - so switching
+         * slid a whole new card in, and the copy button went with it and came
+         * back. Now the tabs only pick the source: the header and its copy
+         * button stay put, and the code crossfades in place while the box
+         * springs to the new height (see CodeBlock).
+         */}
+        <div className="overflow-hidden rounded-3xl border">
           <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-            <TabsList>
-              {snippets.map((s) => (
-                <TabsTrigger key={s.value} value={s.value}>
-                  {s.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+            <Tabs value={lang} onValueChange={setLang}>
+              <TabsList>
+                {snippets.map((s) => (
+                  <TabsTrigger key={s.value} value={s.value}>
+                    {s.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <CopyButton
+              value={active.code}
+              label="Copy code"
+              iconOnly
+              variant="plain"
+            />
           </div>
-          {/*
-           * ⚠ THE CARD CHANGES HEIGHT WITH THE SNIPPET, SMOOTHLY. cURL is two
-           * lines shorter than Node; the tab switch fades the code and the box
-           * glides to its new height instead of snapping.
-           */}
-          <AutoHeight grow="animate">
-            {snippets.map((s) => (
-              <TabsContent
-                key={s.value}
-                value={s.value}
-                className="relative m-0 animate-in duration-300 fade-in-0"
-              >
-                <CodeBlock
-                  code={s.code}
-                  filename={s.label}
-                  language={
-                    s.label === "Python" ? "py" : s.label === "cURL" ? "bash" : "ts"
-                  }
-                />
-              </TabsContent>
-            ))}
-          </AutoHeight>
+          <CodeBlock code={active.code} language={active.language} embedded />
           <div className="flex flex-wrap items-center gap-3 border-t bg-muted/20 px-4 py-3">
             <Button
               disabled={!ready || delivery.phase !== "idle"}
@@ -353,7 +412,10 @@ client.emails.send({
             </Button>
             <AnimatePresence mode="wait" initial={false}>
               <motion.p
-                key={delivery.phase + (why ?? "")}
+                key={
+                  (delivery.phase === "sending" ? "watching" : delivery.phase) +
+                  (why ?? "")
+                }
                 initial={
                   reduce
                     ? false
@@ -366,8 +428,8 @@ client.emails.send({
                   ease: [...motionTokens.ease.standard],
                 }}
               >
-                {delivery.phase === "watching"
-                  ? `On its way to ${delivery.to} - waiting for their server to take it.`
+                {delivery.phase === "sending" || delivery.phase === "watching"
+                  ? "On its way to your inbox."
                   : delivery.phase === "failed"
                     ? `It did not arrive (${delivery.status}). Check the address in Emails.`
                     : delivery.phase === "idle"
@@ -376,7 +438,7 @@ client.emails.send({
               </motion.p>
             </AnimatePresence>
           </div>
-        </Tabs>
+        </div>
       </section>
 
       {/*
@@ -392,7 +454,7 @@ client.emails.send({
        */}
       <Reveal show={finished || delivery.phase === "failed"} spacing="">
         {(finished || delivery.phase === "failed") && (
-          <div className="space-y-5">
+          <div ref={congrats} className="scroll-mb-6 space-y-5">
             {delivery.phase === "failed" ? (
               <div className="flex items-start gap-3 rounded-3xl border border-danger/30 bg-danger/5 p-5">
                 <TriangleAlert className="mt-0.5 size-5 shrink-0 text-danger" />

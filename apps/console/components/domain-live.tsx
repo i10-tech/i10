@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
+import { ConnectProgress, type ConnectView } from "@/components/connect-progress"
 import { DetailHero } from "@/components/detail-hero"
 import { DnsRecordsCard } from "@/components/dns-records"
 import { Journey } from "@/components/journey"
@@ -8,6 +10,7 @@ import { Status, describeStatus } from "@/components/status"
 import { PAGE_WATCH_MS, watchUntilVerified } from "@/lib/domain-activation"
 import { domainJourney, domainNotice } from "@/lib/journey"
 import { useResetWhen } from "@/lib/react"
+import { runDnsConnect, takeReturned } from "@/lib/dns-connect"
 import type { Domain } from "@/lib/types"
 
 /**
@@ -30,9 +33,28 @@ interface Live {
   domain: Domain
   /** A newer answer for this domain, from a check that ran in the browser. */
   update: (domain: Domain) => void
+  /**
+   * A DNS provider connection being finished on this page, back from the
+   * provider's sign-in. Set-up's verify step and the domain page that
+   * /domains/new returns to show the same phases. Null otherwise.
+   */
+  connect: ConnectView | null
 }
 
 const LiveDomain = React.createContext<Live | null>(null)
+
+/**
+ * Hands the provider a domain to hold, even before it holds one (2026-10-13).
+ * The add-domain steps sit inside set-up's provider: "I've added the records"
+ * puts its answer here at once, so the verify step that opens next already
+ * knows - rather than waiting on a server render to come round.
+ */
+const AdoptDomain = React.createContext<((domain: Domain) => void) | null>(null)
+
+/** Null outside a provider (the /domains/new page, which navigates instead). */
+export function useAdoptDomain() {
+  return React.useContext(AdoptDomain)
+}
 
 /** The live domain, or null outside a domain page. */
 export function useLiveDomain(): Live | null {
@@ -48,7 +70,11 @@ function useLive(): Live {
 /** What the page shows, as one string: which domain, its status and every record's. */
 function stateKey(domain: Domain | null): string {
   if (!domain) return ""
-  return `${domain.id}:${domain.status}:${domain.records.map((r) => r.status).join(",")}`
+  // ⚠ `records_added_at` IS PART OF IT (2026-10-13). Without it, set-up held
+  // the domain from the moment it was created, and the render that came back
+  // after "I've added the records" looked identical and was dropped - so the
+  // verify step still asked for the records and offered the button again.
+  return `${domain.id}:${domain.status}:${domain.records.map((r) => r.status).join(",")}:${domain.records_added_at ? "added" : ""}`
 }
 
 /**
@@ -72,10 +98,76 @@ export function DomainLiveProvider({
 
   const update = React.useCallback(
     (next: Domain) =>
-      setDomain((current) => (stateKey(current) === stateKey(next) ? current : next)),
+      setDomain((current) => {
+        // ⚠ THE PUBLIC ANSWERS (verify, refresh) DO NOT CARRY THE CONSOLE'S
+        // OWN FIELDS: a tick must not take "they added the records" away.
+        const merged: Domain = {
+          ...next,
+          records_added_at: next.records_added_at ?? current?.records_added_at ?? null,
+        }
+        return stateKey(current) === stateKey(merged) ? current : merged
+      }),
     [],
   )
   const id = domain?.id ?? null
+
+  /*
+   * ⚠ BACK FROM THE DNS PROVIDER, THE CONNECTION IS FINISHED HERE (2026-10-13),
+   * wherever the person started it - set-up's domain step or /domains/new,
+   * which are the same steps (AddDomainSteps) and now come back to the same
+   * thing: the callback page hands the code over and this runs the phases
+   * under the domain's events. See lib/dns-connect.ts.
+   */
+  const router = useRouter()
+  const [connect, setConnect] = React.useState<ConnectView | null>(null)
+  React.useEffect(() => {
+    const returned = takeReturned()
+    if (!returned) return
+    void Promise.resolve()
+      .then(() =>
+        setConnect({
+          name: returned.name,
+          phase: "connecting",
+          blocked: [],
+          unchecked: [],
+        }),
+      )
+      .then(() =>
+        runDnsConnect({
+          provider: returned.provider,
+          code: returned.code,
+          state: returned.state,
+          onPhase: (phase) => {
+            if (phase === "done" || phase === "failed") return
+            setConnect((view) => (view ? { ...view, phase } : view))
+          },
+        }),
+      )
+      .then((outcome) => {
+        setConnect((view) =>
+          view
+            ? {
+                ...view,
+                phase: outcome.ok ? "done" : "failed",
+                error: outcome.error,
+                blocked: outcome.blocked,
+                unchecked: outcome.unchecked,
+              }
+            : view,
+        )
+        // The answers the checks gave, at once; the refresh brings the rest.
+        for (const checked of outcome.domains) {
+          setDomain((current) =>
+            current &&
+            current.id === checked.id &&
+            stateKey(current) !== stateKey(checked)
+              ? checked
+              : current,
+          )
+        }
+        router.refresh()
+      })
+  }, [router])
 
   /*
    * ⚠ IT WATCHES RATHER THAN WAITING TO BE ASKED, UNTIL IT IS VERIFIED OR HAS
@@ -103,10 +195,14 @@ export function DomainLiveProvider({
   }, [id, watching, update])
 
   const value = React.useMemo(
-    () => (domain ? { domain, update } : null),
-    [domain, update],
+    () => (domain ? { domain, update, connect } : null),
+    [domain, update, connect],
   )
-  return <LiveDomain.Provider value={value}>{children}</LiveDomain.Provider>
+  return (
+    <AdoptDomain.Provider value={update}>
+      <LiveDomain.Provider value={value}>{children}</LiveDomain.Provider>
+    </AdoptDomain.Provider>
+  )
 }
 
 /** The header, its tile coloured by the live status. */
@@ -140,13 +236,44 @@ export function LiveDomainStatus() {
  * domain says something more specific than the generic notice, and the two
  * shown together contradict each other - see the domain page.
  */
-export function LiveDomainJourney({ quiet }: { quiet: boolean }) {
-  const { domain } = useLive()
+export function LiveDomainJourney({
+  quiet,
+  publishedByUs,
+  recordsBelow,
+  children,
+}: {
+  quiet: boolean
+  publishedByUs?: boolean
+  recordsBelow?: boolean
+  /** Shown inside the card, under the events. */
+  children?: React.ReactNode
+}) {
+  const { domain, connect } = useLive()
+  // A connection in progress says what is happening itself, under the strip.
+  const connecting = connect !== null && connect.phase !== "failed"
   return (
     <Journey
       title="Domain events"
       steps={domainJourney(domain)}
-      notice={quiet ? null : domainNotice(domain.status, domain.delegated)}
+      notice={
+        quiet || connecting
+          ? null
+          : domainNotice(domain.status, domain.delegated, {
+              // Records we wrote, or ones they told us they added: either
+              // way it is DNS being waited on, not them.
+              publishedByUs:
+                publishedByUs || connect !== null || Boolean(domain.records_added_at),
+              recordsBelow,
+            })
+      }
+      footer={
+        <>
+          {connect && (
+            <ConnectProgress view={connect} verified={domain.status === "verified"} />
+          )}
+          {children}
+        </>
+      }
     />
   )
 }

@@ -342,7 +342,7 @@ export function polarClient(opts: PolarOptions): PolarClient {
     return `${successUrl}${successUrl.includes("?") ? "&" : "?"}checkout_id={CHECKOUT_ID}`
   }
 
-  return {
+  const client: PolarClient = {
     async createCheckout(input) {
       const response = await call("/v1/checkouts/", {
         method: "POST",
@@ -414,6 +414,20 @@ export function polarClient(opts: PolarOptions): PolarClient {
           metadata: { tenant_id: input.tenantId },
         }),
       })
+
+      /*
+       * ⚠ A REFUSED EMAIL NEVER COSTS THE CHECKOUT (2026-10-13). Polar checks
+       * that `customer_email` can receive mail and answers 422 for the whole
+       * checkout when it decides not - a test account's address, a domain
+       * with no MX. The email only prefills the form, so it is dropped and
+       * the checkout made again without it.
+       */
+      if (response.status === 422 && input.email) {
+        const detail = await response.text()
+        if (detail.includes("customer_email")) {
+          return client.createCheckout({ ...input, email: undefined })
+        }
+      }
 
       if (!response.ok) {
         throw new Error(
@@ -740,4 +754,5 @@ export function polarClient(opts: PolarOptions): PolarClient {
       }
     },
   }
+  return client
 }

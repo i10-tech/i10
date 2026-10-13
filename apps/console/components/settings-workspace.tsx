@@ -7,6 +7,7 @@ import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { clerkReason } from "@/components/account/shared"
 import { afterSwitch } from "@/lib/after-switch"
 import { toastError } from "@/lib/toast"
+import { useWorkspacesChanged } from "@/lib/workspace-name"
 
 /**
  * Which workspace these settings are for (2026-10-12): a picker in the top
@@ -24,19 +25,26 @@ export function SettingsWorkspace() {
     userMemberships: { pageSize: 50, keepPreviousData: true },
   })
   const [busy, setBusy] = React.useState(false)
+  const wrap = React.useRef<HTMLDivElement>(null)
+  useWorkspacesChanged(() => {
+    void organization?.reload().catch(() => {})
+    void userMemberships.revalidate?.()
+  })
   const memberships = userMemberships.data ?? []
   if (!isLoaded || !organization || memberships.length < 2) return null
 
-  const items = memberships.map((m) => ({
-    value: m.organization.id,
-    label: m.organization.name,
-    icon: (
-      <WorkspaceMark
-        name={m.organization.name}
-        src={m.organization.hasImage ? m.organization.imageUrl : undefined}
-      />
-    ),
-  }))
+  const items = memberships.map((m) => {
+    // The active one from `organization`, which a rename reloads at once; the
+    // list's copy catches up on its own refetch.
+    const org = m.organization.id === organization.id ? organization : m.organization
+    return {
+      value: org.id,
+      label: org.name,
+      icon: (
+        <WorkspaceMark name={org.name} src={org.hasImage ? org.imageUrl : undefined} />
+      ),
+    }
+  })
 
   async function choose(id: string) {
     if (id === organization?.id) return
@@ -49,19 +57,28 @@ export function SettingsWorkspace() {
       toastError("Could not switch workspace", clerkReason(error))
     } finally {
       setBusy(false)
+      // ⚠ NOT LEFT FOCUSED AFTER A SWITCH (2026-10-13): the select handed focus
+      // back to its trigger, which sat highlighted on the new workspace's page.
+      requestAnimationFrame(() => {
+        const active = document.activeElement
+        if (active instanceof HTMLElement && wrap.current?.contains(active))
+          active.blur()
+      })
     }
   }
 
   return (
-    <MorphSelect
-      label="Workspace"
-      hideLabel
-      align="end"
-      items={items}
-      value={organization.id}
-      disabled={busy}
-      onValueChange={(id) => void choose(id)}
-    />
+    <div ref={wrap} className="contents">
+      <MorphSelect
+        label="Workspace"
+        hideLabel
+        align="end"
+        items={items}
+        value={organization.id}
+        disabled={busy}
+        onValueChange={(id) => void choose(id)}
+      />
+    </div>
   )
 }
 

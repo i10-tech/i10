@@ -206,7 +206,6 @@ export const SETTINGS_NAV: NavGroup[] = [
        * moment Clerk adds a tab. Passkeys, MFA and sessions all live inside it.
        */
       { href: "/account", label: "Profile & security", icon: Users, exact: true },
-      { href: "/account/appearance", label: "Appearance", icon: LayoutGrid },
     ],
   },
 ]

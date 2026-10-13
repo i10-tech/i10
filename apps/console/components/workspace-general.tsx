@@ -23,7 +23,7 @@ import { formatExact } from "@/lib/format"
 import { useReverify } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 import type { BillingState } from "@/lib/types"
-import { announceWorkspaceName } from "@/lib/workspace-name"
+import { announceWorkspaceName, announceWorkspacesChanged } from "@/lib/workspace-name"
 
 /**
  * General settings, drawn like the account page (2026-10-12): the same
@@ -128,6 +128,7 @@ function WorkspaceProfile({
       // The breadcrumb's copy, and Clerk's, which the switcher reads.
       announceWorkspaceName(next)
       await org.reload()
+      announceWorkspacesChanged()
       toastDone("Workspace updated")
       setOpen(false)
     } finally {
@@ -162,6 +163,7 @@ function WorkspaceProfile({
             onUpload={async (file) => {
               try {
                 await org.setLogo({ file })
+                announceWorkspacesChanged()
                 toastDone("Logo updated")
                 // Finished, as a saved name is: the card closes.
                 setOpen(false)
@@ -173,6 +175,7 @@ function WorkspaceProfile({
             onRemove={async () => {
               try {
                 await org.setLogo({ file: null })
+                announceWorkspacesChanged()
               } catch (error) {
                 toastError("Could not remove the logo", clerkReason(error))
               }
@@ -246,6 +249,8 @@ function DeleteWorkspace({
             const done = await reverify(() => organization.destroy())
             if (done === null) return false
             await clerk.setActive({ organization: null })
+            // The pickers drop it now, not on their next refetch.
+            announceWorkspacesChanged()
             router.push("/")
             return true
           } catch (error) {

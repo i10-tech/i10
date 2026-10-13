@@ -15,6 +15,8 @@ import { SkeletonBlock } from "@repo/ui/components/i10/skeleton-block"
 import { cn } from "cn"
 import { ListHead, ListHeader, ListTable } from "@/components/list/table"
 import { useRememberedView } from "@/components/list/toolbar"
+import { useRememberedCount } from "@/components/list/remembered-counts"
+import { MAX_SKELETON_ROWS } from "@/lib/list-counts"
 import { SkeletonTabs } from "@/components/skeleton-tabs"
 
 /**
@@ -185,15 +187,53 @@ function Cell({ column, row, index }: { column: Column; row: number; index: numb
 }
 
 /** A list as a table: the real headings over placeholder rows. */
+/**
+ * The rows to draw: the list's remembered count when there is one (see
+ * components/list/remembered-counts), else the page's guess.
+ */
+function useRows(list: string | undefined, fallback: number): number {
+  const remembered = useRememberedCount(list)
+  return remembered === null ? fallback : Math.min(remembered, MAX_SKELETON_ROWS)
+}
+
+/**
+ * A list that was empty last time loads as its empty state - the icon tile,
+ * the two lines and the button - not as rows that are about to vanish.
+ */
+export function EmptySkeleton({ action = true }: { action?: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className="flex flex-col items-center px-5 py-[clamp(2rem,8vw,3rem)] text-center"
+    >
+      <SkeletonBlock className="size-12 rounded-[var(--radius-panel)]" />
+      <Bar className="mt-5 h-4 w-40" />
+      <Bar className="mt-3 h-3 w-64 max-w-full opacity-70" />
+      <Bar className="mt-2 h-3 w-48 max-w-full opacity-70" />
+      {action && (
+        <SkeletonBlock className="mt-5 h-8 w-32 rounded-[var(--radius-control)]" />
+      )}
+    </div>
+  )
+}
+
 export function TableSkeleton({
   columns,
-  rows = 8,
+  rows: fallback = 8,
+  list,
+  fixed,
 }: {
   columns: Column[]
   rows?: number
+  /** The list's key, to draw as many rows as it had last time. */
+  list?: string
+  /** Match a page that lays its table out fixed (see ListTable). */
+  fixed?: boolean
 }) {
+  const rows = useRows(list, fallback)
+  if (rows === 0) return <EmptySkeleton />
   return (
-    <ListTable>
+    <ListTable fixed={fixed}>
       <ListHeader>
         {columns.map((column, i) =>
           column.kind === "box" ? (
@@ -209,7 +249,7 @@ export function TableSkeleton({
       </ListHeader>
       <tbody>
         {Array.from({ length: rows }, (_, row) => (
-          <tr key={row} style={{ opacity: 1 - row * 0.09 }}>
+          <tr key={row} style={{ opacity: 1 - row * (0.5 / Math.max(rows, 6)) }}>
             {columns.map((column, i) => (
               <Cell key={i} column={column} row={row} index={i} />
             ))}
@@ -222,14 +262,19 @@ export function TableSkeleton({
 
 /** A list as cards, the shape `ListCard` draws. */
 export function CardGridSkeleton({
-  count = 6,
+  count: fallback = 6,
   className,
   lines = 2,
+  list,
 }: {
   count?: number
   className?: string
   lines?: number
+  /** The list's key, to draw as many cards as it had last time. */
+  list?: string
 }) {
+  const count = useRows(list, fallback)
+  if (count === 0) return <EmptySkeleton />
   return (
     <ul className={cn("grid gap-3 sm:grid-cols-2", className)} aria-hidden>
       {Array.from({ length: count }, (_, i) => (
@@ -277,9 +322,12 @@ export function RememberedListSkeleton({
   table: React.ReactNode
   grid: React.ReactNode
 }) {
+  const remembered = useRememberedCount(viewKey)
   // The same store the view switch writes, so a choice made a moment ago on
   // another page is the one this loads in, not the one the server last saw.
   const [view] = useRememberedView(viewKey, fallback)
+  // Empty last time: the empty state, whichever view it was left in.
+  if (remembered === 0) return <EmptySkeleton />
   return <>{view === "grid" ? grid : table}</>
 }
 
@@ -334,5 +382,27 @@ export function SectionsSkeleton({ sections = 3 }: { sections?: number }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/** The template library's cards: a preview, a name and a line, as many as it had. */
+export function TemplateGridSkeleton({ list = "templates" }: { list?: string }) {
+  const count = useRows(list, 8)
+  if (count === 0) return <EmptySkeleton />
+  return (
+    <ul
+      aria-hidden
+      className="grid grid-cols-1 gap-x-4 gap-y-6 pt-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4"
+    >
+      {Array.from({ length: count }, (_, i) => (
+        <li key={i} className="space-y-3" style={{ opacity: 1 - i * 0.07 }}>
+          <SkeletonBlock className="aspect-[4/3] w-full rounded-xl" />
+          <div className="space-y-2 px-0.5">
+            <SkeletonBlock className="h-3.5 w-2/3 rounded-full" />
+            <SkeletonBlock className="h-3 w-1/3 rounded-full opacity-70" />
+          </div>
+        </li>
+      ))}
+    </ul>
   )
 }

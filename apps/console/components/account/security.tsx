@@ -42,7 +42,7 @@ import {
   clerkReason,
   shortDate,
 } from "@/components/account/shared"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { DeletionWarning } from "@/components/deletion-warning"
 import { RowMenu } from "@/components/list/row-menu"
 import { verifyPassword } from "@/lib/actions"
@@ -480,6 +480,8 @@ function Passkeys({ user }: { user: UserResource }) {
         description={`${removing?.name ?? "This passkey"} will be removed, and you will no longer be able to sign in with it.`}
         confirmLabel="Remove"
         doneLabel="Removed"
+        // ⚠ ITS NAME, TYPED (2026-10-13): a sign-in method, removed for good.
+        confirmWord={confirmWordFor([removing?.name])}
         onConfirm={async () => {
           if (!removing) return false
           try {

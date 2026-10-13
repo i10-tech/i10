@@ -378,15 +378,34 @@ export function broadcastJourney(broadcast: {
  * failed in a way worth retrying - and a customer who reads it as "failed"
  * goes and changes records that were correct.
  */
-export function domainNotice(status: string, delegated: boolean): JourneyNotice | null {
+export function domainNotice(
+  status: string,
+  delegated: boolean,
+  {
+    publishedByUs = false,
+    recordsBelow = true,
+  }: {
+    /**
+     * We wrote the records at their provider (a Cloudflare connection, say),
+     * so there is nothing for them to publish: an unregistered domain is only
+     * waiting on DNS, and says so (2026-10-13).
+     */
+    publishedByUs?: boolean
+    /** Whether the records are on this screen, under the notice. */
+    recordsBelow?: boolean
+  } = {},
+): JourneyNotice | null {
+  if (status === "not_started" && publishedByUs)
+    return domainNotice("pending", delegated)
   switch (status) {
     case "not_started":
       return {
         tone: "neutral",
         title: "Waiting for your records",
-        body: delegated
-          ? "Publish the NS records below, then press Verify. We keep checking on our own."
-          : "Publish the records below, then press Verify. We keep checking on our own.",
+        // ⚠ NO BUTTON TO PRESS HERE (2026-10-13). "I've added the records"
+        // lives once, after the records step of adding a domain; past that,
+        // the watch picks the records up by itself.
+        body: `Publish the ${delegated ? "NS records" : "records"}${recordsBelow ? " below" : " at your DNS provider"}. We pick them up on our own as soon as they resolve.`,
         busy: true,
       }
     case "pending":
@@ -400,7 +419,7 @@ export function domainNotice(status: string, delegated: boolean): JourneyNotice 
       return {
         tone: "warning",
         title: "Temporary lookup failure",
-        body: "A DNS lookup failed in a way worth retrying - this is not the same as your records being wrong. We keep checking; press Verify to check now.",
+        body: "A DNS lookup failed in a way worth retrying - this is not the same as your records being wrong. We keep checking on our own.",
         busy: true,
       }
     case "failed":

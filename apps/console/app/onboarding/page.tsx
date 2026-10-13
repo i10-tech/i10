@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { cookies } from "next/headers"
+import { currentUser } from "@clerk/nextjs/server"
 import Link from "next/link"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { Onboarding } from "@/components/onboarding/onboarding"
@@ -59,15 +60,23 @@ export default async function OnboardingPage({
   // SHOW. It used to paint its own green tick and then navigate here a moment
   // later, which read as a glitch; the news now arrives with the step that
   // follows it. See the callback handler and `VerifyStep` in components/onboarding/onboarding.tsx.
-  searchParams: Promise<{ checkout_id?: string; published?: string }>
+  searchParams: Promise<{ checkout_id?: string; published?: string; new?: string }>
 }) {
   const query = await searchParams
+  /*
+   * ⚠ `?new=1` IS SET-UP FOR A WORKSPACE THAT DOES NOT EXIST YET (2026-10-13),
+   * from "Create workspace". The same page, on its workspace step with an
+   * empty name and none of the current workspace's domains or progress;
+   * Continue creates the workspace and carries on here. It needs Clerk to
+   * create anything, so without it this is ordinary set-up.
+   */
+  const creating = query.new === "1" && Boolean(process.env.CLERK_PUBLISHABLE_KEY)
   // ⚠ FROM COOKIES, NOT THE URL - the query is only read for a page reached by
   // Polar's own redirect, and `ArrivalQuery` then clears it. See lib/arrival.ts.
   const checkoutId = await readArrival(ARRIVAL.checkout, query.checkout_id)
   const published = await readArrival(ARRIVAL.published, query.published)
 
-  const [me, domains, plans, offers] = await Promise.all([
+  const [me, domains, plans, offers, person] = await Promise.all([
     tryApi<Me>("/console/me"),
     tryApi<{ data: DomainSummary[] }>("/console/domains"),
     tryApi<{ data: PlanSummary[] }>("/console/plans"),
@@ -75,6 +84,9 @@ export default async function OnboardingPage({
     // email arrives here, and the domain they came for belongs on the domain
     // step. A failure hides the offers rather than the page.
     tryApi<{ data: TransferOffer[] }>("/console/transfers"),
+    // The snippet's `name` is the person's own first name. Without Clerk
+    // (the local preview) there is none, and the snippet says Ada.
+    process.env.CLERK_PUBLISHABLE_KEY ? currentUser().catch(() => null) : null,
   ])
 
   if (!me.ok) {
@@ -163,9 +175,16 @@ export default async function OnboardingPage({
          * and applies the cookie on the way through. `next/link` is for pages;
          * this is not one.
          */}
-        <ButtonLink href="/onboarding/skip" variant="ghost" size="sm" native>
-          Skip to the dashboard
-        </ButtonLink>
+        {creating ? (
+          // Nothing exists yet, so leaving is simply going back.
+          <ButtonLink href="/" variant="ghost" size="sm">
+            Cancel
+          </ButtonLink>
+        ) : (
+          <ButtonLink href="/onboarding/skip" variant="ghost" size="sm" native>
+            Skip to the dashboard
+          </ButtonLink>
+        )}
       </header>
 
       <ArrivalQuery names={[ARRIVAL.checkout, ARRIVAL.published]} />
@@ -178,14 +197,29 @@ export default async function OnboardingPage({
         <JoinSuggestions className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
       )}
       <Onboarding
-        state={me.data.onboarding}
-        workspaceName={me.data.tenant?.name ?? ""}
-        tenantId={me.data.tenant?.id ?? ""}
-        domains={list}
-        focus={focus?.ok ? focus.data : null}
-        domainDraft={domainDraft}
+        creating={creating}
+        state={
+          creating
+            ? {
+                ...me.data.onboarding,
+                step: "workspace",
+                completed_at: null,
+                facts: {
+                  has_domain: false,
+                  has_verified_domain: false,
+                  has_api_key: false,
+                },
+              }
+            : me.data.onboarding
+        }
+        workspaceName={creating ? "" : (me.data.tenant?.name ?? "")}
+        tenantId={creating ? "" : (me.data.tenant?.id ?? "")}
+        domains={creating ? [] : list}
+        focus={!creating && focus?.ok ? focus.data : null}
+        domainDraft={creating ? null : domainDraft}
         offers={offers.ok ? offers.data.data : []}
         userEmail={me.data.user.email}
+        firstName={person?.firstName ?? null}
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
         checkoutId={checkoutId}
@@ -193,15 +227,18 @@ export default async function OnboardingPage({
         // from checkout, would otherwise re-derive from the facts and put
         // somebody who paid on the last step back on "Verify". From a cookie,
         // not `?step=`; see lib/onboarding-step.ts.
-        resumeStep={stepFor(
-          (await cookies()).get(ONBOARDING_STEP_COOKIE)?.value,
-          me.data.tenant?.id ?? "",
-        )}
+        resumeStep={
+          creating
+            ? "workspace"
+            : stepFor(jar.get(ONBOARDING_STEP_COOKIE)?.value, me.data.tenant?.id ?? "")
+        }
         // ⚠ ONLY THIS WORKSPACE'S DOMAINS COUNT. The cookie is the browser's,
         // not the account's, so it carries the ids the DNS callback published
         // and the list above - scoped by the API to whoever is signed in - is
         // what decides which of them are news here. See the callback handler.
-        justPublished={ownPublished(published, domains.ok ? domains.data.data : [])}
+        justPublished={
+          creating ? 0 : ownPublished(published, domains.ok ? domains.data.data : [])
+        }
       />
     </main>
   )

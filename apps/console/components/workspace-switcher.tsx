@@ -19,6 +19,7 @@ import { clerkReason } from "@/components/account/shared"
 import { afterSwitch } from "@/lib/after-switch"
 import { useCreateWorkspace } from "@/lib/create-workspace"
 import { toastDone, toastError } from "@/lib/toast"
+import { useWorkspacesChanged } from "@/lib/workspace-name"
 
 /**
  * The workspace switcher, ours (2026-10-12) - what Clerk's
@@ -51,12 +52,20 @@ export function WorkspaceSwitcher() {
     })
   const { creating, create } = useCreateWorkspace()
   const [busy, setBusy] = React.useState<string | null>(null)
+  /** A switch closed the menu: focus is not handed back to the trigger. */
+  const switched = React.useRef(false)
+  // A rename, a logo or a delete elsewhere: Clerk's cached copies are re-read.
+  useWorkspacesChanged(() => {
+    void organization?.reload().catch(() => {})
+    void userMemberships.revalidate?.()
+  })
 
   if (!isLoaded) {
     return <Skeleton className="h-7 w-full rounded-md" />
   }
 
   async function switchTo(id: string) {
+    switched.current = true
     setBusy(id)
     try {
       await setActive?.({ organization: id })
@@ -100,7 +109,15 @@ export function WorkspaceSwitcher() {
             />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuContent
+          align="start"
+          className="w-72"
+          onCloseAutoFocus={(event) => {
+            if (!switched.current) return
+            switched.current = false
+            event.preventDefault()
+          }}
+        >
           {organization && (
             <>
               <div className="flex items-center gap-3 px-2 py-2">

@@ -5,7 +5,7 @@ import type { ConsoleDeps } from "../src/routes/console/deps.js"
 
 /**
  * Set-up's "Send email" (2026-10-03): one real send from a verified domain to
- * the signed-in person, once per workspace.
+ * the signed-in person - once per domain row since 2026-10-13, recorded on it.
  */
 
 const log = { error: () => {}, warn: () => {} }
@@ -50,17 +50,21 @@ function deps(over: Partial<ConsoleDeps> = {}, hasKey = true, verified = true) {
     ),
     profile: { get: mock(async () => ({ name: "Acme" })) },
     sendTest: mock(async () => ({ status: "accepted", ids: ["msg_1"] })),
+    domains: {
+      onboardingEmailFor: mock(async () => ({ domainId: "dom_1", sent: null })),
+      markOnboardingEmail: mock(async () => {}),
+    },
     ...over,
   } as unknown as Partial<ConsoleDeps>
 }
 
 describe("POST /console/onboarding/test-email", () => {
-  it("sends from the domain to the signed-in person, with a fixed idempotency key", async () => {
+  it("sends from the domain to the signed-in person, keyed by the domain row", async () => {
     const d = deps()
     const res = await send(appWith(d), { domain: "Acme.com" })
 
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({
+    expect(await res.json()).toMatchObject({
       id: "msg_1",
       to: "me@acme.com",
       replayed: false,
@@ -68,7 +72,40 @@ describe("POST /console/onboarding/test-email", () => {
     const call = (d.sendTest as ReturnType<typeof mock>).mock.calls[0] as unknown[]
     expect(call[0]).toBe("ten-1")
     expect(call[1]).toMatchObject({ from: "i10 <hello@acme.com>", to: ["me@acme.com"] })
-    expect(call[2]).toEqual({ idempotencyKey: "onboarding-test-email:ten-1" })
+    expect(call[2]).toEqual({ idempotencyKey: "onboarding-test-email:dom_1" })
+  })
+
+  it("records the send on the domain row", async () => {
+    const d = deps()
+    await send(appWith(d), { domain: "acme.com" })
+    const domains = (
+      d as unknown as { domains: { markOnboardingEmail: ReturnType<typeof mock> } }
+    ).domains
+    const call = domains.markOnboardingEmail.mock.calls[0] as unknown[]
+    expect(call[0]).toBe("ten-1")
+    expect(call[1]).toBe("dom_1")
+    expect(call[2]).toMatchObject({ id: "msg_1", to: "me@acme.com" })
+  })
+
+  /*
+   * ⚠ A DOMAIN THAT HAS HAD ITS SEND ANSWERS WITH IT, FOR GOOD - whatever the
+   * idempotency table has since forgotten. Nothing goes out again.
+   */
+  it("answers with the recorded send and sends nothing for a domain that had one", async () => {
+    const d = deps({
+      domains: {
+        onboardingEmailFor: mock(async () => ({
+          domainId: "dom_1",
+          sent: { id: "msg_0", to: "me@acme.com", at: "2026-10-13T00:00:00.000Z" },
+        })),
+        markOnboardingEmail: mock(async () => {}),
+      },
+    } as unknown as Partial<ConsoleDeps>)
+    const res = await send(appWith(d), { domain: "acme.com" })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ id: "msg_0", replayed: true })
+    expect(d.sendTest).not.toHaveBeenCalled()
   })
 
   /*
