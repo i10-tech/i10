@@ -38,9 +38,9 @@ function partsFor(value: number, decimals: number, locale: string): Part[] {
 }
 
 /** One digit on the wheel. Its offset from the wheel position decides where it sits and how visible it is. */
-function Glyph({ position, digit }: { position: MotionValue<number>; digit: number }) {
+function Glyph({ position, digit, flip }: { position: MotionValue<number>; digit: number; flip: boolean }) {
   const offset = useTransform(position, current => ((((digit - current) % 10) + 15) % 10) - 5);
-  const y = useTransform(offset, current => `${current}em`);
+  const y = useTransform(offset, current => `${flip ? -current : current}em`);
   const opacity = useTransform(offset, current => Math.max(0, 1 - Math.abs(current)));
   const visibility = useTransform(offset, current => Math.abs(current) >= 1 ? "hidden" : "visible");
   const filter = useTransform(offset, current => Math.abs(current) < .02 || Math.abs(current) >= 1 ? "none" : `blur(${(Math.abs(current) * motionTokens.blur.subtle).toFixed(2)}px)`);
@@ -50,7 +50,8 @@ function Glyph({ position, digit }: { position: MotionValue<number>; digit: numb
 const presence = { initial: { width: 0, opacity: 0 }, animate: { width: "auto", opacity: 1 }, exit: { width: 0, opacity: 0 } };
 
 /** A digit wheel. It always turns in the direction the whole number moved, wrapping 9 → 0 like an odometer. */
-function Column({ digit, direction, armed, delay, reduceMotion }: { digit: number; direction: number; armed: boolean; delay: number; reduceMotion: boolean }) {
+/** `flip` draws the wheel upside down, so a countdown stepping back one digit still rolls the new digit up from below. */
+function Column({ digit, direction, flip, armed, delay, reduceMotion }: { digit: number; direction: number; flip: boolean; armed: boolean; delay: number; reduceMotion: boolean }) {
   const position = useMotionValue(armed ? 0 : digit);
   const wheel = useRef({ digit: armed ? 0 : digit, target: armed ? 0 : digit, revealed: !armed });
   useEffect(() => {
@@ -64,7 +65,7 @@ function Column({ digit, direction, armed, delay, reduceMotion }: { digit: numbe
   }, [armed, delay, digit, direction, position, reduceMotion]);
   return <motion.span className={styles.column} {...presence} transition={reduceMotion ? { duration: 0 } : motionTokens.spring.morph}>
     <span className={styles.sizer}>0</span>
-    {DIGITS.map(item => <Glyph key={item} position={position} digit={item} />)}
+    {DIGITS.map(item => <Glyph key={item} position={position} digit={item} flip={flip} />)}
   </motion.span>;
 }
 
@@ -74,7 +75,8 @@ export function AnimatedCounter({ value, label, prefix = "", suffix = "", decima
   const reduceMotion = !!useReducedMotion();
   const [previous, setPrevious] = useState(value);
   const [direction, setDirection] = useState(1);
-  if (value !== previous) { setPrevious(value); setDirection(roll === "up" || value > previous ? 1 : -1); }
+  // `up` is a countdown: each column steps back to its new digit by the shortest way (9 to 8 is one step, not nine), drawn flipped so it still rises.
+  if (value !== previous) { setPrevious(value); setDirection(roll === "up" ? -1 : value > previous ? 1 : -1); }
   const parts = partsFor(value, decimals, locale);
   const text = `${prefix}${parts.map(part => "text" in part ? part.text : part.digit).join("")}${suffix}`;
   const armed = animateOnView && !inView;
@@ -85,7 +87,7 @@ export function AnimatedCounter({ value, label, prefix = "", suffix = "", decima
       {prefix && <span className={styles.symbol}>{prefix}</span>}
       <AnimatePresence initial={false}>
         {parts.map(part => "digit" in part
-          ? <Column key={part.key} digit={part.digit} direction={direction} armed={armed} delay={Math.min(part.order * motionTokens.stagger.item, .25)} reduceMotion={reduceMotion} />
+          ? <Column key={part.key} digit={part.digit} direction={direction} flip={roll === "up"} armed={armed} delay={Math.min(part.order * motionTokens.stagger.item, .25)} reduceMotion={reduceMotion} />
           : <motion.span key={part.key} className={styles.symbol} {...presence} transition={reduceMotion ? { duration: 0 } : motionTokens.spring.morph}>{part.text}</motion.span>)}
       </AnimatePresence>
       {suffix && <span className={styles.symbol}>{suffix}</span>}

@@ -6,6 +6,7 @@ import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { Onboarding } from "@/components/onboarding/onboarding"
 import { Wordmark } from "@/components/wordmark"
 import { JoinSuggestions } from "@/components/join-suggestions"
+import { Arrivals } from "@/components/arrivals"
 import { tryApi } from "@/lib/api"
 import { DRAFT_COOKIES, draftFor } from "@/lib/add-domain-draft"
 import { restoreDraft } from "@/lib/add-domain-restore"
@@ -15,6 +16,7 @@ import type {
   Domain,
   DomainSummary,
   Me,
+  OnboardingState,
   PlanSummary,
   TransferOffer,
 } from "@/lib/types"
@@ -70,7 +72,7 @@ export default async function OnboardingPage({
    * Continue creates the workspace and carries on here. It needs Clerk to
    * create anything, so without it this is ordinary set-up.
    */
-  const creating = query.new === "1" && Boolean(process.env.CLERK_PUBLISHABLE_KEY)
+  const clerkOn = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
   // ⚠ FROM COOKIES, NOT THE URL - the query is only read for a page reached by
   // Polar's own redirect, and `ArrivalQuery` then clears it. See lib/arrival.ts.
   const checkoutId = await readArrival(ARRIVAL.checkout, query.checkout_id)
@@ -89,7 +91,16 @@ export default async function OnboardingPage({
     process.env.CLERK_PUBLISHABLE_KEY ? currentUser().catch(() => null) : null,
   ])
 
-  if (!me.ok) {
+  /*
+   * ⚠ NO WORKSPACE IS THE START OF SET-UP, NOT A FAILURE (#325). Nobody is
+   * given one at sign-up any more, so somebody fresh from sign-up lands here
+   * with none: the workspace step, empty, and naming it (or picking Personal)
+   * is what creates it. Nothing else on this page has anything to show yet.
+   */
+  const noWorkspace = clerkOn && !me.ok && me.error.name === "no_workspace"
+  const creating = noWorkspace || (query.new === "1" && clerkOn)
+
+  if (!me.ok && !noWorkspace) {
     /*
      * ⚠ `tenant_not_ready` REACHES HERE TOO, AND IT IS STILL NOT AN ERROR. The
      * console layout handles it with a retry; this page is outside that layout,
@@ -112,7 +123,8 @@ export default async function OnboardingPage({
     )
   }
 
-  const billing: BillingState = me.data.billing
+  const billing: BillingState = me.ok ? me.data.billing : NO_BILLING
+  const tenantOf = me.ok ? me.data.tenant : null
 
   /*
    * ⚠ THE DOMAIN THE VERIFY AND SEND STEPS ARE ABOUT, READ IN FULL so they can
@@ -136,7 +148,7 @@ export default async function OnboardingPage({
    */
   const jar = await cookies()
   const domainDraft = await restoreDraft(
-    draftFor(jar.get(DRAFT_COOKIES.onboarding.name)?.value, me.data.tenant?.id ?? ""),
+    draftFor(jar.get(DRAFT_COOKIES.onboarding.name)?.value, tenantOf?.id ?? ""),
   )
 
   return (
@@ -175,7 +187,7 @@ export default async function OnboardingPage({
          * and applies the cookie on the way through. `next/link` is for pages;
          * this is not one.
          */}
-        {creating ? (
+        {noWorkspace ? null : creating ? (
           // Nothing exists yet, so leaving is simply going back.
           <ButtonLink href="/" variant="ghost" size="sm">
             Cancel
@@ -193,6 +205,13 @@ export default async function OnboardingPage({
        * @acme.com address may be setting up a workspace they do not need:
        * Acme's is already here, one request away.
        */}
+      {/*
+       * ⚠ "You joined Acme" COMES BEFORE EVERYTHING (#326): somebody auto-joined
+       * at sign-up has a workspace already, and only needs to be told.
+       */}
+      {noWorkspace && (
+        <Arrivals className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
+      )}
       {process.env.CLERK_PUBLISHABLE_KEY && (
         <JoinSuggestions className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
       )}
@@ -201,7 +220,7 @@ export default async function OnboardingPage({
         state={
           creating
             ? {
-                ...me.data.onboarding,
+                ...(me.ok ? me.data.onboarding : NO_ONBOARDING),
                 step: "workspace",
                 completed_at: null,
                 facts: {
@@ -210,15 +229,21 @@ export default async function OnboardingPage({
                   has_api_key: false,
                 },
               }
-            : me.data.onboarding
+            : me.ok
+              ? me.data.onboarding
+              : NO_ONBOARDING
         }
-        workspaceName={creating ? "" : (me.data.tenant?.name ?? "")}
-        tenantId={creating ? "" : (me.data.tenant?.id ?? "")}
+        workspaceName={creating ? "" : (tenantOf?.name ?? "")}
+        tenantId={creating ? "" : (tenantOf?.id ?? "")}
         domains={creating ? [] : list}
         focus={!creating && focus?.ok ? focus.data : null}
         domainDraft={creating ? null : domainDraft}
         offers={offers.ok ? offers.data.data : []}
-        userEmail={me.data.user.email}
+        userEmail={
+          me.ok
+            ? me.data.user.email
+            : (person?.primaryEmailAddress?.emailAddress ?? null)
+        }
         firstName={person?.firstName ?? null}
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
@@ -230,7 +255,7 @@ export default async function OnboardingPage({
         resumeStep={
           creating
             ? "workspace"
-            : stepFor(jar.get(ONBOARDING_STEP_COOKIE)?.value, me.data.tenant?.id ?? "")
+            : stepFor(jar.get(ONBOARDING_STEP_COOKIE)?.value, tenantOf?.id ?? "")
         }
         // ⚠ ONLY THIS WORKSPACE'S DOMAINS COUNT. The cookie is the browser's,
         // not the account's, so it carries the ids the DNS callback published
@@ -242,6 +267,25 @@ export default async function OnboardingPage({
       />
     </main>
   )
+}
+
+/** Billing for a workspace that does not exist yet: nothing. */
+const NO_BILLING: BillingState = {
+  plan: null,
+  subscription: null,
+  anchor: null,
+  overage_enabled: false,
+  storage_bytes: null,
+}
+
+/** Set-up state for a workspace that does not exist yet: the very start. */
+const NO_ONBOARDING: OnboardingState = {
+  step: "workspace",
+  completed_at: null,
+  last_onboarded_plan: null,
+  use_case: null,
+  should_onboard: true,
+  facts: { has_domain: false, has_verified_domain: false, has_api_key: false },
 }
 
 /**

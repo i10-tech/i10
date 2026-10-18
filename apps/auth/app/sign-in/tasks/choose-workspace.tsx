@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { useClerk, useOrganizationList, useUser } from "@clerk/nextjs"
-import { ChevronRight, Plus } from "lucide-react"
+import { useOrganizationList } from "@clerk/nextjs"
+import { ChevronRight } from "lucide-react"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
 import { Spinner } from "@repo/ui/components/i10/spinner"
 import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
@@ -10,20 +10,21 @@ import { StepHeading } from "../../_components/step-heading"
 
 /**
  * Clerk's `choose-organization` task, ours (2026-10-12) - what
- * `<TaskChooseOrganization />` was: the workspaces you belong to, the ones you
- * are invited to, and a way to make one.
+ * `<TaskChooseOrganization />` was: the workspaces you belong to and the ones
+ * you are invited to.
  *
- * ⚠ MAKING ONE ASKS FOR NO NAME. Onboarding's first step is the workspace's
- * name, so a name typed here would be asked again a screen later. It is made
- * with a placeholder and named there - the console's switcher does the same.
+ * ⚠ IT MAKES NO WORKSPACE (#325). It used to make one with a placeholder name
+ * on a click, which is exactly the workspace nobody asked for. Clerk raises
+ * this task only while "membership required" is on, and it is off: somebody
+ * with no workspace goes straight to the console, whose onboarding is where
+ * one is named (or Personal picked) and created. Turning that setting back on
+ * would strand anybody with no workspace here.
  *
  * ⚠ IT CHOOSES AND STOPS; IT NEVER LEAVES. Choosing resolves this task, and a
  * session can owe another (`setup-mfa`) - the panel then renders that one, or
  * leaves for the console once none is left. Leaving from here skipped it.
  */
 export function ChooseWorkspace() {
-  const clerk = useClerk()
-  const { user } = useUser()
   const { isLoaded, setActive, userMemberships, userInvitations } = useOrganizationList(
     {
       userMemberships: { pageSize: 50 },
@@ -42,20 +43,6 @@ export function ChooseWorkspace() {
       await setActive?.({ organization: id })
     } catch {
       setError("That did not work. Try again.")
-      setBusy(null)
-    }
-  }
-
-  async function create() {
-    setBusy("new")
-    setError(null)
-    try {
-      const made = await clerk.createOrganization({
-        name: placeholderName(user?.firstName),
-      })
-      await setActive?.({ organization: made.id })
-    } catch {
-      setError("Could not create a workspace. Try again.")
       setBusy(null)
     }
   }
@@ -97,9 +84,7 @@ export function ChooseWorkspace() {
 
   return (
     <div className="flex flex-col gap-6">
-      <StepHeading title="Choose a workspace">
-        Pick where to go, or start a new one.
-      </StepHeading>
+      <StepHeading title="Choose a workspace">Pick where to go.</StepHeading>
       {!isLoaded ? (
         <div className="flex justify-center py-6">
           <Spinner />
@@ -136,19 +121,6 @@ export function ChooseWorkspace() {
               }
             />
           ))}
-          <li>
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void create()}
-              className="flex w-full items-center gap-3 rounded-2xl border border-dashed px-4 py-3 text-sm text-muted-foreground transition-colors duration-(--duration-fast) hover:border-[var(--border-strong)] hover:text-foreground disabled:opacity-60"
-            >
-              <span className="grid size-9 place-items-center rounded-lg bg-muted">
-                {busy === "new" ? <Spinner /> : <Plus className="size-4" aria-hidden />}
-              </span>
-              Create a workspace
-            </button>
-          </li>
         </ul>
       )}
       {error && <p className="text-center text-sm text-danger">{error}</p>}
@@ -192,9 +164,4 @@ function Row({
       </button>
     </li>
   )
-}
-
-/** "Mohamed's workspace" until onboarding names it. */
-export function placeholderName(firstName: string | null | undefined): string {
-  return firstName?.trim() ? `${firstName.trim()}'s workspace` : "New workspace"
 }

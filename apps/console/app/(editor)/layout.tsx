@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation"
+import { NoWorkspace } from "@/components/no-workspace"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { tryApi } from "@/lib/api"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
@@ -19,6 +20,7 @@ export default async function EditorLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   const me = await tryApi<Me>("/console/me")
   if (!me.ok && me.error.name === "tenant_not_ready") return <TenantNotReady />
+  if (!me.ok && me.error.name === "no_workspace") return <NoWorkspace />
   if (!me.ok) throw new Error(me.error.message)
   if (
     me.data.onboarding.should_onboard &&

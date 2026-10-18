@@ -62,6 +62,7 @@ export function SendFirstEmail({
   hasApiKey,
   recipient,
   firstName,
+  workspaceName,
   already,
   onSent,
   onDone,
@@ -74,6 +75,8 @@ export function SendFirstEmail({
   recipient: string | null
   /** For the snippet's `name` variable; Ada when there is none. */
   firstName?: string | null
+  /** The sender's display name - the workspace's, as the send button uses. */
+  workspaceName?: string | null
   /** This domain's set-up send, if it has had it - it gets exactly one. */
   already?: { id: string; to: string; at: string } | null
   /** Once it is delivered (or very nearly certainly on its way). */
@@ -118,7 +121,19 @@ export function SendFirstEmail({
   const congrats = React.useRef<HTMLDivElement>(null)
 
   const issued = key !== null || hasApiKey
-  const sender = from ? `hello@${from}` : "hello@yourdomain.com"
+  const address = from ? `hello@${from}` : "hello@yourdomain.com"
+  /*
+   * ⚠ WITH A DISPLAY NAME, THE SAME ONE THE BUTTON SENDS WITH (2026-10-14):
+   * the workspace's. A bare address shows in Gmail as its local part -
+   * "hello" - and this is the code people copy.
+   */
+  const label =
+    (workspaceName ?? "")
+      .replace(/[<>"'\\`$@,;:]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 64) || "i10"
+  const sender = `${label} <${address}>`
   const typedOk = EMAIL.test(typed.trim())
   const to = recipient ?? (typed.trim() || "you@example.com")
   const secret = key?.secret ?? "i10_live_xxxxxxxxxxxxxxxx"
@@ -473,7 +488,7 @@ client.emails.send({
                     ? delivery.to
                     : ""
                 }
-                from={sender}
+                from={address}
                 delivered={delivery.phase === "delivered"}
                 reduce={reduce}
               />

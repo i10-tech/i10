@@ -40,6 +40,15 @@ export interface Logger {
 
 export interface DeliverDeps {
   sender: AuthEmailSender
+  /**
+   * An invitation we sent (#327): when it expires, worded in the zone the
+   * admin chose, and our own link in place of Clerk's - which checks the
+   * clock before handing over. Null for one we did not send.
+   */
+  invitation?: (input: {
+    to: string
+    actionUrl: string | null
+  }) => Promise<{ expires: string; url: string | null } | null>
   log?: Logger
 }
 
@@ -71,6 +80,33 @@ export function authEmailDelivery(deps: DeliverDeps) {
       if (!to) {
         deps.log?.warn({ slug: event.slug }, "clerk email has no recipient")
         return "nothing_to_send"
+      }
+
+      /*
+       * ⚠ OUR WORDS ADDED TO CLERK'S DATA, NEVER CLERK'S REMOVED. The expiry
+       * rides in under a key Clerk does not use, and our link replaces the
+       * action URL only when we have one; a lookup that fails sends the email
+       * as Clerk wrote it rather than not at all.
+       */
+      if (event.slug === SLUG.organizationInvitation && deps.invitation) {
+        const actionUrl =
+          typeof event.data?.action_url === "string" ? event.data.action_url : null
+        const ours = await deps
+          .invitation({ to, actionUrl })
+          .catch((error: unknown) => {
+            deps.log?.warn(
+              { err: String(error) },
+              "could not read the invitation's expiry",
+            )
+            return null
+          })
+        if (ours) {
+          event.data = {
+            ...(event.data ?? {}),
+            i10_expires: ours.expires,
+            ...(ours.url ? { action_url: ours.url } : {}),
+          }
+        }
       }
 
       const rendered = await renderClerkEmail(event)

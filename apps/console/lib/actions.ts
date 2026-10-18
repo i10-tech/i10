@@ -579,36 +579,132 @@ export async function reserveCodeSend(purpose: string) {
   )
 }
 
+// ── Team access (#326) ──────────────────────────────────────────────────────
+
+export type AccessMode = "off" | "suggest" | "auto"
+
+export interface AccessRule {
+  /** `pslhq.app`, `dev.pslhq.app`, or `*.pslhq.app` (any depth). */
+  pattern: string
+  mode: AccessMode
+  /** The Clerk role given on joining by this rule. */
+  role: string
+}
+
+export interface AccessDomain {
+  id: string
+  name: string
+  source: "domains" | "txt"
+  status: "verified" | "pending" | "lapsed" | "displaced"
+  txt: { name: string; value: string }
+  rules: AccessRule[]
+  /** From /domains, whose sending domain was deleted: it needs its own TXT. */
+  orphaned: boolean
+  verified_at: string | null
+  checked_at: string | null
+  created_at: string
+}
+
 /**
- * This workspace's DNS-verified domains, and which of them suggest it - join
- * suggestions run by us since 2026-10-13 (Clerk's are not on our plan).
+ * This workspace's team access domains, the names verified on /domains, and
+ * those of them still to suggest. See apps/api/src/console/team-domains.ts.
  */
-export async function teamDomainSuggestions() {
+export async function teamAccessDomains() {
   return run(
     () =>
-      api<{ data: string[]; enabled: string[] }>("/console/team/domain-suggestions"),
+      api<{ data: AccessDomain[]; verified: string[]; suggested: string[] }>(
+        "/console/team/access-domains",
+      ),
     [],
     { refreshCaller: false },
   )
 }
 
-/** Switches join suggestions for one verified domain on or off. */
-export async function setTeamDomain(name: string, on: boolean) {
+/** Adds an access domain: one verified on /domains, or one to prove by TXT. */
+export async function addAccessDomain(name: string, source: "domains" | "txt") {
   return run(
     () =>
-      api<{ name: string; on: boolean }>("/console/team/domains", {
-        method: "PUT",
-        body: { name, on },
+      api<{ id: string }>("/console/team/access-domains", {
+        method: "POST",
+        body: { name, source },
       }),
     [],
     { refreshCaller: false },
   )
 }
 
+/** Looks for an access domain's TXT record. A verdict, not an error. */
+export async function verifyAccessDomain(id: string) {
+  return run(
+    () =>
+      api<{ proven: boolean; reason: "proven" | "absent" | "unreachable" }>(
+        `/console/team/access-domains/${encodeURIComponent(id)}/verify`,
+        { method: "POST" },
+      ),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export async function saveAccessRules(id: string, rules: AccessRule[]) {
+  return run(
+    () =>
+      api<{ rules: AccessRule[] }>(
+        `/console/team/access-domains/${encodeURIComponent(id)}/rules`,
+        { method: "PUT", body: { rules } },
+      ),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export async function removeAccessDomain(id: string) {
+  return run(
+    () =>
+      api<undefined>(`/console/team/access-domains/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** "Not now" on the suggestion card, for the whole workspace. */
+export async function dismissAccessSuggestion(name: string) {
+  return run(
+    () =>
+      api<{ ok: true }>("/console/team/access-suggestions/dismiss", {
+        method: "POST",
+        body: { name },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export interface JoinRecord {
+  user_id: string
+  email: string
+  how: "auto" | "join" | "request"
+  via: string | null
+  created_at: string
+}
+
+/** How each member got in through an access domain. */
+export async function teamJoins() {
+  return run(() => api<{ data: JoinRecord[] }>("/console/team/joins"), [], {
+    refreshCaller: false,
+  })
+}
+
 export interface JoinRequest {
   id: string
   user_id: string
   email: string
+  /** The rule pattern that matched. */
+  via: string | null
+  /** Filed because an auto-join found the workspace full. */
+  full: boolean
   created_at: string
 }
 
@@ -619,17 +715,157 @@ export async function teamJoinRequests() {
   })
 }
 
-/** Accepts (adds them as a member) or declines a request to join. */
-export async function answerJoinRequest(id: string, accept: boolean) {
+/**
+ * Accepts (adds them, with their rule's role) or declines a request to join;
+ * `block` also puts the address on the block list. 409 `workspace_full` when
+ * there is no room.
+ */
+export async function answerJoinRequest(id: string, accept: boolean, block = false) {
   return run(
     () =>
       api<{ ok: true }>(`/console/team/join-requests/${encodeURIComponent(id)}`, {
         method: "POST",
-        body: { accept },
+        body: { accept, block },
       }),
     [],
     { refreshCaller: false },
   )
+}
+
+/** Removes a member onto the removed list, or (`block`) the block list. */
+export async function removeTeamMember(userId: string, block: boolean) {
+  return run(
+    () =>
+      api<{ ok: true }>(`/console/team/members/${encodeURIComponent(userId)}/remove`, {
+        method: "POST",
+        body: { block },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export interface Exclusion {
+  email: string
+  kind: "removed" | "blocked"
+  created_at: string
+}
+
+/** The removed and block lists; empty for somebody who is not an admin. */
+export async function teamExclusions() {
+  return run(() => api<{ data: Exclusion[] }>("/console/team/exclusions"), [], {
+    refreshCaller: false,
+  })
+}
+
+/** "Allow", or "Allow and invite". */
+export async function allowAddress(email: string, invite: boolean) {
+  return run(
+    () =>
+      api<{ ok: true }>("/console/team/exclusions/allow", {
+        method: "POST",
+        body: { email, invite },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+// ── Members, invitations and capacity (#327) ───────────────────────────────
+
+export interface TeamCapacity {
+  members: number
+  invitations: number
+  limit: number
+  free: number
+  full: boolean
+  /** What would make room, when full: only what applies. */
+  reasons: string[]
+  can_upgrade: boolean
+  personal: boolean
+  /** Access-rule patterns that let people in, for the last-spot warning. */
+  patterns: string[]
+  /** The capacity alert's state; null for somebody who is not an admin. */
+  alert: { level: 0 | 80 | 100; alerted_at: string | null } | null
+}
+
+/** Members, invitations and the plan's limit; null without a team workspace. */
+export async function teamCapacity() {
+  return run(() => api<{ data: TeamCapacity | null }>("/console/team/capacity"), [], {
+    refreshCaller: false,
+  })
+}
+
+export interface PendingInvitation {
+  id: string
+  email: string
+  role: string
+  expires_at: string
+  /** The zone the expiry was worded in, and the country when one was picked. */
+  zone: string
+  country: string | null
+  created_at: string
+}
+
+/** Pending invitations we sent, soonest to expire first. */
+export async function teamInvitations() {
+  return run(
+    () => api<{ data: PendingInvitation[] }>("/console/team/invitations"),
+    [],
+    {
+      refreshCaller: false,
+    },
+  )
+}
+
+/**
+ * Sends invitations that expire at `expires_at` (1 hour to 7 days ahead),
+ * worded in `zone` - and `country`, when one was picked. 409
+ * `workspace_full` with `free` and `reasons` when there are too few spots.
+ */
+export async function sendInvitations(input: {
+  emails: string[]
+  role: string
+  expires_at: string
+  zone: string
+  country: string | null
+}) {
+  return run(
+    () =>
+      api<{
+        sent: { id: string; email: string; expires_at: string }[]
+        failed: { email: string; reason: string }[]
+      }>("/console/team/invitations", {
+        method: "POST",
+        body: input.country ? input : { ...input, country: undefined },
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** Withdraws a pending invitation. Its expiry cannot be edited, only this. */
+export async function withdrawInvitation(id: string) {
+  return run(
+    () =>
+      api<undefined>(`/console/team/invitations/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export interface ZoneCatalog {
+  countries: { code: string; name: string; zones: { id: string; city: string }[] }[]
+  zones: { id: string; city: string }[]
+}
+
+/** Countries and their zones, from the API's runtime (some browsers lack them). */
+export async function timeZones() {
+  return run(() => api<ZoneCatalog>("/console/team/time-zones"), [], {
+    refreshCaller: false,
+  })
 }
 
 export interface JoinSuggestion {
@@ -637,11 +873,13 @@ export interface JoinSuggestion {
   name: string
   image_url: string | null
   domain: string
+  /** `auto`: Join adds them at once. `suggest`: they ask, an admin approves. */
+  mode: "suggest" | "auto"
   /** Asked, and not answered yet. */
   requested: boolean
 }
 
-/** Workspaces suggested to the signed-in person by their verified addresses. */
+/** Workspaces offered to the signed-in person by their verified addresses. */
 export async function myJoinSuggestions() {
   return run(
     () => api<{ data: JoinSuggestion[] }>("/console/me/join-suggestions"),
@@ -660,6 +898,39 @@ export async function requestToJoin(tenantId: string) {
         method: "POST",
         body: { tenant_id: tenantId },
       }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * Joins at once where the rule is auto-join. `full` when the workspace had no
+ * room, in which case a request was filed for its admins.
+ */
+export async function joinWorkspace(tenantId: string) {
+  return run(
+    () =>
+      api<{ joined: boolean; organization_id?: string; full?: boolean }>(
+        "/console/me/joins",
+        { method: "POST", body: { tenant_id: tenantId } },
+      ),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export interface Arrival {
+  organization_id: string
+  name: string
+  image_url: string | null
+  outcome: "joined" | "full"
+  via: string | null
+}
+
+/** What happened at sign-up: auto-joins, and full workspaces that took a request. */
+export async function myArrivals() {
+  return run(
+    () => api<{ data: Arrival[] }>("/console/me/arrivals", { method: "POST" }),
     [],
     { refreshCaller: false },
   )
@@ -1869,6 +2140,33 @@ export async function resumeSubscription() {
   return run(
     () => api<{ status: string }>("/console/billing/resume", { method: "POST" }),
     ["/settings/billing", "/settings/usage", "/"],
+  )
+}
+
+/**
+ * Makes this person's Personal workspace, or finds the one they have (#325).
+ * Answers the Clerk organization to activate.
+ */
+export async function createPersonalWorkspace() {
+  return run(
+    () =>
+      api<{ organization_id: string }>("/console/workspaces/personal", {
+        method: "POST",
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** Turns the active Personal workspace into a team workspace (#325). */
+export async function makeTeamWorkspace(name: string) {
+  return run(
+    () =>
+      api<{ ok: true }>("/console/workspace/team", {
+        method: "POST",
+        body: { name },
+      }),
+    [],
   )
 }
 

@@ -71,7 +71,10 @@ describe("POST /console/onboarding/test-email", () => {
     })
     const call = (d.sendTest as ReturnType<typeof mock>).mock.calls[0] as unknown[]
     expect(call[0]).toBe("ten-1")
-    expect(call[1]).toMatchObject({ from: "i10 <hello@acme.com>", to: ["me@acme.com"] })
+    expect(call[1]).toMatchObject({
+      from: "Acme <hello@acme.com>",
+      to: ["me@acme.com"],
+    })
     expect(call[2]).toEqual({ idempotencyKey: "onboarding-test-email:dom_1" })
   })
 

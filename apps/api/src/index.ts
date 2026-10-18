@@ -24,6 +24,20 @@ import {
 } from "./observability.js"
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
+import { createInvitationQueue, invitationScheduler } from "./queue/invitation-queue.js"
+import { memberStore } from "./console/members-db.js"
+import { clerkMembers } from "./console/clerk-members.js"
+import { memberMail } from "./console/member-mail.js"
+import {
+  DAY_MS,
+  beforeSeatUse,
+  invitationEmail,
+  notifyAccepted,
+  onClerkEvent,
+  sendInvitations,
+  withMemberLimitSync,
+  type MembersDeps,
+} from "./console/members.js"
 import { acceptDatabaseOps } from "./send/accept-db.js"
 import { acceptSend } from "./send/accept.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
@@ -73,6 +87,8 @@ import { riskSystem, systemTenantIds } from "./risk/wire.js"
 import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
 import { joinStore } from "./console/join.js"
+import { autoJoinFromWebhook, type TeamDomainDeps } from "./console/team-domains.js"
+import { nodeTxtLookup } from "./domains/ownership.js"
 import { domainTransferStore } from "./domains/transfers.js"
 import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
@@ -420,21 +436,22 @@ const entitlements = postgresEntitlements({
   freePlanId: env.METERING_FREE_PLAN_ID,
 })
 
-const grants = subscriptionGrants({ subscriptions, entitlements, log })
+/*
+ * ⚠ EVERY PLAN CHANGE SYNCS CLERK'S MEMBER LIMIT (#327), by wrapping the one
+ * port that changes plans. `members` is built further down, once our sender
+ * exists; the grant path only runs after boot.
+ */
+const grants = subscriptionGrants({
+  subscriptions,
+  entitlements: withMemberLimitSync(entitlements, () => members),
+  log,
+})
 
 /**
- * Sign-up: a Clerk organization becomes a tenant, and a user with no
- * organization gets one made for them. See tenants/provision.ts.
+ * A Clerk organization becomes a tenant. Nobody is given one at sign-up any
+ * more (#325). See tenants/provision.ts.
  */
 const provisioning = tenantProvisioning({
-  organizations: {
-    membershipCount: async (userId) =>
-      (await clerk.users.getOrganizationMembershipList({ userId, limit: 1 }))
-        .totalCount,
-    create: async ({ name, slug, createdBy }) => {
-      await clerk.organizations.createOrganization({ name, slug, createdBy })
-    },
-  },
   tenants: tenantStore(db),
   entitlements,
   log,
@@ -754,6 +771,28 @@ if (systemSender && consoleUrl) {
   }, 30_000).unref()
 }
 
+/**
+ * Member limits per plan, invitations with a chosen expiry, and capacity
+ * alerts (#327). See console/members.ts.
+ *
+ * ⚠ THE EXPIRY JOBS RUN IN THE WORKER (worker.ts); this process only adds and
+ * removes them. Without our sender there are no alert emails and the
+ * invitation email keeps Clerk's own link.
+ */
+const invitationQueue = createInvitationQueue({ redis: queueRedis })
+const members: MembersDeps = {
+  store: memberStore(db),
+  clerk: clerkMembers(clerk),
+  expiry: invitationScheduler(invitationQueue),
+  ...(systemSender && consoleUrl
+    ? {
+        mail: memberMail({ sender: systemSender, consoleUrl }),
+        inviteLink: (id: string) => `${consoleUrl.replace(/\/$/, "")}/invite/${id}`,
+      }
+    : {}),
+  log,
+}
+
 const sesStatusChanges = sesStatusService({
   store: sesStatus,
   ...(sesNotice ? { notice: sesNotice } : {}),
@@ -889,6 +928,153 @@ const sendPath = {
   log,
 }
 
+/*
+ * Team access (#326): access domains, rules, requests, the removed and block
+ * lists - ours, with only memberships and invitations written to Clerk. The
+ * console routes and the `user.created` webhook (auto-join at sign-up) share
+ * this one set.
+ */
+const clerkCodes = (error: unknown) =>
+  ((error as { errors?: { code?: string }[] }).errors ?? []).map((e) => e.code)
+
+const teamDomains: TeamDomainDeps | null = domains
+  ? {
+      verified: async (tenantId: string) =>
+        (await domains.list(tenantId))
+          .filter((domain) => domain.status === "verified")
+          .map((domain) => domain.name),
+      can: async (userId: string, orgId: string, permission: string) => {
+        const { data } = await clerk.users.getOrganizationMembershipList({
+          userId,
+          limit: 100,
+        })
+        const membership = data.find((m) => m.organization.id === orgId)
+        return membership?.permissions.includes(permission) ?? false
+      },
+      // Ours since 2026-10-13: Clerk's verified domains are not on our plan.
+      store: joinStore(db),
+      memberOrgIds: async (userId: string) => {
+        const { data } = await clerk.users.getOrganizationMembershipList({
+          userId,
+          limit: 100,
+        })
+        return data.map((m) => m.organization.id)
+      },
+      describe: async (orgIds: string[]) => {
+        const found = await Promise.all(
+          [...new Set(orgIds)].map((organizationId) =>
+            clerk.organizations
+              .getOrganization({ organizationId })
+              .then(
+                (org) =>
+                  [
+                    organizationId,
+                    {
+                      name: org.name,
+                      imageUrl: org.hasImage ? org.imageUrl : null,
+                    },
+                  ] as const,
+              )
+              // A workspace Clerk no longer has is not suggested.
+              .catch(() => null),
+          ),
+        )
+        return Object.fromEntries(found.filter((f) => f !== null))
+      },
+      /*
+       * ⚠ A FULL WORKSPACE IS AN ANSWER, NOT A FAILURE. Clerk refuses with
+       * `organization_membership_quota_exceeded` when members plus pending
+       * invitations reach the limit; auto-join turns that into a request and
+       * Accept tells the admin what would make room.
+       */
+      addMember: async (orgId: string, userId: string, role: string) => {
+        try {
+          await clerk.organizations.createOrganizationMembership({
+            organizationId: orgId,
+            userId,
+            role,
+          })
+          return "added" as const
+        } catch (error) {
+          const codes = clerkCodes(error)
+          // Already a member (an invitation got there first) is done.
+          if (codes.includes("already_a_member_in_organization"))
+            return "added" as const
+          if (codes.includes("organization_membership_quota_exceeded"))
+            return "full" as const
+          throw error
+        }
+      },
+      removeMember: async (orgId: string, userId: string) => {
+        try {
+          await clerk.organizations.deleteOrganizationMembership({
+            organizationId: orgId,
+            userId,
+          })
+        } catch (error) {
+          if (!clerkNotFound(error)) throw error
+        }
+      },
+      /*
+       * ⚠ CLERK'S INVITATION, OUR EMAIL. Clerk's own delivery is off; the
+       * invitation raises `email.created` and the auth mail path sends ours
+       * (packages/emails organization-invitation), as for every other invite.
+       */
+      /*
+       * ⚠ "ALLOW AND INVITE" GOES THROUGH OUR INVITATIONS TOO (#327), so it is
+       * counted, scheduled and worded like every other: seven days, the
+       * longest an admin can pick, stated in UTC since nobody chose a zone.
+       */
+      invite: async (
+        orgId: string,
+        inviterUserId: string,
+        email: string,
+        role: string,
+        tenantId: string,
+      ) => {
+        const sent = await sendInvitations(members, {
+          tenantId,
+          orgId,
+          userId: inviterUserId,
+          emails: [email],
+          role,
+          expiresAt: new Date(Date.now() + 7 * DAY_MS).toISOString(),
+          zone: "UTC",
+        })
+        if (sent.outcome !== "ok" || sent.sent.length === 0)
+          throw new Error(`could not invite ${email}: ${sent.outcome}`)
+      },
+      emailsOf: async (userId: string) => {
+        try {
+          const user = await clerk.users.getUser(userId)
+          return user.emailAddresses
+            .filter((e) => e.verification?.status === "verified")
+            .map((e) => e.emailAddress.toLowerCase())
+        } catch (error) {
+          // A deleted account has no addresses left; the join record still names one.
+          if (clerkNotFound(error)) return []
+          throw error
+        }
+      },
+      isPersonal: async (orgId: string) => {
+        const org = await clerk.organizations.getOrganization({ organizationId: orgId })
+        return org.publicMetadata?.kind === "personal"
+      },
+      txt: nodeTxtLookup(),
+      // Member limits per plan (#327): checked before every seat use.
+      seats: {
+        beforeSeatUse: (tenantId: string, orgId: string) =>
+          beforeSeatUse(members, tenantId, orgId),
+        accepted: (input: {
+          tenantId: string
+          requestId: string
+          email: string
+          waited: boolean
+        }) => notifyAccepted(members, input),
+      },
+    }
+  : null
+
 const app = createApp({
   suppressions,
   trustedTemplates: risk.trustedTemplates,
@@ -919,6 +1105,8 @@ const app = createApp({
       : {}),
     log,
   },
+  // The link in our invitation email (#327).
+  invitationLinks: members,
   clerkWebhooks: {
     db,
     signingSecret: env.CLERK_WEBHOOK_SECRET,
@@ -929,6 +1117,14 @@ const app = createApp({
     // plan assignment on Pro, and Polar charging a card for a workspace nobody
     // could sign in to. See tenants/lifecycle.ts.
     lifecycle,
+    // Member limits, late acceptances and capacity alerts (#327).
+    members: (type: string, data: unknown) => onClerkEvent(members, type, data),
+    // Auto-join at sign-up (#326): verified addresses only, idempotent.
+    ...(teamDomains
+      ? {
+          autoJoin: (data: unknown) => autoJoinFromWebhook(teamDomains, data),
+        }
+      : {}),
     // ⚠ ONLY WHEN BOTH HALVES EXIST. Without a from-address or i10's tenant we
     // would have nowhere to send from and nothing to attribute it to, and the
     // webhook then acknowledges the event while Clerk keeps sending - which is
@@ -937,6 +1133,9 @@ const app = createApp({
       ? {
           authEmail: authEmailDelivery({
             sender: systemSender,
+            // The expiry, and our link, in the invitation email (#327).
+            invitation: (input: { to: string; actionUrl: string | null }) =>
+              invitationEmail(members, input),
             log,
           }),
         }
@@ -1189,6 +1388,58 @@ const app = createApp({
       rename: async (clerkOrgId: string, name: string) => {
         await clerk.organizations.updateOrganization(clerkOrgId, { name })
       },
+      /*
+       * ⚠ ONE PER PERSON, FOUND BY ITS MARK RATHER THAN ITS NAME. Somebody may
+       * well call a team "Personal"; only the one we made carries
+       * `kind: "personal"` and was created by them. A second press, or a
+       * retry after a timeout, finds it instead of making another.
+       *
+       * ⚠ LIMITED TO ONE MEMBER IN CLERK ITSELF, so nothing - an invitation, a
+       * join request - can put a second person in it. Single-member
+       * organizations are free on Clerk's plan, which is the point of it.
+       */
+      createPersonal: async (userId: string) => {
+        const { data } = await clerk.users.getOrganizationMembershipList({
+          userId,
+          limit: 100,
+        })
+        const existing = data.find(
+          (m) =>
+            m.organization.publicMetadata?.kind === "personal" &&
+            m.organization.createdBy === userId,
+        )
+        if (existing) return { id: existing.organization.id, created: false }
+        const made = await clerk.organizations.createOrganization({
+          name: "Personal",
+          // Clerk slugs are unique across the instance; the user id makes it so.
+          slug: `personal-${userId.replace(/^user_/, "").toLowerCase()}`,
+          createdBy: userId,
+          maxAllowedMemberships: 1,
+          publicMetadata: { kind: "personal" },
+        })
+        return { id: made.id, created: true }
+      },
+      /*
+       * ⚠ ONLY THE PERSONAL WORKSPACE OF THE PERSON ASKING. The mark and the
+       * creator are both checked, so nobody can lift the limit on a workspace
+       * that is not theirs by calling this on it.
+       *
+       * ⚠ THE LIMIT IS THE PLAN'S, SET BY THE ROUTE ONCE THE MARK HAS CHANGED
+       * (#327) - `syncMemberLimit` reads the organization as a team.
+       */
+      makeTeam: async (clerkOrgId: string, userId: string, name: string) => {
+        const org = await clerk.organizations.getOrganization({
+          organizationId: clerkOrgId,
+        })
+        if (org.publicMetadata?.kind !== "personal" || org.createdBy !== userId) {
+          return "not_personal" as const
+        }
+        await clerk.organizations.updateOrganization(clerkOrgId, { name })
+        await clerk.organizations.updateOrganizationMetadata(clerkOrgId, {
+          publicMetadata: { kind: "team" },
+        })
+        return "ok" as const
+      },
     },
     /*
      * ⚠ A HUNDRED IS THE CEILING, NOT A PAGE. Nobody belongs to that many
@@ -1202,69 +1453,8 @@ const app = createApp({
       allow: passwordAttempts(cache),
     },
     codeSends: codeCooldown(cache),
-    ...(domains
-      ? {
-          teamDomains: {
-            verified: async (tenantId: string) =>
-              (await domains.list(tenantId))
-                .filter((domain) => domain.status === "verified")
-                .map((domain) => domain.name),
-            can: async (userId: string, orgId: string, permission: string) => {
-              const { data } = await clerk.users.getOrganizationMembershipList({
-                userId,
-                limit: 100,
-              })
-              const membership = data.find((m) => m.organization.id === orgId)
-              return membership?.permissions.includes(permission) ?? false
-            },
-            // Ours since 2026-10-13: Clerk's verified domains are not on our plan.
-            store: joinStore(db),
-            memberOrgIds: async (userId: string) => {
-              const { data } = await clerk.users.getOrganizationMembershipList({
-                userId,
-                limit: 100,
-              })
-              return data.map((m) => m.organization.id)
-            },
-            describe: async (orgIds: string[]) => {
-              const found = await Promise.all(
-                [...new Set(orgIds)].map((organizationId) =>
-                  clerk.organizations
-                    .getOrganization({ organizationId })
-                    .then(
-                      (org) =>
-                        [
-                          organizationId,
-                          {
-                            name: org.name,
-                            imageUrl: org.hasImage ? org.imageUrl : null,
-                          },
-                        ] as const,
-                    )
-                    // A workspace Clerk no longer has is not suggested.
-                    .catch(() => null),
-                ),
-              )
-              return Object.fromEntries(found.filter((f) => f !== null))
-            },
-            addMember: async (orgId: string, userId: string) => {
-              try {
-                await clerk.organizations.createOrganizationMembership({
-                  organizationId: orgId,
-                  userId,
-                  role: "org:member",
-                })
-              } catch (error) {
-                // Already a member (an invitation got there first) is done.
-                const codes = (
-                  (error as { errors?: { code?: string }[] }).errors ?? []
-                ).map((e) => e.code)
-                if (!codes.includes("already_a_member_in_organization")) throw error
-              }
-            },
-          },
-        }
-      : {}),
+    ...(teamDomains ? { teamDomains } : {}),
+    members,
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
@@ -1288,7 +1478,7 @@ const app = createApp({
           primary?.verification?.status === "verified"
             ? primary.emailAddress.toLowerCase()
             : null
-        return { name, primaryEmail, verifiedEmails }
+        return { name, primaryEmail, verifiedEmails, createdAt: user.createdAt }
       },
     },
     memberships: {

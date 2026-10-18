@@ -35,6 +35,7 @@ import type { PlanChange } from "../../billing/plan-change.js"
 import type { PasswordCheckDeps } from "../../console/password-check.js"
 import type { TeamDomainDeps } from "../../console/team-domains.js"
 import type { Reservation } from "../../console/code-cooldown.js"
+import type { MembersDeps } from "../../console/members.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -145,7 +146,23 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * this endpoint did before - the two names simply drift, which is the
    * complaint rather than a crash.
    */
-  organizations?: { rename(clerkOrgId: string, name: string): Promise<void> }
+  organizations?: {
+    rename(clerkOrgId: string, name: string): Promise<void>
+    /**
+     * This person's Personal workspace, made if they have none (#325): named
+     * "Personal", limited to one member. `created` is false when it existed.
+     */
+    createPersonal?(userId: string): Promise<{ id: string; created: boolean }>
+    /**
+     * Turns this person's Personal workspace into a team one: renamed, its
+     * member limit raised, its mark changed. `not_personal` for anything else.
+     */
+    makeTeam?(
+      clerkOrgId: string,
+      userId: string,
+      name: string,
+    ): Promise<"ok" | "not_personal">
+  }
   /**
    * The Clerk organizations a person belongs to - where an accepted domain may
    * land.
@@ -161,9 +178,13 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * matched against.
    */
   people?: {
-    get(
-      userId: string,
-    ): Promise<{ name: string; primaryEmail: string | null; verifiedEmails: string[] }>
+    get(userId: string): Promise<{
+      name: string
+      primaryEmail: string | null
+      verifiedEmails: string[]
+      /** When they signed up, in ms - auto-join runs only for the newly arrived (#326). */
+      createdAt?: number
+    }>
   }
   /**
    * Checks the signed-in person's current password, rate limited (2026-10-12).
@@ -171,10 +192,17 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   passwords?: PasswordCheckDeps
   /**
-   * Sending domains offered to the Team page as Clerk verified domains
-   * (2026-10-12). Optional; without it the suggestion never shows.
+   * Team access domains, requests and the removed and block lists (#326).
+   * Optional; without it the Team page's access block and every suggestion
+   * stay empty.
    */
   teamDomains?: TeamDomainDeps
+  /**
+   * Member limits per plan, invitations with a chosen expiry and capacity
+   * alerts (#327). Optional; without it invitations answer 501 and the Team
+   * page and /usage show no member counts.
+   */
+  members?: MembersDeps
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

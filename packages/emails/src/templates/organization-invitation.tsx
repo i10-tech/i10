@@ -5,10 +5,13 @@ export default function OrganizationInvitation({
   url,
   organizationName,
   inviterName,
+  expires,
 }: {
   url: string
   organizationName?: string
   inviterName?: string
+  /** When it expires, already worded: "15 March at 3:00 PM Paris time" (#327). */
+  expires?: string
 }) {
   const org = organizationName ?? "an organization"
 
@@ -20,6 +23,9 @@ export default function OrganizationInvitation({
           ? `${inviterName} has invited you to join ${org} on i10.`
           : `You have been invited to join ${org} on i10.`}
       </Text>
+      {expires ? (
+        <Text style={styles.text}>This invitation expires on {expires}.</Text>
+      ) : null}
       <ActionButton href={url}>Accept invitation</ActionButton>
       <FallbackLink href={url} />
     </Layout>
@@ -41,4 +47,5 @@ OrganizationInvitation.PreviewProps = {
   url: "https://auth.i10.tech/accept?ticket=sample",
   organizationName: "Acme",
   inviterName: "Mohamed",
+  expires: "15 March at 3:00 PM Paris time",
 } satisfies React.ComponentProps<typeof OrganizationInvitation>

@@ -19,6 +19,7 @@ import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
 import { EmailInput } from "@repo/ui/components/i10/email-input"
+import { emailProblem } from "@repo/ui/checks"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { OtpField, OTP_LENGTH } from "@repo/ui/components/i10/otp-field"
 import { Reveal } from "@repo/ui/components/i10/reveal"
@@ -418,6 +419,7 @@ function AddEmail({
   }, [resume])
 
   function reset() {
+    setJustAdded(null)
     setAddress("")
     setPending(null)
     setCode("")
@@ -426,8 +428,33 @@ function AddEmail({
     onDone()
   }
 
+  /*
+   * ⚠ THE SHARED EMAIL CHECK, THEN ONE MORE RULE (2026-10-14): an address
+   * already on the account, verified or not, is refused here rather than by
+   * Clerk after a round trip. Add stays off until the address passes both.
+   */
+  /*
+   * ⚠ LESS THE ADDRESS THIS FORM JUST ADDED. Clerk puts it on the account the
+   * moment Add is pressed, while this step is still on screen sending its
+   * code - so without this the address the person just added was refused
+   * under the field as already being theirs.
+   */
+  const [justAdded, setJustAdded] = React.useState<string | null>(null)
+  const onAccount = new Set(
+    user.emailAddresses
+      .map((e) => e.emailAddress.toLowerCase())
+      .filter((e) => e !== justAdded),
+  )
+  const addressProblem = (value: string) =>
+    emailProblem(value) ??
+    (onAccount.has(value.trim().toLowerCase())
+      ? "That address is already on your account."
+      : null)
+  const addressOk = address.trim() !== "" && addressProblem(address) === null
+
   async function add(event: React.FormEvent) {
     event.preventDefault()
+    if (!addressOk) return
     setBusy(true)
     setError(null)
     try {
@@ -435,6 +462,7 @@ function AddEmail({
         user.createEmailAddress({ email: address.trim() }),
       )
       if (!created) return
+      setJustAdded(created.emailAddress.toLowerCase())
       await codes.send(
         () => created.prepareVerification({ strategy: "email_code" }),
         `email:${created.id}`,
@@ -536,13 +564,14 @@ function AddEmail({
                 setAddress(event.target.value)
               }}
               refused={error ?? undefined}
+              check={addressProblem}
               autoFocus
             />
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={reset}>
                 Cancel
               </Button>
-              <Button type="submit" loading={busy} disabled={!address.trim()}>
+              <Button type="submit" loading={busy} disabled={!addressOk}>
                 Add
               </Button>
             </div>

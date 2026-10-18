@@ -5,21 +5,11 @@ import { tenantProvisioning } from "../src/tenants/provision.js"
 const log = { info: () => {}, warn: () => {}, error: () => {} }
 
 const deps = (over: Record<string, unknown> = {}) => ({
-  organizations: {
-    membershipCount: mock(async () => 0),
-    create: mock(async () => {}),
-  },
   tenants: { provision: mock(async () => ({ id: "ten-1", created: true })) },
   entitlements: { ensureCustomer: mock(async () => {}) },
   log,
   ...over,
 })
-
-const user = {
-  id: "user_abc12345678",
-  first_name: "Mohamed",
-  email_addresses: [{ email_address: "mohamed@i10.tech" }],
-}
 
 const org = {
   id: "org_xyz98765432",
@@ -28,55 +18,11 @@ const org = {
   created_by: "user_abc12345678",
 }
 
+// ⚠ NOTHING IS MADE FOR A NEW USER ANY MORE (#325): no organization, no
+// tenant. A workspace exists only once somebody names one or picks Personal.
 describe("a new user", () => {
-  it("gets a personal organization, because a user with none cannot send", async () => {
-    const d = deps()
-    const outcome = await tenantProvisioning(d).onUserCreated(user)
-
-    expect(outcome).toBe("organization_created")
-    expect(d.organizations.create).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Mohamed", createdBy: user.id }),
-    )
-  })
-
-  // ⚠ THE COMMON CASE IS THE RETRY. Svix redelivers, and a second organization
-  // would be a second tenant and a second bill for one person.
-  it("gets nothing when they already belong to one", async () => {
-    const d = deps({
-      organizations: {
-        membershipCount: mock(async () => 1),
-        create: mock(async () => {}),
-      },
-    })
-
-    expect(await tenantProvisioning(d).onUserCreated(user)).toBe("already_provisioned")
-    expect(d.organizations.create).not.toHaveBeenCalled()
-  })
-
-  // Clerk slugs are unique across the instance, so two people with the same
-  // name would collide on the second sign-up - a 500 in somebody's first minute.
-  it("gets a slug that cannot collide with another person of the same name", async () => {
-    const d = deps()
-    await tenantProvisioning(d).onUserCreated(user)
-
-    // The name, then the last eight characters of the user id - lowercase,
-    // alphanumeric and hyphens, which is all Clerk accepts.
-    expect(d.organizations.create).toHaveBeenCalledWith(
-      expect.objectContaining({ slug: "mohamed-12345678" }),
-    )
-  })
-
-  it("falls back to the email local part when there is no first name", async () => {
-    const d = deps()
-    await tenantProvisioning(d).onUserCreated({ ...user, first_name: null })
-
-    expect(d.organizations.create).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "mohamed" }),
-    )
-  })
-
-  it("ignores a payload with no user id rather than throwing", async () => {
-    expect(await tenantProvisioning(deps()).onUserCreated({})).toBe("ignored")
+  it("is given no workspace", () => {
+    expect("onUserCreated" in tenantProvisioning(deps())).toBe(false)
   })
 })
 
@@ -144,13 +90,13 @@ describe("the Clerk webhook route", () => {
   // redelivery repairs a sign-up that failed the first time. That needs a
   // database, and belongs in an integration test we do not have yet.
   it("does not provision anything for an unsigned request", async () => {
-    const onUserCreated = mock(async () => "organization_created" as const)
+    const onOrganizationCreated = mock(async () => "tenant_created" as const)
     const app = createApp({
       clerkWebhooks: {
         db: null as never,
         signingSecret: "whsec_test",
         hostedDomains: ["i10.tech"],
-        provisioning: { onUserCreated, onOrganizationCreated: mock() },
+        provisioning: { onOrganizationCreated },
         log,
       },
     })
@@ -158,10 +104,10 @@ describe("the Clerk webhook route", () => {
     const res = await app.request("/webhooks/clerk", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "user.created", data: user }),
+      body: JSON.stringify({ type: "organization.created", data: org }),
     })
 
     expect(res.status).toBe(401)
-    expect(onUserCreated).not.toHaveBeenCalled()
+    expect(onOrganizationCreated).not.toHaveBeenCalled()
   })
 })

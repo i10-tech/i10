@@ -10,6 +10,8 @@ import {
   createCheckoutStatus,
   type CheckoutStatusDeps,
 } from "./routes/checkout-status.js"
+import { createInvitationLinks } from "./routes/invitation-links.js"
+import type { MembersDeps } from "./console/members.js"
 import { createConsole, type ConsoleDeps } from "./routes/console.js"
 import { createPolarWebhooks, type PolarWebhookDeps } from "./routes/polar-events.js"
 import { createGithubWebhooks, type GithubWebhookDeps } from "./routes/github-events.js"
@@ -178,6 +180,11 @@ export interface AppDeps {
    * it reports the row the Polar webhook writes. See routes/checkout-status.ts.
    */
   checkoutStatus?: CheckoutStatusDeps
+  /**
+   * The link in our invitation email (#327). Unauthenticated; answers about
+   * the one invitation whose id it names. See routes/invitation-links.ts.
+   */
+  invitationLinks?: MembersDeps
   /**
    * The dashboard's own surface, at `/console`.
    *
@@ -524,6 +531,9 @@ export function createApp(deps: AppDeps = {}) {
   // would be one refactor away from unguarding its neighbours. It grants
   // nothing - it reads back a row only the Polar webhook can move.
   app.route("/checkout-status", createCheckoutStatus(deps.checkoutStatus))
+
+  // The invitation email's link (#327), outside the document like the above.
+  app.route("/invitation-links", createInvitationLinks(deps.invitationLinks))
 
   // Mounted for the same reason and with the same exclusion from the document.
   // Traefik puts this path on `autoconfig.i10.tech` alongside Stalwart's own

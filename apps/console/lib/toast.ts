@@ -39,6 +39,7 @@ const TITLES: Record<string, string> = {
   domain_already_claimed: "Verified elsewhere at the same moment",
   plan_limit_exceeded: "Your plan does not cover that",
   tenant_not_ready: "Your workspace is still being set up",
+  no_workspace: "Choose a workspace first",
   invalid_access: "Please sign in again",
   service_unavailable: "We could not reach the service",
   gateway_timeout: "That took too long",

@@ -5,8 +5,7 @@ import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
 import { checkPassword } from "../../console/password-check.js"
 import { PURPOSE } from "../../console/code-cooldown.js"
-import { answerJoinRequest, setTeamDomain } from "../../console/team-domains.js"
-import { domainsOf } from "../../console/join.js"
+import { revokeExpired, seats, syncMemberLimit } from "../../console/members.js"
 
 /**
  * Who this workspace is, what it has used, and what it is paying for.
@@ -118,144 +117,56 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     return c.json({ retry_after: reserved.retryAfter })
   })
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // Join suggestions, ours (2026-10-13). See console/team-domains.ts.
-  // ───────────────────────────────────────────────────────────────────────────
+  // Team access - domains, rules, requests and the lists - is routes/console/team.ts (#326).
 
-  const forbidden = (message: string) =>
-    ({ statusCode: 403, name: "forbidden" as const, message }) as const
-
-  /** The workspace's verified domains, and which of them suggest it. */
-  app.get("/team/domain-suggestions", async (c) => {
-    if (!d.teamDomains) return c.json({ data: [], enabled: [] })
-    const { tenantId } = c.get("auth")
-    const [verified, enabled] = await Promise.all([
-      d.teamDomains.verified(tenantId),
-      d.teamDomains.store.enabled(tenantId),
-    ])
-    return c.json({ data: verified, enabled })
-  })
-
-  app.put("/team/domains", async (c) => {
-    if (!d.teamDomains) return c.json(notWired("Team domains"), 501)
-    const { tenantId } = c.get("auth")
-    const { userId, orgId } = c.get("user")
-    const body = await readJson(c)
-    const name = typeof body?.name === "string" ? body.name : ""
-    if (!name) return c.json(validation("`name` is required."), 422)
-    const outcome = await setTeamDomain(d.teamDomains, {
-      tenantId,
-      userId,
-      orgId,
-      name,
-      on: body?.on === true,
-    })
-    if (outcome === "ok")
-      return c.json({ name: name.trim().toLowerCase(), on: body?.on === true })
-    if (outcome === "forbidden")
-      return c.json(forbidden("Only an admin can change join suggestions."), 403)
-    if (outcome === "no_org")
-      return c.json(validation("Join suggestions need a team workspace."), 422)
-    return c.json(validation("Verify that domain on the Domains page first."), 422)
-  })
-
-  /** Unanswered requests to join this workspace. */
-  app.get("/team/join-requests", async (c) => {
-    if (!d.teamDomains) return c.json({ data: [] })
-    const { tenantId } = c.get("auth")
-    return c.json({ data: await d.teamDomains.store.pending(tenantId) })
-  })
-
-  app.post("/team/join-requests/:id", async (c) => {
-    if (!d.teamDomains) return c.json(notWired("Join requests"), 501)
-    const { tenantId } = c.get("auth")
-    const { userId, orgId } = c.get("user")
-    const body = await readJson(c)
-    const outcome = await answerJoinRequest(d.teamDomains, {
-      tenantId,
-      userId,
-      orgId,
-      id: c.req.param("id"),
-      accept: body?.accept === true,
-    })
-    if (outcome === "ok") return c.json({ ok: true })
-    if (outcome === "forbidden")
-      return c.json(forbidden("Only an admin can answer requests to join."), 403)
-    if (outcome === "no_org")
-      return c.json(validation("Join requests need a team workspace."), 422)
-    return c.json(notFound("That request was already answered."), 404)
+  /**
+   * The person's Personal workspace (#325), made the first time they pick it
+   * on onboarding. Answers with the Clerk organization to activate; the tenant
+   * follows through `organization.created` like any other workspace.
+   */
+  app.post("/workspaces/personal", async (c) => {
+    const createPersonal = d.organizations?.createPersonal
+    if (!createPersonal) return c.json(notWired("Personal workspaces"), 501)
+    const { userId } = c.get("user")
+    const made = await createPersonal(userId)
+    return c.json({ organization_id: made.id }, made.created ? 201 : 200)
   })
 
   /**
-   * Workspaces suggested to the signed-in person: those suggesting the domain
-   * of one of their VERIFIED addresses, which they are not already in.
+   * Turns the active Personal workspace into a team workspace (#325): a name,
+   * and room for more than one member. The tenant keeps everything it has.
    */
-  app.get("/me/join-suggestions", async (c) => {
-    if (!d.teamDomains || !d.people) return c.json({ data: [] })
+  app.post("/workspace/team", async (c) => {
+    const makeTeam = d.organizations?.makeTeam
+    if (!makeTeam) return c.json(notWired("Team workspaces"), 501)
     const { tenantId } = c.get("auth")
-    const { userId } = c.get("user")
-    const person = await d.people.get(userId).catch(() => null)
-    const seekerDomains = domainsOf(person?.verifiedEmails ?? [])
-    if (seekerDomains.length === 0) return c.json({ data: [] })
-    const memberOf = await d.teamDomains.memberOrgIds(userId)
-    const found = await d.teamDomains.store.suggestionsFor({
-      currentTenantId: tenantId,
-      userId,
-      seekerDomains,
-      exceptOrgIds: memberOf,
-    })
-    const faces = await d.teamDomains.describe(found.map((s) => s.clerkOrgId))
-    return c.json({
-      data: found.flatMap((s) => {
-        const face = faces[s.clerkOrgId]
-        if (!face) return []
-        return [
-          {
-            tenant_id: s.tenantId,
-            name: face.name,
-            image_url: face.imageUrl,
-            domain: s.domain,
-            requested: s.requested,
-          },
-        ]
-      }),
-    })
-  })
-
-  app.post("/me/join-requests", async (c) => {
-    if (!d.teamDomains || !d.people) return c.json(notWired("Join requests"), 501)
-    const { tenantId } = c.get("auth")
-    const { userId } = c.get("user")
+    const { userId, orgId } = c.get("user")
     const body = await readJson(c)
-    const target = typeof body?.tenant_id === "string" ? body.tenant_id : ""
-    if (!target) return c.json(validation("Which workspace?"), 422)
-    const person = await d.people.get(userId).catch(() => null)
-    const verified = person?.verifiedEmails ?? []
-    const seekerDomains = domainsOf(verified)
-    // The address shown to the admin: theirs at the domain that matched.
-    const suggestion = (
-      await d.teamDomains.store.suggestionsFor({
-        currentTenantId: tenantId,
-        userId,
-        seekerDomains,
-        exceptOrgIds: [],
-      })
-    ).find((s) => s.tenantId === target)
-    const email = suggestion
-      ? verified.find((e) => e.toLowerCase().endsWith(`@${suggestion.domain}`))
-      : undefined
-    if (!suggestion || !email)
-      return c.json(validation("That workspace is not suggested to you."), 422)
-    const outcome = await d.teamDomains.store.request({
-      currentTenantId: tenantId,
-      userId,
-      email,
-      seekerDomains,
-      tenantId: target,
-    })
-    if (outcome === "not_suggested")
-      return c.json(validation("That workspace is not suggested to you."), 422)
-    return c.json({ requested: true }, outcome === "created" ? 201 : 200)
+    const name = typeof body?.name === "string" ? body.name.trim() : ""
+    if (!name) return c.json(validation("`name` is required."), 422)
+    if (name.length > 120) return c.json(validation("`name` is too long."), 422)
+    if (!orgId) return c.json(validation("Open your Personal workspace first."), 422)
+    const outcome = await makeTeam(orgId, userId, name)
+    if (outcome === "not_personal")
+      return c.json(
+        validation("Only your Personal workspace can be turned into a team."),
+        422,
+      )
+    await d.profile.rename(tenantId, name)
+    /*
+     * ⚠ THE LIMIT COMES FROM THE PLAN NOW (#327), set after the mark changed
+     * so the sync reads a team. A Clerk failure here leaves it at one member
+     * until the next seat use corrects it (see `beforeSeatUse`).
+     */
+    if (d.members) {
+      await syncMemberLimit(d.members, tenantId).catch((error: unknown) =>
+        d.log.error(
+          { err: error, tenantId },
+          "could not set the new team's member limit",
+        ),
+      )
+    }
+    return c.json({ ok: true })
   })
 
   app.patch("/me/tenant", async (c) => {
@@ -315,12 +226,14 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
 
   app.get("/usage", async (c) => {
     const { tenantId } = c.get("auth")
-    const [usage, limits, billing] = await Promise.all([
+    const { orgId } = c.get("user")
+    const [usage, limits, billing, members] = await Promise.all([
       d.usage.usage(tenantId),
       d.usage.limits(tenantId),
       d.usage.billing(tenantId),
+      memberUsage(d, tenantId, orgId),
     ])
-    return c.json({ usage, limits, billing })
+    return c.json({ usage, limits, billing, members })
   })
 
   app.get("/plans", async (c) => {
@@ -732,7 +645,13 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     const outcome = await d.sendTest(
       tenantId,
       {
-        from: `i10 <hello@${domain}>`,
+        /*
+         * ⚠ THE WORKSPACE'S NAME, NOT OURS (2026-10-14). This mail goes from the
+         * customer's own domain, so "i10" in the inbox was the wrong name on
+         * it. Characters that would break the header or read as an address are
+         * dropped; "i10" only when nothing is left.
+         */
+        from: `${senderName(profile?.name)} <hello@${domain}>`,
         to: [to],
         template: { id: "welcome", variables },
         tags: [{ name: "onboarding_test", value: "true" }],
@@ -798,3 +717,42 @@ function returnTo(
 
 /** A plain address, for the one recipient a person may type in set-up. */
 const EMAIL = /^[^\s@<>,;"]+@[^\s@<>.,;"]+(?:\.[^\s@<>.,;"]+)*\.[A-Za-z]{2,}$/
+
+/**
+ * The member meter on /usage (#327): members, pending invitations and free
+ * spots against the plan's limit.
+ *
+ * ⚠ EXPIRED INVITATIONS ARE REVOKED FIRST, so the meter never counts a spot
+ * nobody holds. A Clerk failure leaves the meter out rather than the page.
+ */
+async function memberUsage(
+  d: ConsoleDeps,
+  tenantId: string,
+  orgId: string | undefined,
+) {
+  if (!d.members || !orgId) return null
+  try {
+    await revokeExpired(d.members, tenantId)
+    const room = await seats(d.members, tenantId, orgId)
+    if (room.personal) return null
+    return {
+      members: room.members,
+      invitations: room.invitations,
+      limit: room.limit,
+      free: room.free,
+    }
+  } catch (error) {
+    d.log.warn({ err: error, tenantId }, "could not read member usage")
+    return null
+  }
+}
+
+/** A workspace name fit for a `From` display name, or "i10". */
+export function senderName(raw: string | null | undefined): string {
+  const clean = (raw ?? "")
+    .replace(/[<>"'\\`$@,;:]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 64)
+  return clean || "i10"
+}

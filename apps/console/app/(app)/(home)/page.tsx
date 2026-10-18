@@ -21,6 +21,7 @@ import { TrendCard } from "@/components/trend-card"
 import { PanelError } from "@/components/panel-error"
 import { SendingHealthCard } from "@/components/sending-health"
 import { SendingStatusBanner } from "@/components/sending-status-banner"
+import { CapacityBanner } from "@/components/capacity-banner"
 import { JoinSuggestions } from "@/components/join-suggestions"
 import { tryApi } from "@/lib/api"
 import { formatRelative, bareAddress } from "@/lib/format"
@@ -76,6 +77,10 @@ export default async function OverviewPage({
         {/* What the rail's sending notice links to. Nothing when healthy. */}
         <Suspense fallback={null}>
           <SendingStatusBanner />
+        </Suspense>
+        {/* Admins only, at 80% and 100% of the member limit (#327). */}
+        <Suspense fallback={null}>
+          <CapacityBanner />
         </Suspense>
         {/*
          * Workspaces this person is suggested or invited to (2026-10-12).

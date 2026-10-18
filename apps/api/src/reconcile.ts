@@ -49,6 +49,10 @@
  * different things and share no state beyond the order above, so a Polar outage
  * must not also stop the SES leg from writing down mail that went.
  */
+import { createClerkClient } from "@clerk/backend"
+import { memberStore } from "./console/members-db.js"
+import { clerkMembers } from "./console/clerk-members.js"
+import { withMemberLimitSync } from "./console/members.js"
 import pino from "pino"
 import { subscriptionOps } from "./billing/db.js"
 import { subscriptionGrants } from "./billing/grants.js"
@@ -388,10 +392,21 @@ await withMonitor(
         // plan" a fact about the wiring rather than a rule to remember.
         grants: subscriptionGrants({
           subscriptions,
-          entitlements: postgresEntitlements({
-            db,
-            freePlanId: env.METERING_FREE_PLAN_ID,
-          }),
+          // ⚠ AND CLERK'S MEMBER LIMIT FOLLOWS A REPAIRED PLAN (#327), as on
+          // the webhook path. No mail here: alerts wait for the API's next look.
+          entitlements: withMemberLimitSync(
+            postgresEntitlements({
+              db,
+              freePlanId: env.METERING_FREE_PLAN_ID,
+            }),
+            () => ({
+              store: memberStore(db),
+              clerk: clerkMembers(
+                createClerkClient({ secretKey: env.CLERK_SECRET_KEY }),
+              ),
+              log,
+            }),
+          ),
           log,
         }),
         options: {

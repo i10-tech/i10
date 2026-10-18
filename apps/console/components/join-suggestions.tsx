@@ -48,7 +48,8 @@ function parse(raw: string): string[] {
  * up with an @acme.com address lands in their own new workspace and never
  * opens it - so Acme turning suggestions on reached nobody. A suggestion is
  * a request: they ask, an admin at Acme accepts (Team > Requests). An
- * invitation is already accepted on the other side, so it joins at once.
+ * invitation is already accepted on the other side, so it joins at once, and
+ * so does a workspace whose access rule for their address is auto-join (#326).
  *
  * ⚠ "NOT NOW" IS PER BROWSER AND PER SUGGESTION, in local storage. It hides a
  * card somebody has read; the switcher still lists it, and a new suggestion
@@ -65,6 +66,8 @@ export function JoinSuggestions({ className }: { className?: string }) {
   const dismissed = React.useMemo(() => parse(raw), [raw])
   const [hidden, setHidden] = React.useState<string[]>([])
   const [busy, setBusy] = React.useState<string | null>(null)
+  // Joined at once, but the workspace was full: a request was filed instead.
+  const [full, setFull] = React.useState<string[]>([])
 
   if (!isLoaded || suggestions.list === null) return null
 
@@ -72,7 +75,7 @@ export function JoinSuggestions({ className }: { className?: string }) {
     id: string
     name: string
     image?: string
-    kind: "suggestion" | "invitation"
+    kind: "suggestion" | "invitation" | "auto"
     requested: boolean
     act: () => Promise<void>
   }
@@ -96,12 +99,30 @@ export function JoinSuggestions({ className }: { className?: string }) {
       id: `suggest:${suggestion.tenant_id}`,
       name: suggestion.name,
       image: suggestion.image_url ?? undefined,
-      kind: "suggestion" as const,
+      kind: suggestion.mode === "auto" ? ("auto" as const) : ("suggestion" as const),
       requested: suggestion.requested,
-      act: async () => {
-        const result = await suggestions.ask(suggestion.tenant_id)
-        if (!result.ok) throw new Error(result.error)
-      },
+      act:
+        suggestion.mode === "auto"
+          ? /*
+             * ⚠ JOIN, NOT ASK (#326): the workspace's rule lets people at this
+             * address straight in. A full workspace files a request instead,
+             * and the card says so rather than failing.
+             */
+            async () => {
+              const result = await suggestions.join(suggestion.tenant_id)
+              if (!result.ok) throw new Error(result.error)
+              if (result.data.full || !result.data.organization_id) {
+                setFull((list) => [...list, `suggest:${suggestion.tenant_id}`])
+                return
+              }
+              await setActive?.({ organization: result.data.organization_id })
+              router.push("/")
+              router.refresh()
+            }
+          : async () => {
+              const result = await suggestions.ask(suggestion.tenant_id)
+              if (!result.ok) throw new Error(result.error)
+            },
     })),
   ].filter((row) => !dismissed.includes(row.id) && !hidden.includes(row.id))
   // Nothing to say: no box, and no padding reserved for one.
@@ -124,7 +145,7 @@ export function JoinSuggestions({ className }: { className?: string }) {
       await row.act()
     } catch (error) {
       toastError(
-        row.kind === "invitation" ? "Could not join" : "Could not ask to join",
+        row.kind === "suggestion" ? "Could not ask to join" : "Could not join",
         // Clerk's reason for an invitation; ours (the API's message) for a request.
         clerkReason(error, error instanceof Error ? error.message : undefined),
       )
@@ -136,53 +157,60 @@ export function JoinSuggestions({ className }: { className?: string }) {
   return (
     <div className={className}>
       <MotionList>
-        {rows.map((row) => (
-          <MotionItem key={row.id}>
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4">
-              <span className="flex min-w-0 items-center gap-3">
-                <Avatar name={row.name} src={row.image} className="rounded-lg" />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">
-                    {row.kind === "invitation"
-                      ? `You're invited to ${row.name}`
-                      : `${row.name} uses i10`}
-                  </span>
-                  <span className="block text-xs text-muted-foreground">
-                    <TextMorph>
+        {rows.map((row) => {
+          const waiting = row.requested || full.includes(row.id)
+          return (
+            <MotionItem key={row.id}>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4">
+                <span className="flex min-w-0 items-center gap-3">
+                  <Avatar name={row.name} src={row.image} className="rounded-lg" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium">
                       {row.kind === "invitation"
-                        ? "Join to see its domains, emails and settings."
-                        : row.requested
-                          ? "Asked. An admin there will let you in."
-                          : "Your email address is at its domain. Ask to join and an admin there approves it."}
-                    </TextMorph>
+                        ? `You're invited to ${row.name}`
+                        : `${row.name} uses i10`}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      <TextMorph>
+                        {full.includes(row.id)
+                          ? `${row.name} is full right now. We've asked its admins to add you.`
+                          : row.kind === "invitation"
+                            ? "Join to see its domains, emails and settings."
+                            : row.requested
+                              ? "Asked. An admin there will let you in."
+                              : row.kind === "auto"
+                                ? "Your email address is at its domain, so you can join straight away."
+                                : "Your email address is at its domain. Ask to join and an admin there approves it."}
+                      </TextMorph>
+                    </span>
                   </span>
                 </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-1">
-                {!row.requested && (
-                  <Button variant="ghost" size="sm" onClick={() => dismiss(row.id)}>
-                    Not now
-                  </Button>
-                )}
-                {row.requested ? (
-                  <span className="flex items-center gap-1.5 px-3 text-sm text-muted-foreground">
-                    <Check className="size-4 text-success" aria-hidden />
-                    Requested
-                  </span>
-                ) : (
-                  <Button
-                    size="sm"
-                    loading={busy === row.id}
-                    disabled={busy !== null}
-                    onClick={() => void act(row)}
-                  >
-                    {row.kind === "invitation" ? "Join" : "Request to join"}
-                  </Button>
-                )}
-              </span>
-            </div>
-          </MotionItem>
-        ))}
+                <span className="flex shrink-0 items-center gap-1">
+                  {!waiting && (
+                    <Button variant="ghost" size="sm" onClick={() => dismiss(row.id)}>
+                      Not now
+                    </Button>
+                  )}
+                  {waiting ? (
+                    <span className="flex items-center gap-1.5 px-3 text-sm text-muted-foreground">
+                      <Check className="size-4 text-success" aria-hidden />
+                      Requested
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      loading={busy === row.id}
+                      disabled={busy !== null}
+                      onClick={() => void act(row)}
+                    >
+                      {row.kind === "suggestion" ? "Request to join" : "Join"}
+                    </Button>
+                  )}
+                </span>
+              </div>
+            </MotionItem>
+          )
+        })}
       </MotionList>
     </div>
   )

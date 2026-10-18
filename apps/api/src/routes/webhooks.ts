@@ -43,6 +43,27 @@ export interface ClerkWebhookDeps {
    * still switched on per template, remains the only sender.
    */
   authEmail?: ReturnType<typeof authEmailDelivery>
+  /**
+   * Auto-join at sign-up (#326): `user.created` adds the new person to every
+   * workspace whose access rule for one of their VERIFIED addresses is
+   * auto-join, or files a request where the workspace is full.
+   *
+   * ⚠ OUTSIDE THE SVIX DEDUPE, LIKE PROVISIONING, AND IDEMPOTENT FOR THE SAME
+   * REASON: a retry is the only repair for a Clerk call that failed the first
+   * time. Absent, nobody is auto-joined and suggestions still work.
+   */
+  autoJoin?: (data: unknown) => Promise<string | null>
+  /**
+   * Member limits and invitations (#327): a new organization gets its plan's
+   * limit; an invitation accepted after we expired it is undone; members
+   * moving re-check the capacity alerts. Outside the dedupe and idempotent,
+   * like the two above.
+   *
+   * ⚠ NEEDS THESE EVENTS SUBSCRIBED ON CLERK'S WEBHOOK ENDPOINT:
+   * `organizationInvitation.accepted`, `organizationInvitation.revoked`,
+   * `organizationMembership.created` and `organizationMembership.deleted`.
+   */
+  members?: (type: string, data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -132,6 +153,8 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // the only chance to fix it, and swallowing that leaves somebody with an
       // account that can never send. Both halves are idempotent on their own.
       const provisioned = await provision(deps, event.type, event.data)
+      // After provisioning, so a new organization's tenant exists to read.
+      const members = (await deps.members?.(event.type, event.data)) ?? null
 
       // ⚠ OUTSIDE THE DEDUPE FOR THE SAME REASON PROVISIONING IS, and safe for
       // a different one. `applyClerkEvent` claims the Svix id and answers
@@ -150,6 +173,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
           type: event.type,
           outcome: result.outcome,
           ...(provisioned ? { provisioned } : {}),
+          ...(members ? { members } : {}),
           ...(emailed ? { emailed } : {}),
         },
         "clerk webhook applied",
@@ -191,8 +215,6 @@ async function provision(
   data: unknown,
 ): Promise<string | null> {
   switch (type) {
-    case "user.created":
-      return deps.provisioning?.onUserCreated(data) ?? null
     case "organization.created":
       return deps.provisioning?.onOrganizationCreated(data) ?? null
 
@@ -224,6 +246,13 @@ async function provision(
       return deps.lifecycle?.onOrganizationUpdated(data) ?? null
     case "user.deleted":
       return deps.lifecycle?.onUserDeleted(data) ?? null
+
+    /*
+     * ⚠ NO WORKSPACE IS MADE HERE ANY MORE (#325); a new person is only ever
+     * added to workspaces that asked for people at their address (#326).
+     */
+    case "user.created":
+      return deps.autoJoin?.(data) ?? null
 
     default:
       return null

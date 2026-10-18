@@ -2,11 +2,12 @@ import { Hono } from "hono"
 import type { Context } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { MAX_SET_BYTES } from "@repo/templates"
-import { requireTenant } from "../middleware/tenant.js"
+import { NO_TENANT, requireTenant } from "../middleware/tenant.js"
 import { requireFreshAuth } from "../middleware/session.js"
 import type { ConsoleDeps } from "./console/deps.js"
 import { notWired } from "./console/http.js"
 import { mountAccount } from "./console/account.js"
+import { mountTeam } from "./console/team.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountTemplates } from "./console/templates.js"
@@ -57,6 +58,20 @@ declare module "hono" {
   }
 }
 
+/**
+ * Routes about the PERSON, which answer for somebody with no workspace (#325):
+ * what they are suggested, asking to join, joining at once where a rule says
+ * auto-join, what happened at sign-up (#326), and making a Personal
+ * workspace. Everything else needs an active organization.
+ */
+const WITHOUT_WORKSPACE = new Set([
+  "/me/join-suggestions",
+  "/me/join-requests",
+  "/me/joins",
+  "/me/arrivals",
+  "/workspaces/personal",
+])
+
 export function createConsole(deps?: ConsoleDeps) {
   const app = new Hono()
 
@@ -75,6 +90,7 @@ export function createConsole(deps?: ConsoleDeps) {
       sessions: d.sessions,
       tenants: d.tenants,
       ...(d.activeOrg ? { activeOrg: d.activeOrg } : {}),
+      workspaceOptional: WITHOUT_WORKSPACE.has(c.req.path.replace(/^\/console/, "")),
     })
     // ⚠ SET FOR EVERY ROUTE, READ BY ALMOST NONE. `requireFreshAuth` is applied
     // per route rather than here: a step-up prompt in front of "list my
@@ -94,7 +110,7 @@ export function createConsole(deps?: ConsoleDeps) {
     app.use("*", async (c, next) => {
       const user = c.get("user") as { userId: string } | undefined
       const auth = c.get("auth") as { tenantId: string } | undefined
-      if (user && auth) {
+      if (user && auth && auth.tenantId !== NO_TENANT) {
         try {
           observe({ userId: user.userId, tenantId: auth.tenantId, request: c.req.raw })
         } catch {
@@ -220,6 +236,7 @@ export function createConsole(deps?: ConsoleDeps) {
    * is no second router with its own lifecycle to reason about.
    */
   mountAccount(app, d)
+  mountTeam(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)

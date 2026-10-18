@@ -271,6 +271,99 @@ describe("a deletion arriving from Clerk", () => {
   })
 })
 
+/**
+ * Auto-join at sign-up (#326): `user.created` reaches the hook even when the
+ * projection has seen the message before, and a failure is a 500 so Svix
+ * retries - the hook itself is idempotent.
+ */
+describe("a sign-up arriving from Clerk", () => {
+  const autoJoin = mock(async () => "joined:org_acme" as string | null)
+  const hooked = () =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        autoJoin,
+      },
+    })
+  const send = (body: string, id: string) =>
+    hooked().request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(body, id),
+      body,
+    })
+
+  beforeEach(() => {
+    autoJoin.mockClear()
+    applyClerkEvent.mockResolvedValue({ outcome: "upserted", email: "a@i10.tech" })
+  })
+
+  it("hands user.created to auto-join and reports what it did", async () => {
+    const res = await send(event, "msg_signup")
+    expect(res.status).toBe(200)
+    expect(autoJoin).toHaveBeenCalledTimes(1)
+    expect(await res.json()).toMatchObject({ provisioned: "joined:org_acme" })
+  })
+
+  it("runs again on a redelivery the projection discards as a duplicate", async () => {
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+    await send(event, "msg_signup")
+    expect(autoJoin).toHaveBeenCalledTimes(1)
+  })
+
+  it("answers 500 when Clerk could not be reached, so Svix retries", async () => {
+    autoJoin.mockRejectedValueOnce(new Error("clerk down"))
+    expect((await send(event, "msg_signup")).status).toBe(500)
+  })
+})
+
+/**
+ * Member limits and invitations (#327): accepted and revoked invitations and
+ * membership changes reach the members hook, outside the dedupe, and a
+ * failure is a 500 so Svix retries.
+ */
+describe("membership events arriving from Clerk", () => {
+  const members = mock(async (type: string) => `seen:${type}` as string | null)
+  const accepted = JSON.stringify({
+    type: "organizationInvitation.accepted",
+    data: { id: "orginv_1", organization_id: "org_acme", user_id: "user_late" },
+  })
+  const send = (id: string) =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        members,
+      },
+    }).request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(accepted, id),
+      body: accepted,
+    })
+
+  beforeEach(() => {
+    members.mockClear()
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+  })
+
+  it("hands the event to the members hook even as a duplicate", async () => {
+    const res = await send("msg_accept")
+    expect(res.status).toBe(200)
+    expect(members).toHaveBeenCalledWith("organizationInvitation.accepted", {
+      id: "orginv_1",
+      organization_id: "org_acme",
+      user_id: "user_late",
+    })
+  })
+
+  it("answers 500 when the hook fails, so Svix retries", async () => {
+    members.mockRejectedValueOnce(new Error("clerk down"))
+    expect((await send("msg_accept")).status).toBe(500)
+  })
+})
+
 describe("GET /readyz", () => {
   it("reports ok when the database answers", async () => {
     const res = await createApp({ pingDb: async () => {} }).request("/readyz")

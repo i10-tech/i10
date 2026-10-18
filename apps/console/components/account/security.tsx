@@ -1105,7 +1105,16 @@ function DeleteAccount({
           try {
             const done = await reverify(() => user.delete())
             if (done === null) return false
-            await clerk.signOut({ redirectUrl: "/" })
+            /*
+             * ⚠ THE NAVIGATION IS OURS, NOT `signOut`'s (2026-10-13). Deleting
+             * the user ends its session, and Clerk's `signOut` opens with
+             * `if (!this.client || !this.session) return` - so its
+             * `redirectUrl` never fired and the page sat on the dialog until a
+             * refresh. Any other signed-in session is still signed out; then
+             * a real page load of `/`, which the middleware sends to sign-in.
+             */
+            await clerk.signOut().catch(() => {})
+            window.location.replace("/")
             return true
           } catch (error) {
             toastError("Could not delete your account", clerkReason(error))

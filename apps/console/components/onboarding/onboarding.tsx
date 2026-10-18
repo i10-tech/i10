@@ -38,6 +38,7 @@ import { Status } from "@/components/status"
 import { EASE, StepItem, StepRail } from "@/components/steps"
 import {
   acceptTransfer,
+  createPersonalWorkspace,
   renameWorkspace,
   updateOnboarding,
   workspaceReady,
@@ -325,7 +326,8 @@ export function Onboarding({
                       <CreateWorkspaceForm
                         value={name}
                         onChange={setName}
-                        onCreated={(newTenantId) => {
+                        onCreated={(newTenantId, madeName) => {
+                          setName(madeName)
                           // The new workspace's own step, from here on.
                           rememberStep(newTenantId, "domain")
                           void updateOnboarding({ step: "domain" })
@@ -400,6 +402,7 @@ export function Onboarding({
                       hasApiKey={state.facts.has_api_key}
                       recipient={userEmail}
                       firstName={firstName}
+                      workspaceName={name || workspaceName}
                       onSent={(to) => setSentTo(to)}
                       onDone={() => advance("send")}
                     />
@@ -602,33 +605,61 @@ function CreateWorkspaceForm({
 }: {
   value: string
   onChange: (value: string) => void
-  onCreated: (tenantId: string) => void
+  onCreated: (tenantId: string, name: string) => void
 }) {
   const clerk = useClerk()
-  const [creating, setCreating] = React.useState(false)
+  const [creating, setCreating] = React.useState<"named" | "personal" | null>(null)
+
+  /** Activates the organization and waits for our tenant behind it. */
+  async function enter(orgId: string, name: string) {
+    await clerk.setActive({ organization: orgId })
+    announceWorkspacesChanged()
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const tenantId = await workspaceReady(orgId)
+      if (tenantId) return onCreated(tenantId, name)
+      await new Promise((resolve) => setTimeout(resolve, 750))
+    }
+    toastError(
+      "The workspace is still being set up",
+      "It was created. Reload in a moment to carry on.",
+    )
+    setCreating(null)
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     const next = value.trim()
     if (!next || creating) return
-    setCreating(true)
+    setCreating("named")
     try {
       const made = await clerk.createOrganization({ name: next })
-      await clerk.setActive({ organization: made.id })
-      announceWorkspacesChanged()
-      for (let attempt = 0; attempt < 40; attempt++) {
-        const tenantId = await workspaceReady(made.id)
-        if (tenantId) return onCreated(tenantId)
-        await new Promise((resolve) => setTimeout(resolve, 750))
-      }
-      toastError(
-        "The workspace is still being set up",
-        "It was created. Reload in a moment to carry on.",
-      )
+      await enter(made.id, next)
     } catch (error) {
       toastError("Could not create the workspace", clerkReason(error))
+      setCreating(null)
     }
-    setCreating(false)
+  }
+
+  /*
+   * ⚠ PERSONAL IS MADE BY OUR API, NOT BY CLERK'S BROWSER CALL (#325). It is
+   * limited to one member, and only the backend can set an organization's
+   * limit. Pressing it again finds the one they have.
+   */
+  async function personal() {
+    if (creating) return
+    setCreating("personal")
+    try {
+      const made = await createPersonalWorkspace()
+      if (!made.ok) {
+        toastError("Could not create your Personal workspace", made.error)
+        setCreating(null)
+        return
+      }
+      await enter(made.data.organization_id, "Personal")
+    } catch (error) {
+      toastError("Could not create your Personal workspace", clerkReason(error))
+      setCreating(null)
+    }
   }
 
   return (
@@ -641,11 +672,30 @@ function CreateWorkspaceForm({
         data-carry="value"
         maxLength={120}
         autoFocus
-        disabled={creating}
+        disabled={creating !== null}
       />
-      <Button type="submit" loading={creating} disabled={!value.trim()}>
-        Continue
-      </Button>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="submit"
+          loading={creating === "named"}
+          disabled={!value.trim() || creating !== null}
+        >
+          Continue
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          loading={creating === "personal"}
+          disabled={creating !== null}
+          onClick={() => void personal()}
+        >
+          Use a Personal workspace
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Personal is just for you, with nothing to name. You can turn it into a team
+        workspace later.
+      </p>
     </form>
   )
 }
@@ -1045,6 +1095,7 @@ function SendStep({
   hasApiKey,
   recipient,
   firstName,
+  workspaceName,
   onSent,
   onDone,
 }: {
@@ -1053,6 +1104,7 @@ function SendStep({
   hasApiKey: boolean
   recipient: string | null
   firstName: string | null
+  workspaceName: string
   onSent: (to: string) => void
   onDone: () => void
 }) {
@@ -1068,6 +1120,7 @@ function SendStep({
       hasApiKey={hasApiKey}
       recipient={recipient}
       firstName={firstName}
+      workspaceName={workspaceName}
       already={already}
       onSent={({ to }) => onSent(to)}
       onDone={onDone}

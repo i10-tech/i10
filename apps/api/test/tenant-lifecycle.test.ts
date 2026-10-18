@@ -348,9 +348,8 @@ describe("a deleted user who owned workspaces", () => {
 })
 
 /*
- * ⚠ WE CREATE THE ORGANIZATION, SO WE HAVE TO REMOVE IT. `onUserCreated` makes
- * a personal organization for anybody who signs up without one, and nothing
- * ever took it away again - so a deleted account left an organization with zero
+ * ⚠ AN ORGANIZATION NOBODY IS LEFT IN HAS TO BE REMOVED. Until #325 every
+ * sign-up was given a personal organization, and nothing ever took it away - so a deleted account left an organization with zero
  * members standing in Clerk for ever. Measured in production 2026-09-20: two of
  * them, both answering 200 with `total_count: 0`.
  */
