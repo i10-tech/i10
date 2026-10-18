@@ -50,7 +50,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: renderer
-          image: ghcr.io/i10-tech/i10-template-renderer:prod-bf8106d7c1f8f9b39e34933637e7758a9641d860@sha256:66d06b1de59ac17de600d05e9b6bc9d4a1b743ef6fb58860e555186ccc745bee
+          image: ghcr.io/i10-tech/i10-template-renderer:prod-dde7f105dbcb6fc4bff6a27000634325b7eda2a1@sha256:2ff72585ec42b09ff76757bed7843aa3ef999bd66e9c39ed5c1d7d543981cb1f
           imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 8787 }
