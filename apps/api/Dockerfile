@@ -8,7 +8,7 @@
 # this version - `.bun-version`, `packageManager` in package.json, BUN_VERSION
 # in ci.yml, and every Dockerfile base image - and they move together. A
 # floating major would let the image drift away from what CI tested.
-FROM oven/bun:1.4.2-alpine AS base
+FROM oven/bun:1.4.3-alpine AS base
 
 FROM base AS deps
 WORKDIR /repo
