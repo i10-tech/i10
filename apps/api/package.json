@@ -14,6 +14,7 @@
     "db:migrate": "drizzle-kit migrate",
     "openapi": "bun scripts/generate-openapi.ts",
     "adopt-dkim": "bun scripts/adopt-dkim.ts",
+    "workspace-roles": "bun scripts/workspace-roles.ts",
     "risk-admin": "bun src/risk-admin.ts"
   },
   "dependencies": {

@@ -48,7 +48,13 @@ export default async function GeneralSettingsPage() {
    * button itself in the danger zone. The page below is the no-Clerk preview.
    */
   if (process.env.CLERK_PUBLISHABLE_KEY) {
-    return <WorkspaceGeneral tenant={tenant} billing={me.data.billing} />
+    return (
+      <WorkspaceGeneral
+        tenant={tenant}
+        billing={me.data.billing}
+        access={me.data.access}
+      />
+    )
   }
 
   return (

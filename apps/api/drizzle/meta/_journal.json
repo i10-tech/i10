@@ -918,6 +918,20 @@
       "when": 1791926588538,
       "tag": "0130_join_domains_due",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792437664879,
+      "tag": "0131_workspace_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1792440658794,
+      "tag": "0132_invitation_applied",
+      "breakpoints": true
     }
   ]
 }

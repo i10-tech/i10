@@ -131,6 +131,7 @@ export function deps(
 ) {
   const mem = memory(rules)
   const added: { orgId: string; userId: string; role: string }[] = []
+  const released: { actor: string; member: string }[] = []
   const removed: string[] = []
   const invited: string[] = []
   const members = new Set(over.member ?? [])
@@ -146,11 +147,15 @@ export function deps(
       members.add(userId)
       return "added"
     },
+    release: async (_t, _o, actor, member) => {
+      released.push({ actor, member })
+      return { outcome: "ok", undo: async () => {} }
+    },
     removeMember: async (_o, userId) => void removed.push(userId),
     invite: async (_o, _i, email) => void invited.push(email),
     emailsOf: async () => ["gone@pslhq.app", "Other@Example.com"],
     isPersonal: async () => false,
     ...over,
   }
-  return { d, added, removed, invited, ...mem }
+  return { d, added, removed, released, invited, ...mem }
 }

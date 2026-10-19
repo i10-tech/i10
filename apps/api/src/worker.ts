@@ -37,6 +37,7 @@ import {
   startInvitationWorker,
 } from "./queue/invitation-queue.js"
 import { memberStore } from "./console/members-db.js"
+import { roleStore } from "./console/roles-db.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { expireInvitation } from "./console/members.js"
 
@@ -381,6 +382,8 @@ function startInvitationExpiry() {
   const members = {
     store: memberStore(db),
     clerk: clerkMembers(createClerkClient({ secretKey: env.CLERK_SECRET_KEY })),
+    // Read only for capacity alerts, which this process has no mail to send.
+    roles: roleStore(db),
     log,
   }
   const worker = startInvitationWorker({

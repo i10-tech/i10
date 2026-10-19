@@ -36,6 +36,7 @@ import type { PasswordCheckDeps } from "../../console/password-check.js"
 import type { TeamDomainDeps } from "../../console/team-domains.js"
 import type { Reservation } from "../../console/code-cooldown.js"
 import type { MembersDeps } from "../../console/members.js"
+import type { RolesDeps } from "../../console/roles.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -149,6 +150,13 @@ export interface ConsoleDeps extends TenantAuthDeps {
   organizations?: {
     rename(clerkOrgId: string, name: string): Promise<void>
     /**
+     * A new team workspace for this person (#335): created through the
+     * backend, its creator demoted in Clerk at once (`createWorkspace` in
+     * console/roles.ts). `not_allowed` when Clerk's own settings for them
+     * would have refused it.
+     */
+    create?(userId: string, name: string): Promise<{ id: string } | "not_allowed">
+    /**
      * This person's Personal workspace, made if they have none (#325): named
      * "Personal", limited to one member. `created` is false when it existed.
      */
@@ -162,6 +170,14 @@ export interface ConsoleDeps extends TenantAuthDeps {
       userId: string,
       name: string,
     ): Promise<"ok" | "not_personal">
+    /**
+     * Deletes the organization (#335): Clerk's `organization.deleted` then
+     * tears the tenant down, as it always has. Already gone is `already_gone`.
+     */
+    remove?(clerkOrgId: string): Promise<"deleted" | "already_gone">
+    /** The workspace's logo, through Clerk's backend API (#335). */
+    setLogo?(clerkOrgId: string, file: Blob, uploaderUserId: string): Promise<void>
+    removeLogo?(clerkOrgId: string): Promise<void>
   }
   /**
    * The Clerk organizations a person belongs to - where an accepted domain may
@@ -197,6 +213,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * stay empty.
    */
   teamDomains?: TeamDomainDeps
+  /**
+   * Workspace roles (#335): who may do what, from our table. Optional like
+   * the rest; without it every check that needs a role refuses, and the
+   * routes that change roles answer 501.
+   */
+  roles?: RolesDeps
   /**
    * Member limits per plan, invitations with a chosen expiry and capacity
    * alerts (#327). Optional; without it invitations answer 501 and the Team

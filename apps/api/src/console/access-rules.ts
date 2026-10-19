@@ -1,4 +1,5 @@
 import type { JoinRule } from "../db/core.js"
+import { parseJoinRole } from "./roles.js"
 
 /**
  * Team access rules (#326), pure: which names may be access domains, which
@@ -206,9 +207,18 @@ export function cleanRules(
     if (problem) return { ok: false, error: problem }
     if (r.mode !== "off" && r.mode !== "suggest" && r.mode !== "auto")
       return { ok: false, error: "A rule's mode is off, suggest or auto." }
-    const role = typeof r.role === "string" && r.role.trim() ? r.role.trim() : ""
-    if (!/^org:[a-z0-9_:-]{1,64}$/.test(role))
-      return { ok: false, error: "A rule needs a role." }
+    // ⚠ MEMBER OR ADMIN, NEVER OWNER: ownership is never given by an address.
+    const role = parseJoinRole(r.role)
+    if (!role)
+      return {
+        ok: false,
+        error:
+          typeof r.role !== "string" || !r.role.trim()
+            ? "A rule needs a role."
+            : r.role.trim() === "owner"
+              ? "A rule can't make anyone an owner."
+              : "A rule's role is member or admin.",
+      }
     const pattern = normalizeName(r.pattern)
     if (seen.has(pattern)) return { ok: false, error: `${pattern} is listed twice.` }
     seen.add(pattern)
@@ -262,7 +272,7 @@ export interface Match {
   email: string
   pattern: string
   mode: Exclude<JoinMode, "off">
-  role: string
+  role: JoinRule["role"]
 }
 
 const STRENGTH: Record<JoinMode, number> = { off: 0, suggest: 1, auto: 2 }

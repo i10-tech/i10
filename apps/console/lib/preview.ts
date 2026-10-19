@@ -952,6 +952,18 @@ const ROUTES: [
         should_onboard: false,
         facts: { has_domain: true, has_verified_domain: true, has_api_key: true },
       },
+      // The reviewer sees everything an owner would (#335).
+      access: {
+        role: "owner",
+        permissions: [
+          "members:manage",
+          "access_domains:manage",
+          "roles:manage",
+          "owners:manage",
+          "workspace:manage",
+          "workspace:delete",
+        ],
+      },
     }),
   ],
 

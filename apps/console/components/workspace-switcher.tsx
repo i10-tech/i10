@@ -21,6 +21,9 @@ import { useCreateWorkspace } from "@/lib/create-workspace"
 import { toastDone, toastError } from "@/lib/toast"
 import { useWorkspacesChanged } from "@/lib/workspace-name"
 import { useJoinSuggestions } from "@/lib/join-suggestions"
+import { teamRoles } from "@/lib/actions"
+import { roleLabel } from "@/lib/roles"
+import type { WorkspaceRole } from "@/lib/types"
 
 /**
  * The workspace switcher, ours (2026-10-12) - what Clerk's
@@ -44,7 +47,7 @@ import { useJoinSuggestions } from "@/lib/join-suggestions"
  */
 export function WorkspaceSwitcher() {
   const router = useRouter()
-  const { organization, membership } = useOrganization()
+  const { organization } = useOrganization()
   const { isLoaded, setActive, userMemberships, userInvitations } = useOrganizationList(
     {
       userMemberships: { pageSize: 50 },
@@ -57,6 +60,24 @@ export function WorkspaceSwitcher() {
   const [busy, setBusy] = React.useState<string | null>(null)
   /** A switch closed the menu: focus is not handed back to the trigger. */
   const switched = React.useRef(false)
+  /*
+   * ⚠ YOUR ROLE IS OURS (#335), read once per workspace. Clerk's
+   * `membership.roleName` says "Member" for everybody now.
+   */
+  const [role, setRole] = React.useState<{ org: string; role: WorkspaceRole } | null>(
+    null,
+  )
+  const orgId = organization?.id
+  React.useEffect(() => {
+    if (!orgId) return
+    let current = true
+    void teamRoles().then((result) => {
+      if (current && result.ok) setRole({ org: orgId, role: result.data.me.role })
+    })
+    return () => {
+      current = false
+    }
+  }, [orgId])
   // A rename, a logo or a delete elsewhere: Clerk's cached copies are re-read.
   useWorkspacesChanged(() => {
     void organization?.reload().catch(() => {})
@@ -132,7 +153,7 @@ export function WorkspaceSwitcher() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{name}</span>
                   <span className="block truncate text-xs text-muted-foreground">
-                    {membership?.roleName ?? "Member"}
+                    {role?.org === organization.id ? roleLabel(role.role) : "\u00a0"}
                   </span>
                 </span>
               </div>

@@ -61,14 +61,15 @@ declare module "hono" {
 /**
  * Routes about the PERSON, which answer for somebody with no workspace (#325):
  * what they are suggested, asking to join, joining at once where a rule says
- * auto-join, what happened at sign-up (#326), and making a Personal
- * workspace. Everything else needs an active organization.
+ * auto-join, what happened at sign-up (#326), and making a workspace,
+ * Personal or team (#335). Everything else needs an active organization.
  */
 const WITHOUT_WORKSPACE = new Set([
   "/me/join-suggestions",
   "/me/join-requests",
   "/me/joins",
   "/me/arrivals",
+  "/workspaces",
   "/workspaces/personal",
 ])
 
@@ -203,6 +204,13 @@ export function createConsole(deps?: ConsoleDeps) {
   app.use("/contacts/import", async (c, next) => {
     c.set("bodyLimited", true)
     return csvBodyLimit(c, next)
+  })
+  // ⚠ A WORKSPACE LOGO IS RAW IMAGE BYTES (#335): the editor's 512px square,
+  // which a PNG can take past 256 KB.
+  const logoBodyLimit = bodyLimit({ maxSize: 2 * 1024 * 1024, onError: tooLarge })
+  app.use("/workspace/logo", async (c, next) => {
+    c.set("bodyLimited", true)
+    return logoBodyLimit(c, next)
   })
   for (const path of [
     "/templates/upload",

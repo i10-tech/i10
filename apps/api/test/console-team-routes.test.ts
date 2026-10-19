@@ -11,7 +11,7 @@ import { ACME, deps } from "./team-access-fixtures.js"
  * and that the person routes read addresses from Clerk, never the body.
  */
 
-const auto: JoinRule[] = [{ pattern: "*.pslhq.app", mode: "auto", role: "org:member" }]
+const auto: JoinRule[] = [{ pattern: "*.pslhq.app", mode: "auto", role: "member" }]
 
 function appWith(
   t: ReturnType<typeof deps>,
@@ -94,7 +94,7 @@ describe("access domain routes", () => {
       "PUT",
       `/team/access-domains/${crypto.randomUUID()}/rules`,
       {
-        rules: [{ pattern: "*.app", mode: "auto", role: "org:member" }],
+        rules: [{ pattern: "*.app", mode: "auto", role: "member" }],
       },
     )
     expect(res.status).toBe(404)
@@ -173,7 +173,7 @@ describe("person routes", () => {
 
 describe("member and request routes", () => {
   it("answers 409 workspace_full when accepting into a full workspace", async () => {
-    const t = deps([{ pattern: "*.pslhq.app", mode: "suggest", role: "org:member" }], {
+    const t = deps([{ pattern: "*.pslhq.app", mode: "suggest", role: "member" }], {
       full: true,
     })
     await t.store.fileRequest(ACME.tenantId, {

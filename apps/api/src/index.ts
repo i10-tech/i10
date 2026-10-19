@@ -26,6 +26,18 @@ import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { createInvitationQueue, invitationScheduler } from "./queue/invitation-queue.js"
 import { memberStore } from "./console/members-db.js"
+import { roleStore } from "./console/roles-db.js"
+import {
+  CLERK_ROLE,
+  addMember as addRuleMember,
+  can,
+  createWorkspace,
+  mayCreateWorkspace,
+  onClerkEvent as onRoleEvent,
+  releaseMember,
+  type JoinRole,
+  type RolesDeps,
+} from "./console/roles.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { memberMail } from "./console/member-mail.js"
 import {
@@ -780,9 +792,130 @@ if (systemSender && consoleUrl) {
  * invitation email keeps Clerk's own link.
  */
 const invitationQueue = createInvitationQueue({ redis: queueRedis })
+
+/**
+ * Workspace roles (#335): ours, in `core.workspace_roles`. Every check reads
+ * the table; Clerk is only asked to make and end memberships (always as
+ * `org:member`) and, in the webhook, for a joining person's addresses.
+ */
+const roleRows = roleStore(db)
+const clerkCodes = (error: unknown) =>
+  ((error as { errors?: { code?: string }[] }).errors ?? []).map((e) => e.code)
+const verifiedEmailsOf = async (userId: string) => {
+  try {
+    const user = await clerk.users.getUser(userId)
+    return user.emailAddresses
+      .filter((e) => e.verification?.status === "verified")
+      .map((e) => e.emailAddress.toLowerCase())
+  } catch (error) {
+    // A deleted account has no addresses left; the join record still names one.
+    if (clerkNotFound(error)) return []
+    throw error
+  }
+}
+const roles: RolesDeps = {
+  store: roleRows,
+  tenantOf: (orgId: string) => memberStore(db).tenantOf(orgId),
+  invitations: (tenantId: string, since: Date, membershipId: string) =>
+    memberStore(db).recentInvitations(tenantId, since, membershipId),
+  applyInvitation: (tenantId: string, id: string, membershipId: string) =>
+    memberStore(db).applyInvitation(tenantId, id, membershipId),
+  emailsOf: verifiedEmailsOf,
+  clerk: {
+    /*
+     * ⚠ A FULL WORKSPACE IS AN ANSWER, NOT A FAILURE. Clerk refuses with
+     * `organization_membership_quota_exceeded` when members plus pending
+     * invitations reach the limit; auto-join turns that into a request and
+     * Accept tells the admin what would make room.
+     */
+    create: async (orgId: string, userId: string) => {
+      try {
+        const made = await clerk.organizations.createOrganizationMembership({
+          organizationId: orgId,
+          userId,
+          role: CLERK_ROLE,
+        })
+        return { outcome: "created" as const, membershipId: made.id }
+      } catch (error) {
+        const codes = clerkCodes(error)
+        // Already a member (an invitation got there first) is done.
+        if (codes.includes("already_a_member_in_organization"))
+          return { outcome: "already_member" as const }
+        if (codes.includes("organization_membership_quota_exceeded"))
+          return { outcome: "full" as const }
+        throw error
+      }
+    },
+    remove: async (orgId: string, userId: string) => {
+      try {
+        await clerk.organizations.deleteOrganizationMembership({
+          organizationId: orgId,
+          userId,
+        })
+      } catch (error) {
+        if (!clerkNotFound(error)) throw error
+      }
+    },
+    isMember: async (orgId: string, userId: string) => {
+      const { data } = await clerk.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+        userId: [userId],
+        limit: 1,
+      })
+      return data.length > 0
+    },
+    createOrganization: async (input) => {
+      const made = await clerk.organizations.createOrganization(input)
+      return { id: made.id }
+    },
+    demote: async (orgId: string, userId: string) => {
+      try {
+        await clerk.organizations.updateOrganizationMembership({
+          organizationId: orgId,
+          userId,
+          role: CLERK_ROLE,
+        })
+      } catch (error) {
+        // A membership, or an organization, already gone has nothing to demote.
+        if (!clerkNotFound(error)) throw error
+      }
+    },
+    /*
+     * ⚠ "STILL HERE" IS BOTH: THE ACCOUNT AND THE MEMBERSHIP. A 404 on the user
+     * is a deleted account; anything else that fails is thrown, never read as
+     * gone - see `confirmOwners` in console/roles.ts.
+     */
+    stillMember: async (orgId: string, userId: string) => {
+      try {
+        await clerk.users.getUser(userId)
+      } catch (error) {
+        if (clerkNotFound(error)) return false
+        throw error
+      }
+      const { data } = await clerk.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+        userId: [userId],
+        limit: 1,
+      })
+      return data.length > 0
+    },
+    organizationExists: async (orgId: string) => {
+      try {
+        await clerk.organizations.getOrganization({ organizationId: orgId })
+        return true
+      } catch (error) {
+        if (clerkNotFound(error)) return false
+        throw error
+      }
+    },
+  },
+  log,
+}
+
 const members: MembersDeps = {
   store: memberStore(db),
   clerk: clerkMembers(clerk),
+  roles: roleRows,
   expiry: invitationScheduler(invitationQueue),
   ...(systemSender && consoleUrl
     ? {
@@ -934,23 +1067,15 @@ const sendPath = {
  * console routes and the `user.created` webhook (auto-join at sign-up) share
  * this one set.
  */
-const clerkCodes = (error: unknown) =>
-  ((error as { errors?: { code?: string }[] }).errors ?? []).map((e) => e.code)
-
 const teamDomains: TeamDomainDeps | null = domains
   ? {
       verified: async (tenantId: string) =>
         (await domains.list(tenantId))
           .filter((domain) => domain.status === "verified")
           .map((domain) => domain.name),
-      can: async (userId: string, orgId: string, permission: string) => {
-        const { data } = await clerk.users.getOrganizationMembershipList({
-          userId,
-          limit: 100,
-        })
-        const membership = data.find((m) => m.organization.id === orgId)
-        return membership?.permissions.includes(permission) ?? false
-      },
+      // ⚠ OUR TABLE, NO CLERK CALL (#335). Clerk's roles are powerless.
+      can: (tenantId, userId, permission) =>
+        can(roleRows, tenantId, userId, permission),
       // Ours since 2026-10-13: Clerk's verified domains are not on our plan.
       store: joinStore(db),
       memberOrgIds: async (userId: string) => {
@@ -981,40 +1106,11 @@ const teamDomains: TeamDomainDeps | null = domains
         )
         return Object.fromEntries(found.filter((f) => f !== null))
       },
-      /*
-       * ⚠ A FULL WORKSPACE IS AN ANSWER, NOT A FAILURE. Clerk refuses with
-       * `organization_membership_quota_exceeded` when members plus pending
-       * invitations reach the limit; auto-join turns that into a request and
-       * Accept tells the admin what would make room.
-       */
-      addMember: async (orgId: string, userId: string, role: string) => {
-        try {
-          await clerk.organizations.createOrganizationMembership({
-            organizationId: orgId,
-            userId,
-            role,
-          })
-          return "added" as const
-        } catch (error) {
-          const codes = clerkCodes(error)
-          // Already a member (an invitation got there first) is done.
-          if (codes.includes("already_a_member_in_organization"))
-            return "added" as const
-          if (codes.includes("organization_membership_quota_exceeded"))
-            return "full" as const
-          throw error
-        }
-      },
-      removeMember: async (orgId: string, userId: string) => {
-        try {
-          await clerk.organizations.deleteOrganizationMembership({
-            organizationId: orgId,
-            userId,
-          })
-        } catch (error) {
-          if (!clerkNotFound(error)) throw error
-        }
-      },
+      // `org:member` in Clerk, the rule's role in our table. See console/roles.ts.
+      addMember: (orgId, userId, role) => addRuleMember(roles, { orgId, userId, role }),
+      release: (tenantId, orgId, actorUserId, memberUserId) =>
+        releaseMember(roles, { tenantId, orgId, actorUserId, userId: memberUserId }),
+      removeMember: roles.clerk.remove,
       /*
        * ⚠ CLERK'S INVITATION, OUR EMAIL. Clerk's own delivery is off; the
        * invitation raises `email.created` and the auth mail path sends ours
@@ -1029,7 +1125,7 @@ const teamDomains: TeamDomainDeps | null = domains
         orgId: string,
         inviterUserId: string,
         email: string,
-        role: string,
+        role: JoinRole,
         tenantId: string,
       ) => {
         const sent = await sendInvitations(members, {
@@ -1044,18 +1140,7 @@ const teamDomains: TeamDomainDeps | null = domains
         if (sent.outcome !== "ok" || sent.sent.length === 0)
           throw new Error(`could not invite ${email}: ${sent.outcome}`)
       },
-      emailsOf: async (userId: string) => {
-        try {
-          const user = await clerk.users.getUser(userId)
-          return user.emailAddresses
-            .filter((e) => e.verification?.status === "verified")
-            .map((e) => e.emailAddress.toLowerCase())
-        } catch (error) {
-          // A deleted account has no addresses left; the join record still names one.
-          if (clerkNotFound(error)) return []
-          throw error
-        }
-      },
+      emailsOf: verifiedEmailsOf,
       isPersonal: async (orgId: string) => {
         const org = await clerk.organizations.getOrganization({ organizationId: orgId })
         return org.publicMetadata?.kind === "personal"
@@ -1117,6 +1202,8 @@ const app = createApp({
     // plan assignment on Pro, and Polar charging a card for a workspace nobody
     // could sign in to. See tenants/lifecycle.ts.
     lifecycle,
+    // Workspace roles kept in step with Clerk's memberships (#335).
+    roles: (type: string, data: unknown) => onRoleEvent(roles, type, data),
     // Member limits, late acceptances and capacity alerts (#327).
     members: (type: string, data: unknown) => onClerkEvent(members, type, data),
     // Auto-join at sign-up (#326): verified addresses only, idempotent.
@@ -1409,15 +1496,31 @@ const app = createApp({
             m.organization.createdBy === userId,
         )
         if (existing) return { id: existing.organization.id, created: false }
-        const made = await clerk.organizations.createOrganization({
+        // ⚠ ITS CREATOR IS DEMOTED IN CLERK AT ONCE (#335), as for any workspace.
+        const made = await createWorkspace(roles, {
           name: "Personal",
+          userId,
           // Clerk slugs are unique across the instance; the user id makes it so.
           slug: `personal-${userId.replace(/^user_/, "").toLowerCase()}`,
-          createdBy: userId,
           maxAllowedMemberships: 1,
           publicMetadata: { kind: "personal" },
         })
         return { id: made.id, created: true }
+      },
+      /*
+       * ⚠ THROUGH THE BACKEND, NOT CLERK-JS IN THE BROWSER (#335), so the
+       * creator's Clerk admin role - which Clerk will not let `creator_role`
+       * go without - is taken away in the same request. Clerk's per-person
+       * creation settings are checked here because the backend skips them.
+       */
+      create: async (userId: string, name: string) => {
+        const [user, { data }] = await Promise.all([
+          clerk.users.getUser(userId),
+          clerk.users.getOrganizationMembershipList({ userId, limit: 100 }),
+        ])
+        const created = data.filter((m) => m.organization.createdBy === userId).length
+        if (!mayCreateWorkspace(user, created)) return "not_allowed" as const
+        return createWorkspace(roles, { name, userId })
       },
       /*
        * ⚠ ONLY THE PERSONAL WORKSPACE OF THE PERSON ASKING. The mark and the
@@ -1440,6 +1543,30 @@ const app = createApp({
         })
         return "ok" as const
       },
+      /*
+       * ⚠ THROUGH THE BACKEND SINCE #335. These were `organization.destroy()`
+       * and `setLogo()` in the browser, which need Clerk system permissions
+       * nobody holds any more; our routes check our roles first. Deleting
+       * leaves the teardown to `organization.deleted`, as before.
+       */
+      remove: async (clerkOrgId: string) => {
+        try {
+          await clerk.organizations.deleteOrganization(clerkOrgId)
+          return "deleted" as const
+        } catch (error) {
+          if (clerkNotFound(error)) return "already_gone" as const
+          throw error
+        }
+      },
+      setLogo: async (clerkOrgId: string, file: Blob, uploaderUserId: string) => {
+        await clerk.organizations.updateOrganizationLogo(clerkOrgId, {
+          file,
+          uploaderUserId,
+        })
+      },
+      removeLogo: async (clerkOrgId: string) => {
+        await clerk.organizations.deleteOrganizationLogo(clerkOrgId)
+      },
     },
     /*
      * ⚠ A HUNDRED IS THE CEILING, NOT A PAGE. Nobody belongs to that many
@@ -1454,6 +1581,7 @@ const app = createApp({
     },
     codeSends: codeCooldown(cache),
     ...(teamDomains ? { teamDomains } : {}),
+    roles,
     members,
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,

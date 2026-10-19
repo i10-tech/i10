@@ -52,6 +52,7 @@
 import { createClerkClient } from "@clerk/backend"
 import { memberStore } from "./console/members-db.js"
 import { clerkMembers } from "./console/clerk-members.js"
+import { roleStore } from "./console/roles-db.js"
 import { withMemberLimitSync } from "./console/members.js"
 import pino from "pino"
 import { subscriptionOps } from "./billing/db.js"
@@ -404,6 +405,7 @@ await withMonitor(
               clerk: clerkMembers(
                 createClerkClient({ secretKey: env.CLERK_SECRET_KEY }),
               ),
+              roles: roleStore(db),
               log,
             }),
           ),

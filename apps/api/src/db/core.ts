@@ -21,6 +21,7 @@ import {
   vector,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
+import type { JoinRole } from "../console/roles.js"
 import type { RetiringSecret } from "../webhooks/keys.js"
 import type { ReplayFilter } from "../webhooks/replay.js"
 
@@ -856,7 +857,7 @@ export const joinDomains = core.table(
       .notNull()
       .default(sql`replace(gen_random_uuid()::text, '-', '')`),
     /** Pattern -> mode -> role, most specific first wins. See console/access-rules.ts. */
-    rules: jsonb("rules").$type<JoinRule[]>().notNull().default([]),
+    rules: jsonb("rules").$type<StoredJoinRule[]>().notNull().default([]),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
     lapsedAt: timestamp("lapsed_at", { withTimezone: true }),
@@ -883,9 +884,18 @@ export interface JoinRule {
   /** `pslhq.app`, `dev.pslhq.app`, or `*.pslhq.app` (any depth). */
   pattern: string
   mode: "off" | "suggest" | "auto"
-  /** The Clerk role given on joining by this rule - auto-join, or approval. */
-  role: string
+  /** Our role given on joining by this rule - auto-join, or approval (#335). */
+  role: JoinRole
 }
+
+/**
+ * A rule as the column holds it.
+ *
+ * ⚠ ROWS FROM BEFORE #335 SAY `org:member` OR `org:admin`, Clerk's keys. They
+ * are read through `readJoinRole` (console/roles.ts) and only ever written
+ * back as ours.
+ */
+export type StoredJoinRule = Omit<JoinRule, "role"> & { role: string }
 
 /**
  * Somebody asking to join a workspace they were suggested (2026-10-13), or
@@ -1101,6 +1111,14 @@ export const memberInvitations = core.table(
     actionUrl: text("action_url"),
     /** `pending`, `accepted`, `withdrawn` or `expired`. */
     status: text("status").notNull().default("pending"),
+    /**
+     * The Clerk membership this invitation's role was given to (#335), and
+     * when. Set once: an invitation never gives its role to a second
+     * membership - somebody removed and back in by another door is not an
+     * admin again because an old invitation said so.
+     */
+    appliedMembershipId: text("applied_membership_id"),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -1150,6 +1168,61 @@ export const memberAlerts = core.table(
   },
   (t) => [
     pgPolicy("member_alerts_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Who may do what in a workspace (#335): one row per member, with their role.
+ *
+ * ⚠ THE ROLE IS OURS AND CLERK'S IS NOT CONSULTED. Every Clerk membership is
+ * `org:member` - reads only - because a Clerk admin can change memberships at
+ * Clerk's Frontend API around everything we check (probe P6). The roles and
+ * what they permit are console/roles.ts; this is where each member's lives.
+ *
+ * ⚠ NO ROW READS AS MEMBER, NEVER AS ANYTHING MORE. Owners and admins always
+ * have one: the creator's is written on `organization.created`, everybody
+ * else's on `organizationMembership.created` or by our own `addMember`, and
+ * the backfill wrote the ones from before.
+ *
+ * ⚠ `clerk_membership_id` IS WHAT MAKES THE WEBHOOKS SAFE IN ANY ORDER. A
+ * redelivered `created` for the same membership changes nothing; one for a
+ * NEW membership (they left and came back) replaces the old role; a late
+ * `deleted` for an old one leaves the new one alone. See `membershipCreated`.
+ *
+ * ⚠ THE WORKSPACE'S OWN ROWS ONLY, and every write goes through
+ * `RoleStore.transact`, which takes one lock per workspace so "is this the
+ * last owner" is never answered against rows another request is changing.
+ */
+export const workspaceRoles = core.table(
+  "workspace_roles",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Clerk's user id. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** `owner`, `admin` or `member`. See console/roles.ts. */
+    role: text("role").notNull(),
+    /** Null until Clerk's `organizationMembership.created` names it. */
+    clerkMembershipId: text("clerk_membership_id"),
+    /** Why the row says what it says: `creator`, `invitation`, `access_rule`... */
+    source: text("source").notNull(),
+    /** The Clerk user who gave it; null when the system did. */
+    grantedBy: text("granted_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.clerkUserId] }),
+    index("workspace_roles_tenant_role_idx").on(t.tenantId, t.role),
+    // ⚠ UNQUALIFIED: a CHECK is created with its table, before a qualified name
+    // for it could be relied on. Adding a role means adding it here as well.
+    check("workspace_roles_role_check", sql`"role" in ('owner', 'admin', 'member')`),
+    pgPolicy("workspace_roles_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

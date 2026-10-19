@@ -39,6 +39,7 @@ import { EASE, StepItem, StepRail } from "@/components/steps"
 import {
   acceptTransfer,
   createPersonalWorkspace,
+  createTeamWorkspace,
   renameWorkspace,
   updateOnboarding,
   workspaceReady,
@@ -632,8 +633,18 @@ function CreateWorkspaceForm({
     if (!next || creating) return
     setCreating("named")
     try {
-      const made = await clerk.createOrganization({ name: next })
-      await enter(made.id, next)
+      /*
+       * ⚠ THROUGH OUR API, NOT `clerk.createOrganization()` (#335): Clerk
+       * makes every creator an admin, and only the backend can demote them
+       * in the same request. Activating and waiting are as before.
+       */
+      const made = await createTeamWorkspace(next)
+      if (!made.ok) {
+        toastError("Could not create the workspace", made.error)
+        setCreating(null)
+        return
+      }
+      await enter(made.data.organization_id, next)
     } catch (error) {
       toastError("Could not create the workspace", clerkReason(error))
       setCreating(null)

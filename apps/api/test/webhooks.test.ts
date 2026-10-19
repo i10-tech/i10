@@ -364,6 +364,68 @@ describe("membership events arriving from Clerk", () => {
   })
 })
 
+/**
+ * Workspace roles (#335): the roles hook sees every event, even a duplicate,
+ * after provisioning made the tenant and before the members hook mails the
+ * owners and admins - and a failure is a 500 so Svix retries.
+ */
+describe("role events arriving from Clerk", () => {
+  const order: string[] = []
+  const roles = mock(async (type: string) => {
+    order.push(`roles:${type}`)
+    return `role:${type}`
+  })
+  const members = mock(async (type: string) => {
+    order.push(`members:${type}`)
+    return null
+  })
+  const created = JSON.stringify({
+    type: "organization.created",
+    data: { id: "org_acme", name: "Acme", created_by: "user_1" },
+  })
+  const send = (id: string) =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        provisioning: {
+          onOrganizationCreated: async () => {
+            order.push("provision")
+            return "tenant_created"
+          },
+        },
+        roles,
+        members,
+      },
+    }).request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(created, id),
+      body: created,
+    })
+
+  beforeEach(() => {
+    order.length = 0
+    roles.mockClear()
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+  })
+
+  it("runs after provisioning and before members, even as a duplicate", async () => {
+    const res = await send("msg_org")
+    expect(res.status).toBe(200)
+    expect(order).toEqual([
+      "provision",
+      "roles:organization.created",
+      "members:organization.created",
+    ])
+  })
+
+  it("answers 500 when the hook fails, so Svix retries", async () => {
+    roles.mockRejectedValueOnce(new Error("database down"))
+    expect((await send("msg_org")).status).toBe(500)
+  })
+})
+
 describe("GET /readyz", () => {
   it("reports ok when the database answers", async () => {
     const res = await createApp({ pingDb: async () => {} }).request("/readyz")

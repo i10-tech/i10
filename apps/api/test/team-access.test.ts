@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  MANAGE_DOMAINS,
-  MANAGE_MEMBERS,
   addAccessDomain,
   allowAddress,
   answerJoinRequest,
@@ -35,8 +33,8 @@ const admin = { tenantId: ACME.tenantId, userId: "user_admin", orgId: ACME.orgId
 
 describe("offersFor", () => {
   const rules: JoinRule[] = [
-    { pattern: "pslhq.app", mode: "suggest", role: "org:member" },
-    { pattern: "*.pslhq.app", mode: "auto", role: "org:member" },
+    { pattern: "pslhq.app", mode: "suggest", role: "member" },
+    { pattern: "*.pslhq.app", mode: "auto", role: "member" },
   ]
 
   test("verified addresses only ever come from the caller; a stranger gets nothing", async () => {
@@ -83,7 +81,7 @@ describe("offersFor", () => {
 describe("requestToJoin", () => {
   test("files a request with the matching address and rule; once", async () => {
     const { d, requests } = deps([
-      { pattern: "pslhq.app", mode: "suggest", role: "org:member" },
+      { pattern: "pslhq.app", mode: "suggest", role: "member" },
     ])
     const input = { ...seeker(["a@pslhq.app"]), tenantId: ACME.tenantId }
     expect(await requestToJoin(d, input)).toBe("created")
@@ -96,7 +94,7 @@ describe("requestToJoin", () => {
   })
   test("blocked: no request", async () => {
     const { d, exclusions } = deps([
-      { pattern: "pslhq.app", mode: "suggest", role: "org:member" },
+      { pattern: "pslhq.app", mode: "suggest", role: "member" },
     ])
     exclusions.set("a@pslhq.app", "blocked")
     expect(
@@ -104,7 +102,7 @@ describe("requestToJoin", () => {
     ).toBe("not_suggested")
   })
   test("off: no request", async () => {
-    const { d } = deps([{ pattern: "pslhq.app", mode: "off", role: "org:member" }])
+    const { d } = deps([{ pattern: "pslhq.app", mode: "off", role: "member" }])
     expect(
       await requestToJoin(d, { ...seeker(["a@pslhq.app"]), tenantId: ACME.tenantId }),
     ).toBe("not_suggested")
@@ -112,7 +110,7 @@ describe("requestToJoin", () => {
 })
 
 describe("joinNow", () => {
-  const auto: JoinRule[] = [{ pattern: "*.pslhq.app", mode: "auto", role: "org:admin" }]
+  const auto: JoinRule[] = [{ pattern: "*.pslhq.app", mode: "auto", role: "admin" }]
 
   test("adds an existing user at once with the rule's role, and records how", async () => {
     const { d, added, joins } = deps(auto)
@@ -121,9 +119,7 @@ describe("joinNow", () => {
       tenantId: ACME.tenantId,
     })
     expect(out).toEqual({ outcome: "joined", orgId: ACME.orgId })
-    expect(added).toEqual([
-      { orgId: ACME.orgId, userId: "user_new", role: "org:admin" },
-    ])
+    expect(added).toEqual([{ orgId: ACME.orgId, userId: "user_new", role: "admin" }])
     expect(joins[0]).toMatchObject({ how: "join", via: "*.pslhq.app" })
   })
   test("a removed person cannot instant-join", async () => {
@@ -137,9 +133,7 @@ describe("joinNow", () => {
     expect(added).toEqual([])
   })
   test("suggest-only cannot instant-join", async () => {
-    const { d } = deps([
-      { pattern: "*.pslhq.app", mode: "suggest", role: "org:member" },
-    ])
+    const { d } = deps([{ pattern: "*.pslhq.app", mode: "suggest", role: "member" }])
     const out = await joinNow(d, {
       ...seeker(["a@dev.pslhq.app"]),
       tenantId: ACME.tenantId,
@@ -158,7 +152,7 @@ describe("joinNow", () => {
 })
 
 describe("autoJoin at sign-up", () => {
-  const auto: JoinRule[] = [{ pattern: "pslhq.app", mode: "auto", role: "org:member" }]
+  const auto: JoinRule[] = [{ pattern: "pslhq.app", mode: "auto", role: "member" }]
 
   test("joins once however often it runs", async () => {
     const { d, added } = deps(auto)
@@ -199,7 +193,7 @@ describe("autoJoin at sign-up", () => {
 })
 
 describe("autoJoinFromWebhook", () => {
-  const auto: JoinRule[] = [{ pattern: "pslhq.app", mode: "auto", role: "org:member" }]
+  const auto: JoinRule[] = [{ pattern: "pslhq.app", mode: "auto", role: "member" }]
   const payload = (status: string) => ({
     id: "user_w",
     email_addresses: [{ email_address: "W@pslhq.app", verification: { status } }],
@@ -231,8 +225,8 @@ describe("autoJoinFromWebhook", () => {
 
 describe("answerJoinRequest", () => {
   const rules: JoinRule[] = [
-    { pattern: "pslhq.app", mode: "suggest", role: "org:member" },
-    { pattern: "*.pslhq.app", mode: "suggest", role: "org:admin" },
+    { pattern: "pslhq.app", mode: "suggest", role: "member" },
+    { pattern: "*.pslhq.app", mode: "suggest", role: "admin" },
   ]
 
   async function withRequest(
@@ -252,9 +246,7 @@ describe("answerJoinRequest", () => {
     expect(await answerJoinRequest(t.d, { ...admin, id: t.id, accept: true })).toBe(
       "ok",
     )
-    expect(t.added).toEqual([
-      { orgId: ACME.orgId, userId: "user_new", role: "org:admin" },
-    ])
+    expect(t.added).toEqual([{ orgId: ACME.orgId, userId: "user_new", role: "admin" }])
     expect(t.exclusions.size).toBe(0)
     expect(t.joins[0]).toMatchObject({ how: "request", via: "*.pslhq.app" })
   })
@@ -282,7 +274,7 @@ describe("answerJoinRequest", () => {
   test("only for somebody who can manage members", async () => {
     let asked = ""
     const t = await withRequest({
-      can: async (_u, _o, permission) => {
+      can: async (_t, _u, permission) => {
         asked = permission
         return false
       },
@@ -290,7 +282,7 @@ describe("answerJoinRequest", () => {
     expect(await answerJoinRequest(t.d, { ...admin, id: t.id, accept: true })).toBe(
       "forbidden",
     )
-    expect(asked).toBe(MANAGE_MEMBERS)
+    expect(asked).toBe("members:manage")
   })
 
   test("a Clerk failure leaves the request open", async () => {
@@ -335,9 +327,50 @@ describe("removeTeamMember", () => {
       await removeTeamMember(d, { ...admin, memberUserId: admin.userId, block: false }),
     ).toBe("self")
   })
+  // #335: the role row decides first; a refusal lists and removes nobody.
+  test("an owner only by an owner: nothing listed, nobody removed", async () => {
+    const { d, removed, exclusions } = deps([], {
+      release: async () => ({ outcome: "owner_only" }),
+    })
+    expect(
+      await removeTeamMember(d, { ...admin, memberUserId: "user_owner", block: true }),
+    ).toBe("owner_only")
+    expect(removed).toEqual([])
+    expect(exclusions.size).toBe(0)
+  })
+  test("a Clerk failure puts their role back", async () => {
+    let undone = false
+    const { d } = deps([], {
+      release: async () => ({
+        outcome: "ok",
+        undo: async () => {
+          undone = true
+        },
+      }),
+      removeMember: async () => {
+        throw new Error("clerk down")
+      },
+    })
+    await expect(
+      removeTeamMember(d, { ...admin, memberUserId: "user_9", block: false }),
+    ).rejects.toThrow("clerk down")
+    expect(undone).toBe(true)
+  })
 })
 
 describe("allowAddress", () => {
+  test("an invitation's role is ours; owner is refused", async () => {
+    const { d, invited } = deps([])
+    expect(
+      await allowAddress(d, {
+        ...admin,
+        email: "x@pslhq.app",
+        invite: true,
+        role: "owner",
+      }),
+    ).toBe("invalid")
+    expect(invited).toEqual([])
+  })
   test("Allow takes them off the list; Allow and invite also invites", async () => {
     const { d, exclusions, invited } = deps([])
     exclusions.set("x@pslhq.app", "blocked")
@@ -376,7 +409,7 @@ describe("access domains", () => {
   test("only for somebody who can manage domains", async () => {
     let asked = ""
     const { d } = deps([], {
-      can: async (_u, _o, permission) => {
+      can: async (_t, _u, permission) => {
         asked = permission
         return false
       },
@@ -386,7 +419,7 @@ describe("access domains", () => {
     ).toEqual({
       outcome: "forbidden",
     })
-    expect(asked).toBe(MANAGE_DOMAINS)
+    expect(asked).toBe("access_domains:manage")
   })
   test("the suggestion card offers exactly the /domains names, never a parent", async () => {
     const { d } = deps([])
@@ -400,18 +433,18 @@ describe("access domains", () => {
       await setAccessRules(d, {
         ...admin,
         id: "jd_1",
-        rules: [{ pattern: "*.app", mode: "auto", role: "org:member" }],
+        rules: [{ pattern: "*.app", mode: "auto", role: "member" }],
       }),
     ).toMatchObject({ outcome: "invalid" })
     expect(
       await setAccessRules(d, {
         ...admin,
         id: "jd_1",
-        rules: [{ pattern: "*.pslhq.app", mode: "auto", role: "org:admin" }],
+        rules: [{ pattern: "*.pslhq.app", mode: "auto", role: "admin" }],
       }),
     ).toEqual({
       outcome: "ok",
-      rules: [{ pattern: "*.pslhq.app", mode: "auto", role: "org:admin" }],
+      rules: [{ pattern: "*.pslhq.app", mode: "auto", role: "admin" }],
     })
   })
 })

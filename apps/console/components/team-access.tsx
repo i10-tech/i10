@@ -32,6 +32,7 @@ import {
   type AccessMode,
   type AccessRule,
   type Exclusion,
+  type JoinRole,
 } from "@/lib/actions"
 import { toastDone, toastError } from "@/lib/toast"
 
@@ -78,7 +79,8 @@ export function AccessDomains({
 }: {
   /** `false` when the API could not say. */
   state: AccessState | false | null
-  roles: { value: string; label: string }[]
+  /** What a rule may give (#335): member or admin, never owner. */
+  roles: { value: JoinRole; label: string }[]
   onChange: () => void
 }) {
   const [adding, setAdding] = React.useState(false)
@@ -310,7 +312,8 @@ function DomainRow({
   onChange,
 }: {
   domain: AccessDomain
-  roles: { value: string; label: string }[]
+  /** What a rule may give (#335): member or admin, never owner. */
+  roles: { value: JoinRole; label: string }[]
   onChange: () => void
 }) {
   const [editing, setEditing] = React.useState(false)
@@ -458,11 +461,11 @@ function RulesEditor({
   onSaved,
 }: {
   domain: AccessDomain
-  roles: { value: string; label: string }[]
+  /** What a rule may give (#335): member or admin, never owner. */
+  roles: { value: JoinRole; label: string }[]
   onSaved: () => void
 }) {
-  const fallbackRole =
-    roles.find((r) => r.value === "org:member")?.value ?? "org:member"
+  const fallbackRole: JoinRole = "member"
   const [rules, setRules] = React.useState<AccessRule[]>(() =>
     domain.rules.length > 0
       ? domain.rules
@@ -472,7 +475,7 @@ function RulesEditor({
   const [error, setError] = React.useState<string | null>(null)
   const [confirming, setConfirming] = React.useState(false)
   const roleItems =
-    roles.length > 0 ? roles : [{ value: "org:member", label: "Member" }]
+    roles.length > 0 ? roles : [{ value: fallbackRole, label: "Member" }]
 
   const newlyAuto = rules.some(
     (r) =>
@@ -481,9 +484,9 @@ function RulesEditor({
   )
   const newlyAdmin = rules.some(
     (r) =>
-      r.role === "org:admin" &&
+      r.role === "admin" &&
       r.mode !== "off" &&
-      !domain.rules.some((o) => o.pattern === r.pattern && o.role === "org:admin"),
+      !domain.rules.some((o) => o.pattern === r.pattern && o.role === "admin"),
   )
 
   function update(index: number, change: Partial<AccessRule>) {
@@ -548,7 +551,7 @@ function RulesEditor({
                 hideLabel
                 items={roleItems}
                 value={rule.role}
-                onValueChange={(value) => update(index, { role: value })}
+                onValueChange={(value) => update(index, { role: value as JoinRole })}
               />
               <Button
                 variant="ghost"

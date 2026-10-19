@@ -6,6 +6,15 @@ import { notFound, notWired, readJson, validation } from "./http.js"
 import { checkPassword } from "../../console/password-check.js"
 import { PURPOSE } from "../../console/code-cooldown.js"
 import { revokeExpired, seats, syncMemberLimit } from "../../console/members.js"
+import { accessOf, can, type Permission } from "../../console/roles.js"
+import { requireFreshAuth } from "../../middleware/session.js"
+
+const forbidden = (message: string) =>
+  ({ statusCode: 403, name: "forbidden" as const, message }) as const
+
+/** A logo is the editor's 512px square; this is room to spare, not a target. */
+const MAX_LOGO_BYTES = 2 * 1024 * 1024
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
 /**
  * Who this workspace is, what it has used, and what it is paying for.
@@ -16,13 +25,17 @@ import { revokeExpired, seats, syncMemberLimit } from "../../console/members.js"
  * says. A change to any of them is a change to the first screen after sign-in.
  */
 export function mountAccount(app: Hono, d: ConsoleDeps): void {
+  /** Our roles table (#335); no roles wired means no permission. */
+  const allowed = async (tenantId: string, userId: string, permission: Permission) =>
+    Boolean(d.roles && (await can(d.roles.store, tenantId, userId, permission)))
+
   // ───────────────────────────────────────────────────────────────────────────
   // Who am I, and what is my workspace
   // ───────────────────────────────────────────────────────────────────────────
 
   app.get("/me", async (c) => {
     const { tenantId } = c.get("auth")
-    const { userId } = c.get("user")
+    const { userId, orgId } = c.get("user")
 
     /*
      * ⚠ ONE BILLING READ, PASSED INTO THE ONBOARDING DECISION. This used to
@@ -39,10 +52,14 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
      * stop somebody offering a domain to themselves; a Clerk hiccup must not
      * take the whole console shell down with it, so a failure answers empty.
      */
-    const [profile, billing, person] = await Promise.all([
+    const [profile, billing, person, access] = await Promise.all([
       d.profile.get(tenantId),
       d.usage.billing(tenantId),
       d.people?.get(userId).catch(() => null) ?? Promise.resolve(null),
+      // ⚠ WHAT THE SHELL MAY OFFER, FROM OUR TABLE (#335) - never Clerk's `has()`.
+      d.roles && orgId
+        ? accessOf(d.roles.store, tenantId, userId)
+        : Promise.resolve(null),
     ])
     const onboardingState = await d.onboarding.get(tenantId, billing.plan?.id ?? null)
 
@@ -55,6 +72,7 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       tenant: profile,
       billing,
       onboarding: onboardingState,
+      access: access ? { role: access.role, permissions: access.permissions } : null,
     })
   })
 
@@ -133,6 +151,29 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
   })
 
   /**
+   * A new team workspace (#335), made by onboarding's "Create workspace".
+   * Answers the Clerk organization to activate; the tenant follows through
+   * `organization.created`, as for Personal, and so does the owner row.
+   *
+   * ⚠ HERE RATHER THAN `clerk.createOrganization()` IN THE BROWSER, because
+   * Clerk makes every creator an admin (a powerless `creator_role` is
+   * refused) and only the backend can take that away in the same request.
+   */
+  app.post("/workspaces", async (c) => {
+    const create = d.organizations?.create
+    if (!create) return c.json(notWired("Creating workspaces"), 501)
+    const { userId } = c.get("user")
+    const body = await readJson(c)
+    const name = typeof body?.name === "string" ? body.name.trim() : ""
+    if (!name) return c.json(validation("`name` is required."), 422)
+    if (name.length > 120) return c.json(validation("`name` is too long."), 422)
+    const made = await create(userId, name)
+    if (made === "not_allowed")
+      return c.json(forbidden("Your account can't create more workspaces."), 403)
+    return c.json({ organization_id: made.id }, 201)
+  })
+
+  /**
    * Turns the active Personal workspace into a team workspace (#325): a name,
    * and room for more than one member. The tenant keeps everything it has.
    */
@@ -169,6 +210,80 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
     return c.json({ ok: true })
   })
 
+  /**
+   * Deletes the workspace (#335): owners only, behind a fresh session, like
+   * every other delete that cannot be undone.
+   *
+   * ⚠ IT DELETES THE ORGANIZATION AND NOTHING ELSE. `organization.deleted`
+   * is what tears the tenant down - terminates it, stops the bill, gives back
+   * its domains - exactly as when this was `organization.destroy()` in the
+   * browser, which needed a Clerk permission nobody holds any more.
+   */
+  app.delete("/workspace", requireFreshAuth, async (c) => {
+    const remove = d.organizations?.remove
+    if (!remove || !d.roles) return c.json(notWired("Deleting workspaces"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId, orgId } = c.get("user")
+    if (!orgId) return c.json(validation("Open the workspace you want to delete."), 422)
+    if (!(await allowed(tenantId, userId, "workspace:delete")))
+      return c.json(forbidden("Only an owner can delete the workspace."), 403)
+    const outcome = await remove(orgId)
+    d.roles.log.info(
+      {
+        audit: "workspace.deleted",
+        tenantId,
+        clerkOrgId: orgId,
+        actorUserId: userId,
+        outcome,
+      },
+      "workspace deleted",
+    )
+    return c.json({ deleted: true })
+  })
+
+  /**
+   * The workspace's logo: the cropped square the console's editor made, as
+   * the raw body (#335). Through Clerk's backend API, since a powerless Clerk
+   * role cannot set it at Clerk's Frontend API any more.
+   */
+  app.put("/workspace/logo", async (c) => {
+    const setLogo = d.organizations?.setLogo
+    if (!setLogo) return c.json(notWired("Workspace logos"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId, orgId } = c.get("user")
+    if (!orgId) return c.json(validation("Open a workspace first."), 422)
+    if (!(await allowed(tenantId, userId, "workspace:manage")))
+      return c.json(forbidden("Only an admin can change the workspace's logo."), 403)
+    const type = (c.req.header("content-type") ?? "").split(";")[0]!.trim()
+    if (!LOGO_TYPES.includes(type))
+      return c.json(validation("Use a PNG, JPEG, GIF or WebP image."), 422)
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    if (bytes.length === 0) return c.json(validation("Choose an image."), 422)
+    if (bytes.length > MAX_LOGO_BYTES)
+      return c.json(validation("That image is too large."), 422)
+    await setLogo(orgId, new Blob([bytes], { type }), userId)
+    return c.json({ ok: true })
+  })
+
+  app.delete("/workspace/logo", async (c) => {
+    const removeLogo = d.organizations?.removeLogo
+    if (!removeLogo) return c.json(notWired("Workspace logos"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId, orgId } = c.get("user")
+    if (!orgId) return c.json(validation("Open a workspace first."), 422)
+    if (!(await allowed(tenantId, userId, "workspace:manage")))
+      return c.json(forbidden("Only an admin can change the workspace's logo."), 403)
+    await removeLogo(orgId)
+    return c.json({ ok: true })
+  })
+
+  /**
+   * ⚠ ANY MEMBER, STILL (#335), AND DELIBERATELY UNCHANGED. Onboarding's name
+   * step renames through here for whoever is setting the workspace up, and
+   * this route never asked for a role - so roles did not take it away. The
+   * Settings page offers it only with `workspace:manage`, as it only offered
+   * it to Clerk's admins before.
+   */
   app.patch("/me/tenant", async (c) => {
     const { tenantId } = c.get("auth")
     const body = await readJson(c)

@@ -83,7 +83,15 @@ export interface Me {
   tenant: TenantProfile | null
   billing: BillingState
   onboarding: OnboardingState
+  /**
+   * The reader's role in the active workspace and what it lets them do
+   * (#335) - ours, never Clerk's `has()`. Null with no workspace.
+   */
+  access: { role: WorkspaceRole; permissions: string[] } | null
 }
+
+/** Workspace roles (#335). Clerk's roles are powerless; these are the real ones. */
+export type WorkspaceRole = "owner" | "admin" | "member"
 
 export interface DailyStat {
   date: string

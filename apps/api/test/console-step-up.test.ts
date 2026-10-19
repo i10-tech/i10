@@ -100,6 +100,8 @@ describe("the routes that cannot be undone", () => {
   it.each([
     ["/console/api-keys/" + KEY_ID, "DELETE"],
     ["/console/domains/" + KEY_ID, "DELETE"],
+    // Deleting the workspace, through us since #335.
+    ["/console/workspace", "DELETE"],
   ])("refuses %s on a stale session", async (path, method) => {
     const res = await appWith(stale).request(path, { method, headers: BEARER })
 

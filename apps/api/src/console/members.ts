@@ -7,6 +7,7 @@ import {
   type Capacity,
 } from "./capacity.js"
 import type { InvitationRow, MemberStore } from "./members-db.js"
+import { parseJoinRole, type RoleStore } from "./roles.js"
 import { expiryForEmail, resolveZone } from "./zones.js"
 
 /**
@@ -35,20 +36,24 @@ export interface ClerkMembers {
   /** Pending invitations, newest first, as Clerk counts them. */
   pendingInvitations(orgId: string): Promise<{ id: string; createdAt: number }[]>
   setLimit(orgId: string, max: number): Promise<void>
-  /** Throws Clerk's error; see `inviteFailure`. */
+  /**
+   * Throws Clerk's error; see `inviteFailure`.
+   *
+   * ⚠ NO ROLE: Clerk's invitation is always `org:member` (#335). The role the
+   * person joins with is our row's, matched when the membership arrives.
+   */
   invite(input: {
     orgId: string
     inviterUserId: string
     email: string
-    role: string
     expiresInDays: number
   }): Promise<{ id: string }>
   /** Already revoked, accepted or gone is done. */
   revoke(orgId: string, invitationId: string): Promise<void>
   /** Already gone is done. */
   removeMember(orgId: string, userId: string): Promise<void>
-  /** Addresses of the members who may manage members. */
-  admins(orgId: string): Promise<string[]>
+  /** The sign-in addresses of these members (the capacity alert's recipients). */
+  addresses(orgId: string, userIds: string[]): Promise<string[]>
 }
 
 /** One delayed job per invitation, at its expiry. */
@@ -85,6 +90,8 @@ export interface Logger {
 export interface MembersDeps {
   store: MemberStore
   clerk: ClerkMembers
+  /** Who the owners and admins are, for the capacity alerts (#335). */
+  roles: Pick<RoleStore, "list">
   expiry?: ExpiryScheduler
   mail?: MemberMail
   /** Where an invitation email's link points: our own, which checks the clock. */
@@ -299,7 +306,11 @@ export async function evaluateAlerts(
   const at = clock(d)
   await d.store.setAlert(tenantId, next.level, next.send ? at : null)
   if (!next.send) return null
-  const admins = await d.clerk.admins(orgId)
+  // ⚠ OWNERS AND ADMINS FROM OUR TABLE (#335), addresses from Clerk.
+  const managers = (await d.roles.list(tenantId))
+    .filter((r) => r.role === "owner" || r.role === "admin")
+    .map((r) => r.userId)
+  const admins = managers.length > 0 ? await d.clerk.addresses(orgId, managers) : []
   if (admins.length === 0) return next.send
   await d.mail
     .capacity({
@@ -381,8 +392,15 @@ export async function sendInvitations(
     return { outcome: "invalid", error: `At most ${MAX_BATCH} invitations at once.` }
   const bad = emails.find((e) => !EMAIL.test(e))
   if (bad) return { outcome: "invalid", error: `${bad} is not an email address.` }
-  if (typeof input.role !== "string" || !input.role.startsWith("org:"))
-    return { outcome: "invalid", error: "Pick a role." }
+  const role = parseJoinRole(input.role)
+  if (!role)
+    return {
+      outcome: "invalid",
+      error:
+        input.role === "owner"
+          ? "An invitation can't make anyone an owner."
+          : "Pick a role.",
+    }
 
   const now = clock(d)
   const expiry = checkExpiry(input.expiresAt, now)
@@ -411,7 +429,6 @@ export async function sendInvitations(
       }),
     }
 
-  const role = input.role
   const sent: { id: string; email: string; expires_at: string }[] = []
   const failed: { email: string; reason: string }[] = []
   for (const email of emails) {
@@ -429,7 +446,6 @@ export async function sendInvitations(
         orgId: input.orgId,
         inviterUserId: input.userId,
         email,
-        role,
         expiresInDays: clerkDays(expiry.at, now),
       })
       await d.store.attachClerk(input.tenantId, id, made.id)
