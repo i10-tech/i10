@@ -1,4 +1,5 @@
 import "server-only"
+import { clientContextHeader } from "./client-context"
 import type { NextRequest } from "next/server"
 import { SAVED_LIMIT } from "./remembered-cookie"
 
@@ -93,10 +94,24 @@ export async function callApi(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<Response> {
+  const context = await clientContextHeader()
   return fetch(`${apiBase()}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
+    headers: {
+      "content-type": "application/json",
+      ...(context ? { "x-i10-client": context } : {}),
+      ...headers,
+    },
     body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(5000),
+  })
+}
+
+/** A GET to the API, for what it publishes (an OIDC connection's JWKS, #338). */
+export async function getApi(path: string): Promise<Response> {
+  return fetch(`${apiBase()}${path}`, {
+    method: "GET",
     cache: "no-store",
     signal: AbortSignal.timeout(5000),
   })

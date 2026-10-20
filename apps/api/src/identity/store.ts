@@ -287,6 +287,57 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
       return rows.map((r) => r.name)
     },
 
+    async connectionSecrets(tenantId, id) {
+      if (!secrets) throw new Error("connection secrets need WEBHOOK_SECRET_KEY")
+      const [row] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({ sealed: connections.secrets })
+          .from(connections)
+          .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
+          .limit(1),
+      )
+      if (!row) return null
+      if (!row.sealed) return {}
+      const opened: unknown = JSON.parse(secrets.open(row.sealed))
+      return opened && typeof opened === "object" && !Array.isArray(opened)
+        ? (opened as Record<string, unknown>)
+        : {}
+    },
+
+    async setConnectionSecrets(tenantId, id, edit) {
+      const box = secrets
+      if (!box) throw new Error("connection secrets need WEBHOOK_SECRET_KEY")
+      return withTenant(db, tenantId, async (tx) => {
+        const [current] = await tx
+          .select({ sealed: connections.secrets, config: connections.config })
+          .from(connections)
+          .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
+          .for("update")
+          .limit(1)
+        if (!current) return null
+        const opened: unknown = current.sealed
+          ? JSON.parse(box.open(current.sealed))
+          : {}
+        const next = edit({
+          secrets:
+            opened && typeof opened === "object" && !Array.isArray(opened)
+              ? (opened as Record<string, unknown>)
+              : {},
+          config: current.config,
+        })
+        const [row] = await tx
+          .update(connections)
+          .set({
+            secrets: box.seal(JSON.stringify(next.secrets)),
+            config: next.config,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
+          .returning()
+        return row ? toConnection(row) : null
+      })
+    },
+
     async workspaceOrg(tenantId) {
       const [row] = await withTenant(db, tenantId, (tx) =>
         tx

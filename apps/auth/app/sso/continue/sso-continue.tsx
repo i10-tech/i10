@@ -17,6 +17,7 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
   const { signIn } = useSignIn()
   const started = useRef(false)
   const [error, setError] = useState<string | null>(null)
+  const [tested, setTested] = useState<"passed" | "failed" | null>(null)
 
   useEffect(() => {
     if (!signIn || started.current) return
@@ -24,6 +25,13 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
     const hash = new URLSearchParams(window.location.hash.slice(1))
     // The code must not survive a reload or a copied address bar.
     history.replaceState(null, "", window.location.pathname)
+    // A test run (#338) signs nobody in: its result is all there is to show.
+    const test = hash.get("sso_test")
+    if (test === "passed" || test === "failed") {
+      // Settled like every outcome below, after the effect, not inside it.
+      void Promise.resolve<"passed" | "failed">(test).then(setTested)
+      return
+    }
     const code = hash.get("code")
     const finished = code
       ? finishSso(signIn, code, fallbackUrl)
@@ -32,6 +40,17 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
       if (message) setError(message)
     })
   }, [signIn, fallbackUrl])
+
+  if (tested)
+    return (
+      <div className="flex flex-col items-center gap-6">
+        <StepHeading title={tested === "passed" ? "Test passed" : "Test failed"}>
+          {tested === "passed"
+            ? "Your identity provider signed you in and i10 accepted it. Nobody was signed in."
+            : "i10 did not accept what your identity provider sent. The setup screen shows why."}
+        </StepHeading>
+      </div>
+    )
 
   if (error)
     return (

@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono"
+import { Hono, type Context, type MiddlewareHandler } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import {
   bind,
@@ -16,6 +16,12 @@ import {
 } from "../identity/model.js"
 import type { SsoGateChecker } from "../identity/gate.js"
 import { testAssertion } from "../identity/test-engine.js"
+import {
+  finishOidc,
+  publicJwks,
+  readCallbackQuery,
+  type OidcEngine,
+} from "../identity/oidc.js"
 import type { IdentityReader } from "./devices.js"
 import { equalSecrets } from "../webhooks/signing.js"
 
@@ -25,6 +31,8 @@ import { equalSecrets } from "../webhooks/signing.js"
  *
  *   POST /sso/attempts      start: { connection, purpose, binding, returnTo }
  *   POST /sso/test/assert   the TEST engine's "IdP" (dev only, 404 otherwise)
+ *   POST /sso/oidc/callback { state, binding, query } -> as completeLogin (#338)
+ *   GET  /sso/oidc/jwks/:id the public keys of a private_key_jwt connection
  *   POST /sso/handoff       { code, binding } -> { ticket, handoff }
  *   POST /sso/bind          Bearer <new session>, { handoff } -> bound
  *
@@ -47,6 +55,13 @@ export interface SsoRouteDeps {
   returnOrigins: readonly string[]
   /** Whether the TEST engine is on (identity/test-engine.ts). */
   testEngine: boolean
+  /**
+   * Per-IP and per-connection limits on every POST here (identity/
+   * rate-limit.ts). Absent: unlimited (tests).
+   */
+  rateLimit?: MiddlewareHandler
+  /** The OIDC engine (#338), when wired. Absent: its routes are 404. */
+  oidc?: OidcEngine
   /** May this person manage this workspace's SSO (test runs)? */
   mayManage(tenantId: string, userId: string): Promise<boolean>
   /** The connection's tenant, for the `test_run` permission check. */
@@ -118,6 +133,11 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
         501,
       )
     await next()
+  })
+  // ⚠ EVERY POST, NOT THE PUBLIC KEYS: an IdP fetching our JWKS is not a sign-in.
+  app.use("*", async (c, next) => {
+    if (c.req.method !== "POST" || !deps?.rateLimit) return next()
+    return deps.rateLimit(c, next)
   })
 
   app.post("/attempts", async (c) => {
@@ -196,6 +216,56 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
         { err: String(error) },
         "could not complete a test SSO sign-in",
       )
+      return unavailable(c)
+    }
+  })
+
+  app.post("/oidc/callback", async (c) => {
+    const d = deps!
+    if (!d.oidc)
+      return c.json({ statusCode: 404, name: "not_found", message: "Not found." }, 404)
+    const b = await body(c)
+    const binding = readSecret(b.binding)
+    const state = readSecret(b.state)
+    const query = readCallbackQuery(b.query)
+    if (!binding || !state || !query)
+      return invalid(c, "state, binding and the callback's code or error are required.")
+    try {
+      const via = b.via === "google" ? "google" : "oidc"
+      const done = await finishOidc(d.bridge, d.oidc, { state, binding, query, via })
+      if (done.outcome === "unavailable") return unavailable(c)
+      if (done.outcome === "refused") return refused(c, done.reason)
+      return c.json(done, 200)
+    } catch (error) {
+      // ⚠ THE ERROR'S NAME AND MESSAGE ONLY, never its cause: openid-client
+      // keeps the callback's parameters, code included, on its errors.
+      d.bridge.log.error(
+        { err: error instanceof Error ? `${error.name}: ${error.message}` : "unknown" },
+        "could not complete an OIDC sign-in",
+      )
+      return unavailable(c)
+    }
+  })
+
+  /*
+   * ⚠ PUBLIC KEYS ONLY, AND ONLY OIDC CONNECTIONS. The IdP fetches this to
+   * check our private_key_jwt assertions; it says nothing a connection id does
+   * not already name, and a draft needs it as much as an active one (the IdP
+   * is set up first).
+   */
+  app.get("/oidc/jwks/:connection", async (c) => {
+    const d = deps!
+    const id = c.req.param("connection")
+    const notFound = () =>
+      c.json({ statusCode: 404, name: "not_found", message: "Not found." }, 404)
+    if (!d.oidc) return notFound()
+    try {
+      const connection = await d.bridge.store.connectionForStart(id)
+      if (!connection || connection.protocol !== "oidc") return notFound()
+      c.header("Cache-Control", "public, max-age=300")
+      return c.json(publicJwks(connection), 200)
+    } catch (error) {
+      d.bridge.log.error({ err: String(error) }, "could not read a connection's JWKS")
       return unavailable(c)
     }
   })

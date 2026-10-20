@@ -567,17 +567,45 @@ describe("owners and managed rows", () => {
     expect(w.store.identities).toHaveLength(0)
   })
 
-  it("keeps an owner who is already managed managed", async () => {
-    const w = world({ owners: ["user_ada"] })
-    w.store.managed.set("user_ada", {
-      clerkUserId: "user_ada",
+  it("lets a managed owner in only through the link they already have", async () => {
+    const managedOwner = () => {
+      const w = world({ owners: ["user_ada"] })
+      w.store.managed.set("user_ada", {
+        clerkUserId: "user_ada",
+        tenantId: TENANT,
+        connectionId: CONNECTION,
+        reason: "claimed",
+        emails: ["ada@acme.test"],
+      })
+      return w
+    }
+    // Linked on this connection: signs in, stays managed.
+    const linked = managedOwner()
+    linked.store.identities.push({
+      id: "22222222-2222-4222-8222-222222222222",
       tenantId: TENANT,
       connectionId: CONNECTION,
-      reason: "claimed",
-      emails: ["ada@acme.test"],
+      subject: "okta|ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+      lastLoginAt: null,
     })
-    await w.signIn()
-    expect(w.store.managed.get("user_ada")?.tenantId).toBe(TENANT)
+    await linked.signIn()
+    expect(linked.store.managed.get("user_ada")?.tenantId).toBe(TENANT)
+
+    // Not linked here (another connection's IdP asserting her address): refused.
+    const claimed = managedOwner()
+    const { state } = await claimed.start()
+    expect(
+      await completeLogin(claimed.deps, {
+        protocol: "test",
+        state,
+        binding: BINDING,
+        assertion: claimed.assertion(),
+      }),
+    ).toEqual({ outcome: "refused", reason: "role_exempt" })
+    expect(claimed.store.identities).toHaveLength(0)
+    expect(claimed.clerk.minted).toEqual([])
   })
 
   it("follows an IdP rename on the stored row, and never lists an address the account lacks", async () => {

@@ -9,7 +9,7 @@ import {
   newSecret,
   normaliseEmail,
   onLiveDomain,
-  provedMfa,
+  assertionProvesMfa,
   sameHash,
   type Assertion,
   type AttemptPurpose,
@@ -186,7 +186,7 @@ export async function attemptForCallback(
 
 export type CompleteOutcome =
   | { outcome: "signed_in"; code: string; returnTo: string | null }
-  | { outcome: "tested"; testRunId: string; passed: boolean }
+  | { outcome: "tested"; testRunId: string; passed: boolean; returnTo: string | null }
   | { outcome: "stepped_up"; returnTo: string | null }
   | { outcome: "refused"; reason: Refusal }
 
@@ -204,31 +204,52 @@ type Resolved =
     }
   | { ok: false; reason: Refusal }
 
+type Refuse = (
+  reason: Refusal,
+  extra?: Record<string, unknown>,
+) => Promise<{ outcome: "refused"; reason: Refusal }>
+
+type Opened =
+  | { ok: true; attempt: AttemptRow; refuse: Refuse }
+  | { ok: false; outcome: CompleteOutcome }
+
 /**
- * Called by an engine AFTER it verified the IdP's response.
+ * Whether a callback may even be looked at: this browser's, unused, unexpired.
+ * An engine asks this BEFORE it talks to the IdP (#338), so a callback replayed
+ * from another machine never spends the real person's authorization code; the
+ * bridge asks again, and spends the attempt, in `openAttempt`.
+ */
+export function precheckAttempt(
+  attempt: AttemptRow,
+  binding: string,
+  now: Date,
+): Refusal | null {
+  if (!sameHash(attempt.bindingHash, hashSecret(binding))) return "wrong_browser"
+  if (attempt.consumedAt) return "attempt_used"
+  if (attempt.expiresAt.getTime() <= now.getTime()) return "attempt_expired"
+  return null
+}
+
+/**
+ * The attempt a callback names, checked and SPENT, with the refusal that
+ * records why on it and in the audit log.
  *
  * ⚠ THE ATTEMPT IS SPENT BEFORE ANYTHING ELSE HAPPENS. Two callbacks for one
  * attempt (a replay, a double click) race on `consumed_at`; the loser is
  * refused before it reads a user, so nothing the winner does can be done
  * twice.
  */
-export async function completeLogin(
-  d: BridgeDeps,
-  input: {
-    state: string
-    binding: string
-    assertion: Assertion
-    /** The engine that verified `assertion`: it must be the connection's own. */
-    protocol: Protocol
-  },
-): Promise<CompleteOutcome> {
-  const now = clock(d)
+async function openAttempt(
+  d: Pick<BridgeDeps, "store" | "log">,
+  input: { state: string; binding: string; subject?: string },
+  now: Date,
+): Promise<Opened> {
   const attempt = await d.store.attemptByState(hashSecret(input.state))
   if (!attempt) {
     d.log.warn({}, "an SSO callback named no attempt we know")
-    return { outcome: "refused", reason: "attempt_unknown" }
+    return { ok: false, outcome: { outcome: "refused", reason: "attempt_unknown" } }
   }
-  const refuse = async (reason: Refusal, extra: Record<string, unknown> = {}) => {
+  const refuse: Refuse = async (reason, extra = {}) => {
     await d.store.finishAttempt(attempt.tenantId, attempt.id, {
       outcome: "refused",
       failureReason: reason,
@@ -237,7 +258,11 @@ export async function completeLogin(
       type: attempt.purpose === "step_up" ? "step_up.failed" : "sign_in.failed",
       connectionId: attempt.connectionId,
       reason,
-      data: { attemptId: attempt.id, subject: input.assertion.subject, ...extra },
+      data: {
+        attemptId: attempt.id,
+        ...(input.subject !== undefined ? { subject: input.subject } : {}),
+        ...extra,
+      },
     })
     return { outcome: "refused" as const, reason }
   }
@@ -251,23 +276,69 @@ export async function completeLogin(
       reason: "wrong_browser",
       data: { attemptId: attempt.id },
     })
-    return { outcome: "refused", reason: "wrong_browser" }
+    return { ok: false, outcome: { outcome: "refused", reason: "wrong_browser" } }
   }
   // ⚠ A REPLAY IS RECORDED BUT DOES NOT TOUCH THE ATTEMPT: `refuse` would
   // overwrite the outcome the first, real completion wrote.
-  const replayed = async (): Promise<CompleteOutcome> => {
+  const replayed = async (): Promise<Opened> => {
     await d.store.record(attempt.tenantId, {
       type: attempt.purpose === "step_up" ? "step_up.failed" : "sign_in.failed",
       connectionId: attempt.connectionId,
       reason: "attempt_used",
       data: { attemptId: attempt.id },
     })
-    return { outcome: "refused", reason: "attempt_used" }
+    return { ok: false, outcome: { outcome: "refused", reason: "attempt_used" } }
   }
   if (attempt.consumedAt) return replayed()
-  if (attempt.expiresAt.getTime() <= now.getTime()) return refuse("attempt_expired")
+  if (attempt.expiresAt.getTime() <= now.getTime())
+    return { ok: false, outcome: await refuse("attempt_expired") }
   if (!(await d.store.consumeAttempt(attempt.tenantId, attempt.id, now)))
     return replayed()
+  return { ok: true, attempt, refuse }
+}
+
+/**
+ * An engine could not, or would not, accept what the IdP sent back (#338): an
+ * `error=` redirect, a response that failed verification, a Google account
+ * outside the workspace. The attempt is spent and the refusal audited exactly
+ * as `completeLogin` would have.
+ *
+ * ⚠ `extra` IS AUDITED, SO NOTHING SECRET GOES IN IT: never the code, the
+ * state, a token or a verifier. A short failure code and a claim NAME at most.
+ */
+export async function refuseLogin(
+  d: Pick<BridgeDeps, "store" | "log" | "now">,
+  input: {
+    state: string
+    binding: string
+    reason: Refusal
+    extra?: Record<string, unknown>
+  },
+): Promise<CompleteOutcome> {
+  const opened = await openAttempt(d, input, clock(d))
+  if (!opened.ok) return opened.outcome
+  return opened.refuse(input.reason, input.extra)
+}
+
+/** Called by an engine AFTER it verified the IdP's response. */
+export async function completeLogin(
+  d: BridgeDeps,
+  input: {
+    state: string
+    binding: string
+    assertion: Assertion
+    /** The engine that verified `assertion`: it must be the connection's own. */
+    protocol: Protocol
+  },
+): Promise<CompleteOutcome> {
+  const now = clock(d)
+  const opened = await openAttempt(
+    d,
+    { state: input.state, binding: input.binding, subject: input.assertion.subject },
+    now,
+  )
+  if (!opened.ok) return opened.outcome
+  const { attempt, refuse } = opened
 
   const connection = await d.store.connection(attempt.tenantId, attempt.connectionId)
   const usable =
@@ -285,8 +356,11 @@ export async function completeLogin(
   if (connection.protocol !== input.protocol) return refuse("engine_mismatch")
   const assertion = input.assertion
 
-  if (connection.mfaRequired && !provedMfa(assertion.amr))
-    return refuse("mfa_required", { amr: assertion.amr ?? [] })
+  if (connection.mfaRequired && !assertionProvesMfa(assertion))
+    return refuse("mfa_required", {
+      amr: assertion.amr ?? [],
+      acr: assertion.acr ?? null,
+    })
 
   if (attempt.purpose === "step_up")
     return stepUp(d, attempt, connection, assertion, refuse)
@@ -314,7 +388,12 @@ export async function completeLogin(
       reason: resolved.ok ? null : resolved.reason,
       data: { testRunId: run.id, passed: resolved.ok },
     })
-    return { outcome: "tested", testRunId: run.id, passed: resolved.ok }
+    return {
+      outcome: "tested",
+      testRunId: run.id,
+      passed: resolved.ok,
+      returnTo: attempt.returnTo,
+    }
   }
 
   if (!resolved.ok) return refuse(resolved.reason)
@@ -330,7 +409,18 @@ export async function completeLogin(
    * #340's.
    */
   const existing = resolved.managed
-  if (!existing && (await d.isExempt(attempt.tenantId, resolved.userId)))
+  /*
+   * ⚠ AND A PRIVILEGED ACCOUNT THAT IS MANAGED SIGNS IN ONLY THROUGH THE LINK
+   * IT ALREADY HAS (#338). A member claimed through SSO and later made an
+   * owner or admin is managed, so the rule above lets them through; but only
+   * as `linked` on this very connection. Never claimed by address, made by
+   * JIT or found by SCIM on another one: otherwise an admin could stand up a
+   * second connection on an IdP they run, move the domain to it, and sign in
+   * as that owner. Changing the trust of the connection they ARE linked on
+   * needs an owner (routes/console/identity-oidc.ts).
+   */
+  const exempt = await d.isExempt(attempt.tenantId, resolved.userId)
+  if (exempt && (!existing || resolved.path !== "linked"))
     return refuse("role_exempt", { clerkUserId: resolved.userId })
 
   // ── Membership, link, managed ──
@@ -544,7 +634,7 @@ export function verifiedAddresses(
   return [...new Set([email, ...wanted])].filter((a) => held.has(a))
 }
 
-/** The assertion as a test run shows it: claims, no secrets (an engine has none here). */
+/** The assertion as a test run shows it: claims, no secrets (no token, no code). */
 function claimsOf(assertion: Assertion): Record<string, unknown> {
   return {
     subject: assertion.subject,
@@ -554,6 +644,7 @@ function claimsOf(assertion: Assertion): Record<string, unknown> {
     familyName: assertion.familyName ?? null,
     groups: assertion.groups ?? [],
     amr: assertion.amr ?? [],
+    acr: assertion.acr ?? null,
     authTime: assertion.authTime?.toISOString() ?? null,
     attributes: assertion.attributes ?? {},
   }
@@ -573,7 +664,7 @@ async function stepUp(
   attempt: AttemptRow,
   connection: Connection,
   assertion: Assertion,
-  refuse: (reason: Refusal) => Promise<CompleteOutcome>,
+  refuse: Refuse,
 ): Promise<CompleteOutcome> {
   const now = clock(d)
   const linked = await d.store.identityBySubject(

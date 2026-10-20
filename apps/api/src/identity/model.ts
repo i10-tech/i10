@@ -21,6 +21,14 @@ export const STATUSES: readonly ConnectionStatus[] = [
   "active",
   "disabled",
 ]
+/**
+ * Connection statuses whose TRUST settings only an owner may change: issuer,
+ * client, secret, keys, domains, MFA proof, claim mapping (sso.md 2.14). A
+ * disabled connection is an active one paused: its managed accounts are
+ * still its own.
+ */
+export const OWNER_GUARDED: readonly ConnectionStatus[] = ["active", "disabled"]
+
 export const ENFORCEMENTS: readonly Enforcement[] = [
   "off",
   "optional",
@@ -64,6 +72,13 @@ export interface Assertion {
   authTime: Date | null
   /** OIDC `amr`, or SAML AuthnContextClassRef mapped to the same words. */
   amr?: string[]
+  /** OIDC `acr` as the IdP sent it, for the record. */
+  acr?: string | null
+  /**
+   * The engine found `acr` on the connection's own list of values that prove
+   * MFA (#338). `amr` alone is not enough for IdPs that only send `acr`.
+   */
+  mfaByAcr?: boolean
   /** OIDC `sid` / SAML SessionIndex, for IdP logout (#345). */
   idpSession?: string | null
 }
@@ -189,6 +204,17 @@ export function provedMfa(amr: readonly string[] | undefined): boolean {
   return (amr ?? []).some((value) => SECOND_FACTORS.has(value.toLowerCase()))
 }
 
+/**
+ * Whether an assertion proves MFA: by `amr`, or by an `acr` the engine found
+ * on the connection's own list (`mfaByAcr`). An `acr` means only what the IdP
+ * says it means, so no value is trusted unless an admin listed it.
+ */
+export function assertionProvesMfa(
+  assertion: Pick<Assertion, "amr" | "mfaByAcr">,
+): boolean {
+  return provedMfa(assertion.amr) || assertion.mfaByAcr === true
+}
+
 // ── Refusals ─────────────────────────────────────────────────────────────
 
 /** Why a login was refused: recorded on the attempt and in the audit log. */
@@ -215,6 +241,12 @@ export type Refusal =
   | "engine_disabled"
   | "engine_mismatch"
   | "role_exempt"
+  /** The IdP answered the redirect with `error=` instead of a code (#338). */
+  | "idp_error"
+  /** The engine could not verify the IdP's response: signature, iss, aud, exp, nonce, PKCE. */
+  | "invalid_response"
+  /** Google: no `hd` claim (a consumer account) or one the workspace has not verified. */
+  | "hosted_domain"
 
 /** What the person is told. Never which check failed in detail. */
 export function refusalMessage(reason: Refusal): string {
@@ -235,6 +267,10 @@ export function refusalMessage(reason: Refusal): string {
       return "Your administrator has not allowed this account."
     case "role_exempt":
       return "Workspace owners and admins sign in with their own passkey or password, not SSO."
+    case "idp_error":
+      return "Your company's sign-in did not finish. Start again, or ask your administrator."
+    case "hosted_domain":
+      return "Sign in with your company's Google Workspace account, not a personal one."
     default:
       return "We could not sign you in with your company's SSO. Ask your administrator."
   }

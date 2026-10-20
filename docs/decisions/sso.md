@@ -511,6 +511,72 @@ Whatever speaks the protocol (Part 3), the semantics are ours:
   rows on displacement, or handing them to the new owner's connection, has to
   be decided.
 
+### 2.14 What #338 settled for OIDC (2026-10-20)
+
+- **Trust changes on a live connection are an owner's** (decision 7, open item
+  b, for the OIDC half). Issuer, discovery URL, client id, client
+  authentication method, client secret and the private_key_jwt key decide who
+  a connection believes. On an `active` or `disabled` connection, changing any
+  of them needs `owners:manage`, step-up, and is audited with the actor; on
+  `draft` and `testing`, `sso:manage` is enough, since nobody signs in through
+  them. Moving an active or disabled connection back to `draft` or `testing`
+  needs an owner as well, or demote, edit, reactivate would step around the
+  rule; disabling stays an admin's, because it only stops sign-ins. **Domains
+  too** (found in review): adding or removing a domain on an active or
+  disabled connection needs an owner, or an admin could move a domain off the
+  guarded connection onto one they run. SAML certificates are #339's.
+- **A privileged account that is managed signs in only through its existing
+  link** (found in review). Owners and admins who are not managed are refused
+  (`role_exempt`, 2.13); one who IS managed (claimed as a member, promoted
+  later) is let in only as `linked` on the connection they are linked on,
+  never claimed by address, by JIT or by SCIM through another connection.
+- **Google has its own redirect URI** (`/sso/callback/google`, found in
+  review). Our Google client is shared by every workspace; with one callback
+  URL for all IdPs, a hostile IdP on one workspace could route a person
+  through Google and receive their Google code (OAuth mix-up, RFC 9700 4.4).
+  A Google code can only land at the Google URL, and a callback for the wrong
+  kind of connection is refused before the code is exchanged. Register only
+  `<auth origin>/sso/callback/google` on our Google client.
+- **Loosening a live connection is an owner's**: turning `mfaRequired` off,
+  changing the claim mapping, or listing which `acr` proves MFA.
+- **Rate limits on the public `/sso` POSTs** (identity/rate-limit.ts): 60 a
+  minute per browser address, the address taken only from the signed
+  `x-i10-client` context apps/auth sends or Cloudflare's `cf-connecting-ip`,
+  never a header anybody could set, and skipped when neither is there; and
+  1,200 sign-in starts a minute per connection. Redis first, this process when
+  Redis fails.
+- **The console never repeats the egress guard's reason**, which can name what
+  a host resolved to inside our network; the admin is told only that the
+  issuer could not be reached from the internet.
+- **Secrets are write-only.** The client secret and the private key are sealed
+  in `connections.secrets` and no route reads them back; `config.oidc` says
+  only that a secret is set and which public keys exist. Rotating the key keeps
+  the previous public key published (one rotation of overlap).
+- **Every IdP fetch is the webhook egress guard's** (vetted address, pinned
+  connection, https, no redirects, 5 s, 256 KiB), discovery cached 10 minutes,
+  JWKS by openid-client's own 5 minute rule. An unreachable or misconfigured
+  IdP is a 503 at start and at callback, never a pass, and an outage at the
+  callback does not spend the attempt.
+- **The ID token's signature is checked against the IdP's JWKS.** openid-client
+  skips it for a token from the token endpoint unless
+  `enableNonRepudiationChecks` is on (OIDC Core 3.1.3.7 allows the skip); we
+  turn it on.
+- **A callback is checked before the code is exchanged.** Wrong browser,
+  replay or expiry is refused without calling the token endpoint, so a
+  forwarded callback URL cannot spend somebody else's code.
+- **MFA by `acr`** counts only for values the connection lists
+  (`mfaAcrValues`), beside the RFC 8176 `amr` words.
+- **Presets** (identity/oidc-presets.ts): Entra must use the tenant issuer
+  (`/<tenant id>/v2.0`) and needs the optional claims `email` and `xms_edov`,
+  which stands in for the `email_verified` Entra never sends; Entra is client
+  secret only (its private_key_jwt needs an uploaded certificate). Okta's
+  private_key_jwt assertion is addressed to its token endpoint, everyone
+  else's to the issuer. **Unverified against real tenants (inferred):** that
+  Okta accepts that `aud`; that Google honours `prompt=login max_age=0` and
+  sends `auth_time` (Google documents neither, so a Google step-up may fail
+  closed as `step_up_stale`); that Google's ID tokens carry the `https://`
+  issuer form in this flow.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?
@@ -760,8 +826,8 @@ users) **(inferred)**.
    anything is joined, linked or minted, and they sign in with their own
    passkey. Admins are included because the same admin could otherwise claim a
    fellow admin, and the planned IT-admin role would make that an escalation.
-   Still open, for #338 and #340: (a) an owner who chooses to use SSO, linked
-   from their own session; (b) a managed account later made an owner, whose
+   Still open, for #338 and #340 (b is settled for OIDC trust settings, 2.14):
+   (a) an owner who chooses to use SSO, linked from their own session; (b) a managed account later made an owner, whose
    sign-in the connection's admins still control, so changing such a
    connection's trust (issuer, keys, domains, status) should need an owner;
    (c) claiming (2.3) also reaches somebody who owns a DIFFERENT workspace if

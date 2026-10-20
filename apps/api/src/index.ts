@@ -48,6 +48,9 @@ import { ssoGate } from "./identity/gate.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
+import { oidcEngine } from "./identity/oidc.js"
+import { guardedFetch } from "./identity/oidc-fetch.js"
+import { fixedWindow, ssoRateLimit } from "./identity/rate-limit.js"
 import { onIdentityClerkEvent } from "./identity/events.js"
 import {
   clerkSessionIds,
@@ -1211,6 +1214,35 @@ if (testEngineEnabled)
     {},
     "SSO TEST ENGINE ON - anybody who starts a sign-in can assert any identity",
   )
+/*
+ * The OIDC engine (#338). It needs the secret box (PKCE verifiers and client
+ * secrets are sealed) and the auth app, whose `/sso/callback` is the redirect
+ * URI every IdP is given.
+ *
+ * ⚠ EVERY FETCH IT MAKES IS THE WEBHOOK EGRESS GUARD's, with the same allow
+ * list: `WEBHOOK_EGRESS_ALLOW`, which env.ts refuses in production, is what
+ * lets a local development IdP on 127.0.0.1 be reached and nothing else.
+ */
+const oidc =
+  secrets && authOrigin
+    ? oidcEngine({
+        store: identity,
+        fetch: guardedFetch({
+          vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+        }),
+        redirectUri: new URL("/sso/callback", authOrigin).href,
+        google:
+          env.GOOGLE_SSO_CLIENT_ID && env.GOOGLE_SSO_CLIENT_SECRET
+            ? {
+                clientId: env.GOOGLE_SSO_CLIENT_ID,
+                clientSecret: env.GOOGLE_SSO_CLIENT_SECRET,
+              }
+            : null,
+        log,
+      })
+    : null
+if (oidc) engines.set("oidc", oidc)
+else log.warn({}, "OIDC SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
 const managedDeps = { store: identity, clerk: identityClerk, log }
 const sweepQueue = createIdentitySweepQueue({ redis: queueRedis })
 const consoleFreshAuth = withSsoFreshness(
@@ -1240,6 +1272,15 @@ const identityConsole = {
   clerk: identityClerk,
   gate: gateChecker,
   protocols: [...engines.keys()],
+  ...(oidc && authOrigin
+    ? {
+        oidc: {
+          engine: oidc,
+          jwksUrl: (connectionId: string) =>
+            new URL(`/sso/jwks/${connectionId}`, authOrigin).href,
+        },
+      }
+    : {}),
   deprovision: {
     ...managedDeps,
     workspaceOrg: (tenantId: string) => identity.workspaceOrg(tenantId),
@@ -1523,6 +1564,12 @@ const app = createApp({
           }),
           returnOrigins: [...env.AUTH_ORIGINS, ...env.CONSOLE_ORIGINS],
           testEngine: testEngineEnabled,
+          rateLimit: ssoRateLimit({
+            take: fixedWindow(cache),
+            contextSecret: env.CLIENT_CONTEXT_SECRET,
+            perConnectionStarts: true,
+          }),
+          ...(oidc ? { oidc } : {}),
           mayManage: (tenantId: string, userId: string) =>
             can(roleRows, tenantId, userId, "sso:manage"),
           tenantOfConnection: async (connectionId: string) =>

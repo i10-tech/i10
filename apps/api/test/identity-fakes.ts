@@ -89,6 +89,8 @@ export function memoryStore(
   const events: (AuditEvent & { tenantId: string })[] = []
   const testRuns: Record<string, unknown>[] = []
   const settings = new Map<string, DeprovisionMode>()
+  /** Plain here; sealed by the real store. */
+  const secrets = new Map<string, Record<string, unknown>>()
   let n = 0
   const id = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`
   const fail = { gateRead: false }
@@ -144,6 +146,23 @@ export function memoryStore(
     },
     async workspaceOrg(tenantId) {
       return orgs[tenantId] ?? null
+    },
+    async connectionSecrets(tenantId, cid) {
+      const c = connections.get(cid)
+      if (!c || c.tenantId !== tenantId) return null
+      return structuredClone(secrets.get(cid) ?? {})
+    },
+    async setConnectionSecrets(tenantId, cid, edit) {
+      const c = connections.get(cid)
+      if (!c || c.tenantId !== tenantId) return null
+      const done = edit({
+        secrets: structuredClone(secrets.get(cid) ?? {}),
+        config: structuredClone(c.config),
+      })
+      secrets.set(cid, structuredClone(done.secrets))
+      const next = { ...c, config: structuredClone(done.config) }
+      connections.set(cid, next)
+      return { ...next }
     },
     async createAttempt(input: NewAttempt) {
       const row: Attempt = {
@@ -377,6 +396,7 @@ export function memoryStore(
     sessions,
     events,
     testRuns,
+    secrets,
     fail,
   }
 }

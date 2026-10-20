@@ -5,6 +5,7 @@ import { requireFreshAuth } from "../../middleware/session.js"
 import { can, mayRemove, type Permission } from "../../console/roles.js"
 import { deprovision, type DeprovisionDeps } from "../../identity/managed.js"
 import {
+  OWNER_GUARDED,
   ENFORCEMENTS,
   PROTOCOLS,
   STATUSES,
@@ -20,6 +21,9 @@ import type {
   Logger,
 } from "../../identity/ports.js"
 import type { SsoGateChecker } from "../../identity/gate.js"
+import { oidcReady } from "../../identity/oidc.js"
+import { presetOf } from "../../identity/oidc-presets.js"
+import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
 
 /**
  * The identity core's console API (#337). The screens are #340's; these are
@@ -35,6 +39,7 @@ import type { SsoGateChecker } from "../../identity/gate.js"
  *   GET    /identity/members/:userId/sessions            a member's bound sessions
  *   POST   /identity/members/:userId/sessions/:sid/revoke
  *   POST   /identity/members/:userId/deprovision         (step-up)
+ *   ...    /identity/connections/:id/oidc[/secret|/keys] OIDC settings (#338, identity-oidc.ts)
  *
  * ⚠ EVERY ROUTE CHECKS OUR ROLES TABLE (#335): `sso:manage` for setup,
  * `owners:manage` for what deprovisioning does, and the removal rule
@@ -49,6 +54,8 @@ export interface IdentityConsoleDeps {
   gate: SsoGateChecker
   /** The protocols an engine exists for in this process; `test` only in development. */
   protocols: readonly Protocol[]
+  /** The OIDC engine's console half (#338). Absent: OIDC routes answer 501. */
+  oidc?: OidcConsoleDeps
   deprovision: DeprovisionDeps
   log: Logger
 }
@@ -127,6 +134,7 @@ export function readPatch(body: Record<string, unknown>): ConnectionPatch | stri
 }
 
 export function mountIdentity(app: Hono, d: ConsoleDeps): void {
+  mountIdentityOidc(app, d)
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
@@ -142,6 +150,23 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       d.roles.store.roleOf(tenantId, member),
     ])
     return mayRemove(actor ?? "member", target ?? "member")
+  }
+
+  /**
+   * ⚠ A DOMAIN IS TRUST TOO (#338): which addresses a connection may sign in
+   * and claim. On an active or disabled connection only an owner changes it,
+   * as with the issuer and keys - or an admin could move a domain from the
+   * owner-guarded connection to one they run. The refusal, or null to go on.
+   */
+  const domainGuard = async (c: Context, tenantId: string, connectionId: string) => {
+    const target = await d.identity!.store.connection(tenantId, connectionId)
+    if (!target) return c.json(notFound(), 404)
+    if (OWNER_GUARDED.includes(target.status) && !(await allowed(c, "owners:manage")))
+      return c.json(
+        forbidden("Only an owner can change the domains of an active connection."),
+        403,
+      )
+    return null
   }
 
   app.get("/identity/connections", async (c) => {
@@ -177,6 +202,17 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       return c.json(validation("That protocol is not available."), 422)
     if (!/^[a-z0-9_-]{1,32}$/.test(provider))
       return c.json(validation("provider is not valid."), 422)
+    /*
+     * ⚠ AN OIDC CONNECTION IS ONE OF THE PRESETS (#338), and `google` only
+     * where our own Google client is configured: without it there is no client
+     * to sign anybody in with.
+     */
+    if (protocol === "oidc") {
+      const preset = presetOf(provider)
+      if (!preset) return c.json(validation("provider is not valid for OIDC."), 422)
+      if (preset.id === "google" && !id.oidc?.engine.google)
+        return c.json(validation("Google Workspace sign-in is not available."), 422)
+    }
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
     const made = await id.store.createConnection(tenantId, {
@@ -219,6 +255,51 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
           422,
         )
     }
+    /*
+     * ⚠ BACK TO DRAFT OR TESTING FROM ACTIVE OR DISABLED IS AN OWNER'S MOVE.
+     * Trust changes on an active or disabled connection need an owner
+     * (identity-oidc.ts); were an admin able to demote it, edit it and
+     * reactivate it, that rule would be decoration. Disabling stays an
+     * admin's, because stopping sign-ins is always the safe direction.
+     */
+    /*
+     * ⚠ WEAKENING A LIVE CONNECTION IS AN OWNER'S MOVE TOO: turning off its
+     * MFA requirement, or changing which claim is the email (and so who gets
+     * claimed). Tightening stays an admin's.
+     */
+    if (
+      OWNER_GUARDED.includes(before.status) &&
+      (patch.mfaRequired === false || patch.attributeMapping !== undefined) &&
+      !(await allowed(c, "owners:manage"))
+    )
+      return c.json(
+        forbidden("Only an owner can loosen an active connection's checks."),
+        403,
+      )
+    if (
+      patch.status !== undefined &&
+      OWNER_GUARDED.includes(before.status) &&
+      (patch.status === "draft" || patch.status === "testing") &&
+      !(await allowed(c, "owners:manage"))
+    )
+      return c.json(
+        forbidden("Only an owner can move an active connection back to setup."),
+        403,
+      )
+    // ⚠ A TEST RUN OR A SIGN-IN NEEDS SOMETHING TO TALK TO: an OIDC connection
+    // is testable only once its issuer, client and credential are set (#338).
+    if (
+      before.protocol === "oidc" &&
+      (patch.status === "active" || patch.status === "testing") &&
+      patch.status !== before.status &&
+      !oidcReady(before, id.oidc?.engine.google ?? false)
+    )
+      return c.json(
+        validation(
+          "Finish the connection's OIDC settings before testing or activating it.",
+        ),
+        422,
+      )
     const after = await id.store.updateConnection(tenantId, connectionId, patch)
     if (!after) return c.json(notFound(), 404)
     await id.store.record(tenantId, {
@@ -249,6 +330,8 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       )
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
+    const guarded = await domainGuard(c, tenantId, connectionId)
+    if (guarded) return guarded
     const added = await id.store.addDomain(tenantId, connectionId, joinDomainId)
     if (added === "not_found")
       return c.json(validation("Use a verified access domain of this workspace."), 422)
@@ -284,6 +367,8 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
         return c.json(notFound(), 404)
       const { tenantId } = c.get("auth")
       const { userId } = c.get("user")
+      const guarded = await domainGuard(c, tenantId, connectionId)
+      if (guarded) return guarded
       if (!(await id.store.removeDomain(tenantId, connectionId, joinDomainId)))
         return c.json(notFound(), 404)
       await id.store.record(tenantId, {

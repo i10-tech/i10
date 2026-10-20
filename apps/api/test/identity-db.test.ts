@@ -308,6 +308,33 @@ suite("identity schema", () => {
     expect(await store().events(rival, { limit: 10 })).toEqual([])
   })
 
+  it("seals a connection's secrets at rest and opens them only for its workspace (#338)", async () => {
+    expect(await store().connectionSecrets(acme, connectionId)).toEqual({})
+    const written = await store().setConnectionSecrets(acme, connectionId, () => ({
+      secrets: { oidc: { clientSecret: "client-secret-at-rest" } },
+      config: { oidc: { clientSecretSet: true } },
+    }))
+    expect(written?.config).toEqual({ oidc: { clientSecretSet: true } })
+    const [row] =
+      await owner`select secrets, config from identity.connections where id = ${connectionId}`
+    expect(String(row!.secrets)).toStartWith("v1.")
+    expect(String(row!.secrets)).not.toContain("client-secret-at-rest")
+    expect(await store().connectionSecrets(acme, connectionId)).toEqual({
+      oidc: { clientSecret: "client-secret-at-rest" },
+    })
+    expect(await store().connectionSecrets(rival, connectionId)).toBeNull()
+    expect(
+      await store().setConnectionSecrets(rival, connectionId, () => ({
+        secrets: { oidc: {} },
+        config: {},
+      })),
+    ).toBeNull()
+    // The connection as every other read returns it carries no secret.
+    expect(JSON.stringify(await store().connection(acme, connectionId))).not.toContain(
+      "client-secret-at-rest",
+    )
+  })
+
   it("forgets a deleted user's links and managed row", async () => {
     await store().link(acme, {
       connectionId,

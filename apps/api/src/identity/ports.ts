@@ -165,6 +165,34 @@ export interface IdentityStore {
   ): Promise<boolean>
   /** Names whose proof is live right now. */
   liveDomains(tenantId: string, connectionId: string): Promise<string[]>
+  /**
+   * The connection's sealed `secrets`, opened: a JSON object the engine
+   * defines (#338: the OIDC client secret, the private_key_jwt keys). `{}` when
+   * none are set, null when there is no such connection.
+   *
+   * ⚠ THROWS WITHOUT `WEBHOOK_SECRET_KEY`: there is nothing to open them with,
+   * and an empty answer would read as "no secret set".
+   */
+  connectionSecrets(
+    tenantId: string,
+    id: string,
+  ): Promise<Record<string, unknown> | null>
+  /**
+   * Changes a connection's sealed `secrets` and its `config` together:
+   * `edit` gets both as they are NOW, under a row lock, and returns both.
+   *
+   * ⚠ A READ-MODIFY-WRITE UNDER ONE LOCK. Setting a client secret and rotating
+   * a key both edit the same sealed blob; read outside the lock, two at once
+   * would each write the other's change away.
+   */
+  setConnectionSecrets(
+    tenantId: string,
+    id: string,
+    edit: (current: {
+      secrets: Record<string, unknown>
+      config: Record<string, unknown>
+    }) => { secrets: Record<string, unknown>; config: Record<string, unknown> },
+  ): Promise<Connection | null>
   /** The workspace's Clerk organization, or null once the workspace is gone. */
   workspaceOrg(tenantId: string): Promise<string | null>
 

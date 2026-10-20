@@ -200,6 +200,20 @@ const schema = z.object({
   IDENTITY_TEST_ENGINE: z.enum(["on", "off"]).default("off"),
 
   /**
+   * OUR Google OAuth client, for one-click Google Workspace sign-in (#338,
+   * sso.md 2.9). Its authorised redirect URI is `<AUTH_ORIGINS[0]>/sso/callback`.
+   *
+   * ⚠ BOTH OR NEITHER, AND NEITHER MEANS THE PRESET DOES NOT EXIST: a `google`
+   * connection cannot be created, and an existing one cannot start. The
+   * secret is a Google client secret, so it lives in Doppler like the rest.
+   */
+  GOOGLE_SSO_CLIENT_ID: z
+    .string()
+    .regex(/^[0-9a-z-]+\.apps\.googleusercontent\.com$/)
+    .optional(),
+  GOOGLE_SSO_CLIENT_SECRET: z.string().min(8).optional(),
+
+  /**
    * Origins allowed to present a Clerk session to `/mailboxes`.
    *
    * ⚠ THIS IS THE `azp` CHECK, AND LEAVING IT EMPTY DISABLES IT. One Clerk
@@ -1247,6 +1261,16 @@ const validated = schema.superRefine((env, ctx) => {
       message:
         `needs a development Clerk instance (an sk_test_ CLERK_SECRET_KEY). The ` +
         `test SSO engine must never mint sign-in tokens on a live instance.`,
+    })
+  }
+
+  if (Boolean(env.GOOGLE_SSO_CLIENT_ID) !== Boolean(env.GOOGLE_SSO_CLIENT_SECRET)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["GOOGLE_SSO_CLIENT_ID"],
+      message:
+        `GOOGLE_SSO_CLIENT_ID and GOOGLE_SSO_CLIENT_SECRET are set together or not at ` +
+        `all. One without the other is a Google client nobody can sign in with.`,
     })
   }
 
