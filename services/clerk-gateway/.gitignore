@@ -1,0 +1,4 @@
+.wrangler
+# Secrets never live in files here; these are ignored so a stray one cannot be committed.
+.dev.vars
+.env

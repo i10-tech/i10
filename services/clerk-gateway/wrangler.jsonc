@@ -1,0 +1,60 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "i10-clerk-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+
+  // ⚠ NO ROUTE AND NO CUSTOM DOMAIN YET, ON PURPOSE. Attaching `clerk.i10.tech`
+  // is a step of the rollout in README.md, taken by hand in its order (Clerk
+  // support's answer first, then the secret, the deploy, the proxy check, and
+  // only then the DNS). Putting it here would make the first `wrangler deploy`
+  // take the hostname over before Clerk knows to expect a proxy.
+  //
+  // ⚠ ITS ONLY SECRET IS `CLERK_SECRET_KEY`, SET OUT OF BAND:
+  //     wrangler secret put CLERK_SECRET_KEY
+  // It is NOT in this file and must never be. Without it, or with a key from
+  // the other instance, the gateway answers 503 to everything.
+  "secrets": { "required": ["CLERK_SECRET_KEY"] },
+  "vars": {
+    "INSTANCE": "production",
+    "UPSTREAM_ORIGIN": "https://frontend-api.clerk.dev",
+    "PROXY_URL": "https://clerk.i10.tech",
+    "ALLOWED_ORIGINS": "https://auth.i10.tech,https://dash.i10.tech",
+    "UPSTREAM_TIMEOUT_MS": "10000",
+  },
+  "observability": { "enabled": true },
+
+  "env": {
+    // `bun run dev` here: the DEV instance, reached as https://clerk.i10.localhost
+    // through Caddy (dev/Caddyfile). The dev secret comes from Doppler through
+    // the process environment, never a file:
+    //     doppler run --project i10 --config dev -- bun run dev
+    // `secrets.required` is what makes wrangler read it from process.env, and
+    // ONLY it - not the rest of the Doppler environment.
+    //
+    // ⚠ NEVER DEPLOYED. `wrangler deploy --env local` would create a separate
+    // Worker; there is no reason to.
+    "local": {
+      "secrets": { "required": ["CLERK_SECRET_KEY"] },
+      "vars": {
+        "INSTANCE": "development",
+        "UPSTREAM_ORIGIN": "https://frontend-api.clerk.dev",
+        "PROXY_URL": "https://clerk.i10.localhost",
+        "ALLOWED_ORIGINS": "https://auth.i10.localhost,https://dash.i10.localhost",
+        "UPSTREAM_TIMEOUT_MS": "10000",
+      },
+    },
+  },
+
+  // `wrangler dev` only (top level: wrangler does not read `dev` per env).
+  // Caddy fronts it as https://clerk.i10.localhost (dev/Caddyfile).
+  //
+  // ⚠ HTTPS LOCALLY TOO, AND NOT FOR SECRECY. wrangler dev rewrites every
+  // response header that names the request's host onto the protocol the
+  // request arrived with. Over plain http that turned Clerk's
+  // `Location: https://clerk.i10.localhost/npm/...` into `http://...`, which
+  // the browser then refuses from an https page. Arriving over https makes the
+  // rewrite a no-op. The certificate is wrangler's own; Caddy skips verifying
+  // it on the loopback hop only.
+  "dev": { "port": 3006, "local_protocol": "https" },
+}

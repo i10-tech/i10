@@ -8,6 +8,10 @@ import { PURPOSE } from "../../console/code-cooldown.js"
 import { revokeExpired, seats, syncMemberLimit } from "../../console/members.js"
 import { accessOf, can, type Permission } from "../../console/roles.js"
 import { requireFreshAuth } from "../../middleware/session.js"
+import {
+  checkAccountDeletion,
+  soleOwnerMessage,
+} from "../../console/account-deletion.js"
 
 const forbidden = (message: string) =>
   ({ statusCode: 403, name: "forbidden" as const, message }) as const
@@ -237,6 +241,49 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
         outcome,
       },
       "workspace deleted",
+    )
+    return c.json({ deleted: true })
+  })
+
+  /**
+   * Deletes the signed-in person's whole account (#336), behind a fresh
+   * session like every delete that cannot be undone.
+   *
+   * ⚠ THROUGH OUR API, NOT `user.delete()` AT CLERK'S FRONTEND API, which the
+   * Clerk gateway refuses for everyone. And refused, naming the workspaces,
+   * while the person is the only owner of one that still has other members:
+   * see console/account-deletion.ts. Clerk's `user.deleted` then does the rest,
+   * as it did before.
+   */
+  app.delete("/me/account", requireFreshAuth, async (c) => {
+    const accounts = d.accounts
+    if (!accounts || !d.roles) return c.json(notWired("Deleting accounts"), 501)
+    const { userId } = c.get("user")
+    const check = await checkAccountDeletion({ roles: d.roles, accounts }, userId)
+    if (check.outcome === "unconfirmed")
+      return c.json(
+        {
+          statusCode: 503,
+          name: "service_unavailable" as const,
+          message:
+            "We could not check your workspaces' other owners just now. Try again in a minute.",
+        },
+        503,
+      )
+    if (check.outcome === "sole_owner")
+      return c.json(
+        {
+          statusCode: 409,
+          name: "sole_owner" as const,
+          message: soleOwnerMessage(check.workspaces),
+          workspaces: check.workspaces,
+        },
+        409,
+      )
+    const outcome = await accounts.remove(userId)
+    d.roles.log.info(
+      { audit: "account.deleted", actorUserId: userId, userId, outcome },
+      "account deleted",
     )
     return c.json({ deleted: true })
   })

@@ -791,6 +791,22 @@ export async function deleteWorkspace() {
   )
 }
 
+/**
+ * Deletes the signed-in person's whole account (#336), through our API:
+ * Clerk's gateway refuses `DELETE /v1/me` at the Frontend API. A 409
+ * `sole_owner` names the workspaces in `body.workspaces` and says what to do
+ * in its message; a 403 carries the step-up hint.
+ */
+export async function deleteAccount() {
+  return run(
+    () => api<{ deleted: true }>("/console/me/account", { method: "DELETE" }),
+    [],
+    {
+      refreshCaller: false,
+    },
+  )
+}
+
 /** The workspace's logo, through our API since Clerk's roles are powerless. */
 export async function setWorkspaceLogo(form: FormData) {
   const file: unknown = form.get("file")

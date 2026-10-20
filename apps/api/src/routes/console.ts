@@ -71,6 +71,8 @@ const WITHOUT_WORKSPACE = new Set([
   "/me/arrivals",
   "/workspaces",
   "/workspaces/personal",
+  // Deleting the account (#336): a person with no workspace can still leave.
+  "/me/account",
 ])
 
 export function createConsole(deps?: ConsoleDeps) {

@@ -1609,6 +1609,44 @@ const app = createApp({
         return { name, primaryEmail, verifiedEmails, createdAt: user.createdAt }
       },
     },
+    /*
+     * Account deletion (#336), through the backend: the gateway refuses
+     * `DELETE /v1/me`. Each read throws when Clerk cannot answer, which the
+     * route turns into a 503 rather than a guess.
+     */
+    accounts: {
+      workspaces: async (userId: string) => {
+        const found: { orgId: string; name: string }[] = []
+        for (let offset = 0; ; offset += 100) {
+          const { data, totalCount } = await clerk.users.getOrganizationMembershipList({
+            userId,
+            limit: 100,
+            offset,
+          })
+          for (const m of data)
+            found.push({ orgId: m.organization.id, name: m.organization.name })
+          if (data.length === 0 || offset + data.length >= totalCount) return found
+        }
+      },
+      memberCount: async (orgId: string) => {
+        const org = await clerk.organizations.getOrganization({
+          organizationId: orgId,
+          includeMembersCount: true,
+        })
+        if (typeof org.membersCount !== "number")
+          throw new Error("Clerk did not return a member count")
+        return org.membersCount
+      },
+      remove: async (userId: string) => {
+        try {
+          await clerk.users.deleteUser(userId)
+          return "deleted" as const
+        } catch (error) {
+          if (clerkNotFound(error)) return "already_gone" as const
+          throw error
+        }
+      },
+    },
     memberships: {
       list: async (userId: string) => {
         const { data } = await clerk.users.getOrganizationMembershipList({

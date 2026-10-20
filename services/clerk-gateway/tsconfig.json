@@ -1,0 +1,12 @@
+{
+  // The Worker: Workers types only. The tests are a second program
+  // (tsconfig.test.json), because `bun` types and Workers types declare the
+  // same globals differently and cannot share one - as in template-renderer.
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

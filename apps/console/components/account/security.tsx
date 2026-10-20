@@ -45,8 +45,8 @@ import {
 import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { DeletionWarning } from "@/components/deletion-warning"
 import { RowMenu } from "@/components/list/row-menu"
-import { verifyPassword } from "@/lib/actions"
-import { useReverify } from "@/lib/step-up"
+import { deleteAccount, verifyPassword } from "@/lib/actions"
+import { useReverify, useStepUp } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 import type { BillingState } from "@/lib/types"
 
@@ -86,7 +86,7 @@ export function Security({
         <Devices user={user} />
       </ProfileRow>
       <ProfileRow label="Delete account">
-        <DeleteAccount user={user} billing={billing} />
+        <DeleteAccount billing={billing} />
       </ProfileRow>
     </ProfileBlock>
   )
@@ -1075,15 +1075,9 @@ function DeviceArt({ mobile }: { mobile: boolean }) {
  * panel. The sign-in page then clears this account's saved card - it asks
  * which saved accounts still exist, and this one no longer does.
  */
-function DeleteAccount({
-  user,
-  billing,
-}: {
-  user: UserResource
-  billing: BillingState | null
-}) {
+function DeleteAccount({ billing }: { billing: BillingState | null }) {
   const clerk = useClerk()
-  const reverify = useReverify()
+  const stepUp = useStepUp()
   const [open, setOpen] = React.useState(false)
   return (
     <div className="flex items-center justify-between gap-3">
@@ -1102,24 +1096,29 @@ function DeleteAccount({
         doneLabel="Deleted"
         confirmWord="Delete account"
         onConfirm={async () => {
-          try {
-            const done = await reverify(() => user.delete())
-            if (done === null) return false
-            /*
-             * ⚠ THE NAVIGATION IS OURS, NOT `signOut`'s (2026-10-13). Deleting
-             * the user ends its session, and Clerk's `signOut` opens with
-             * `if (!this.client || !this.session) return` - so its
-             * `redirectUrl` never fired and the page sat on the dialog until a
-             * refresh. Any other signed-in session is still signed out; then
-             * a real page load of `/`, which the middleware sends to sign-in.
-             */
-            await clerk.signOut().catch(() => {})
-            window.location.replace("/")
-            return true
-          } catch (error) {
-            toastError("Could not delete your account", clerkReason(error))
+          /*
+           * ⚠ THROUGH OUR API SINCE #336, NOT `user.delete()`: the Clerk
+           * gateway refuses `DELETE /v1/me` for everyone. The step-up is asked
+           * first, as for deleting a workspace; a sole owner of a workspace
+           * with other members is refused there, and told which.
+           */
+          if (!(await stepUp())) return false
+          const result = await deleteAccount()
+          if (!result.ok) {
+            toastError("Could not delete your account", { description: result.error })
             return false
           }
+          /*
+           * ⚠ THE NAVIGATION IS OURS, NOT `signOut`'s (2026-10-13). Deleting
+           * the user ends its session, and Clerk's `signOut` opens with
+           * `if (!this.client || !this.session) return` - so its
+           * `redirectUrl` never fired and the page sat on the dialog until a
+           * refresh. Any other signed-in session is still signed out; then
+           * a real page load of `/`, which the middleware sends to sign-in.
+           */
+          await clerk.signOut().catch(() => {})
+          window.location.replace("/")
+          return true
         }}
       >
         {/*

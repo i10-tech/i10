@@ -54,6 +54,10 @@ function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider
       publishableKey={publishableKey}
+      // Only when set: see middleware.ts, which carries the same option.
+      {...(process.env.CLERK_PROXY_URL
+        ? { proxyUrl: process.env.CLERK_PROXY_URL }
+        : {})}
       signInUrl={process.env.CLERK_SIGN_IN_URL}
       signUpUrl={process.env.CLERK_SIGN_UP_URL}
       /*

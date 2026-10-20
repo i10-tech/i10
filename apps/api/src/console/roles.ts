@@ -938,13 +938,37 @@ async function confirmOwners(
   if (rows.find((r) => r.userId === input.userId)?.role !== "owner") return "ok"
   const others = rows.filter((r) => r.role === "owner" && r.userId !== input.userId)
   if (others.some((r) => r.userId === input.actorUserId)) return "ok"
+  return (await realOtherOwner(d, input, others)) === "unconfirmed"
+    ? "unconfirmed"
+    : "ok"
+}
+
+/**
+ * Is there an owner of this workspace, other than `userId`, whose account and
+ * membership Clerk confirms? The core of `confirmOwners`, and what account
+ * deletion asks for every workspace the person owns.
+ *
+ * ⚠ GHOSTS FOUND ON THE WAY ARE PRUNED, as in `confirmOwners`, and a Clerk
+ * failure with no real owner found is `unconfirmed`, never `none`: the caller
+ * refuses and asks for a retry rather than guessing.
+ */
+export async function realOtherOwner(
+  d: Pick<RolesDeps, "store" | "clerk" | "log">,
+  input: { tenantId: string; orgId: string; userId: string },
+  owners?: RoleRow[],
+): Promise<"found" | "none" | "unconfirmed"> {
+  const others =
+    owners ??
+    (await d.store.list(input.tenantId)).filter(
+      (r) => r.role === "owner" && r.userId !== input.userId,
+    )
   const ghosts: RoleRow[] = []
   let unknown = false
   for (const owner of others) {
     try {
       if (await d.clerk.stillMember(input.orgId, owner.userId)) {
         if (ghosts.length > 0) await prune(d, input, ghosts)
-        return "ok"
+        return "found"
       }
       ghosts.push(owner)
     } catch (error) {
@@ -961,7 +985,7 @@ async function confirmOwners(
     }
   }
   if (ghosts.length > 0) await prune(d, input, ghosts)
-  return unknown ? "unconfirmed" : "ok"
+  return unknown ? "unconfirmed" : "none"
 }
 
 async function prune(

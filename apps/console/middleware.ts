@@ -135,6 +135,16 @@ export default PREVIEW
          */
         signInUrl: process.env.CLERK_SIGN_IN_URL,
         signUpUrl: process.env.CLERK_SIGN_UP_URL,
+        /**
+         * ⚠ ONLY WHEN SET, SO PRODUCTION IS EXACTLY AS BEFORE THE GATEWAY.
+         * `CLERK_PROXY_URL` points the handshake at the Clerk gateway
+         * (services/clerk-gateway); locally that is https://clerk.i10.localhost in
+         * front of the dev instance. Production needs no value at all: the gateway
+         * answers clerk.i10.tech, the very host the publishable key already names.
+         */
+        ...(process.env.CLERK_PROXY_URL
+          ? { proxyUrl: process.env.CLERK_PROXY_URL }
+          : {}),
       },
     )
 
