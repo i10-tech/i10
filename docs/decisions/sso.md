@@ -176,12 +176,84 @@ step inside it. One thing to check before choosing it: how Clerk counts monthly
 retained users when no session is ever created through its Frontend API, and
 whether its terms say anything about backend-only use **(not checked)**.
 
-**Where it lands.** With `clerk.i10.tech` pointed at us, L1 gives most of what
-the user asked for: nobody reaches Clerk except through us, and we decide
-request by request. L2 goes one step further (the browser never holds a Clerk
-session at all) at the price of rewriting our session layer. i10 is greenfield
-(no real users), so neither carries a migration cost. Both keep Clerk as the
+**Where it lands.** The user's gateway idea is L1, built at the same hostname,
+not a third level: same mechanism (Clerk's Frontend API proxy), but nothing
+changes for clerk-js and every request reaches us first. i10 is greenfield (no
+real users), so neither level carries a migration cost. Both keep Clerk as the
 user and org store.
+
+### 1.5 L1 (our gateway) vs L2 (Clerk behind our API), weighed
+
+Scores 1 (poor) to 5 (best) **(judgement)**:
+
+| Criterion                             | Weight | L1 gateway                                                                    | L2 Clerk behind API                                                           |
+| ------------------------------------- | ------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Meets "nobody talks to Clerk but us"  | 5      | 4 (every request passes us; the browser still holds a Clerk session; P8 open) | 5 (the browser never sees Clerk)                                              |
+| Strength of SSO enforcement           | 5      | 4 (refused at the door and at our API)                                        | 5 (no Clerk session exists to misuse)                                         |
+| SSO design complexity                 | 4      | 3 (ticket, handoff, bind; sweeper as backstop)                                | 5 (the callback makes an i10 session)                                         |
+| Build cost now                        | 4      | 4 (a small gateway; apps/auth flows stay)                                     | 2 (new session layer, sign-in flows, OAuth, passkeys, step-up, throttling)    |
+| Security-critical code we own forever | 4      | 4 (Clerk keeps sessions, password and bot protection)                         | 2 (sessions, cookies, CSRF, brute-force throttling, WebAuthn, OAuth all ours) |
+| Availability                          | 3      | 3 (gateway in the path of every token refresh, about once a minute)           | 4 (Clerk only in the path of sign-ins)                                        |
+| Value from what we pay Clerk          | 3      | 5 (sessions, `has()`, reverification, client trust, bot protection)           | 2 (Clerk shrinks to a user and org database)                                  |
+| Reversibility                         | 2      | 5 (unset `proxy_url`, restore the CNAME)                                      | 2                                                                             |
+| Open unknowns                         | 3      | 3 (P8; a whole hostname as `proxy_url` is inferred)                           | 3 (how Clerk counts retained users with no frontend sessions; its terms)      |
+| **Weighted total (of 165)**           |        | **127**                                                                       | **117**                                                                       |
+
+**Decided 2026-10-19 by the user: L1 through the gateway, default-deny.** It
+gets nearly all of L2's control (we see, refuse or rewrite every request) while
+Clerk keeps doing the session and credential work we pay it for. L2 turns Clerk
+into a database, and if Clerk is only a database, the honest next question is
+why Clerk at all, which contradicts the constraint to keep it.
+
+What the gateway does:
+
+- **Allowlist, default deny:** only the Frontend API paths our UI and Clerk's
+  server-side handshake use pass. Everything else gets a 404 from us and never
+  reaches Clerk.
+- **Managed accounts at the door (wired by #337):** a sign-in whose identifier
+  is a managed account gets "continue with your company's SSO"; for them, only
+  a ticket passes, and the self-service account routes are refused.
+- **Never at Clerk directly:** organization creation (ours since #335), org
+  admin routes, account deletion.
+- **Logged:** every request, with the real client IP, nothing secret.
+- **Outage rule:** Clerk unreachable is a 503, never "signed out".
+- Our API's own gate stays, so a gap in the gateway is not a gap in i10.
+
+**Where it runs, decided 2026-10-20: a Cloudflare Worker** on `clerk.i10.tech`
+(`services/clerk-gateway`), over a Bun service on psl-vps or a route in
+`apps/api`. It does not depend on our cluster, it reads the real client IP from
+`CF-Connecting-IP`, and it is faster: Clerk's Frontend API is itself behind
+Cloudflare (`frontend-api.clerk.services` → `worker.clerkprod-cloudflare.net`),
+so a Worker adds only its own execution, while a cluster service adds the trip
+from Cloudflare to psl-vps and back on every request. Measured from one
+location on 2026-10-20 (median of 5, Cloudflare's Palermo edge):
+`clerk.i10.tech` first byte about 180 ms, `api.i10.tech` (edge to cluster)
+about 320 ms. That matters because every signed-in browser refreshes its
+session token through the gateway about once a minute. Only sign-in attempts
+will consult our API (the managed-account check, #337), with a short cache.
+
+**The question for Clerk support (P8), to send before the switch:**
+
+> We plan to run Clerk's Frontend API through our own proxy at
+> `https://clerk.i10.tech` (production instance, `proxy_url` set to that URL)
+> and point the `clerk.i10.tech` DNS record at our proxy instead of
+> `frontend-api.clerk.services`.
+>
+> 1. Is a whole hostname accepted as `proxy_url`, or must it be a path on the
+>    application's domain?
+> 2. Once `proxy_url` is set, does Clerk refuse Frontend API requests for our
+>    instance that do not come through the proxy (no `Clerk-Proxy-Url` and
+>    `Clerk-Secret-Key`)? For example, a client that connects to
+>    `frontend-api.clerk.services` directly with `Host: clerk.i10.tech`.
+> 3. What happens to Clerk's certificate for `clerk.i10.tech` after the DNS
+>    moves, and is there any other hostname that serves our instance's Frontend
+>    API?
+> 4. Do Clerk webhooks, sign-in tokens, actor tokens and OAuth callbacks keep
+>    working unchanged through the proxy?
+
+**When to revisit L2:** if Clerk support says it keeps serving
+`clerk.i10.tech` in a way we cannot close (P8), or if the gateway ends up
+overriding most of Clerk's behaviour anyway.
 
 ---
 
