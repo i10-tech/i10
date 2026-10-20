@@ -10,17 +10,22 @@
   // only then the DNS). Putting it here would make the first `wrangler deploy`
   // take the hostname over before Clerk knows to expect a proxy.
   //
-  // ⚠ ITS ONLY SECRET IS `CLERK_SECRET_KEY`, SET OUT OF BAND:
+  // ⚠ TWO SECRETS, BOTH SET OUT OF BAND, NEVER IN THIS FILE:
   //     wrangler secret put CLERK_SECRET_KEY
-  // It is NOT in this file and must never be. Without it, or with a key from
-  // the other instance, the gateway answers 503 to everything.
-  "secrets": { "required": ["CLERK_SECRET_KEY"] },
+  //     wrangler secret put I10_API_SECRET   (the API's IDENTITY_GATEWAY_SECRET)
+  // Without the Clerk key, or with one from the other instance, the gateway
+  // answers 503 to everything. Without the API secret (or `I10_API_URL`) every
+  // managed-account lookup fails, so sign-ins that name an identifier and the
+  // self-service account routes answer 503; token refreshes are unaffected.
+  "secrets": { "required": ["CLERK_SECRET_KEY", "I10_API_SECRET"] },
   "vars": {
     "INSTANCE": "production",
     "UPSTREAM_ORIGIN": "https://frontend-api.clerk.dev",
     "PROXY_URL": "https://clerk.i10.tech",
     "ALLOWED_ORIGINS": "https://auth.i10.tech,https://dash.i10.tech",
     "UPSTREAM_TIMEOUT_MS": "10000",
+    // Our API, for the managed-account lookup (#337).
+    "I10_API_URL": "https://api.i10.tech",
   },
   "observability": { "enabled": true },
 
@@ -35,13 +40,16 @@
     // ⚠ NEVER DEPLOYED. `wrangler deploy --env local` would create a separate
     // Worker; there is no reason to.
     "local": {
-      "secrets": { "required": ["CLERK_SECRET_KEY"] },
+      "secrets": { "required": ["CLERK_SECRET_KEY", "I10_API_SECRET"] },
       "vars": {
         "INSTANCE": "development",
         "UPSTREAM_ORIGIN": "https://frontend-api.clerk.dev",
         "PROXY_URL": "https://clerk.i10.localhost",
         "ALLOWED_ORIGINS": "https://auth.i10.localhost,https://dash.i10.localhost",
         "UPSTREAM_TIMEOUT_MS": "10000",
+        // ⚠ THE API'S OWN PORT, NOT api.i10.localhost: workerd does not trust
+        // Caddy's local CA.
+        "I10_API_URL": "http://localhost:3001",
       },
     },
   },

@@ -866,6 +866,9 @@ export const joinDomains = core.table(
   },
   (t) => [
     uniqueIndex("join_domains_tenant_name_unique").on(t.tenantId, t.name),
+    // The target of identity.connection_domains' tenant-matched foreign key
+    // (#337): a proof can only ever be covered by its own workspace's SSO.
+    unique("join_domains_id_tenant_unique").on(t.id, t.tenantId),
     index("join_domains_name_idx").on(t.name),
     pgPolicy("join_domains_workspace", {
       for: "all",

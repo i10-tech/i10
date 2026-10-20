@@ -1,7 +1,11 @@
 import type { MiddlewareHandler } from "hono"
 import { sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
-import type { ActiveOrgReader, SessionVerifier } from "./session.js"
+import {
+  ssoGateRefusal,
+  type ActiveOrgReader,
+  type SessionVerifier,
+} from "./session.js"
 
 /**
  * The console's credential: a signed-in person, resolved to the tenant whose
@@ -172,6 +176,15 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
       503,
     )
   }
+
+  /*
+   * ⚠ THE SSO GATE BEFORE ANYTHING IS RESOLVED (#337). A managed account on a
+   * session that skipped its IdP stops here with `403 sso_required`, whatever
+   * route and whatever workspace - including the routes that work without
+   * one. Its cost for everybody else is in identity/gate.ts.
+   */
+  const refused = await ssoGateRefusal(c, outcome.userId)
+  if (refused) return refused
 
   /*
    * ⚠ A FAILED ORG LOOKUP IS A 503, NOT A FALLBACK TO THE PERSONAL TENANT.

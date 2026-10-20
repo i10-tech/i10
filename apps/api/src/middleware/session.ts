@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from "hono"
+import type { Context, MiddlewareHandler } from "hono"
 import type { ClerkClient } from "@clerk/backend"
 import { reverificationError } from "@clerk/backend/internal"
 
@@ -108,6 +108,74 @@ export function clerkSessions(
 }
 
 /**
+ * The SSO gate's answer for one verified request (#337, sso.md 2.2).
+ *
+ * ⚠ A SEPARATE READER AGAIN, NOT A FIELD ON `SessionOutcome`, for the reason
+ * `clerkActiveOrg` gives: it needs the session id, and no caller of `verify`
+ * should be able to authorise against one.
+ */
+export type SsoGateOutcome =
+  | { status: "pass" }
+  | {
+      status: "sso_required"
+      startUrl: string | null
+      reason: "unbound" | "connection_inactive" | "max_age" | "idle" | "revoked"
+    }
+  | { status: "unknown" }
+
+export type SsoGateReader = (
+  request: Request,
+  userId: string,
+) => Promise<SsoGateOutcome>
+
+/**
+ * The refusal a managed account gets on a session that did not come through
+ * its company's SSO. The console sends the person to `startUrl`.
+ */
+export function ssoRequired(
+  c: Context,
+  outcome: Extract<SsoGateOutcome, { status: "sso_required" }>,
+) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "sso_required",
+      message: "Your company signs you in. Continue with your company's SSO.",
+      startUrl: outcome.startUrl,
+    },
+    403,
+  )
+}
+
+/**
+ * Runs the SSO gate for a verified person, if this process has one: a refusal
+ * to return, or null to carry on. Shared by `requireUser` and `requireTenant`.
+ * Unwired (tests, and processes with no identity core) means no managed
+ * accounts can exist to gate.
+ */
+export async function ssoGateRefusal(c: Context, userId: string) {
+  const gate = c.get("ssoGate")
+  if (!gate) return null
+  const verdict = await gate(c.req.raw, userId)
+  if (verdict.status === "sso_required") return ssoRequired(c, verdict)
+  if (verdict.status === "unknown") return gateUnavailable(c)
+  return null
+}
+
+/** 503 for a gate that could not tell: never a pass, never a sign-out. */
+export function gateUnavailable(c: Context) {
+  c.header("Retry-After", "5")
+  return c.json(
+    {
+      statusCode: 503,
+      name: "service_unavailable",
+      message: "Could not verify your session right now. Retry shortly.",
+    },
+    503,
+  )
+}
+
+/**
  * ⚠ THE 503 BRANCH IS THE SAME RULE `requireApiKey` FOLLOWS, and it matters
  * more here. A 401 tells someone their sign-in is bad; during a Clerk outage
  * they respond by signing out and finding they cannot sign back in. authd
@@ -130,10 +198,18 @@ export const requireUser: MiddlewareHandler = async (c, next) => {
   const outcome = await verifier.verify(c.req.raw)
 
   switch (outcome.status) {
-    case "signed-in":
+    case "signed-in": {
+      /*
+       * ⚠ THE GATE RUNS HERE AS WELL AS IN `requireTenant`: `/mailboxes` is a
+       * person's route, and a managed account's email-code session must not
+       * reach it either.
+       */
+      const refused = await ssoGateRefusal(c, outcome.userId)
+      if (refused) return refused
       c.set("user", { userId: outcome.userId })
       await next()
       return
+    }
 
     case "signed-out":
       return c.json(
@@ -274,6 +350,11 @@ export type FreshAuthOutcome =
   | { status: "stale" }
   /** Clerk did not answer. Do NOT guess - see the 503 below. */
   | { status: "unknown" }
+  /**
+   * A managed account (#337) that has not been back to its IdP recently.
+   * Clerk's own reverification does not count for them (sso.md 2.4).
+   */
+  | { status: "sso_stale"; startUrl: string | null }
 
 export type FreshAuthReader = (request: Request) => Promise<FreshAuthOutcome>
 
@@ -421,6 +502,23 @@ export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
         message: "Could not check your session right now. Retry shortly.",
       },
       503,
+    )
+  }
+
+  /*
+   * ⚠ NOT CLERK'S HINT FOR A MANAGED ACCOUNT. Clerk's dialog would offer the
+   * account's first factor - an email code - which proves nothing their
+   * company asked for. The console sends them to their IdP instead (#340).
+   */
+  if (outcome.status === "sso_stale") {
+    return c.json(
+      {
+        statusCode: 403,
+        name: "sso_step_up_required",
+        message: "Sign in with your company's SSO again before doing this.",
+        startUrl: outcome.startUrl,
+      },
+      403,
     )
   }
 

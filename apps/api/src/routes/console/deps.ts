@@ -38,6 +38,7 @@ import type { Reservation } from "../../console/code-cooldown.js"
 import type { MembersDeps } from "../../console/members.js"
 import type { RolesDeps } from "../../console/roles.js"
 import type { AccountDeps } from "../../console/account-deletion.js"
+import type { IdentityConsoleDeps } from "./identity.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -220,6 +221,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * routes that change roles answer 501.
    */
   roles?: RolesDeps
+  /**
+   * SSO connections, member sessions and deprovisioning (#337). Optional:
+   * without it the identity routes answer 501.
+   */
+  identity?: IdentityConsoleDeps
   /**
    * Deleting a person's account through our API (#336), since the Clerk
    * gateway refuses `DELETE /v1/me`. Optional; without it the route answers 501.

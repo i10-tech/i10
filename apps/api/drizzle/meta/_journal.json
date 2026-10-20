@@ -932,6 +932,27 @@
       "when": 1792440658794,
       "tag": "0132_invitation_applied",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1792474015664,
+      "tag": "0133_join_domains_id_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1792474016945,
+      "tag": "0134_identity_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1792474026051,
+      "tag": "0135_identity_grants",
+      "breakpoints": true
     }
   ]
 }

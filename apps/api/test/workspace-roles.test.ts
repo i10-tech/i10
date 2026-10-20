@@ -57,12 +57,14 @@ describe("the role map", () => {
         "owners:manage",
         "workspace:manage",
         "workspace:delete",
+        "sso:manage",
       ],
       admin: [
         "members:manage",
         "access_domains:manage",
         "roles:manage",
         "workspace:manage",
+        "sso:manage",
       ],
       member: [],
     })

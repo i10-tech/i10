@@ -30,14 +30,35 @@ import { roleStore } from "./console/roles-db.js"
 import {
   CLERK_ROLE,
   addMember as addRuleMember,
+  DEFAULT_ROLE,
   can,
   createWorkspace,
+  leaveWorkspace,
   mayCreateWorkspace,
+  mayRemove,
   onClerkEvent as onRoleEvent,
   releaseMember,
+  removeMemberAs,
   type JoinRole,
   type RolesDeps,
 } from "./console/roles.js"
+import { identityStore } from "./identity/store.js"
+import { clerkIdentityApi } from "./identity/clerk.js"
+import { ssoGate } from "./identity/gate.js"
+import type { Engine } from "./identity/bridge.js"
+import type { Protocol } from "./identity/model.js"
+import { testEngine, testEngineOn } from "./identity/test-engine.js"
+import { onIdentityClerkEvent } from "./identity/events.js"
+import {
+  clerkSessionIds,
+  gateReader,
+  startUrlFor,
+  withSsoFreshness,
+} from "./identity/middleware.js"
+import {
+  createIdentitySweepQueue,
+  sweepScheduler,
+} from "./queue/identity-sweep-queue.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { memberMail } from "./console/member-mail.js"
 import {
@@ -1160,6 +1181,100 @@ const teamDomains: TeamDomainDeps | null = domains
     }
   : null
 
+/**
+ * The identity core (#337): SSO connections, the sign-in bridge, the gate,
+ * the sweeper's scheduling and the managed-account watchdog. See
+ * docs/decisions/sso.md 2.1 to 2.5 and src/identity/.
+ *
+ * ⚠ THE GATE IS WIRED UNCONDITIONALLY. Every session route consults it; it
+ * costs a cached map lookup for anybody who is not managed (identity/gate.ts)
+ * and refuses with 503 when it cannot tell.
+ *
+ * ⚠ THE TEST ENGINE ONLY WHERE env.ts LET IT ON (development, a dev Clerk
+ * instance). Off, `test` connections cannot be made, started or finished.
+ */
+const identity = identityStore(db, secrets)
+const identityClerk = clerkIdentityApi(clerk, { secretKey: env.CLERK_SECRET_KEY })
+const gateChecker = ssoGate({ store: identity, clerk: identityClerk, log })
+const sessionIds = clerkSessionIds(clerk, {
+  authorizedParties: env.CONSOLE_ORIGINS,
+  log,
+})
+const authOrigin = env.AUTH_ORIGINS[0]
+const ssoStartUrl = startUrlFor(authOrigin)
+const testEngineEnabled = testEngineOn(env)
+const engines = new Map<Protocol, Engine>(
+  testEngineEnabled && authOrigin ? [["test", testEngine(authOrigin)]] : [],
+)
+if (testEngineEnabled)
+  log.warn(
+    {},
+    "SSO TEST ENGINE ON - anybody who starts a sign-in can assert any identity",
+  )
+const managedDeps = { store: identity, clerk: identityClerk, log }
+const sweepQueue = createIdentitySweepQueue({ redis: queueRedis })
+const consoleFreshAuth = withSsoFreshness(
+  freshAuth,
+  sessionIds,
+  gateChecker,
+  startUrlFor(authOrigin, "/sso/step-up"),
+  async (userId) => (await identity.managedByUser(userId))?.connectionId ?? null,
+  log,
+)
+const bridge = {
+  store: identity,
+  clerk: identityClerk,
+  engines,
+  // ⚠ OUR ROLES CODE, AS A MEMBER (#335): SSO never makes anybody an admin;
+  // group-to-role rules are #341's. A full workspace is refused (#327).
+  join: (orgId: string, userId: string) =>
+    addRuleMember(roles, { orgId, userId, role: DEFAULT_ROLE }),
+  isExempt: async (tenantId: string, userId: string) => {
+    const role = await roles.store.roleOf(tenantId, userId)
+    return role === "owner" || role === "admin"
+  },
+  log,
+}
+const identityConsole = {
+  store: identity,
+  clerk: identityClerk,
+  gate: gateChecker,
+  protocols: [...engines.keys()],
+  deprovision: {
+    ...managedDeps,
+    workspaceOrg: (tenantId: string) => identity.workspaceOrg(tenantId),
+    // ⚠ THE ACTOR'S ROLE, NOT THE PERSON'S OWN: deprovisioning is somebody
+    // else taking them out, so it obeys the rule removing somebody obeys.
+    authorize: async (input: {
+      tenantId: string
+      actorUserId: string | null
+      userId: string
+    }) => {
+      if (input.actorUserId === null) return "ok" as const
+      const [actor, target] = await Promise.all([
+        roles.store.roleOf(input.tenantId, input.actorUserId),
+        roles.store.roleOf(input.tenantId, input.userId),
+      ])
+      return mayRemove(actor ?? "member", target ?? "member")
+    },
+    removeMembership: async (input: {
+      tenantId: string
+      orgId: string
+      actorUserId: string | null
+      userId: string
+    }) => {
+      // A directory (null actor) removes as the workspace; leaving's rules then
+      // apply, so the last owner still cannot go.
+      const done =
+        input.actorUserId === null
+          ? await leaveWorkspace(roles, input)
+          : await removeMemberAs(roles, { ...input, actorUserId: input.actorUserId })
+      return done === "ok" ? ("removed" as const) : done
+    },
+  },
+  log,
+}
+
 const app = createApp({
   suppressions,
   trustedTemplates: risk.trustedTemplates,
@@ -1180,6 +1295,7 @@ const app = createApp({
   devices: {
     store: devices,
     clerk: clerkResume(clerk),
+    managed: async (userId: string) => (await identity.managedByUser(userId)) !== null,
     ...(env.AUTH_ORIGINS.length
       ? {
           identify: clerkAuthAppIdentity(clerk, {
@@ -1204,6 +1320,13 @@ const app = createApp({
     lifecycle,
     // Workspace roles kept in step with Clerk's memberships (#335).
     roles: (type: string, data: unknown) => onRoleEvent(roles, type, data),
+    // The SSO sweeper, the managed-account watchdog (#337).
+    identity: (type: string, data: unknown) =>
+      onIdentityClerkEvent(
+        { ...managedDeps, schedule: sweepScheduler(sweepQueue) },
+        type,
+        data,
+      ),
     // Member limits, late acceptances and capacity alerts (#327).
     members: (type: string, data: unknown) => onClerkEvent(members, type, data),
     // Auto-join at sign-up (#326): verified addresses only, idempotent.
@@ -1388,6 +1511,41 @@ const app = createApp({
    * a 501 that would claim mailboxes are not a feature.
    */
   sessionAuth: sessions,
+  ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl),
+  ...(env.AUTH_ORIGINS.length
+    ? {
+        sso: {
+          bridge,
+          gate: gateChecker,
+          identify: clerkAuthAppIdentity(clerk, {
+            authorizedParties: env.AUTH_ORIGINS,
+            log,
+          }),
+          returnOrigins: [...env.AUTH_ORIGINS, ...env.CONSOLE_ORIGINS],
+          testEngine: testEngineEnabled,
+          mayManage: (tenantId: string, userId: string) =>
+            can(roleRows, tenantId, userId, "sso:manage"),
+          tenantOfConnection: async (connectionId: string) =>
+            (await identity.connectionForStart(connectionId))?.tenantId ?? null,
+        },
+      }
+    : {}),
+  internalIdentity: {
+    secret: env.IDENTITY_GATEWAY_SECRET,
+    managedByIdentifier: (identifier: string) =>
+      identity.managedByIdentifier(identifier),
+    /*
+     * ⚠ A SESSION NAMES NO USER UNTIL CLERK SAYS WHOSE IT IS. Only the
+     * gateway's self-service routes ask this, and it caches the answer, so
+     * one Clerk read per session per minute at most. A session Clerk does
+     * not know acts as nobody: not managed.
+     */
+    managedBySession: async (sessionId: string) => {
+      const session = await identityClerk.session(sessionId)
+      return session ? (await identity.managedByUser(session.userId)) !== null : false
+    },
+    log,
+  },
 
   /**
    * The dashboard, at `/console`.
@@ -1408,7 +1566,10 @@ const app = createApp({
     sessions,
     tenants: tenantResolver(db),
     activeOrg,
-    freshAuth,
+    // ⚠ STEP-UP FOR MANAGED ACCOUNTS IS THEIR IdP's (sso.md 2.4); see
+    // `withSsoFreshness`. Everybody else is Clerk's `strict`, unchanged.
+    freshAuth: consoleFreshAuth,
+    identity: identityConsole,
     queries: consoleQueries(db, contentStore),
     sesStatus,
     sesReputation,
@@ -1615,6 +1776,8 @@ const app = createApp({
      * route turns into a 503 rather than a guess.
      */
     accounts: {
+      isManaged: async (userId: string) =>
+        (await identity.managedByUser(userId)) !== null,
       workspaces: async (userId: string) => {
         const found: { orgId: string; name: string }[] = []
         for (let offset = 0; ; offset += 100) {

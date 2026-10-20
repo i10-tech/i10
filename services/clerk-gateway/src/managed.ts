@@ -1,19 +1,17 @@
 /**
  * Is this person a managed account - one whose company signs them in (SSO)?
  *
- * ⚠ THE INTERFACE IS FINAL; THE ANSWER IS NOT YET. #337 builds the identity
- * core that knows who is managed. Until then the gateway runs with
- * `NOT_MANAGED`, which answers "no" for everybody, so nothing changes for
- * anyone today. The policy for a managed account is already written and tested
- * in policy.ts: self-service account routes refused, every sign-in strategy
- * except `ticket` refused. #337 supplies an implementation of this interface -
- * a call to our API with a shared secret, wrapped in `cached()` below - and
- * changes nothing else.
+ * ⚠ ANSWERED BY OUR API (#337), NOT BY THE GATEWAY. `apiManaged` below asks
+ * `POST /internal/identity/managed` with the shared secret, wrapped in
+ * `cached()`; the policy for a managed account is in policy.ts (self-service
+ * account routes refused, every sign-in strategy except `ticket` refused) and
+ * did not change when this was wired.
  *
  * ⚠ A LOOKUP THAT FAILS MUST THROW, NOT ANSWER "NO". The policy turns a thrown
  * error into a 503 (never a 401, never "signed out"). Answering `false` on an
  * outage would wave a managed account past its company's SSO exactly when our
- * API is down, which is the worst moment to open that door.
+ * API is down, which is the worst moment to open that door. An unconfigured
+ * gateway (no `I10_API_URL` or `I10_API_SECRET`) throws on every lookup too.
  */
 export interface ManagedAccounts {
   /** A sign-in identifier, already trimmed and lower-cased. */
@@ -22,7 +20,7 @@ export interface ManagedAccounts {
   bySession(sessionId: string): Promise<boolean>
 }
 
-/** TODO(#337): replace with the API-backed implementation. */
+/** Nobody is managed. For the tests only: the Worker always asks the API. */
 export const NOT_MANAGED: ManagedAccounts = {
   async byIdentifier() {
     return false
@@ -30,6 +28,57 @@ export const NOT_MANAGED: ManagedAccounts = {
   async bySession() {
     return false
   },
+}
+
+export interface ApiManagedOptions {
+  /** Our API's origin, e.g. `https://api.i10.tech`. Unset: every lookup throws. */
+  url: string | undefined
+  /** `IDENTITY_GATEWAY_SECRET` on the API side. Unset: every lookup throws. */
+  secret: string | undefined
+  fetch: (url: string, init: RequestInit) => Promise<Response>
+  /** How long to wait for our API before the lookup fails (and the policy says 503). */
+  timeoutMs?: number
+}
+
+/**
+ * The lookup, against our API.
+ *
+ * ⚠ ONLY `{ managed: true | false }` FROM A 200 IS AN ANSWER. Any other
+ * status, a body of any other shape, a timeout or a network error throws.
+ */
+export function apiManaged(options: ApiManagedOptions): ManagedAccounts {
+  const ask = async (body: Record<string, string>): Promise<boolean> => {
+    if (!options.url || !options.secret)
+      throw new Error("managed lookup is not configured")
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 3_000)
+    try {
+      const response = await options.fetch(
+        `${options.url.replace(/\/+$/, "")}/internal/identity/managed`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${options.secret}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        },
+      )
+      if (response.status !== 200)
+        throw new Error(`managed lookup answered ${response.status}`)
+      const answer = (await response.json()) as { managed?: unknown }
+      if (typeof answer?.managed !== "boolean")
+        throw new Error("managed lookup answered nonsense")
+      return answer.managed
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return {
+    byIdentifier: (identifier) => ask({ identifier }),
+    bySession: (sessionId) => ask({ sessionId }),
+  }
 }
 
 /**

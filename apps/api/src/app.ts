@@ -50,12 +50,18 @@ import { domains } from "./routes/domains.js"
 import { mailboxes } from "./routes/mailboxes.js"
 import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
+import {
+  createInternalIdentityRoutes,
+  createSsoRoutes,
+  type InternalIdentityDeps,
+  type SsoRouteDeps,
+} from "./routes/sso.js"
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
-import type { SessionVerifier } from "./middleware/session.js"
+import type { SessionVerifier, SsoGateReader } from "./middleware/session.js"
 import type { MailboxProvisioning } from "./mailboxes/provision.js"
 
 /**
@@ -141,6 +147,15 @@ export interface AppDeps {
    * 501 rather than letting an unauthenticated caller through.
    */
   sessionAuth?: SessionVerifier
+  /**
+   * The SSO gate (#337), read by `requireUser` and `requireTenant`. Absent
+   * means no identity core in this process, so no managed accounts to gate.
+   */
+  ssoGate?: SsoGateReader
+  /** The SSO bridge's routes (#337), at `/sso`. */
+  sso?: SsoRouteDeps
+  /** The Clerk gateway's managed-account lookup (#337), at `/internal/identity`. */
+  internalIdentity?: InternalIdentityDeps
   /**
    * Creating a human mailbox, for `/mailboxes`.
    *
@@ -279,7 +294,8 @@ export function createApp(deps: AppDeps = {}) {
     deps.trustedTemplates ||
     deps.domains ||
     deps.sessionAuth ||
-    deps.mailboxes
+    deps.mailboxes ||
+    deps.ssoGate
   ) {
     const auth = deps.apiKeyAuth
     const sendPath = deps.sendPath
@@ -293,6 +309,7 @@ export function createApp(deps: AppDeps = {}) {
     const domainStore = deps.domains
     const sessions = deps.sessionAuth
     const mailboxStore = deps.mailboxes
+    const gate = deps.ssoGate
     app.use("*", async (c, next) => {
       if (auth) c.set("apiKeyAuth", auth)
       if (sendPath) c.set("sendPath", sendPath)
@@ -306,6 +323,7 @@ export function createApp(deps: AppDeps = {}) {
       if (domainStore) c.set("domains", domainStore)
       if (sessions) c.set("sessionAuth", sessions)
       if (mailboxStore) c.set("mailboxes", mailboxStore)
+      if (gate) c.set("ssoGate", gate)
       await next()
     })
   }
@@ -518,6 +536,11 @@ export function createApp(deps: AppDeps = {}) {
   // answers 501 with a reason rather than 404 - which would read as the console
   // being pointed at the wrong origin.
   app.route("/console", createConsole(deps.console))
+
+  // ⚠ OUTSIDE THE OPENAPI DOCUMENT, like `/console`: the sign-in bridge and
+  // the gateway's lookup are ours, not the product's API.
+  app.route("/sso", createSsoRoutes(deps.sso))
+  app.route("/internal/identity", createInternalIdentityRoutes(deps.internalIdentity))
 
   // ⚠ ALSO OUTSIDE THE OPENAPI DOCUMENT, AND NOT FOR THE SAME REASON. The two
   // routers above implement somebody else's contract; this one is ours, but it

@@ -24,12 +24,23 @@ export interface AccountDeps {
   workspaces(userId: string): Promise<{ orgId: string; name: string }[]>
   /** How many members the organization has now. Throws if Clerk cannot be asked. */
   memberCount(orgId: string): Promise<number>
+  /**
+   * Whether the account is SSO-managed (#337). Throws if it cannot be told.
+   * Absent: nobody is (processes with no identity core).
+   */
+  isManaged?: (userId: string) => Promise<boolean>
   /** Deletes the Clerk user. An account already gone is `already_gone`. */
   remove(userId: string): Promise<"deleted" | "already_gone">
 }
 
 export type DeletionCheck =
   | { outcome: "ok" }
+  /**
+   * ⚠ SSO-MANAGED (#337, sso.md 2.3): the company deactivates it, the person
+   * cannot delete it. Clerk's `delete_self_enabled: false` binds only Clerk's
+   * Frontend API, never this backend call, so the rule is enforced here.
+   */
+  | { outcome: "managed" }
   /** The only owner of these workspaces, each with other members. */
   | { outcome: "sole_owner"; workspaces: string[] }
   /** Clerk could not be asked: refused rather than guessed. */
@@ -42,6 +53,17 @@ export async function checkAccountDeletion(
   },
   userId: string,
 ): Promise<DeletionCheck> {
+  if (d.accounts.isManaged) {
+    try {
+      if (await d.accounts.isManaged(userId)) return { outcome: "managed" }
+    } catch (error) {
+      d.roles.log.warn(
+        { err: error, userId },
+        "could not tell whether an account is SSO-managed - refusing to delete it",
+      )
+      return { outcome: "unconfirmed" }
+    }
+  }
   let workspaces: { orgId: string; name: string }[]
   try {
     workspaces = await d.accounts.workspaces(userId)

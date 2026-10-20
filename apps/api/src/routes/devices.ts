@@ -45,6 +45,8 @@ export type IdentityReader = (request: Request) => Promise<Identity>
 export interface DeviceRouteDeps {
   store: DeviceStore
   clerk: ResumeClerk
+  /** SSO-managed accounts are never resumed by ticket (#337). */
+  managed?: (userId: string) => Promise<boolean>
   /** Absent when no auth origin is configured: `remember` then answers 501. */
   identify?: IdentityReader
   log?: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void }
@@ -155,7 +157,7 @@ export function createDeviceRoutes(deps?: DeviceRouteDeps) {
   })
 
   app.post("/fresh", async (c) => {
-    const { clerk, identify, log } = deps!
+    const { clerk, identify, managed, log } = deps!
     if (!identify) {
       return c.json(
         {
@@ -177,6 +179,10 @@ export function createDeviceRoutes(deps?: DeviceRouteDeps) {
     if (who.status === "unavailable") return c.json(unavailable, 503)
 
     try {
+      // ⚠ NEVER A TICKET FOR A MANAGED ACCOUNT (#337), as with `resume`: it
+      // would be a session that skipped the company's IdP.
+      if (managed && (await managed(who.userId)))
+        return c.json({ outcome: "refused" as const }, 200)
       return c.json(await freshAfterSignUp(who, { clerk }), 200)
     } catch (error) {
       log?.warn({ err: String(error) }, "could not refresh a sign-up session")
@@ -185,13 +191,16 @@ export function createDeviceRoutes(deps?: DeviceRouteDeps) {
   })
 
   app.post("/resume", async (c) => {
-    const { store, clerk, log } = deps!
+    const { store, clerk, managed, log } = deps!
     const body = await readJson(c.req.raw)
     if (!isPresentable(body)) return c.json({ outcome: "forget" as const }, 200)
 
     try {
       return c.json(
-        await resume({ id: body.id, secret: body.secret }, { store, clerk }),
+        await resume(
+          { id: body.id, secret: body.secret },
+          { store, clerk, ...(managed ? { managed } : {}) },
+        ),
         200,
       )
     } catch (error) {

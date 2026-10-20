@@ -40,6 +40,13 @@ import { memberStore } from "./console/members-db.js"
 import { roleStore } from "./console/roles-db.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { expireInvitation } from "./console/members.js"
+import {
+  createIdentitySweepQueue,
+  startIdentitySweepWorker,
+} from "./queue/identity-sweep-queue.js"
+import { identityStore } from "./identity/store.js"
+import { clerkIdentityApi } from "./identity/clerk.js"
+import { sweepSession } from "./identity/managed.js"
 
 /**
  * The send worker.
@@ -396,10 +403,37 @@ function startInvitationExpiry() {
   return worker
 }
 
+/**
+ * The SSO sweeper (#337, sso.md 2.2): a managed account's ticket session that
+ * is not bound two minutes after Clerk made it is revoked. The API schedules
+ * the jobs from `session.created`; this process runs them. See
+ * queue/identity-sweep-queue.ts.
+ *
+ * ⚠ HERE FOR THE SAME REASON AS INVITATION EXPIRY: the worker always runs.
+ */
+function startIdentitySweeper() {
+  const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+  const deps = {
+    // No sealed values are read on this path, so no secret box is needed.
+    store: identityStore(db, null),
+    clerk: clerkIdentityApi(clerk, { secretKey: env.CLERK_SECRET_KEY }),
+    log,
+  }
+  const worker = startIdentitySweepWorker({
+    queue: createIdentitySweepQueue({ redis: queueRedis }),
+    name: `${workerId}:identity-sweeps`,
+    sweep: (job) => sweepSession(deps, job),
+    log,
+  })
+  log.info({}, "SSO sweeper started")
+  return worker
+}
+
 const workers = [
   ...(["transactional", "bulk"] as const).map(startWorker),
   startWebhookWorker(),
   startInvitationExpiry(),
+  startIdentitySweeper(),
 ].filter((w) => w !== null)
 
 /**

@@ -174,6 +174,32 @@ const schema = z.object({
     ),
 
   /**
+   * The shared secret the Clerk gateway (services/clerk-gateway) presents to
+   * `/internal/identity/*` as `Authorization: Bearer <secret>`, to ask whether
+   * a sign-in identifier or a session is a managed account (#337).
+   *
+   * ⚠ UNSET MEANS THE ROUTES ANSWER 503, NEVER "NOT MANAGED". The gateway
+   * turns a 503 into its own 503, so a missing secret stops sign-ins at the
+   * door rather than waving managed accounts past it. The same value is the
+   * gateway's `I10_API_SECRET` (`wrangler secret put`).
+   */
+  IDENTITY_GATEWAY_SECRET: z.string().min(32).optional(),
+
+  /**
+   * `on` turns on the TEST connection protocol (#337): an "engine" that lets
+   * whoever started a sign-in assert any subject and email, so the bridge can
+   * be driven end to end on the Clerk dev instance without a real IdP.
+   *
+   * ⚠ A DOOR WITH NO LOCK, SO IT IS BOLTED SHUT THREE WAYS. Refused at boot
+   * when NODE_ENV is production (staging included), refused at boot unless
+   * CLERK_SECRET_KEY is a dev instance's `sk_test_` key, and when it is off
+   * the protocol cannot be created, started or completed (identity/
+   * test-engine.ts). A test connection row that somehow reached production is
+   * inert.
+   */
+  IDENTITY_TEST_ENGINE: z.enum(["on", "off"]).default("off"),
+
+  /**
    * Origins allowed to present a Clerk session to `/mailboxes`.
    *
    * ⚠ THIS IS THE `azp` CHECK, AND LEAVING IT EMPTY DISABLES IT. One Clerk
@@ -1199,6 +1225,28 @@ const validated = schema.superRefine((env, ctx) => {
       message:
         `must not be set when NODE_ENV is production. It lets webhook delivery ` +
         `reach private addresses, which in a cluster means our own services.`,
+    })
+  }
+
+  if (env.IDENTITY_TEST_ENGINE === "on" && env.NODE_ENV === "production") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["IDENTITY_TEST_ENGINE"],
+      message:
+        `must not be on when NODE_ENV is production. The test SSO engine lets ` +
+        `anybody assert any identity; it exists for the Clerk dev instance only.`,
+    })
+  }
+  if (
+    env.IDENTITY_TEST_ENGINE === "on" &&
+    !env.CLERK_SECRET_KEY.startsWith("sk_test_")
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["IDENTITY_TEST_ENGINE"],
+      message:
+        `needs a development Clerk instance (an sk_test_ CLERK_SECRET_KEY). The ` +
+        `test SSO engine must never mint sign-in tokens on a live instance.`,
     })
   }
 

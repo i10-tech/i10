@@ -12,6 +12,8 @@ import {
 // The transactional product. Re-exported so drizzle-kit and `import * as
 // schema` both see one entry point, rather than two that can disagree.
 export * from "./core.js"
+// Enterprise identity (#337): its own schema, the same tenant boundary.
+export * from "./identity.js"
 
 /**
  * The Clerk projection - a read model of Clerk's users, maintained by webhook.

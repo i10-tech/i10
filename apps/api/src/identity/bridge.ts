@@ -1,0 +1,773 @@
+import { enforceManaged } from "./managed.js"
+import {
+  ATTEMPT_TTL_MS,
+  BIND_WINDOW_MS,
+  CLOCK_SKEW_MS,
+  HANDOFF_TTL_MS,
+  STEP_UP_MAX_AGE_MS,
+  hashSecret,
+  newSecret,
+  normaliseEmail,
+  onLiveDomain,
+  provedMfa,
+  sameHash,
+  type Assertion,
+  type AttemptPurpose,
+  type Connection,
+  type ManagedReason,
+  type Protocol,
+  type Refusal,
+} from "./model.js"
+import type {
+  AttemptRow,
+  ClerkIdentity,
+  ClerkUserSnapshot,
+  IdentityStore,
+  Logger,
+  ManagedRow,
+} from "./ports.js"
+
+/**
+ * The sign-in bridge (sso.md 2.1): from "this IdP says this is Ada" to a Clerk
+ * session the gate will accept.
+ *
+ *   1. `startLogin`: an attempt row (state, nonce, PKCE verifier, the hash of
+ *      a cookie only this browser holds), then the engine's redirect.
+ *   2. The engine verifies the IdP's answer (#338 OIDC, #339 SAML, the test
+ *      engine here) and calls `completeLogin` with what it verified.
+ *   3. `completeLogin`: the attempt is unused, unexpired and this browser's;
+ *      the person is resolved (link, pre-provisioned, claimed, JIT, or
+ *      refused); their membership is kept or made; the account is managed;
+ *      the browser gets a one-time handoff CODE.
+ *   4. `redeemHandoff`: the same browser swaps the code for a Clerk sign-in
+ *      token (minted now, 60 seconds, `second_factor_verification: fresh`)
+ *      and a handoff SECRET.
+ *   5. apps/auth signs in with the ticket, then `bind`: Clerk confirms THIS
+ *      new session came from THAT ticket, and `sso_sessions` gets its row.
+ *
+ * ⚠ THE BROWSER NEVER HOLDS ANYTHING WORTH STEALING FOR LONG. The code lives
+ * two minutes and works once, from the browser that started; the ticket lives
+ * sixty seconds; the handoff secret only binds a session that already exists.
+ * Every one is stored as a hash and spent with a compare-and-set.
+ */
+
+export interface Engine {
+  protocol: Protocol
+  /** Where the browser goes to authenticate. */
+  begin(
+    connection: Connection,
+    attempt: {
+      state: string
+      nonce: string
+      pkceVerifier: string | null
+      /**
+       * ⚠ `step_up` MUST MAKE THE IdP ASK AGAIN: OIDC `prompt=login max_age=0`,
+       * SAML `ForceAuthn="true"` (sso.md 2.4). Without it an IdP answers from
+       * its own session and the step-up fails `step_up_stale`.
+       */
+      purpose: AttemptPurpose
+    },
+  ): Promise<{ redirectUrl: string; requestId?: string | null }>
+  /** Whether this engine needs a PKCE verifier kept for its callback. */
+  pkce: boolean
+}
+
+export interface BridgeDeps {
+  store: IdentityStore
+  clerk: ClerkIdentity
+  engines: ReadonlyMap<Protocol, Engine>
+  /**
+   * Membership through our roles code (#335): `added` (or already a member)
+   * or `full` (capacity, #327).
+   */
+  join(orgId: string, userId: string): Promise<"added" | "full">
+  /**
+   * Whether this person is an owner or an admin of the workspace in our roles
+   * table (#335): the people SSO never takes over (decision 7).
+   */
+  isExempt(tenantId: string, userId: string): Promise<boolean>
+  /** SCIM's pre-provisioned person for this subject (#342). None yet. */
+  preProvisioned?: (ctx: ResolveContext) => Promise<string | null>
+  /** Just-in-time creation (#341). None yet, so an unknown person is refused. */
+  jit?: (ctx: ResolveContext) => Promise<string | null>
+  log: Logger
+  now?: () => Date
+}
+
+export interface ResolveContext {
+  tenantId: string
+  connection: Connection
+  assertion: Assertion
+  email: string
+}
+
+const clock = (d: { now?: () => Date }) => (d.now ?? (() => new Date()))()
+
+// ── 1. Start ─────────────────────────────────────────────────────────────
+
+export type StartOutcome =
+  { outcome: "redirect"; redirectUrl: string } | { outcome: "refused"; reason: Refusal }
+
+/**
+ * ⚠ THE BINDING VALUE IS THE BROWSER'S, NOT OURS. apps/auth draws it, puts it
+ * in an httpOnly cookie on its own origin and sends it here once; we keep only
+ * its hash. Whoever finishes this sign-in must present it again, which a link
+ * forwarded to somebody else, or a callback replayed from another machine,
+ * cannot.
+ */
+export async function startLogin(
+  d: Pick<BridgeDeps, "store" | "engines" | "log" | "now">,
+  input: {
+    connectionId: string
+    purpose: AttemptPurpose
+    binding: string
+    returnTo: string | null
+    /** For `step_up`: the verified session being made fresh. */
+    stepUp?: { userId: string; sessionId: string }
+  },
+): Promise<StartOutcome> {
+  const connection = await d.store.connectionForStart(input.connectionId)
+  if (!connection) return { outcome: "refused", reason: "connection_inactive" }
+  const usable =
+    input.purpose === "test_run"
+      ? connection.status === "testing" || connection.status === "active"
+      : connection.status === "active"
+  if (!usable) return { outcome: "refused", reason: "connection_inactive" }
+  const engine = d.engines.get(connection.protocol)
+  if (!engine) return { outcome: "refused", reason: "engine_disabled" }
+
+  if (input.purpose === "step_up") {
+    const session = input.stepUp
+      ? await d.store.sessionRow(connection.tenantId, input.stepUp.sessionId)
+      : null
+    if (
+      !session ||
+      session.revokedAt ||
+      session.clerkUserId !== input.stepUp?.userId ||
+      session.connectionId !== connection.id
+    )
+      return { outcome: "refused", reason: "step_up_mismatch" }
+  }
+
+  const state = newSecret()
+  const nonce = newSecret()
+  const pkceVerifier = engine.pkce ? newSecret() : null
+  const begun = await engine.begin(connection, {
+    state,
+    nonce,
+    pkceVerifier,
+    purpose: input.purpose,
+  })
+  await d.store.createAttempt({
+    tenantId: connection.tenantId,
+    connectionId: connection.id,
+    purpose: input.purpose,
+    stateHash: hashSecret(state),
+    bindingHash: hashSecret(input.binding),
+    nonce,
+    pkceVerifier,
+    requestId: begun.requestId ?? null,
+    returnTo: input.returnTo,
+    stepUpSessionId: input.stepUp?.sessionId ?? null,
+    expiresAt: new Date(clock(d).getTime() + ATTEMPT_TTL_MS),
+  })
+  return { outcome: "redirect", redirectUrl: begun.redirectUrl }
+}
+
+/** What an engine's callback needs back from the attempt it is finishing. */
+export async function attemptForCallback(
+  d: Pick<BridgeDeps, "store">,
+  state: string,
+): Promise<AttemptRow | null> {
+  return d.store.attemptByState(hashSecret(state))
+}
+
+// ── 3. Complete ──────────────────────────────────────────────────────────
+
+export type CompleteOutcome =
+  | { outcome: "signed_in"; code: string; returnTo: string | null }
+  | { outcome: "tested"; testRunId: string; passed: boolean }
+  | { outcome: "stepped_up"; returnTo: string | null }
+  | { outcome: "refused"; reason: Refusal }
+
+type Resolved =
+  | {
+      ok: true
+      userId: string
+      user: ClerkUserSnapshot
+      path: "linked" | "scim" | "claimed" | "jit"
+      identityId: string | null
+      orgId: string
+      email: string
+      /** Its managed row, if any: always this workspace's by now. */
+      managed: ManagedRow | null
+    }
+  | { ok: false; reason: Refusal }
+
+/**
+ * Called by an engine AFTER it verified the IdP's response.
+ *
+ * ⚠ THE ATTEMPT IS SPENT BEFORE ANYTHING ELSE HAPPENS. Two callbacks for one
+ * attempt (a replay, a double click) race on `consumed_at`; the loser is
+ * refused before it reads a user, so nothing the winner does can be done
+ * twice.
+ */
+export async function completeLogin(
+  d: BridgeDeps,
+  input: {
+    state: string
+    binding: string
+    assertion: Assertion
+    /** The engine that verified `assertion`: it must be the connection's own. */
+    protocol: Protocol
+  },
+): Promise<CompleteOutcome> {
+  const now = clock(d)
+  const attempt = await d.store.attemptByState(hashSecret(input.state))
+  if (!attempt) {
+    d.log.warn({}, "an SSO callback named no attempt we know")
+    return { outcome: "refused", reason: "attempt_unknown" }
+  }
+  const refuse = async (reason: Refusal, extra: Record<string, unknown> = {}) => {
+    await d.store.finishAttempt(attempt.tenantId, attempt.id, {
+      outcome: "refused",
+      failureReason: reason,
+    })
+    await d.store.record(attempt.tenantId, {
+      type: attempt.purpose === "step_up" ? "step_up.failed" : "sign_in.failed",
+      connectionId: attempt.connectionId,
+      reason,
+      data: { attemptId: attempt.id, subject: input.assertion.subject, ...extra },
+    })
+    return { outcome: "refused" as const, reason }
+  }
+
+  // ⚠ WRONG BROWSER AND EXPIRED ARE CHECKED BEFORE THE ATTEMPT IS SPENT, so a
+  // stranger replaying a callback cannot burn the real person's attempt.
+  if (!sameHash(attempt.bindingHash, hashSecret(input.binding))) {
+    await d.store.record(attempt.tenantId, {
+      type: "sign_in.failed",
+      connectionId: attempt.connectionId,
+      reason: "wrong_browser",
+      data: { attemptId: attempt.id },
+    })
+    return { outcome: "refused", reason: "wrong_browser" }
+  }
+  // ⚠ A REPLAY IS RECORDED BUT DOES NOT TOUCH THE ATTEMPT: `refuse` would
+  // overwrite the outcome the first, real completion wrote.
+  const replayed = async (): Promise<CompleteOutcome> => {
+    await d.store.record(attempt.tenantId, {
+      type: attempt.purpose === "step_up" ? "step_up.failed" : "sign_in.failed",
+      connectionId: attempt.connectionId,
+      reason: "attempt_used",
+      data: { attemptId: attempt.id },
+    })
+    return { outcome: "refused", reason: "attempt_used" }
+  }
+  if (attempt.consumedAt) return replayed()
+  if (attempt.expiresAt.getTime() <= now.getTime()) return refuse("attempt_expired")
+  if (!(await d.store.consumeAttempt(attempt.tenantId, attempt.id, now)))
+    return replayed()
+
+  const connection = await d.store.connection(attempt.tenantId, attempt.connectionId)
+  const usable =
+    connection &&
+    d.engines.has(connection.protocol) &&
+    (attempt.purpose === "test_run"
+      ? connection.status === "testing" || connection.status === "active"
+      : connection.status === "active")
+  if (!connection || !usable) return refuse("connection_inactive")
+  /*
+   * ⚠ ONLY THE CONNECTION'S OWN ENGINE MAY FINISH ITS ATTEMPT. Otherwise, in a
+   * process where two engines run, an OIDC attempt could be finished by an
+   * assertion some other engine "verified" - the test engine verifies nothing.
+   */
+  if (connection.protocol !== input.protocol) return refuse("engine_mismatch")
+  const assertion = input.assertion
+
+  if (connection.mfaRequired && !provedMfa(assertion.amr))
+    return refuse("mfa_required", { amr: assertion.amr ?? [] })
+
+  if (attempt.purpose === "step_up")
+    return stepUp(d, attempt, connection, assertion, refuse)
+
+  const resolved = await resolve(d, attempt.tenantId, connection, assertion)
+
+  if (attempt.purpose === "test_run") {
+    const run = await d.store.recordTestRun(attempt.tenantId, {
+      connectionId: connection.id,
+      attemptId: attempt.id,
+      outcome: resolved.ok ? "passed" : "failed",
+      reason: resolved.ok ? null : resolved.reason,
+      claims: claimsOf(assertion),
+      resolution: resolved.ok
+        ? { path: resolved.path, clerkUserId: resolved.userId, email: resolved.email }
+        : { refused: resolved.reason },
+    })
+    await d.store.finishAttempt(attempt.tenantId, attempt.id, {
+      outcome: "tested",
+      failureReason: resolved.ok ? null : resolved.reason,
+    })
+    await d.store.record(attempt.tenantId, {
+      type: "test_run.completed",
+      connectionId: connection.id,
+      reason: resolved.ok ? null : resolved.reason,
+      data: { testRunId: run.id, passed: resolved.ok },
+    })
+    return { outcome: "tested", testRunId: run.id, passed: resolved.ok }
+  }
+
+  if (!resolved.ok) return refuse(resolved.reason)
+
+  /*
+   * ⚠ AN OWNER OR ADMIN WHO IS NOT MANAGED IS NEVER SIGNED IN THROUGH SSO
+   * (decision 7), refused HERE, before anything is joined, linked or minted.
+   * They keep their own way in (a passkey), so a broken or hostile IdP can
+   * never lock the workspace out of itself - and anybody who can set up a
+   * connection and run the IdP behind it (an admin, the planned IT-admin
+   * role) can never sign in AS an owner or a fellow admin by asserting their
+   * address. Letting them use SSO deliberately, from their own session, is
+   * #340's.
+   */
+  const existing = resolved.managed
+  if (!existing && (await d.isExempt(attempt.tenantId, resolved.userId)))
+    return refuse("role_exempt", { clerkUserId: resolved.userId })
+
+  // ── Membership, link, managed ──
+  const joined = await d.join(resolved.orgId, resolved.userId)
+  if (joined === "full")
+    return refuse("workspace_full", { clerkUserId: resolved.userId })
+
+  const identityId =
+    resolved.identityId ??
+    (
+      await d.store.link(attempt.tenantId, {
+        connectionId: connection.id,
+        subject: assertion.subject,
+        clerkUserId: resolved.userId,
+        email: resolved.email,
+      })
+    ).id
+
+  const reason: ManagedReason =
+    resolved.path === "claimed"
+      ? "claimed"
+      : resolved.path === "jit"
+        ? "jit"
+        : resolved.path === "scim"
+          ? "scim"
+          : "linked"
+  /*
+   * ⚠ WHAT A MANAGED ACCOUNT KEEPS. Newly claimed: the asserted address and
+   * every address it already held verified. Already managed: the addresses on
+   * its row plus the one the IdP asserts now (a rename), so a sign-in never
+   * blesses an address that slipped onto the account some other way.
+   */
+  const keep = verifiedAddresses(
+    resolved.user,
+    existing ? [resolved.email, ...existing.emails] : null,
+    resolved.email,
+  )
+
+  const claimed = await d.store.claimManaged(attempt.tenantId, {
+    clerkUserId: resolved.userId,
+    tenantId: attempt.tenantId,
+    connectionId: connection.id,
+    reason,
+    emails: keep,
+  })
+  if (claimed === "elsewhere") return refuse("managed_elsewhere")
+
+  /*
+   * ⚠ A NEWLY MANAGED ACCOUNT LOSES EVERY OTHER WAY IN, AND EVERY SESSION IT
+   * HAD, BEFORE A TICKET IS EVER MINTED. Somebody who signed up with a
+   * password before their company turned on SSO keeps their account and
+   * their other workspaces (sso.md 2.3, "claiming"), but not the password, and
+   * not the sessions that password made: those never passed the IdP.
+   */
+  if (claimed === "created") {
+    for (const session of await d.clerk.activeSessions(resolved.userId))
+      await d.clerk.revokeSession(session.id)
+    await d.store.record(attempt.tenantId, {
+      type: "managed.claimed",
+      subjectUserId: resolved.userId,
+      connectionId: connection.id,
+      reason,
+      // TODO(#340): email the person that their account is now managed. Until
+      // the console's identity screens ship there is no page to link them to;
+      // this event is the notice of record.
+      data: { email: resolved.email, notified: false },
+    })
+  }
+  if (claimed === "kept") {
+    /*
+     * ⚠ THE STORED LIST FOLLOWS THE IdP. An address the IdP now asserts (a
+     * rename) must be on the row, or the watchdog's next pass - which reads
+     * the row, not this sign-in - would strip the very address the person
+     * just signed in with, and the gateway would not know it as managed.
+     * The connection follows too: it is where the gate sends them back to.
+     */
+    await d.store.setManagedEmails(
+      attempt.tenantId,
+      resolved.userId,
+      keep,
+      connection.id,
+    )
+  }
+  await enforceManaged(
+    d,
+    { tenantId: attempt.tenantId, clerkUserId: resolved.userId, emails: keep },
+    claimed === "created" ? "claimed" : "sign_in",
+  )
+  await d.store.touchIdentity(attempt.tenantId, identityId, resolved.email, now)
+
+  const code = newSecret()
+  await d.store.finishAttempt(attempt.tenantId, attempt.id, {
+    outcome: "signed_in",
+    clerkUserId: resolved.userId,
+    identityId,
+    clerkOrgId: resolved.orgId,
+    idpSession: assertion.idpSession ?? null,
+    authTime: assertion.authTime,
+    handoffCodeHash: hashSecret(code),
+    handoffExpiresAt: new Date(now.getTime() + HANDOFF_TTL_MS),
+  })
+  await d.store.record(attempt.tenantId, {
+    type: "sign_in.verified",
+    subjectUserId: resolved.userId,
+    connectionId: connection.id,
+    data: { attemptId: attempt.id, path: resolved.path },
+  })
+  return { outcome: "signed_in", code, returnTo: attempt.returnTo }
+}
+
+/**
+ * Who this is, by the only rules that may answer it.
+ *
+ *   1. An existing link `(connection, subject)`.
+ *   2. A person SCIM already provisioned for this subject (#342).
+ *   3. An existing Clerk account holding this address VERIFIED, on one of the
+ *      connection's live domains, claimed (sso.md 2.3).
+ *   4. JIT (#341), when the connection allows it.
+ *   5. Nobody: refused.
+ *
+ * ⚠ NEVER AN EMAIL-ONLY MATCH OUTSIDE THE WORKSPACE'S VERIFIED DOMAINS. Rule 3
+ * needs all of: the IdP vouching for the address, the address on a domain
+ * this workspace has proved and still holds (not lapsed, not displaced), and
+ * Clerk holding it verified. Any one missing and the person is refused, not
+ * guessed at.
+ */
+async function resolve(
+  d: BridgeDeps,
+  tenantId: string,
+  connection: Connection,
+  assertion: Assertion,
+): Promise<Resolved> {
+  const orgId = await d.store.workspaceOrg(tenantId)
+  if (!orgId) return { ok: false, reason: "workspace_gone" }
+  const email = normaliseEmail(assertion.email)
+  if (!email) return { ok: false, reason: "no_email" }
+  const live = await d.store.liveDomains(tenantId, connection.id)
+  // ⚠ EVEN FOR A LINKED PERSON: displacement disables SSO for the domain.
+  if (!onLiveDomain(email, live)) return { ok: false, reason: "domain_not_verified" }
+
+  const linked = await d.store.identityBySubject(
+    tenantId,
+    connection.id,
+    assertion.subject,
+  )
+  let userId: string | null = linked?.clerkUserId ?? null
+  let path: "linked" | "scim" | "claimed" | "jit" = "linked"
+
+  if (!userId) {
+    if (!assertion.emailVerified) return { ok: false, reason: "email_unverified" }
+    const ctx: ResolveContext = { tenantId, connection, assertion, email }
+    const pre = (await d.preProvisioned?.(ctx)) ?? null
+    if (pre) {
+      userId = pre
+      path = "scim"
+    } else {
+      const holders = (await d.clerk.usersByEmail(email)).filter((u) =>
+        u.emails.some((e) => e.verified && e.address.toLowerCase() === email),
+      )
+      if (holders.length > 1) return { ok: false, reason: "ambiguous_account" }
+      if (holders.length === 1) {
+        userId = holders[0]!.id
+        path = "claimed"
+      } else if (connection.jitEnabled && d.jit) {
+        userId = await d.jit(ctx)
+        path = "jit"
+      }
+    }
+    if (!userId) return { ok: false, reason: "no_account" }
+    // Somebody else's subject already holds this account on this connection.
+    if (await d.store.identityByUser(tenantId, connection.id, userId))
+      return { ok: false, reason: "already_linked" }
+  }
+
+  const user = await d.clerk.user(userId)
+  if (!user) return { ok: false, reason: "no_account" }
+  if (user.banned) return { ok: false, reason: "account_banned" }
+  if (await d.store.isBlocked(tenantId, email)) return { ok: false, reason: "blocked" }
+  const managed = await d.store.managedByUser(userId)
+  if (managed && managed.tenantId !== tenantId)
+    return { ok: false, reason: "managed_elsewhere" }
+
+  return {
+    ok: true,
+    userId,
+    user,
+    path,
+    identityId: linked?.id ?? null,
+    orgId,
+    email,
+    managed,
+  }
+}
+
+/**
+ * The addresses a managed account keeps, the asserted one first: of the
+ * candidates (every address when none are given), only those Clerk holds
+ * VERIFIED on this account. An address the account does not hold is never
+ * listed, or the gateway would refuse whoever else signs in with it.
+ */
+export function verifiedAddresses(
+  user: ClerkUserSnapshot,
+  candidates: readonly string[] | null,
+  email: string,
+): string[] {
+  const verified = user.emails
+    .filter((e) => e.verified)
+    .map((e) => e.address.toLowerCase())
+  const held = new Set(verified)
+  const wanted = candidates ? candidates.map((a) => a.toLowerCase()) : verified
+  return [...new Set([email, ...wanted])].filter((a) => held.has(a))
+}
+
+/** The assertion as a test run shows it: claims, no secrets (an engine has none here). */
+function claimsOf(assertion: Assertion): Record<string, unknown> {
+  return {
+    subject: assertion.subject,
+    email: assertion.email,
+    emailVerified: assertion.emailVerified,
+    givenName: assertion.givenName ?? null,
+    familyName: assertion.familyName ?? null,
+    groups: assertion.groups ?? [],
+    amr: assertion.amr ?? [],
+    authTime: assertion.authTime?.toISOString() ?? null,
+    attributes: assertion.attributes ?? {},
+  }
+}
+
+/**
+ * A step-up (sso.md 2.4): the IdP asked again, so the session is fresh.
+ *
+ * ⚠ THE SAME PERSON, AND A REAL RE-AUTHENTICATION. The subject must resolve,
+ * through its existing link only, to the user of the session being made
+ * fresh; and the IdP's `auth_time` must be within `STEP_UP_MAX_AGE_MS`,
+ * because an IdP that answered from its own long-lived session (no
+ * `prompt=login` honoured) proved nothing new.
+ */
+async function stepUp(
+  d: BridgeDeps,
+  attempt: AttemptRow,
+  connection: Connection,
+  assertion: Assertion,
+  refuse: (reason: Refusal) => Promise<CompleteOutcome>,
+): Promise<CompleteOutcome> {
+  const now = clock(d)
+  const linked = await d.store.identityBySubject(
+    attempt.tenantId,
+    connection.id,
+    assertion.subject,
+  )
+  const session = attempt.stepUpSessionId
+    ? await d.store.sessionRow(attempt.tenantId, attempt.stepUpSessionId)
+    : null
+  if (
+    !linked ||
+    !session ||
+    session.revokedAt ||
+    session.clerkUserId !== linked.clerkUserId
+  )
+    return refuse("step_up_mismatch")
+  const at = assertion.authTime
+  if (
+    !at ||
+    now.getTime() - at.getTime() > STEP_UP_MAX_AGE_MS ||
+    at.getTime() > now.getTime() + CLOCK_SKEW_MS
+  )
+    return refuse("step_up_stale")
+  await d.store.setFresh(attempt.tenantId, session.sessionId, at)
+  await d.store.finishAttempt(attempt.tenantId, attempt.id, {
+    outcome: "stepped_up",
+    clerkUserId: linked.clerkUserId,
+    identityId: linked.id,
+    authTime: at,
+  })
+  await d.store.record(attempt.tenantId, {
+    type: "step_up.succeeded",
+    subjectUserId: linked.clerkUserId,
+    connectionId: connection.id,
+    sessionId: session.sessionId,
+  })
+  return { outcome: "stepped_up", returnTo: attempt.returnTo }
+}
+
+// ── 4. Redeem ────────────────────────────────────────────────────────────
+
+export type RedeemOutcome =
+  | { outcome: "ticket"; ticket: string; handoff: string }
+  | { outcome: "refused"; reason: Refusal }
+
+/**
+ * The browser swaps its handoff code for a Clerk ticket.
+ *
+ * ⚠ THE TICKET IS MINTED HERE, NOT AT `completeLogin`, AND NEVER STORED. Its
+ * sixty seconds start when the browser is ready to use it, and nothing at
+ * rest can be replayed into a session. Only its id is kept, for `bind`.
+ *
+ * ⚠ A MINT THAT FAILS AFTER THE CODE IS SPENT COSTS A RESTART, NOT A SECOND
+ * TICKET. The code is claimed first; Clerk failing then throws (503), and the
+ * person starts the sign-in again. Never two tickets for one login.
+ */
+export async function redeemHandoff(
+  d: Pick<BridgeDeps, "store" | "clerk" | "log" | "now">,
+  input: { code: string; binding: string },
+): Promise<RedeemOutcome> {
+  const now = clock(d)
+  const attempt = await d.store.attemptByHandoffCode(hashSecret(input.code))
+  if (
+    !attempt ||
+    attempt.outcome !== "signed_in" ||
+    !attempt.clerkUserId ||
+    !attempt.clerkOrgId
+  )
+    return { outcome: "refused", reason: "attempt_unknown" }
+  const refuse = async (reason: Refusal): Promise<RedeemOutcome> => {
+    await d.store.record(attempt.tenantId, {
+      type: "handoff.failed",
+      subjectUserId: attempt.clerkUserId,
+      connectionId: attempt.connectionId,
+      reason,
+      data: { attemptId: attempt.id },
+    })
+    return { outcome: "refused", reason }
+  }
+  if (!sameHash(attempt.bindingHash, hashSecret(input.binding)))
+    return refuse("wrong_browser")
+  if (attempt.redeemedAt) return refuse("attempt_used")
+  if (!attempt.handoffExpiresAt || attempt.handoffExpiresAt.getTime() <= now.getTime())
+    return refuse("attempt_expired")
+  if (!(await d.store.claimRedeem(attempt.tenantId, attempt.id, now)))
+    return refuse("attempt_used")
+
+  const token = await d.clerk.mintSignInToken({
+    userId: attempt.clerkUserId,
+    orgId: attempt.clerkOrgId,
+  })
+  const handoff = newSecret()
+  await d.store.recordToken(attempt.tenantId, attempt.id, {
+    signInTokenId: token.id,
+    mintedAt: now,
+    handoffSecretHash: hashSecret(handoff),
+  })
+  return { outcome: "ticket", ticket: token.token, handoff }
+}
+
+// ── 5. Bind ──────────────────────────────────────────────────────────────
+
+export type BindOutcome =
+  | { outcome: "bound"; returnTo: string | null }
+  | {
+      outcome: "refused"
+      reason:
+        | "unknown"
+        | "used"
+        | "expired"
+        | "wrong_user"
+        | "session_mismatch"
+        | "not_ticket"
+        | "token_not_accepted"
+    }
+
+/**
+ * `POST /sso/bind`: the new Clerk session, proved to be the one our ticket
+ * made, becomes a bound SSO session.
+ *
+ * ⚠ CLERK HAS NO "WAS THIS TOKEN REDEEMED" READ (a GET is 404, sso.md 1.1),
+ * SO IT IS ASKED THREE WAYS AT ONCE. The session is this user's, active, and
+ * no older than the mint; its client last signed in with `ticket` (P4); and
+ * revoking the token now is refused with `sign_in_token_cannot_be_revoked_code`,
+ * which Clerk answers for an accepted token. A token still pending revokes
+ * cleanly instead - so it was NOT what made this session, the bind is refused,
+ * and the token is dead either way.
+ */
+export async function bind(
+  d: Pick<BridgeDeps, "store" | "clerk" | "log" | "now">,
+  input: { userId: string; sessionId: string; handoff: string },
+): Promise<BindOutcome> {
+  const now = clock(d)
+  const attempt = await d.store.attemptByHandoffSecret(hashSecret(input.handoff))
+  if (
+    !attempt ||
+    !attempt.signInTokenId ||
+    !attempt.tokenMintedAt ||
+    !attempt.clerkUserId
+  )
+    return { outcome: "refused", reason: "unknown" }
+  const refuse = async (
+    reason: Exclude<BindOutcome, { outcome: "bound" }>["reason"],
+  ) => {
+    await d.store.record(attempt.tenantId, {
+      type: "session.bind_failed",
+      subjectUserId: attempt.clerkUserId,
+      connectionId: attempt.connectionId,
+      sessionId: input.sessionId,
+      reason,
+      data: { attemptId: attempt.id },
+    })
+    return { outcome: "refused" as const, reason }
+  }
+  if (attempt.boundAt) return refuse("used")
+  if (now.getTime() - attempt.tokenMintedAt.getTime() > BIND_WINDOW_MS)
+    return refuse("expired")
+  if (attempt.clerkUserId !== input.userId) return refuse("wrong_user")
+
+  const session = await d.clerk.session(input.sessionId)
+  if (
+    !session ||
+    session.userId !== input.userId ||
+    session.status !== "active" ||
+    session.createdAt.getTime() < attempt.tokenMintedAt.getTime() - CLOCK_SKEW_MS
+  )
+    return refuse("session_mismatch")
+  if ((await d.clerk.lastStrategy(session.clientId)) !== "ticket")
+    return refuse("not_ticket")
+  if ((await d.clerk.revokeSignInToken(attempt.signInTokenId)) !== "not_revocable")
+    return refuse("token_not_accepted")
+
+  if (!(await d.store.markBound(attempt.tenantId, attempt.id, input.sessionId, now)))
+    return refuse("used")
+  await d.store.bindSession(attempt.tenantId, {
+    sessionId: input.sessionId,
+    clerkUserId: input.userId,
+    connectionId: attempt.connectionId,
+    identityId: attempt.identityId,
+    idpSession: attempt.idpSession,
+    authTime: attempt.authTime,
+    at: now,
+    // ⚠ FRESH AS OF THE IdP's OWN auth_time, NOT THE BIND. An IdP that signed
+    // the person in from a day-old session of its own proved nothing recent;
+    // no auth_time at all proves nothing, so it is the epoch.
+    freshAt: attempt.authTime ?? new Date(0),
+  })
+  await d.store.record(attempt.tenantId, {
+    type: "sign_in.succeeded",
+    subjectUserId: input.userId,
+    connectionId: attempt.connectionId,
+    sessionId: input.sessionId,
+    data: { attemptId: attempt.id },
+  })
+  return { outcome: "bound", returnTo: attempt.returnTo }
+}

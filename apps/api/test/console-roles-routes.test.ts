@@ -70,6 +70,7 @@ describe("GET /team/roles", () => {
           "access_domains:manage",
           "roles:manage",
           "workspace:manage",
+          "sso:manage",
         ],
         grantable: ["admin", "member"],
         invitable: ["member", "admin"],
@@ -287,6 +288,7 @@ describe("GET /console/me", () => {
         "access_domains:manage",
         "roles:manage",
         "workspace:manage",
+        "sso:manage",
       ],
     })
   })

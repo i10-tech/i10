@@ -110,6 +110,29 @@ describe("DELETE /console/me/account", () => {
     ])
   })
 
+  it("refuses an SSO-managed account: its company deactivates it (#337)", async () => {
+    const t = await deletion("user_ada", {
+      members: { [ACME.orgId]: 1 },
+      accounts: { isManaged: async () => true },
+    })
+    expect(t.res.status).toBe(409)
+    expect(((await t.res.json()) as { name: string }).name).toBe("managed_account")
+    expect(t.removed).toEqual([])
+  })
+
+  it("refuses with 503 when it cannot tell whether the account is managed", async () => {
+    const t = await deletion("user_ada", {
+      members: { [ACME.orgId]: 1 },
+      accounts: {
+        isManaged: async () => {
+          throw new Error("database down")
+        },
+      },
+    })
+    expect(t.res.status).toBe(503)
+    expect(t.removed).toEqual([])
+  })
+
   it("works with no workspace open", async () => {
     const t = await deletion("user_ada", { workspace: false })
     expect(t.res.status).toBe(200)

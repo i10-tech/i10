@@ -270,6 +270,16 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
         },
         503,
       )
+    if (check.outcome === "managed")
+      return c.json(
+        {
+          statusCode: 409,
+          name: "managed_account" as const,
+          message:
+            "Your company manages this account through its single sign-on. Ask your administrator to deactivate it.",
+        },
+        409,
+      )
     if (check.outcome === "sole_owner")
       return c.json(
         {

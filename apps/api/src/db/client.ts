@@ -176,7 +176,7 @@ export async function assertRlsSubject(
            (select count(*)::int
               from pg_class c
               join pg_namespace n on n.oid = c.relnamespace
-             where n.nspname = 'core'
+             where n.nspname in ('core', 'identity')
                and c.relkind in ('r', 'p')
                and c.relowner = r.oid)                      as owned
       from pg_roles r
@@ -188,7 +188,7 @@ export async function assertRlsSubject(
   const reasons = [
     row.superuser && "it is a superuser",
     row.bypassrls && "it has BYPASSRLS",
-    row.owned > 0 && `it owns ${row.owned} table(s) in core`,
+    row.owned > 0 && `it owns ${row.owned} table(s) in core or identity`,
   ].filter(Boolean)
 
   if (reasons.length > 0) {
@@ -207,7 +207,8 @@ export async function assertRlsSubject(
    * through the parent - and every SECURITY DEFINER function executable by
    * PUBLIC, which let the mail server's role terminate workspaces. Migration
    * 0064 closed both; this is what stops the next table, partition or function
-   * reopening them, checked where a failure stops the rollout.
+   * reopening them, checked where a failure stops the rollout. `identity`
+   * (#337) is held to the same rule as `core`.
    */
   const [schema] = await sql_<
     { unprotected: string[]; partitions: string[]; definers: string[] }[]
@@ -215,7 +216,7 @@ export async function assertRlsSubject(
     select
       (select coalesce(array_agg(c.relname::text order by c.relname), '{}')
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
-        where n.nspname = 'core' and c.relkind in ('r', 'p')
+        where n.nspname in ('core', 'identity') and c.relkind in ('r', 'p')
           and not c.relrowsecurity)                                    as unprotected,
       (select coalesce(array_agg(c.relname::text order by c.relname), '{}')
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -223,7 +224,7 @@ export async function assertRlsSubject(
           and has_table_privilege(current_user, c.oid, 'SELECT'))      as partitions,
       (select coalesce(array_agg(p.proname::text order by p.proname), '{}')
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = 'core' and p.prosecdef
+        where n.nspname in ('core', 'identity') and p.prosecdef
           and has_function_privilege('public', p.oid, 'EXECUTE'))     as definers
   `
   const holes = [
@@ -237,7 +238,7 @@ export async function assertRlsSubject(
 
   if (holes.length > 0) {
     throw new Error(
-      `Refusing to start: the tenant boundary in core has holes - ${holes.join("; ")}. ` +
+      `Refusing to start: the tenant boundary in core or identity has holes - ${holes.join("; ")}. ` +
         `Give every table RLS and a tenant policy, revoke direct grants on partitions, ` +
         `and REVOKE EXECUTE ... FROM PUBLIC on definer functions (see migration 0064).`,
     )

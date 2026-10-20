@@ -16,6 +16,7 @@ import { mountCredentials } from "./console/credentials.js"
 import { mountDns } from "./console/dns.js"
 import { mountDomains } from "./console/domains.js"
 import { mountSending } from "./console/sending.js"
+import { mountIdentity } from "./console/identity.js"
 
 export type { ConsoleDeps }
 
@@ -255,6 +256,7 @@ export function createConsole(deps?: ConsoleDeps) {
   mountTemplates(app, d)
   mountGithub(app, d)
   mountDns(app, d)
+  mountIdentity(app, d)
 
   return app
 }

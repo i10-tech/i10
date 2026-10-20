@@ -75,6 +75,15 @@ export interface ClerkWebhookDeps {
    * WEBHOOK ENDPOINT, beside the ones `members` needs.
    */
   roles?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * The identity core (#337): the SSO sweeper on `session.created`, the
+   * managed-account watchdog on `user.updated`, links forgotten on
+   * `user.deleted`. Outside the dedupe and idempotent - see
+   * identity/events.ts.
+   *
+   * ⚠ NEEDS `session.created` SUBSCRIBED ON CLERK'S WEBHOOK ENDPOINT.
+   */
+  identity?: (type: string, data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -168,6 +177,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // and before members, whose capacity alerts go to the owners and admins.
       const roles = (await deps.roles?.(event.type, event.data)) ?? null
       const members = (await deps.members?.(event.type, event.data)) ?? null
+      const identity = (await deps.identity?.(event.type, event.data)) ?? null
 
       // ⚠ OUTSIDE THE DEDUPE FOR THE SAME REASON PROVISIONING IS, and safe for
       // a different one. `applyClerkEvent` claims the Svix id and answers
@@ -188,6 +198,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
           ...(provisioned ? { provisioned } : {}),
           ...(roles ? { roles } : {}),
           ...(members ? { members } : {}),
+          ...(identity ? { identity } : {}),
           ...(emailed ? { emailed } : {}),
         },
         "clerk webhook applied",

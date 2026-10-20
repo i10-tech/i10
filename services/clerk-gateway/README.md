@@ -16,7 +16,7 @@ stays, so a gap here is not a gap in i10.
 | ---------------- | --------------------------------------------------------------- |
 | `src/routes.ts`  | The allowlist and the explicit deny list, one table each        |
 | `src/policy.ts`  | Pure pass/deny decision: path rules, `_method`, bodies, managed |
-| `src/managed.ts` | The managed-account hook (a stub until #337) and its cache      |
+| `src/managed.ts` | The managed-account lookup (our API, #337) and its cache        |
 | `src/forward.ts` | Clerk's proxy contract: headers in, `Set-Cookie`/`Location` out |
 | `src/gateway.ts` | One request end to end, with everything side-effecting injected |
 | `src/log.ts`     | The one structured line per request                             |
@@ -69,8 +69,18 @@ ask the hook whether the session in `_clerk_session_id` is a managed account;
 if so, 403 `managed_account`. `guard: "sign_in_create"` asks about the
 `identifier`; a managed one gets 422 `sso_required` ("Continue with your
 company's SSO"), unless `strategy=ticket`, which passes without a lookup. A
-lookup that throws is a 503, never "not managed". Today the hook is `NOT_MANAGED`
-and nothing changes for anyone.
+lookup that throws is a 503, never "not managed".
+
+The lookup is our API's `POST /internal/identity/managed` (`{ identifier }` or
+`{ sessionId }` in, `{ managed }` out), authenticated with
+`Authorization: Bearer <I10_API_SECRET>`, the same value as the API's
+`IDENTITY_GATEWAY_SECRET`. Answers are cached per isolate for 15 seconds;
+failures never are. Anything but a 200 with a boolean, a timeout (3 s), or a
+missing `I10_API_URL` / `I10_API_SECRET` throws, so the policy answers 503.
+Telling our tickets from Clerk's other tickets (invitations, saved accounts) is
+done behind the door, by the API: only a session bound through `POST
+/sso/bind` passes its gate, and the sweeper revokes an unbound ticket session
+after two minutes.
 
 **Forwarding** (Clerk's guide at
 clerk.com/docs/guides/dashboard/dns-domains/proxy-fapi, and Clerk's own
@@ -98,7 +108,7 @@ method, route name, decision, reason, our status, Clerk's status, duration,
 client IP, Cloudflare ray id, and for a refused request the path (never the
 query). No headers, no query, no body, ever: those carry cookies, session
 tokens, dev-browser tokens, tickets and passwords. The type in `src/log.ts` is
-the whole vocabulary. The identity audit log is #337's.
+the whole vocabulary. The identity audit log (sign-ins, refusals, revocations) is the API's, in `identity.events`.
 
 ## Running it locally
 
@@ -117,9 +127,12 @@ doppler run --project i10 --config dev -- bun run local
 the root `turbo run dev`, which is capped at 10 persistent tasks and refuses to
 start with an eleventh. The gateway is opt-in locally, so it stays out of it.
 
-The secret comes from Doppler through the process environment:
+The secrets come from Doppler through the process environment:
 `secrets.required` in `wrangler.jsonc` makes wrangler read `CLERK_SECRET_KEY`
-(and nothing else) from it. Never write it to `.dev.vars`.
+and `I10_API_SECRET` (and nothing else) from it. Never write them to
+`.dev.vars`. `I10_API_SECRET` must equal the API's `IDENTITY_GATEWAY_SECRET` in
+the same Doppler config; locally the gateway asks the API at
+`http://localhost:3001` (`I10_API_URL` in `env.local`).
 
 Then start the apps against it, from the repo root:
 
@@ -152,13 +165,21 @@ Nothing below has been done. Each step is manual and in this order.
    answer is that a whole hostname cannot be a `proxy_url`, or that Clerk keeps
    serving `clerk.i10.tech` some other way that we cannot close, stop here.
 
-2. **Give the Worker the production secret**, piped so it is never printed:
+2. **Give the Worker the production secrets**, piped so they are never
+   printed. The API must already run with `IDENTITY_GATEWAY_SECRET` set
+   (Doppler `prod`), or every managed-account lookup answers 503:
 
    ```bash
    cd services/clerk-gateway
    doppler secrets get CLERK_SECRET_KEY --project i10 --config prod --plain \
      | bunx wrangler secret put CLERK_SECRET_KEY
+   doppler secrets get IDENTITY_GATEWAY_SECRET --project i10 --config prod --plain \
+     | bunx wrangler secret put I10_API_SECRET
    ```
+
+   Check the lookup end to end before going on: a sign-in attempt for an
+   identifier that is not managed must reach Clerk (not a 503 with
+   `X-Clerk-Gateway: unavailable`).
 
 3. **Deploy it, on `workers.dev` only** (no route is configured):
    `bunx wrangler deploy`. Check `GET https://i10-clerk-gateway.<account>.workers.dev/v1/environment`

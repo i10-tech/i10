@@ -20,6 +20,14 @@ export interface Env {
   ALLOWED_ORIGINS?: string
   /** How long to wait for Clerk's response headers. */
   UPSTREAM_TIMEOUT_MS?: string
+  /**
+   * Our API, asked whether an identifier or a session is a managed account
+   * (#337), e.g. `https://api.i10.tech`. Unset: those lookups fail, and the
+   * sign-ins and account routes that need them answer 503.
+   */
+  I10_API_URL?: string
+  /** Secret: the API's `IDENTITY_GATEWAY_SECRET`. `wrangler secret put I10_API_SECRET`. */
+  I10_API_SECRET?: string
 }
 
 export interface Config {

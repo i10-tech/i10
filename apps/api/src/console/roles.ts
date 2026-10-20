@@ -45,6 +45,12 @@ export const PERMISSIONS = [
   "workspace:manage",
   /** Delete the workspace. */
   "workspace:delete",
+  /**
+   * SSO connections, their domains, enforcement and session policy, and what
+   * deprovisioning does (#337). The IT-admin role (sso.md 2.11) will hold it
+   * without billing.
+   */
+  "sso:manage",
 ] as const
 export type Permission = (typeof PERMISSIONS)[number]
 
@@ -61,6 +67,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "access_domains:manage",
     "roles:manage",
     "workspace:manage",
+    "sso:manage",
   ],
   member: [],
 }
@@ -402,6 +409,20 @@ export type ReleaseOutcome =
   | { outcome: "forbidden" | "owner_only" | "last_owner" }
 
 /**
+ * Whether one person may take another out of a workspace, or act on them as
+ * removing would (end their sessions, deprovision them, #337): an admin
+ * anybody but an owner, an owner anybody.
+ */
+export function mayRemove(
+  actor: Role,
+  target: Role,
+): "ok" | "forbidden" | "owner_only" {
+  if (!may(actor, "members:manage")) return "forbidden"
+  if (target === "owner" && !may(actor, "owners:manage")) return "owner_only"
+  return "ok"
+}
+
+/**
  * Somebody leaving (`actorUserId === userId`) or being removed: whether they
  * may, and their row taken out if so.
  *
@@ -415,10 +436,8 @@ export function release(
 ): Decision<ReleaseOutcome> {
   const target = roleIn(rows, input.userId)
   if (input.actorUserId !== input.userId) {
-    const actor = roleIn(rows, input.actorUserId)
-    if (!may(actor, "members:manage")) return none({ outcome: "forbidden" })
-    if (target === "owner" && !may(actor, "owners:manage"))
-      return none({ outcome: "owner_only" })
+    const allowed = mayRemove(roleIn(rows, input.actorUserId), target)
+    if (allowed !== "ok") return none({ outcome: allowed })
   }
   if (target === "owner" && ownersIn(rows) <= 1) return none({ outcome: "last_owner" })
   const previous = rowOf(rows, input.userId) ?? null
@@ -1065,6 +1084,37 @@ export async function leaveWorkspace(
       userId: input.userId,
     },
     "left a workspace",
+  )
+  return "ok"
+}
+
+/**
+ * Takes somebody else out of the workspace as `actorUserId` (#337's
+ * deprovisioning): our row first under the role rule, then Clerk, the row put
+ * back if Clerk fails. The Team page's removal does the same through
+ * team-domains.ts, with its block list on top.
+ */
+export async function removeMemberAs(
+  d: RolesDeps,
+  input: { tenantId: string; orgId: string; actorUserId: string; userId: string },
+): Promise<"ok" | "forbidden" | "owner_only" | "last_owner" | "unconfirmed"> {
+  const released = await releaseMember(d, input)
+  if (released.outcome !== "ok") return released.outcome
+  try {
+    await d.clerk.remove(input.orgId, input.userId)
+  } catch (error) {
+    await released.undo()
+    throw error
+  }
+  d.log.info(
+    {
+      audit: "member.removed",
+      tenantId: input.tenantId,
+      clerkOrgId: input.orgId,
+      actorUserId: input.actorUserId,
+      userId: input.userId,
+    },
+    "removed a member",
   )
   return "ok"
 }

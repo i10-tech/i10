@@ -484,6 +484,33 @@ Whatever speaks the protocol (Part 3), the semantics are ours:
 
 ---
 
+### 2.13 Where #337 departs from 2.1 to 2.5, on purpose (2026-10-20)
+
+- **The ticket is minted at the handoff swap, not at completion** (2.1 step 6).
+  Its sixty seconds start when the browser is ready to use it, and nothing at
+  rest can be turned into a session; only its id is stored, for the bind.
+- **The bind proves acceptance three ways.** Clerk has no "was this token
+  redeemed" read, so: the session is the user's, active and newer than the
+  mint; its client's last strategy is `ticket`; and revoking the token is
+  refused with `sign_in_token_cannot_be_revoked_code`. Probed on dev: an
+  accepted token is not revocable, a pending one revokes, and an expired one
+  that was never used also revokes, so expiry never reads as acceptance.
+- **Step-up for a managed account is the IdP only** (2.4 said Clerk strict OR
+  `fresh_at`). A managed account has no password and no Clerk 2FA, so Clerk's
+  strict check would fall back to an email code, which is not what the company
+  asked for. Everybody else keeps Clerk's strict check, unchanged.
+- **Session limits are per connection, not per workspace** (2.5). A workspace
+  with one connection sees no difference; one with two IdPs can hold them to
+  different policies. The console (#340) can still present one setting.
+- **Owners and admins who are not managed are refused SSO** (decision 7,
+  `role_exempt`).
+- **Displacement** refuses new sign-ins and, since the review, bound sessions
+  too (the gate checks the connection still covers a live proof). Still open
+  (#340): the displaced workspace's managed accounts stay managed by it, so the
+  person cannot sign in anywhere until that row is released; releasing managed
+  rows on displacement, or handing them to the new owner's connection, has to
+  be decided.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?
@@ -725,6 +752,22 @@ users) **(inferred)**.
 7. ~~Owner exemption~~ **Decided 2026-10-19: owners exempt from "required" by
    default, passkey required on exempt owners**, every bypass sign-in audited
    and alerting the other admins; removing the exemption needs two owners.
+   **Found while building #337 (2026-10-20):** the exemption has to work both
+   ways. An admin holds `sso:manage`, so an admin can set up a connection and
+   run the IdP behind it; if the bridge signed in whoever the IdP named, that
+   admin could sign in AS the owner by asserting the owner's address. So the
+   bridge refuses an owner or admin who is not managed (`role_exempt`) before
+   anything is joined, linked or minted, and they sign in with their own
+   passkey. Admins are included because the same admin could otherwise claim a
+   fellow admin, and the planned IT-admin role would make that an escalation.
+   Still open, for #338 and #340: (a) an owner who chooses to use SSO, linked
+   from their own session; (b) a managed account later made an owner, whose
+   sign-in the connection's admins still control, so changing such a
+   connection's trust (issuer, keys, domains, status) should need an owner;
+   (c) claiming (2.3) also reaches somebody who owns a DIFFERENT workspace if
+   their address is on this workspace's proved domain. That follows the domain
+   authority model on purpose, but it should be a conscious choice before
+   launch.
 8. ~~Roles~~ **Decided 2026-10-19: workspace roles live in OUR database.**
    Clerk gives every member one powerless role (`org:member`, reads only) and
    `creator_role` moves to it as well; our table holds the real roles and our

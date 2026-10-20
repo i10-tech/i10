@@ -72,6 +72,11 @@ declare module "hono" {
     freshAuth?: import("./session.js").FreshAuthReader
     /** Human mailboxes, and the rules for who may have one. */
     mailboxes?: import("../mailboxes/provision.js").MailboxProvisioning
+    /**
+     * The SSO gate (#337): a managed account passes only on a bound session.
+     * Read by `requireUser` and `requireTenant`. See middleware/session.ts.
+     */
+    ssoGate?: import("./session.js").SsoGateReader
   }
 }
 
