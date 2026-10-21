@@ -25,6 +25,9 @@ import { oidcReady } from "../../identity/oidc.js"
 import { presetOf } from "../../identity/oidc-presets.js"
 import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
 import { mountIdentityGroups } from "./identity-groups.js"
+import { mountIdentitySaml, type SamlConsoleDeps } from "./identity-saml.js"
+import { samlReady } from "../../identity/saml.js"
+import { samlPresetOf } from "../../identity/saml-presets.js"
 
 /**
  * The identity core's console API (#337). The screens are #340's; these are
@@ -42,6 +45,7 @@ import { mountIdentityGroups } from "./identity-groups.js"
  *   POST   /identity/members/:userId/deprovision         (step-up)
  *   ...    /identity/connections/:id/oidc[/secret|/keys] OIDC settings (#338, identity-oidc.ts)
  *   ...    /identity/connections/:id/group-rules[/:ruleId] group-to-role rules (#341, identity-groups.ts)
+ *   ...    /identity/connections/:id/saml[/...]         SAML settings (#339, identity-saml.ts)
  *
  * ⚠ EVERY ROUTE CHECKS OUR ROLES TABLE (#335): `sso:manage` for setup,
  * `owners:manage` for what deprovisioning does, and the removal rule
@@ -58,6 +62,8 @@ export interface IdentityConsoleDeps {
   protocols: readonly Protocol[]
   /** The OIDC engine's console half (#338). Absent: OIDC routes answer 501. */
   oidc?: OidcConsoleDeps
+  /** The SAML engine's console half (#339). Absent: SAML routes answer 501. */
+  saml?: SamlConsoleDeps
   deprovision: DeprovisionDeps
   log: Logger
 }
@@ -138,6 +144,7 @@ export function readPatch(body: Record<string, unknown>): ConnectionPatch | stri
 export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentityOidc(app, d)
   mountIdentityGroups(app, d)
+  mountIdentitySaml(app, d)
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
@@ -216,6 +223,9 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       if (preset.id === "google" && !id.oidc?.engine.google)
         return c.json(validation("Google Workspace sign-in is not available."), 422)
     }
+    // A SAML connection is one of its presets too (#339).
+    if (protocol === "saml" && !samlPresetOf(provider))
+      return c.json(validation("provider is not valid for SAML."), 422)
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
     const made = await id.store.createConnection(tenantId, {
@@ -323,6 +333,22 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       return c.json(
         validation(
           "Finish the connection's OIDC settings before testing or activating it.",
+        ),
+        422,
+      )
+    // The same for SAML: an entity id, an SSO URL and a certificate valid today.
+    if (
+      before.protocol === "saml" &&
+      (patch.status === "active" || patch.status === "testing") &&
+      patch.status !== before.status &&
+      !(
+        id.saml &&
+        samlReady(before, await id.saml.store.certificates(tenantId, connectionId))
+      )
+    )
+      return c.json(
+        validation(
+          "Finish the connection's SAML settings before testing or activating it.",
         ),
         422,
       )

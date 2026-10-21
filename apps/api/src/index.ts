@@ -49,6 +49,8 @@ import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
 import { oidcEngine } from "./identity/oidc.js"
+import { redisReplayCache, samlEngine } from "./identity/saml.js"
+import { samlStore } from "./identity/saml-store.js"
 import { guardedFetch } from "./identity/oidc-fetch.js"
 import { fixedWindow, ssoRateLimit } from "./identity/rate-limit.js"
 import { onIdentityClerkEvent } from "./identity/events.js"
@@ -1249,6 +1251,33 @@ const oidc =
     : null
 if (oidc) engines.set("oidc", oidc)
 else log.warn({}, "OIDC SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
+/*
+ * The SAML engine (#339). The same needs as OIDC (our SP keys are sealed,
+ * every URL an IdP is given is on the auth app), plus Redis for the
+ * assertion replay cache.
+ *
+ * ⚠ THE CACHE CLIENT FAILS FAST, AND HERE THAT IS A 503, NOT A MISS. Every
+ * other user of `cache` treats an error as "not cached"; the replay cache
+ * throws instead (identity/saml.ts), so an outage refuses SAML sign-ins
+ * rather than letting an assertion be spent twice.
+ */
+const samlRows = samlStore(db)
+const replay = redisReplayCache(cache)
+const saml =
+  secrets && authOrigin
+    ? samlEngine({
+        store: identity,
+        saml: samlRows,
+        fetch: guardedFetch({
+          vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+        }),
+        replay,
+        authOrigin,
+        log,
+      })
+    : null
+if (saml) engines.set("saml", saml)
+else log.warn({}, "SAML SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
 const managedDeps = { store: identity, clerk: identityClerk, log }
 const sweepQueue = createIdentitySweepQueue({ redis: queueRedis })
 const consoleFreshAuth = withSsoFreshness(
@@ -1316,6 +1345,7 @@ const identityConsole = {
         },
       }
     : {}),
+  ...(saml ? { saml: { engine: saml, store: samlRows, log } } : {}),
   deprovision: {
     ...managedDeps,
     workspaceOrg: (tenantId: string) => identity.workspaceOrg(tenantId),
@@ -1605,6 +1635,22 @@ const app = createApp({
             perConnectionStarts: true,
           }),
           ...(oidc ? { oidc } : {}),
+          ...(saml
+            ? {
+                saml: {
+                  engine: saml,
+                  slo: {
+                    store: identity,
+                    saml: samlRows,
+                    clerk: identityClerk,
+                    replay,
+                    forget: (input: { userId?: string; sessionId?: string }) =>
+                      gateChecker.forget(input),
+                    log,
+                  },
+                },
+              }
+            : {}),
           mayManage: (tenantId: string, userId: string) =>
             can(roleRows, tenantId, userId, "sso:manage"),
           tenantOfConnection: async (connectionId: string) =>

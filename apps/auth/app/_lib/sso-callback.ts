@@ -46,11 +46,32 @@ export async function finishCallback(request: NextRequest, via: "oidc" | "google
     )
   }
 
+  return outcomeRedirect(request, answer)
+}
+
+/** Where a finished callback sends the browser, OIDC or SAML. */
+export function outcomeRedirect(
+  request: NextRequest,
+  answer: {
+    outcome?: string
+    code?: string
+    returnTo?: string | null
+    passed?: boolean
+    /** SAML IdP-initiated (#339): ask before signing in as this address. */
+    confirmAs?: string | null
+  },
+  setCookie?: string,
+): Response {
   if (answer.outcome === "signed_in" && answer.code) {
     // The binding cookie stays: the continue page's handoff swap needs it.
     const url = new URL("/sso/continue", request.url)
-    url.hash = new URLSearchParams({ code: answer.code }).toString()
-    return leave(url, false)
+    url.hash = new URLSearchParams({
+      code: answer.code,
+      ...(answer.confirmAs !== undefined ? { confirm: answer.confirmAs ?? "" } : {}),
+    }).toString()
+    const response = leave(url, false)
+    if (setCookie) response.headers.append("Set-Cookie", setCookie)
+    return response
   }
   if (answer.outcome === "stepped_up")
     return leave(new URL(answer.returnTo ?? afterAuthUrl(undefined)), true)
@@ -65,7 +86,7 @@ export async function finishCallback(request: NextRequest, via: "oidc" | "google
   return leave(failedUrl(request, "We could not sign you in. Start again."), true)
 }
 
-function leave(to: URL, clear: boolean): Response {
+export function leave(to: URL, clear: boolean): Response {
   const response = new Response(null, { status: 303, headers: { Location: to.href } })
   response.headers.set("Cache-Control", "no-store")
   response.headers.set("Referrer-Policy", "no-referrer")

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useSignIn } from "@clerk/nextjs"
+import { Button } from "@repo/ui/components/button/button"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
 import { StepHeading } from "../../_components/step-heading"
@@ -18,6 +19,13 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
   const started = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [tested, setTested] = useState<"passed" | "failed" | null>(null)
+  /**
+   * ⚠ AN IdP-INITIATED SAML SIGN-IN (#339) WAITS FOR A CLICK. Nothing proves
+   * this browser asked for it, so the person sees whose account it is before
+   * the code is swapped: a colleague's assertion auto-posted from another
+   * site would otherwise sign this browser in as them.
+   */
+  const [confirm, setConfirm] = useState<{ code: string; as: string } | null>(null)
 
   useEffect(() => {
     if (!signIn || started.current) return
@@ -33,6 +41,13 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
       return
     }
     const code = hash.get("code")
+    const confirmAs = hash.get("confirm")
+    if (code && confirmAs !== null) {
+      void Promise.resolve({ code, as: confirmAs || "your company account" }).then(
+        setConfirm,
+      )
+      return
+    }
     const finished = code
       ? finishSso(signIn, code, fallbackUrl)
       : Promise.resolve(hash.get("error") ?? "This sign-in has expired. Start again.")
@@ -40,6 +55,31 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
       if (message) setError(message)
     })
   }, [signIn, fallbackUrl])
+
+  if (confirm)
+    return (
+      <div className="flex flex-col items-center gap-6">
+        <StepHeading title="Continue to i10?">
+          {`Your company's sign-in is asking to sign you in as ${confirm.as}. Continue only if you started this.`}
+        </StepHeading>
+        <Button
+          className="w-full"
+          onClick={() => {
+            const { code } = confirm
+            setConfirm(null)
+            if (!signIn) return
+            void finishSso(signIn, code, fallbackUrl).then((message) => {
+              if (message) setError(message)
+            })
+          }}
+        >
+          Continue
+        </Button>
+        <ButtonLink href="/sign-in" variant="secondary" className="w-full">
+          Cancel
+        </ButtonLink>
+      </div>
+    )
 
   if (tested)
     return (

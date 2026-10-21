@@ -43,9 +43,16 @@ export default clerkMiddleware({
   ...(process.env.CLERK_PROXY_URL ? { proxyUrl: process.env.CLERK_PROXY_URL } : {}),
 })
 
+/*
+ * ⚠ THE SAML ROUTES AN IdP DRIVES ARE OUTSIDE CLERK'S MIDDLEWARE (#339). The
+ * ACS and SLO receive cross-site POSTs and redirects from the IdP and need no
+ * Clerk context; a Clerk handshake redirect there would turn the IdP's POST
+ * into a GET and lose the response. `/sso/saml/logout` stays inside: it reads
+ * the session.
+ */
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/((?!_next|sso/saml/(?:acs|slo|metadata)/|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
   ],
 }

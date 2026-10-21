@@ -391,6 +391,97 @@ export interface IdentityStore {
   ): Promise<StoredEvent[]>
 }
 
+/** One IdP signing certificate of a SAML connection (`identity.saml_certificates`). */
+export interface SamlCertificateRow {
+  id: string
+  fingerprint: string
+  /** The DER, base64. */
+  certificate: string
+  subject: string
+  notBefore: Date
+  notAfter: Date
+  /** `upload` (an admin pasted it) or `metadata` (the metadata URL listed it). */
+  source: "upload" | "metadata"
+  /** The smallest expiry threshold (30, 7, 1 days) already alerted on, or null. */
+  alertedDays: number | null
+  createdAt: Date
+}
+
+/** At most this many IdP certificates per connection: a rotation, with room. */
+export const SAML_CERTIFICATE_LIMIT = 5
+
+/**
+ * The SAML half of the identity store (#339): the certificate table, what SLO
+ * needs to find sessions, and the cross-workspace list the daily refresh reads.
+ */
+export interface SamlStore {
+  certificates(tenantId: string, connectionId: string): Promise<SamlCertificateRow[]>
+  /** `limit`: the connection already has SAML_CERTIFICATE_LIMIT. */
+  addCertificate(
+    tenantId: string,
+    connectionId: string,
+    cert: Omit<SamlCertificateRow, "id" | "alertedDays" | "createdAt">,
+    by: string | null,
+  ): Promise<"added" | "exists" | "limit">
+  removeCertificate(
+    tenantId: string,
+    connectionId: string,
+    id: string,
+  ): Promise<boolean>
+  /**
+   * Makes the `metadata` certificates exactly `certs`, leaving uploaded ones
+   * alone, in one transaction. Returns the fingerprints added and removed.
+   */
+  replaceMetadataCertificates(
+    tenantId: string,
+    connectionId: string,
+    certs: Omit<SamlCertificateRow, "id" | "alertedDays" | "createdAt" | "source">[],
+  ): Promise<{ added: string[]; removed: string[] }>
+  noteAlert(tenantId: string, certificateId: string, days: number): Promise<void>
+  /** A bound session as SP-initiated logout needs it: its IdP session and subject. */
+  boundSession(
+    tenantId: string,
+    sessionId: string,
+  ): Promise<{
+    clerkUserId: string
+    connectionId: string
+    idpSession: string | null
+    subject: string | null
+    revokedAt: Date | null
+  } | null>
+  /**
+   * Live bound sessions an IdP LogoutRequest names on this connection: the
+   * identity `subject`'s, narrowed to `sessionIndexes` when the IdP sent any;
+   * with no subject, those `sessionIndexes` alone (never "all of them").
+   */
+  sessionsForLogout(
+    tenantId: string,
+    connectionId: string,
+    match: { subject: string | null; sessionIndexes: readonly string[] },
+  ): Promise<{ sessionId: string; clerkUserId: string }[]>
+  /**
+   * SAML connections the daily refresh should look at, across every
+   * workspace, in id order after `after` (a SECURITY DEFINER function: ids
+   * only, nothing else of any workspace's).
+   */
+  dueConnections(
+    after: string | null,
+    limit: number,
+  ): Promise<{ id: string; tenantId: string }[]>
+}
+
+/**
+ * Seen-once keys (SAML assertion ids, logout request ids), in Redis.
+ *
+ * ⚠ `claim` THROWS WHEN IT CANNOT TELL (Redis down). A replay cache that
+ * answers "not seen" on an outage is no replay cache; the caller turns the
+ * throw into a 503, never a sign-in.
+ */
+export interface ReplayCache {
+  /** True for the first caller of `key` within `ttlMs`, false for any other. */
+  claim(key: string, ttlMs: number): Promise<boolean>
+}
+
 /** A Clerk user as the managed-account rules see it. */
 export interface ClerkUserSnapshot {
   id: string

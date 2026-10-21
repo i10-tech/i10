@@ -144,7 +144,12 @@ const clock = (d: { now?: () => Date }) => (d.now ?? (() => new Date()))()
 // ── 1. Start ─────────────────────────────────────────────────────────────
 
 export type StartOutcome =
-  { outcome: "redirect"; redirectUrl: string } | { outcome: "refused"; reason: Refusal }
+  /**
+   * `protocol` tells apps/auth which cookies the callback will need: a SAML
+   * response is a cross-site POST, so it sets one more (#339).
+   */
+  | { outcome: "redirect"; redirectUrl: string; protocol: Protocol }
+  | { outcome: "refused"; reason: Refusal }
 
 /**
  * ⚠ THE BINDING VALUE IS THE BROWSER'S, NOT OURS. apps/auth draws it, puts it
@@ -209,7 +214,11 @@ export async function startLogin(
     stepUpSessionId: input.stepUp?.sessionId ?? null,
     expiresAt: new Date(clock(d).getTime() + ATTEMPT_TTL_MS),
   })
-  return { outcome: "redirect", redirectUrl: begun.redirectUrl }
+  return {
+    outcome: "redirect",
+    redirectUrl: begun.redirectUrl,
+    protocol: connection.protocol,
+  }
 }
 
 /** What an engine's callback needs back from the attempt it is finishing. */

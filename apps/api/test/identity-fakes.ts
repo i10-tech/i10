@@ -13,7 +13,12 @@ import type {
   IdentityStore,
   ManagedRow,
   NewAttempt,
+  ReplayCache,
+  SamlCertificateRow,
+  SamlStore,
 } from "../src/identity/ports.js"
+import { SAML_CERTIFICATE_LIMIT } from "../src/identity/ports.js"
+import { ReplayUnavailable } from "../src/identity/saml.js"
 
 /**
  * In-memory doubles for the identity core's two ports. The store keeps the
@@ -705,3 +710,132 @@ export function memoryClerk(init: { users?: ClerkUserSnapshot[] } = {}) {
 }
 
 export const log = { info: () => {}, warn: () => {}, error: () => {} }
+
+/**
+ * The SAML half (#339): certificates in memory, and the logout lookups read
+ * from `memoryStore`'s own sessions and identities.
+ */
+export function memorySaml(world: ReturnType<typeof memoryStore>) {
+  const certs: (SamlCertificateRow & { tenantId: string; connectionId: string })[] = []
+  let n = 0
+  const saml: SamlStore = {
+    async certificates(tenantId, connectionId) {
+      return certs
+        .filter((c) => c.tenantId === tenantId && c.connectionId === connectionId)
+        .map((c) => ({ ...c }))
+    },
+    async addCertificate(tenantId, connectionId, cert) {
+      const mine = certs.filter(
+        (c) => c.tenantId === tenantId && c.connectionId === connectionId,
+      )
+      if (mine.some((c) => c.fingerprint === cert.fingerprint)) return "exists"
+      if (mine.length >= SAML_CERTIFICATE_LIMIT) return "limit"
+      certs.push({
+        ...cert,
+        id: `00000000-0000-4000-9000-${String(++n).padStart(12, "0")}`,
+        tenantId,
+        connectionId,
+        alertedDays: null,
+        createdAt: new Date(),
+      })
+      return "added"
+    },
+    async removeCertificate(tenantId, connectionId, id) {
+      const i = certs.findIndex(
+        (c) =>
+          c.tenantId === tenantId && c.connectionId === connectionId && c.id === id,
+      )
+      if (i === -1) return false
+      certs.splice(i, 1)
+      return true
+    },
+    async replaceMetadataCertificates(tenantId, connectionId, list) {
+      const wanted = new Set(list.map((c) => c.fingerprint))
+      const removed: string[] = []
+      for (let i = certs.length - 1; i >= 0; i--) {
+        const c = certs[i]!
+        if (
+          c.tenantId === tenantId &&
+          c.connectionId === connectionId &&
+          c.source === "metadata" &&
+          !wanted.has(c.fingerprint)
+        ) {
+          removed.push(c.fingerprint)
+          certs.splice(i, 1)
+        }
+      }
+      const added: string[] = []
+      for (const cert of list)
+        if (
+          (await saml.addCertificate(
+            tenantId,
+            connectionId,
+            { ...cert, source: "metadata" },
+            null,
+          )) === "added"
+        )
+          added.push(cert.fingerprint)
+      return { added, removed }
+    },
+    async noteAlert(_t, id, days) {
+      const c = certs.find((x) => x.id === id)
+      if (c) c.alertedDays = days
+    },
+    async boundSession(tenantId, sessionId) {
+      const s = world.sessions.get(sessionId)
+      if (!s || s.tenantId !== tenantId) return null
+      const identity = world.identities.find((i) => i.id === s.identityId)
+      return {
+        clerkUserId: s.clerkUserId,
+        connectionId: s.connectionId,
+        idpSession: s.idpSession,
+        subject: identity?.subject ?? null,
+        revokedAt: s.revokedAt,
+      }
+    },
+    async sessionsForLogout(tenantId, connectionId, match) {
+      if (match.subject === null && match.sessionIndexes.length === 0) return []
+      return [...world.sessions.values()]
+        .filter((s) => {
+          if (s.tenantId !== tenantId || s.connectionId !== connectionId || s.revokedAt)
+            return false
+          const identity = world.identities.find((i) => i.id === s.identityId)
+          if (match.subject !== null && identity?.subject !== match.subject)
+            return false
+          return (
+            match.sessionIndexes.length === 0 ||
+            match.sessionIndexes.includes(s.idpSession ?? "")
+          )
+        })
+        .map((s) => ({ sessionId: s.sessionId, clerkUserId: s.clerkUserId }))
+    },
+    async dueConnections(after, limit) {
+      return [...world.connections.values()]
+        .filter(
+          (c) =>
+            c.protocol === "saml" &&
+            c.status !== "draft" &&
+            (after === null || c.id > after),
+        )
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .slice(0, limit)
+        .map((c) => ({ id: c.id, tenantId: c.tenantId }))
+    },
+  }
+  return { saml, certs }
+}
+
+/** A replay cache in memory, with an outage switch. */
+export function memoryReplay() {
+  const seen = new Set<string>()
+  const fail = { down: false }
+  const replay: ReplayCache = {
+    async claim(key) {
+      if (fail.down) throw new ReplayUnavailable()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    },
+  }
+  return { replay, seen, fail }
+}

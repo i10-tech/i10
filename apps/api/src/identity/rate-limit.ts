@@ -104,9 +104,13 @@ export function ssoRateLimit(deps: {
       const verdict = await deps.take(`ip:${ip}`, PER_IP)
       if (!verdict.ok) return tooMany(verdict.retryAfter)
     }
+    /*
+     * ⚠ A SAML ACS POST COUNTS AS A START TOO (#339): an IdP-initiated
+     * response makes its own attempt row, so it is capped like one.
+     */
     if (
       c.req.method === "POST" &&
-      c.req.path.endsWith("/attempts") &&
+      (c.req.path.endsWith("/attempts") || c.req.path.endsWith("/saml/acs")) &&
       deps.perConnectionStarts
     ) {
       const connection = connectionIn(await c.req.json().catch(() => null))

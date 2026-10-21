@@ -117,7 +117,7 @@ async function readCapped(
   response: Response,
   cap: number,
   host: string,
-): Promise<Uint8Array | null> {
+): Promise<Uint8Array<ArrayBuffer> | null> {
   if (!response.body) return null
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []

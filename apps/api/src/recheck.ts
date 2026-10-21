@@ -54,6 +54,12 @@ import { pollReputation, sesReputationReader } from "./ses-status/reputation-pol
 import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
 import { sesStatusStore } from "./ses-status/store.js"
+import { identityStore } from "./identity/store.js"
+import { samlStore } from "./identity/saml-store.js"
+import { fetchIdpMetadata } from "./identity/saml.js"
+import { dailySamlPass } from "./identity/saml-refresh.js"
+import { guardedFetch } from "./identity/oidc-fetch.js"
+import { parseAllowList, vetHost } from "./webhooks/egress.js"
 
 const log = pino({ name: "i10-domain-recheck" })
 const env = loadEnv()
@@ -147,6 +153,30 @@ await withMonitor(
       }
 
       if (env.SES_ENABLED) await pollSesStatuses(db, sql)
+
+      /*
+       * ⚠ SAML METADATA AND CERTIFICATE EXPIRY RIDE THIS PASS TOO (#339): one
+       * daily job across every workspace already exists. Its failure is
+       * reported without failing the domain re-check, which has written
+       * what it found.
+       */
+      try {
+        const allow = parseAllowList(env.WEBHOOK_EGRESS_ALLOW)
+        const fetch = guardedFetch({
+          vet: (host, signal) => vetHost(host, { allow, signal }),
+        })
+        const samlSummary = await dailySamlPass({
+          // Metadata and certificates are public: no secret box is needed.
+          store: identityStore(db, null),
+          saml: samlStore(db),
+          fetchMetadata: (url) => fetchIdpMetadata(fetch, url),
+          log,
+        })
+        log.info(samlSummary, "SAML metadata and certificate pass complete")
+      } catch (error) {
+        log.error({ err: error }, "SAML metadata and certificate pass failed")
+        captureError(error, { phase: "recheck-saml" })
+      }
 
       /*
        * ⚠ EVERY LOOKUP FAILING IS OUR PROBLEM, NOT THE CUSTOMERS'. A pass that

@@ -6,14 +6,18 @@ import type { NextRequest } from "next/server"
  * The SSO bridge's browser half, server side (#337). See the API's
  * routes/sso.ts and identity/bridge.ts for what each step proves.
  *
- * ⚠ TWO httpOnly `__Host-` COOKIES, AND NO PAGE SCRIPT EVER SEES EITHER:
+ * ⚠ THREE httpOnly `__Host-` COOKIES, AND NO PAGE SCRIPT EVER SEES ANY:
  *
  *   - `__Host-i10_sso`: the browser-binding value, drawn here when a sign-in
  *     starts. The API keeps only its hash on the attempt; finishing the
  *     sign-in or swapping the handoff code needs it again, which a callback
  *     URL forwarded to another machine cannot supply. SameSite=Lax so it
- *     comes back on the IdP's top-level redirect to us (OIDC, #338); a SAML
- *     POST binding (#339) is cross-site and will need its own answer.
+ *     comes back on the IdP's top-level redirect to us (OIDC, #338).
+ *   - `__Host-i10_sso_saml` (#339): the SAME binding value, set only when the
+ *     sign-in is SAML, SameSite=None and ten minutes. The IdP answers with a
+ *     cross-site form POST, on which no Lax cookie is sent; this one is, and
+ *     only the ACS (`/sso/saml/acs/<id>`) ever reads it. Every other route
+ *     reads the Lax cookie, so None widens nothing else. See sso.md 2.16.
  *   - `__Host-i10_sso_handoff`: the secret the API hands back with the ticket,
  *     presented at `/sso/bind`. Strict: only our own pages ever send it.
  *
@@ -23,6 +27,7 @@ import type { NextRequest } from "next/server"
 
 export const BINDING_COOKIE = "__Host-i10_sso"
 export const HANDOFF_COOKIE = "__Host-i10_sso_handoff"
+export const SAML_COOKIE = "__Host-i10_sso_saml"
 
 export function newBinding(): string {
   return randomBytes(32).toString("base64url")
@@ -32,12 +37,16 @@ export function bindingCookie(value: string): string {
   return `${BINDING_COOKIE}=${value}; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Lax`
 }
 
+export function samlBindingCookie(value: string): string {
+  return `${SAML_COOKIE}=${value}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=None`
+}
+
 export function handoffCookie(value: string): string {
   return `${HANDOFF_COOKIE}=${value}; Path=/; Max-Age=300; HttpOnly; Secure; SameSite=Strict`
 }
 
 export function clearCookies(response: Response): void {
-  for (const name of [BINDING_COOKIE, HANDOFF_COOKIE])
+  for (const name of [BINDING_COOKIE, HANDOFF_COOKIE, SAML_COOKIE])
     response.headers.append(
       "Set-Cookie",
       `${name}=; Path=/; Max-Age=0; HttpOnly; Secure`,

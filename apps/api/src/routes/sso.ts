@@ -22,8 +22,16 @@ import {
   readCallbackQuery,
   type OidcEngine,
 } from "../identity/oidc.js"
+import {
+  finishSaml,
+  finishSlo,
+  startLogout,
+  type SamlEngine,
+  type SloDeps,
+} from "../identity/saml.js"
 import type { IdentityReader } from "./devices.js"
 import { equalSecrets } from "../webhooks/signing.js"
+import { z } from "zod"
 
 /**
  * The SSO bridge's HTTP surface (#337). Called by apps/auth's server routes,
@@ -33,6 +41,10 @@ import { equalSecrets } from "../webhooks/signing.js"
  *   POST /sso/test/assert   the TEST engine's "IdP" (dev only, 404 otherwise)
  *   POST /sso/oidc/callback { state, binding, query } -> as completeLogin (#338)
  *   GET  /sso/oidc/jwks/:id the public keys of a private_key_jwt connection
+ *   POST /sso/saml/acs      { connection, samlResponse, relayState, binding, freshBinding } (#339)
+ *   GET  /sso/saml/metadata/:id   our SP metadata for a SAML connection
+ *   POST /sso/saml/slo      an IdP's LogoutRequest or LogoutResponse, either binding
+ *   POST /sso/saml/logout   Bearer <session> -> SP-initiated logout's redirect
  *   POST /sso/handoff       { code, binding } -> { ticket, handoff }
  *   POST /sso/bind          Bearer <new session>, { handoff } -> bound
  *
@@ -62,6 +74,8 @@ export interface SsoRouteDeps {
   rateLimit?: MiddlewareHandler
   /** The OIDC engine (#338), when wired. Absent: its routes are 404. */
   oidc?: OidcEngine
+  /** The SAML engine and what its logout needs (#339). Absent: its routes are 404. */
+  saml?: { engine: SamlEngine; slo: SloDeps }
   /** May this person manage this workspace's SSO (test runs)? */
   mayManage(tenantId: string, userId: string): Promise<boolean>
   /** The connection's tenant, for the `test_run` permission check. */
@@ -76,11 +90,49 @@ export interface InternalIdentityDeps {
   log: { warn: (o: object, m: string) => void; error: (o: object, m: string) => void }
 }
 
-const small = bodyLimit({
-  maxSize: 16 * 1024,
-  onError: (c) =>
-    c.json({ statusCode: 413, name: "validation_error", message: "Too large." }, 413),
+const tooLarge = (c: Context) =>
+  c.json({ statusCode: 413, name: "validation_error", message: "Too large." }, 413)
+const small = bodyLimit({ maxSize: 16 * 1024, onError: tooLarge })
+/**
+ * ⚠ A SAML RESPONSE IS THE ONE BIG BODY: a signed, possibly encrypted
+ * assertion with certificates, base64 in JSON. The verifier caps the decoded
+ * XML at 256 KiB; this caps what reaches it.
+ */
+const SAML_BODY = 400 * 1024
+const large = bodyLimit({ maxSize: SAML_BODY, onError: tooLarge })
+const SAML_LARGE = new Set(["/saml/acs", "/saml/slo"])
+
+const UUID = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+const SECRET = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/)
+const AcsBody = z.object({
+  connection: UUID,
+  samlResponse: z.string().min(1).max(SAML_BODY),
+  relayState: z.string().max(80).nullable().optional(),
+  binding: SECRET.nullable().optional(),
+  freshBinding: SECRET,
 })
+const SloBody = z.discriminatedUnion("binding", [
+  z.object({
+    connection: UUID,
+    binding: z.literal("redirect"),
+    rawQuery: z
+      .string()
+      .min(1)
+      .max(96 * 1024),
+  }),
+  z.object({
+    connection: UUID,
+    binding: z.literal("post"),
+    parameter: z.enum(["SAMLRequest", "SAMLResponse"]),
+    message: z
+      .string()
+      .min(1)
+      .max(96 * 1024),
+    relayState: z.string().max(80).nullable().optional(),
+  }),
+])
 
 const unavailable = (c: Context) => {
   c.header("Retry-After", "5")
@@ -93,6 +145,9 @@ const unavailable = (c: Context) => {
     503,
   )
 }
+
+const notFound = (c: Context) =>
+  c.json({ statusCode: 404, name: "not_found", message: "Not found." }, 404)
 
 const invalid = (c: Context, message: string) =>
   c.json({ statusCode: 422, name: "validation_error", message }, 422)
@@ -122,7 +177,9 @@ const PURPOSES: readonly AttemptPurpose[] = ["sign_in", "test_run", "step_up"]
 
 export function createSsoRoutes(deps?: SsoRouteDeps) {
   const app = new Hono()
-  app.use("*", small)
+  app.use("*", (c, next) =>
+    (SAML_LARGE.has(c.req.path.replace(/^.*\/sso/, "")) ? large : small)(c, next),
+  )
   app.use("*", async (c, next) => {
     if (!deps)
       return c.json(
@@ -185,7 +242,10 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
         ...(stepUp ? { stepUp } : {}),
       })
       if (started.outcome === "refused") return refused(c, started.reason)
-      return c.json({ redirectUrl: started.redirectUrl }, 200)
+      return c.json(
+        { redirectUrl: started.redirectUrl, protocol: started.protocol },
+        200,
+      )
     } catch (error) {
       d.bridge.log.error({ err: String(error) }, "could not start an SSO sign-in")
       return unavailable(c)
@@ -267,6 +327,131 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
       return c.json(publicJwks(connection), 200)
     } catch (error) {
       d.bridge.log.error({ err: String(error) }, "could not read a connection's JWKS")
+      return unavailable(c)
+    }
+  })
+
+  app.post("/saml/acs", async (c) => {
+    const d = deps!
+    if (!d.saml) return notFound(c)
+    const parsed = AcsBody.safeParse(await body(c))
+    if (!parsed.success)
+      return invalid(c, "connection, samlResponse and freshBinding are required.")
+    const b = parsed.data
+    try {
+      const done = await finishSaml(d.bridge, d.saml.engine, {
+        connectionId: b.connection.toLowerCase(),
+        samlResponse: b.samlResponse,
+        relayState: b.relayState ?? null,
+        binding: b.binding ?? null,
+        freshBinding: b.freshBinding,
+      })
+      if (done.outcome === "unavailable") return unavailable(c)
+      if (done.outcome === "refused") return refused(c, done.reason, done.message)
+      return c.json(done, 200)
+    } catch (error) {
+      // ⚠ THE NAME AND MESSAGE ONLY: never the response, which is an assertion.
+      d.bridge.log.error(
+        { err: error instanceof Error ? `${error.name}: ${error.message}` : "unknown" },
+        "could not complete a SAML sign-in",
+      )
+      return unavailable(c)
+    }
+  })
+
+  /*
+   * ⚠ PUBLIC, LIKE THE OIDC JWKS: an IdP's admin (or its metadata fetcher)
+   * reads it before the connection is live. Only public certificates.
+   */
+  app.get("/saml/metadata/:connection", async (c) => {
+    const d = deps!
+    if (!d.saml) return notFound(c)
+    const id = c.req.param("connection")
+    if (!UUID.safeParse(id).success) return notFound(c)
+    try {
+      const connection = await d.bridge.store.connectionForStart(id)
+      if (!connection || connection.protocol !== "saml") return notFound(c)
+      c.header("Content-Type", "application/samlmetadata+xml; charset=utf-8")
+      c.header("Cache-Control", "public, max-age=300")
+      return c.body(d.saml.engine.metadata(connection), 200)
+    } catch (error) {
+      d.bridge.log.error(
+        { err: String(error) },
+        "could not read a connection's SAML metadata",
+      )
+      return unavailable(c)
+    }
+  })
+
+  app.post("/saml/slo", async (c) => {
+    const d = deps!
+    if (!d.saml) return notFound(c)
+    const parsed = SloBody.safeParse(await body(c))
+    if (!parsed.success) return invalid(c, "A SAML logout message is required.")
+    const b = parsed.data
+    try {
+      const done = await finishSlo(
+        d.saml.slo,
+        d.saml.engine,
+        b.binding === "redirect"
+          ? {
+              connectionId: b.connection.toLowerCase(),
+              binding: "redirect",
+              rawQuery: b.rawQuery,
+            }
+          : {
+              connectionId: b.connection.toLowerCase(),
+              binding: "post",
+              parameter: b.parameter,
+              message: b.message,
+              relayState: b.relayState ?? null,
+            },
+      )
+      if (done.outcome === "unavailable") return unavailable(c)
+      if (done.outcome === "refused")
+        return c.json(
+          {
+            statusCode: 409,
+            name: "sso_refused",
+            reason: "logout_refused",
+            message: "That logout was not accepted.",
+          },
+          409,
+        )
+      return c.json(done, 200)
+    } catch (error) {
+      d.bridge.log.error(
+        { err: error instanceof Error ? `${error.name}: ${error.message}` : "unknown" },
+        "could not handle a SAML logout",
+      )
+      return unavailable(c)
+    }
+  })
+
+  app.post("/saml/logout", async (c) => {
+    const d = deps!
+    if (!d.saml) return notFound(c)
+    try {
+      const who = await d.identify(c.req.raw)
+      if (who.status === "unavailable") return unavailable(c)
+      if (who.status === "signed-out")
+        return c.json(
+          { statusCode: 401, name: "invalid_access", message: "Not signed in." },
+          401,
+        )
+      const managed = await d.bridge.store.managedByUser(who.userId)
+      if (!managed) return c.json({ redirectUrl: null }, 200)
+      const done = await startLogout(d.saml.slo, d.saml.engine, {
+        tenantId: managed.tenantId,
+        userId: who.userId,
+        sessionId: who.sessionId,
+      })
+      return c.json(
+        { redirectUrl: done.outcome === "redirect" ? done.redirectUrl : null },
+        200,
+      )
+    } catch (error) {
+      d.bridge.log.error({ err: String(error) }, "could not start a SAML logout")
       return unavailable(c)
     }
   })

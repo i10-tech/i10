@@ -5,6 +5,7 @@ import { afterAuthUrl } from "../../_lib/redirect"
 import {
   bindingCookie,
   failedUrl,
+  samlBindingCookie,
   newBinding,
   startedByUs,
 } from "../../_lib/sso-server"
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
   )
   const binding = newBinding()
 
-  let answer: { redirectUrl?: string; message?: string }
+  let answer: { redirectUrl?: string; message?: string; protocol?: string }
   try {
     const token = await (await auth()).getToken()
     if (!token) return Response.redirect(new URL("/sign-in", request.url), 303)
@@ -62,6 +63,9 @@ export async function GET(request: NextRequest) {
     headers: { Location: answer.redirectUrl },
   })
   response.headers.append("Set-Cookie", bindingCookie(binding))
+  // A SAML IdP answers with a cross-site POST: see SAML_COOKIE (#339).
+  if (answer.protocol === "saml")
+    response.headers.append("Set-Cookie", samlBindingCookie(binding))
   response.headers.set("Cache-Control", "no-store")
   return response
 }

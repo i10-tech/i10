@@ -612,6 +612,109 @@ Whatever speaks the protocol (Part 3), the semantics are ours:
   (removal is not deprovisioning). Kept as in #337; whether removal should also
   stop SSO from bringing them back is a decision for #340's member screens.
 
+### 2.16 What #339 settled for SAML (2026-10-21)
+
+- **Engine: `xml-crypto` 6.3.3 directly, with `@xmldom/xmldom` 0.8.15 (its
+  own parser, pinned once) and our wrapper; not `@boxyhq/saml20`.** Both were
+  read at source (saml20 1.20.1, the newest at least two weeks old; xml-crypto
+  6.4.0 was a week old, so 6.3.3). saml20 is itself a wrapper on xml-crypto
+  and xml-encryption, and parses every message twice with two different
+  parsers (`xml2js` for the data, xmldom for the signature), which is the
+  parser differential the advisories feed on; it finds the Signature by
+  position heuristics with a fallback to "any element named Signature",
+  takes the first of several assertions (`assertion[0]`), makes the algorithm
+  allowlist optional, matches certificates by SHA-1 thumbprint, and has no
+  ForceAuthn or step-up notion. Its good parts (refusing DTDs and
+  multi-rooted documents, reading from `getSignedReferences()`, signed-only
+  InResponseTo and Recipient) are rules our wrapper keeps anyway. With
+  xml-crypto alone there is one parser for everything, and every rule is in
+  identity/saml-verify.ts where the suite can pin it.
+- **The hardened parser refuses rather than configures** (identity/
+  saml-xml.ts): DTD keywords anywhere, entities but the five predefined and
+  numeric ones, comments (messages only; metadata may have them), processing
+  instructions but the UTF-8 declaration, any parser warning, more than one
+  root, and size, element, depth and attribute limits.
+- **Our checks** follow Better Auth's `saml/assertions.ts` (MIT, credited in
+  the file; restated, not copied): one Response, one Assertion (by local
+  name, any namespace) as its direct child, one Signature on it, every other
+  Signature of any namespace refused (stricter than stripping), every ID-like
+  attribute unique, one Reference to the assertion's own ID, transforms only
+  enveloped-signature plus one canonicalization without comments, RSA-SHA256
+  or better, SHA-256 or better, our certificates only (never KeyInfo), data
+  read only from the re-parsed signed reference. A Response signature, when
+  present, must verify too and never replaces the assertion's. Then issuer,
+  audience (every AudienceRestriction), bearer Recipient = our ACS,
+  InResponseTo = the attempt's request id, time windows with 2 minutes of
+  skew, one AuthnStatement, unknown conditions refused, transient NameIDs
+  refused, the replay cache (Redis, `SET NX PX` until the assertion could no
+  longer be presented, a 503 when Redis is down) asked last.
+- **One SP entity id, ACS and SLO URL per connection** (`/sso/saml/metadata|
+acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
+  Audience and Recipient then bind an assertion to one workspace's
+  connection even when two workspaces trust the same IdP.
+- **The cross-site POST and the binding cookie.** The IdP's form POST to the
+  ACS is cross-site, so the Lax binding cookie is not sent. A SAML start sets
+  a second cookie, `__Host-i10_sso_saml`, holding the same binding value with
+  `SameSite=None; Secure; HttpOnly`, ten minutes, read only by the ACS and
+  cleared there. Chosen over a relay-state design because the attempt keeps
+  one binding hash and the bridge needs no second path; and None widens
+  nothing else, because every other route reads only the Lax cookie. The ACS
+  checks the binding before it reads any XML, as the OIDC callback does. A
+  browser that blocks the cookie fails closed (`wrong_browser`). The ACS and
+  SLO routes are outside Clerk's middleware so no handshake redirect can turn
+  the IdP's POST into a GET.
+- **IdP-initiated sign-in only when an owner turns it on**, and then: no
+  InResponseTo anywhere, issued within 3 minutes, the same checks and replay
+  cache, plain sign-ins only (never step-up or test runs), the IdP's
+  RelayState never used as a destination, an attempt made at the ACS bound to
+  a binding apps/auth draws for that browser, and the continue page asks
+  "continue as <address>?" before the code is swapped. That last step is the
+  answer to login CSRF, which an unsolicited response cannot otherwise rule
+  out.
+- **Step-up:** `ForceAuthn="true"` on a step-up's AuthnRequest; the bridge
+  holds `AuthnInstant` to its 5 minute rule, so an IdP that ignores
+  ForceAuthn fails `step_up_stale`.
+- **Subject:** `<format>:<NameID>` (`persistent:`, `email:`, `unspecified:`),
+  or `attribute:<value>` when the connection names a subject attribute. The
+  format is part of it, so a format change breaks the link instead of
+  matching somebody else. An email NameID (Google's always is) or an email
+  subject attribute is the nOAuth shape: whoever holds the address at the IdP
+  holds the account; the presets say so and the subject attribute is an
+  owner's setting. `emailVerified` is true by policy when the assertion
+  carries an address: the connection is pinned to one IdP entity and claiming
+  still needs a live verified domain.
+- **Encrypted assertions** are decrypted with node:crypto, not another XML
+  library: RSA-OAEP key transport only (PKCS#1 v1.5 is refused), AES-GCM or
+  AES-CBC (Entra), one EncryptedKey, no CipherReference, one failure answer
+  for every decryption error. The SP key is RSA 2048 with a self-signed
+  certificate we write as DER ourselves (node:crypto cannot make one),
+  sealed, rotated keeping exactly the previous one.
+- **Certificates:** `identity.saml_certificates`, at most five per
+  connection, RSA 2048 or more, an expired one verifies nothing. The metadata
+  URL is read through the egress guard when set and daily by the nightly
+  re-check job (src/recheck.ts; one daily cross-workspace job already
+  existed), through `identity.saml_connections_due`, a SECURITY DEFINER that
+  answers ids only (migration 0137, hand-written like 0130). The refresh
+  rotates certificates and follows endpoint moves; a changed entity id is
+  refused and audited. Expiry alerts at 30, 7, 1 and 0 days, once per
+  threshold, are an audit event (`sso.certificate.expiring`) and a log line;
+  the email is #345's.
+- **Trust:** on an active or disabled connection the entity id, SSO/SLO URLs,
+  metadata, certificates, our SP key, NameID format, subject attribute, MFA
+  context classes, requiring encryption and IdP-initiated sign-in are an
+  owner's to change, with step-up, audited. Signing our requests is not.
+- **SLO:** an IdP LogoutRequest must be signed (Redirect binding: over the raw
+  query octets; POST: an enveloped signature with the assertion rules) and is
+  replay-checked; it revokes the subject's bound sessions on the connection,
+  narrowed to its SessionIndexes, Clerk first. SP-initiated logout ends our
+  session first, then sends a signed LogoutRequest. A LogoutResponse changes
+  nothing.
+- **Unverified against real tenants (inferred):** Okta, Entra and Google SAML
+  apps end to end, that Google honours ForceAuthn, that Entra issues a
+  pairwise persistent NameID for the default claim when persistent is asked
+  for, and that every browser we support sends a SameSite=None cookie on a
+  cross-site top-level form POST.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

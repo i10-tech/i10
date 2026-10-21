@@ -166,6 +166,63 @@ export const connectionDomains = identity.table(
 )
 
 /**
+ * A SAML connection's IdP signing certificates (#339, sso.md 2.3): several at
+ * once, so an IdP can rotate by publishing the next one before it signs with
+ * it.
+ *
+ * ⚠ PUBLIC CERTIFICATES, NOT SECRETS, BUT TRUST ALL THE SAME. Whatever is in
+ * this table can sign somebody into the workspace, so on an active or
+ * disabled connection only an owner adds or removes a row
+ * (routes/console/identity-saml.ts). `source` says who put it there: an
+ * admin's upload, or the metadata URL, whose daily refresh replaces only its
+ * own rows.
+ *
+ * ⚠ `alerted_days` IS THE SMALLEST EXPIRY THRESHOLD (30, 7, 1) ALREADY
+ * ANNOUNCED, so the daily pass alerts once per threshold, not once per day.
+ */
+export const samlCertificates = identity.table(
+  "saml_certificates",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    /** SHA-256 of the DER, lowercase hex. */
+    fingerprint: text("fingerprint").notNull(),
+    /** The DER, base64. */
+    certificate: text("certificate").notNull(),
+    subject: text("subject").notNull(),
+    notBefore: timestamp("not_before", { withTimezone: true }).notNull(),
+    notAfter: timestamp("not_after", { withTimezone: true }).notNull(),
+    source: text("source").notNull(),
+    alertedDays: integer("alerted_days"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "saml_certificates_connection_fk",
+      columns: [t.connectionId, t.tenantId],
+      foreignColumns: [connections.id, connections.tenantId],
+    }).onDelete("cascade"),
+    uniqueIndex("saml_certificates_connection_fingerprint_unique").on(
+      t.connectionId,
+      t.fingerprint,
+    ),
+    index("saml_certificates_not_after_idx").on(t.notAfter),
+    check("saml_certificates_source_check", sql`"source" in ('upload', 'metadata')`),
+    pgPolicy("saml_certificates_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
  * `(connection, subject)` -> Clerk user. The only identifier after first link.
  *
  * ⚠ NEVER MATCHED BY EMAIL. The address is recorded for the console; a later
