@@ -577,6 +577,41 @@ Whatever speaks the protocol (Part 3), the semantics are ours:
   closed as `step_up_stale`); that Google's ID tokens carry the `https://`
   issuer form in this flow.
 
+### 2.15 What #341 settled for JIT and group rules (2026-10-21)
+
+- **JIT creates only when no Clerk account holds the address at all.** An
+  account holding it verified is claimed (2.3); one holding it unverified is
+  refused (`no_account`, logged as `address_held`), because claiming needs the
+  address verified and Clerk would refuse the creation anyway.
+- **One lock per address, on every connection** (a transaction-scoped advisory
+  lock), with the subject's link and Clerk's holders asked again inside it.
+  Clerk's uniqueness (`form_identifier_exists`, case-insensitive, probed on the
+  dev instance) is the net under it; an `exists` answer re-resolves once, onto
+  the claim path.
+- **Created verified, with no password**, and managed before the membership is
+  added, so a passwordless account never stands unmanaged. A failure after that
+  leaves a managed person who is not a member yet; the next sign-in finishes.
+- **No name, no account.** Our Clerk instances require first and last name; an
+  IdP that sends none gets `profile_incomplete`, never a 503 and never a name
+  made up from the address. The test run reports whether names arrive.
+- **Group rules never touch an owner**, in either direction, and never name
+  owner (a database check as well as the code). No rules on a connection leaves
+  roles to the Team page; with rules, no match is member. Groups match exactly
+  as the IdP sends them.
+- **Owner-only on a live connection:** turning JIT on, activating a connection
+  with JIT on, and every group rule change. On draft and testing an admin may
+  prepare rules: they only grant admin, which an admin can grant anyway, and
+  unmanaged admins never reach the sync (`role_exempt`).
+- **A full workspace files a waiting-list request** for people JIT made, as
+  auto-join does; everybody else is refused `workspace_full`. Our plan limit is
+  asked before Clerk's, only for people who are not members yet.
+- **An active connection's domains leave auto-join.** Addresses at a name an
+  active connection covers with a live proof get no suggestion, request, Join
+  or auto-join; the IdP decides who gets in.
+- **Open:** an SSO sign-in re-adds a member an admin removed on the Team page
+  (removal is not deprovisioning). Kept as in #337; whether removal should also
+  stop SSO from bringing them back is a decision for #340's member screens.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

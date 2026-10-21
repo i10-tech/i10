@@ -247,6 +247,17 @@ export type Refusal =
   | "invalid_response"
   /** Google: no `hd` claim (a consumer account) or one the workspace has not verified. */
   | "hosted_domain"
+  /**
+   * JIT (#341) into a full workspace (#327): the person exists now and their
+   * request is on the waiting list, but they are not in yet.
+   */
+  | "waiting_list"
+  /**
+   * JIT (#341): Clerk would not create the person because the IdP left out
+   * something the instance requires of every user (a first or last name).
+   * The admin maps the claim; nobody is made up from the address.
+   */
+  | "profile_incomplete"
 
 /** What the person is told. Never which check failed in detail. */
 export function refusalMessage(reason: Refusal): string {
@@ -262,6 +273,10 @@ export function refusalMessage(reason: Refusal): string {
       return "There is no i10 account for you yet. Ask your administrator."
     case "workspace_full":
       return "This workspace has no free seats. Ask your administrator."
+    case "waiting_list":
+      return "This workspace is full right now. We've asked its admins to add you."
+    case "profile_incomplete":
+      return "Your identity provider did not send your name. Ask your administrator."
     case "blocked":
     case "account_banned":
       return "Your administrator has not allowed this account."

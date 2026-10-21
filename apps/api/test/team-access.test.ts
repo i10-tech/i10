@@ -78,6 +78,104 @@ describe("offersFor", () => {
   })
 })
 
+// ⚠ A COVERED ADDRESS IS THE IDP'S TO ADMIT (#341): the JIT-created person
+// would otherwise be pulled in by the user.created webhook, past the IdP's
+// groups. Only the exact names an active connection proves are covered.
+describe("an SSO-covered domain", () => {
+  const rules: JoinRule[] = [
+    { pattern: "pslhq.app", mode: "auto", role: "member" },
+    { pattern: "*.pslhq.app", mode: "auto", role: "member" },
+  ]
+  const covered = { ssoDomains: async () => ["pslhq.app"] }
+
+  test("offers nothing to an address at the covered name", async () => {
+    const { d } = deps(rules, covered)
+    expect(
+      await offersFor(d, { ...seeker(["x@pslhq.app"]), exceptOrgIds: [] }),
+    ).toEqual([])
+    // Suggest mode is held back too: the IdP decides.
+    const suggest = deps(
+      [{ pattern: "pslhq.app", mode: "suggest", role: "member" }],
+      covered,
+    )
+    expect(
+      await offersFor(suggest.d, { ...seeker(["x@pslhq.app"]), exceptOrgIds: [] }),
+    ).toEqual([])
+  })
+
+  test("never auto-joins, joins now, requests or answers for a covered address", async () => {
+    const { d, added, requests } = deps(rules, covered)
+    expect(await autoJoin(d, seeker(["x@pslhq.app"]))).toEqual([])
+    expect(
+      await joinNow(d, { ...seeker(["x@pslhq.app"]), tenantId: ACME.tenantId }),
+    ).toEqual({ outcome: "not_offered" })
+    const suggest = deps(
+      [{ pattern: "pslhq.app", mode: "suggest", role: "member" }],
+      covered,
+    )
+    expect(
+      await requestToJoin(suggest.d, {
+        ...seeker(["x@pslhq.app"]),
+        tenantId: ACME.tenantId,
+      }),
+    ).toBe("not_suggested")
+    expect(suggest.requests).toEqual([])
+    expect(
+      await autoJoinFromWebhook(d, {
+        id: "user_w",
+        email_addresses: [
+          { email_address: "x@pslhq.app", verification: { status: "verified" } },
+        ],
+      }),
+    ).toBeNull()
+    expect(added).toEqual([])
+    expect(requests).toEqual([])
+  })
+
+  test("still offers an address the rules reach at a subdomain, and other people's addresses", async () => {
+    const { d, added } = deps(rules, covered)
+    const [offer] = await offersFor(d, {
+      ...seeker(["x@dev.pslhq.app"]),
+      exceptOrgIds: [],
+    })
+    expect(offer).toMatchObject({ mode: "auto", email: "x@dev.pslhq.app" })
+    expect(await autoJoin(d, seeker(["x@dev.pslhq.app"]))).toEqual([
+      { tenantId: ACME.tenantId, orgId: ACME.orgId, outcome: "joined" },
+    ])
+    expect(added).toHaveLength(1)
+    // A person with one covered and one uncovered address is offered by the other.
+    const both = deps(rules, covered)
+    const offers = await offersFor(both.d, {
+      ...seeker(["x@pslhq.app", "x@dev.pslhq.app"]),
+      exceptOrgIds: [],
+    })
+    expect(offers).toMatchObject([{ email: "x@dev.pslhq.app" }])
+  })
+
+  test("is case-insensitive about the address, and changes nothing without ssoDomains", async () => {
+    const { d } = deps(rules, covered)
+    expect(
+      await offersFor(d, { ...seeker(["X@PSLHQ.App"]), exceptOrgIds: [] }),
+    ).toEqual([])
+    const plain = deps(rules)
+    expect(
+      await offersFor(plain.d, { ...seeker(["x@pslhq.app"]), exceptOrgIds: [] }),
+    ).toHaveLength(1)
+  })
+
+  test("asks only about the matched workspace, once per workspace", async () => {
+    const asked: string[] = []
+    const { d } = deps(rules, {
+      ssoDomains: async (tenantId) => {
+        asked.push(tenantId)
+        return []
+      },
+    })
+    await offersFor(d, { ...seeker(["x@pslhq.app"]), exceptOrgIds: [] })
+    expect(asked).toEqual([ACME.tenantId])
+  })
+})
+
 describe("requestToJoin", () => {
   test("files a request with the matching address and rule; once", async () => {
     const { d, requests } = deps([

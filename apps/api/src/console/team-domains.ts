@@ -95,6 +95,12 @@ export interface TeamDomainDeps {
    * check, as it was in #326.
    */
   seats?: SeatChecks
+  /**
+   * The names an ACTIVE SSO connection of this workspace covers with a live
+   * proof (#341, identity store `coveredDomains`). Their people are the IdP's
+   * to admit; see `offersFor`.
+   */
+  ssoDomains?(tenantId: string): Promise<string[]>
 }
 
 /**
@@ -262,6 +268,16 @@ export interface Offer {
 /**
  * Every workspace whose rules let this person in, by their verified
  * addresses, less blocked addresses and workspaces in `exceptOrgIds`.
+ *
+ * ⚠ A CONNECTED IdP SUPERSEDES THESE RULES FOR ITS DOMAINS (#341, sso.md
+ * 2.12). An address at a name one of the workspace's ACTIVE SSO connections
+ * covers is not matched against its access rules at all - no suggestion, no
+ * request, no Join, no auto-join at sign-up - because who at that domain gets
+ * in is the IdP's to say now: through JIT, SCIM or an invitation. The match is
+ * redone without those addresses, so a person's other address (a subdomain
+ * the rules reach and the connection does not) still counts. Read under the
+ * matched workspace's own tenant, like its lists; a disabled or draft
+ * connection, or a lapsed proof, gives the rules back.
  */
 export async function offersFor(
   d: TeamDomainDeps,
@@ -273,9 +289,23 @@ export async function offersFor(
   },
 ): Promise<Offer[]> {
   const found = await d.store.accessFor(input)
-  const matches = matchAccess(found.domains, input.emails).filter(
-    (m) => !input.exceptOrgIds.includes(m.clerkOrgId),
+  const tenants = [...new Set(found.domains.map((dom) => dom.tenantId))]
+  const matches = (
+    await Promise.all(
+      tenants.map(async (tenantId) => {
+        const covered = new Set(d.ssoDomains ? await d.ssoDomains(tenantId) : [])
+        const emails = input.emails.filter(
+          (e) => !covered.has(e.trim().toLowerCase().split("@").pop() ?? ""),
+        )
+        return matchAccess(
+          found.domains.filter((dom) => dom.tenantId === tenantId),
+          emails,
+        )
+      }),
+    )
   )
+    .flat()
+    .filter((m) => !input.exceptOrgIds.includes(m.clerkOrgId))
   const offers: Offer[] = []
   for (const m of matches) {
     // ⚠ READ UNDER THE MATCHED WORKSPACE'S TENANT: its lists are its own.
@@ -580,6 +610,10 @@ export async function allowAddress(
  *
  * ⚠ THROWS ON A CLERK OR DATABASE FAILURE, SO SVIX RETRIES; the whole thing
  * is idempotent (see `autoJoin`). A full workspace is not a failure.
+ *
+ * ⚠ AND NEVER FOR AN ADDRESS AN ACTIVE SSO CONNECTION COVERS (#341,
+ * `offersFor`). A person JIT just created raises `user.created` too; their
+ * workspace already has them, through its IdP, with the IdP's role.
  */
 export async function autoJoinFromWebhook(
   d: TeamDomainDeps,

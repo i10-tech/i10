@@ -5,6 +5,7 @@ import {
   connectionDomains,
   connections,
   events,
+  groupRoleRules,
   identities,
   loginAttempts,
   managedAccounts,
@@ -24,7 +25,24 @@ import type {
   ManagedReason,
   Protocol,
 } from "./model.js"
-import type { AttemptRow, IdentityStore, ManagedRow } from "./ports.js"
+import { readJoinRole } from "../console/roles.js"
+import { MAX_GROUP_RULES } from "./jit.js"
+import type { AttemptRow, GroupRoleRule, IdentityStore, ManagedRow } from "./ports.js"
+
+const toRule = (r: typeof groupRoleRules.$inferSelect): GroupRoleRule => ({
+  id: r.id,
+  connectionId: r.connectionId,
+  groupValue: r.groupValue,
+  // ⚠ READ AS A JOINING ROLE: never owner, whatever a row could say.
+  role: readJoinRole(r.role),
+  precedence: r.precedence,
+})
+
+/** A unique violation: Postgres's 23505, wherever the driver put it. */
+const isUniqueViolation = (error: unknown): boolean => {
+  const e = error as { code?: unknown; cause?: { code?: unknown } } | null
+  return e?.code === "23505" || e?.cause?.code === "23505"
+}
 
 /**
  * The database half of the identity core. See db/identity.ts for the
@@ -347,6 +365,177 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
           .limit(1),
       )
       return row && row.status !== "deleted" ? row.org : null
+    },
+
+    async workspaceName(tenantId) {
+      const [row] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({ name: tenants.name })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId))
+          .limit(1),
+      )
+      return row?.name ?? null
+    },
+
+    async coveredDomains(tenantId) {
+      const rows = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({ name: joinDomains.name })
+          .from(connectionDomains)
+          .innerJoin(joinDomains, eq(joinDomains.id, connectionDomains.joinDomainId))
+          .innerJoin(connections, eq(connections.id, connectionDomains.connectionId))
+          .where(
+            and(
+              eq(connectionDomains.tenantId, tenantId),
+              eq(connections.tenantId, tenantId),
+              eq(joinDomains.tenantId, tenantId),
+              eq(connections.status, "active"),
+              sql`${liveProof}`,
+            ),
+          ),
+      )
+      return [...new Set(rows.map((r) => r.name))]
+    },
+
+    // ── group-to-role rules ──
+    async groupRules(tenantId, connectionId) {
+      const rows = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select()
+          .from(groupRoleRules)
+          .where(
+            and(
+              eq(groupRoleRules.tenantId, tenantId),
+              eq(groupRoleRules.connectionId, connectionId),
+            ),
+          )
+          // ⚠ uuidv7 ids sort by creation, so a tie goes to the older rule.
+          .orderBy(groupRoleRules.precedence, groupRoleRules.id),
+      )
+      return rows.map(toRule)
+    },
+
+    async createGroupRule(tenantId, input) {
+      try {
+        return await withTenant(db, tenantId, async (tx) => {
+          // ⚠ THE CONNECTION'S ROW IS LOCKED, so two creations at the limit
+          // cannot both count 99 and both insert.
+          const [connection] = await tx
+            .select({ id: connections.id })
+            .from(connections)
+            .where(
+              and(
+                eq(connections.tenantId, tenantId),
+                eq(connections.id, input.connectionId),
+              ),
+            )
+            .for("update")
+            .limit(1)
+          if (!connection) return "not_found" as const
+          const [count] = await tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(groupRoleRules)
+            .where(
+              and(
+                eq(groupRoleRules.tenantId, tenantId),
+                eq(groupRoleRules.connectionId, input.connectionId),
+              ),
+            )
+          if ((count?.n ?? 0) >= MAX_GROUP_RULES) return "too_many" as const
+          const [row] = await tx
+            .insert(groupRoleRules)
+            .values({ tenantId, ...input })
+            .onConflictDoNothing()
+            .returning()
+          return row ? toRule(row) : ("exists" as const)
+        })
+      } catch (error) {
+        if (isUniqueViolation(error)) return "exists"
+        throw error
+      }
+    },
+
+    async updateGroupRule(tenantId, connectionId, ruleId, patch) {
+      try {
+        const [row] = await withTenant(db, tenantId, (tx) =>
+          tx
+            .update(groupRoleRules)
+            .set({ ...patch, updatedAt: new Date() })
+            .where(
+              and(
+                eq(groupRoleRules.tenantId, tenantId),
+                eq(groupRoleRules.connectionId, connectionId),
+                eq(groupRoleRules.id, ruleId),
+              ),
+            )
+            .returning(),
+        )
+        return row ? toRule(row) : null
+      } catch (error) {
+        if (isUniqueViolation(error)) return "exists"
+        throw error
+      }
+    },
+
+    async deleteGroupRule(tenantId, connectionId, ruleId) {
+      const [row] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .delete(groupRoleRules)
+          .where(
+            and(
+              eq(groupRoleRules.tenantId, tenantId),
+              eq(groupRoleRules.connectionId, connectionId),
+              eq(groupRoleRules.id, ruleId),
+            ),
+          )
+          .returning(),
+      )
+      return row ? toRule(row) : null
+    },
+
+    async provisionLocked(tenantId, key, fn) {
+      return withTenant(db, tenantId, async (tx) => {
+        /*
+         * ⚠ ADVISORY AND `_xact_`, AS THE ROLES TABLE'S LOCK IS (roles-db.ts):
+         * there is no row yet to lock - the person does not exist - and
+         * PgBouncer pools by transaction. Keyed on the address ALONE, the
+         * thing Clerk makes unique, so two connections covering one domain
+         * wait for each other too instead of racing to Clerk's refusal.
+         */
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`identity_jit:${key.email}`}, 0))`,
+        )
+        return fn({
+          async identityBySubject(subject) {
+            const [row] = await tx
+              .select({ id: identities.id, clerkUserId: identities.clerkUserId })
+              .from(identities)
+              .where(
+                and(
+                  eq(identities.tenantId, tenantId),
+                  eq(identities.connectionId, key.connectionId),
+                  eq(identities.subject, subject),
+                ),
+              )
+              .limit(1)
+            return row ?? null
+          },
+          async link(input) {
+            const [row] = await tx
+              .insert(identities)
+              .values({
+                tenantId,
+                connectionId: key.connectionId,
+                subject: input.subject,
+                clerkUserId: input.clerkUserId,
+                email: input.email,
+              })
+              .returning({ id: identities.id })
+            return { id: row!.id }
+          },
+        })
+      })
     },
 
     // ── attempts ──

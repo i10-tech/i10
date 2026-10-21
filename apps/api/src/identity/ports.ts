@@ -1,3 +1,4 @@
+import type { JoinRole } from "../console/roles.js"
 import type {
   AttemptPurpose,
   BoundSession,
@@ -118,6 +119,30 @@ export type GateRead =
         | null
     }
 
+/** A group-to-role rule (#341): `groupValue` in the IdP's groups gives `role`. */
+export interface GroupRoleRule {
+  id: string
+  connectionId: string
+  groupValue: string
+  role: JoinRole
+  precedence: number
+}
+
+/**
+ * What a JIT creation may do while it holds its lock (#341): read and write
+ * the identity link in the lock's own transaction.
+ */
+export interface ProvisionLock {
+  identityBySubject(
+    subject: string,
+  ): Promise<{ id: string; clerkUserId: string } | null>
+  link(input: {
+    subject: string
+    clerkUserId: string
+    email: string
+  }): Promise<{ id: string }>
+}
+
 /** One row of the identity audit log. Nothing secret, ever. */
 export interface AuditEvent {
   type: string
@@ -195,6 +220,56 @@ export interface IdentityStore {
   ): Promise<Connection | null>
   /** The workspace's Clerk organization, or null once the workspace is gone. */
   workspaceOrg(tenantId: string): Promise<string | null>
+  /** The workspace's name, for what a person is told ("Acme is full right now"). */
+  workspaceName(tenantId: string): Promise<string | null>
+  /**
+   * Names covered by an ACTIVE connection of this workspace whose proof is
+   * live: the domains whose people the IdP admits, and #326's access rules
+   * no longer do (#341).
+   */
+  coveredDomains(tenantId: string): Promise<string[]>
+
+  // ── group-to-role rules (#341) ──
+  /** The connection's rules, first by precedence, then oldest first. */
+  groupRules(tenantId: string, connectionId: string): Promise<GroupRoleRule[]>
+  /** `exists`: that group already has a rule; `not_found`: no such connection; `too_many`: at the limit. */
+  createGroupRule(
+    tenantId: string,
+    input: {
+      connectionId: string
+      groupValue: string
+      role: JoinRole
+      precedence: number
+      createdBy: string
+    },
+  ): Promise<GroupRoleRule | "exists" | "not_found" | "too_many">
+  updateGroupRule(
+    tenantId: string,
+    connectionId: string,
+    ruleId: string,
+    patch: { groupValue?: string; role?: JoinRole; precedence?: number },
+  ): Promise<GroupRoleRule | "exists" | null>
+  deleteGroupRule(
+    tenantId: string,
+    connectionId: string,
+    ruleId: string,
+  ): Promise<GroupRoleRule | null>
+
+  /**
+   * Runs `fn` holding the JIT lock for one address, on every connection (#341):
+   * a second first sign-in for the same person waits here, then finds the
+   * first one's link.
+   *
+   * ⚠ `fn` MAY CALL CLERK WHILE THE LOCK'S TRANSACTION IS OPEN. Nothing is
+   * written in it but the identity link (`lock.link`, same transaction, so the
+   * pool is never asked for a second connection); the lock goes with the
+   * commit.
+   */
+  provisionLocked<T>(
+    tenantId: string,
+    key: { connectionId: string; email: string },
+    fn: (lock: ProvisionLock) => Promise<T>,
+  ): Promise<T>
 
   // ── attempts ──
   createAttempt(input: NewAttempt): Promise<{ id: string }>
@@ -381,6 +456,29 @@ export interface ClerkIdentity {
   user(userId: string): Promise<ClerkUserSnapshot | null>
   /** Users holding this address, verified or not. */
   usersByEmail(email: string): Promise<ClerkUserSnapshot[]>
+  /**
+   * JIT (#341): a new user holding exactly this address, VERIFIED (Clerk
+   * marks backend-created addresses verified), with no password
+   * (`skip_password_requirement`). `exists` when Clerk refuses because the
+   * address is already somebody's (`form_identifier_exists`): Clerk's own
+   * uniqueness, the net under our lock. `incomplete` when the instance requires
+   * something (first and last name, today) that was not given.
+   */
+  createUser(input: {
+    email: string
+    firstName: string | null
+    lastName: string | null
+  }): Promise<
+    | { outcome: "created"; userId: string }
+    | { outcome: "exists" }
+    /** Clerk's `form_data_missing`: the instance requires a field the IdP did not send. */
+    | { outcome: "incomplete" }
+  >
+  /** Profile sync at sign-in (#341): only the names given are changed. */
+  updateProfile(
+    userId: string,
+    names: { firstName?: string; lastName?: string },
+  ): Promise<void>
   removePassword(userId: string): Promise<void>
   deleteExternalAccount(userId: string, id: string): Promise<void>
   deletePasskey(userId: string, id: string): Promise<void>

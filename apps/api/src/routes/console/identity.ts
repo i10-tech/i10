@@ -24,6 +24,7 @@ import type { SsoGateChecker } from "../../identity/gate.js"
 import { oidcReady } from "../../identity/oidc.js"
 import { presetOf } from "../../identity/oidc-presets.js"
 import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
+import { mountIdentityGroups } from "./identity-groups.js"
 
 /**
  * The identity core's console API (#337). The screens are #340's; these are
@@ -40,6 +41,7 @@ import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
  *   POST   /identity/members/:userId/sessions/:sid/revoke
  *   POST   /identity/members/:userId/deprovision         (step-up)
  *   ...    /identity/connections/:id/oidc[/secret|/keys] OIDC settings (#338, identity-oidc.ts)
+ *   ...    /identity/connections/:id/group-rules[/:ruleId] group-to-role rules (#341, identity-groups.ts)
  *
  * ⚠ EVERY ROUTE CHECKS OUR ROLES TABLE (#335): `sso:manage` for setup,
  * `owners:manage` for what deprovisioning does, and the removal rule
@@ -135,6 +137,7 @@ export function readPatch(body: Record<string, unknown>): ConnectionPatch | stri
 
 export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentityOidc(app, d)
+  mountIdentityGroups(app, d)
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
@@ -284,6 +287,29 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     )
       return c.json(
         forbidden("Only an owner can move an active connection back to setup."),
+        403,
+      )
+    /*
+     * ⚠ TURNING JIT ON FOR A LIVE CONNECTION IS AN OWNER'S MOVE (#341): from
+     * then on, anybody the IdP names at the connection's domains becomes a
+     * member, with whatever role the group rules give. Turning it off stops
+     * that, which is the safe direction, so it stays an admin's - as it does
+     * when SCIM is on and only the directory should provision (sso.md 2.6).
+     * ⚠ AND SO IS ACTIVATING A CONNECTION WITH JIT ON, or an admin would turn
+     * it on in draft and then activate: the same step around the rule that
+     * moving back to draft would be.
+     */
+    const jitTurnedOn =
+      patch.jitEnabled === true &&
+      !before.jitEnabled &&
+      OWNER_GUARDED.includes(before.status)
+    const goesLiveWithJit =
+      patch.status === "active" &&
+      !OWNER_GUARDED.includes(before.status) &&
+      (patch.jitEnabled ?? before.jitEnabled)
+    if ((jitTurnedOn || goesLiveWithJit) && !(await allowed(c, "owners:manage")))
+      return c.json(
+        forbidden("Only an owner can turn on JIT for an active connection."),
         403,
       )
     // ⚠ A TEST RUN OR A SIGN-IN NEEDS SOMETHING TO TALK TO: an OIDC connection

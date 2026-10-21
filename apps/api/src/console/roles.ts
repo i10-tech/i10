@@ -182,6 +182,8 @@ export type RoleSource =
   | "changed"
   /** Written by scripts/workspace-roles.ts from Clerk's roles before #335. */
   | "backfill"
+  /** From an SSO connection's group-to-role rules (#341), at JIT or at sign-in. */
+  | "sso"
 
 export interface RoleRow {
   userId: string
@@ -318,21 +320,84 @@ export function membershipCreated(
  */
 export function joinedByRule(
   rows: RoleRow[],
-  event: { userId: string; membershipId: string; role: JoinRole },
+  event: {
+    userId: string
+    membershipId: string
+    role: JoinRole
+    /** `sso` for a JIT membership (#341); an access rule's otherwise. */
+    source?: "access_rule" | "sso"
+  },
 ): Decision<"set"> {
   return {
     writes: [
       {
         put: {
           userId: event.userId,
-          role: event.role,
+          role: joinRoleOnly(event.role),
           membershipId: event.membershipId,
-          source: "access_rule",
+          source: event.source ?? "access_rule",
           grantedBy: null,
         },
       },
     ],
     result: "set",
+  }
+}
+
+/**
+ * ⚠ A JOINING ROLE AT RUN TIME TOO, NOT ONLY IN THE TYPES. Whatever reaches a
+ * rule's write - a stored rule, a group rule, a cast somewhere - owner is
+ * never written by it; it becomes the default.
+ */
+function joinRoleOnly(role: unknown): JoinRole {
+  return (JOIN_ROLES as readonly unknown[]).includes(role)
+    ? (role as JoinRole)
+    : DEFAULT_ROLE
+}
+
+export type SyncOutcome =
+  | { outcome: "changed"; from: Role; to: JoinRole }
+  | { outcome: "unchanged"; role: Role }
+  /** An owner, whom no group rule ever changes. */
+  | { outcome: "owner_kept" }
+
+/**
+ * An SSO sign-in's group-to-role rules (#341), applied to a member's row.
+ *
+ * ⚠ AN OWNER IS NEVER A GROUP RULE'S TO CHANGE, IN EITHER DIRECTION. Rules
+ * only ever name member or admin (`JOIN_ROLES`), so they cannot make an owner;
+ * and they do not demote one either. Ownership is handed on and taken back by
+ * an owner on the Team page (`changeRole`, `owners:manage`); a rule may be
+ * written by an admin (on a draft connection) and the groups are whatever the
+ * IdP says, so letting either demote an owner would be an admin, or whoever
+ * runs the IdP, doing what only an owner may. It also means the last owner can
+ * never be demoted from here.
+ *
+ * ⚠ NO ROW MEANS MEMBER, so a member mapped to member writes nothing; a row is
+ * only written when the role actually changes, and keeps its membership id.
+ */
+export function syncedRole(
+  rows: RoleRow[],
+  input: { userId: string; role: JoinRole },
+): Decision<SyncOutcome> {
+  const to = joinRoleOnly(input.role)
+  const existing = rowOf(rows, input.userId)
+  const from = existing?.role ?? "member"
+  if (from === "owner") return none({ outcome: "owner_kept" })
+  if (from === to) return none({ outcome: "unchanged", role: from })
+  return {
+    writes: [
+      {
+        put: {
+          userId: input.userId,
+          role: to,
+          membershipId: existing?.membershipId ?? null,
+          source: "sso",
+          grantedBy: null,
+        },
+      },
+    ],
+    result: { outcome: "changed", from, to },
   }
 }
 
@@ -847,7 +912,12 @@ export type AddOutcome = "added" | "full"
  */
 export async function addMember(
   d: RolesDeps,
-  input: { orgId: string; userId: string; role: JoinRole },
+  input: {
+    orgId: string
+    userId: string
+    role: JoinRole
+    source?: "access_rule" | "sso"
+  },
 ): Promise<AddOutcome> {
   const made = await d.clerk.create(input.orgId, input.userId)
   if (made.outcome !== "created") return made.outcome === "full" ? "full" : "added"
@@ -864,9 +934,23 @@ export async function addMember(
       userId: input.userId,
       membershipId: made.membershipId,
       role: input.role,
+      ...(input.source ? { source: input.source } : {}),
     }),
   )
   return "added"
+}
+
+/**
+ * A member's role from their SSO groups (#341), under the workspace's lock.
+ * See `syncedRole` for what it will and will not change.
+ */
+export async function syncRole(
+  d: Pick<RolesDeps, "store">,
+  input: { tenantId: string; userId: string; role: JoinRole },
+): Promise<SyncOutcome> {
+  return d.store.transact(input.tenantId, (rows) =>
+    syncedRole(rows, { userId: input.userId, role: input.role }),
+  )
 }
 
 export type RoleChangeOutcome =

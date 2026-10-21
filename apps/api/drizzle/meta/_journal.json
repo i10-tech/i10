@@ -953,6 +953,13 @@
       "when": 1792474026051,
       "tag": "0135_identity_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1792551386696,
+      "tag": "0136_group_role_rules",
+      "breakpoints": true
     }
   ]
 }

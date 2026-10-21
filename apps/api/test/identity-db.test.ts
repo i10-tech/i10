@@ -346,4 +346,314 @@ suite("identity schema", () => {
     expect(await store().identityBySubject(acme, connectionId, "okta|ada")).toBeNull()
     expect(await store().managedByUser(ada)).toBeNull()
   })
+
+  // ── #341: group rules, the JIT lock, what an SSO domain covers ──
+
+  const refusal = async (run: () => Promise<unknown>) => {
+    try {
+      await run()
+      return "accepted"
+    } catch (error) {
+      return String(error)
+    }
+  }
+
+  it("keeps group rules per connection, ordered, unique by group and capped (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Rules",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    try {
+      const admin = await store().createGroupRule(acme, {
+        connectionId: mine.id,
+        groupValue: "eng-admins",
+        role: "admin",
+        precedence: 20,
+        createdBy: "user_owner",
+      })
+      const staff = await store().createGroupRule(acme, {
+        connectionId: mine.id,
+        groupValue: "staff",
+        role: "member",
+        precedence: 5,
+        createdBy: "user_owner",
+      })
+      if (typeof admin === "string" || typeof staff === "string")
+        throw new Error("rules were not created")
+      expect(admin).toMatchObject({
+        groupValue: "eng-admins",
+        role: "admin",
+        precedence: 20,
+      })
+      expect(
+        (await store().groupRules(acme, mine.id)).map((r) => r.groupValue),
+      ).toEqual(["staff", "eng-admins"])
+      // One rule per group, in the database itself.
+      expect(
+        await store().createGroupRule(acme, {
+          connectionId: mine.id,
+          groupValue: "staff",
+          role: "admin",
+          precedence: 1,
+          createdBy: "u",
+        }),
+      ).toBe("exists")
+      expect(
+        await store().updateGroupRule(acme, mine.id, admin.id, { groupValue: "staff" }),
+      ).toBe("exists")
+      expect(
+        await store().updateGroupRule(acme, mine.id, admin.id, {
+          precedence: 1,
+          role: "member",
+        }),
+      ).toMatchObject({ groupValue: "eng-admins", precedence: 1, role: "member" })
+      // A tie goes to the older rule (uuidv7 ids sort by creation).
+      await store().updateGroupRule(acme, mine.id, staff.id, { precedence: 1 })
+      expect(
+        (await store().groupRules(acme, mine.id)).map((r) => r.groupValue),
+      ).toEqual(["eng-admins", "staff"])
+      // The wrong connection or an unknown rule is not found.
+      expect(
+        await store().updateGroupRule(acme, connectionId, admin.id, { precedence: 2 }),
+      ).toBeNull()
+      expect(await store().deleteGroupRule(acme, connectionId, admin.id)).toBeNull()
+      expect(
+        await store().deleteGroupRule(acme, mine.id, crypto.randomUUID()),
+      ).toBeNull()
+
+      // The cap is 100; two creations racing for the last place get one place.
+      for (let i = 0; i < 97; i++)
+        await owner`insert into identity.group_role_rules (tenant_id, connection_id, group_value, role, precedence)
+                    values (${acme}, ${mine.id}, ${`filler-${i}`}, 'member', ${i})`
+      const racing = await Promise.all(
+        ["last-a", "last-b"].map((groupValue) =>
+          store().createGroupRule(acme, {
+            connectionId: mine.id,
+            groupValue,
+            role: "member",
+            precedence: 1,
+            createdBy: "u",
+          }),
+        ),
+      )
+      expect(racing.filter((r) => typeof r !== "string")).toHaveLength(1)
+      expect(racing.filter((r) => r === "too_many")).toHaveLength(1)
+      expect(await store().groupRules(acme, mine.id)).toHaveLength(100)
+
+      expect(await store().deleteGroupRule(acme, mine.id, staff.id)).toMatchObject({
+        groupValue: "staff",
+      })
+      expect(await store().groupRules(acme, mine.id)).toHaveLength(99)
+    } finally {
+      // Rules go with their connection (cascade); nothing is left behind.
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+    const [left] =
+      await owner`select count(*)::int as n from identity.group_role_rules where connection_id = ${mine.id}`
+    expect(left!.n).toBe(0)
+  })
+
+  it("hides group rules from another workspace and refuses a cross-workspace row (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Rules RLS",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    try {
+      const made = await store().createGroupRule(acme, {
+        connectionId: mine.id,
+        groupValue: "secret-group",
+        role: "admin",
+        precedence: 1,
+        createdBy: "u",
+      })
+      if (typeof made === "string") throw new Error("rule was not created")
+      // The rival names Acme's connection and rule and gets nothing, changes nothing.
+      expect(await store().groupRules(rival, mine.id)).toEqual([])
+      expect(
+        await store().createGroupRule(rival, {
+          connectionId: mine.id,
+          groupValue: "planted",
+          role: "admin",
+          precedence: 1,
+          createdBy: "u",
+        }),
+      ).toBe("not_found")
+      expect(
+        await store().updateGroupRule(rival, mine.id, made.id, { role: "member" }),
+      ).toBeNull()
+      expect(await store().deleteGroupRule(rival, mine.id, made.id)).toBeNull()
+      expect(await store().groupRules(acme, mine.id)).toMatchObject([
+        { groupValue: "secret-group", role: "admin" },
+      ])
+      // A direct query as the rival sees no rule at all.
+      const seen = await db.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${rival}, true)`
+        return tx`select id from identity.group_role_rules`
+      })
+      expect(seen).toHaveLength(0)
+      // As the owner, with no policy in the way, the composite key still refuses it.
+      expect(
+        await refusal(
+          () => owner`insert into identity.group_role_rules (tenant_id, connection_id, group_value, role, precedence)
+                      values (${rival}, ${mine.id}, 'x', 'admin', 1)`,
+        ),
+      ).toMatch(/group_role_rules_connection_fk/)
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
+
+  it("refuses an owner role and an out-of-range precedence in the table itself (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Rules checks",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    try {
+      const insert = (role: string, precedence: number) => () =>
+        owner`insert into identity.group_role_rules (tenant_id, connection_id, group_value, role, precedence)
+              values (${acme}, ${mine.id}, ${`g-${role}-${precedence}`}, ${role}, ${precedence})`
+      expect(await refusal(insert("owner", 1))).toMatch(/group_role_rules_role_check/)
+      expect(await refusal(insert("", 1))).toMatch(/group_role_rules_role_check/)
+      expect(await refusal(insert("member", -1))).toMatch(
+        /group_role_rules_precedence_check/,
+      )
+      expect(await refusal(insert("member", 10_001))).toMatch(
+        /group_role_rules_precedence_check/,
+      )
+      expect(await refusal(insert("admin", 10_000))).toBe("accepted")
+      // And the update path: a patch cannot smuggle owner past the store either.
+      const [rule] = await store().groupRules(acme, mine.id)
+      // (Drizzle wraps the driver's error; the constraint is in its cause.)
+      const smuggled = await store()
+        .updateGroupRule(acme, mine.id, rule!.id, { role: "owner" as never })
+        .then(
+          () => "accepted",
+          (error: { cause?: unknown }) => String(error.cause),
+        )
+      expect(smuggled).toMatch(/group_role_rules_role_check/)
+      expect((await store().groupRules(acme, mine.id))[0]).toMatchObject({
+        role: "admin",
+      })
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
+
+  it("serialises provisioning per address, across connections, and links in the lock's transaction (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "JIT lock",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    const key = { connectionId: mine.id, email: `grace@${live}` }
+    const order: string[] = []
+    const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    try {
+      const run = async (name: string, subject: string, userId: string) =>
+        store().provisionLocked(acme, key, async (lock) => {
+          order.push(`${name}:in`)
+          const found = await lock.identityBySubject(subject)
+          // Long enough for the other call to be waiting on the lock.
+          await pause(150)
+          if (found) {
+            order.push(`${name}:found`)
+            return found.clerkUserId
+          }
+          await lock.link({ subject, clerkUserId: userId, email: key.email })
+          order.push(`${name}:linked`)
+          return userId
+        })
+      const results = await Promise.all([
+        run("a", "okta|grace", "user_jit_a"),
+        run("b", "okta|grace", "user_jit_b"),
+      ])
+      // One got in first and linked; the other waited, then SAW that link.
+      const winner = order[0]!.split(":")[0]!
+      const loser = winner === "a" ? "b" : "a"
+      expect(order).toEqual([
+        `${winner}:in`,
+        `${winner}:linked`,
+        `${loser}:in`,
+        `${loser}:found`,
+      ])
+      expect(results[0]).toBe(results[1]!)
+      expect(
+        await store().identityBySubject(acme, mine.id, "okta|grace"),
+      ).toMatchObject({ clerkUserId: results[0] })
+
+      // A different address does not wait for this one.
+      const t0 = Date.now()
+      await Promise.all([
+        store().provisionLocked(acme, key, async () => pause(200)),
+        store().provisionLocked(
+          acme,
+          { connectionId: mine.id, email: `ada@${live}` },
+          async () => pause(200),
+        ),
+      ])
+      expect(Date.now() - t0).toBeLessThan(380)
+
+      // The same address through ANOTHER connection does wait: the lock is
+      // the address's, which is what Clerk makes unique.
+      const t1 = Date.now()
+      await Promise.all([
+        store().provisionLocked(acme, key, async () => pause(200)),
+        store().provisionLocked(
+          acme,
+          { connectionId: crypto.randomUUID(), email: key.email },
+          async () => pause(200),
+        ),
+      ])
+      expect(Date.now() - t1).toBeGreaterThanOrEqual(400)
+
+      // A failure inside the lock rolls the link back: nobody is half-linked.
+      await expect(
+        store().provisionLocked(acme, key, async (lock) => {
+          await lock.link({
+            subject: "okta|rolled",
+            clerkUserId: "user_x",
+            email: key.email,
+          })
+          throw new Error("clerk went away")
+        }),
+      ).rejects.toThrow("clerk went away")
+      expect(await store().identityBySubject(acme, mine.id, "okta|rolled")).toBeNull()
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
+
+  it("reads the workspace's name and the names an active connection covers (#341)", async () => {
+    expect(await store().workspaceName(acme)).toBe("Acme")
+    expect(await store().workspaceName(rival)).toBe("Rival")
+    expect(await store().workspaceName(crypto.randomUUID())).toBeNull()
+
+    // `connectionId` holds the live proof and is still a draft here.
+    expect(await store().coveredDomains(acme)).toEqual([])
+    try {
+      await store().updateConnection(acme, connectionId, { status: "testing" })
+      expect(await store().coveredDomains(acme)).toEqual([])
+      await store().updateConnection(acme, connectionId, { status: "active" })
+      expect(await store().coveredDomains(acme)).toEqual([live])
+      // Another workspace is covered by nothing of Acme's.
+      expect(await store().coveredDomains(rival)).toEqual([])
+      // A displaced proof no longer covers anyone.
+      await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
+      expect(await store().coveredDomains(acme)).toEqual([])
+      await owner`update core.join_domains set displaced_at = null where id = ${liveProof}`
+      expect(await store().coveredDomains(acme)).toEqual([live])
+      await store().updateConnection(acme, connectionId, { status: "disabled" })
+      expect(await store().coveredDomains(acme)).toEqual([])
+    } finally {
+      await store().updateConnection(acme, connectionId, { status: "draft" })
+    }
+    expect(await store().coveredDomains(acme)).toEqual([])
+  })
 })

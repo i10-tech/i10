@@ -97,13 +97,14 @@ const unavailable = (c: Context) => {
 const invalid = (c: Context, message: string) =>
   c.json({ statusCode: 422, name: "validation_error", message }, 422)
 
-const refused = (c: Context, reason: Refusal | string) =>
+/** `message`: the bridge's own words for this refusal ("Acme is full right now..."). */
+const refused = (c: Context, reason: Refusal | string, message?: string) =>
   c.json(
     {
       statusCode: 409,
       name: "sso_refused",
       reason,
-      message: refusalMessage(reason as Refusal),
+      message: message ?? refusalMessage(reason as Refusal),
     },
     409,
   )
@@ -209,7 +210,7 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
         assertion,
         protocol: "test",
       })
-      if (done.outcome === "refused") return refused(c, done.reason)
+      if (done.outcome === "refused") return refused(c, done.reason, done.message)
       return c.json(done, 200)
     } catch (error) {
       d.bridge.log.error(
@@ -234,7 +235,7 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
       const via = b.via === "google" ? "google" : "oidc"
       const done = await finishOidc(d.bridge, d.oidc, { state, binding, query, via })
       if (done.outcome === "unavailable") return unavailable(c)
-      if (done.outcome === "refused") return refused(c, done.reason)
+      if (done.outcome === "refused") return refused(c, done.reason, done.message)
       return c.json(done, 200)
     } catch (error) {
       // ⚠ THE ERROR'S NAME AND MESSAGE ONLY, never its cause: openid-client

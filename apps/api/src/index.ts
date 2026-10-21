@@ -30,7 +30,6 @@ import { roleStore } from "./console/roles-db.js"
 import {
   CLERK_ROLE,
   addMember as addRuleMember,
-  DEFAULT_ROLE,
   can,
   createWorkspace,
   leaveWorkspace,
@@ -39,6 +38,7 @@ import {
   onClerkEvent as onRoleEvent,
   releaseMember,
   removeMemberAs,
+  syncRole,
   type JoinRole,
   type RolesDeps,
 } from "./console/roles.js"
@@ -1170,6 +1170,12 @@ const teamDomains: TeamDomainDeps | null = domains
         return org.publicMetadata?.kind === "personal"
       },
       txt: nodeTxtLookup(),
+      /*
+       * ⚠ A CONNECTED IdP SUPERSEDES AUTO-JOIN FOR ITS DOMAINS (#341): the
+       * names an active SSO connection covers are left out of every match.
+       * `identity` is made further down; this runs per request, long after.
+       */
+      ssoDomains: (tenantId: string) => identity.coveredDomains(tenantId),
       // Member limits per plan (#327): checked before every seat use.
       seats: {
         beforeSeatUse: (tenantId: string, orgId: string) =>
@@ -1253,18 +1259,47 @@ const consoleFreshAuth = withSsoFreshness(
   async (userId) => (await identity.managedByUser(userId))?.connectionId ?? null,
   log,
 )
+const ssoJoinRequests = joinStore(db)
 const bridge = {
   store: identity,
   clerk: identityClerk,
   engines,
-  // ⚠ OUR ROLES CODE, AS A MEMBER (#335): SSO never makes anybody an admin;
-  // group-to-role rules are #341's. A full workspace is refused (#327).
-  join: (orgId: string, userId: string) =>
-    addRuleMember(roles, { orgId, userId, role: DEFAULT_ROLE }),
+  /*
+   * ⚠ OUR ROLES CODE (#335), WITH THE ROLE THE GROUP RULES GIVE (#341) - a
+   * joining role, never owner - and #327's capacity as auto-join has it: our
+   * plan's limit is asked before Clerk's (`beforeSeatUse`, which also frees
+   * spots expired invitations still hold), but only for somebody who is not
+   * a member already, or a full workspace would lock its own members out.
+   */
+  join: async (input: {
+    tenantId: string
+    orgId: string
+    userId: string
+    role: JoinRole
+  }) => {
+    const held = await roles.store.roleOf(input.tenantId, input.userId)
+    if (held === null && !(await roles.clerk.isMember(input.orgId, input.userId))) {
+      const room = await beforeSeatUse(members, input.tenantId, input.orgId)
+      if (room.full) return "full" as const
+    }
+    return addRuleMember(roles, {
+      orgId: input.orgId,
+      userId: input.userId,
+      role: input.role,
+      source: "sso",
+    })
+  },
   isExempt: async (tenantId: string, userId: string) => {
     const role = await roles.store.roleOf(tenantId, userId)
     return role === "owner" || role === "admin"
   },
+  // JIT (#341): available; each connection's `jit_enabled` decides.
+  jit: true,
+  syncRole: (input: { tenantId: string; userId: string; role: JoinRole }) =>
+    syncRole(roles, input),
+  // ⚠ THE SAME WAITING LIST AUTO-JOIN FILES INTO (#327): `full`, under Requests.
+  waitlist: (tenantId: string, input: { userId: string; email: string; via: string }) =>
+    ssoJoinRequests.fileRequest(tenantId, { ...input, full: true }),
   log,
 }
 const identityConsole = {

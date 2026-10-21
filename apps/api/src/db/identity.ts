@@ -455,6 +455,63 @@ export const managedAccounts = identity.table(
   ],
 )
 
+/**
+ * Group-to-role rules (#341, sso.md 2.3 and 2.6): which of OUR roles (#335) a
+ * group the IdP names gives, per connection, first match by precedence.
+ *
+ * ⚠ NEVER OWNER, IN THE DATABASE ITSELF. A rule is matched against whatever
+ * groups the IdP sends, and ownership is only ever handed on by an owner; the
+ * check below means no code path, however wrong, can store a rule that makes
+ * somebody an owner. Admin is allowed - an admin can make admins anyway - and
+ * changing rules on a live connection is an owner's (routes/console/
+ * identity-groups.ts).
+ *
+ * ⚠ `group_value` IS COMPARED EXACTLY, as the IdP sends it (Okta a name,
+ * Entra an object id). One rule per group per connection.
+ */
+export const groupRoleRules = identity.table(
+  "group_role_rules",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    groupValue: text("group_value").notNull(),
+    /** `member` or `admin`: a joining role (console/roles.ts `JOIN_ROLES`). */
+    role: text("role").notNull(),
+    /** Lower first; equal precedence falls to the older rule. */
+    precedence: integer("precedence").notNull(),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "group_role_rules_connection_fk",
+      columns: [t.connectionId, t.tenantId],
+      foreignColumns: [connections.id, connections.tenantId],
+    }).onDelete("cascade"),
+    uniqueIndex("group_role_rules_connection_group_unique").on(
+      t.connectionId,
+      t.groupValue,
+    ),
+    index("group_role_rules_connection_idx").on(t.connectionId, t.precedence),
+    check("group_role_rules_role_check", sql`"role" in ('member', 'admin')`),
+    check(
+      "group_role_rules_precedence_check",
+      sql`"precedence" >= 0 and "precedence" <= 10000`,
+    ),
+    pgPolicy("group_role_rules_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
 /** Break-glass: people a connection lets sign in another way (#340 uses it). */
 export const bypassUsers = identity.table(
   "bypass_users",

@@ -22,6 +22,7 @@ const SOURCES: readonly RoleSource[] = [
   "membership",
   "changed",
   "backfill",
+  "sso",
 ]
 
 const toRow = (r: typeof workspaceRoles.$inferSelect): RoleRow => ({

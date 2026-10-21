@@ -202,6 +202,35 @@ export function clerkIdentityApi(
       return data.map(snapshot)
     },
 
+    /*
+     * ⚠ NO PASSWORD, ONE VERIFIED ADDRESS, AND CLERK'S UNIQUENESS AS THE NET.
+     * `skip_password_requirement` makes an account whose only way in is the
+     * bridge's ticket; the address is created verified (Clerk's default for a
+     * backend-created address), which is what the IdP vouched for. Two
+     * creations for one address: Clerk lets one through and answers the other
+     * `form_identifier_exists`, which the bridge turns into a re-resolve.
+     */
+    async createUser({ email, firstName, lastName }) {
+      try {
+        const made = await clerk.users.createUser({
+          emailAddress: [email],
+          skipPasswordRequirement: true,
+          ...(firstName ? { firstName } : {}),
+          ...(lastName ? { lastName } : {}),
+        })
+        return { outcome: "created", userId: made.id }
+      } catch (error) {
+        const codes = codesOf(error)
+        if (codes.includes("form_identifier_exists")) return { outcome: "exists" }
+        // ⚠ THE INSTANCE REQUIRES FIRST AND LAST NAME: an IdP that sends none
+        // is the admin's mapping to fix, not an outage to retry (a 503).
+        if (codes.includes("form_data_missing")) return { outcome: "incomplete" }
+        throw error
+      }
+    },
+    async updateProfile(userId, names) {
+      await clerk.users.updateUser(userId, names)
+    },
     async removePassword(userId) {
       await clerk.users.removePassword(userId, { signOutOfOtherSessions: true })
     },

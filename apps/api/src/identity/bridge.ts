@@ -1,3 +1,12 @@
+import type { JoinRole, SyncOutcome } from "../console/roles.js"
+import {
+  jitAllowed,
+  profileChanges,
+  provision,
+  readName,
+  roleFromGroups,
+  type MappedRole,
+} from "./jit.js"
 import { enforceManaged } from "./managed.js"
 import {
   ATTEMPT_TTL_MS,
@@ -5,6 +14,7 @@ import {
   CLOCK_SKEW_MS,
   HANDOFF_TTL_MS,
   STEP_UP_MAX_AGE_MS,
+  emailDomain,
   hashSecret,
   newSecret,
   normaliseEmail,
@@ -77,10 +87,16 @@ export interface BridgeDeps {
   clerk: ClerkIdentity
   engines: ReadonlyMap<Protocol, Engine>
   /**
-   * Membership through our roles code (#335): `added` (or already a member)
-   * or `full` (capacity, #327).
+   * Membership through our roles code (#335): `added` (or already a member,
+   * whose role this never changes) or `full` (capacity, #327). `role` is what
+   * a NEW member joins with: the connection's group rules' answer (#341).
    */
-  join(orgId: string, userId: string): Promise<"added" | "full">
+  join(input: {
+    tenantId: string
+    orgId: string
+    userId: string
+    role: JoinRole
+  }): Promise<"added" | "full">
   /**
    * Whether this person is an owner or an admin of the workspace in our roles
    * table (#335): the people SSO never takes over (decision 7).
@@ -88,8 +104,30 @@ export interface BridgeDeps {
   isExempt(tenantId: string, userId: string): Promise<boolean>
   /** SCIM's pre-provisioned person for this subject (#342). None yet. */
   preProvisioned?: (ctx: ResolveContext) => Promise<string | null>
-  /** Just-in-time creation (#341). None yet, so an unknown person is refused. */
-  jit?: (ctx: ResolveContext) => Promise<string | null>
+  /**
+   * Just-in-time creation (#341). Unset, an unknown person is refused
+   * whatever the connection says; set, a connection with `jit_enabled`
+   * creates them (identity/jit.ts).
+   */
+  jit?: boolean
+  /**
+   * The group rules' role written to our roles table at every sign-in (#341,
+   * console/roles.ts `syncRole`). Absent: roles are left as they are.
+   */
+  syncRole?: (input: {
+    tenantId: string
+    userId: string
+    role: JoinRole
+  }) => Promise<SyncOutcome>
+  /**
+   * The waiting list (#327): a request filed as auto-join files one when the
+   * workspace is full (`JoinStore.fileRequest` with `full`). Absent: a full
+   * workspace is a plain refusal.
+   */
+  waitlist?: (
+    tenantId: string,
+    input: { userId: string; email: string; via: string },
+  ) => Promise<"created" | "exists">
   log: Logger
   now?: () => Date
 }
@@ -188,7 +226,8 @@ export type CompleteOutcome =
   | { outcome: "signed_in"; code: string; returnTo: string | null }
   | { outcome: "tested"; testRunId: string; passed: boolean; returnTo: string | null }
   | { outcome: "stepped_up"; returnTo: string | null }
-  | { outcome: "refused"; reason: Refusal }
+  /** `message`, when set, is what the person is told instead of `refusalMessage`. */
+  | { outcome: "refused"; reason: Refusal; message?: string }
 
 type Resolved =
   | {
@@ -201,13 +240,18 @@ type Resolved =
       email: string
       /** Its managed row, if any: always this workspace's by now. */
       managed: ManagedRow | null
+      /** JIT made this Clerk user during this sign-in (#341). */
+      created: boolean
     }
-  | { ok: false; reason: Refusal }
+  /** A test run that JIT would have created somebody for (#341): nobody is. */
+  | { ok: "would_create"; orgId: string; email: string }
+  | { ok: false; reason: Refusal; extra?: Record<string, unknown> }
 
 type Refuse = (
   reason: Refusal,
   extra?: Record<string, unknown>,
-) => Promise<{ outcome: "refused"; reason: Refusal }>
+  message?: string,
+) => Promise<{ outcome: "refused"; reason: Refusal; message?: string }>
 
 type Opened =
   | { ok: true; attempt: AttemptRow; refuse: Refuse }
@@ -249,7 +293,7 @@ async function openAttempt(
     d.log.warn({}, "an SSO callback named no attempt we know")
     return { ok: false, outcome: { outcome: "refused", reason: "attempt_unknown" } }
   }
-  const refuse: Refuse = async (reason, extra = {}) => {
+  const refuse: Refuse = async (reason, extra = {}, message) => {
     await d.store.finishAttempt(attempt.tenantId, attempt.id, {
       outcome: "refused",
       failureReason: reason,
@@ -264,7 +308,9 @@ async function openAttempt(
         ...extra,
       },
     })
-    return { outcome: "refused" as const, reason }
+    return message !== undefined
+      ? { outcome: "refused" as const, reason, message }
+      : { outcome: "refused" as const, reason }
   }
 
   // ⚠ WRONG BROWSER AND EXPIRED ARE CHECKED BEFORE THE ATTEMPT IS SPENT, so a
@@ -365,38 +411,70 @@ export async function completeLogin(
   if (attempt.purpose === "step_up")
     return stepUp(d, attempt, connection, assertion, refuse)
 
-  const resolved = await resolve(d, attempt.tenantId, connection, assertion)
+  const mode = attempt.purpose === "test_run" ? "test_run" : "sign_in"
+  const resolved = await resolve(d, attempt.tenantId, connection, assertion, mode)
+  /*
+   * ⚠ THE ROLE IS THE IdP's GROUPS, READ AT EVERY SIGN-IN (#341). The rules
+   * are this connection's; no rule matching gives the default, member. A
+   * connection with no rules leaves roles to the Team page.
+   */
+  const rules = await d.store.groupRules(attempt.tenantId, connection.id)
+  const mapped = roleFromGroups(rules, assertion.groups)
 
   if (attempt.purpose === "test_run") {
+    const passed = resolved.ok !== false
+    const reason = resolved.ok === false ? resolved.reason : null
+    const role = { role: mapped.role, rule: mapped.rule?.id ?? null }
     const run = await d.store.recordTestRun(attempt.tenantId, {
       connectionId: connection.id,
       attemptId: attempt.id,
-      outcome: resolved.ok ? "passed" : "failed",
-      reason: resolved.ok ? null : resolved.reason,
+      outcome: passed ? "passed" : "failed",
+      reason,
       claims: claimsOf(assertion),
-      resolution: resolved.ok
-        ? { path: resolved.path, clerkUserId: resolved.userId, email: resolved.email }
-        : { refused: resolved.reason },
+      resolution:
+        resolved.ok === true
+          ? {
+              path: resolved.path,
+              clerkUserId: resolved.userId,
+              email: resolved.email,
+              ...role,
+            }
+          : resolved.ok === "would_create"
+            ? {
+                path: "jit",
+                wouldCreate: true,
+                email: resolved.email,
+                // What Clerk will require of the new person: the console says
+                // so before going live, instead of a refused first sign-in.
+                names: {
+                  given: readName(assertion.givenName) !== null,
+                  family: readName(assertion.familyName) !== null,
+                },
+                ...role,
+              }
+            : { refused: resolved.reason },
     })
     await d.store.finishAttempt(attempt.tenantId, attempt.id, {
       outcome: "tested",
-      failureReason: resolved.ok ? null : resolved.reason,
+      failureReason: reason,
     })
     await d.store.record(attempt.tenantId, {
       type: "test_run.completed",
       connectionId: connection.id,
-      reason: resolved.ok ? null : resolved.reason,
-      data: { testRunId: run.id, passed: resolved.ok },
+      reason,
+      data: { testRunId: run.id, passed },
     })
     return {
       outcome: "tested",
       testRunId: run.id,
-      passed: resolved.ok,
+      passed,
       returnTo: attempt.returnTo,
     }
   }
 
-  if (!resolved.ok) return refuse(resolved.reason)
+  if (resolved.ok === false) return refuse(resolved.reason, resolved.extra)
+  // A sign-in never resolves to "would create"; refused rather than trusted.
+  if (resolved.ok !== true) return refuse("no_account")
 
   /*
    * ⚠ AN OWNER OR ADMIN WHO IS NOT MANAGED IS NEVER SIGNED IN THROUGH SSO
@@ -423,10 +501,70 @@ export async function completeLogin(
   if (exempt && (!existing || resolved.path !== "linked"))
     return refuse("role_exempt", { clerkUserId: resolved.userId })
 
+  const takeOver = () =>
+    manage(d, {
+      tenantId: attempt.tenantId,
+      connectionId: connection.id,
+      resolved,
+    })
+
+  /*
+   * ⚠ SOMEBODY JIT JUST MADE IS MANAGED BEFORE ANYTHING ELSE CAN FAIL. The
+   * account exists at Clerk from this moment, with a verified company address
+   * and no password; managed, the gateway sends every other way in back to
+   * the IdP. A failure after this leaves a managed person who is not a member
+   * yet - their next sign-in finishes the job - never a free-standing one.
+   */
+  let managedNow = false
+  if (resolved.created) {
+    if ((await takeOver()) === "elsewhere") return refuse("managed_elsewhere")
+    managedNow = true
+    await d.store.record(attempt.tenantId, {
+      type: "jit.provisioned",
+      subjectUserId: resolved.userId,
+      connectionId: connection.id,
+      data: { email: resolved.email, ...ruleData(mapped) },
+    })
+  }
+
   // ── Membership, link, managed ──
-  const joined = await d.join(resolved.orgId, resolved.userId)
-  if (joined === "full")
+  const joined = await d.join({
+    tenantId: attempt.tenantId,
+    orgId: resolved.orgId,
+    userId: resolved.userId,
+    role: mapped.role,
+  })
+  if (joined === "full") {
+    /*
+     * ⚠ A FULL WORKSPACE TURNS JIT INTO A WAITING-LIST REQUEST (#327), as it
+     * does auto-join: the person exists and is managed, their request is
+     * under the admins' Requests, and they are told so - not an error. Only
+     * for people JIT made (now, or on an earlier sign-in that also found it
+     * full); anybody else is refused as before.
+     */
+    const jitPerson = resolved.path === "jit" || existing?.reason === "jit"
+    if (d.waitlist && jitPerson) {
+      const filed = await d.waitlist(attempt.tenantId, {
+        userId: resolved.userId,
+        email: resolved.email,
+        via: emailDomain(resolved.email),
+      })
+      await d.store.record(attempt.tenantId, {
+        type: "jit.waitlisted",
+        subjectUserId: resolved.userId,
+        connectionId: connection.id,
+        reason: "workspace_full",
+        data: { request: filed },
+      })
+      const name = (await d.store.workspaceName(attempt.tenantId)) ?? "This workspace"
+      return refuse(
+        "waiting_list",
+        { clerkUserId: resolved.userId },
+        `${name} is full right now. We've asked its admins to add you.`,
+      )
+    }
     return refuse("workspace_full", { clerkUserId: resolved.userId })
+  }
 
   const identityId =
     resolved.identityId ??
@@ -439,76 +577,24 @@ export async function completeLogin(
       })
     ).id
 
-  const reason: ManagedReason =
-    resolved.path === "claimed"
-      ? "claimed"
-      : resolved.path === "jit"
-        ? "jit"
-        : resolved.path === "scim"
-          ? "scim"
-          : "linked"
-  /*
-   * ⚠ WHAT A MANAGED ACCOUNT KEEPS. Newly claimed: the asserted address and
-   * every address it already held verified. Already managed: the addresses on
-   * its row plus the one the IdP asserts now (a rename), so a sign-in never
-   * blesses an address that slipped onto the account some other way.
-   */
-  const keep = verifiedAddresses(
-    resolved.user,
-    existing ? [resolved.email, ...existing.emails] : null,
-    resolved.email,
-  )
+  if (!managedNow && (await takeOver()) === "elsewhere")
+    return refuse("managed_elsewhere")
 
-  const claimed = await d.store.claimManaged(attempt.tenantId, {
-    clerkUserId: resolved.userId,
+  await syncRole(d, {
     tenantId: attempt.tenantId,
     connectionId: connection.id,
-    reason,
-    emails: keep,
+    userId: resolved.userId,
+    mapped,
+    hasRules: rules.length > 0,
   })
-  if (claimed === "elsewhere") return refuse("managed_elsewhere")
-
-  /*
-   * ⚠ A NEWLY MANAGED ACCOUNT LOSES EVERY OTHER WAY IN, AND EVERY SESSION IT
-   * HAD, BEFORE A TICKET IS EVER MINTED. Somebody who signed up with a
-   * password before their company turned on SSO keeps their account and
-   * their other workspaces (sso.md 2.3, "claiming"), but not the password, and
-   * not the sessions that password made: those never passed the IdP.
-   */
-  if (claimed === "created") {
-    for (const session of await d.clerk.activeSessions(resolved.userId))
-      await d.clerk.revokeSession(session.id)
-    await d.store.record(attempt.tenantId, {
-      type: "managed.claimed",
-      subjectUserId: resolved.userId,
+  // A person JIT just made has the IdP's names already.
+  if (!resolved.created)
+    await syncProfile(d, {
+      tenantId: attempt.tenantId,
       connectionId: connection.id,
-      reason,
-      // TODO(#340): email the person that their account is now managed. Until
-      // the console's identity screens ship there is no page to link them to;
-      // this event is the notice of record.
-      data: { email: resolved.email, notified: false },
+      user: resolved.user,
+      assertion,
     })
-  }
-  if (claimed === "kept") {
-    /*
-     * ⚠ THE STORED LIST FOLLOWS THE IdP. An address the IdP now asserts (a
-     * rename) must be on the row, or the watchdog's next pass - which reads
-     * the row, not this sign-in - would strip the very address the person
-     * just signed in with, and the gateway would not know it as managed.
-     * The connection follows too: it is where the gate sends them back to.
-     */
-    await d.store.setManagedEmails(
-      attempt.tenantId,
-      resolved.userId,
-      keep,
-      connection.id,
-    )
-  }
-  await enforceManaged(
-    d,
-    { tenantId: attempt.tenantId, clerkUserId: resolved.userId, emails: keep },
-    claimed === "created" ? "claimed" : "sign_in",
-  )
   await d.store.touchIdentity(attempt.tenantId, identityId, resolved.email, now)
 
   const code = newSecret()
@@ -531,6 +617,183 @@ export async function completeLogin(
   return { outcome: "signed_in", code, returnTo: attempt.returnTo }
 }
 
+/** The rule behind a role, for the audit log: its id and group, or the default. */
+function ruleData(mapped: MappedRole): Record<string, unknown> {
+  return {
+    role: mapped.role,
+    rule: mapped.rule
+      ? {
+          id: mapped.rule.id,
+          group: mapped.rule.groupValue,
+          precedence: mapped.rule.precedence,
+        }
+      : null,
+  }
+}
+
+/**
+ * Makes (or keeps) the account managed by this workspace, and takes every
+ * other way in away from it.
+ */
+async function manage(
+  d: BridgeDeps,
+  input: {
+    tenantId: string
+    connectionId: string
+    resolved: Extract<Resolved, { ok: true }>
+  },
+): Promise<"created" | "kept" | "elsewhere"> {
+  const { resolved, tenantId, connectionId } = input
+  const existing = resolved.managed
+  const reason: ManagedReason =
+    resolved.path === "claimed"
+      ? "claimed"
+      : resolved.path === "jit"
+        ? "jit"
+        : resolved.path === "scim"
+          ? "scim"
+          : "linked"
+  /*
+   * ⚠ WHAT A MANAGED ACCOUNT KEEPS. Newly claimed: the asserted address and
+   * every address it already held verified. Already managed: the addresses on
+   * its row plus the one the IdP asserts now (a rename), so a sign-in never
+   * blesses an address that slipped onto the account some other way.
+   */
+  const keep = verifiedAddresses(
+    resolved.user,
+    existing ? [resolved.email, ...existing.emails] : null,
+    resolved.email,
+  )
+
+  const claimed = await d.store.claimManaged(tenantId, {
+    clerkUserId: resolved.userId,
+    tenantId,
+    connectionId,
+    reason,
+    emails: keep,
+  })
+  if (claimed === "elsewhere") return claimed
+
+  /*
+   * ⚠ A NEWLY MANAGED ACCOUNT LOSES EVERY OTHER WAY IN, AND EVERY SESSION IT
+   * HAD, BEFORE A TICKET IS EVER MINTED. Somebody who signed up with a
+   * password before their company turned on SSO keeps their account and
+   * their other workspaces (sso.md 2.3, "claiming"), but not the password, and
+   * not the sessions that password made: those never passed the IdP.
+   */
+  if (claimed === "created") {
+    for (const session of await d.clerk.activeSessions(resolved.userId))
+      await d.clerk.revokeSession(session.id)
+    await d.store.record(tenantId, {
+      type: "managed.claimed",
+      subjectUserId: resolved.userId,
+      connectionId,
+      reason,
+      // #340 emails the person that their account is now managed. Until
+      // the console's identity screens ship there is no page to link them to;
+      // this event is the notice of record.
+      data: { email: resolved.email, notified: false },
+    })
+  }
+  if (claimed === "kept") {
+    /*
+     * ⚠ THE STORED LIST FOLLOWS THE IdP. An address the IdP now asserts (a
+     * rename) must be on the row, or the watchdog's next pass - which reads
+     * the row, not this sign-in - would strip the very address the person
+     * just signed in with, and the gateway would not know it as managed.
+     * The connection follows too: it is where the gate sends them back to.
+     */
+    await d.store.setManagedEmails(tenantId, resolved.userId, keep, connectionId)
+  }
+  await enforceManaged(
+    d,
+    { tenantId, clerkUserId: resolved.userId, emails: keep },
+    claimed === "created" ? "claimed" : "sign_in",
+  )
+  return claimed
+}
+
+/**
+ * The group rules' role, written to our roles table (#341).
+ *
+ * ⚠ ONLY THROUGH THE ROLES CODE (`syncRole`), SO ITS RULES HOLD: a joining
+ * role only, never owner, and an owner's row never touched - which is also
+ * why the last owner can never be demoted from here. Owners and admins who
+ * are not managed never get this far (`role_exempt` above).
+ *
+ * ⚠ EVERY CHANGE IS AUDITED WITH THE RULE THAT MADE IT, or `rule: null` for
+ * the default.
+ */
+async function syncRole(
+  d: BridgeDeps,
+  input: {
+    tenantId: string
+    connectionId: string
+    userId: string
+    mapped: MappedRole
+    hasRules: boolean
+  },
+): Promise<void> {
+  if (!input.hasRules || !d.syncRole) return
+  const synced = await d.syncRole({
+    tenantId: input.tenantId,
+    userId: input.userId,
+    role: input.mapped.role,
+  })
+  if (synced.outcome === "changed")
+    await d.store.record(input.tenantId, {
+      type: "role.synced",
+      subjectUserId: input.userId,
+      connectionId: input.connectionId,
+      data: { from: synced.from, to: synced.to, rule: ruleData(input.mapped).rule },
+    })
+  if (synced.outcome === "owner_kept")
+    await d.store.record(input.tenantId, {
+      type: "role.sync_skipped",
+      subjectUserId: input.userId,
+      connectionId: input.connectionId,
+      reason: "owner",
+      data: { wanted: input.mapped.role, rule: ruleData(input.mapped).rule },
+    })
+}
+
+/**
+ * Profile sync (#341, Clerk's `sync_user_attributes`): the IdP's names to
+ * Clerk when they changed.
+ *
+ * ⚠ AUDITED AS "PROFILE UPDATED" AND NOTHING MORE: the names are the person's
+ * data, not the log's.
+ *
+ * ⚠ A FAILURE IS LOGGED, NOT A REFUSAL. A name decides nobody's access; the
+ * sign-in goes on and the next one tries again.
+ */
+async function syncProfile(
+  d: BridgeDeps,
+  input: {
+    tenantId: string
+    connectionId: string
+    user: ClerkUserSnapshot
+    assertion: Assertion
+  },
+): Promise<void> {
+  const changes = profileChanges(input.user, input.assertion)
+  if (!changes) return
+  try {
+    await d.clerk.updateProfile(input.user.id, changes)
+  } catch (error) {
+    d.log.warn(
+      { err: String(error), clerkUserId: input.user.id },
+      "could not sync an SSO profile to Clerk",
+    )
+    return
+  }
+  await d.store.record(input.tenantId, {
+    type: "profile.updated",
+    subjectUserId: input.user.id,
+    connectionId: input.connectionId,
+  })
+}
+
 /**
  * Who this is, by the only rules that may answer it.
  *
@@ -538,20 +801,22 @@ export async function completeLogin(
  *   2. A person SCIM already provisioned for this subject (#342).
  *   3. An existing Clerk account holding this address VERIFIED, on one of the
  *      connection's live domains, claimed (sso.md 2.3).
- *   4. JIT (#341), when the connection allows it.
+ *   4. JIT (#341), when the connection allows it and NO Clerk account holds
+ *      the address at all.
  *   5. Nobody: refused.
  *
  * ⚠ NEVER AN EMAIL-ONLY MATCH OUTSIDE THE WORKSPACE'S VERIFIED DOMAINS. Rule 3
  * needs all of: the IdP vouching for the address, the address on a domain
  * this workspace has proved and still holds (not lapsed, not displaced), and
  * Clerk holding it verified. Any one missing and the person is refused, not
- * guessed at.
+ * guessed at. JIT needs the same first two.
  */
 async function resolve(
   d: BridgeDeps,
   tenantId: string,
   connection: Connection,
   assertion: Assertion,
+  mode: "sign_in" | "test_run",
 ): Promise<Resolved> {
   const orgId = await d.store.workspaceOrg(tenantId)
   if (!orgId) return { ok: false, reason: "workspace_gone" }
@@ -561,58 +826,100 @@ async function resolve(
   // ⚠ EVEN FOR A LINKED PERSON: displacement disables SSO for the domain.
   if (!onLiveDomain(email, live)) return { ok: false, reason: "domain_not_verified" }
 
-  const linked = await d.store.identityBySubject(
-    tenantId,
-    connection.id,
-    assertion.subject,
-  )
-  let userId: string | null = linked?.clerkUserId ?? null
-  let path: "linked" | "scim" | "claimed" | "jit" = "linked"
+  /*
+   * ⚠ AT MOST TWICE. JIT answering `exists` means a Clerk account for the
+   * address appeared while we looked (a sign-in racing ours, the person
+   * signing up by hand); the second pass finds it by link or as a holder,
+   * and never creates.
+   */
+  for (let pass = 0; pass < 2; pass++) {
+    const linked = await d.store.identityBySubject(
+      tenantId,
+      connection.id,
+      assertion.subject,
+    )
+    let userId: string | null = linked?.clerkUserId ?? null
+    let identityId: string | null = linked?.id ?? null
+    let path: "linked" | "scim" | "claimed" | "jit" = "linked"
+    let created = false
 
-  if (!userId) {
-    if (!assertion.emailVerified) return { ok: false, reason: "email_unverified" }
-    const ctx: ResolveContext = { tenantId, connection, assertion, email }
-    const pre = (await d.preProvisioned?.(ctx)) ?? null
-    if (pre) {
-      userId = pre
-      path = "scim"
-    } else {
-      const holders = (await d.clerk.usersByEmail(email)).filter((u) =>
-        u.emails.some((e) => e.verified && e.address.toLowerCase() === email),
-      )
-      if (holders.length > 1) return { ok: false, reason: "ambiguous_account" }
-      if (holders.length === 1) {
-        userId = holders[0]!.id
-        path = "claimed"
-      } else if (connection.jitEnabled && d.jit) {
-        userId = await d.jit(ctx)
-        path = "jit"
+    if (!userId) {
+      if (!assertion.emailVerified) return { ok: false, reason: "email_unverified" }
+      const ctx: ResolveContext = { tenantId, connection, assertion, email }
+      const pre = (await d.preProvisioned?.(ctx)) ?? null
+      if (pre) {
+        userId = pre
+        path = "scim"
+      } else {
+        const all = await d.clerk.usersByEmail(email)
+        const holders = all.filter((u) =>
+          u.emails.some((e) => e.verified && e.address.toLowerCase() === email),
+        )
+        if (holders.length > 1) return { ok: false, reason: "ambiguous_account" }
+        // A test run asks what JIT would do once the connection is live;
+        // it never creates anybody (`would_create` below).
+        const jit =
+          d.jit === true &&
+          jitAllowed(
+            mode === "test_run" ? { ...connection, status: "active" } : connection,
+          )
+        if (holders.length === 1) {
+          userId = holders[0]!.id
+          path = "claimed"
+        } else if (jit && all.length > 0) {
+          /*
+           * ⚠ NEVER JIT FOR AN ADDRESS A CLERK ACCOUNT ALREADY HOLDS, EVEN
+           * UNVERIFIED. Clerk would refuse the creation anyway; and claiming
+           * is the only path to an existing account, which needs the address
+           * verified on it.
+           */
+          return { ok: false, reason: "no_account", extra: { jit: "address_held" } }
+        } else if (jit) {
+          // ⚠ BEFORE ANYTHING IS CREATED: the block list wins (sso.md 2.7).
+          if (await d.store.isBlocked(tenantId, email))
+            return { ok: false, reason: "blocked" }
+          if (mode === "test_run") return { ok: "would_create", orgId, email }
+          const made = await provision(d, { tenantId, connection, assertion, email })
+          if (made.outcome === "exists") continue
+          if (made.outcome === "incomplete")
+            return { ok: false, reason: "profile_incomplete" }
+          userId = made.userId
+          identityId = made.identityId
+          path = made.outcome === "created" ? "jit" : "linked"
+          created = made.outcome === "created"
+        }
       }
+      if (!userId) return { ok: false, reason: "no_account" }
+      // Somebody else's subject already holds this account on this connection.
+      if (
+        identityId === null &&
+        (await d.store.identityByUser(tenantId, connection.id, userId))
+      )
+        return { ok: false, reason: "already_linked" }
     }
-    if (!userId) return { ok: false, reason: "no_account" }
-    // Somebody else's subject already holds this account on this connection.
-    if (await d.store.identityByUser(tenantId, connection.id, userId))
-      return { ok: false, reason: "already_linked" }
-  }
 
-  const user = await d.clerk.user(userId)
-  if (!user) return { ok: false, reason: "no_account" }
-  if (user.banned) return { ok: false, reason: "account_banned" }
-  if (await d.store.isBlocked(tenantId, email)) return { ok: false, reason: "blocked" }
-  const managed = await d.store.managedByUser(userId)
-  if (managed && managed.tenantId !== tenantId)
-    return { ok: false, reason: "managed_elsewhere" }
+    const user = await d.clerk.user(userId)
+    if (!user) return { ok: false, reason: "no_account" }
+    if (user.banned) return { ok: false, reason: "account_banned" }
+    if (await d.store.isBlocked(tenantId, email))
+      return { ok: false, reason: "blocked" }
+    const managed = await d.store.managedByUser(userId)
+    if (managed && managed.tenantId !== tenantId)
+      return { ok: false, reason: "managed_elsewhere" }
 
-  return {
-    ok: true,
-    userId,
-    user,
-    path,
-    identityId: linked?.id ?? null,
-    orgId,
-    email,
-    managed,
+    return {
+      ok: true,
+      userId,
+      user,
+      path,
+      identityId,
+      orgId,
+      email,
+      managed,
+      created,
+    }
   }
+  return { ok: false, reason: "no_account", extra: { jit: "raced" } }
 }
 
 /**

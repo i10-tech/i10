@@ -45,7 +45,7 @@ function world(
     store: store.store,
     clerk: clerk.clerk,
     engines: new Map([["test", testEngine("https://auth.i10.localhost")]]),
-    join: async (orgId, userId) => {
+    join: async ({ orgId, userId }) => {
       joined.push({ orgId, userId })
       return options.join ?? "added"
     },
@@ -493,21 +493,38 @@ describe("completing", () => {
   })
 
   it("never uses JIT unless the connection allows it and a JIT hook exists", async () => {
-    const w = world({ users: [] })
-    let asked = 0
-    w.deps.jit = async () => (asked++, "user_new")
-    const { state } = await w.start()
+    // The connection says no (the default), with the hook present.
+    const off = world({ users: [] })
+    off.deps.jit = true
+    const first = await off.start()
     expect(
       (
-        await completeLogin(w.deps, {
+        await completeLogin(off.deps, {
           protocol: "test",
-          state,
+          state: first.state,
           binding: BINDING,
-          assertion: w.assertion(),
+          assertion: off.assertion(),
         })
       ).outcome,
     ).toBe("refused")
-    expect(asked).toBe(0)
+    expect(off.clerk.created).toEqual([])
+    // The connection says yes, with no hook in this process.
+    const unwired = world({
+      users: [],
+      store: { connections: [connection({ jitEnabled: true })] },
+    })
+    const second = await unwired.start()
+    expect(
+      (
+        await completeLogin(unwired.deps, {
+          protocol: "test",
+          state: second.state,
+          binding: BINDING,
+          assertion: unwired.assertion(),
+        })
+      ).outcome,
+    ).toBe("refused")
+    expect(unwired.clerk.created).toEqual([])
   })
 
   it("records a test run with the claims and what would happen, and signs nobody in", async () => {

@@ -9,6 +9,7 @@ import type {
   ClerkIdentity,
   ClerkSessionSnapshot,
   ClerkUserSnapshot,
+  GroupRoleRule,
   IdentityStore,
   ManagedRow,
   NewAttempt,
@@ -52,17 +53,34 @@ type Attempt = AttemptRow & {
   boundSessionId: string | null
 }
 
+/** A rule as the store hands it out: without the fake's tenant column. */
+const publicRule = (r: GroupRoleRule): GroupRoleRule => ({
+  id: r.id,
+  connectionId: r.connectionId,
+  groupValue: r.groupValue,
+  role: r.role,
+  precedence: r.precedence,
+})
+
 export function memoryStore(
   init: {
     connections?: Connection[]
     live?: Record<string, string[]>
     orgs?: Record<string, string | null>
     blocked?: string[]
+    rules?: GroupRoleRule[]
+    names?: Record<string, string>
   } = {},
 ) {
   const connections = new Map(
     (init.connections ?? [connection()]).map((c) => [c.id, c]),
   )
+  const rules: (GroupRoleRule & { tenantId: string })[] = (init.rules ?? []).map(
+    (r) => ({ ...r, tenantId: connections.get(r.connectionId)?.tenantId ?? TENANT }),
+  )
+  /** The JIT lock: one chain per key, as Postgres's advisory lock serialises. */
+  const locks = new Map<string, Promise<unknown>>()
+  const lockLog: string[] = []
   const live = init.live ?? { [CONNECTION]: ["acme.test"] }
   const orgs = init.orgs ?? { [TENANT]: ORG }
   const attempts = new Map<string, Attempt>()
@@ -146,6 +164,101 @@ export function memoryStore(
     },
     async workspaceOrg(tenantId) {
       return orgs[tenantId] ?? null
+    },
+    async workspaceName(tenantId) {
+      return (init.names ?? { [TENANT]: "Acme" })[tenantId] ?? null
+    },
+    async coveredDomains(tenantId) {
+      return [...connections.values()]
+        .filter((c) => c.tenantId === tenantId && c.status === "active")
+        .flatMap((c) => live[c.id] ?? [])
+    },
+    async groupRules(tenantId, cid) {
+      return rules
+        .filter((r) => r.tenantId === tenantId && r.connectionId === cid)
+        .sort((a, b) => a.precedence - b.precedence || a.id.localeCompare(b.id))
+        .map(publicRule)
+    },
+    async createGroupRule(tenantId, input) {
+      const c = connections.get(input.connectionId)
+      if (!c || c.tenantId !== tenantId) return "not_found"
+      const mine = rules.filter((r) => r.connectionId === input.connectionId)
+      if (mine.some((r) => r.groupValue === input.groupValue)) return "exists"
+      if (mine.length >= 100) return "too_many"
+      const row = {
+        id: id(),
+        tenantId,
+        connectionId: input.connectionId,
+        groupValue: input.groupValue,
+        role: input.role,
+        precedence: input.precedence,
+      }
+      rules.push(row)
+      return publicRule(row)
+    },
+    async updateGroupRule(tenantId, cid, ruleId, patch) {
+      const row = rules.find(
+        (r) => r.tenantId === tenantId && r.connectionId === cid && r.id === ruleId,
+      )
+      if (!row) return null
+      if (
+        patch.groupValue !== undefined &&
+        rules.some(
+          (r) =>
+            r.connectionId === cid &&
+            r.id !== ruleId &&
+            r.groupValue === patch.groupValue,
+        )
+      )
+        return "exists"
+      Object.assign(row, patch)
+      return publicRule(row)
+    },
+    async deleteGroupRule(tenantId, cid, ruleId) {
+      const at = rules.findIndex(
+        (r) => r.tenantId === tenantId && r.connectionId === cid && r.id === ruleId,
+      )
+      if (at < 0) return null
+      const [row] = rules.splice(at, 1)
+      return publicRule(row!)
+    },
+    async provisionLocked(tenantId, key, fn) {
+      const name = `${key.connectionId}:${key.email}`
+      const before = locks.get(name) ?? Promise.resolve()
+      const run = before.then(async () => {
+        lockLog.push(`lock:${name}`)
+        try {
+          return await fn({
+            async identityBySubject(subject) {
+              const row = identities.find(
+                (i) =>
+                  i.tenantId === tenantId &&
+                  i.connectionId === key.connectionId &&
+                  i.subject === subject,
+              )
+              return row ? { id: row.id, clerkUserId: row.clerkUserId } : null
+            },
+            async link(input) {
+              const row = {
+                id: id(),
+                tenantId,
+                connectionId: key.connectionId,
+                ...input,
+                lastLoginAt: null,
+              }
+              identities.push(row)
+              return { id: row.id }
+            },
+          })
+        } finally {
+          lockLog.push(`unlock:${name}`)
+        }
+      })
+      locks.set(
+        name,
+        run.catch(() => {}),
+      )
+      return run
     },
     async connectionSecrets(tenantId, cid) {
       const c = connections.get(cid)
@@ -397,6 +510,8 @@ export function memoryStore(
     events,
     testRuns,
     secrets,
+    rules,
+    lockLog,
     fail,
   }
 }
@@ -430,8 +545,13 @@ export function memoryClerk(init: { users?: ClerkUserSnapshot[] } = {}) {
   const clerkSessions = new Map<string, ClerkSessionSnapshot>()
   const strategies = new Map<string, string | null>()
   const active = new Map<string, { id: string; createdAt: Date }[]>()
-  const fail = { mint: false, revokeSession: false }
+  const fail = { mint: false, revokeSession: false, updateProfile: false }
+  /** Runs inside `createUser` before Clerk's uniqueness is checked: a race's other half. */
+  const hooks: { beforeCreate?: (email: string) => Promise<void> | void } = {}
+  const created: string[] = []
+  const profiles: { userId: string; names: Record<string, string> }[] = []
   let n = 0
+  let made = 0
 
   const clerk: ClerkIdentity = {
     async mintSignInToken(input) {
@@ -470,6 +590,38 @@ export function memoryClerk(init: { users?: ClerkUserSnapshot[] } = {}) {
       return [...users.values()].filter((u) =>
         u.emails.some((e) => e.address === email),
       )
+    },
+    async createUser(input) {
+      await hooks.beforeCreate?.(input.email)
+      // Clerk's own uniqueness: one account per address in an instance.
+      if (
+        [...users.values()].some((u) => u.emails.some((e) => e.address === input.email))
+      )
+        return { outcome: "exists" }
+      // Like our instances: first and last name are required of every user.
+      if (!input.firstName || !input.lastName) return { outcome: "incomplete" }
+      const uid = `user_jit_${++made}`
+      users.set(
+        uid,
+        user({
+          id: uid,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          primaryEmailId: `idn_${uid}`,
+          emails: [{ id: `idn_${uid}`, address: input.email, verified: true }],
+          deleteSelfEnabled: true,
+        }),
+      )
+      created.push(uid)
+      calls.push(`createUser:${input.email}`)
+      return { outcome: "created", userId: uid }
+    },
+    async updateProfile(userId, names) {
+      if (fail.updateProfile) throw new Error("clerk down")
+      profiles.push({ userId, names: { ...names } as Record<string, string> })
+      const u = users.get(userId)!
+      if (names.firstName !== undefined) u.firstName = names.firstName
+      if (names.lastName !== undefined) u.lastName = names.lastName
     },
     async removePassword(userId) {
       calls.push(`removePassword:${userId}`)
@@ -545,6 +697,9 @@ export function memoryClerk(init: { users?: ClerkUserSnapshot[] } = {}) {
     strategies,
     active,
     fail,
+    hooks,
+    created,
+    profiles,
     redeem,
   }
 }
