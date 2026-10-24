@@ -715,6 +715,40 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
   for, and that every browser we support sends a SameSite=None cookie on a
   cross-site top-level form POST.
 
+### 2.17 What #342 settled for SCIM (2026-10-24)
+
+- **Directories belong to the workspace, not to a connection.** A provisioning
+  app need not be the SSO app, Google's directory (#343) has none, and a person
+  is active while ANY enabled directory says so. Disabling a directory freezes
+  it (its tokens stop, its vote stops counting); it never deprovisions.
+- **Tokens:** `i10_scim_` plus a 256-bit secret, shown once, stored as its
+  hash and found through a one-setting outsider policy. Rotation keeps the old
+  token for an overlap (default a day, at most a week). Issuing, creating and
+  enabling are an owner's with step-up; revoking and disabling are an admin's.
+- **Outbox, then apply.** Every SCIM write puts the directory rows, an outbox
+  entry and the audit row in one transaction; a job per person reads the row
+  as it is now and brings Clerk to it, so jobs are idempotent and order-free.
+  Lost jobs are re-kicked when the directory talks to us or its admins look.
+- **Nobody is put under management without a way in.** Creating or claiming
+  needs the address on a live proved domain (checked before Clerk is asked, so
+  a directory cannot probe who has an account) AND an active SSO connection
+  covering it; otherwise the row waits as `no_sso_connection`. Owners and
+  admins are taken over only through an existing link; a ban the directory did
+  not place wins; no name means no account (`profile_incomplete`).
+- **Roles:** people a directory adds join as members; their role comes from the
+  group rules (2.15) of the connection they first sign in through.
+- **Deactivated is refused at sign-in** (`deprovisioned`) for every account a
+  sign-in resolves to, so neither a kept identity link, claiming by address nor
+  JIT puts them back. The last owner is never deprovisioned (`last_owner`).
+- **Problems live on the row** (`conflict`), audited when they change, and the
+  directory is answered with success: an error would make the IdP retry and
+  flag the app for something only the workspace's admins can settle.
+- **Open:** no route deletes a directory (only disabling); a conflict is
+  retried by a new push or the console's retry, not by the kick; waiting-list
+  requests from a directory carry `via = 'directory'`, which #326's Requests UI
+  may show oddly. **Unverified against real tenants:** Okta's, Entra's and
+  Google's SCIM clients end to end.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

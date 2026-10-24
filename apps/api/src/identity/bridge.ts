@@ -102,8 +102,20 @@ export interface BridgeDeps {
    * table (#335): the people SSO never takes over (decision 7).
    */
   isExempt(tenantId: string, userId: string): Promise<boolean>
-  /** SCIM's pre-provisioned person for this subject (#342). None yet. */
-  preProvisioned?: (ctx: ResolveContext) => Promise<string | null>
+  /**
+   * SCIM's pre-provisioned person for this subject (#342): their Clerk user
+   * id, null for nobody, or `deprovisioned` when a directory knows the person
+   * and says they are switched off (the sign-in is refused, not resolved some
+   * other way).
+   */
+  preProvisioned?: (ctx: ResolveContext) => Promise<string | null | "deprovisioned">
+  /**
+   * Whether the workspace's directories have switched this account off (#342).
+   * Asked for every account a sign-in resolves to, however it was found:
+   * deprovisioning ends the managed row and the membership, not the identity
+   * link, so without this the person's next sign-in would put them back.
+   */
+  deprovisioned?: (tenantId: string, clerkUserId: string) => Promise<boolean>
   /**
    * Just-in-time creation (#341). Unset, an unknown person is refused
    * whatever the connection says; set, a connection with `jit_enabled`
@@ -856,6 +868,7 @@ async function resolve(
       if (!assertion.emailVerified) return { ok: false, reason: "email_unverified" }
       const ctx: ResolveContext = { tenantId, connection, assertion, email }
       const pre = (await d.preProvisioned?.(ctx)) ?? null
+      if (pre === "deprovisioned") return { ok: false, reason: "deprovisioned" }
       if (pre) {
         userId = pre
         path = "scim"
@@ -910,6 +923,8 @@ async function resolve(
     const user = await d.clerk.user(userId)
     if (!user) return { ok: false, reason: "no_account" }
     if (user.banned) return { ok: false, reason: "account_banned" }
+    if (await d.deprovisioned?.(tenantId, userId))
+      return { ok: false, reason: "deprovisioned" }
     if (await d.store.isBlocked(tenantId, email))
       return { ok: false, reason: "blocked" }
     const managed = await d.store.managedByUser(userId)

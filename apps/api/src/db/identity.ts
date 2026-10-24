@@ -709,3 +709,338 @@ export const workspaceSettings = identity.table(
     }),
   ],
 )
+
+// ── SCIM directories (#342, sso.md 2.3 and 2.7) ─────────────────────────────
+
+/**
+ * A company directory that provisions people into a workspace over SCIM 2.0:
+ * its base URL is `<SCIM_BASE_URL>/<id>`, its credentials are rows of
+ * `directory_tokens`.
+ *
+ * ⚠ ONE PER IdP APP, PER WORKSPACE, AND NOT TIED TO A CONNECTION. Okta and
+ * Entra provision through an app of their own that need not be the SSO app,
+ * Google's directory (#343) has no connection at all, a connection can be
+ * rebuilt (OIDC to SAML) without provisioning everybody again, and "active
+ * while any enabled directory says active" (sso.md 2.7) needs several per
+ * workspace. A person a directory provisions signs in through whichever of the
+ * workspace's connections covers their address (`directoryPreProvisioned`).
+ *
+ * ⚠ `enabled: false` STOPS THE DIRECTORY, IT DOES NOT DEPROVISION ANYBODY.
+ * Its tokens stop working and its "active" no longer keeps anybody in;
+ * nothing is taken away until a directory that is still enabled says so.
+ */
+export const directories = identity.table(
+  "directories",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** `okta`, `entra`, `google`, `generic`: which setup guide (#340) applies. */
+    provider: text("provider").notNull().default("generic"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("directories_tenant_idx").on(t.tenantId),
+    unique("directories_id_tenant_unique").on(t.id, t.tenantId),
+    check(
+      "directories_provider_check",
+      sql`"provider" in ('okta', 'entra', 'google', 'generic')`,
+    ),
+    pgPolicy("directories_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * A directory's bearer tokens.
+ *
+ * ⚠ ONLY THE SHA-256 OF A TOKEN IS EVER STORED, and the token itself is shown
+ * once, when it is made. A SCIM token can create and deprovision accounts.
+ *
+ * ⚠ ROTATION OVERLAPS. A new token gives every older live one an `expires_at`
+ * (the overlap the owner chose, zero for at once), so the IdP can be switched
+ * over without a window of failed pushes; `revoked_at` ends one at once.
+ *
+ * ⚠ `directory_tokens_hash_read`: a SCIM request knows no workspace, only the
+ * token it presents. The hash of that token reads exactly its own row, as a
+ * handoff code does in `login_attempts`, and the request is then served under
+ * the tenant that row names.
+ */
+export const directoryTokens = identity.table(
+  "directory_tokens",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    directoryId: uuid("directory_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    /** The first characters of the token, so the console can tell them apart. */
+    hint: text("hint").notNull(),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Written at most once a minute per token. */
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: "directory_tokens_directory_fk",
+      columns: [t.directoryId, t.tenantId],
+      foreignColumns: [directories.id, directories.tenantId],
+    }).onDelete("cascade"),
+    uniqueIndex("directory_tokens_hash_unique").on(t.tokenHash),
+    index("directory_tokens_directory_idx").on(t.directoryId),
+    pgPolicy("directory_tokens_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("directory_tokens_hash_read", {
+      for: "select",
+      using: sql`${t.tokenHash} = nullif(current_setting('app.scim_token', true), '')`,
+    }),
+  ],
+)
+
+/**
+ * A person as a directory sent them: the SCIM User resource, and what we made
+ * of it.
+ *
+ * ⚠ `resource` IS THE WHOLE RESOURCE AS STORED (core attributes, the
+ * enterprise extension, custom extension attributes), minus `id`, `meta`,
+ * `groups` and never a password. The columns beside it are what the API
+ * matches and filters on, re-read from `resource` on every write so the two
+ * cannot drift.
+ *
+ * ⚠ `clerk_user_id` IS WRITTEN BY THE APPLY JOB, NEVER BY A SCIM REQUEST. A
+ * directory decides who should exist; whether a Clerk account is made, claimed
+ * or refused is ours (identity/directory.ts), and why not is `conflict`.
+ *
+ * ⚠ A DELETE MARKS `deleted_at`; THE ROW GOES ONCE THE APPLY JOB HAS
+ * DEPROVISIONED THE PERSON. It is how the job still knows whose account it
+ * was. To SCIM the row is gone at once, and its userName is free again.
+ */
+export const directoryUsers = identity.table(
+  "directory_users",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    directoryId: uuid("directory_id").notNull(),
+    userName: text("user_name").notNull(),
+    externalId: text("external_id"),
+    displayName: text("display_name"),
+    givenName: text("given_name"),
+    familyName: text("family_name"),
+    /** The primary address, lowercased, or null when the resource has none. */
+    email: text("email"),
+    active: boolean("active").notNull().default(true),
+    resource: jsonb("resource").$type<Record<string, unknown>>().notNull().default({}),
+    clerkUserId: text("clerk_user_id"),
+    /** Why the person is not (fully) in: see `DIRECTORY_CONFLICTS`. */
+    conflict: text("conflict"),
+    conflictDetail: jsonb("conflict_detail").$type<Record<string, unknown>>(),
+    conflictAt: timestamp("conflict_at", { withTimezone: true }),
+    /**
+     * Deprovisioning in `account` mode banned the Clerk user, so reactivation
+     * may lift that ban. A ban without this is somebody else's, and wins.
+     */
+    bannedByDirectory: boolean("banned_by_directory").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: "directory_users_directory_fk",
+      columns: [t.directoryId, t.tenantId],
+      foreignColumns: [directories.id, directories.tenantId],
+    }).onDelete("cascade"),
+    unique("directory_users_id_tenant_unique").on(t.id, t.tenantId),
+    unique("directory_users_id_directory_tenant_unique").on(
+      t.id,
+      t.directoryId,
+      t.tenantId,
+    ),
+    // ⚠ CASE-INSENSITIVE, AS SCIM's userName IS (RFC 7643 4.1.1), and free
+    // again the moment the row is deleted.
+    uniqueIndex("directory_users_user_name_unique")
+      .on(t.directoryId, sql`lower(${t.userName})`)
+      .where(sql`${t.deletedAt} is null`),
+    // One row per person per directory: a second would be a second identity.
+    uniqueIndex("directory_users_clerk_user_unique")
+      .on(t.directoryId, t.clerkUserId)
+      .where(sql`${t.deletedAt} is null and ${t.clerkUserId} is not null`),
+    index("directory_users_tenant_user_idx").on(t.tenantId, t.clerkUserId),
+    index("directory_users_external_idx").on(t.directoryId, t.externalId),
+    index("directory_users_email_idx").on(t.tenantId, t.email),
+    check(
+      "directory_users_conflict_check",
+      sql`"conflict" is null or "conflict" in ('workspace_full', 'blocked', 'banned', 'domain_not_verified', 'address_taken', 'ambiguous_account', 'managed_elsewhere', 'role_exempt', 'already_linked', 'no_email', 'profile_incomplete', 'last_owner', 'account_deleted', 'no_sso_connection')`,
+    ),
+    pgPolicy("directory_users_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/** A group as a directory sent it. Its members are `directory_memberships`. */
+export const directoryGroups = identity.table(
+  "directory_groups",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    directoryId: uuid("directory_id").notNull(),
+    displayName: text("display_name").notNull(),
+    externalId: text("external_id"),
+    /** The resource minus `id`, `meta` and `members`. */
+    resource: jsonb("resource").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "directory_groups_directory_fk",
+      columns: [t.directoryId, t.tenantId],
+      foreignColumns: [directories.id, directories.tenantId],
+    }).onDelete("cascade"),
+    unique("directory_groups_id_tenant_unique").on(t.id, t.tenantId),
+    unique("directory_groups_id_directory_tenant_unique").on(
+      t.id,
+      t.directoryId,
+      t.tenantId,
+    ),
+    index("directory_groups_directory_idx").on(t.directoryId, t.displayName),
+    pgPolicy("directory_groups_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Who is in which group.
+ *
+ * ⚠ BOTH SIDES CARRY THE DIRECTORY AND THE TENANT, as composite foreign keys
+ * on `(id, directory_id, tenant_id)`: a group can only ever hold people of
+ * its own directory, in its own workspace, whatever id a request names.
+ */
+export const directoryMemberships = identity.table(
+  "directory_memberships",
+  {
+    groupId: uuid("group_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    directoryId: uuid("directory_id").notNull(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "directory_memberships_group_fk",
+      columns: [t.groupId, t.directoryId, t.tenantId],
+      foreignColumns: [
+        directoryGroups.id,
+        directoryGroups.directoryId,
+        directoryGroups.tenantId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "directory_memberships_user_fk",
+      columns: [t.userId, t.directoryId, t.tenantId],
+      foreignColumns: [
+        directoryUsers.id,
+        directoryUsers.directoryId,
+        directoryUsers.tenantId,
+      ],
+    }).onDelete("cascade"),
+    primaryKey({ columns: [t.groupId, t.userId] }),
+    index("directory_memberships_user_idx").on(t.userId),
+    pgPolicy("directory_memberships_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * The outbox: every SCIM change to a person, written in the SAME transaction
+ * as the change, for the apply job to carry to Clerk, the membership and our
+ * roles (sso.md 2.7). Clerk calls cannot sit inside a transaction; this is
+ * what makes "the directory said so" survive a crash between the two.
+ *
+ * ⚠ AN ENTRY NAMES A PERSON, NOT WHAT TO DO TO THEM. The job reads the row as
+ * it is NOW and brings Clerk to it, so entries can be applied late, twice or
+ * out of order and the outcome is the same; it then stamps `applied_at` on
+ * every entry it saw. A group change writes one entry per member it touched.
+ */
+export const directoryOutbox = identity.table(
+  "directory_outbox",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    directoryId: uuid("directory_id").notNull(),
+    directoryUserId: uuid("directory_user_id").notNull(),
+    /** What changed, for the record: `created`, `updated`, `deleted`, `group`. */
+    cause: text("cause").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    /** The last failure's short reason. Never a token or a payload. */
+    lastError: text("last_error"),
+  },
+  (t) => [
+    foreignKey({
+      name: "directory_outbox_user_fk",
+      columns: [t.directoryUserId, t.directoryId, t.tenantId],
+      foreignColumns: [
+        directoryUsers.id,
+        directoryUsers.directoryId,
+        directoryUsers.tenantId,
+      ],
+    }).onDelete("cascade"),
+    index("directory_outbox_pending_idx")
+      .on(t.tenantId, t.directoryId, t.createdAt)
+      .where(sql`${t.appliedAt} is null`),
+    index("directory_outbox_user_idx").on(t.directoryUserId),
+    check(
+      "directory_outbox_cause_check",
+      sql`"cause" in ('created', 'updated', 'deleted', 'group')`,
+    ),
+    pgPolicy("directory_outbox_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)

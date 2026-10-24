@@ -56,6 +56,7 @@ import {
   type InternalIdentityDeps,
   type SsoRouteDeps,
 } from "./routes/sso.js"
+import { createScimRoutes, type ScimRouteDeps } from "./routes/scim.js"
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
@@ -154,6 +155,8 @@ export interface AppDeps {
   ssoGate?: SsoGateReader
   /** The SSO bridge's routes (#337), at `/sso`. */
   sso?: SsoRouteDeps
+  /** The SCIM server (#342), at `/scim/v2/<directory id>`. */
+  scim?: ScimRouteDeps
   /** The Clerk gateway's managed-account lookup (#337), at `/internal/identity`. */
   internalIdentity?: InternalIdentityDeps
   /**
@@ -540,6 +543,9 @@ export function createApp(deps: AppDeps = {}) {
   // ⚠ OUTSIDE THE OPENAPI DOCUMENT, like `/console`: the sign-in bridge and
   // the gateway's lookup are ours, not the product's API.
   app.route("/sso", createSsoRoutes(deps.sso))
+  // ⚠ SCIM's OWN ERROR SHAPE AND ITS OWN AUTHENTICATION: a directory's bearer
+  // token, not a session or an API key. See routes/scim.ts.
+  app.route("/scim/v2", createScimRoutes(deps.scim))
   app.route("/internal/identity", createInternalIdentityRoutes(deps.internalIdentity))
 
   // ⚠ ALSO OUTSIDE THE OPENAPI DOCUMENT, AND NOT FOR THE SAME REASON. The two

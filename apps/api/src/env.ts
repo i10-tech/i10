@@ -200,6 +200,18 @@ const schema = z.object({
   IDENTITY_TEST_ENGINE: z.enum(["on", "off"]).default("off"),
 
   /**
+   * Where SCIM directories (#342) are reached by the IdPs that provision into
+   * them: a directory's base URL is `<SCIM_BASE_URL>/<directory id>`. This API's
+   * own public origin is not configured anywhere else, hence a setting of its
+   * own; it must be the address the IdP's servers can reach, and the SCIM
+   * routes are served at `/scim/v2` of this process.
+   */
+  SCIM_BASE_URL: z
+    .url()
+    .refine((v) => !v.endsWith("/"), "SCIM_BASE_URL must not end with a slash.")
+    .default("https://api.i10.tech/scim/v2"),
+
+  /**
    * OUR Google OAuth client, for one-click Google Workspace sign-in (#338,
    * sso.md 2.9). Its authorised redirect URI is `<AUTH_ORIGINS[0]>/sso/callback`.
    *

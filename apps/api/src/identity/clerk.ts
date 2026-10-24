@@ -1,6 +1,7 @@
 import type { ClerkClient } from "@clerk/backend"
 import { notFound } from "../mailboxes/clerk.js"
 import { TICKET_SECONDS } from "./model.js"
+import type { ClerkProvisioning } from "./directory-ports.js"
 import type { ClerkIdentity, ClerkUserSnapshot } from "./ports.js"
 
 /**
@@ -266,6 +267,67 @@ export function clerkIdentityApi(
     },
     async ban(userId) {
       await clerk.users.banUser(userId)
+    },
+  }
+}
+
+/**
+ * `ClerkProvisioning` (#342) on Clerk's backend API.
+ *
+ * ⚠ ONLY WHAT CLERK SAID IS AN OUTCOME. `form_identifier_exists` is `taken`
+ * and `form_data_missing` is `incomplete`; every other failure throws, and the
+ * apply job retries it. An outage is never a "no".
+ */
+export function clerkProvisioningApi(clerk: ClerkClient): ClerkProvisioning {
+  return {
+    /*
+     * ⚠ NO PASSWORD, NO LEGAL CHECKS, ONE VERIFIED ADDRESS. The directory vouches
+     * for the address (and we have checked it is on a domain the workspace
+     * proved), so the account is made verified, as JIT makes it, and its only
+     * way in is the bridge's ticket. `externalId` is the directory row, so a
+     * Clerk user can be traced to the record that made it.
+     */
+    async createUser({ email, firstName, lastName, externalId }) {
+      try {
+        const made = await clerk.users.createUser({
+          emailAddress: [email],
+          skipPasswordRequirement: true,
+          skipLegalChecks: true,
+          firstName,
+          lastName,
+          externalId,
+        })
+        return { outcome: "created", id: made.id }
+      } catch (error) {
+        const codes = codesOf(error)
+        if (codes.includes("form_identifier_exists")) return { outcome: "taken" }
+        // ⚠ THE INSTANCE REQUIRES FIRST AND LAST NAME (sso.md 2.15).
+        if (codes.includes("form_data_missing")) return { outcome: "incomplete" }
+        throw error
+      }
+    },
+
+    async addPrimaryEmail(userId, email) {
+      try {
+        await clerk.emailAddresses.createEmailAddress({
+          userId,
+          emailAddress: email,
+          verified: true,
+          primary: true,
+        })
+        return "added"
+      } catch (error) {
+        if (codesOf(error).includes("form_identifier_exists")) return "taken"
+        throw error
+      }
+    },
+
+    async makePrimary(userId, emailId) {
+      await clerk.users.updateUser(userId, { primaryEmailAddressID: emailId })
+    },
+
+    async unban(userId) {
+      await clerk.users.unbanUser(userId)
     },
   }
 }

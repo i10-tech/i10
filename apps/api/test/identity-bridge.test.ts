@@ -7,7 +7,11 @@ import {
   type BridgeDeps,
 } from "../src/identity/bridge.js"
 import { testEngine } from "../src/identity/test-engine.js"
-import { normaliseEmail, type Assertion } from "../src/identity/model.js"
+import {
+  normaliseEmail,
+  refusalMessage,
+  type Assertion,
+} from "../src/identity/model.js"
 import { mayRemove } from "../src/console/roles.js"
 import {
   CONNECTION,
@@ -1016,5 +1020,106 @@ describe("who may act on whom", () => {
     expect(mayRemove("admin", "member")).toBe("ok")
     expect(mayRemove("admin", "owner")).toBe("owner_only")
     expect(mayRemove("member", "member")).toBe("forbidden")
+  })
+})
+
+describe("a person a company directory has switched off (#342)", () => {
+  async function attempt(
+    w: ReturnType<typeof world>,
+    over: Partial<Assertion> = {},
+    binding = BINDING,
+  ) {
+    const { state } = await w.start()
+    return completeLogin(w.deps, {
+      protocol: "test",
+      state,
+      binding,
+      assertion: w.assertion(over),
+    })
+  }
+  const reasons = (w: ReturnType<typeof world>) =>
+    w.store.events.filter((e) => e.type === "sign_in.failed").map((e) => e.reason)
+
+  it("is refused instead of claimed by address, whatever Clerk holds under that address", async () => {
+    const w = world({ users: [user()] })
+    w.deps.preProvisioned = async () => "deprovisioned"
+    const done = await attempt(w)
+    expect(done).toEqual({ outcome: "refused", reason: "deprovisioned" })
+    expect(reasons(w)).toEqual(["deprovisioned"])
+    expect(w.store.managed.size).toBe(0)
+    expect(w.store.identities).toEqual([])
+    expect(w.joined).toEqual([])
+    expect(w.clerk.calls).toEqual([])
+    expect(refusalMessage("deprovisioned")).toBe(
+      "Your administrator has removed your access.",
+    )
+  })
+
+  it("is not made again by JIT, even on a connection that allows it", async () => {
+    const w = world({
+      users: [],
+      store: { connections: [connection({ jitEnabled: true })] },
+    })
+    w.deps.jit = true
+    w.deps.preProvisioned = async () => "deprovisioned"
+    expect(await attempt(w)).toEqual({ outcome: "refused", reason: "deprovisioned" })
+    expect(w.clerk.created).toEqual([])
+    expect(w.clerk.calls).toEqual([])
+    expect(w.joined).toEqual([])
+  })
+
+  it("is refused even with an identity link of their own: deprovisioning ends the managed row, not the link", async () => {
+    const w = world({ users: [user()] })
+    await w.store.store.link(TENANT, {
+      connectionId: CONNECTION,
+      subject: "okta|ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+    })
+    // Not switched off: the linked person signs in.
+    w.deps.deprovisioned = async () => false
+    expect((await attempt(w)).outcome).toBe("signed_in")
+    // Switched off: the same sign-in is refused, and joins nobody.
+    w.joined.length = 0
+    w.deps.deprovisioned = async (tenantId, userId) => {
+      expect([tenantId, userId]).toEqual([TENANT, "user_ada"])
+      return true
+    }
+    expect(await attempt(w)).toEqual({ outcome: "refused", reason: "deprovisioned" })
+    expect(w.joined).toEqual([])
+    expect(reasons(w)).toEqual(["deprovisioned"])
+  })
+
+  it("is refused when the account was found by address too, not only by link", async () => {
+    const w = world({ users: [user()] })
+    w.deps.deprovisioned = async () => true
+    expect(await attempt(w)).toEqual({ outcome: "refused", reason: "deprovisioned" })
+    expect(w.store.managed.size).toBe(0)
+  })
+
+  it("lets the directory's own account through, as a pre-provisioned person", async () => {
+    const w = world({ users: [user()] })
+    w.deps.preProvisioned = async () => "user_ada"
+    w.deps.deprovisioned = async () => false
+    expect((await attempt(w)).outcome).toBe("signed_in")
+    expect(w.store.managed.get("user_ada")).toMatchObject({ reason: "scim" })
+  })
+
+  it("is reported in a test run as a refusal, creating nobody", async () => {
+    const w = world({ users: [user()] })
+    w.deps.preProvisioned = async () => "deprovisioned"
+    const { state } = await w.start("test_run")
+    const done = await completeLogin(w.deps, {
+      protocol: "test",
+      state,
+      binding: BINDING,
+      assertion: w.assertion(),
+    })
+    expect(done).toMatchObject({ outcome: "tested", passed: false })
+    expect(w.store.testRuns[0]).toMatchObject({
+      outcome: "failed",
+      reason: "deprovisioned",
+      resolution: { refused: "deprovisioned" },
+    })
   })
 })

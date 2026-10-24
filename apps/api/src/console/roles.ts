@@ -184,6 +184,8 @@ export type RoleSource =
   | "backfill"
   /** From an SSO connection's group-to-role rules (#341), at JIT or at sign-in. */
   | "sso"
+  /** Added by a company directory over SCIM (#342): the default role, until SSO's rules apply. */
+  | "scim"
 
 export interface RoleRow {
   userId: string
@@ -324,8 +326,8 @@ export function joinedByRule(
     userId: string
     membershipId: string
     role: JoinRole
-    /** `sso` for a JIT membership (#341); an access rule's otherwise. */
-    source?: "access_rule" | "sso"
+    /** `sso` for a JIT membership (#341), `scim` for a directory's (#342); an access rule's otherwise. */
+    source?: "access_rule" | "sso" | "scim"
   },
 ): Decision<"set"> {
   return {
@@ -916,7 +918,7 @@ export async function addMember(
     orgId: string
     userId: string
     role: JoinRole
-    source?: "access_rule" | "sso"
+    source?: "access_rule" | "sso" | "scim"
   },
 ): Promise<AddOutcome> {
   const made = await d.clerk.create(input.orgId, input.userId)

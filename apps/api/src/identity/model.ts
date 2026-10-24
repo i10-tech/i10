@@ -258,6 +258,12 @@ export type Refusal =
    * The admin maps the claim; nobody is made up from the address.
    */
   | "profile_incomplete"
+  /**
+   * Their company's directory (SCIM, #342) has switched them off: nobody
+   * signs a person back in, claims them by address or makes them again by JIT
+   * while the directory that deactivated them still says so.
+   */
+  | "deprovisioned"
 
 /** What the person is told. Never which check failed in detail. */
 export function refusalMessage(reason: Refusal): string {
@@ -277,6 +283,8 @@ export function refusalMessage(reason: Refusal): string {
       return "This workspace is full right now. We've asked its admins to add you."
     case "profile_incomplete":
       return "Your identity provider did not send your name. Ask your administrator."
+    case "deprovisioned":
+      return "Your administrator has removed your access."
     case "blocked":
     case "account_banned":
       return "Your administrator has not allowed this account."

@@ -28,6 +28,7 @@ import { mountIdentityGroups } from "./identity-groups.js"
 import { mountIdentitySaml, type SamlConsoleDeps } from "./identity-saml.js"
 import { samlReady } from "../../identity/saml.js"
 import { samlPresetOf } from "../../identity/saml-presets.js"
+import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
 
 /**
  * The identity core's console API (#337). The screens are #340's; these are
@@ -46,6 +47,7 @@ import { samlPresetOf } from "../../identity/saml-presets.js"
  *   ...    /identity/connections/:id/oidc[/secret|/keys] OIDC settings (#338, identity-oidc.ts)
  *   ...    /identity/connections/:id/group-rules[/:ruleId] group-to-role rules (#341, identity-groups.ts)
  *   ...    /identity/connections/:id/saml[/...]         SAML settings (#339, identity-saml.ts)
+ *   ...    /identity/directories[/:id[/tokens|/conflicts]] SCIM directories (#342, identity-scim.ts)
  *
  * ⚠ EVERY ROUTE CHECKS OUR ROLES TABLE (#335): `sso:manage` for setup,
  * `owners:manage` for what deprovisioning does, and the removal rule
@@ -64,6 +66,8 @@ export interface IdentityConsoleDeps {
   oidc?: OidcConsoleDeps
   /** The SAML engine's console half (#339). Absent: SAML routes answer 501. */
   saml?: SamlConsoleDeps
+  /** SCIM directories (#342). Absent: their routes answer 501. */
+  scim?: ScimConsoleDeps
   deprovision: DeprovisionDeps
   log: Logger
 }
@@ -145,6 +149,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentityOidc(app, d)
   mountIdentityGroups(app, d)
   mountIdentitySaml(app, d)
+  mountIdentityScim(app, d)
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")

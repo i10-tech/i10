@@ -43,7 +43,24 @@ import {
   type RolesDeps,
 } from "./console/roles.js"
 import { identityStore } from "./identity/store.js"
-import { clerkIdentityApi } from "./identity/clerk.js"
+import { clerkIdentityApi, clerkProvisioningApi } from "./identity/clerk.js"
+import { directoryStore } from "./identity/scim-store.js"
+import {
+  applyDirectoryUser,
+  directoryDeprovisioned,
+  directoryKicker,
+  directoryPreProvisioned,
+  safeError,
+  scheduleEntries,
+  type DirectoryDeps,
+} from "./identity/directory.js"
+import {
+  createDirectoryQueue,
+  directoryScheduler,
+  startDirectoryWorker,
+} from "./queue/directory-queue.js"
+import type { OutboxEntry } from "./identity/directory-ports.js"
+import type { AuditEvent } from "./identity/ports.js"
 import { ssoGate } from "./identity/gate.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
@@ -1289,6 +1306,22 @@ const consoleFreshAuth = withSsoFreshness(
   log,
 )
 const ssoJoinRequests = joinStore(db)
+/*
+ * SCIM directories (#342): the store, the apply queue and the kick that finds
+ * entries nobody scheduled. The routes and the console schedule after their
+ * transaction commits; a Redis failure there is logged, never the request's.
+ */
+const directories = directoryStore(db)
+const directoryQueue = createDirectoryQueue({ redis: queueRedis })
+const directoryEnqueue = directoryScheduler(directoryQueue)
+const scheduleDirectory = (tenantId: string, entries: readonly OutboxEntry[]) =>
+  scheduleEntries({ enqueue: directoryEnqueue, log }, tenantId, entries)
+const kickDirectory = directoryKicker({
+  store: directories,
+  enqueue: directoryEnqueue,
+  log,
+})
+const scimBaseUrl = (directoryId: string) => `${env.SCIM_BASE_URL}/${directoryId}`
 const bridge = {
   store: identity,
   clerk: identityClerk,
@@ -1324,6 +1357,9 @@ const bridge = {
   },
   // JIT (#341): available; each connection's `jit_enabled` decides.
   jit: true,
+  // SCIM (#342): a person a directory provisioned, and one it switched off.
+  preProvisioned: directoryPreProvisioned({ store: directories, log }),
+  deprovisioned: directoryDeprovisioned({ store: directories }),
   syncRole: (input: { tenantId: string; userId: string; role: JoinRole }) =>
     syncRole(roles, input),
   // ⚠ THE SAME WAITING LIST AUTO-JOIN FILES INTO (#327): `full`, under Requests.
@@ -1336,6 +1372,12 @@ const identityConsole = {
   clerk: identityClerk,
   gate: gateChecker,
   protocols: [...engines.keys()],
+  scim: {
+    store: directories,
+    baseUrl: scimBaseUrl,
+    kick: kickDirectory,
+    schedule: scheduleDirectory,
+  },
   ...(oidc && authOrigin
     ? {
         oidc: {
@@ -1380,6 +1422,38 @@ const identityConsole = {
   },
   log,
 }
+
+/*
+ * The apply worker (#342) runs in this process, not in worker.ts: only here are
+ * `roles` (the membership calls), `members` (our plan's capacity) and the
+ * deprovisioning rules composed, and its jobs are immediate, so it does not
+ * need the worker's always-on guarantee. It is closed first on SIGTERM.
+ */
+const directoryDeps: DirectoryDeps = {
+  store: directories,
+  identity,
+  clerk: identityClerk,
+  provisioning: clerkProvisioningApi(clerk),
+  deprovision: identityConsole.deprovision,
+  isMember: (orgId, userId) => roles.clerk.isMember(orgId, userId),
+  seats: (tenantId, orgId) => beforeSeatUse(members, tenantId, orgId),
+  join: (input) =>
+    addRuleMember(roles, {
+      orgId: input.orgId,
+      userId: input.userId,
+      role: input.role,
+      source: "scim",
+    }),
+  isExempt: bridge.isExempt,
+  forget: (input) => gateChecker.forget(input),
+  log,
+}
+const directoryWorker = startDirectoryWorker({
+  queue: directoryQueue,
+  apply: (job) => applyDirectoryUser(directoryDeps, job),
+  name: `api-${process.pid}:directory-apply`,
+  log,
+})
 
 const app = createApp({
   suppressions,
@@ -1658,6 +1732,16 @@ const app = createApp({
         },
       }
     : {}),
+  scim: {
+    store: directories,
+    baseUrl: scimBaseUrl,
+    schedule: scheduleDirectory,
+    kick: kickDirectory,
+    record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
+    take: fixedWindow(cache),
+    contextSecret: env.CLIENT_CONTEXT_SECRET,
+    log,
+  },
   internalIdentity: {
     secret: env.IDENTITY_GATEWAY_SECRET,
     managedByIdentifier: (identifier: string) =>
@@ -2169,8 +2253,15 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     // contract `server.close(cb)` had. Passing `true` would close active
     // connections immediately, which is precisely the dropped-request
     // behaviour this block exists to prevent.
-    void server
-      .stop()
+    // ⚠ THE DIRECTORY WORKER FIRST (#342): a job in flight finishes its Clerk
+    // calls and its marks before the pool and Redis go; an interrupted one is
+    // retried from the outbox either way, this just avoids doing half of it.
+    void directoryWorker
+      .close(15_000)
+      .catch((err) =>
+        log.warn({ ...safeError(err) }, "could not close the directory worker"),
+      )
+      .then(() => server.stop())
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
       .then(() =>
