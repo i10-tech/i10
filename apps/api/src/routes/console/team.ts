@@ -329,6 +329,8 @@ export function mountTeam(app: Hono, d: ConsoleDeps): void {
     })
     switch (changed.outcome) {
       case "ok":
+        // ⚠ A ROLE DECIDES WHO IS EXEMPT FROM "REQUIRED" SSO (#340).
+        d.identity?.enforcement?.forgetTenant(tenantId)
         return c.json({ user_id: target, role: changed.to })
       case "invalid":
         return c.json(validation("Pick a role: owner, admin or member."), 422)

@@ -597,7 +597,53 @@ export const bypassUsers = identity.table(
   ],
 )
 
-/** Setup links for a customer's IT contact (#340): hashed, scoped, revocable. */
+/**
+ * Bypass sign-ins (#340, decision 7): a session of somebody on a connection's
+ * bypass list that the gate let through without SSO.
+ *
+ * ⚠ ONE ROW PER WORKSPACE AND SESSION, BY PRIMARY KEY, and that is what makes
+ * `sso.bypass_used` once per session across every API process: the gate's
+ * insert and the audit row share one transaction, and only the insert that
+ * made the row writes the event.
+ */
+export const bypassSignIns = identity.table(
+  "bypass_sign_ins",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    seenAt: timestamp("seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "bypass_sign_ins_connection_fk",
+      columns: [t.connectionId, t.tenantId],
+      foreignColumns: [connections.id, connections.tenantId],
+    }).onDelete("cascade"),
+    primaryKey({ columns: [t.tenantId, t.sessionId] }),
+    pgPolicy("bypass_sign_ins_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Setup links for a customer's IT contact (#340): hashed, scoped, revocable.
+ *
+ * ⚠ ONE CONNECTION, AND ONLY WHILE IT IS `draft` OR `testing`. The routes
+ * (routes/sso-setup.ts) read the connection at every request; activating it
+ * revokes its links as well, so an owner moving it back to setup later does
+ * not bring an old link back to life.
+ *
+ * ⚠ `setup_links_hash_read`: a setup request knows no workspace, only the
+ * token in its URL. The hash of that token reads exactly its own row, as a
+ * SCIM token does in `directory_tokens`.
+ */
 export const setupLinks = identity.table(
   "setup_links",
   {
@@ -607,7 +653,7 @@ export const setupLinks = identity.table(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    connectionId: uuid("connection_id"),
+    connectionId: uuid("connection_id").notNull(),
     tokenHash: text("token_hash").notNull(),
     scopes: text("scopes")
       .array()
@@ -633,6 +679,10 @@ export const setupLinks = identity.table(
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("setup_links_hash_read", {
+      for: "select",
+      using: sql`${t.tokenHash} = nullif(current_setting('app.setup_token', true), '')`,
     }),
   ],
 )
@@ -683,8 +733,14 @@ export const events = identity.table(
 )
 
 /**
- * Per-workspace identity settings (decision 5): what deprovisioning does.
- * No row means the default, `membership`.
+ * Per-workspace identity settings: what deprovisioning does (decision 5), and
+ * the owner exemption (decision 7, #340). No row means the defaults,
+ * `membership` and exempt.
+ *
+ * ⚠ TURNING THE EXEMPTION OFF TAKES TWO OWNERS. The first one's request is
+ * `exemption_off_requested_by` / `_at`; a different owner's approval within a
+ * day applies it, as one compare-and-set on these columns. Turning it back on
+ * is one owner's, and clears any request.
  */
 export const workspaceSettings = identity.table(
   "workspace_settings",
@@ -694,6 +750,13 @@ export const workspaceSettings = identity.table(
       .references(() => tenants.id, { onDelete: "cascade" }),
     /** `membership` (remove from this workspace) or `account` (ban everywhere). */
     deprovision: text("deprovision").notNull().default("membership"),
+    /** Unmanaged owners and admins are exempt from "required" SSO, and must hold a passkey. */
+    ownerExemption: boolean("owner_exemption").notNull().default(true),
+    /** The owner who asked to turn the exemption off, until another owner approves. */
+    exemptionOffRequestedBy: text("exemption_off_requested_by"),
+    exemptionOffRequestedAt: timestamp("exemption_off_requested_at", {
+      withTimezone: true,
+    }),
     updatedBy: text("updated_by"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -701,6 +764,10 @@ export const workspaceSettings = identity.table(
     check(
       "workspace_settings_deprovision_check",
       sql`"deprovision" in ('membership', 'account')`,
+    ),
+    check(
+      "workspace_settings_exemption_request_check",
+      sql`("exemption_off_requested_by" is null) = ("exemption_off_requested_at" is null)`,
     ),
     pgPolicy("workspace_settings_workspace", {
       for: "all",

@@ -1,5 +1,6 @@
 import type { ClerkClient } from "@clerk/backend"
 import type { FreshAuthReader, SsoGateReader } from "../middleware/session.js"
+import type { EnforcementGate } from "./enforcement.js"
 import type { SsoGateChecker } from "./gate.js"
 
 /**
@@ -64,15 +65,33 @@ export function startUrlFor(
   }
 }
 
+/**
+ * ⚠ WITH A TENANT IT ASKS ONLY THE WORKSPACE'S ENFORCEMENT (#340): the
+ * managed-account check already ran for this request, without one, before
+ * the workspace was resolved. No `enforcement` wired means none is enforced,
+ * which is only ever a test's or a process without the identity core.
+ */
 export function gateReader(
   sessionIds: SessionIdReader,
   checker: SsoGateChecker,
   startUrl: (connectionId: string | null) => string | null,
+  enforcement?: EnforcementGate,
 ): SsoGateReader {
-  return async (request, userId) => {
+  return async (request, userId, tenantId) => {
     const ids = await sessionIds(request)
     // ⚠ A DIFFERENT USER THAN THE VERIFIER SAW IS A CONTRADICTION, not a pass.
     if (ids.status !== "ok" || ids.userId !== userId) return { status: "unknown" }
+    if (tenantId !== undefined) {
+      if (!enforcement) return { status: "pass" }
+      const enforced = await enforcement.check(tenantId, userId, ids.sessionId)
+      return enforced.status === "sso_required"
+        ? {
+            status: "sso_required",
+            startUrl: startUrl(enforced.connectionId),
+            reason: "enforced",
+          }
+        : enforced
+    }
     const verdict = await checker.check(userId, ids.sessionId)
     if (verdict.status === "sso_required")
       return {

@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono"
 import { z } from "zod"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
-import { readIdpUrl } from "./identity-oidc.js"
+import { readIdpUrl, type SettingsActor } from "./identity-oidc.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import { can, type Permission } from "../../console/roles.js"
 import { OWNER_GUARDED, type Connection } from "../../identity/model.js"
@@ -111,6 +111,315 @@ const certView = (c: {
   source: c.source,
 })
 
+/** The connection a settings write is for, already loaded and allowed. */
+export interface SamlTarget {
+  id: NonNullable<ConsoleDeps["identity"]>
+  saml: SamlConsoleDeps
+  connection: Connection
+  tenantId: string
+}
+
+const actorData = (actor: SettingsActor) =>
+  actor.setupLinkId ? { setupLinkId: actor.setupLinkId } : {}
+
+/** What the setup screen shows. Never a secret: our private key is write-only. */
+export async function samlSetupView(connection: Connection, s: SamlConsoleDeps) {
+  const preset = samlPresetOf(connection.provider)
+  const stored = storedSaml(connection)
+  const certs = await s.store.certificates(connection.tenantId, connection.id)
+  const at = s.engine.endpoints(connection.id)
+  return {
+    provider: connection.provider,
+    label: preset?.label ?? connection.provider,
+    entityId: at.entityId,
+    acsUrl: at.acsUrl,
+    sloUrl: at.sloUrl,
+    metadataUrl: at.entityId,
+    entityIdHint: preset?.entityIdHint ?? null,
+    requires: preset?.requires ?? [],
+    idpEntityId: stored.idpEntityId ?? null,
+    ssoUrl: stored.ssoUrl ?? null,
+    idpSloUrl: stored.sloUrl ?? null,
+    idpMetadataUrl: stored.metadataUrl ?? null,
+    metadataFetchedAt: stored.metadataFetchedAt ?? null,
+    metadataError: stored.metadataError ?? null,
+    nameIdFormat: stored.nameIdFormat ?? preset?.nameIdFormat ?? null,
+    signRequests: stored.signRequests === true,
+    requireEncryption: stored.requireEncryption === true,
+    idpInitiated: stored.idpInitiated === true,
+    subjectAttribute: stored.subjectAttribute ?? null,
+    mfaContextClasses: stored.mfaContextClasses ?? [],
+    spCertificates: (stored.spCertificates ?? []).map((k) => ({
+      fingerprint: k.fingerprint,
+      certificate: k.certificate,
+      notAfter: k.notAfter,
+      createdAt: k.createdAt,
+    })),
+    certificates: certs.map(certView),
+    ready: samlReady(connection, certs),
+  }
+}
+
+/** Draws our SP key the first time a connection is set up, under the secrets lock. */
+async function ensureSpKey(
+  connection: Connection,
+  loaded: { id: NonNullable<ConsoleDeps["identity"]>; tenantId: string },
+  actor: SettingsActor,
+) {
+  if ((storedSaml(connection).spCertificates?.length ?? 0) > 0) return connection
+  const made = await newSpKey(`i10 SAML ${connection.id}`)
+  const after = await loaded.id.store.setConnectionSecrets(
+    loaded.tenantId,
+    connection.id,
+    (now) => {
+      const current = storedSaml({ config: now.config })
+      if ((current.spCertificates?.length ?? 0) > 0) return now
+      return {
+        secrets: {
+          ...now.secrets,
+          saml: { ...sealedSaml(now.secrets), spKeys: [made.privateKey] },
+        },
+        config: {
+          ...now.config,
+          saml: { ...current, spCertificates: [made.publicCert] },
+        },
+      }
+    },
+  )
+  if (after)
+    await loaded.id.store.record(loaded.tenantId, {
+      type: "connection.key_rotated",
+      actorUserId: actor.userId,
+      connectionId: connection.id,
+      data: {
+        kind: "saml_sp",
+        fingerprint: made.publicCert.fingerprint,
+        previous: null,
+        ...actorData(actor),
+      },
+    })
+  return after ?? connection
+}
+
+/**
+ * Metadata from the request (a URL to fetch or a file), or a response that
+ * says why not.
+ *
+ * ⚠ THE GUARD'S REASON IS NEVER REPEATED (sso.md 2.14): it can name what a
+ * host resolved to inside our network.
+ */
+async function readMetadata(
+  c: Context,
+  s: SamlConsoleDeps,
+  input: { url?: string | null; xml?: string },
+  connectionId: string,
+): Promise<{ metadata: IdpMetadata } | { error: Response }> {
+  if (input.xml !== undefined) {
+    const parsed = parseIdpMetadata(input.xml)
+    return "error" in parsed
+      ? { error: c.json(validation(parsed.error), 422) }
+      : { metadata: parsed }
+  }
+  try {
+    return { metadata: await s.engine.fetchMetadata(input.url!) }
+  } catch (error) {
+    if (error instanceof SamlMisconfigured)
+      return {
+        error: c.json(
+          validation(`We could not use that metadata: ${error.message}`),
+          422,
+        ),
+      }
+    s.log.warn(
+      { connectionId, err: error instanceof Error ? error.message : "unknown" },
+      "SAML metadata could not be fetched through the egress guard",
+    )
+    return {
+      error: c.json(
+        validation(
+          "We could not reach that metadata URL from the internet. Check the URL and that it is public.",
+        ),
+        422,
+      ),
+    }
+  }
+}
+
+/**
+ * `PUT .../saml`: the settings, metadata read through the egress guard, the
+ * trust rule, saved and audited. Shared by the console and setup links
+ * (routes/sso-setup.ts), as `putOidcSettings` is.
+ */
+export async function putSamlSettings(
+  c: Context,
+  t: SamlTarget,
+  input: Record<string, unknown>,
+  actor: SettingsActor,
+  trustRefusal: () => Promise<Response | null>,
+): Promise<Response> {
+  const { id, saml, tenantId } = t
+  let connection = t.connection
+  const parsed = SamlInput.safeParse(input)
+  if (!parsed.success)
+    return c.json(validation("Those SAML settings are not valid."), 422)
+  const body = parsed.data
+  const current = storedSaml(connection)
+  const next: StoredSaml = { ...current }
+
+  if (body.metadataUrl !== undefined) {
+    if (body.metadataUrl === null || body.metadataUrl === "") next.metadataUrl = null
+    else {
+      const url = readIdpUrl(body.metadataUrl, "metadataUrl", { query: true })
+      if (typeof url !== "string") return c.json(validation(url.error), 422)
+      next.metadataUrl = url
+    }
+  }
+  for (const key of ["ssoUrl", "sloUrl"] as const) {
+    const value = body[key]
+    if (value === undefined) continue
+    if (value === null || value === "") {
+      if (key === "ssoUrl")
+        return c.json(validation("ssoUrl must be an https URL."), 422)
+      next.sloUrl = null
+      continue
+    }
+    const url = readIdpUrl(value, key, { query: true })
+    if (typeof url !== "string") return c.json(validation(url.error), 422)
+    next[key] = url
+  }
+  if (body.idpEntityId !== undefined) next.idpEntityId = body.idpEntityId
+  if (body.nameIdFormat !== undefined) next.nameIdFormat = body.nameIdFormat
+  for (const key of ["signRequests", "requireEncryption", "idpInitiated"] as const)
+    if (body[key] !== undefined) next[key] = body[key]
+  if (body.subjectAttribute !== undefined) next.subjectAttribute = body.subjectAttribute
+  if (body.mfaContextClasses !== undefined)
+    next.mfaContextClasses = [...new Set(body.mfaContextClasses)]
+
+  // ⚠ METADATA FILLS IN THE IdP's SETTINGS AND ITS CERTIFICATES, as one change.
+  let metadata: IdpMetadata | null = null
+  const fromUrl = body.metadataUrl !== undefined && next.metadataUrl
+  if (body.metadataXml !== undefined || fromUrl) {
+    const read = await readMetadata(
+      c,
+      saml,
+      body.metadataXml !== undefined
+        ? { xml: body.metadataXml }
+        : { url: next.metadataUrl },
+      connection.id,
+    )
+    if ("error" in read) return read.error
+    metadata = read.metadata
+    next.idpEntityId = metadata.entityId
+    next.ssoUrl = metadata.ssoUrl
+    next.sloUrl = metadata.sloUrl
+    next.sloResponseUrl = metadata.sloResponseUrl
+    if (metadata.wantAuthnRequestsSigned) next.signRequests = true
+    if (fromUrl) {
+      next.metadataFetchedAt = new Date().toISOString()
+      next.metadataError = null
+    }
+  }
+
+  const changed = ([...TRUST_FIELDS, "signRequests"] as const).filter(
+    (k) => JSON.stringify(next[k] ?? null) !== JSON.stringify(current[k] ?? null),
+  )
+  const trust = changed.filter((k) => (TRUST_FIELDS as readonly string[]).includes(k))
+  if (trust.length || metadata) {
+    const refusal = await trustRefusal()
+    if (refusal) return refusal
+  }
+  connection = await ensureSpKey(connection, { id, tenantId }, actor)
+  const after = await id.store.setConnectionSecrets(tenantId, connection.id, (now) => ({
+    secrets: now.secrets,
+    config: {
+      ...now.config,
+      saml: {
+        ...next,
+        spCertificates: storedSaml({ config: now.config }).spCertificates ?? [],
+      },
+    },
+  }))
+  if (!after) return c.json(notFound(), 404)
+  let certificates: { added: string[]; removed: string[] } | null = null
+  if (metadata)
+    certificates = await saml.store.replaceMetadataCertificates(
+      tenantId,
+      connection.id,
+      metadata.certificates,
+    )
+  if (changed.length || certificates)
+    await id.store.record(tenantId, {
+      type: "connection.saml_updated",
+      actorUserId: actor.userId,
+      connectionId: connection.id,
+      data: {
+        changed,
+        trust: trust.length > 0 || metadata !== null,
+        status: connection.status,
+        from: pick(current, changed),
+        to: pick(next, changed),
+        ...(certificates ? { certificates } : {}),
+        ...actorData(actor),
+      },
+    })
+  return c.json(await samlSetupView(after, saml))
+}
+
+/** `POST .../saml/certificates`: one IdP certificate, valid today. Shared like `putSamlSettings`. */
+export async function addSamlCertificate(
+  c: Context,
+  t: SamlTarget,
+  input: Record<string, unknown>,
+  actor: SettingsActor,
+  trustRefusal: () => Promise<Response | null>,
+): Promise<Response> {
+  const { id, saml, connection, tenantId } = t
+  const refusal = await trustRefusal()
+  if (refusal) return refusal
+  const parsed = z
+    .object({
+      certificate: z
+        .string()
+        .min(1)
+        .max(16 * 1024),
+    })
+    .strict()
+    .safeParse(input)
+  if (!parsed.success)
+    return c.json(
+      validation("certificate must be one PEM or base64 X.509 certificate."),
+      422,
+    )
+  const cert = readCertificate(parsed.data.certificate)
+  if ("error" in cert) return c.json(validation(cert.error), 422)
+  if (cert.notAfter.getTime() <= Date.now())
+    return c.json(validation("That certificate has expired."), 422)
+  const added = await saml.store.addCertificate(
+    tenantId,
+    connection.id,
+    { ...(cert as IdpCertificate), source: "upload" },
+    actor.userId,
+  )
+  if (added === "limit")
+    return c.json(
+      validation("A connection holds at most five certificates. Remove one first."),
+      422,
+    )
+  if (added === "added")
+    await id.store.record(tenantId, {
+      type: "connection.certificate_added",
+      actorUserId: actor.userId,
+      connectionId: connection.id,
+      data: {
+        fingerprint: cert.fingerprint,
+        notAfter: cert.notAfter,
+        status: connection.status,
+        ...actorData(actor),
+      },
+    })
+  return c.json(await samlSetupView(connection, saml), added === "added" ? 201 : 200)
+}
+
 export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
@@ -144,247 +453,22 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
     )
   }
 
-  const view = async (connection: Connection, s: SamlConsoleDeps) => {
-    const preset = samlPresetOf(connection.provider)
-    const stored = storedSaml(connection)
-    const certs = await s.store.certificates(connection.tenantId, connection.id)
-    const at = s.engine.endpoints(connection.id)
-    return {
-      provider: connection.provider,
-      label: preset?.label ?? connection.provider,
-      entityId: at.entityId,
-      acsUrl: at.acsUrl,
-      sloUrl: at.sloUrl,
-      metadataUrl: at.entityId,
-      entityIdHint: preset?.entityIdHint ?? null,
-      requires: preset?.requires ?? [],
-      idpEntityId: stored.idpEntityId ?? null,
-      ssoUrl: stored.ssoUrl ?? null,
-      idpSloUrl: stored.sloUrl ?? null,
-      idpMetadataUrl: stored.metadataUrl ?? null,
-      metadataFetchedAt: stored.metadataFetchedAt ?? null,
-      metadataError: stored.metadataError ?? null,
-      nameIdFormat: stored.nameIdFormat ?? preset?.nameIdFormat ?? null,
-      signRequests: stored.signRequests === true,
-      requireEncryption: stored.requireEncryption === true,
-      idpInitiated: stored.idpInitiated === true,
-      subjectAttribute: stored.subjectAttribute ?? null,
-      mfaContextClasses: stored.mfaContextClasses ?? [],
-      spCertificates: (stored.spCertificates ?? []).map((k) => ({
-        fingerprint: k.fingerprint,
-        certificate: k.certificate,
-        notAfter: k.notAfter,
-        createdAt: k.createdAt,
-      })),
-      certificates: certs.map(certView),
-      ready: samlReady(connection, certs),
-    }
-  }
-
-  /** Draws our SP key the first time a connection is set up, under the secrets lock. */
-  const ensureSpKey = async (
-    c: Context,
-    connection: Connection,
-    loaded: { id: NonNullable<ConsoleDeps["identity"]>; tenantId: string },
-  ) => {
-    if ((storedSaml(connection).spCertificates?.length ?? 0) > 0) return connection
-    const made = await newSpKey(`i10 SAML ${connection.id}`)
-    const after = await loaded.id.store.setConnectionSecrets(
-      loaded.tenantId,
-      connection.id,
-      (now) => {
-        const current = storedSaml({ config: now.config })
-        if ((current.spCertificates?.length ?? 0) > 0) return now
-        return {
-          secrets: {
-            ...now.secrets,
-            saml: { ...sealedSaml(now.secrets), spKeys: [made.privateKey] },
-          },
-          config: {
-            ...now.config,
-            saml: { ...current, spCertificates: [made.publicCert] },
-          },
-        }
-      },
-    )
-    if (after)
-      await loaded.id.store.record(loaded.tenantId, {
-        type: "connection.key_rotated",
-        actorUserId: c.get("user").userId,
-        connectionId: connection.id,
-        data: {
-          kind: "saml_sp",
-          fingerprint: made.publicCert.fingerprint,
-          previous: null,
-        },
-      })
-    return after ?? connection
-  }
-
-  /**
-   * Metadata from the request (a URL to fetch or a file), or a response that
-   * says why not.
-   *
-   * ⚠ THE GUARD'S REASON IS NEVER REPEATED (sso.md 2.14): it can name what a
-   * host resolved to inside our network.
-   */
-  const readMetadata = async (
-    c: Context,
-    s: SamlConsoleDeps,
-    input: { url?: string | null; xml?: string },
-    connectionId: string,
-  ): Promise<{ metadata: IdpMetadata } | { error: Response }> => {
-    if (input.xml !== undefined) {
-      const parsed = parseIdpMetadata(input.xml)
-      return "error" in parsed
-        ? { error: c.json(validation(parsed.error), 422) }
-        : { metadata: parsed }
-    }
-    try {
-      return { metadata: await s.engine.fetchMetadata(input.url!) }
-    } catch (error) {
-      if (error instanceof SamlMisconfigured)
-        return {
-          error: c.json(
-            validation(`We could not use that metadata: ${error.message}`),
-            422,
-          ),
-        }
-      s.log.warn(
-        { connectionId, err: error instanceof Error ? error.message : "unknown" },
-        "SAML metadata could not be fetched through the egress guard",
-      )
-      return {
-        error: c.json(
-          validation(
-            "We could not reach that metadata URL from the internet. Check the URL and that it is public.",
-          ),
-          422,
-        ),
-      }
-    }
-  }
-
   app.get("/identity/connections/:id/saml", async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
-    return c.json(await view(loaded.connection, loaded.saml))
+    return c.json(await samlSetupView(loaded.connection, loaded.saml))
   })
 
   app.put("/identity/connections/:id/saml", requireFreshAuth, async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
-    const { id, saml, tenantId } = loaded
-    let connection = loaded.connection
-    const parsed = SamlInput.safeParse((await readJson(c)) ?? {})
-    if (!parsed.success)
-      return c.json(validation("Those SAML settings are not valid."), 422)
-    const body = parsed.data
-    const current = storedSaml(connection)
-    const next: StoredSaml = { ...current }
-
-    if (body.metadataUrl !== undefined) {
-      if (body.metadataUrl === null || body.metadataUrl === "") next.metadataUrl = null
-      else {
-        const url = readIdpUrl(body.metadataUrl, "metadataUrl", { query: true })
-        if (typeof url !== "string") return c.json(validation(url.error), 422)
-        next.metadataUrl = url
-      }
-    }
-    for (const key of ["ssoUrl", "sloUrl"] as const) {
-      const value = body[key]
-      if (value === undefined) continue
-      if (value === null || value === "") {
-        if (key === "ssoUrl")
-          return c.json(validation("ssoUrl must be an https URL."), 422)
-        next.sloUrl = null
-        continue
-      }
-      const url = readIdpUrl(value, key, { query: true })
-      if (typeof url !== "string") return c.json(validation(url.error), 422)
-      next[key] = url
-    }
-    if (body.idpEntityId !== undefined) next.idpEntityId = body.idpEntityId
-    if (body.nameIdFormat !== undefined) next.nameIdFormat = body.nameIdFormat
-    for (const key of ["signRequests", "requireEncryption", "idpInitiated"] as const)
-      if (body[key] !== undefined) next[key] = body[key]
-    if (body.subjectAttribute !== undefined)
-      next.subjectAttribute = body.subjectAttribute
-    if (body.mfaContextClasses !== undefined)
-      next.mfaContextClasses = [...new Set(body.mfaContextClasses)]
-
-    // ⚠ METADATA FILLS IN THE IdP's SETTINGS AND ITS CERTIFICATES, as one change.
-    let metadata: IdpMetadata | null = null
-    const fromUrl = body.metadataUrl !== undefined && next.metadataUrl
-    if (body.metadataXml !== undefined || fromUrl) {
-      const read = await readMetadata(
-        c,
-        saml,
-        body.metadataXml !== undefined
-          ? { xml: body.metadataXml }
-          : { url: next.metadataUrl },
-        connection.id,
-      )
-      if ("error" in read) return read.error
-      metadata = read.metadata
-      next.idpEntityId = metadata.entityId
-      next.ssoUrl = metadata.ssoUrl
-      next.sloUrl = metadata.sloUrl
-      next.sloResponseUrl = metadata.sloResponseUrl
-      if (metadata.wantAuthnRequestsSigned) next.signRequests = true
-      if (fromUrl) {
-        next.metadataFetchedAt = new Date().toISOString()
-        next.metadataError = null
-      }
-    }
-
-    const changed = ([...TRUST_FIELDS, "signRequests"] as const).filter(
-      (k) => JSON.stringify(next[k] ?? null) !== JSON.stringify(current[k] ?? null),
+    return putSamlSettings(
+      c,
+      loaded,
+      (await readJson(c)) ?? {},
+      { userId: c.get("user").userId },
+      () => trustRefusal(c, loaded.connection),
     )
-    const trust = changed.filter((k) => (TRUST_FIELDS as readonly string[]).includes(k))
-    if (trust.length || metadata) {
-      const refusal = await trustRefusal(c, connection)
-      if (refusal) return refusal
-    }
-    const { userId } = c.get("user")
-    connection = await ensureSpKey(c, connection, { id, tenantId })
-    const after = await id.store.setConnectionSecrets(
-      tenantId,
-      connection.id,
-      (now) => ({
-        secrets: now.secrets,
-        config: {
-          ...now.config,
-          saml: {
-            ...next,
-            spCertificates: storedSaml({ config: now.config }).spCertificates ?? [],
-          },
-        },
-      }),
-    )
-    if (!after) return c.json(notFound(), 404)
-    let certificates: { added: string[]; removed: string[] } | null = null
-    if (metadata)
-      certificates = await saml.store.replaceMetadataCertificates(
-        tenantId,
-        connection.id,
-        metadata.certificates,
-      )
-    if (changed.length || certificates)
-      await id.store.record(tenantId, {
-        type: "connection.saml_updated",
-        actorUserId: userId,
-        connectionId: connection.id,
-        data: {
-          changed,
-          trust: trust.length > 0 || metadata !== null,
-          status: connection.status,
-          from: pick(current, changed),
-          to: pick(next, changed),
-          ...(certificates ? { certificates } : {}),
-        },
-      })
-    return c.json(await view(after, saml))
   })
 
   app.post(
@@ -393,51 +477,13 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
     async (c) => {
       const loaded = await load(c)
       if ("error" in loaded) return loaded.error
-      const { id, saml, connection, tenantId } = loaded
-      const refusal = await trustRefusal(c, connection)
-      if (refusal) return refusal
-      const parsed = z
-        .object({
-          certificate: z
-            .string()
-            .min(1)
-            .max(16 * 1024),
-        })
-        .strict()
-        .safeParse((await readJson(c)) ?? {})
-      if (!parsed.success)
-        return c.json(
-          validation("certificate must be one PEM or base64 X.509 certificate."),
-          422,
-        )
-      const cert = readCertificate(parsed.data.certificate)
-      if ("error" in cert) return c.json(validation(cert.error), 422)
-      if (cert.notAfter.getTime() <= Date.now())
-        return c.json(validation("That certificate has expired."), 422)
-      const { userId } = c.get("user")
-      const added = await saml.store.addCertificate(
-        tenantId,
-        connection.id,
-        { ...(cert as IdpCertificate), source: "upload" },
-        userId,
+      return addSamlCertificate(
+        c,
+        loaded,
+        (await readJson(c)) ?? {},
+        { userId: c.get("user").userId },
+        () => trustRefusal(c, loaded.connection),
       )
-      if (added === "limit")
-        return c.json(
-          validation("A connection holds at most five certificates. Remove one first."),
-          422,
-        )
-      if (added === "added")
-        await id.store.record(tenantId, {
-          type: "connection.certificate_added",
-          actorUserId: userId,
-          connectionId: connection.id,
-          data: {
-            fingerprint: cert.fingerprint,
-            notAfter: cert.notAfter,
-            status: connection.status,
-          },
-        })
-      return c.json(await view(connection, saml), added === "added" ? 201 : 200)
     },
   )
 
@@ -460,7 +506,7 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
         connectionId: connection.id,
         data: { certificateId, status: connection.status },
       })
-      return c.json(await view(connection, saml))
+      return c.json(await samlSetupView(connection, saml))
     },
   )
 
@@ -517,7 +563,7 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
         status: connection.status,
       },
     })
-    return c.json(await view(after, saml), 201)
+    return c.json(await samlSetupView(after, saml), 201)
   })
 
   /*
@@ -539,7 +585,7 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
       c.get("user").userId,
     )
     const after = (await id.store.connection(tenantId, connection.id)) ?? connection
-    return c.json({ ...(await view(after, saml)), refresh: done })
+    return c.json({ ...(await samlSetupView(after, saml)), refresh: done })
   })
 }
 

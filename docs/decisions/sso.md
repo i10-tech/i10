@@ -749,6 +749,42 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
   may show oddly. **Unverified against real tenants:** Okta's, Entra's and
   Google's SCIM clients end to end.
 
+### 2.18 What #340 settled for enforcement and break-glass (2026-10-24)
+
+- **Enforcement is per workspace.** It runs once the workspace is known
+  (`requireTenant`), never on routes without one, so one workspace requiring SSO
+  never locks a person out of their other workspaces. A member is covered by an
+  active connection set to `required_domain` when they hold a verified address
+  on its live domains, or to `required_all` always. A covered member's session
+  must be SSO-bound in this workspace, or they get 403 `sso_required`. `off` and
+  `optional` enforce nothing. A gate that cannot read its facts answers 503.
+- **Going live with "required" is an owner's**, and needs a test run that passed
+  in the last 24 hours, both when setting the mode on an active connection and
+  when activating one that already has it.
+- **The owner exemption (decision 7):** owners and admins who are not managed are
+  exempt, because `role_exempt` keeps them off SSO, and an exempt person must
+  hold a passkey (403 `passkey_required` otherwise). The exemption is on by
+  default; turning it off takes a request from one owner and approval by a
+  second, different, still-current owner within 24 hours. Turning it on takes
+  one owner.
+- **The bypass list:** a person passes only when every connection covering them
+  lists them; each bypass sign-in is audited once per session
+  (`sso.bypass_used`). The alert email to the other admins is #345's.
+- **Setup links:** `i10_setup_` tokens, stored hashed, one connection, 1 to 168
+  hours (default 72), revocable with a reason, and revoked when the connection
+  leaves draft or testing. A link may read and set the IdP settings (including a
+  write-only OIDC secret and SAML certificates) and start test runs, never
+  activate, change enforcement, add domains or touch the bypass list.
+- **Discovery:** `POST /sso/discover` answers `required`, `available` or `none`
+  for an address from its domain alone, the same for every caller, so it
+  reveals nothing about accounts or memberships.
+- **Open:** another API replica may enforce up to 15 seconds after a change (the
+  gate's per-process cache); with the exemption off, an unmanaged owner can only
+  get in through the bypass list until "an owner opts into SSO" (decision 7,
+  open item a) is built; the setup link's token sits in the URL path, so the
+  setup page (#340's console slice) must move it into the fragment and send no
+  referrer; the staff path waits for #217.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

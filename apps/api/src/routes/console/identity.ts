@@ -6,6 +6,7 @@ import { can, mayRemove, type Permission } from "../../console/roles.js"
 import { deprovision, type DeprovisionDeps } from "../../identity/managed.js"
 import {
   OWNER_GUARDED,
+  SETUP_STATUSES,
   ENFORCEMENTS,
   PROTOCOLS,
   STATUSES,
@@ -19,8 +20,12 @@ import type {
   ClerkIdentity,
   IdentityStore,
   Logger,
+  SsoPolicyStore,
 } from "../../identity/ports.js"
 import type { SsoGateChecker } from "../../identity/gate.js"
+import type { EnforcementGate } from "../../identity/enforcement.js"
+import { mountIdentityBreakGlass } from "./identity-break-glass.js"
+import { mountIdentitySetupLinks } from "./identity-setup-links.js"
 import { oidcReady } from "../../identity/oidc.js"
 import { presetOf } from "../../identity/oidc-presets.js"
 import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
@@ -50,6 +55,9 @@ import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
  *   ...    /identity/connections/:id/saml[/...]         SAML settings (#339, identity-saml.ts)
  *   ...    /identity/directories[/:id[/tokens|/conflicts]] SCIM directories (#342, identity-scim.ts)
  *   ...    /identity/connections/:id/ldap[/service|/test] LDAP pass-through for IMAP (#344, identity-ldap.ts)
+ *   ...    /identity/connections/:id/bypass[/:userId]     the bypass list (#340, identity-break-glass.ts)
+ *   ...    /identity/owner-exemption[/...]               the owner exemption (#340, identity-break-glass.ts)
+ *   ...    /identity/connections/:id/setup-links[/...]   setup links (#340, identity-setup-links.ts)
  *
  * ⚠ EVERY ROUTE CHECKS OUR ROLES TABLE (#335): `sso:manage` for setup,
  * `owners:manage` for what deprovisioning does, and the removal rule
@@ -72,6 +80,13 @@ export interface IdentityConsoleDeps {
   scim?: ScimConsoleDeps
   /** LDAP pass-through for managed accounts' IMAP (#344). Absent: its routes answer 501. */
   ldap?: LdapConsoleDeps
+  /**
+   * Enforcement, break-glass and setup links (#340). Absent: their routes
+   * answer 501, and no connection can be made "required".
+   */
+  policy?: SsoPolicyStore
+  /** The enforcement gate's cache, dropped when a workspace's facts change. */
+  enforcement?: Pick<EnforcementGate, "forgetTenant">
   deprovision: DeprovisionDeps
   log: Logger
 }
@@ -80,6 +95,43 @@ const forbidden = (message: string) =>
   ({ statusCode: 403, name: "forbidden" as const, message }) as const
 
 const SESSION_ID = /^sess_[A-Za-z0-9]{1,64}$/
+
+/** A passed test run counts this long towards "required" (sso.md 2.10). */
+export const TEST_RUN_WINDOW_MS = 24 * 60 * 60 * 1000
+
+const REQUIRED_MODES: readonly Enforcement[] = ["required_domain", "required_all"]
+const STRICTNESS: Record<Enforcement, number> = {
+  off: 0,
+  optional: 1,
+  required_domain: 2,
+  required_all: 3,
+}
+
+/**
+ * What a PATCH does to enforcement (#340): whether the connection BECOMES
+ * live and required by it (newly active with a required mode, or a required
+ * mode changed while active), and whether that, or loosening or tightening a
+ * guarded connection's enforcement, is an owner's move. Turning a guarded
+ * connection from `off` to `optional` enforces nothing, so stays an admin's.
+ */
+export function enforcementChange(
+  before: Pick<Connection, "status" | "enforcement">,
+  patch: Pick<ConnectionPatch, "status" | "enforcement">,
+): { becomesRequired: boolean; ownerOnly: boolean } {
+  const status = patch.status ?? before.status
+  const enforcement = patch.enforcement ?? before.enforcement
+  const changed = enforcement !== before.enforcement
+  const requiredBefore =
+    before.status === "active" && REQUIRED_MODES.includes(before.enforcement)
+  const requiredAfter = status === "active" && REQUIRED_MODES.includes(enforcement)
+  const becomesRequired = requiredAfter && (!requiredBefore || changed)
+  const guardedChange =
+    OWNER_GUARDED.includes(before.status) &&
+    changed &&
+    (REQUIRED_MODES.includes(enforcement) ||
+      STRICTNESS[enforcement] < STRICTNESS[before.enforcement])
+  return { becomesRequired, ownerOnly: becomesRequired || guardedChange }
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function view(connection: Connection) {
@@ -155,6 +207,8 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentitySaml(app, d)
   mountIdentityScim(app, d)
   mountIdentityLdap(app, d)
+  mountIdentityBreakGlass(app, d)
+  mountIdentitySetupLinks(app, d)
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
@@ -332,6 +386,31 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
         forbidden("Only an owner can turn on JIT for an active connection."),
         403,
       )
+    /*
+     * ⚠ "REQUIRED" IS AN OWNER'S, AND ONLY AFTER A TEST RUN PASSED (#340,
+     * sso.md 2.10). Requiring SSO locks every covered member out of every
+     * other way in, so it needs proof, within a day, that the IdP signs
+     * somebody in; and like turning JIT on it is an owner's move, including
+     * activating a connection that already says "required" and loosening a
+     * live one's enforcement.
+     */
+    const enforced = enforcementChange(before, patch)
+    if (enforced.ownerOnly && !(await allowed(c, "owners:manage")))
+      return c.json(
+        forbidden("Only an owner can change whether an active connection is required."),
+        403,
+      )
+    if (enforced.becomesRequired) {
+      if (!id.policy) return c.json(notWired("SSO enforcement"), 501)
+      const since = new Date(Date.now() - TEST_RUN_WINDOW_MS)
+      if (!(await id.policy.passedTestRunSince(tenantId, connectionId, since)))
+        return c.json(
+          validation(
+            "Run a test sign-in that passes first. Requiring SSO needs a passed test run in the last 24 hours.",
+          ),
+          422,
+        )
+    }
     // ⚠ A TEST RUN OR A SIGN-IN NEEDS SOMETHING TO TALK TO: an OIDC connection
     // is testable only once its issuer, client and credential are set (#338).
     if (
@@ -364,6 +443,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       )
     const after = await id.store.updateConnection(tenantId, connectionId, patch)
     if (!after) return c.json(notFound(), 404)
+    id.enforcement?.forgetTenant(tenantId)
     await id.store.record(tenantId, {
       type: "connection.updated",
       actorUserId: userId,
@@ -374,6 +454,31 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
         to: pick(view(after), patch),
       },
     })
+    /*
+     * ⚠ A CONNECTION LEAVING SETUP TAKES ITS SETUP LINKS WITH IT. They serve
+     * only draft and testing anyway; revoked, an owner moving the connection
+     * back to setup later does not bring an IT contact's old link back.
+     */
+    if (
+      id.policy &&
+      SETUP_STATUSES.includes(before.status) &&
+      !SETUP_STATUSES.includes(after.status)
+    ) {
+      const revoked = await id.policy.revokeSetupLinksOf(
+        tenantId,
+        connectionId,
+        "connection_left_setup",
+        new Date(),
+      )
+      for (const linkId of revoked)
+        await id.store.record(tenantId, {
+          type: "setup_link.revoked",
+          actorUserId: userId,
+          connectionId,
+          reason: "connection_left_setup",
+          data: { setupLinkId: linkId, status: after.status },
+        })
+    }
     return c.json(view(after))
   })
 
@@ -406,6 +511,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
         },
         409,
       )
+    id.enforcement?.forgetTenant(tenantId)
     await id.store.record(tenantId, {
       type: "connection.domain_added",
       actorUserId: userId,
@@ -433,6 +539,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       if (guarded) return guarded
       if (!(await id.store.removeDomain(tenantId, connectionId, joinDomainId)))
         return c.json(notFound(), 404)
+      id.enforcement?.forgetTenant(tenantId)
       await id.store.record(tenantId, {
         type: "connection.domain_removed",
         actorUserId: userId,

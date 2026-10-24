@@ -130,6 +130,27 @@ export function readSecret(value: unknown): string | null {
     : null
 }
 
+// ── Setup links (#340) ───────────────────────────────────────────────────
+
+/** The statuses a setup link serves: nobody signs in through either. */
+export const SETUP_STATUSES: readonly ConnectionStatus[] = ["draft", "testing"]
+export const SETUP_TOKEN_PREFIX = "i10_setup_"
+/** A link's life when the admin does not choose one, and the longest allowed. */
+export const SETUP_LINK_DEFAULT_HOURS = 72
+export const SETUP_LINK_MAX_HOURS = 7 * 24
+
+/** A new setup link's token, shown once: the prefix and a fresh secret. */
+export function newSetupToken(): string {
+  return `${SETUP_TOKEN_PREFIX}${newSecret()}`
+}
+
+/** A setup token as received in a URL, or null. Exactly the shape we issue. */
+export function readSetupToken(value: unknown): string | null {
+  return typeof value === "string" && /^i10_setup_[A-Za-z0-9_-]{43}$/.test(value)
+    ? value
+    : null
+}
+
 // ── Domains ──────────────────────────────────────────────────────────────
 
 /**

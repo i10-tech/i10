@@ -8,12 +8,17 @@ import {
   type BridgeDeps,
 } from "../identity/bridge.js"
 import {
+  emailDomain,
+  normaliseEmail,
   readSecret,
   refusalMessage,
   safeReturnTo,
   type AttemptPurpose,
   type Refusal,
 } from "../identity/model.js"
+import { strictestFirst } from "../identity/enforcement.js"
+import type { SsoPolicyStore } from "../identity/ports.js"
+import { createSetupRoutes, type SetupRouteDeps } from "./sso-setup.js"
 import type { SsoGateChecker } from "../identity/gate.js"
 import { testAssertion } from "../identity/test-engine.js"
 import {
@@ -47,6 +52,8 @@ import { z } from "zod"
  *   POST /sso/saml/logout   Bearer <session> -> SP-initiated logout's redirect
  *   POST /sso/handoff       { code, binding } -> { ticket, handoff }
  *   POST /sso/bind          Bearer <new session>, { handoff } -> bound
+ *   POST /sso/discover      { email } -> which SSO, if any, the address uses (#340)
+ *   ...  /sso/setup/:token  a setup link's routes (#340, sso-setup.ts)
  *
  * ⚠ PUBLIC ROUTES, AND SAFE AS PUBLIC ROUTES. Each step needs a secret only
  * the browser that started holds (the binding value, which apps/auth keeps in
@@ -80,6 +87,13 @@ export interface SsoRouteDeps {
   mayManage(tenantId: string, userId: string): Promise<boolean>
   /** The connection's tenant, for the `test_run` permission check. */
   tenantOfConnection(connectionId: string): Promise<string | null>
+  /** Home realm discovery (#340). Absent: `/discover` is 404. */
+  discovery?: {
+    store: Pick<SsoPolicyStore, "discover">
+    startUrl: (connectionId: string | null) => string | null
+  }
+  /** Setup links (#340). Absent: `/setup/*` is 404. */
+  setup?: SetupRouteDeps
 }
 
 export interface InternalIdentityDeps {
@@ -101,6 +115,9 @@ const small = bodyLimit({ maxSize: 16 * 1024, onError: tooLarge })
 const SAML_BODY = 400 * 1024
 const large = bodyLimit({ maxSize: SAML_BODY, onError: tooLarge })
 const SAML_LARGE = new Set(["/saml/acs", "/saml/slo"])
+/** A setup link's SAML settings may carry the IdP's metadata file (256 KiB). */
+const SETUP_SAML = /^\/setup\/[A-Za-z0-9_-]+\/saml$/
+const DiscoverBody = z.object({ email: z.string().max(320) }).strict()
 
 const UUID = z
   .string()
@@ -177,9 +194,10 @@ const PURPOSES: readonly AttemptPurpose[] = ["sign_in", "test_run", "step_up"]
 
 export function createSsoRoutes(deps?: SsoRouteDeps) {
   const app = new Hono()
-  app.use("*", (c, next) =>
-    (SAML_LARGE.has(c.req.path.replace(/^.*\/sso/, "")) ? large : small)(c, next),
-  )
+  app.use("*", (c, next) => {
+    const path = c.req.path.replace(/^.*\/sso/, "")
+    return (SAML_LARGE.has(path) || SETUP_SAML.test(path) ? large : small)(c, next)
+  })
   app.use("*", async (c, next) => {
     if (!deps)
       return c.json(
@@ -197,6 +215,49 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
     if (c.req.method !== "POST" || !deps?.rateLimit) return next()
     return deps.rateLimit(c, next)
   })
+
+  /*
+   * ⚠ THE ANSWER DEPENDS ON THE ADDRESS'S DOMAIN AND NOTHING ELSE (#340): the
+   * same input always gets the same answer, whoever holds the address, so it
+   * never says whether an account or a membership exists. "required" is what
+   * the gate's rule 1 says of an address on that connection's live domain.
+   */
+  app.post("/discover", async (c) => {
+    const d = deps!
+    if (!d.discovery) return notFound(c)
+    const parsed = DiscoverBody.safeParse(await body(c))
+    if (!parsed.success) return invalid(c, "email is required.")
+    c.header("Cache-Control", "no-store")
+    const email = normaliseEmail(parsed.data.email)
+    if (!email) return c.json({ sso: "none" }, 200)
+    try {
+      const [pick] = strictestFirst(
+        await d.discovery.store.discover(emailDomain(email)),
+      )
+      if (!pick) return c.json({ sso: "none" }, 200)
+      return c.json(
+        {
+          sso:
+            pick.enforcement === "required_domain" ||
+            pick.enforcement === "required_all"
+              ? "required"
+              : "available",
+          connection: pick.id,
+          startUrl: d.discovery.startUrl(pick.id),
+          name: pick.name,
+        },
+        200,
+      )
+    } catch (error) {
+      d.bridge.log.error(
+        { err: error instanceof Error ? error.name : "unknown" },
+        "could not discover an address's SSO",
+      )
+      return unavailable(c)
+    }
+  })
+
+  if (deps?.setup) app.route("/setup", createSetupRoutes(deps.setup))
 
   app.post("/attempts", async (c) => {
     const d = deps!

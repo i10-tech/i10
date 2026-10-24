@@ -8,6 +8,7 @@ import type {
   Enforcement,
   ManagedReason,
   Protocol,
+  SessionPolicy,
 } from "./model.js"
 
 /**
@@ -587,4 +588,176 @@ export interface Logger {
   info: (o: object, m: string) => void
   warn: (o: object, m: string) => void
   error: (o: object, m: string) => void
+}
+
+// ── Enforcement, break-glass, setup links and discovery (#340) ─────────────
+
+/** An active connection whose enforcement is a required mode, as the gate reads it. */
+export interface RequiredConnection {
+  id: string
+  enforcement: Extract<Enforcement, "required_domain" | "required_all">
+  createdAt: Date
+  /** Names whose proof is live right now. */
+  domains: string[]
+  /** The signed-in person is on this connection's bypass list. */
+  bypassed: boolean
+}
+
+/**
+ * What the enforcement gate reads for one person, session and workspace, in
+ * one transaction.
+ *
+ * ⚠ `required: false` IS THE COMMON ANSWER (no active connection in the
+ * workspace requires SSO), read with one query and cached per workspace.
+ */
+export type EnforcementRead =
+  | { required: false }
+  | {
+      required: true
+      connections: RequiredConnection[]
+      /** The workspace's owner exemption (decision 7), on unless two owners turned it off. */
+      exemption: boolean
+      /** An owner or an admin in our roles table. */
+      privileged: boolean
+      /** A managed account, in any workspace. */
+      managed: boolean
+      /**
+       * This session as the bridge bound it IN THIS WORKSPACE, on a connection
+       * that is active and covers a live proof, or null.
+       */
+      session:
+        | (Pick<BoundSession, "boundAt" | "lastSeenAt" | "revokedAt"> & SessionPolicy)
+        | null
+    }
+
+export interface BypassEntry {
+  clerkUserId: string
+  reason: string | null
+  addedBy: string | null
+  createdAt: Date
+}
+
+export interface OwnerExemption {
+  enabled: boolean
+  /** A first owner's request to turn it off, while it can still be approved. */
+  pending: { requestedBy: string; requestedAt: Date; expiresAt: Date } | null
+}
+
+export interface SetupLinkRow {
+  id: string
+  tenantId: string
+  connectionId: string
+  contactEmail: string | null
+  createdBy: string | null
+  expiresAt: Date
+  usedAt: Date | null
+  revokedAt: Date | null
+  revokedReason: string | null
+  createdAt: Date
+}
+
+/** An active connection covering a live proof of an address's domain (discovery). */
+export interface DiscoveredConnection {
+  id: string
+  tenantId: string
+  name: string
+  enforcement: Enforcement
+  createdAt: Date
+}
+
+/** The database half of #340: see identity/policy-store.ts for the policies. */
+export interface SsoPolicyStore {
+  enforcementRead(
+    tenantId: string,
+    clerkUserId: string,
+    sessionId: string,
+  ): Promise<EnforcementRead>
+  /**
+   * Notes a bypass sign-in and audits `sso.bypass_used`, in one transaction.
+   * True only for the call that saw this session first in this workspace.
+   */
+  noteBypassSignIn(
+    tenantId: string,
+    row: { sessionId: string; clerkUserId: string; connectionIds: string[] },
+  ): Promise<boolean>
+
+  bypassList(tenantId: string, connectionId: string): Promise<BypassEntry[]>
+  /** `exists`: already listed; `not_found`: no such connection in this workspace. */
+  addBypass(
+    tenantId: string,
+    connectionId: string,
+    entry: { clerkUserId: string; reason: string; addedBy: string },
+  ): Promise<"added" | "exists" | "not_found">
+  removeBypass(
+    tenantId: string,
+    connectionId: string,
+    clerkUserId: string,
+  ): Promise<BypassEntry | null>
+
+  ownerExemption(tenantId: string, now: Date): Promise<OwnerExemption>
+  /** `off`: already off; `pending`: a live request already waits (anybody's). */
+  requestExemptionOff(
+    tenantId: string,
+    by: string,
+    now: Date,
+  ): Promise<"requested" | "off" | "pending">
+  /**
+   * Applies a live request made by a DIFFERENT owner who is still an owner,
+   * in one transaction under the settings row's lock. `none`: no live request
+   * (or its maker is no longer an owner); `same_owner`: the approver made it.
+   */
+  approveExemptionOff(
+    tenantId: string,
+    by: string,
+    now: Date,
+  ): Promise<
+    | { outcome: "applied"; requestedBy: string }
+    | { outcome: "none" }
+    | { outcome: "same_owner" }
+  >
+  cancelExemptionOff(tenantId: string): Promise<boolean>
+  /** True when it was off (or a request was pending) and is now on with none. */
+  enableExemption(tenantId: string, by: string): Promise<boolean>
+
+  /** A test run with outcome `passed` on this connection at or after `since`. */
+  passedTestRunSince(
+    tenantId: string,
+    connectionId: string,
+    since: Date,
+  ): Promise<boolean>
+
+  /** Active connections covering a live proof of exactly this name, any workspace. */
+  discover(domain: string): Promise<DiscoveredConnection[]>
+
+  createSetupLink(
+    tenantId: string,
+    input: {
+      connectionId: string
+      tokenHash: string
+      contactEmail: string | null
+      createdBy: string
+      expiresAt: Date
+    },
+  ): Promise<SetupLinkRow>
+  setupLinks(tenantId: string, connectionId: string): Promise<SetupLinkRow[]>
+  revokeSetupLink(
+    tenantId: string,
+    connectionId: string,
+    id: string,
+    reason: string,
+    at: Date,
+  ): Promise<SetupLinkRow | null>
+  /** Every live link of the connection, revoked; the ids revoked. */
+  revokeSetupLinksOf(
+    tenantId: string,
+    connectionId: string,
+    reason: string,
+    at: Date,
+  ): Promise<string[]>
+  /** With no workspace in scope: the one row this token hash names. */
+  setupLinkByHash(
+    tokenHash: string,
+  ): Promise<(SetupLinkRow & { tokenHash: string }) | null>
+  /** Compare-and-set on `used_at`: true for the first use. */
+  markSetupLinkUsed(tenantId: string, id: string, at: Date): Promise<boolean>
 }

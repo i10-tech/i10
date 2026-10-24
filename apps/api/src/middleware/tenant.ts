@@ -259,6 +259,16 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
     )
   }
 
+  /*
+   * ⚠ AND THE WORKSPACE'S OWN ENFORCEMENT ONCE THE WORKSPACE IS KNOWN (#340).
+   * A workspace that requires SSO refuses its covered members on a session
+   * its IdP did not bind - here, for this workspace only: its setting never
+   * reaches the person's other workspaces, nor the routes that work without
+   * one.
+   */
+  const enforced = await ssoGateRefusal(c, outcome.userId, tenantId)
+  if (enforced) return enforced
+
   c.set("auth", {
     // ⚠ THE EMPTY STRING SAYS "NO KEY", AND IT IS NOT A PLACEHOLDER FOR ONE.
     // `AuthContext.apiKeyId` is typed as a string because every API-key route

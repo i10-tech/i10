@@ -62,6 +62,8 @@ import {
 import type { OutboxEntry } from "./identity/directory-ports.js"
 import type { AuditEvent } from "./identity/ports.js"
 import { ssoGate } from "./identity/gate.js"
+import { enforcementGate } from "./identity/enforcement.js"
+import { ssoPolicyStore } from "./identity/policy-store.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
@@ -1226,6 +1228,13 @@ const teamDomains: TeamDomainDeps | null = domains
 const identity = identityStore(db, secrets)
 const identityClerk = clerkIdentityApi(clerk, { secretKey: env.CLERK_SECRET_KEY })
 const gateChecker = ssoGate({ store: identity, clerk: identityClerk, log })
+/*
+ * Enforcement, break-glass, setup links and discovery (#340). The enforcement
+ * gate runs in `requireTenant` once the workspace is known; see
+ * identity/enforcement.ts for what it costs.
+ */
+const ssoPolicy = ssoPolicyStore(db)
+const enforcement = enforcementGate({ store: ssoPolicy, clerk: identityClerk, log })
 const sessionIds = clerkSessionIds(clerk, {
   authorizedParties: env.CONSOLE_ORIGINS,
   log,
@@ -1373,6 +1382,8 @@ const identityConsole = {
   store: identity,
   clerk: identityClerk,
   gate: gateChecker,
+  policy: ssoPolicy,
+  enforcement,
   protocols: [...engines.keys()],
   scim: {
     store: directories,
@@ -1702,7 +1713,7 @@ const app = createApp({
    * a 501 that would claim mailboxes are not a feature.
    */
   sessionAuth: sessions,
-  ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl),
+  ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl, enforcement),
   ...(env.AUTH_ORIGINS.length
     ? {
         sso: {
@@ -1740,6 +1751,15 @@ const app = createApp({
             can(roleRows, tenantId, userId, "sso:manage"),
           tenantOfConnection: async (connectionId: string) =>
             (await identity.connectionForStart(connectionId))?.tenantId ?? null,
+          discovery: { store: ssoPolicy, startUrl: ssoStartUrl },
+          setup: {
+            links: ssoPolicy,
+            identity: identityConsole,
+            bridge,
+            returnOrigins: [...env.AUTH_ORIGINS, ...env.CONSOLE_ORIGINS],
+            take: fixedWindow(cache),
+            contextSecret: env.CLIENT_CONTEXT_SECRET,
+          },
         },
       }
     : {}),

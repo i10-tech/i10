@@ -119,13 +119,22 @@ export type SsoGateOutcome =
   | {
       status: "sso_required"
       startUrl: string | null
-      reason: "unbound" | "connection_inactive" | "max_age" | "idle" | "revoked"
+      /** `enforced`: a workspace's "required" enforcement covers them (#340). */
+      reason:
+        "unbound" | "connection_inactive" | "max_age" | "idle" | "revoked" | "enforced"
     }
+  /** An owner or admin exempt from "required" SSO who holds no passkey (#340). */
+  | { status: "passkey_required" }
   | { status: "unknown" }
 
+/**
+ * Without `tenantId`: the managed-account gate, which holds everywhere. With
+ * it: the workspace's own enforcement (#340), once `requireTenant` knows it.
+ */
 export type SsoGateReader = (
   request: Request,
   userId: string,
+  tenantId?: string,
 ) => Promise<SsoGateOutcome>
 
 /**
@@ -148,16 +157,35 @@ export function ssoRequired(
 }
 
 /**
+ * The refusal an owner or admin exempt from "required" SSO gets without a
+ * passkey (decision 7). The console sends them to add one; adding it is
+ * Clerk's frontend API, which this API never stands in front of.
+ */
+export function passkeyRequired(c: Context) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "passkey_required",
+      message:
+        "Your workspace requires SSO, and owners and admins who skip it must sign in with a passkey. Add a passkey to your account to continue.",
+    },
+    403,
+  )
+}
+
+/**
  * Runs the SSO gate for a verified person, if this process has one: a refusal
- * to return, or null to carry on. Shared by `requireUser` and `requireTenant`.
+ * to return, or null to carry on. Shared by `requireUser` and `requireTenant`;
+ * `tenantId` asks for that workspace's enforcement (#340) as well.
  * Unwired (tests, and processes with no identity core) means no managed
  * accounts can exist to gate.
  */
-export async function ssoGateRefusal(c: Context, userId: string) {
+export async function ssoGateRefusal(c: Context, userId: string, tenantId?: string) {
   const gate = c.get("ssoGate")
   if (!gate) return null
-  const verdict = await gate(c.req.raw, userId)
+  const verdict = await gate(c.req.raw, userId, tenantId)
   if (verdict.status === "sso_required") return ssoRequired(c, verdict)
+  if (verdict.status === "passkey_required") return passkeyRequired(c)
   if (verdict.status === "unknown") return gateUnavailable(c)
   return null
 }

@@ -181,7 +181,7 @@ export function readOidcInput(
 }
 
 /** What the setup screen shows. Never a secret. */
-function setupView(
+export function oidcSetupView(
   connection: Connection,
   o: OidcConsoleDeps,
 ): Record<string, unknown> {
@@ -251,143 +251,31 @@ export function mountIdentityOidc(app: Hono, d: ConsoleDeps): void {
   app.get("/identity/connections/:id/oidc", async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
-    return c.json(setupView(loaded.connection, loaded.oidc))
+    return c.json(oidcSetupView(loaded.connection, loaded.oidc))
   })
 
   app.put("/identity/connections/:id/oidc", requireFreshAuth, async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
-    const { id, oidc, connection, tenantId } = loaded
-    const preset = presetOf(connection.provider)
-    if (!preset)
-      return c.json(validation("This connection's provider is not known."), 422)
-    const read = readOidcInput(
+    return putOidcSettings(
+      c,
+      loaded,
       (await readJson(c)) ?? {},
-      preset,
-      storedOidc(connection),
+      { userId: c.get("user").userId },
+      () => trustRefusal(c, loaded.connection),
     )
-    if (typeof read === "string") return c.json(validation(read), 422)
-    const trust = read.changed.filter((k) =>
-      (TRUST_FIELDS as readonly string[]).includes(k),
-    )
-    if (trust.length) {
-      const refusal = await trustRefusal(c, connection)
-      if (refusal) return refusal
-    }
-    /*
-     * ⚠ THE ISSUER IS PROVED BEFORE IT IS SAVED: its discovery document is
-     * fetched through the egress guard and must name exactly this issuer. A
-     * private address, an unreachable host or a mismatched document is a 422
-     * here, not a broken sign-in later.
-     */
-    if (
-      read.next.issuer &&
-      (trust.includes("issuer") || trust.includes("discoveryUrl"))
-    ) {
-      try {
-        await oidc.engine.discover({
-          issuer: read.next.issuer,
-          discoveryUrl: read.next.discoveryUrl ?? null,
-        })
-      } catch (error) {
-        /*
-         * ⚠ A GENERIC ANSWER, THE REASON IN OUR LOG ONLY. The guard's reason
-         * names what a host resolved to; echoed here it would let a workspace
-         * admin map names inside our network one 422 at a time. Problems with
-         * the IdP's own document are the admin's to fix, so those are said.
-         */
-        if (error instanceof OidcMisconfigured)
-          return c.json(
-            validation(`We could not use that issuer: ${error.message}`),
-            422,
-          )
-        id.log.warn(
-          {
-            connectionId: connection.id,
-            err: error instanceof Error ? error.message : "unknown",
-          },
-          "an OIDC issuer could not be reached through the egress guard",
-        )
-        return c.json(
-          validation(
-            "We could not reach that issuer's discovery document from the internet. Check the URL and that it is public.",
-          ),
-          422,
-        )
-      }
-    }
-    const { userId } = c.get("user")
-    const after = await id.store.updateConnection(tenantId, connection.id, {
-      config: { ...connection.config, oidc: read.next },
-    })
-    if (!after) return c.json(notFound(), 404)
-    if (read.changed.length)
-      await id.store.record(tenantId, {
-        type: "connection.oidc_updated",
-        actorUserId: userId,
-        connectionId: connection.id,
-        data: {
-          changed: read.changed,
-          trust: trust.length > 0,
-          status: connection.status,
-          from: pickFields(storedOidc(connection), read.changed),
-          to: pickFields(read.next, read.changed),
-        },
-      })
-    return c.json(setupView(after, oidc))
   })
 
   app.put("/identity/connections/:id/oidc/secret", requireFreshAuth, async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
-    const { id, oidc, connection, tenantId } = loaded
-    if (connection.provider === "google")
-      return c.json(
-        validation("A Google Workspace connection has no secret to set."),
-        422,
-      )
-    const refusal = await trustRefusal(c, connection)
-    if (refusal) return refusal
-    const body = (await readJson(c)) ?? {}
-    const secret = body.clientSecret
-    if (
-      typeof secret !== "string" ||
-      !/^[\x20-\x7E]{1,1024}$/.test(secret) ||
-      !secret.trim()
+    return putOidcSecret(
+      c,
+      loaded,
+      (await readJson(c)) ?? {},
+      { userId: c.get("user").userId },
+      () => trustRefusal(c, loaded.connection),
     )
-      return c.json(
-        validation("clientSecret must be 1 to 1024 visible characters."),
-        422,
-      )
-    const stored = storedOidc(connection)
-    const after = await id.store.setConnectionSecrets(
-      tenantId,
-      connection.id,
-      (now) => ({
-        secrets: {
-          ...now.secrets,
-          oidc: { ...sealedOidc(now.secrets), clientSecret: secret },
-        },
-        config: {
-          ...now.config,
-          oidc: { ...storedOidc({ config: now.config }), clientSecretSet: true },
-        },
-      }),
-    )
-    if (!after) return c.json(notFound(), 404)
-    const { userId } = c.get("user")
-    await id.store.record(tenantId, {
-      type: "connection.secret_set",
-      actorUserId: userId,
-      connectionId: connection.id,
-      // ⚠ THAT IT CHANGED, NEVER WHAT TO.
-      data: {
-        kind: "client_secret",
-        rotated: stored.clientSecretSet === true,
-        status: connection.status,
-      },
-    })
-    return c.json(setupView(after, oidc))
   })
 
   app.post("/identity/connections/:id/oidc/keys", requireFreshAuth, async (c) => {
@@ -444,8 +332,165 @@ export function mountIdentityOidc(app: Hono, d: ConsoleDeps): void {
         status: connection.status,
       },
     })
-    return c.json(setupView(after, oidc), 201)
+    return c.json(oidcSetupView(after, oidc), 201)
   })
+}
+
+/**
+ * Who changes a connection's IdP settings, for the audit log: a console user,
+ * or a setup link acting for the customer's IT contact (#340), which has no
+ * user and is named by its id.
+ */
+export interface SettingsActor {
+  userId: string | null
+  setupLinkId?: string
+}
+
+/** The connection a settings write is for, already loaded and allowed. */
+export interface OidcTarget {
+  id: NonNullable<ConsoleDeps["identity"]>
+  oidc: OidcConsoleDeps
+  connection: Connection
+  tenantId: string
+}
+
+const actorData = (actor: SettingsActor) =>
+  actor.setupLinkId ? { setupLinkId: actor.setupLinkId } : {}
+
+/**
+ * `PUT .../oidc`: the body merged over what is stored, the trust rule, the
+ * issuer proved through the egress guard, saved and audited. Shared by the
+ * console and setup links (routes/sso-setup.ts); `trustRefusal` is the
+ * caller's answer to "may this actor change who the connection trusts".
+ */
+export async function putOidcSettings(
+  c: Context,
+  t: OidcTarget,
+  body: Record<string, unknown>,
+  actor: SettingsActor,
+  trustRefusal: () => Promise<Response | null>,
+): Promise<Response> {
+  const { id, oidc, connection, tenantId } = t
+  const preset = presetOf(connection.provider)
+  if (!preset)
+    return c.json(validation("This connection's provider is not known."), 422)
+  const read = readOidcInput(body, preset, storedOidc(connection))
+  if (typeof read === "string") return c.json(validation(read), 422)
+  const trust = read.changed.filter((k) =>
+    (TRUST_FIELDS as readonly string[]).includes(k),
+  )
+  if (trust.length) {
+    const refusal = await trustRefusal()
+    if (refusal) return refusal
+  }
+  /*
+   * ⚠ THE ISSUER IS PROVED BEFORE IT IS SAVED: its discovery document is
+   * fetched through the egress guard and must name exactly this issuer. A
+   * private address, an unreachable host or a mismatched document is a 422
+   * here, not a broken sign-in later.
+   */
+  if (
+    read.next.issuer &&
+    (trust.includes("issuer") || trust.includes("discoveryUrl"))
+  ) {
+    try {
+      await oidc.engine.discover({
+        issuer: read.next.issuer,
+        discoveryUrl: read.next.discoveryUrl ?? null,
+      })
+    } catch (error) {
+      /*
+       * ⚠ A GENERIC ANSWER, THE REASON IN OUR LOG ONLY. The guard's reason
+       * names what a host resolved to; echoed here it would let a workspace
+       * admin map names inside our network one 422 at a time. Problems with
+       * the IdP's own document are the admin's to fix, so those are said.
+       */
+      if (error instanceof OidcMisconfigured)
+        return c.json(validation(`We could not use that issuer: ${error.message}`), 422)
+      id.log.warn(
+        {
+          connectionId: connection.id,
+          err: error instanceof Error ? error.message : "unknown",
+        },
+        "an OIDC issuer could not be reached through the egress guard",
+      )
+      return c.json(
+        validation(
+          "We could not reach that issuer's discovery document from the internet. Check the URL and that it is public.",
+        ),
+        422,
+      )
+    }
+  }
+  const after = await id.store.updateConnection(tenantId, connection.id, {
+    config: { ...connection.config, oidc: read.next },
+  })
+  if (!after) return c.json(notFound(), 404)
+  if (read.changed.length)
+    await id.store.record(tenantId, {
+      type: "connection.oidc_updated",
+      actorUserId: actor.userId,
+      connectionId: connection.id,
+      data: {
+        changed: read.changed,
+        trust: trust.length > 0,
+        status: connection.status,
+        from: pickFields(storedOidc(connection), read.changed),
+        to: pickFields(read.next, read.changed),
+        ...actorData(actor),
+      },
+    })
+  return c.json(oidcSetupView(after, oidc))
+}
+
+/** `PUT .../oidc/secret`: set or rotate the client secret, write-only. */
+export async function putOidcSecret(
+  c: Context,
+  t: OidcTarget,
+  body: Record<string, unknown>,
+  actor: SettingsActor,
+  trustRefusal: () => Promise<Response | null>,
+): Promise<Response> {
+  const { id, oidc, connection, tenantId } = t
+  if (connection.provider === "google")
+    return c.json(
+      validation("A Google Workspace connection has no secret to set."),
+      422,
+    )
+  const refusal = await trustRefusal()
+  if (refusal) return refusal
+  const secret = body.clientSecret
+  if (
+    typeof secret !== "string" ||
+    !/^[\x20-\x7E]{1,1024}$/.test(secret) ||
+    !secret.trim()
+  )
+    return c.json(validation("clientSecret must be 1 to 1024 visible characters."), 422)
+  const stored = storedOidc(connection)
+  const after = await id.store.setConnectionSecrets(tenantId, connection.id, (now) => ({
+    secrets: {
+      ...now.secrets,
+      oidc: { ...sealedOidc(now.secrets), clientSecret: secret },
+    },
+    config: {
+      ...now.config,
+      oidc: { ...storedOidc({ config: now.config }), clientSecretSet: true },
+    },
+  }))
+  if (!after) return c.json(notFound(), 404)
+  await id.store.record(tenantId, {
+    type: "connection.secret_set",
+    actorUserId: actor.userId,
+    connectionId: connection.id,
+    // ⚠ THAT IT CHANGED, NEVER WHAT TO.
+    data: {
+      kind: "client_secret",
+      rotated: stored.clientSecretSet === true,
+      status: connection.status,
+      ...actorData(actor),
+    },
+  })
+  return c.json(oidcSetupView(after, oidc))
 }
 
 function pickFields(o: StoredOidc, keys: readonly string[]): Record<string, unknown> {

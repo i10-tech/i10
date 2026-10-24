@@ -988,6 +988,13 @@
       "when": 1792814104243,
       "tag": "0140_authd_managed_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1792819553913,
+      "tag": "0141_sso_break_glass",
+      "breakpoints": true
     }
   ]
 }
