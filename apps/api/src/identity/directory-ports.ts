@@ -54,14 +54,35 @@ export const DIRECTORY_CONFLICTS = [
 ] as const
 export type DirectoryConflict = (typeof DIRECTORY_CONFLICTS)[number]
 
+export const GOOGLE_WATCH_EVENTS = ["add", "update", "delete", "undelete"] as const
+export type GoogleWatchEvent = (typeof GOOGLE_WATCH_EVENTS)[number]
+
+export type DirectorySyncStatus = "ok" | "failed"
+
 export interface Directory {
   id: string
   tenantId: string
   name: string
   provider: DirectoryProvider
   enabled: boolean
+  adminEmail: string | null
+  domain: string | null
+  lastSyncAt: Date | null
+  lastSyncStatus: DirectorySyncStatus | null
+  lastSyncError: string | null
   createdAt: Date
   updatedAt: Date
+}
+
+export interface WatchChannelRow {
+  id: string
+  tenantId: string
+  directoryId: string
+  event: GoogleWatchEvent
+  resourceId: string
+  tokenHash: string
+  expiresAt: Date
+  createdAt: Date
 }
 
 export interface DirectoryToken {
@@ -149,15 +170,56 @@ export interface DirectoryStore {
   // ── the console ──
   createDirectory(
     tenantId: string,
-    input: { name: string; provider: DirectoryProvider; createdBy: string },
+    input: {
+      name: string
+      provider: DirectoryProvider
+      enabled?: boolean
+      adminEmail?: string | null
+      domain?: string | null
+      createdBy: string
+    },
   ): Promise<Directory>
   directories(tenantId: string): Promise<DirectorySummary[]>
   directory(tenantId: string, id: string): Promise<Directory | null>
   updateDirectory(
     tenantId: string,
     id: string,
-    patch: { name?: string; enabled?: boolean },
+    patch: {
+      name?: string
+      enabled?: boolean
+      adminEmail?: string | null
+      domain?: string | null
+    },
   ): Promise<Directory | null>
+  noteDirectorySync(
+    tenantId: string,
+    id: string,
+    input: { status: DirectorySyncStatus; error: string | null; at: Date },
+  ): Promise<void>
+  /** Enabled Google directories across workspaces, keyset-paged by id. */
+  dueGoogleDirectories(
+    after: string | null,
+    limit: number,
+  ): Promise<{ id: string; tenantId: string }[]>
+  watchChannels(tenantId: string, directoryId: string): Promise<WatchChannelRow[]>
+  saveWatchChannel(
+    tenantId: string,
+    input: {
+      id: string
+      directoryId: string
+      event: GoogleWatchEvent
+      resourceId: string
+      tokenHash: string
+      expiresAt: Date
+    },
+  ): Promise<WatchChannelRow>
+  deleteWatchChannels(
+    tenantId: string,
+    directoryId: string,
+    ids?: readonly string[],
+  ): Promise<WatchChannelRow[]>
+  /** With no workspace in scope: the one watch channel this id names. */
+  watchChannelById(id: string): Promise<WatchChannelRow | null>
   /**
    * A new token, and every older live one given `expires_at = now + overlap`
    * (revoked at once when the overlap is zero), in one transaction. Null when

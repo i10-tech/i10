@@ -58,6 +58,10 @@ import {
 } from "./routes/sso.js"
 import { createScimRoutes, type ScimRouteDeps } from "./routes/scim.js"
 import { createInternalAuthdRoutes, type InternalAuthdDeps } from "./routes/authd.js"
+import {
+  createGoogleDirectoryRoutes,
+  type GoogleDirectoryRouteDeps,
+} from "./routes/google-directory.js"
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
@@ -158,6 +162,8 @@ export interface AppDeps {
   sso?: SsoRouteDeps
   /** The SCIM server (#342), at `/scim/v2/<directory id>`. */
   scim?: ScimRouteDeps
+  /** Google Workspace directory watch notifications (#343), at `/google/directory/notify`. */
+  googleDirectory?: GoogleDirectoryRouteDeps
   /** The Clerk gateway's managed-account lookup (#337), at `/internal/identity`. */
   internalIdentity?: InternalIdentityDeps
   /** authd's pass-through lookup (#344), at `/internal/authd`. */
@@ -549,6 +555,9 @@ export function createApp(deps: AppDeps = {}) {
   // ⚠ SCIM's OWN ERROR SHAPE AND ITS OWN AUTHENTICATION: a directory's bearer
   // token, not a session or an API key. See routes/scim.ts.
   app.route("/scim/v2", createScimRoutes(deps.scim))
+  // Google Admin SDK `users.watch` push notifications (#343): channel id +
+  // constant-time secret hash, outside the OpenAPI document.
+  app.route("/google/directory", createGoogleDirectoryRoutes(deps.googleDirectory))
   app.route("/internal/identity", createInternalIdentityRoutes(deps.internalIdentity))
   app.route("/internal/authd", createInternalAuthdRoutes(deps.internalAuthd))
 

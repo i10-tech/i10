@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { parseKeyring } from "./content/seal.js"
+import { parseGoogleServiceAccount } from "./identity/google-directory.js"
 import { SYSTEM_FROM } from "./system-mail.js"
 import { parseAllowList } from "./webhooks/egress.js"
 
@@ -235,6 +236,39 @@ const schema = z.object({
     .regex(/^[0-9a-z-]+\.apps\.googleusercontent\.com$/)
     .optional(),
   GOOGLE_SSO_CLIENT_SECRET: z.string().min(8).optional(),
+
+  /**
+   * OUR Google service account JSON key, for Google Workspace directory sync
+   * under domain-wide delegation (#343, sso.md 2.7 and 2.9). Customers never
+   * upload a key; their admin authorises this service account's client id for
+   * the two readonly Directory scopes.
+   *
+   * ⚠ UNSET MEANS GOOGLE DIRECTORIES CANNOT BE ENABLED, NOT A CRASH. The
+   * console tells the workspace why, and SCIM directories work unchanged. A
+   * non-empty value that is not a valid RSA service-account key refuses to boot
+   * without echoing the secret.
+   */
+  GOOGLE_DIRECTORY_SERVICE_ACCOUNT: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const trimmed = v?.trim()
+      return trimmed ? trimmed : undefined
+    })
+    .superRefine((value, ctx) => {
+      if (value === undefined) return
+      try {
+        parseGoogleServiceAccount(value)
+      } catch (error) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            error instanceof Error
+              ? error.message
+              : "invalid Google service account key",
+        })
+      }
+    }),
 
   /**
    * Origins allowed to present a Clerk session to `/mailboxes`.

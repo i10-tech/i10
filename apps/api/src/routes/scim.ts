@@ -218,6 +218,13 @@ export function createScimRoutes(deps?: ScimRouteDeps) {
       return refuse(404, "The directory does not exist.", "no_directory", known)
     if (!directory.enabled)
       return refuse(403, "The directory is disabled.", "directory_disabled", known)
+    if (directory.provider === "google")
+      return refuse(
+        403,
+        "Google Workspace directories are synced by pull, not SCIM.",
+        "wrong_provider",
+        known,
+      )
 
     const verdict = await d.take(`scim:dir:${directory.id}`, limits.perDirectory)
     if (!verdict.ok)

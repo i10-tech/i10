@@ -59,6 +59,21 @@ import {
   directoryScheduler,
   startDirectoryWorker,
 } from "./queue/directory-queue.js"
+import {
+  GOOGLE_DIRECTORY_SCOPES,
+  GOOGLE_FETCH_MAX_BYTES,
+  GOOGLE_FETCH_TIMEOUT_MS,
+  checkGoogleDirectoryAccess,
+  createGoogleTokenSource,
+  parseGoogleServiceAccount,
+  stopGoogleWatchChannels,
+} from "./identity/google-directory.js"
+import {
+  createGoogleDirectoryQueue,
+  googlePullScheduler,
+  startGoogleDirectoryScheduler,
+  startGoogleDirectoryWorker,
+} from "./queue/google-directory-queue.js"
 import type { OutboxEntry } from "./identity/directory-ports.js"
 import type { AuditEvent } from "./identity/ports.js"
 import { ssoGate } from "./identity/gate.js"
@@ -1333,6 +1348,28 @@ const kickDirectory = directoryKicker({
   log,
 })
 const scimBaseUrl = (directoryId: string) => `${env.SCIM_BASE_URL}/${directoryId}`
+/*
+ * Google Workspace directory sync (#343): domain-wide delegation with our own
+ * service account, outbound HTTP exclusively through `guardedFetch`, and one
+ * groupmq pull at a time per directory.
+ */
+const googleServiceAccount = env.GOOGLE_DIRECTORY_SERVICE_ACCOUNT
+  ? parseGoogleServiceAccount(env.GOOGLE_DIRECTORY_SERVICE_ACCOUNT)
+  : null
+const googleFetch = guardedFetch({
+  vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+  timeoutMs: GOOGLE_FETCH_TIMEOUT_MS,
+  maxBytes: GOOGLE_FETCH_MAX_BYTES,
+})
+const googleTokens = googleServiceAccount
+  ? createGoogleTokenSource({
+      serviceAccount: googleServiceAccount,
+      fetch: googleFetch,
+    })
+  : null
+const googleNotifyUrl = new URL("/google/directory/notify", env.SCIM_BASE_URL).href
+const googleDirectoryQueue = createGoogleDirectoryQueue({ redis: queueRedis })
+const enqueueGooglePull = googlePullScheduler(googleDirectoryQueue)
 const bridge = {
   store: identity,
   clerk: identityClerk,
@@ -1390,6 +1427,39 @@ const identityConsole = {
     baseUrl: scimBaseUrl,
     kick: kickDirectory,
     schedule: scheduleDirectory,
+    google: {
+      serviceAccount: googleServiceAccount
+        ? {
+            clientEmail: googleServiceAccount.clientEmail,
+            clientId: googleServiceAccount.clientId,
+          }
+        : null,
+      scopes: GOOGLE_DIRECTORY_SCOPES,
+      checkAccess: (input: {
+        tenantId: string
+        adminEmail: string | null
+        domain: string | null
+      }) =>
+        checkGoogleDirectoryAccess(
+          { tokens: googleTokens, fetch: googleFetch, store: directories },
+          input,
+        ),
+      schedulePull: (tenantId: string, directoryId: string) =>
+        enqueueGooglePull({ tenantId, directoryId, cause: "enable" }),
+      stopChannels: (
+        tenantId: string,
+        directoryId: string,
+        adminEmail?: string | null,
+      ) =>
+        stopGoogleWatchChannels(
+          { store: directories, tokens: googleTokens, fetch: googleFetch, log },
+          {
+            tenantId,
+            directoryId,
+            ...(adminEmail !== undefined ? { adminEmail } : {}),
+          },
+        ),
+    },
   },
   ...(oidc && authOrigin
     ? {
@@ -1476,6 +1546,26 @@ const directoryWorker = startDirectoryWorker({
   name: `api-${process.pid}:directory-apply`,
   log,
 })
+const googleDirectoryWorker = startGoogleDirectoryWorker({
+  queue: googleDirectoryQueue,
+  deps: {
+    store: directories,
+    tokens: googleTokens,
+    fetch: googleFetch,
+    notifyUrl: googleNotifyUrl,
+    schedule: scheduleDirectory,
+    record: (tenantId, event) => identity.record(tenantId, event),
+    log,
+  },
+  name: `api-${process.pid}:google-directory-pull`,
+})
+const googleDirectoryScheduler = googleTokens
+  ? startGoogleDirectoryScheduler({
+      store: directories,
+      enqueue: enqueueGooglePull,
+      log,
+    })
+  : null
 
 const app = createApp({
   suppressions,
@@ -1776,6 +1866,15 @@ const app = createApp({
   internalAuthd: {
     secret: env.AUTHD_API_SECRET,
     passthrough: (connectionId: string) => passthroughFor(identity, connectionId),
+    log,
+  },
+  googleDirectory: {
+    store: directories,
+    schedulePull: (tenantId: string, directoryId: string) =>
+      enqueueGooglePull({ tenantId, directoryId, cause: "notify" }),
+    record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
+    take: fixedWindow(cache),
+    contextSecret: env.CLIENT_CONTEXT_SECRET,
     log,
   },
   internalIdentity: {
@@ -2289,14 +2388,25 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     // contract `server.close(cb)` had. Passing `true` would close active
     // connections immediately, which is precisely the dropped-request
     // behaviour this block exists to prevent.
-    // ⚠ THE DIRECTORY WORKER FIRST (#342): a job in flight finishes its Clerk
-    // calls and its marks before the pool and Redis go; an interrupted one is
-    // retried from the outbox either way, this just avoids doing half of it.
-    void directoryWorker
-      .close(15_000)
-      .catch((err) =>
-        log.warn({ ...safeError(err) }, "could not close the directory worker"),
-      )
+    // ⚠ THE DIRECTORY WORKERS FIRST (#342, #343): a job in flight finishes its
+    // Clerk or Google calls and its marks before the pool and Redis go; an
+    // interrupted one is retried either way, this just avoids doing half of it.
+    googleDirectoryScheduler?.stop()
+    void Promise.all([
+      directoryWorker
+        .close(15_000)
+        .catch((err) =>
+          log.warn({ ...safeError(err) }, "could not close the directory worker"),
+        ),
+      googleDirectoryWorker
+        .close(15_000)
+        .catch((err) =>
+          log.warn(
+            { ...safeError(err) },
+            "could not close the Google directory worker",
+          ),
+        ),
+    ])
       .then(() => server.stop())
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.

@@ -22,6 +22,7 @@ import {
   directoryOutbox,
   directoryTokens,
   directoryUsers,
+  directoryWatchChannels,
   events,
 } from "../db/identity.js"
 import { NO_TENANT } from "../middleware/tenant.js"
@@ -32,9 +33,12 @@ import type {
   DirectoryGroupRow,
   DirectoryProvider,
   DirectoryStore,
+  DirectorySyncStatus,
   DirectoryToken,
   DirectoryUserRow,
+  GoogleWatchEvent,
   OutboxEntry,
+  WatchChannelRow,
 } from "./directory-ports.js"
 import type { StoredUser } from "./scim.js"
 
@@ -63,8 +67,26 @@ const toDirectory = (r: typeof directories.$inferSelect): Directory => ({
   name: r.name,
   provider: r.provider as DirectoryProvider,
   enabled: r.enabled,
+  adminEmail: r.adminEmail,
+  domain: r.domain,
+  lastSyncAt: r.lastSyncAt,
+  lastSyncStatus: r.lastSyncStatus as DirectorySyncStatus | null,
+  lastSyncError: r.lastSyncError,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
+})
+
+const toWatchChannel = (
+  r: typeof directoryWatchChannels.$inferSelect,
+): WatchChannelRow => ({
+  id: r.id,
+  tenantId: r.tenantId,
+  directoryId: r.directoryId,
+  event: r.event as GoogleWatchEvent,
+  resourceId: r.resourceId,
+  tokenHash: r.tokenHash,
+  expiresAt: r.expiresAt,
+  createdAt: r.createdAt,
 })
 
 const toToken = (r: typeof directoryTokens.$inferSelect): DirectoryToken => ({
@@ -203,6 +225,9 @@ export function directoryStore(db: Database): DirectoryStore {
             tenantId,
             name: input.name,
             provider: input.provider,
+            enabled: input.enabled ?? input.provider !== "google",
+            adminEmail: input.adminEmail ?? null,
+            domain: input.domain ?? null,
             createdBy: input.createdBy,
           })
           .returning(),
@@ -274,6 +299,7 @@ export function directoryStore(db: Database): DirectoryStore {
     },
 
     async updateDirectory(tenantId, id, patch) {
+      if (!UUID.test(id)) return null
       const [row] = await withTenant(db, tenantId, (tx) =>
         tx
           .update(directories)
@@ -282,6 +308,111 @@ export function directoryStore(db: Database): DirectoryStore {
           .returning(),
       )
       return row ? toDirectory(row) : null
+    },
+
+    async noteDirectorySync(tenantId, id, input) {
+      if (!UUID.test(id)) return
+      await withTenant(db, tenantId, (tx) =>
+        tx
+          .update(directories)
+          .set({
+            lastSyncAt: input.at,
+            lastSyncStatus: input.status,
+            lastSyncError: input.error,
+            updatedAt: input.at,
+          })
+          .where(and(eq(directories.tenantId, tenantId), eq(directories.id, id))),
+      )
+    },
+
+    async dueGoogleDirectories(after, limit) {
+      if (after !== null && !UUID.test(after)) return []
+      const rows = (await db.execute(
+        sql`select * from identity.google_directories_due(${after}::uuid, ${Math.trunc(limit)})`,
+      )) as unknown as { id: string; tenant_id: string }[]
+      return rows.map((r) => ({ id: r.id, tenantId: r.tenant_id }))
+    },
+
+    async watchChannels(tenantId, directoryId) {
+      if (!UUID.test(directoryId)) return []
+      const rows = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select()
+          .from(directoryWatchChannels)
+          .where(
+            and(
+              eq(directoryWatchChannels.tenantId, tenantId),
+              eq(directoryWatchChannels.directoryId, directoryId),
+            ),
+          )
+          .orderBy(asc(directoryWatchChannels.createdAt)),
+      )
+      return rows.map(toWatchChannel)
+    },
+
+    async saveWatchChannel(tenantId, input) {
+      const [row] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .insert(directoryWatchChannels)
+          .values({
+            id: input.id,
+            tenantId,
+            directoryId: input.directoryId,
+            event: input.event,
+            resourceId: input.resourceId,
+            tokenHash: input.tokenHash,
+            expiresAt: input.expiresAt,
+          })
+          .returning(),
+      )
+      return toWatchChannel(row!)
+    },
+
+    async deleteWatchChannels(tenantId, directoryId, ids) {
+      if (!UUID.test(directoryId)) return []
+      if (ids !== undefined) {
+        const clean = ids.filter((x) => UUID.test(x))
+        if (clean.length === 0) return []
+        const gone = await withTenant(db, tenantId, (tx) =>
+          tx
+            .delete(directoryWatchChannels)
+            .where(
+              and(
+                eq(directoryWatchChannels.tenantId, tenantId),
+                eq(directoryWatchChannels.directoryId, directoryId),
+                inArray(directoryWatchChannels.id, clean),
+              ),
+            )
+            .returning(),
+        )
+        return gone.map(toWatchChannel)
+      }
+      const gone = await withTenant(db, tenantId, (tx) =>
+        tx
+          .delete(directoryWatchChannels)
+          .where(
+            and(
+              eq(directoryWatchChannels.tenantId, tenantId),
+              eq(directoryWatchChannels.directoryId, directoryId),
+            ),
+          )
+          .returning(),
+      )
+      return gone.map(toWatchChannel)
+    },
+
+    async watchChannelById(id) {
+      if (!UUID.test(id)) return null
+      const lower = id.toLowerCase()
+      const [row] = await withTenant(db, NO_TENANT, async (tx) => {
+        await tx.execute(sql`select set_config('app.google_channel', ${lower}, true)`)
+        return tx
+          .select()
+          .from(directoryWatchChannels)
+          .where(eq(directoryWatchChannels.id, lower))
+          .limit(1)
+      })
+      return row ? toWatchChannel(row) : null
     },
 
     async issueToken(tenantId, directoryId, input, now) {

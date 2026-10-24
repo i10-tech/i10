@@ -809,6 +809,15 @@ export const directories = identity.table(
     /** `okta`, `entra`, `google`, `generic`: which setup guide (#340) applies. */
     provider: text("provider").notNull().default("generic"),
     enabled: boolean("enabled").notNull().default(true),
+    /** Customer Workspace admin to act as for domain-wide delegation (#343). */
+    adminEmail: text("admin_email"),
+    /** Primary Workspace domain pulled for a `google` directory (#343). */
+    domain: text("domain"),
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    /** `ok` or `failed` after a Google pull; null before the first run. */
+    lastSyncStatus: text("last_sync_status"),
+    /** Fixed error code when `lastSyncStatus` is `failed`; never Google's message. */
+    lastSyncError: text("last_sync_error"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -819,6 +828,10 @@ export const directories = identity.table(
     check(
       "directories_provider_check",
       sql`"provider" in ('okta', 'entra', 'google', 'generic')`,
+    ),
+    check(
+      "directories_last_sync_status_check",
+      sql`"last_sync_status" is null or "last_sync_status" in ('ok', 'failed')`,
     ),
     pgPolicy("directories_workspace", {
       for: "all",
@@ -1108,6 +1121,56 @@ export const directoryOutbox = identity.table(
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Push notification channels registered with Google's `users.watch` (#343).
+ *
+ * ⚠ ONLY THE SHA-256 OF `X-Goog-Channel-Token` IS STORED. A notification on
+ * `POST /google/directory/notify` looks up the channel by `id` via
+ * `directory_watch_channels_id_read`, compares the token hash in constant time,
+ * audits a wrong token under the row's workspace, and schedules a pull without
+ * trusting anything in the request body.
+ */
+export const directoryWatchChannels = identity.table(
+  "directory_watch_channels",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    directoryId: uuid("directory_id").notNull(),
+    /** Which `users.watch` event this channel listens for. */
+    event: text("event").notNull(),
+    /** Opaque server-side resource id Google needs on `channels.stop`. */
+    resourceId: text("resource_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "directory_watch_channels_directory_fk",
+      columns: [t.directoryId, t.tenantId],
+      foreignColumns: [directories.id, directories.tenantId],
+    }).onDelete("cascade"),
+    index("directory_watch_channels_directory_idx").on(t.directoryId),
+    check(
+      "directory_watch_channels_event_check",
+      sql`"event" in ('add', 'update', 'delete', 'undelete')`,
+    ),
+    pgPolicy("directory_watch_channels_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+    pgPolicy("directory_watch_channels_id_read", {
+      for: "select",
+      using: sql`${t.id}::text = nullif(current_setting('app.google_channel', true), '')`,
     }),
   ],
 )

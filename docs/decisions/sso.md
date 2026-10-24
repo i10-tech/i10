@@ -785,6 +785,34 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
   setup page (#340's console slice) must move it into the fragment and send no
   referrer; the staff path waits for #217.
 
+### 2.19 What #343 settled for Google Workspace directories (2026-10-24)
+
+- **Domain-wide delegation, our service account, no key from the customer.** The
+  key is `GOOGLE_DIRECTORY_SERVICE_ACCOUNT`; unset, Google directories cannot be
+  enabled. Tokens come from the JWT bearer grant (RS256 with node:crypto, no
+  Google SDK) through the egress guard, cached until five minutes before expiry.
+- **The admin we act as, and the domain, must both be on the workspace's live
+  proved domains**, checked at setup, at enable and before every pull: any
+  Workspace customer can authorise our client id, so an unchecked address would
+  let a workspace read another company's directory. Setting them is an owner's,
+  with step-up.
+- **A pull is all or nothing.** Nothing is written until every page has parsed;
+  people missing from Google are deleted only after a complete pull, a pull of
+  zero people over a directory we hold is refused (`empty_directory`), and a
+  failure records a fixed code on the directory and changes nobody. Unchanged
+  people write nothing. Everything after is #342's outbox and apply job.
+- **Schedule and push:** every 15 minutes and on enable, one pull per directory
+  at a time, plus `users.watch` notifications verified by channel id and a
+  hashed per-channel token; a notification only schedules a pull. Directories
+  due for a pull are found through a SECURITY DEFINER function returning ids
+  only (as 0130 and 0138), never a setting-gated cross-workspace policy.
+- **Open:** whether these two readonly scopes put our Google OAuth app through
+  verification is not settled by Google's pages (no end-user consent screen
+  under delegation, but our account reads customer data); check the scope list
+  in the Cloud console before launch. A cap on how many people one pull may
+  delete would also guard a partial wrong answer, not only an empty one.
+  **Unverified against a real Workspace tenant:** the API shapes and errors.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

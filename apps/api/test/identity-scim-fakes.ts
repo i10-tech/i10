@@ -8,6 +8,7 @@ import type {
   DirectoryUserRow,
   OutboxEntry,
   TokenRow,
+  WatchChannelRow,
 } from "../src/identity/directory-ports.js"
 import type { AuditEvent } from "../src/identity/ports.js"
 import {
@@ -69,12 +70,18 @@ export function memoryDirectories(
   const id = () => `00000000-0000-7000-8000-${String(++n).padStart(12, "0")}`
   const directories = new Map<string, Directory>()
   for (const over of init.directories ?? [{ id: DIRECTORY }]) {
+    const provider = over.provider ?? "generic"
     const made: Directory = {
       id: DIRECTORY,
       tenantId: tenant,
       name: "Acme directory",
-      provider: "generic",
-      enabled: true,
+      provider,
+      enabled: provider !== "google",
+      adminEmail: null,
+      domain: null,
+      lastSyncAt: null,
+      lastSyncStatus: null,
+      lastSyncError: null,
       createdAt: new Date("2026-10-01T00:00:00Z"),
       updatedAt: new Date("2026-10-01T00:00:00Z"),
       ...over,
@@ -82,6 +89,7 @@ export function memoryDirectories(
     directories.set(made.id, made)
   }
   const tokens: TokenRecord[] = []
+  const watchChannels: WatchChannelRow[] = []
   const users: DirectoryUserRow[] = []
   const groups: DirectoryGroupRow[] = []
   const memberships: { groupId: string; userId: string; directoryId: string }[] = []
@@ -198,7 +206,12 @@ export function memoryDirectories(
         tenantId,
         name: input.name,
         provider: input.provider,
-        enabled: true,
+        enabled: input.enabled ?? input.provider !== "google",
+        adminEmail: input.adminEmail ?? null,
+        domain: input.domain ?? null,
+        lastSyncAt: null,
+        lastSyncStatus: null,
+        lastSyncError: null,
         createdAt: clock,
         updatedAt: clock,
       }
@@ -227,6 +240,75 @@ export function memoryDirectories(
       if (!d || d.tenantId !== tenantId) return null
       Object.assign(d, patch, { updatedAt: clock })
       return { ...d }
+    },
+    async noteDirectorySync(tenantId, did, input) {
+      const d = directories.get(did)
+      if (!d || d.tenantId !== tenantId) return
+      d.lastSyncAt = input.at
+      d.lastSyncStatus = input.status
+      d.lastSyncError = input.error
+      d.updatedAt = input.at
+    },
+    async dueGoogleDirectories(after, limit) {
+      if (after !== null && !UUID.test(after)) return []
+      const capped = Math.min(Math.max(Math.trunc(limit), 0), 500)
+      if (capped === 0) return []
+      return [...directories.values()]
+        .filter(
+          (d) =>
+            d.provider === "google" && d.enabled && (after === null || d.id > after),
+        )
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .slice(0, capped)
+        .map((d) => ({ id: d.id, tenantId: d.tenantId }))
+    },
+    async watchChannels(tenantId, did) {
+      if (!UUID.test(did)) return []
+      return watchChannels
+        .filter((w) => w.tenantId === tenantId && w.directoryId === did)
+        .map((w) => ({ ...w }))
+    },
+    async saveWatchChannel(tenantId, input) {
+      const d = directories.get(input.directoryId)
+      if (!d || d.tenantId !== tenantId) throw new Error("no such directory")
+      const made: WatchChannelRow = {
+        id: input.id.toLowerCase(),
+        tenantId,
+        directoryId: input.directoryId,
+        event: input.event,
+        resourceId: input.resourceId,
+        tokenHash: input.tokenHash,
+        expiresAt: input.expiresAt,
+        createdAt: clock,
+      }
+      watchChannels.push(made)
+      return { ...made }
+    },
+    async deleteWatchChannels(tenantId, did, ids) {
+      if (!UUID.test(did)) return []
+      const wanted =
+        ids === undefined
+          ? null
+          : new Set(ids.filter((x) => UUID.test(x)).map((x) => x.toLowerCase()))
+      if (wanted !== null && wanted.size === 0) return []
+      const gone: WatchChannelRow[] = []
+      for (let i = watchChannels.length - 1; i >= 0; i--) {
+        const w = watchChannels[i]!
+        if (
+          w.tenantId === tenantId &&
+          w.directoryId === did &&
+          (wanted === null || wanted.has(w.id))
+        ) {
+          gone.push({ ...w })
+          watchChannels.splice(i, 1)
+        }
+      }
+      return gone.reverse()
+    },
+    async watchChannelById(cid) {
+      if (!UUID.test(cid)) return null
+      const w = watchChannels.find((x) => x.id === cid.toLowerCase())
+      return w ? { ...w } : null
     },
     async issueToken(tenantId, did, input, now) {
       const d = directories.get(did)
@@ -691,6 +773,7 @@ export function memoryDirectories(
     store,
     directories,
     tokens,
+    watchChannels,
     users,
     groups,
     memberships,
