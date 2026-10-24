@@ -21,6 +21,7 @@ import (
 
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
+	"github.com/i10-tech/i10/services/authd/internal/passthrough"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
 )
@@ -28,6 +29,12 @@ import (
 // Verifier is the password oracle. In production it is *clerkauth.Client.
 type Verifier interface {
 	Verify(ctx context.Context, userID, password string) (clerkauth.Outcome, error)
+}
+
+// PassThrough answers a managed account's bind from its company's directory
+// (#344). In production it is *passthrough.Service.
+type PassThrough interface {
+	Bind(ctx context.Context, connectionID, email, password string) passthrough.Result
 }
 
 type Options struct {
@@ -44,6 +51,10 @@ type Options struct {
 	// the bind path needs no branch of its own.
 	CredCache *credcache.Cache
 
+	// PassThrough serves managed accounts. Nil means none is configured, and a
+	// managed account's bind is then refused - never sent to Verifier.
+	PassThrough PassThrough
+
 	// OpTimeout bounds the work behind a single LDAP operation - the projection
 	// query, and for a bind the Clerk call as well.
 	OpTimeout time.Duration
@@ -57,6 +68,7 @@ type Server struct {
 	verifier          Verifier
 	limiter           *throttle.Limiter
 	credCache         *credcache.Cache
+	passthrough       PassThrough
 	log               *slog.Logger
 	opTimeout         time.Duration
 }
@@ -78,6 +90,7 @@ func New(opts Options) *Server {
 		verifier:          opts.Verifier,
 		limiter:           opts.Limiter,
 		credCache:         opts.CredCache,
+		passthrough:       opts.PassThrough,
 		log:               log,
 		opTimeout:         timeout,
 	}

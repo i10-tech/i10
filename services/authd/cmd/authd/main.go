@@ -26,6 +26,7 @@ import (
 	"github.com/i10-tech/i10/services/authd/internal/config"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
+	"github.com/i10-tech/i10/services/authd/internal/passthrough"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
 )
@@ -69,6 +70,24 @@ func run() error {
 	limiter := throttle.New(cfg.BindsPerMinute)
 	go sweepLoop(ctx, limiter, log)
 
+	// ⚠ A TYPED NIL IS NOT A NIL INTERFACE: Options.PassThrough must stay a
+	// true nil when pass-through is not configured, so that managed accounts
+	// are refused rather than panicking the bind.
+	var managed ldapsrv.PassThrough
+	if cfg.PassthroughConfigured() {
+		src, err := passthrough.NewHTTPSource(cfg.APIURL, cfg.APISecret, cfg.APITimeout)
+		if err != nil {
+			return err
+		}
+		managed = passthrough.NewService(
+			passthrough.NewCache(src, passthrough.MaxCacheTTL),
+			&passthrough.Binder{},
+		)
+		log.Info("ldap pass-through enabled for managed accounts")
+	} else {
+		log.Warn("ldap pass-through is not configured: managed accounts cannot bind")
+	}
+
 	srv := ldap.NewServer()
 	srv.ReadTimeout = 30 * time.Second
 	srv.WriteTimeout = 30 * time.Second
@@ -80,6 +99,7 @@ func run() error {
 		Verifier:          clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout),
 		Limiter:           limiter,
 		CredCache:         credcache.New(cfg.CredCacheTTL),
+		PassThrough:       managed,
 		Logger:            log,
 	}).Routes())
 

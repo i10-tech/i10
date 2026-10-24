@@ -71,3 +71,26 @@ func TestValidateRejectsNonPositiveRate(t *testing.T) {
 		t.Fatal("BindsPerMinute=0 accepted; that would deny every bind")
 	}
 }
+
+func TestPassthroughSettingsGoTogether(t *testing.T) {
+	secret := strings.Repeat("s", MinAPISecretLength)
+	for name, tc := range map[string]struct {
+		url, secret string
+		ok          bool
+	}{
+		"neither":      {"", "", true},
+		"both":         {"http://i10-api.default.svc:3001", secret, true},
+		"url only":     {"http://i10-api:3001", "", false},
+		"secret only":  {"", secret, false},
+		"short secret": {"http://i10-api:3001", "short", false},
+		"not a url":    {"i10-api:3001", secret, false},
+		"file scheme":  {"file:///etc/passwd", secret, false},
+		"no host":      {"https://", secret, false},
+	} {
+		c := valid()
+		c.APIURL, c.APISecret, c.APITimeout = tc.url, tc.secret, 5_000_000_000
+		if err := c.Validate(); (err == nil) != tc.ok {
+			t.Errorf("%s: Validate() = %v, want ok=%v", name, err, tc.ok)
+		}
+	}
+}

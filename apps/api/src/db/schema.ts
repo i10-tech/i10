@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm"
 import {
   boolean,
+  foreignKey,
   index,
   pgSchema,
   primaryKey,
@@ -8,6 +9,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core"
+import { connections, managedAccounts } from "./identity.js"
 
 // The transactional product. Re-exported so drizzle-kit and `import * as
 // schema` both see one entry point, rather than two that can disagree.
@@ -132,6 +134,49 @@ export const groupMembers = authd.table(
   (t) => [
     primaryKey({ columns: [t.groupName, t.clerkUserId] }),
     index("group_members_account_idx").on(t.clerkUserId),
+  ],
+)
+
+/**
+ * Which accounts a company's SSO connection manages (#344), as authd needs it.
+ *
+ * A mirror of `identity.managed_accounts`, which authd cannot read: that table
+ * is behind row-level security and authd holds SELECT on this schema only.
+ *
+ * ⚠ A SEPARATE TABLE, NOT A COLUMN ON `accounts`, BECAUSE A MANAGED ACCOUNT MUST
+ * BE MANAGED BEFORE IT HAS A MAILBOX ROW. `accounts` is written when a mailbox
+ * is provisioned; the claim happens when SSO links the person. A flag on the
+ * mailbox row would be unset in the gap between the two, and an unset flag
+ * means "ask Clerk" - the one thing a managed account must never do.
+ *
+ * ⚠ ONE WRITER: identity/authd-mirror.ts, called from the same transaction as
+ * every change to `identity.managed_accounts`. The foreign keys are the
+ * backstop for what the API does not do itself - a workspace deleted takes its
+ * managed rows with it (cascade), a connection deleted leaves the account
+ * managed by NOTHING (set null), which authd refuses. Neither frees an account
+ * to be asked of Clerk while its company still owns it.
+ */
+export const authdManagedAccounts = authd.table(
+  "managed_accounts",
+  {
+    clerkUserId: text("clerk_user_id").primaryKey(),
+    /** The connection whose pass-through answers this account's binds. Null: none. */
+    connectionId: uuid("connection_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Named by hand: the generated name is past Postgres's 63 characters and
+    // would be truncated in the database but not in the snapshot.
+    foreignKey({
+      name: "authd_managed_user_fk",
+      columns: [t.clerkUserId],
+      foreignColumns: [managedAccounts.clerkUserId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "authd_managed_connection_fk",
+      columns: [t.connectionId],
+      foreignColumns: [connections.id],
+    }).onDelete("set null"),
   ],
 )
 

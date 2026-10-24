@@ -146,6 +146,11 @@ func newFixture(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMin
 
 func newFixtureWith(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMinute int, cache *credcache.Cache) string {
 	t.Helper()
+	return newFixtureFull(t, store, v, perMinute, cache, nil)
+}
+
+func newFixtureFull(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMinute int, cache *credcache.Cache, pt ldapsrv.PassThrough) string {
+	t.Helper()
 
 	srv := ldap.NewServer()
 	srv.Handle(ldapsrv.New(ldapsrv.Options{
@@ -156,6 +161,7 @@ func newFixtureWith(t *testing.T, store projection.Store, v ldapsrv.Verifier, pe
 		Verifier:          v,
 		Limiter:           throttle.New(perMinute),
 		CredCache:         cache,
+		PassThrough:       pt,
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OpTimeout:         2 * time.Second,
 	}).Routes())

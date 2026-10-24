@@ -29,6 +29,7 @@ import { mountIdentitySaml, type SamlConsoleDeps } from "./identity-saml.js"
 import { samlReady } from "../../identity/saml.js"
 import { samlPresetOf } from "../../identity/saml-presets.js"
 import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
+import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
 
 /**
  * The identity core's console API (#337). The screens are #340's; these are
@@ -48,6 +49,7 @@ import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
  *   ...    /identity/connections/:id/group-rules[/:ruleId] group-to-role rules (#341, identity-groups.ts)
  *   ...    /identity/connections/:id/saml[/...]         SAML settings (#339, identity-saml.ts)
  *   ...    /identity/directories[/:id[/tokens|/conflicts]] SCIM directories (#342, identity-scim.ts)
+ *   ...    /identity/connections/:id/ldap[/service|/test] LDAP pass-through for IMAP (#344, identity-ldap.ts)
  *
  * ⚠ EVERY ROUTE CHECKS OUR ROLES TABLE (#335): `sso:manage` for setup,
  * `owners:manage` for what deprovisioning does, and the removal rule
@@ -68,6 +70,8 @@ export interface IdentityConsoleDeps {
   saml?: SamlConsoleDeps
   /** SCIM directories (#342). Absent: their routes answer 501. */
   scim?: ScimConsoleDeps
+  /** LDAP pass-through for managed accounts' IMAP (#344). Absent: its routes answer 501. */
+  ldap?: LdapConsoleDeps
   deprovision: DeprovisionDeps
   log: Logger
 }
@@ -150,6 +154,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentityGroups(app, d)
   mountIdentitySaml(app, d)
   mountIdentityScim(app, d)
+  mountIdentityLdap(app, d)
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")

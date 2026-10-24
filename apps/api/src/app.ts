@@ -57,6 +57,7 @@ import {
   type SsoRouteDeps,
 } from "./routes/sso.js"
 import { createScimRoutes, type ScimRouteDeps } from "./routes/scim.js"
+import { createInternalAuthdRoutes, type InternalAuthdDeps } from "./routes/authd.js"
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { equalSecrets } from "./webhooks/signing.js"
@@ -159,6 +160,8 @@ export interface AppDeps {
   scim?: ScimRouteDeps
   /** The Clerk gateway's managed-account lookup (#337), at `/internal/identity`. */
   internalIdentity?: InternalIdentityDeps
+  /** authd's pass-through lookup (#344), at `/internal/authd`. */
+  internalAuthd?: InternalAuthdDeps
   /**
    * Creating a human mailbox, for `/mailboxes`.
    *
@@ -547,6 +550,7 @@ export function createApp(deps: AppDeps = {}) {
   // token, not a session or an API key. See routes/scim.ts.
   app.route("/scim/v2", createScimRoutes(deps.scim))
   app.route("/internal/identity", createInternalIdentityRoutes(deps.internalIdentity))
+  app.route("/internal/authd", createInternalAuthdRoutes(deps.internalAuthd))
 
   // ⚠ ALSO OUTSIDE THE OPENAPI DOCUMENT, AND NOT FOR THE SAME REASON. The two
   // routers above implement somebody else's contract; this one is ours, but it

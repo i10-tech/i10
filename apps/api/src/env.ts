@@ -186,6 +186,17 @@ const schema = z.object({
   IDENTITY_GATEWAY_SECRET: z.string().min(32).optional(),
 
   /**
+   * The shared secret `services/authd` presents to `/internal/authd/*` as
+   * `Authorization: Bearer <secret>` to fetch a connection's LDAP pass-through
+   * settings (#344). The same value is authd's `AUTHD_API_SECRET`.
+   *
+   * ⚠ THE ANSWER CARRIES A COMPANY'S SERVICE ACCOUNT SECRET IN THE CLEAR, and
+   * unset means the route answers 503 to everybody - authd then refuses
+   * managed binds as unavailable, and never asks Clerk instead.
+   */
+  AUTHD_API_SECRET: z.string().min(32).optional(),
+
+  /**
    * `on` turns on the TEST connection protocol (#337): an "engine" that lets
    * whoever started a sign-in assert any subject and email, so the bridge can
    * be driven end to end on the Clerk dev instance without a real IdP.

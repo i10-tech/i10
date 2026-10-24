@@ -17,8 +17,18 @@ type Account struct {
 	Description    string
 	Active         bool
 	ClerkUpdatedAt *time.Time
-	Aliases        []string
-	MemberOf       []string // group names, not DNs; the caller renders DNs
+
+	// Managed is true when an SSO connection controls this account (#344).
+	// ⚠ A MANAGED ACCOUNT IS NEVER SENT TO CLERK'S verify_password, and never
+	// served from the credential cache: its password belongs to the company's
+	// directory. ManagedConnection names the connection whose pass-through
+	// answers its binds; it is empty when the connection is gone, which authd
+	// refuses rather than falling back to Clerk.
+	Managed           bool
+	ManagedConnection string
+
+	Aliases  []string
+	MemberOf []string // group names, not DNs; the caller renders DNs
 }
 
 // Group is a mail-enabled group.

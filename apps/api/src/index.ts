@@ -69,6 +69,8 @@ import { oidcEngine } from "./identity/oidc.js"
 import { redisReplayCache, samlEngine } from "./identity/saml.js"
 import { samlStore } from "./identity/saml-store.js"
 import { guardedFetch } from "./identity/oidc-fetch.js"
+import { passthroughFor } from "./identity/ldap.js"
+import { ldapProbe } from "./identity/ldap-probe.js"
 import { fixedWindow, ssoRateLimit } from "./identity/rate-limit.js"
 import { onIdentityClerkEvent } from "./identity/events.js"
 import {
@@ -1388,6 +1390,15 @@ const identityConsole = {
       }
     : {}),
   ...(saml ? { saml: { engine: saml, store: samlRows, log } } : {}),
+  // LDAP pass-through (#344). The host is vetted like an OIDC issuer: public
+  // addresses only, the connection pinned to the vetted one.
+  ldap: {
+    probe: ldapProbe({
+      vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+      log,
+    }),
+    take: fixedWindow(cache),
+  },
   deprovision: {
     ...managedDeps,
     workspaceOrg: (tenantId: string) => identity.workspaceOrg(tenantId),
@@ -1740,6 +1751,11 @@ const app = createApp({
     record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
     take: fixedWindow(cache),
     contextSecret: env.CLIENT_CONTEXT_SECRET,
+    log,
+  },
+  internalAuthd: {
+    secret: env.AUTHD_API_SECRET,
+    passthrough: (connectionId: string) => passthroughFor(identity, connectionId),
     log,
   },
   internalIdentity: {

@@ -1,12 +1,15 @@
 package ldapsrv
 
 import (
+	"context"
 	"log/slog"
 
 	ldap "github.com/vjeantet/ldapserver"
 
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/directory"
+	"github.com/i10-tech/i10/services/authd/internal/passthrough"
+	"github.com/i10-tech/i10/services/authd/internal/projection"
 )
 
 // handleBind answers Stalwart's two kinds of bind.
@@ -86,6 +89,15 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 
+	// ⚠ A MANAGED ACCOUNT NEVER REACHES THE CACHE OR CLERK (#344). Its password
+	// belongs to the company's directory, so it leaves here: after the account
+	// check above (a deactivated account is already refused) and before
+	// anything that could answer from, or ask, Clerk.
+	if account.Managed {
+		s.bindManaged(w, ctx, dn, uid, account, password)
+		return
+	}
+
 	// ⚠ AFTER THE ACCOUNT LOOKUP, BEFORE THE THROTTLE, AND BOTH HALVES MATTER.
 	//
 	// After, because the projection is what knows whether the account is still
@@ -106,14 +118,7 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 
-	if s.limiter != nil && !s.limiter.Allow(dn) {
-		// Busy, not unavailable: the service is healthy, this identity is
-		// simply over its share. Clients back off on both, but the distinction
-		// is what makes the logs diagnosable.
-		s.log.Warn("bind throttled", "dn", dn)
-		busy := ldap.NewBindResponse(ldap.LDAPResultBusy)
-		busy.SetDiagnosticMessage("too many authentication attempts, slow down")
-		w.Write(busy)
+	if s.throttled(w, dn) {
 		return
 	}
 
@@ -148,4 +153,75 @@ func (s *Server) respondUnavailable(w ldap.ResponseWriter, msg string) {
 	res := ldap.NewBindResponse(ldap.LDAPResultUnavailable)
 	res.SetDiagnosticMessage(msg)
 	w.Write(res)
+}
+
+// throttled answers busy and reports true when this identity is over its share.
+//
+// Busy, not unavailable: the service is healthy, this identity is simply over
+// its share. Clients back off on both, but the distinction is what makes the
+// logs diagnosable.
+func (s *Server) throttled(w ldap.ResponseWriter, dn string) bool {
+	if s.limiter == nil || s.limiter.Allow(dn) {
+		return false
+	}
+	s.log.Warn("bind throttled", "dn", dn)
+	busy := ldap.NewBindResponse(ldap.LDAPResultBusy)
+	busy.SetDiagnosticMessage("too many authentication attempts, slow down")
+	w.Write(busy)
+	return true
+}
+
+// bindManaged answers the bind of an account an SSO connection manages.
+//
+// ⚠ NOTHING HERE TOUCHES CLERK OR THE CREDENTIAL CACHE, and nothing here may
+// ever be changed to fall back to them. A success is never cached either: the
+// directory is asked at every bind, so a password the company changed, or a
+// person it switched off, stops working at the next bind. (The cost is one
+// round trip to the company's directory per IMAP connection; that is the
+// price of "one password, theirs".)
+//
+// The throttle stays: wrong passwords here count against the COMPANY's
+// directory's own lockout, so a mail client stuck on a stale password is
+// slowed before it locks the person out of their SSO.
+//
+// The log carries reason codes, never the password, the service secret or a
+// DN the directory returned.
+func (s *Server) bindManaged(
+	w ldap.ResponseWriter,
+	ctx context.Context,
+	dn, uid string,
+	account *projection.Account,
+	password string,
+) {
+	refused := ldap.NewBindResponse(ldap.LDAPResultInvalidCredentials)
+	switch {
+	case account.ManagedConnection == "":
+		// Managed by a connection that is gone. Not an account Clerk may judge.
+		s.log.Info("bind rejected", "reason", "managed_no_connection", "uid", uid)
+		w.Write(refused)
+		return
+	case s.passthrough == nil:
+		s.log.Info("bind rejected", "reason", "passthrough_not_configured", "uid", uid)
+		w.Write(refused)
+		return
+	}
+	if s.throttled(w, dn) {
+		return
+	}
+
+	result := s.passthrough.Bind(ctx, account.ManagedConnection, account.Email, password)
+	switch result.Outcome {
+	case passthrough.Verified:
+		s.log.Info("bind succeeded", "uid", uid, "mail", account.Email, "source", "passthrough")
+		w.Write(ldap.NewBindResponse(ldap.LDAPResultSuccess))
+	case passthrough.Rejected:
+		// Includes a connection with no pass-through: IMAP is off for it.
+		s.log.Info("bind rejected", "reason", result.Reason, "uid", uid, "source", "passthrough")
+		w.Write(refused)
+	default:
+		// ⚠ The directory, the path to it, or our settings for it did not work.
+		// Not evidence about the password, so not invalidCredentials.
+		s.log.Error("bind: passthrough unavailable", "reason", result.Reason, "uid", uid)
+		s.respondUnavailable(w, "directory temporarily unavailable")
+	}
 }

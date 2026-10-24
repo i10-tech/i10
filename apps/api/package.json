@@ -37,6 +37,7 @@
     "groupmq": "^1.1.0",
     "hono": "^4.13.5",
     "ioredis": "^6.0.0",
+    "ldapts": "8.1.8",
     "onnxruntime-web": "1.30.0",
     "openid-client": "6.8.8",
     "pino": "^10.3.1",

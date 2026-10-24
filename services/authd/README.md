@@ -29,6 +29,9 @@ Apple Mail ──IMAP──▶ Stalwart ──LDAP search──▶ authd ──�
                                                              (only on a miss)
 ```
 
+That is the path for an ordinary account. An account an SSO connection manages
+takes a different one, below.
+
 Searches are answered entirely from a local projection of Clerk, maintained by
 webhook. Only the bind reaches Clerk. That split is load-bearing: Clerk allows
 1000 requests per 10 seconds across all of i10, and IMAP clients are chatty.
@@ -93,6 +96,103 @@ users while leaving the normal-operation revocation window at 60 seconds.
 
 It is a different feature answering a different question, and it wants evidence
 about how often Clerk is actually unavailable before the risk is worth taking.
+
+## Managed accounts: the company's password, not ours
+
+An account a company's SSO connection manages (sso.md 2.3) has no Clerk
+password: its company took it away, and its password belongs to the company's
+directory. So authd **never** sends such an account to Clerk's `verify_password`
+and **never** answers it from the credential cache. Per connection it does one
+of two things:
+
+- **LDAP pass-through** to the company's own LDAP server (Okta LDAP Interface,
+  Google Secure LDAP, Entra Domain Services, AD, JumpCloud). One password, theirs.
+- **Nothing.** The bind is refused with `invalidCredentials` and a reason code in
+  the log, and IMAP is off for that connection's managed accounts. This is the
+  state of every connection until pass-through is set up, tested and enabled.
+
+There is no mailbox password and no ROPC.
+
+```
+Stalwart ──LDAP bind──▶ authd ──▶ projection lookup  (active? managed? by which connection?)
+                                    │
+                    not managed ────┴──── managed
+                         │                   │
+                  cache / Clerk        throttle ─▶ settings (API, cached ≤60s)
+                  (as above)                         │
+                                           resolve + vet host ─▶ dial the vetted IP
+                                           TLS (ldaps | StartTLS, verified) ─▶ service bind
+                                           search: exactly one entry ─▶ bind as that entry
+```
+
+**How authd knows.** The API mirrors `identity.managed_accounts` into
+`authd.managed_accounts` in the same transaction as every claim, move, release
+and forget, and `AccountByUID` reads it in the same query as the account. It is
+a separate table rather than a column on `accounts` because an account is
+managed before it has a mailbox row.
+
+**Where the settings come from.** `POST /internal/authd/passthrough` on the API,
+authenticated by `AUTHD_API_SECRET` (constant-time compare, 401 otherwise),
+answers the connection's decrypted settings: host, port (389 or 636), TLS mode
+(`ldaps` or `starttls`; plaintext does not exist), an optional pinned CA, the
+search base, the user filter (`{email}` is replaced by the address, RFC 4515
+escaped) and the service account. The API holds them sealed with the
+connection's other secrets and lets an admin enable them only after a setup test
+passed in the last 24 hours.
+
+**The bind**, in this order and no other:
+
+1. An empty password is refused before any network call.
+2. The host is resolved and **every** address must be public: loopback,
+   private, link-local (so cloud metadata), CGNAT, multicast, reserved and the
+   IPv6 tunnelling ranges are refused, IPv4-mapped IPv6 judged as the IPv4 it
+   carries. One bad address refuses the name. The same list as the API's guard.
+3. authd dials the vetted **address**, not the name again, with the name as the
+   TLS server name. `ldaps` is TLS from the first byte; `starttls` is the first
+   operation and nothing is sent before it. The certificate is verified against
+   the system roots, or against the pinned CA when there is one (never both,
+   never a fallback if the pin is unusable). TLS 1.2 or later.
+4. Bind as the service account, search the base for the filter with a size
+   limit of 2. **Exactly one entry** or the bind is refused.
+5. Bind as that entry with the password given. Success is that bind and nothing
+   else.
+
+Every timeout is bounded: dial 5s, each operation 5s, the whole walk 15s.
+
+| Directory / path                                                                                               | LDAP answer            |
+| -------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| the person's own bind succeeds                                                                                 | `success`              |
+| their bind returns 49, no entry for the address, or several                                                    | `invalidCredentials`   |
+| connection has no pass-through, or it is disabled                                                              | `invalidCredentials`   |
+| API unreachable, host blocked or unresolvable, dial or TLS failure, service bind or search fails, bad settings | **`unavailable` (52)** |
+| local throttle exceeded                                                                                        | `busy` (51)            |
+
+The service bind failing is `unavailable`, not `invalidCredentials`: it says
+something about our settings, not about the person, and a mail client told
+otherwise prompts for a password that is fine. The unmanaged path is untouched:
+it keeps working while the API is down, and a managed account is never answered
+by Clerk, outage or not.
+
+**What is cached, for how long, and why.**
+
+- **The settings answer:** in memory only, per connection, at most **60 seconds**
+  (`passthrough.MaxCacheTTL`, not configurable upward), and only answers - a
+  failed fetch is never remembered, "pass-through is off" is. So disabling
+  pass-through or rotating the service secret takes up to a minute to reach
+  authd. It holds a service secret in the clear in this process for that long,
+  and nowhere else.
+- **A pass-through success: nothing.** The credential cache is for Clerk
+  verifications, keyed by the account's `clerk_updated_at`, which moves when
+  _Clerk_ changes the user. It cannot see the company's directory change a
+  password or switch a person off, so a cached success would outlive both. The
+  directory is asked at every bind; the cost is one round trip per IMAP
+  connection, bounded by the throttle (which stays, because a mail client
+  retrying a stale password counts against the company's own lockout).
+- **A rejection or an outage:** never.
+
+The log carries reason codes (`user_not_found`, `ambiguous_entry`,
+`user_bind_rejected`, `host_blocked`, `tls_failed`, ...), never the password,
+the service secret, a filter or a DN the directory returned.
 
 ## The one rule you must not break
 
@@ -162,19 +262,22 @@ Worth reporting upstream.
 
 ## Configuration
 
-| Variable                    | Default                    |                                                     |
-| --------------------------- | -------------------------- | --------------------------------------------------- |
-| `AUTHD_LISTEN`              | `127.0.0.1:3893`           | Must be loopback.                                   |
-| `AUTHD_BASE_DN`             | `dc=i10,dc=tech`           |                                                     |
-| `AUTHD_SERVICE_BIND_DN`     | -                          | Stalwart's own bind, needed even in bind-auth mode. |
-| `AUTHD_SERVICE_BIND_SECRET` | -                          |                                                     |
-| `AUTHD_DATABASE_URL`        | -                          | The projection. Goes through PgBouncer.             |
-| `AUTHD_CLERK_SECRET_KEY`    | -                          |                                                     |
-| `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                     |
-| `AUTHD_CLERK_TIMEOUT`       | `5s`                       |                                                     |
-| `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                  |
-| `AUTHD_CRED_CACHE_TTL`      | `60s`                      | Verified passwords only. `0` disables; max `5m`.    |
-| `AUTHD_LOG_LEVEL`           | `info`                     |                                                     |
+| Variable                    | Default                    |                                                      |
+| --------------------------- | -------------------------- | ---------------------------------------------------- |
+| `AUTHD_LISTEN`              | `127.0.0.1:3893`           | Must be loopback.                                    |
+| `AUTHD_BASE_DN`             | `dc=i10,dc=tech`           |                                                      |
+| `AUTHD_SERVICE_BIND_DN`     | -                          | Stalwart's own bind, needed even in bind-auth mode.  |
+| `AUTHD_SERVICE_BIND_SECRET` | -                          |                                                      |
+| `AUTHD_DATABASE_URL`        | -                          | The projection. Goes through PgBouncer.              |
+| `AUTHD_CLERK_SECRET_KEY`    | -                          |                                                      |
+| `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                      |
+| `AUTHD_CLERK_TIMEOUT`       | `5s`                       |                                                      |
+| `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                   |
+| `AUTHD_CRED_CACHE_TTL`      | `60s`                      | Verified passwords only. `0` disables; max `5m`.     |
+| `AUTHD_API_URL`             | -                          | The API, for pass-through settings. Both or neither. |
+| `AUTHD_API_SECRET`          | -                          | Same value as the API's. 32+ characters.             |
+| `AUTHD_API_TIMEOUT`         | `5s`                       |                                                      |
+| `AUTHD_LOG_LEVEL`           | `info`                     |                                                      |
 
 ## Layout
 
@@ -183,6 +286,7 @@ cmd/authd            entrypoint, signal handling, readiness
 internal/config      env loading, the loopback guard
 internal/directory   the LDAP view: entries, DNs, filter evaluation
 internal/clerkauth   verify_password and the status mapping
+internal/passthrough managed accounts: settings client, host guard, the LDAP walk
 internal/projection  the Clerk read model (Store interface + Postgres)
 internal/ldapsrv     Bind and Search handlers
 internal/throttle    per-DN token bucket

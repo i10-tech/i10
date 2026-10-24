@@ -28,6 +28,7 @@ import type {
 import { readJoinRole } from "../console/roles.js"
 import { MAX_GROUP_RULES } from "./jit.js"
 import type { AttemptRow, GroupRoleRule, IdentityStore, ManagedRow } from "./ports.js"
+import { mirrorManaged, unmirrorManaged } from "./authd-mirror.js"
 
 const toRule = (r: typeof groupRoleRules.$inferSelect): GroupRoleRule => ({
   id: r.id,
@@ -781,8 +782,8 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     },
 
     async claimManaged(tenantId, row) {
-      const made = await withTenant(db, tenantId, (tx) =>
-        tx
+      const made = await withTenant(db, tenantId, async (tx) => {
+        const inserted = await tx
           .insert(managedAccounts)
           .values({
             clerkUserId: row.clerkUserId,
@@ -792,8 +793,26 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
             emails: row.emails,
           })
           .onConflictDoNothing()
-          .returning({ id: managedAccounts.clerkUserId }),
-      )
+          .returning({ id: managedAccounts.clerkUserId })
+        /*
+         * ⚠ AUTHD IS TOLD IN THE SAME TRANSACTION, from the row as it stands:
+         * this workspace's own (policy-scoped), whether just made or already
+         * there. Re-claiming heals a mirror that went missing; another
+         * workspace's row is invisible here and is left alone.
+         */
+        const [own] = await tx
+          .select({ connectionId: managedAccounts.connectionId })
+          .from(managedAccounts)
+          .where(
+            and(
+              eq(managedAccounts.tenantId, tenantId),
+              eq(managedAccounts.clerkUserId, row.clerkUserId),
+            ),
+          )
+          .limit(1)
+        if (own) await mirrorManaged(tx, row.clerkUserId, own.connectionId)
+        return inserted
+      })
       if (made.length > 0) return "created"
       // ⚠ A CONFLICT ON A ROW WE CANNOT SEE IS ANOTHER WORKSPACE'S. Asked as
       // the user, which reads their row wherever it is.
@@ -804,8 +823,8 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     },
 
     async setManagedEmails(tenantId, clerkUserId, emails, connectionId) {
-      await withTenant(db, tenantId, (tx) =>
-        tx
+      await withTenant(db, tenantId, async (tx) => {
+        const [moved] = await tx
           .update(managedAccounts)
           .set({
             emails,
@@ -817,13 +836,16 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
               eq(managedAccounts.tenantId, tenantId),
               eq(managedAccounts.clerkUserId, clerkUserId),
             ),
-          ),
-      )
+          )
+          .returning({ connectionId: managedAccounts.connectionId })
+        // ⚠ THE CONNECTION CAN MOVE HERE, and authd answers binds by it.
+        if (moved) await mirrorManaged(tx, clerkUserId, moved.connectionId)
+      })
     },
 
     async releaseManaged(tenantId, clerkUserId) {
-      const gone = await withTenant(db, tenantId, (tx) =>
-        tx
+      const gone = await withTenant(db, tenantId, async (tx) => {
+        const removed = await tx
           .delete(managedAccounts)
           .where(
             and(
@@ -831,8 +853,10 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
               eq(managedAccounts.clerkUserId, clerkUserId),
             ),
           )
-          .returning({ id: managedAccounts.clerkUserId }),
-      )
+          .returning({ id: managedAccounts.clerkUserId })
+        if (removed.length > 0) await unmirrorManaged(tx, clerkUserId)
+        return removed
+      })
       return gone.length > 0
     },
 
@@ -846,7 +870,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
               eq(identities.clerkUserId, clerkUserId),
             ),
           )
-        await tx
+        const removed = await tx
           .delete(managedAccounts)
           .where(
             and(
@@ -854,6 +878,8 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
               eq(managedAccounts.clerkUserId, clerkUserId),
             ),
           )
+          .returning({ id: managedAccounts.clerkUserId })
+        if (removed.length > 0) await unmirrorManaged(tx, clerkUserId)
       })
     },
 
