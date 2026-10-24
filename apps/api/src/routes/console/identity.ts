@@ -27,12 +27,12 @@ import type { EnforcementGate } from "../../identity/enforcement.js"
 import { mountIdentityBreakGlass } from "./identity-break-glass.js"
 import { mountIdentitySetupLinks } from "./identity-setup-links.js"
 import { oidcReady } from "../../identity/oidc.js"
-import { presetOf } from "../../identity/oidc-presets.js"
+import { OIDC_PRESETS, presetOf } from "../../identity/oidc-presets.js"
 import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
 import { mountIdentityGroups } from "./identity-groups.js"
 import { mountIdentitySaml, type SamlConsoleDeps } from "./identity-saml.js"
 import { samlReady } from "../../identity/saml.js"
-import { samlPresetOf } from "../../identity/saml-presets.js"
+import { SAML_PRESETS, samlPresetOf } from "../../identity/saml-presets.js"
 import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
 import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
 
@@ -40,9 +40,10 @@ import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
  * The identity core's console API (#337). The screens are #340's; these are
  * the routes they will call, and what the end-to-end run uses today.
  *
- *   GET    /identity/connections                         list, with domains
+ *   GET    /identity/connections                         list, with domains, and the IdP presets
  *   POST   /identity/connections                         create a draft
  *   PATCH  /identity/connections/:id                     status, policy, mapping
+ *   GET    /identity/connections/:id/test-runs            its test runs, newest first (#340)
  *   POST   /identity/connections/:id/domains             cover an access domain
  *   DELETE /identity/connections/:id/domains/:domainId   stop covering it
  *   GET    /identity/settings, PUT /identity/settings     deprovisioning mode
@@ -253,7 +254,47 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     return c.json({
       data: rows.map((r) => ({ ...view(r), domains: r.domains })),
       protocols: id.protocols,
+      presets: {
+        oidc: Object.values(OIDC_PRESETS).map((p) => ({
+          id: p.id,
+          label: p.label,
+          issuerHint: p.issuerHint,
+          requires: p.requires,
+          clientAuthMethods: p.clientAuth,
+        })),
+        saml: Object.values(SAML_PRESETS).map((p) => ({
+          id: p.id,
+          label: p.label,
+          entityIdHint: p.entityIdHint,
+          requires: p.requires,
+        })),
+      },
     })
+  })
+
+  /**
+   * ⚠ THE RAW CLAIMS ARE AN ADMIN'S TO READ, and only this workspace's: they
+   * are the IdP's answer about a real person (name, email, groups). Nothing
+   * secret is in them - the bridge keeps the assertion's fields, never the
+   * token or the assertion itself.
+   */
+  app.get("/identity/connections/:id/test-runs", async (c) => {
+    const id = d.identity
+    if (!id) return c.json(notWired("SSO test runs"), 501)
+    if (!(await allowed(c, "sso:manage")))
+      return c.json(forbidden("Only an admin can see SSO settings."), 403)
+    const connectionId = c.req.param("id")
+    if (!UUID.test(connectionId)) return c.json(notFound(), 404)
+    const { tenantId } = c.get("auth")
+    if (!(await id.store.connection(tenantId, connectionId)))
+      return c.json(notFound(), 404)
+    const limit = Number(c.req.query("limit") ?? 10)
+    const runs = await id.store.testRuns(
+      tenantId,
+      connectionId,
+      Number.isInteger(limit) ? limit : 10,
+    )
+    return c.json({ data: runs })
   })
 
   app.post("/identity/connections", async (c) => {

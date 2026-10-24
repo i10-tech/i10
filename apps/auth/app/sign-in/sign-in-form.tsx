@@ -53,6 +53,43 @@ import type { SsoProvider } from "../_lib/providers"
 /** How long iOS needs after a conditional passkey request before AutoFill counts it. */
 const ARM_SETTLE_MS = 600
 
+/**
+ * Which company SSO, if any, an address uses (#340). `"unavailable"` when the
+ * lookup failed or answered something unexpected - the caller retries rather
+ * than treating it as "none".
+ */
+async function discover(
+  email: string,
+): Promise<
+  | { mode: "required" | "available"; connection: string; name: string }
+  | null
+  | "unavailable"
+> {
+  try {
+    const response = await fetch("/api/sso/discover", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email }),
+    })
+    if (!response.ok) return "unavailable"
+    const answer = (await response.json()) as {
+      sso?: string
+      connection?: string
+      name?: string
+    }
+    if (answer.sso === "none") return null
+    if (
+      (answer.sso === "required" || answer.sso === "available") &&
+      typeof answer.connection === "string" &&
+      typeof answer.name === "string"
+    )
+      return { mode: answer.sso, connection: answer.connection, name: answer.name }
+    return "unavailable"
+  } catch {
+    return "unavailable"
+  }
+}
+
 export function SignInForm({
   afterAuthUrl,
   resetHref,
@@ -119,11 +156,24 @@ export function SignInForm({
    * Nothing else needs to: the password call passes the identifier again (see
    * `onSubmit`), so it lands whether or not Clerk still holds the attempt.
    */
-  const [stage, setStage] = useResumable<"identifier" | "password">(
+  const [stage, setStage] = useResumable<"identifier" | "password" | "sso">(
     "signin.stage",
     "identifier",
   )
   const [identifier, setIdentifier] = useResumable("signin.identifier", "")
+  /**
+   * The company SSO the address belongs to, from home realm discovery (#340).
+   * `required`: the only way on is "Continue with <name> SSO". `available`: it
+   * is offered beside the usual methods. Names a connection and its label only.
+   */
+  const [sso, setSso] = useResumable<{
+    mode: "required" | "available"
+    connection: string
+    name: string
+  } | null>("signin.sso", null)
+  const ssoHref = sso
+    ? `/sso/start?${new URLSearchParams({ connection: sso.connection, redirect_url: afterAuthUrl })}`
+    : null
   const [direction, setDirection] = useState<"forward" | "back">("forward")
   // Browser Back from the password step returns to the email box - see
   // _lib/step-history.ts for why it did nothing before.
@@ -440,6 +490,29 @@ export function SignInForm({
 
     setBusy("identifier")
     try {
+      /*
+       * ⚠ DISCOVERY FIRST, AND AN OUTAGE STOPS HERE. It answers from the
+       * address's domain alone, so it says nothing about accounts. "required"
+       * never reaches Clerk: a managed account has no password to ask for. A
+       * failed lookup is a retry, not "no SSO" - the page must not offer a
+       * password to somebody whose company requires its provider.
+       */
+      const found = await discover(value)
+      if (found === "unavailable") {
+        toast.error(
+          "We could not check how your company signs in. Try again in a moment.",
+        )
+        setBusy(null)
+        return
+      }
+      setSso(found)
+      if (found?.mode === "required") {
+        setIdentifier(value)
+        setDirection("forward")
+        setStage("sso")
+        setBusy(null)
+        return
+      }
       const { error } = await signIn.create({ identifier: value })
       if (error) {
         /*
@@ -449,6 +522,15 @@ export function SignInForm({
          * sits there unchanged, is the interface refusing to do the obvious
          * next thing.
          */
+        // An unknown address at an SSO domain is offered its company's sign-in
+        // before a sign-up: JIT may create the account there.
+        if (found?.mode === "available" && isUnknownIdentifier(error)) {
+          setIdentifier(value)
+          setDirection("forward")
+          setStage("sso")
+          setBusy(null)
+          return
+        }
         if (onUnknownIdentifier && isUnknownIdentifier(error)) {
           onUnknownIdentifier(value)
           setBusy(null)
@@ -779,7 +861,34 @@ export function SignInForm({
       <PasskeyCue open={busy === "passkey"} />
 
       <StepStage step={stage} direction={direction}>
-        {stage === "identifier" ? (
+        {stage === "sso" && sso && ssoHref ? (
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <h1 className="text-2xl font-medium">
+                {sso.mode === "required" ? "Sign in with your company" : sso.name}
+              </h1>
+              <button
+                type="button"
+                onClick={changeIdentifier}
+                className="max-w-full truncate rounded-pill border px-3 py-1 text-xs text-muted-foreground transition-colors duration-(--duration-instant) hover:bg-accent hover:text-foreground"
+              >
+                <span data-carry="email">{identifier}</span> · Change
+              </button>
+            </div>
+            <Button size="lg" onClick={() => window.location.assign(ssoHref)}>
+              Continue with {sso.name} SSO
+            </Button>
+            {sso.mode === "available" && onUnknownIdentifier && (
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={() => onUnknownIdentifier(identifier)}
+              >
+                Create an account with a password
+              </Button>
+            )}
+          </div>
+        ) : stage === "identifier" ? (
           <form className="flex flex-col gap-6" onSubmit={onIdentifier} noValidate>
             <FieldGroup>
               {/*
@@ -1053,6 +1162,18 @@ export function SignInForm({
                 >
                   <PasskeyIcon aria-hidden="true" />
                   Use your passkey
+                </Button>
+              )}
+              {/* Discovery said the company offers SSO beside the usual ways in (#340). */}
+              {sso?.mode === "available" && ssoHref && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="lg"
+                  onClick={() => window.location.assign(ssoHref)}
+                  disabled={locked}
+                >
+                  Continue with {sso.name} SSO
                 </Button>
               )}
             </FieldGroup>

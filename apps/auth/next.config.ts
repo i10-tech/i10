@@ -10,6 +10,23 @@ const config: NextConfig = {
   transpilePackages: ["@repo/ui"],
   reactStrictMode: true,
   poweredByHeader: false,
+  /*
+   * ⚠ THE SETUP-LINK PAGE (#340) CARRIES A CREDENTIAL IN ITS ADDRESS, so it is
+   * sent with no `Referer` to anything it loads or links to, and is never
+   * cached or stored. The page also moves the token out of the URL at once
+   * (app/sso/setup/token.ts); these headers cover the request that brought it.
+   */
+  async headers() {
+    return [
+      {
+        source: "/sso/setup/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
+    ]
+  },
 }
 
 export default config

@@ -16,10 +16,12 @@ import { MobileNav } from "@/components/mobile-nav"
 import { UsageRail } from "@/components/usage-rail"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { AccountBar } from "@/components/account-bar"
+import { AccessGate } from "@/components/access-gate"
 import { NoWorkspace } from "@/components/no-workspace"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { tryApi } from "@/lib/api"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
+import { authOrigin } from "@/lib/sso-server"
 import type { Attention, Me } from "@/lib/types"
 
 /**
@@ -68,6 +70,34 @@ export default async function AppLayout({
   // Signed in with no workspace active - see components/no-workspace.tsx.
   if (!me.ok && me.error.name === "no_workspace") {
     return <NoWorkspace />
+  }
+
+  /*
+   * ⚠ A SESSION THE WORKSPACE'S SSO REFUSES SEES ONE SCREEN AND NOTHING ELSE
+   * (#340). `passkey_required`: an owner or admin exempt from "required" SSO
+   * who holds no passkey. `sso_required`: a session that skipped the company's
+   * provider. Rendered instead of the shell, so no link inside it is reachable.
+   */
+  if (!me.ok && me.error.name === "passkey_required") {
+    return (
+      <AccessGate
+        kind="passkey"
+        authOrigin={authOrigin()}
+        startUrl={null}
+        clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+      />
+    )
+  }
+  if (!me.ok && me.error.name === "sso_required") {
+    const start = (me.error as { startUrl?: unknown }).startUrl
+    return (
+      <AccessGate
+        kind="sso"
+        authOrigin={authOrigin()}
+        startUrl={typeof start === "string" ? start : null}
+        clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+      />
+    )
   }
 
   if (!me.ok) {

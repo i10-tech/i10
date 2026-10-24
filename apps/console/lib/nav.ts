@@ -14,6 +14,7 @@ import {
   ScrollText,
   Settings,
   ShieldBan,
+  ShieldCheck,
   Tags,
   Users,
   Webhook,
@@ -186,6 +187,12 @@ export const SETTINGS_NAV: NavGroup[] = [
         ],
       },
       { href: "/settings/team", label: "Team", icon: Building2 },
+      {
+        href: "/settings/security",
+        label: "Security",
+        icon: ShieldCheck,
+        keywords: ["sso", "saml", "oidc", "okta", "entra", "scim", "single sign-on"],
+      },
       { href: "/settings/billing", label: "Billing", icon: CreditCard },
       { href: "/settings/usage", label: "Usage", icon: Gauge },
       {

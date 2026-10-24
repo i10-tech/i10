@@ -385,11 +385,24 @@ export interface IdentityStore {
       resolution: Record<string, unknown>
     },
   ): Promise<{ id: string }>
+  /** A connection's test runs, newest first (#340's screens). */
+  testRuns(tenantId: string, connectionId: string, limit: number): Promise<TestRunRow[]>
   record(tenantId: string, event: AuditEvent): Promise<void>
   events(
     tenantId: string,
     options: { limit: number; subjectUserId?: string },
   ): Promise<StoredEvent[]>
+}
+
+/** One finished test run: the verified claims and what a real sign-in would have done. */
+export interface TestRunRow {
+  id: string
+  connectionId: string
+  outcome: "passed" | "failed"
+  reason: string | null
+  claims: Record<string, unknown>
+  resolution: Record<string, unknown>
+  createdAt: Date
 }
 
 /** One IdP signing certificate of a SAML connection (`identity.saml_certificates`). */

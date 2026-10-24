@@ -308,6 +308,30 @@ suite("identity schema", () => {
     expect(await store().events(rival, { limit: 10 })).toEqual([])
   })
 
+  it("lists a connection's test runs newest first, for its own workspace only (#340)", async () => {
+    await store().recordTestRun(acme, {
+      connectionId,
+      attemptId: crypto.randomUUID(),
+      outcome: "failed",
+      reason: "email_unverified",
+      claims: { email: "a@x.test" },
+      resolution: { refused: "email_unverified" },
+    })
+    await store().recordTestRun(acme, {
+      connectionId,
+      attemptId: crypto.randomUUID(),
+      outcome: "passed",
+      reason: null,
+      claims: { email: "b@x.test" },
+      resolution: { path: "jit" },
+    })
+    const runs = await store().testRuns(acme, connectionId, 10)
+    expect(runs.map((r) => r.outcome)).toEqual(["passed", "failed"])
+    expect(runs[0]!.claims).toEqual({ email: "b@x.test" })
+    expect(await store().testRuns(acme, connectionId, 1)).toHaveLength(1)
+    expect(await store().testRuns(rival, connectionId, 10)).toEqual([])
+  })
+
   it("seals a connection's secrets at rest and opens them only for its workspace (#338)", async () => {
     expect(await store().connectionSecrets(acme, connectionId)).toEqual({})
     const written = await store().setConnectionSecrets(acme, connectionId, () => ({

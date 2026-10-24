@@ -108,6 +108,21 @@ export async function callApi(
   })
 }
 
+/** Any method, for the routes a setup link drives (`PUT /sso/setup/<token>/oidc`). */
+export async function callApiAs(
+  method: "GET" | "POST" | "PUT",
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  return fetch(`${apiBase()}${path}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  })
+}
+
 /** A GET to the API, for what it publishes (an OIDC connection's JWKS, #338). */
 export async function getApi(path: string): Promise<Response> {
   return fetch(`${apiBase()}${path}`, {

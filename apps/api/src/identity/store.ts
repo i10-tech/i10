@@ -1087,6 +1087,31 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
       return { id: made!.id }
     },
 
+    async testRuns(tenantId, connectionId, limit) {
+      const rows = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select()
+          .from(testRuns)
+          .where(
+            and(
+              eq(testRuns.tenantId, tenantId),
+              eq(testRuns.connectionId, connectionId),
+            ),
+          )
+          .orderBy(desc(testRuns.createdAt))
+          .limit(Math.min(Math.max(limit, 1), 50)),
+      )
+      return rows.map((r) => ({
+        id: r.id,
+        connectionId: r.connectionId,
+        outcome: r.outcome === "passed" ? ("passed" as const) : ("failed" as const),
+        reason: r.reason,
+        claims: r.claims,
+        resolution: r.resolution,
+        createdAt: r.createdAt,
+      }))
+    },
+
     async record(tenantId, event) {
       await withTenant(db, tenantId, (tx) =>
         tx.insert(events).values({

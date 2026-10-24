@@ -497,6 +497,21 @@ export function memoryStore(
       testRuns.push({ tenantId, ...row })
       return { id: id() }
     },
+    async testRuns(tenantId, connectionId, limit) {
+      return testRuns
+        .filter((r) => r.tenantId === tenantId && r.connectionId === connectionId)
+        .map((r, i) => ({
+          id: `run-${i}`,
+          connectionId,
+          outcome: r.outcome as "passed" | "failed",
+          reason: (r.reason as string | null) ?? null,
+          claims: (r.claims as Record<string, unknown>) ?? {},
+          resolution: (r.resolution as Record<string, unknown>) ?? {},
+          createdAt: new Date(2026, 9, 24, 12, i),
+        }))
+        .reverse()
+        .slice(0, limit)
+    },
     async record(tenantId, event) {
       events.push({ tenantId, ...event })
     },
