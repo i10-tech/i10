@@ -1,3 +1,4 @@
+import type { MailboxLifecycle } from "./directory-mail.js"
 import { SWEEP_AFTER_MS, type DeprovisionMode } from "./model.js"
 import type {
   ClerkIdentity,
@@ -339,6 +340,8 @@ export interface DeprovisionDeps extends ManagedDeps {
     userId: string
   }): Promise<"removed" | "last_owner" | "unconfirmed" | "forbidden" | "owner_only">
   workspaceOrg(tenantId: string): Promise<string | null>
+  /** The person's mailbox: suspended when they are deprovisioned (#344). */
+  mail: MailboxLifecycle
 }
 
 export type DeprovisionOutcome =
@@ -368,9 +371,16 @@ export type DeprovisionOutcome =
  *   - `account`: the Clerk user is banned, which ends every session it has
  *     anywhere. The managed row stays: nobody re-links a banned account.
  *
- * ⚠ THE MAILBOX IS NOT SUSPENDED HERE YET. There is no suspend primitive in
- * the API today; #344 owns mailboxes for managed accounts and adds it. The
- * audit event records that it was not done.
+ *   - The mailbox is SUSPENDED (#344): the login is refused, mail keeps
+ *     arriving and is kept, and what happens next is the admin's pick
+ *     (identity/directory-mail.ts). Never deleted here.
+ *
+ * ⚠ THE MAILBOX IS SUSPENDED AFTER THE MEMBERSHIP GOES AND BEFORE THE ACCOUNT
+ * IS RELEASED OR BANNED, and that order is load-bearing. A refusal to remove
+ * (the last owner) must leave the mailbox alone, and a failure after the
+ * release would be retried against an account that is no longer managed, which
+ * returns `not_managed` and never suspends. Before the release, a retry finds
+ * the account managed still and suspends again (idempotently).
  */
 export async function deprovision(
   d: DeprovisionDeps,
@@ -425,6 +435,14 @@ export async function deprovision(
       return { outcome: removed }
     }
   }
+  const mailbox = await d.mail.suspend({
+    tenantId: input.tenantId,
+    clerkUserId: input.clerkUserId,
+    actorUserId: input.actorUserId,
+    cause: input.cause,
+  })
+  await d.mail.leaveLists(input.tenantId, input.clerkUserId)
+
   if (mode === "account") await d.clerk.ban(input.clerkUserId)
   else await d.store.releaseManaged(input.tenantId, input.clerkUserId)
 
@@ -433,8 +451,7 @@ export async function deprovision(
     actorUserId: input.actorUserId,
     subjectUserId: input.clerkUserId,
     reason: input.cause,
-    // TODO(#344): suspend the mailbox here once there is a primitive for it.
-    data: { mode, sessions, mailbox: "not_suspended" },
+    data: { mode, sessions, mailbox },
   })
   return { outcome: mode, sessions }
 }

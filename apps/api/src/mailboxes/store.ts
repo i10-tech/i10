@@ -1,8 +1,9 @@
-import { eq, sql } from "drizzle-orm"
+import { and, eq, inArray, not, sql } from "drizzle-orm"
 import { union } from "drizzle-orm/pg-core"
 import type { Mailbox } from "@repo/contracts"
 import type { Database } from "../db/client.js"
-import { accounts, aliases } from "../db/schema.js"
+import { accounts, aliases, groupMembers, groups } from "../db/schema.js"
+import { directoryGroups } from "../db/identity.js"
 import type { MailboxDirectory } from "./provision.js"
 
 /**
@@ -108,4 +109,241 @@ function toMailbox(row: AccountRow): Mailbox {
     active: row.active,
     created_at: row.createdAt.toISOString(),
   }
+}
+
+type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
+
+/**
+ * Everything a company's directory (#344) writes to the projection, in ONE
+ * place beside `activate`: suspension, directory aliases, directory lists.
+ *
+ * ⚠ EVERY FUNCTION TAKES A TRANSACTION, because each is one half of a change
+ * whose other half is a row in `identity.directory_mailboxes` (or the group's
+ * opt-in), and the two must agree after a crash. None of them touches
+ * `active`: a mailbox becomes visible only through `MailboxDirectory.activate`.
+ *
+ * ⚠ NONE OF THEM ACTS ON AN ACCOUNT OF ANOTHER WORKSPACE. Each takes the
+ * tenant and matches `authd.accounts.tenant_id`, which the projection derives
+ * from the domain's owner. `authd` has no row level security, so this WHERE
+ * clause is the whole isolation, as in `metering/levels.ts`.
+ */
+export const directoryMail = {
+  /** The account a workspace's domain gave this person, or null. */
+  async account(tx: Tx, tenantId: string, userId: string) {
+    const [row] = await tx
+      .select({
+        email: accounts.email,
+        active: accounts.active,
+        suspendedAt: accounts.suspendedAt,
+      })
+      .from(accounts)
+      .where(and(eq(accounts.clerkUserId, userId), eq(accounts.tenantId, tenantId)))
+      .limit(1)
+    return row ?? null
+  },
+
+  /**
+   * Refuses the login and keeps delivering: authd's bind turns a set
+   * `suspended_at` away, and its searches do not look at it. Idempotent.
+   */
+  async suspend(tx: Tx, tenantId: string, userId: string, at: Date): Promise<boolean> {
+    const done = await tx
+      .update(accounts)
+      .set({
+        suspendedAt: sql`coalesce(${accounts.suspendedAt}, ${at.toISOString()}::timestamptz)`,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(accounts.clerkUserId, userId), eq(accounts.tenantId, tenantId)))
+      .returning({ id: accounts.clerkUserId })
+    return done.length > 0
+  },
+
+  async resume(tx: Tx, tenantId: string, userId: string): Promise<boolean> {
+    const done = await tx
+      .update(accounts)
+      .set({ suspendedAt: null, updatedAt: sql`now()` })
+      .where(and(eq(accounts.clerkUserId, userId), eq(accounts.tenantId, tenantId)))
+      .returning({ id: accounts.clerkUserId })
+    return done.length > 0
+  },
+
+  /** The mailbox is gone: no recipient, no login. Aliases and list seats cascade. */
+  async drop(tx: Tx, tenantId: string, userId: string): Promise<boolean> {
+    const done = await tx
+      .delete(accounts)
+      .where(and(eq(accounts.clerkUserId, userId), eq(accounts.tenantId, tenantId)))
+      .returning({ id: accounts.clerkUserId })
+    return done.length > 0
+  },
+
+  /**
+   * Makes `wanted` the person's directory aliases. An address that is anybody
+   * else's mailbox or alias is left out and returned in `taken`.
+   *
+   * ⚠ `onConflictDoNothing`, NEVER AN UPDATE. An alias belonging to another
+   * person (or a Clerk-sourced one of this person) is not the directory's to
+   * take; the insert simply loses, and the loss is counted by the caller.
+   */
+  async setAliases(
+    tx: Tx,
+    userId: string,
+    wanted: readonly string[],
+  ): Promise<{ taken: string[] }> {
+    await tx
+      .delete(aliases)
+      .where(
+        and(
+          eq(aliases.clerkUserId, userId),
+          eq(aliases.source, "directory"),
+          wanted.length > 0 ? not(inArray(aliases.address, [...wanted])) : undefined,
+        ),
+      )
+    if (wanted.length === 0) return { taken: [] }
+    // An address that is some account's primary is not an alias of another.
+    const primaries = await tx
+      .select({ email: accounts.email })
+      .from(accounts)
+      .where(
+        and(
+          inArray(accounts.email, [...wanted]),
+          not(eq(accounts.clerkUserId, userId)),
+        ),
+      )
+    const blocked = new Set(primaries.map((r) => r.email))
+    const free = wanted.filter((a) => !blocked.has(a))
+    if (free.length > 0)
+      await tx
+        .insert(aliases)
+        .values(
+          free.map((address) => ({
+            address,
+            clerkUserId: userId,
+            source: "directory",
+          })),
+        )
+        .onConflictDoNothing()
+    const mine = await tx
+      .select({ address: aliases.address })
+      .from(aliases)
+      .where(
+        and(eq(aliases.clerkUserId, userId), inArray(aliases.address, [...wanted])),
+      )
+    const held = new Set(mine.map((r) => r.address))
+    return { taken: wanted.filter((a) => !held.has(a)) }
+  },
+
+  /** `taken`: the address is some account's, alias or another list. */
+  async mirrorGroup(
+    tx: Tx,
+    input: {
+      name: string
+      email: string
+      description: string | null
+      directoryGroupId: string
+    },
+  ): Promise<"mirrored" | "taken"> {
+    const [primary] = await tx
+      .select({ id: accounts.clerkUserId })
+      .from(accounts)
+      .where(eq(accounts.email, input.email))
+      .limit(1)
+    const [alias] = await tx
+      .select({ id: aliases.address })
+      .from(aliases)
+      .where(eq(aliases.address, input.email))
+      .limit(1)
+    if (primary || alias) return "taken"
+    const done = await tx
+      .insert(groups)
+      .values({
+        name: input.name,
+        email: input.email,
+        description: input.description,
+        directoryGroupId: input.directoryGroupId,
+      })
+      .onConflictDoUpdate({
+        target: groups.name,
+        set: { email: input.email, description: input.description },
+        setWhere: eq(groups.directoryGroupId, input.directoryGroupId),
+      })
+      .returning({ name: groups.name })
+    return done.length > 0 ? "mirrored" : "taken"
+  },
+
+  /**
+   * Where a suspended mailbox's mail also goes (forward) or who may open it
+   * (delegate): a list named after the leaver, with the target as its only
+   * member, which authd serves through `filterMemberOf` like any list.
+   *
+   * ⚠ NOT A DIRECTORY LIST (`directory_group_id` stays null): its address is
+   * the leaver's own, which `mirrorGroup` would refuse as taken, and it is
+   * removed with the plan (`dropRoutes`), not with a group.
+   */
+  async setRoute(
+    tx: Tx,
+    input: {
+      kind: "fwd" | "dlg"
+      leaverId: string
+      email: string | null
+      targetId: string
+    },
+  ): Promise<void> {
+    const name = `${input.kind}-${input.leaverId}`
+    await tx
+      .insert(groups)
+      .values({ name, email: input.email, description: input.kind })
+      .onConflictDoUpdate({
+        target: groups.name,
+        set: { email: input.email, description: input.kind },
+      })
+    await tx.delete(groupMembers).where(eq(groupMembers.groupName, name))
+    await tx
+      .insert(groupMembers)
+      .values({ groupName: name, clerkUserId: input.targetId })
+      .onConflictDoNothing()
+  },
+
+  async dropRoutes(tx: Tx, leaverId: string): Promise<void> {
+    await tx
+      .delete(groups)
+      .where(inArray(groups.name, [`fwd-${leaverId}`, `dlg-${leaverId}`]))
+  },
+
+  async dropGroup(tx: Tx, directoryGroupId: string): Promise<void> {
+    await tx.delete(groups).where(eq(groups.directoryGroupId, directoryGroupId))
+  },
+
+  /**
+   * Makes `names` the directory lists of THIS workspace that the person is on,
+   * and no others of theirs. Lists that do not come from this workspace's
+   * directories are not touched.
+   */
+  async setMemberships(
+    tx: Tx,
+    tenantId: string,
+    userId: string,
+    names: readonly string[],
+  ): Promise<void> {
+    const ours = tx
+      .select({ name: groups.name })
+      .from(groups)
+      .innerJoin(directoryGroups, eq(directoryGroups.id, groups.directoryGroupId))
+      .where(eq(directoryGroups.tenantId, tenantId))
+    await tx
+      .delete(groupMembers)
+      .where(
+        and(
+          eq(groupMembers.clerkUserId, userId),
+          inArray(groupMembers.groupName, ours),
+          names.length > 0
+            ? not(inArray(groupMembers.groupName, [...names]))
+            : undefined,
+        ),
+      )
+    if (names.length === 0) return
+    await tx
+      .insert(groupMembers)
+      .values(names.map((groupName) => ({ groupName, clerkUserId: userId })))
+      .onConflictDoNothing()
+  },
 }

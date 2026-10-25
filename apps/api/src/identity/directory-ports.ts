@@ -65,6 +65,8 @@ export interface Directory {
   name: string
   provider: DirectoryProvider
   enabled: boolean
+  /** Give the people it activates a mailbox on the workspace's hosted domains (#344). */
+  createMailboxes: boolean
   adminEmail: string | null
   domain: string | null
   lastSyncAt: Date | null
@@ -128,6 +130,8 @@ export interface DirectoryUserRow extends UserRowView {
   conflictDetail: Record<string, unknown> | null
   conflictAt: Date | null
   bannedByDirectory: boolean
+  /** Other addresses the directory sent that were not made aliases (#344). */
+  aliasesIgnored: number
   deletedAt: Date | null
 }
 
@@ -187,6 +191,7 @@ export interface DirectoryStore {
     patch: {
       name?: string
       enabled?: boolean
+      createMailboxes?: boolean
       adminEmail?: string | null
       domain?: string | null
     },
@@ -348,7 +353,7 @@ export interface DirectoryStore {
     tenantId: string,
     directoryUserId: string,
   ): Promise<{
-    row: DirectoryUserRow & { directoryEnabled: boolean }
+    row: DirectoryUserRow & { directoryEnabled: boolean; createMailboxes: boolean }
     upTo: string | null
   } | null>
   /**
@@ -409,6 +414,17 @@ export interface DirectoryStore {
     directoryId: string,
     id: string,
   ): Promise<OutboxEntry | null>
+  /**
+   * Seats (#327): people who are active in ANY enabled directory, each counted
+   * once however many directories list them and whether or not they ever
+   * signed in. `outside`: those of them who are not workspace members yet.
+   */
+  seats(tenantId: string): Promise<{ people: number; outside: number }>
+  /**
+   * New outbox entries for every active, linked person of a directory (the
+   * "create mailboxes" switch was just turned on: they need looking at again).
+   */
+  requeueActive(tenantId: string, directoryId: string): Promise<OutboxEntry[]>
   /** The workspace's access domains with a live proof (verified, not lapsed, not displaced). */
   liveDomains(tenantId: string): Promise<string[]>
   /** The waiting list (#327): a request "from directory", once. */

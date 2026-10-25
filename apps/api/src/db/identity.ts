@@ -752,6 +752,14 @@ export const workspaceSettings = identity.table(
     deprovision: text("deprovision").notNull().default("membership"),
     /** Unmanaged owners and admins are exempt from "required" SSO, and must hold a passkey. */
     ownerExemption: boolean("owner_exemption").notNull().default(true),
+    /**
+     * What happens to a deprovisioned person's mailbox after it is suspended
+     * (#344): `keep` (suspended until reactivated), `forward_manager`, or
+     * `delete_after` (`leaver_days`, 7 to 365). A per-mailbox choice, which can
+     * also name a delegate, overrides it.
+     */
+    leaverAction: text("leaver_action").notNull().default("keep"),
+    leaverDays: integer("leaver_days"),
     /** The owner who asked to turn the exemption off, until another owner approves. */
     exemptionOffRequestedBy: text("exemption_off_requested_by"),
     exemptionOffRequestedAt: timestamp("exemption_off_requested_at", {
@@ -764,6 +772,10 @@ export const workspaceSettings = identity.table(
     check(
       "workspace_settings_deprovision_check",
       sql`"deprovision" in ('membership', 'account')`,
+    ),
+    check(
+      "workspace_settings_leaver_check",
+      sql`"leaver_action" in ('keep', 'forward_manager', 'delete_after') and (("leaver_action" = 'delete_after') = ("leaver_days" is not null)) and ("leaver_days" is null or "leaver_days" between 7 and 365)`,
     ),
     check(
       "workspace_settings_exemption_request_check",
@@ -809,6 +821,13 @@ export const directories = identity.table(
     /** `okta`, `entra`, `google`, `generic`: which setup guide (#340) applies. */
     provider: text("provider").notNull().default("generic"),
     enabled: boolean("enabled").notNull().default(true),
+    /**
+     * Give the people this directory activates a mailbox on the workspace's
+     * hosted domains (#344, sso.md 2.8). Off by default; turning it ON is an
+     * owner's with step-up, because it makes the directory's admin able to
+     * create addresses that receive the workspace's mail.
+     */
+    createMailboxes: boolean("create_mailboxes").notNull().default(false),
     /** Customer Workspace admin to act as for domain-wide delegation (#343). */
     adminEmail: text("admin_email"),
     /** Primary Workspace domain pulled for a `google` directory (#343). */
@@ -943,6 +962,17 @@ export const directoryUsers = identity.table(
      * may lift that ban. A ban without this is somebody else's, and wins.
      */
     bannedByDirectory: boolean("banned_by_directory").notNull().default(false),
+    /**
+     * Directory addresses (`emails[]`) beyond the primary that were NOT made
+     * aliases because they are off the workspace's hosted domains or taken
+     * (#344). Counted here, not stored.
+     */
+    aliasesIgnored: integer("aliases_ignored").notNull().default(0),
+    /**
+     * Why this person has no mailbox though the directory asks for them
+     * (`domain_not_hosted`, `limit`, `address_taken`), audited when it changes.
+     */
+    mailboxNote: text("mailbox_note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -972,6 +1002,10 @@ export const directoryUsers = identity.table(
     index("directory_users_external_idx").on(t.directoryId, t.externalId),
     index("directory_users_email_idx").on(t.tenantId, t.email),
     check(
+      "directory_users_mailbox_note_check",
+      sql`"mailbox_note" is null or "mailbox_note" in ('domain_not_hosted', 'limit', 'address_taken')`,
+    ),
+    check(
       "directory_users_conflict_check",
       sql`"conflict" is null or "conflict" in ('workspace_full', 'blocked', 'banned', 'domain_not_verified', 'address_taken', 'ambiguous_account', 'managed_elsewhere', 'role_exempt', 'already_linked', 'no_email', 'profile_incomplete', 'last_owner', 'account_deleted', 'no_sso_connection')`,
     ),
@@ -998,10 +1032,25 @@ export const directoryGroups = identity.table(
     externalId: text("external_id"),
     /** The resource minus `id`, `meta` and `members`. */
     resource: jsonb("resource").$type<Record<string, unknown>>().notNull().default({}),
+    /**
+     * The list address an admin gave this group (#344), on a domain the
+     * workspace hosts mail for; null: not a mailing list. Set and cleared only
+     * by the admin's opt-in route, never by a directory.
+     */
+    mailAddress: text("mail_address"),
+    /** `list` (members each get a copy) or `shared` (members share the box). */
+    mailKind: text("mail_kind"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    check(
+      "directory_groups_mail_check",
+      sql`("mail_address" is null) = ("mail_kind" is null) and ("mail_kind" is null or "mail_kind" in ('list', 'shared'))`,
+    ),
+    uniqueIndex("directory_groups_mail_address_unique")
+      .on(sql`lower(${t.mailAddress})`)
+      .where(sql`${t.mailAddress} is not null`),
     foreignKey({
       name: "directory_groups_directory_fk",
       columns: [t.directoryId, t.tenantId],
@@ -1171,6 +1220,71 @@ export const directoryWatchChannels = identity.table(
     pgPolicy("directory_watch_channels_id_read", {
       for: "select",
       using: sql`${t.id}::text = nullif(current_setting('app.google_channel', true), '')`,
+    }),
+  ],
+)
+
+/**
+ * A mailbox a workspace's directory gave or suspended (#344, sso.md 2.8): the
+ * lifecycle that `authd.accounts` cannot hold, keyed by person.
+ *
+ * ⚠ THE MAIL ITSELF IS NOT HERE. The row says where the mailbox is in its life
+ * and what the admin chose for it; whether it resolves, receives or accepts a
+ * login is `authd.accounts` (`active`, `suspended_at`), written in the SAME
+ * transaction by mailboxes/store.ts, so the two cannot disagree.
+ *
+ * ⚠ DELETION IS A DATE, NEVER AN EVENT. `delete_at` is set at suspension (or
+ * when the admin picks "delete") as now + N days, N between 7 and 365, and the
+ * check below keeps the pair together; nothing deletes a mailbox before it,
+ * and the job re-checks that no enabled directory says the person is active.
+ */
+export const directoryMailboxes = identity.table(
+  "directory_mailboxes",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The primary address, lowercased, as the mailbox had it when suspended. */
+    address: text("address").notNull(),
+    /** `active` or `suspended`. A deleted mailbox has no row. */
+    state: text("state").notNull().default("active"),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    /** `keep`, `forward_manager`, `delegate` or `delete`: the admin's pick. */
+    next: text("next").notNull().default("keep"),
+    /** Who receives a copy (forward) or may open the mailbox (delegate). */
+    targetUserId: text("target_user_id"),
+    deleteAfterDays: integer("delete_after_days"),
+    deleteAt: timestamp("delete_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.clerkUserId] }),
+    index("directory_mailboxes_due_idx")
+      .on(t.tenantId, t.deleteAt)
+      .where(sql`${t.deleteAt} is not null`),
+    check("directory_mailboxes_state_check", sql`"state" in ('active', 'suspended')`),
+    check(
+      "directory_mailboxes_next_check",
+      sql`"next" in ('keep', 'forward_manager', 'delegate', 'delete')`,
+    ),
+    check(
+      "directory_mailboxes_target_check",
+      sql`(("next" in ('forward_manager', 'delegate')) = ("target_user_id" is not null))`,
+    ),
+    check(
+      "directory_mailboxes_delete_check",
+      sql`(("next" = 'delete') = ("delete_at" is not null)) and (("next" = 'delete') = ("delete_after_days" is not null)) and ("delete_after_days" is null or "delete_after_days" between 7 and 365)`,
+    ),
+    check(
+      "directory_mailboxes_suspended_check",
+      sql`("state" = 'suspended') = ("suspended_at" is not null) and ("state" = 'suspended' or "next" = 'keep')`,
+    ),
+    pgPolicy("directory_mailboxes_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
     }),
   ],
 )

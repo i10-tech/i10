@@ -293,6 +293,31 @@ func TestSuspendedAccountCannotBind(t *testing.T) {
 	}
 }
 
+// A directory-suspended mailbox (#344) is ACTIVE: it keeps receiving. Only the
+// login is refused, and before the credential cache, Clerk or the company's
+// directory is asked anything.
+func TestDirectorySuspendedMailboxRefusesLoginButKeepsReceiving(t *testing.T) {
+	store := defaultStore()
+	store.accounts[0].Suspended = true
+	v := &fakeVerifier{outcome: clerkauth.Verified}
+	addr := newFixture(t, store, v, 60)
+
+	for i := 0; i < 2; i++ { // twice: a first success must not be cached into a second
+		err := dial(t, addr).Bind(aliceDN, alicePass)
+		if got := resultCode(err); got != goldapclient.LDAPResultInvalidCredentials {
+			t.Fatalf("bind %d = %d, want invalidCredentials", i, got)
+		}
+	}
+	if v.calls != 0 {
+		t.Errorf("verifier called %d times for a suspended mailbox, want 0", v.calls)
+	}
+
+	f := fmt.Sprintf(filterMailbox, aliceEmail, aliceEmail, aliceEmail, aliceEmail)
+	if got := search(t, addr, f); len(got) != 1 || got[0].DN != aliceDN {
+		t.Fatalf("a suspended mailbox stopped resolving as a recipient: %v", got)
+	}
+}
+
 func TestUnknownDNDoesNotReachClerk(t *testing.T) {
 	v := &fakeVerifier{outcome: clerkauth.Verified}
 	addr := newFixture(t, defaultStore(), v, 60)

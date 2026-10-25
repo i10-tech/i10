@@ -105,6 +105,7 @@ const patched = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     enabled: z.boolean().optional(),
+    createMailboxes: z.boolean().optional(),
     adminEmail: z.string().trim().min(1).max(320).optional(),
     domain: z.string().trim().min(1).max(253).optional(),
   })
@@ -113,6 +114,7 @@ const patched = z
     (p) =>
       p.name !== undefined ||
       p.enabled !== undefined ||
+      p.createMailboxes !== undefined ||
       p.adminEmail !== undefined ||
       p.domain !== undefined,
     {
@@ -151,6 +153,7 @@ const view = (directory: Directory, scim: ScimConsoleDeps) =>
         name: directory.name,
         provider: directory.provider,
         enabled: directory.enabled,
+        createMailboxes: directory.createMailboxes,
         baseUrl: null,
         adminEmail: directory.adminEmail,
         domain: directory.domain,
@@ -165,6 +168,7 @@ const view = (directory: Directory, scim: ScimConsoleDeps) =>
         name: directory.name,
         provider: directory.provider,
         enabled: directory.enabled,
+        createMailboxes: directory.createMailboxes,
         baseUrl: scim.baseUrl(directory.id),
         createdAt: directory.createdAt,
       }
@@ -360,6 +364,9 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     // impersonate or pull from decides which Workspace controls this tenant.
     const touchesTrust =
       parsed.data.enabled === true ||
+      // ⚠ MAKING ADDRESSES THAT RECEIVE THE WORKSPACE'S MAIL, FOR WHOEVER RUNS
+      // THE DIRECTORY: an owner's. Turning it off only stops new ones.
+      parsed.data.createMailboxes === true ||
       parsed.data.adminEmail !== undefined ||
       parsed.data.domain !== undefined
     const needed: Permission = touchesTrust ? "owners:manage" : "sso:manage"
@@ -367,7 +374,7 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
       return c.json(
         forbidden(
           needed === "owners:manage"
-            ? "Only an owner can enable a directory or change its Google Workspace settings."
+            ? "Only an owner can enable a directory, let it create mailboxes, or change its Google Workspace settings."
             : "Only an admin can change a directory.",
         ),
         403,
@@ -425,6 +432,9 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     const after = await scim.store.updateDirectory(tenantId, before.id, {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.enabled !== undefined ? { enabled: parsed.data.enabled } : {}),
+      ...(parsed.data.createMailboxes !== undefined
+        ? { createMailboxes: parsed.data.createMailboxes }
+        : {}),
       ...(checked.adminEmail !== undefined ? { adminEmail: checked.adminEmail } : {}),
       ...(checked.domain !== undefined ? { domain: checked.domain } : {}),
     })
@@ -437,6 +447,7 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
         from: {
           name: before.name,
           enabled: before.enabled,
+          createMailboxes: before.createMailboxes,
           ...(checked.adminEmail !== undefined
             ? { adminEmail: before.adminEmail }
             : {}),
@@ -445,11 +456,16 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
         to: {
           name: after.name,
           enabled: after.enabled,
+          createMailboxes: after.createMailboxes,
           ...(checked.adminEmail !== undefined ? { adminEmail: after.adminEmail } : {}),
           ...(checked.domain !== undefined ? { domain: after.domain } : {}),
         },
       },
     })
+    // ⚠ THE PEOPLE IT ALREADY ACTIVATED ARE LOOKED AT AGAIN when mailboxes are
+    // turned on: nothing changed on their rows, so no entry would ever say so.
+    if (after.createMailboxes && !before.createMailboxes && after.enabled)
+      await scim.schedule(tenantId, await scim.store.requeueActive(tenantId, after.id))
     // What it said while it was off is replayed now (applied only if it is on).
     if (after.enabled && !before.enabled) {
       await scim.kick(tenantId, after.id, { force: true })

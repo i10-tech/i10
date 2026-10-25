@@ -1,3 +1,4 @@
+import { memoryMail } from "./identity-mail-fakes.js"
 import { describe, expect, it } from "bun:test"
 import {
   deprovision,
@@ -30,10 +31,12 @@ function world(authorized: "ok" | "forbidden" | "owner_only" = "ok") {
   const clerk = memoryClerk()
   let clock = T0.getTime()
   const removed: string[] = []
+  const mail = memoryMail()
   const deps: DeprovisionDeps = {
     store: store.store,
     clerk: clerk.clerk,
     log,
+    mail: mail.lifecycle,
     now: () => new Date(clock),
     workspaceOrg: async () => ORG,
     authorize: async () => authorized,
@@ -47,7 +50,15 @@ function world(authorized: "ok" | "forbidden" | "owner_only" = "ok") {
       reason: "claimed",
       emails,
     })
-  return { store, clerk, deps, manage, removed, advance: (ms: number) => (clock += ms) }
+  return {
+    store,
+    clerk,
+    deps,
+    mail,
+    manage,
+    removed,
+    advance: (ms: number) => (clock += ms),
+  }
 }
 
 describe("drift", () => {
@@ -265,7 +276,7 @@ describe("deprovisioning", () => {
     expect(w.store.managed.size).toBe(0)
     expect(w.store.events.at(-1)).toMatchObject({
       type: "member.deprovisioned",
-      data: { mode: "membership", sessions: 2, mailbox: "not_suspended" },
+      data: { mode: "membership", sessions: 2, mailbox: "no_mailbox" },
     })
   })
 

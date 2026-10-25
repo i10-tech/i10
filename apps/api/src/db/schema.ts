@@ -1,6 +1,7 @@
-import { relations } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 import {
   boolean,
+  check,
   foreignKey,
   index,
   pgSchema,
@@ -9,7 +10,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core"
-import { connections, managedAccounts } from "./identity.js"
+import { connections, directoryGroups, managedAccounts } from "./identity.js"
 
 // The transactional product. Re-exported so drizzle-kit and `import * as
 // schema` both see one entry point, rather than two that can disagree.
@@ -100,6 +101,19 @@ export const accounts = authd.table("accounts", {
    */
   clerkUpdatedAt: timestamp("clerk_updated_at", { withTimezone: true }),
 
+  /**
+   * Set when a company's directory switched the person off (#344): the mailbox
+   * still EXISTS and still receives mail, but nobody can log in to it.
+   *
+   * ⚠ NOT `active`, AND THAT IS THE POINT. `active` makes an account invisible
+   * (no delivery, no bind); suspension must keep delivering. authd refuses the
+   * bind for a row with this set and answers every search as before.
+   *
+   * ⚠ ONE WRITER: mailboxes/store.ts. The projection's upsert must never name
+   * this column, or a profile edit would lift a suspension.
+   */
+  suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
@@ -111,15 +125,43 @@ export const aliases = authd.table(
     clerkUserId: text("clerk_user_id")
       .notNull()
       .references(() => accounts.clerkUserId, { onDelete: "cascade" }),
+    /**
+     * `clerk` (a verified address on the Clerk user, replaced wholesale by the
+     * projection) or `directory` (an address a company's directory lists,
+     * #344, written only by mailboxes/store.ts).
+     *
+     * ⚠ THE PROJECTION REPLACES ONLY ITS OWN. Without the split, the next
+     * `user.updated` webhook would delete every alias a directory gave.
+     */
+    source: text("source").notNull().default("clerk"),
   },
-  (t) => [index("aliases_account_idx").on(t.clerkUserId)],
+  (t) => [
+    index("aliases_account_idx").on(t.clerkUserId),
+    check("aliases_source_check", sql`"source" in ('clerk', 'directory')`),
+  ],
 )
 
-export const groups = authd.table("groups", {
-  name: text("name").primaryKey(),
-  email: text("email").unique(),
-  description: text("description"),
-})
+export const groups = authd.table(
+  "groups",
+  {
+    name: text("name").primaryKey(),
+    email: text("email").unique(),
+    description: text("description"),
+    /**
+     * The directory group this list was made from (#344), or null for any other
+     * group. The foreign key is the backstop: a group deleted by its directory,
+     * or a workspace deleted, takes its list (and the list's members) with it.
+     */
+    directoryGroupId: uuid("directory_group_id"),
+  },
+  (t) => [
+    foreignKey({
+      name: "authd_groups_directory_group_fk",
+      columns: [t.directoryGroupId],
+      foreignColumns: [directoryGroups.id],
+    }).onDelete("cascade"),
+  ],
+)
 
 export const groupMembers = authd.table(
   "group_members",

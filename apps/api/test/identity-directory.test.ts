@@ -30,6 +30,7 @@ import {
   memoryStore,
   user,
 } from "./identity-fakes.js"
+import { memoryMail, realProvisioning } from "./identity-mail-fakes.js"
 import {
   DIRECTORY,
   OTHER_DIRECTORY,
@@ -100,10 +101,13 @@ function world(options: WorldOptions = {}) {
   const fail = { unconfirmed: false }
   const seats = { full: options.full ?? false, asked: 0 }
   const joined: { userId: string; role: string }[] = []
+  const mail = memoryMail()
+  mail.deps.isMember = async (_t, userId) => members.has(userId)
   const deprovision: DeprovisionDeps = {
     store: identity.store,
     clerk: clerk.clerk,
     log,
+    mail: mail.lifecycle,
     workspaceOrg: (t) => identity.store.workspaceOrg(t),
     authorize: async () => "ok",
     removeMembership: async ({ userId }) => {
@@ -120,6 +124,7 @@ function world(options: WorldOptions = {}) {
     clerk: clerk.clerk,
     provisioning: prov.provisioning,
     deprovision,
+    mail: mail.deps,
     isMember: async (_o, userId) => members.has(userId),
     seats: async () => {
       seats.asked += 1
@@ -146,6 +151,7 @@ function world(options: WorldOptions = {}) {
     members,
     roles,
     deps,
+    mail,
     forgotten,
     fail,
     seats,
@@ -1376,5 +1382,243 @@ describe("scheduling and the kick", () => {
     }
     expect(await kick(TENANT, DIRECTORY, { force: true })).toBe(0)
     expect(errors.length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+// ── Mail from the directory (#344, slice B) ─────────────────────────────────
+
+describe("mail from the directory", () => {
+  const MAIL_DIRECTORY = [
+    { id: DIRECTORY, createMailboxes: true },
+    { id: OTHER_DIRECTORY },
+  ]
+
+  /** A world whose directory opted in (or not), with the real provisioning over the fakes. */
+  function mailWorld(
+    options: WorldOptions & {
+      hosted?: Record<string, string>
+      limit?: boolean
+      optIn?: boolean
+    } = {},
+  ) {
+    const w = world({
+      users: [ada()],
+      members: ["user_ada"],
+      directories: options.optIn === false ? undefined : MAIL_DIRECTORY,
+      ...options,
+    })
+    if (options.hosted) {
+      w.mail.hosted.clear()
+      for (const [domain, tenant] of Object.entries(options.hosted))
+        w.mail.hosted.set(domain, tenant)
+    }
+    realProvisioning(w.mail, w.clerk.users, options.limit ? { limit: true } : {})
+    return w
+  }
+  const types = (w: World) => w.mail.types()
+
+  // ── Refusals first ──
+
+  it("makes NO mailbox unless the directory opted in", async () => {
+    const w = mailWorld({ optIn: false })
+    const p = await push(w)
+    await apply(w, p.id)
+    expect(w.mail.accounts.size).toBe(0)
+    expect(w.mail.delivers("ada@acme.test")).toBe(false)
+    expect(types(w)).not.toContain("mailbox.created")
+  })
+
+  it("makes NO mailbox for an address off a domain the workspace hosts mail for, and says so on the row and in the audit log, once", async () => {
+    const w = mailWorld({ hosted: { "other.test": TENANT } })
+    const p = await push(w)
+    await apply(w, p.id)
+    expect(w.mail.accounts.size).toBe(0)
+    expect(w.mail.notes.get(p.id)).toBe("domain_not_hosted")
+    // The person is otherwise fully in: this is not a conflict.
+    expect(stored(w, p.id).conflict).toBeNull()
+    expect(w.members.has("user_ada")).toBe(true)
+    await change(w, p.id, [{ op: "replace", path: "title", value: "x" }])
+    await apply(w, p.id)
+    expect(types(w).filter((t) => t === "mailbox.refused")).toHaveLength(1)
+  })
+
+  it("makes NO mailbox on a domain ANOTHER workspace hosts (a directory cannot reach into someone else's)", async () => {
+    const w = mailWorld({ hosted: { "acme.test": OTHER_TENANT } })
+    const p = await push(w)
+    await apply(w, p.id)
+    expect(w.mail.accounts.size).toBe(0)
+    expect(w.mail.notes.get(p.id)).toBe("domain_not_hosted")
+  })
+
+  it("makes NO mailbox over the plan's mailbox limit, and none for an address somebody else already holds", async () => {
+    const full = mailWorld({ limit: true })
+    const a = await push(full)
+    await apply(full, a.id)
+    expect(full.mail.accounts.size).toBe(0)
+    expect(full.mail.notes.get(a.id)).toBe("limit")
+
+    const taken = mailWorld()
+    taken.mail.give("user_other", "ada@acme.test")
+    const b = await push(taken)
+    await apply(taken, b.id)
+    expect(taken.mail.accounts.has("user_ada")).toBe(false)
+    expect(taken.mail.notes.get(b.id)).toBe("address_taken")
+  })
+
+  it("makes NO mailbox for somebody who is not in: a full workspace stops before it", async () => {
+    const w = mailWorld({ full: true, members: [] })
+    const p = await push(w)
+    await apply(w, p.id)
+    expect(stored(w, p.id).conflict).toBe("workspace_full")
+    expect(w.mail.accounts.size).toBe(0)
+  })
+
+  // ── The mailbox ──
+
+  it("gives the person their mailbox before they ever sign in: it receives, and only the hosted aliases come with it", async () => {
+    const w = mailWorld()
+    const p = await push(
+      w,
+      person({
+        emails: [
+          { primary: true, type: "work", value: "ada@acme.test" },
+          { type: "other", value: "Ada.L@ACME.test" },
+          { type: "other", value: "ada@gmail.com" },
+          { type: "other", value: "not an address" },
+          { type: "other", value: "ada@acme.test" },
+        ],
+      }),
+    )
+    await apply(w, p.id)
+    expect(w.mail.delivers("ada@acme.test")).toBe(true)
+    expect(w.mail.canLogin("user_ada")).toBe(true)
+    expect([...w.mail.accounts.get("user_ada")!.aliases]).toEqual(["ada.l@acme.test"])
+    expect(w.mail.delivers("ada.l@acme.test")).toBe(true)
+    expect(w.mail.delivers("ada@gmail.com")).toBe(false)
+    // The ignored ones are counted on the row, not stored.
+    expect(w.mail.ignored.get(p.id)).toBe(2)
+    expect(types(w)).toContain("mailbox.created")
+    expect(types(w)).toContain("mailbox.aliases_changed")
+  })
+
+  it("an alias somebody else holds is ignored and counted, never taken", async () => {
+    const w = mailWorld()
+    w.mail.give("user_bob", "ada.l@acme.test")
+    const p = await push(
+      w,
+      person({
+        emails: [
+          { primary: true, value: "ada@acme.test" },
+          { value: "ada.l@acme.test" },
+        ],
+      }),
+    )
+    await apply(w, p.id)
+    expect(w.mail.accounts.get("user_ada")!.aliases.size).toBe(0)
+    expect(w.mail.accounts.get("user_bob")!.address).toBe("ada.l@acme.test")
+    expect(w.mail.ignored.get(p.id)).toBe(1)
+  })
+
+  // ── Deprovisioning ──
+
+  async function provisionedWithMailbox() {
+    const w = mailWorld()
+    const p = await push(
+      w,
+      person({
+        emails: [
+          { primary: true, type: "work", value: "ada@acme.test" },
+          { value: "ada.l@acme.test" },
+        ],
+      }),
+    )
+    await apply(w, p.id)
+    return { w, p }
+  }
+
+  it("deprovisioning SUSPENDS: the login is refused, mail keeps arriving, nothing is deleted", async () => {
+    const { w, p } = await provisionedWithMailbox()
+    await change(w, p.id, [{ op: "replace", value: { active: false } }])
+    await apply(w, p.id)
+    expect(w.mail.canLogin("user_ada")).toBe(false)
+    expect(w.mail.delivers("ada@acme.test")).toBe(true)
+    expect(w.mail.delivers("ada.l@acme.test")).toBe(true)
+    expect(w.mail.rows.get(`${TENANT}/user_ada`)).toMatchObject({
+      state: "suspended",
+      next: "keep",
+      deleteAt: null,
+    })
+    expect(
+      w.identity.events.find((e) => e.type === "member.deprovisioned"),
+    ).toMatchObject({ data: { mailbox: "suspended" } })
+    expect(types(w)).toContain("mailbox.suspended")
+  })
+
+  it("is not suspended while ANOTHER enabled directory still says the person is active", async () => {
+    const { w, p } = await provisionedWithMailbox()
+    const other = await push(w, person({ userName: "ada2@acme.test" }), OTHER_DIRECTORY)
+    await w.dirs.store.linkUser(TENANT, other.id, "user_ada")
+    await change(w, p.id, [{ op: "replace", value: { active: false } }])
+    expect(await apply(w, p.id)).toMatchObject({ action: "kept_by_other_directory" })
+    expect(w.mail.canLogin("user_ada")).toBe(true)
+    expect(w.mail.rows.get(`${TENANT}/user_ada`)?.state).toBe("active")
+  })
+
+  it("a reactivated person gets the SAME mailbox back, aliases and all", async () => {
+    const { w, p } = await provisionedWithMailbox()
+    const before = structuredClone([...w.mail.accounts.get("user_ada")!.aliases])
+    await change(w, p.id, [{ op: "replace", value: { active: false } }])
+    await apply(w, p.id)
+    expect(w.mail.canLogin("user_ada")).toBe(false)
+    await change(w, p.id, [{ op: "replace", value: { active: true } }])
+    await apply(w, p.id)
+    expect(w.mail.canLogin("user_ada")).toBe(true)
+    expect(w.mail.accounts.get("user_ada")!.address).toBe("ada@acme.test")
+    expect([...w.mail.accounts.get("user_ada")!.aliases]).toEqual(before)
+    expect(w.mail.rows.get(`${TENANT}/user_ada`)).toMatchObject({
+      state: "active",
+      next: "keep",
+    })
+    expect(types(w)).toContain("mailbox.resumed")
+  })
+
+  it("reactivation restores the mailbox even when the opt-in has since been turned off", async () => {
+    const { w, p } = await provisionedWithMailbox()
+    await change(w, p.id, [{ op: "replace", value: { active: false } }])
+    await apply(w, p.id)
+    await w.dirs.store.updateDirectory(TENANT, DIRECTORY, { createMailboxes: false })
+    await change(w, p.id, [{ op: "replace", value: { active: true } }])
+    await apply(w, p.id)
+    expect(w.mail.canLogin("user_ada")).toBe(true)
+  })
+
+  it("the last owner is not suspended: the mailbox stays open while the membership stays", async () => {
+    const w = mailWorld({ owners: ["user_ada"] })
+    const p = await push(w)
+    await w.dirs.store.linkUser(TENANT, p.id, "user_ada")
+    await w.identity.store.claimManaged(TENANT, {
+      clerkUserId: "user_ada",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      reason: "linked",
+      emails: ["ada@acme.test"],
+    })
+    w.mail.give("user_ada", "ada@acme.test")
+    await change(w, p.id, [{ op: "replace", value: { active: false } }])
+    await apply(w, p.id)
+    expect(stored(w, p.id).conflict).toBe("last_owner")
+    expect(w.mail.canLogin("user_ada")).toBe(true)
+  })
+
+  it("turning on 'create mailboxes' looks at the people already in again", async () => {
+    const w = mailWorld({ optIn: false })
+    const p = await push(w)
+    await apply(w, p.id)
+    expect(w.mail.accounts.size).toBe(0)
+    await w.dirs.store.updateDirectory(TENANT, DIRECTORY, { createMailboxes: true })
+    const entries = await w.dirs.store.requeueActive(TENANT, DIRECTORY)
+    expect(entries.map((e) => e.directoryUserId)).toEqual([p.id])
+    await apply(w, p.id)
+    expect(w.mail.delivers("ada@acme.test")).toBe(true)
   })
 })

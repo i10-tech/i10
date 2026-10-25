@@ -44,6 +44,17 @@ import {
 } from "./console/roles.js"
 import { identityStore } from "./identity/store.js"
 import { clerkIdentityApi, clerkProvisioningApi } from "./identity/clerk.js"
+import {
+  mailboxLifecycle,
+  runDeletion,
+  type DirectoryMailDeps,
+} from "./identity/directory-mail.js"
+import { directoryMailStore } from "./identity/mail-store.js"
+import {
+  createMailboxDeletionQueue,
+  mailboxDeletionScheduler,
+  startMailboxDeletionWorker,
+} from "./queue/mailbox-deletion-queue.js"
 import { directoryStore } from "./identity/scim-store.js"
 import {
   applyDirectoryUser,
@@ -117,7 +128,11 @@ import { acceptSend } from "./send/accept.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { nameClaims } from "./domains/claims.js"
 import { domainStore } from "./domains/store.js"
-import { mailboxProvisioning } from "./mailboxes/provision.js"
+import {
+  mailboxProvisioning,
+  provisionForDirectory,
+  type ProvisionDeps,
+} from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
 import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
@@ -1347,6 +1362,40 @@ const kickDirectory = directoryKicker({
   enqueue: directoryEnqueue,
   log,
 })
+/*
+ * ⚠ ONE SET OF DEPS FOR BOTH WAYS A MAILBOX IS MADE: a person asking for their
+ * own (`/mailboxes`) and a company's directory giving one (#344). The
+ * projection, not a second writer; `MAIL_DOMAINS` is passed for the reason it
+ * is there - i10's own domains are hosted regardless of who owns a
+ * `core.domains` row.
+ */
+const mailboxProvisionDeps: ProvisionDeps = {
+  identity: clerkIdentity(clerk),
+  directory: mailboxDirectory(db),
+  capacity: postgresMeter(db),
+  project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
+  featureId: MAILBOXES,
+}
+/*
+ * Mail from the directory (#344): mailboxes, aliases and lists for the people
+ * a directory activates, and the suspension of a deprovisioned person's. The
+ * deletion of a suspended mailbox is a delayed job on its date.
+ */
+const mailStore = directoryMailStore(db)
+const mailboxDeletionQueue = createMailboxDeletionQueue({ redis: queueRedis })
+const mailDeps: DirectoryMailDeps = {
+  store: mailStore,
+  provision: (input) => provisionForDirectory(mailboxProvisionDeps, input),
+  // ⚠ A MEMBER IS A ROW IN OUR ROLES TABLE (#335), kept in step with Clerk.
+  isMember: async (tenantId, userId) =>
+    (await roles.store.roleOf(tenantId, userId)) !== null,
+  directoryActive: async (tenantId, userId) =>
+    (await directories.personStatus(tenantId, userId)) === "active",
+  scheduleDeletion: mailboxDeletionScheduler(mailboxDeletionQueue),
+  record: (tenantId, event) => identity.record(tenantId, event),
+  log,
+}
+const mailLifecycle = mailboxLifecycle(mailDeps)
 const scimBaseUrl = (directoryId: string) => `${env.SCIM_BASE_URL}/${directoryId}`
 /*
  * Google Workspace directory sync (#343): domain-wide delegation with our own
@@ -1480,8 +1529,10 @@ const identityConsole = {
     }),
     take: fixedWindow(cache),
   },
+  mail: { deps: mailDeps, groups: mailStore },
   deprovision: {
     ...managedDeps,
+    mail: mailLifecycle,
     workspaceOrg: (tenantId: string) => identity.workspaceOrg(tenantId),
     // ⚠ THE ACTOR'S ROLE, NOT THE PERSON'S OWN: deprovisioning is somebody
     // else taking them out, so it obeys the rule removing somebody obeys.
@@ -1527,6 +1578,7 @@ const directoryDeps: DirectoryDeps = {
   clerk: identityClerk,
   provisioning: clerkProvisioningApi(clerk),
   deprovision: identityConsole.deprovision,
+  mail: mailDeps,
   isMember: (orgId, userId) => roles.clerk.isMember(orgId, userId),
   seats: (tenantId, orgId) => beforeSeatUse(members, tenantId, orgId),
   join: (input) =>
@@ -1544,6 +1596,12 @@ const directoryWorker = startDirectoryWorker({
   queue: directoryQueue,
   apply: (job) => applyDirectoryUser(directoryDeps, job),
   name: `api-${process.pid}:directory-apply`,
+  log,
+})
+const mailboxDeletionWorker = startMailboxDeletionWorker({
+  queue: mailboxDeletionQueue,
+  run: (job) => runDeletion(mailDeps, job),
+  name: `api-${process.pid}:mailbox-deletion`,
   log,
 })
 const googleDirectoryWorker = startGoogleDirectoryWorker({
@@ -2306,17 +2364,7 @@ const app = createApp({
       : {}),
     log,
   },
-  mailboxes: mailboxProvisioning({
-    identity: clerkIdentity(clerk),
-    directory: mailboxDirectory(db),
-    capacity: postgresMeter(db),
-    // ⚠ THE PROJECTION, NOT A SECOND WRITER. Provisioning changes Clerk and
-    // then asks the projection to derive the row, exactly as the webhook does;
-    // `MAIL_DOMAINS` is passed for the same reason it is there - i10's own
-    // domains are hosted regardless of who owns a `core.domains` row.
-    project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
-    featureId: MAILBOXES,
-  }),
+  mailboxes: mailboxProvisioning(mailboxProvisionDeps),
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),
@@ -2397,6 +2445,14 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
         .close(15_000)
         .catch((err) =>
           log.warn({ ...safeError(err) }, "could not close the directory worker"),
+        ),
+      mailboxDeletionWorker
+        .close(15_000)
+        .catch((err) =>
+          log.warn(
+            { ...safeError(err) },
+            "could not close the mailbox deletion worker",
+          ),
         ),
       googleDirectoryWorker
         .close(15_000)

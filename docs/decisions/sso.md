@@ -813,6 +813,42 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
   delete would also guard a partial wrong answer, not only an empty one.
   **Unverified against a real Workspace tenant:** the API shapes and errors.
 
+### 2.20 What #344 slice B settled for mail from the directory (2026-10-24)
+
+- **Opt-in per directory, an owner's with step-up.** `create_mailboxes` is off by
+  default. When on, the apply job gives an activated person a mailbox through
+  the existing single writer (`provisionForDirectory`: the projection, then
+  `MailboxDirectory.activate`), only if the primary address is on a domain THIS
+  workspace hosts mail for. A refusal (`domain_not_hosted`, `limit`,
+  `address_taken`) is a note on the row, audited when it changes, not a conflict.
+  The person receives mail before ever signing in.
+- **Aliases** are the directory's other `emails[]` on the workspace's hosted
+  domains, stored as `authd.aliases` with `source = 'directory'` (the projection
+  replaces only `source = 'clerk'`). The rest, and any taken by someone else,
+  are counted on the row (`aliases_ignored`).
+- **Lists:** an admin opts a directory group in with an address and a kind
+  (`list` or `shared`). Never for an address, or a group name that is itself an
+  address, off a hosted domain. Mirrored to `authd.groups` (FK to the directory
+  group, so deleting it deletes the list); members are active people with a
+  mailbox, served through `filterMemberOf`.
+- **Deprovisioning suspends** (`authd.accounts.suspended_at`): authd refuses the
+  bind before the cache and pass-through, searches still return the account, mail
+  keeps arriving. It runs after the membership goes and before the account is
+  released or banned, so a retry still finds it managed. Next: keep (default),
+  forward to the manager (SCIM enterprise `manager`, only when an active member
+  with a mailbox on a hosted domain, else it falls back to keep and the audit
+  event says why), delegate to a named member, or delete after 7 to 365 days.
+  Deletion is a date: a delayed job re-checks the date and that no enabled
+  directory says the person is active; a lost job deletes late via the console's
+  backup run. Reactivation resumes the same mailbox, opt-in or not.
+- **Seats:** `/usage` members gains `directory: { people, outside }`, people active
+  in any enabled directory counted once (by account, else address).
+- **Open / unverified:** forward and delegate are projected as authd lists
+  (`fwd-`/`dlg-` + user id) and need checking against a real Stalwart, which
+  also owns purging a deleted mailbox's stored mail (we only remove the account);
+  a shared mailbox is served like a list; group renames re-check the name only at
+  list-sync time.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

@@ -47,7 +47,8 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 // when authd.managed_accounts says so.
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	coalesce(a.description, ''), a.active, a.clerk_updated_at,
-	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, '')`
+	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
+	(a.suspended_at IS NOT NULL)`
 
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
@@ -136,7 +137,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
 			&a.Description, &a.Active, &a.ClerkUpdatedAt,
-			&a.Managed, &a.ManagedConnection); err != nil {
+			&a.Managed, &a.ManagedConnection, &a.Suspended); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

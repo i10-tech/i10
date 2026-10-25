@@ -194,6 +194,13 @@ The log carries reason codes (`user_not_found`, `ambiguous_entry`,
 `user_bind_rejected`, `host_blocked`, `tls_failed`, ...), never the password,
 the service secret, a filter or a DN the directory returned.
 
+## Suspended mailboxes (#344)
+
+A mailbox a company's directory switched off has `authd.accounts.suspended_at`
+set and stays `active`. Searches return it, so mail keeps arriving; every bind is
+refused with `invalidCredentials` (`mailbox_suspended`) BEFORE the credential
+cache, Clerk or the pass-through is consulted.
+
 ## The one rule you must not break
 
 > A Clerk outage must never be reported as `invalidCredentials`.

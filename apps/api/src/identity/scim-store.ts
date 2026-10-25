@@ -67,6 +67,7 @@ const toDirectory = (r: typeof directories.$inferSelect): Directory => ({
   name: r.name,
   provider: r.provider as DirectoryProvider,
   enabled: r.enabled,
+  createMailboxes: r.createMailboxes,
   adminEmail: r.adminEmail,
   domain: r.domain,
   lastSyncAt: r.lastSyncAt,
@@ -117,6 +118,7 @@ const toUser = (r: typeof directoryUsers.$inferSelect): DirectoryUserRow => ({
   conflictDetail: r.conflictDetail ?? null,
   conflictAt: r.conflictAt,
   bannedByDirectory: r.bannedByDirectory,
+  aliasesIgnored: r.aliasesIgnored,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
   deletedAt: r.deletedAt,
@@ -981,7 +983,11 @@ export function directoryStore(db: Database): DirectoryStore {
           .orderBy(desc(directoryOutbox.id))
           .limit(1)
         const [row] = await tx
-          .select({ user: directoryUsers, enabled: directories.enabled })
+          .select({
+            user: directoryUsers,
+            enabled: directories.enabled,
+            createMailboxes: directories.createMailboxes,
+          })
           .from(directoryUsers)
           .innerJoin(directories, eq(directories.id, directoryUsers.directoryId))
           .where(
@@ -993,7 +999,11 @@ export function directoryStore(db: Database): DirectoryStore {
           .limit(1)
         if (!row) return null
         return {
-          row: { ...toUser(row.user), directoryEnabled: row.enabled },
+          row: {
+            ...toUser(row.user),
+            directoryEnabled: row.enabled,
+            createMailboxes: row.createMailboxes,
+          },
           upTo: latest?.id ?? null,
         }
       })
@@ -1212,6 +1222,68 @@ export function directoryStore(db: Database): DirectoryStore {
         if (!row) return null
         const [entry] = await outbox(tx, tenantId, directoryId, [id], "updated")
         return entry ?? null
+      })
+    },
+
+    async seats(tenantId) {
+      /*
+       * ⚠ ONE KEY PER PERSON: their Clerk account when linked, else the
+       * lowercased address, else the row. A person two directories list is one
+       * seat, and so is one the directory knows by address before any account
+       * exists. ENABLED directories only, and a row holding `last_owner` still
+       * counts as active (personStatus).
+       */
+      const rows = (await withTenant(db, tenantId, (tx) =>
+        tx.execute(sql`
+          with people as (
+            select distinct
+                   coalesce(u.clerk_user_id, 'e:' || lower(u.email), 'r:' || u.id::text) as person,
+                   u.clerk_user_id as clerk_user_id
+              from identity.directory_users u
+              join identity.directories d
+                on d.id = u.directory_id and d.tenant_id = u.tenant_id
+             where u.tenant_id = ${tenantId}::uuid
+               and d.enabled
+               and u.deleted_at is null
+               and (u.active or u.conflict = 'last_owner')
+          )
+          select count(*)::int as people,
+                 count(*) filter (
+                   where p.clerk_user_id is null
+                      or not exists (
+                        select 1 from core.workspace_roles r
+                         where r.tenant_id = ${tenantId}::uuid
+                           and r.clerk_user_id = p.clerk_user_id)
+                 )::int as outside
+            from people p`),
+      )) as unknown as { people: number; outside: number }[]
+      return { people: rows[0]?.people ?? 0, outside: rows[0]?.outside ?? 0 }
+    },
+
+    async requeueActive(tenantId, directoryId) {
+      if (!UUID.test(directoryId)) return []
+      return withTenant(db, tenantId, async (tx) => {
+        const people = await tx
+          .select({ id: directoryUsers.id })
+          .from(directoryUsers)
+          .where(
+            and(
+              eq(directoryUsers.tenantId, tenantId),
+              eq(directoryUsers.directoryId, directoryId),
+              eq(directoryUsers.active, true),
+              isNull(directoryUsers.deletedAt),
+              isNotNull(directoryUsers.clerkUserId),
+            ),
+          )
+          .limit(5000)
+        if (people.length === 0) return []
+        return outbox(
+          tx,
+          tenantId,
+          directoryId,
+          people.map((p) => p.id),
+          "updated",
+        )
       })
     },
 

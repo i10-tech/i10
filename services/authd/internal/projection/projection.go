@@ -27,6 +27,12 @@ type Account struct {
 	Managed           bool
 	ManagedConnection string
 
+	// Suspended is true when a company's directory switched the person off
+	// (#344): the mailbox still exists and still receives mail, so searches
+	// return it, but NO BIND succeeds. It is not Active=false, which would make
+	// the account invisible and stop delivery.
+	Suspended bool
+
 	Aliases  []string
 	MemberOf []string // group names, not DNs; the caller renders DNs
 }

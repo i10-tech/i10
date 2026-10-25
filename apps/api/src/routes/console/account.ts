@@ -907,11 +907,23 @@ async function memberUsage(
     await revokeExpired(d.members, tenantId)
     const room = await seats(d.members, tenantId, orgId)
     if (room.personal) return null
+    /*
+     * ⚠ DIRECTORY SEATS (#344, sso.md 2.8): people active in any ENABLED
+     * directory count once, signed in or not. `outside` are the ones who are
+     * not members yet (a directory knows them before Clerk or the workspace
+     * does), so `members + outside` is the seats the workspace is about to
+     * need. A directory read that fails leaves its figures out, not the meter.
+     */
+    const directory = await d.identity?.scim?.store.seats(tenantId).catch((error) => {
+      d.log.warn({ err: error, tenantId }, "could not read directory seats")
+      return null
+    })
     return {
       members: room.members,
       invitations: room.invitations,
       limit: room.limit,
       free: room.free,
+      ...(directory ? { directory } : {}),
     }
   } catch (error) {
     d.log.warn({ err: error, tenantId }, "could not read member usage")

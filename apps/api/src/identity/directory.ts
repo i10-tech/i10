@@ -7,6 +7,7 @@ import type {
   DirectoryUserRow,
   OutboxEntry,
 } from "./directory-ports.js"
+import { mailForActive, type DirectoryMailDeps } from "./directory-mail.js"
 import { profileChanges, readName } from "./jit.js"
 import {
   deprovision,
@@ -61,6 +62,11 @@ export interface DirectoryDeps {
   }): Promise<"added" | "full">
   /** An owner or an admin in our roles table: SCIM never takes one over. */
   isExempt(tenantId: string, userId: string): Promise<boolean>
+  /**
+   * Mail from the directory (#344): the mailbox, aliases and lists of the
+   * people it activates, and the reactivation of a suspended one.
+   */
+  mail: DirectoryMailDeps
   /** The gate's cache of this account's managed state. */
   forget(input: { userId: string }): void
   log: Logger
@@ -201,7 +207,7 @@ const conflicted = async (
  */
 async function activate(
   d: DirectoryDeps,
-  row: DirectoryUserRow,
+  row: DirectoryUserRow & { createMailboxes: boolean },
 ): Promise<ApplyOutcome> {
   const t = row.tenantId
   const email = normaliseEmail(row.email)
@@ -320,6 +326,17 @@ async function activate(
     })
   }
   await d.store.closeWaitlist(t, user.id, true)
+  /*
+   * ⚠ THE MAILBOX ONLY FOR SOMEBODY WHO IS IN, MANAGED AND A MEMBER - the
+   * `workspace_full` and every earlier refusal returned above. A person the
+   * directory brought back gets their suspended mailbox back unchanged.
+   */
+  await mailForActive(d.mail, {
+    row,
+    userId: user.id,
+    primary: email,
+    createMailboxes: row.createMailboxes,
+  })
   await settleConflict(d, row, null)
   d.forget({ userId: user.id })
   return {

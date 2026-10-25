@@ -1,3 +1,4 @@
+import { memoryMail } from "./identity-mail-fakes.js"
 import { createVerify, generateKeyPairSync } from "node:crypto"
 import { describe, expect, it } from "bun:test"
 import { Hono } from "hono"
@@ -975,10 +976,12 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
         },
       },
     })
+    const mail = memoryMail()
     const deprovision: DeprovisionDeps = {
       store: identity.store,
       clerk: clerk.clerk,
       log,
+      mail: mail.lifecycle,
       workspaceOrg: (t) => identity.store.workspaceOrg(t),
       authorize: async () => "ok",
       removeMembership: async ({ userId }) => {
@@ -994,6 +997,7 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
       clerk: clerk.clerk,
       provisioning: prov.provisioning,
       deprovision,
+      mail: mail.deps,
       isMember: async (_o, userId) => members.has(userId),
       seats: async () => ({ full: false }),
       join: async ({ orgId, userId, role }) =>

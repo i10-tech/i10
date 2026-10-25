@@ -172,8 +172,9 @@ export interface AppDeps {
    * Creating a human mailbox, for `/mailboxes`.
    *
    * ⚠ THE ONLY PLACE `authd.accounts.active` IS EVER SET TRUE, which is what
-   * makes a mailbox visible to authd at all. Omitted in tests and in the
-   * OpenAPI generator, where the routes answer 501.
+   * makes a mailbox visible to authd at all. A company's directory (#344)
+   * gives mailboxes through the same `activate`, via `provisionForDirectory`.
+   * Omitted in tests and in the OpenAPI generator, where the routes answer 501.
    */
   mailboxes?: MailboxProvisioning
   /** SES delivery events over SNS. Unauthenticated; signature-verified. */

@@ -195,12 +195,17 @@ async function applyUser(
 
   // Aliases are replaced wholesale rather than diffed. The set is small, it is
   // two statements either way, and a diff still has to get removal right.
+  //
+  // ⚠ ONLY THE ONES CLERK GAVE (`source = 'clerk'`). A company's directory
+  // lists addresses of its own (#344, mailboxes/store.ts), and replacing those
+  // here would delete them the next time the person edits their profile.
   if (mailbox.aliases.length > 0) {
     await tx
       .delete(aliases)
       .where(
         and(
           eq(aliases.clerkUserId, mailbox.clerkUserId),
+          eq(aliases.source, "clerk"),
           not(inArray(aliases.address, mailbox.aliases)),
         ),
       )
@@ -214,10 +219,15 @@ async function applyUser(
       )
       .onConflictDoUpdate({
         target: aliases.address,
-        set: { clerkUserId: sql`excluded.clerk_user_id` },
+        // An address Clerk now vouches for is Clerk's, whoever listed it first.
+        set: { clerkUserId: sql`excluded.clerk_user_id`, source: "clerk" },
       })
   } else {
-    await tx.delete(aliases).where(eq(aliases.clerkUserId, mailbox.clerkUserId))
+    await tx
+      .delete(aliases)
+      .where(
+        and(eq(aliases.clerkUserId, mailbox.clerkUserId), eq(aliases.source, "clerk")),
+      )
   }
 
   return { outcome: "upserted", email: updated[0]!.email }

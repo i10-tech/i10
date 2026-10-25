@@ -666,3 +666,44 @@ describe("directories: what they do", () => {
     expect(all).not.toContain(token)
   })
 })
+
+describe("directories: create mailboxes (#344)", () => {
+  const patch = (w: ReturnType<typeof consoleApp>, user: string, body: unknown) =>
+    w.call(user, "PATCH", `/identity/directories/${DIRECTORY}`, body)
+
+  it("is off by default", async () => {
+    const w = consoleApp()
+    expect(w.dirs.directories.get(DIRECTORY)!.createMailboxes).toBe(false)
+  })
+
+  it("turning it ON is an owner's, with step-up, and an admin or member is refused", async () => {
+    const w = consoleApp()
+    expect((await patch(w, "user_admin", { createMailboxes: true })).status).toBe(403)
+    expect((await patch(w, "user_m", { createMailboxes: true })).status).toBe(403)
+    w.setFresh(false)
+    expect((await patch(w, "user_owner", { createMailboxes: true })).status).not.toBe(
+      200,
+    )
+    expect(w.dirs.directories.get(DIRECTORY)!.createMailboxes).toBe(false)
+    expect(w.events("directory.updated")).toHaveLength(0)
+  })
+
+  it("an owner turning it on is audited with the before and after, and the people already in are looked at again", async () => {
+    const w = consoleApp()
+    const res = await patch(w, "user_owner", { createMailboxes: true })
+    expect(res.status).toBe(200)
+    expect(w.dirs.directories.get(DIRECTORY)!.createMailboxes).toBe(true)
+    expect(w.events("directory.updated")[0]).toMatchObject({
+      actorUserId: "user_owner",
+      data: { from: { createMailboxes: false }, to: { createMailboxes: true } },
+    })
+  })
+
+  it("an admin may turn it off again, and a non-boolean is refused", async () => {
+    const w = consoleApp()
+    await patch(w, "user_owner", { createMailboxes: true })
+    expect((await patch(w, "user_admin", { createMailboxes: "yes" })).status).toBe(422)
+    expect((await patch(w, "user_admin", { createMailboxes: false })).status).toBe(200)
+    expect(w.dirs.directories.get(DIRECTORY)!.createMailboxes).toBe(false)
+  })
+})

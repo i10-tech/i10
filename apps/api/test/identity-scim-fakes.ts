@@ -77,6 +77,7 @@ export function memoryDirectories(
       name: "Acme directory",
       provider,
       enabled: provider !== "google",
+      createMailboxes: false,
       adminEmail: null,
       domain: null,
       lastSyncAt: null,
@@ -113,6 +114,8 @@ export function memoryDirectories(
   let clock = new Date("2026-10-21T10:00:00Z")
   const calls: string[] = []
   const fail = { forApply: false }
+  /** Clerk accounts that are workspace members (what `seats` calls `outside` otherwise). */
+  const seated = new Set<string>()
 
   const put = (tenantId: string, directoryId: string, input: StoredUser) => {
     const at = clock
@@ -133,6 +136,7 @@ export function memoryDirectories(
       conflictDetail: null,
       conflictAt: null,
       bannedByDirectory: false,
+      aliasesIgnored: 0,
       createdAt: at,
       updatedAt: at,
       deletedAt: null,
@@ -207,6 +211,7 @@ export function memoryDirectories(
         name: input.name,
         provider: input.provider,
         enabled: input.enabled ?? input.provider !== "google",
+        createMailboxes: false,
         adminEmail: input.adminEmail ?? null,
         domain: input.domain ?? null,
         lastSyncAt: null,
@@ -601,6 +606,7 @@ export function memoryDirectories(
         row: {
           ...structuredClone(row),
           directoryEnabled: directories.get(row.directoryId)!.enabled,
+          createMailboxes: directories.get(row.directoryId)!.createMailboxes,
         },
         upTo: latest ?? null,
       }
@@ -720,6 +726,41 @@ export function memoryDirectories(
     async liveDomains() {
       return [...domains]
     },
+    async seats(tenantId) {
+      // One key per person, as the SQL: the account, else the address, else the row.
+      const people = new Map<string, string | null>()
+      for (const u of users) {
+        if (u.tenantId !== tenantId || u.deletedAt) continue
+        if (!directories.get(u.directoryId)!.enabled) continue
+        if (!(u.active || u.conflict === "last_owner")) continue
+        people.set(
+          u.clerkUserId ?? `e:${u.email?.toLowerCase() ?? `r:${u.id}`}`,
+          u.clerkUserId,
+        )
+      }
+      return {
+        people: people.size,
+        outside: [...people.values()].filter((id) => id === null || !seated.has(id))
+          .length,
+      }
+    },
+    async requeueActive(tenantId, did) {
+      return entries(
+        tenantId,
+        did,
+        users
+          .filter(
+            (u) =>
+              u.tenantId === tenantId &&
+              u.directoryId === did &&
+              u.active &&
+              !u.deletedAt &&
+              u.clerkUserId,
+          )
+          .map((u) => u.id),
+        "updated",
+      )
+    },
     async fileWaitlist(tenantId, input) {
       if (!waitlist.some((w) => w.userId === input.userId && w.answered === null))
         waitlist.push({ tenantId, ...input, answered: null })
@@ -784,6 +825,7 @@ export function memoryDirectories(
     calls,
     fail,
     tenant,
+    seated,
     setClock(at: Date) {
       clock = at
     },

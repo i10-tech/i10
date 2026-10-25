@@ -33,6 +33,7 @@ import { mountIdentityGroups } from "./identity-groups.js"
 import { mountIdentitySaml, type SamlConsoleDeps } from "./identity-saml.js"
 import { samlReady } from "../../identity/saml.js"
 import { SAML_PRESETS, samlPresetOf } from "../../identity/saml-presets.js"
+import { mountIdentityMail, type MailConsoleDeps } from "./identity-mail.js"
 import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
 import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
 
@@ -79,6 +80,8 @@ export interface IdentityConsoleDeps {
   saml?: SamlConsoleDeps
   /** SCIM directories (#342). Absent: their routes answer 501. */
   scim?: ScimConsoleDeps
+  /** Mail from the directory (#344): groups as lists, a leaver's mailbox. Absent: 501. */
+  mail?: MailConsoleDeps
   /** LDAP pass-through for managed accounts' IMAP (#344). Absent: its routes answer 501. */
   ldap?: LdapConsoleDeps
   /**
@@ -207,6 +210,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentityGroups(app, d)
   mountIdentitySaml(app, d)
   mountIdentityScim(app, d)
+  mountIdentityMail(app, d)
   mountIdentityLdap(app, d)
   mountIdentityBreakGlass(app, d)
   mountIdentitySetupLinks(app, d)
