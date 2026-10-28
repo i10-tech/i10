@@ -59,6 +59,8 @@ function world(
     oidc: {
       engine,
       jwksUrl: (id: string) => `https://auth.i10.localhost/sso/jwks/${id}`,
+      backchannelLogoutUrl: (id: string) =>
+        `https://api.i10.localhost/sso/oidc/backchannel/${id}`,
     },
   }
   let fresh = true

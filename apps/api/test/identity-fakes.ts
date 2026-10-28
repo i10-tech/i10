@@ -851,6 +851,10 @@ export function memoryReplay() {
       seen.add(key)
       return true
     },
+    async release(key) {
+      if (fail.down) throw new ReplayUnavailable()
+      seen.delete(key)
+    },
   }
   return { replay, seen, fail }
 }

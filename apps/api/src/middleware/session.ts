@@ -125,6 +125,12 @@ export type SsoGateOutcome =
     }
   /** An owner or admin exempt from "required" SSO who holds no passkey (#340). */
   | { status: "passkey_required" }
+  /** The workspace's IP allowlist does not list the caller's address (#345). */
+  | { status: "ip_not_allowed" }
+  /** The session is past the workspace's (or its connection's) session policy (#345). */
+  | { status: "session_expired"; reason: "max_age" | "idle" | "revoked" }
+  /** The workspace requires a second factor of members outside SSO (#345). */
+  | { status: "mfa_required" }
   | { status: "unknown" }
 
 /**
@@ -173,6 +179,52 @@ export function passkeyRequired(c: Context) {
   )
 }
 
+/** 403 for an address outside the workspace's allowlist, console or API key. */
+export function ipNotAllowed(c: Context) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "ip_not_allowed",
+      message: "This workspace only allows access from its approved networks.",
+    },
+    403,
+  )
+}
+
+/**
+ * 401 for a session past the workspace's session policy. The console reads
+ * `reason` to say why the person was signed out and sends them to sign in.
+ */
+export function sessionExpired(c: Context, reason: "max_age" | "idle" | "revoked") {
+  return c.json(
+    {
+      statusCode: 401,
+      name: "session_expired",
+      reason,
+      message:
+        reason === "idle"
+          ? "You were signed out after being inactive. Sign in again."
+          : reason === "max_age"
+            ? "Your session reached the longest this workspace allows. Sign in again."
+            : "This session was ended. Sign in again.",
+    },
+    401,
+  )
+}
+
+/** 403 for a member outside SSO with no second factor, in a workspace that requires one. */
+export function mfaRequired(c: Context) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "mfa_required",
+      message:
+        "This workspace requires a second factor. Add one to your account to continue.",
+    },
+    403,
+  )
+}
+
 /**
  * Runs the SSO gate for a verified person, if this process has one: a refusal
  * to return, or null to carry on. Shared by `requireUser` and `requireTenant`;
@@ -186,6 +238,9 @@ export async function ssoGateRefusal(c: Context, userId: string, tenantId?: stri
   const verdict = await gate(c.req.raw, userId, tenantId)
   if (verdict.status === "sso_required") return ssoRequired(c, verdict)
   if (verdict.status === "passkey_required") return passkeyRequired(c)
+  if (verdict.status === "ip_not_allowed") return ipNotAllowed(c)
+  if (verdict.status === "session_expired") return sessionExpired(c, verdict.reason)
+  if (verdict.status === "mfa_required") return mfaRequired(c)
   if (verdict.status === "unknown") return gateUnavailable(c)
   return null
 }

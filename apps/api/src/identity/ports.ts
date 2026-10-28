@@ -494,6 +494,12 @@ export interface SamlStore {
 export interface ReplayCache {
   /** True for the first caller of `key` within `ttlMs`, false for any other. */
   claim(key: string, ttlMs: number): Promise<boolean>
+  /**
+   * Gives a claim back. Only for a caller whose work failed AFTER the claim
+   * and is safe to repeat (a back-channel logout, #345), so the IdP's retry
+   * is not refused as a replay of something that never happened.
+   */
+  release(key: string): Promise<void>
 }
 
 /** A Clerk user as the managed-account rules see it. */
@@ -773,4 +779,99 @@ export interface SsoPolicyStore {
   ): Promise<(SetupLinkRow & { tokenHash: string }) | null>
   /** Compare-and-set on `used_at`: true for the first use. */
   markSetupLinkUsed(tenantId: string, id: string, at: Date): Promise<boolean>
+}
+
+// ── Workspace session, second-factor and network policy (#345) ───────────
+
+/** The IP allowlist's saved state. Ranges are canonical CIDR text (identity/network.ts). */
+export interface NetworkPolicy {
+  /** Console sessions are held to `ranges`. */
+  console: boolean
+  /** API keys are held to `ranges`. */
+  apiKeys: boolean
+  ranges: string[]
+  /**
+   * The owner who saved a console list without their own address, and that
+   * address: allowed for them alone until `until`.
+   */
+  grace: { userId: string; address: string; until: Date } | null
+}
+
+export interface WorkspacePolicy {
+  maxSessionSeconds: number | null
+  idleTimeoutSeconds: number | null
+  requireSecondFactor: boolean
+  network: NetworkPolicy
+}
+
+/** The change a policy write makes. Each kind is one audited event. */
+export type WorkspacePolicyChange =
+  | {
+      kind: "session"
+      maxSessionSeconds: number | null
+      idleTimeoutSeconds: number | null
+    }
+  | { kind: "second_factor"; required: boolean }
+  | {
+      kind: "network"
+      console: boolean
+      apiKeys: boolean
+      ranges: string[]
+      grace: { userId: string; address: string; until: Date } | null
+      /** The saving owner confirmed a list that excludes their address. */
+      lockoutConfirmed: boolean
+    }
+
+/**
+ * A session's age as the workspace policy measures it: a bound session from
+ * its bind (and its connection's own limits, `connection*`), any other from
+ * the activity row.
+ */
+export interface SessionFacts {
+  bound: {
+    boundAt: Date
+    lastSeenAt: Date
+    connectionMaxSessionSeconds: number | null
+    connectionIdleTimeoutSeconds: number | null
+  } | null
+  activity: { startedAt: Date; lastSeenAt: Date } | null
+}
+
+/**
+ * The workspace policy store (#345): the saved policy, the activity of
+ * sessions no SSO bind tracks, and the audited writes.
+ *
+ * ⚠ A WRITE AND ITS AUDIT ROW ARE ONE TRANSACTION, under the settings row's
+ * lock: a policy that changed has a row saying who changed it, from what.
+ */
+export interface WorkspacePolicyStore {
+  /** The saved policy; the defaults (nothing set) for a workspace with no row. */
+  policy(tenantId: string): Promise<WorkspacePolicy>
+  /** Applies `change` and audits it as `actorUserId`. Returns both states. */
+  update(
+    tenantId: string,
+    actorUserId: string,
+    change: WorkspacePolicyChange,
+  ): Promise<{ before: WorkspacePolicy; after: WorkspacePolicy }>
+  /**
+   * The session's bind (any status of it) and, unless it is bound, its
+   * activity row. `revoked` for a row that was ended: it never comes back.
+   */
+  sessionFacts(
+    tenantId: string,
+    sessionId: string,
+  ): Promise<SessionFacts & { revoked: boolean }>
+  /** First sight of an unbound session. Idempotent; returns the row as it is. */
+  startActivity(
+    tenantId: string,
+    row: { sessionId: string; clerkUserId: string; startedAt: Date; now: Date },
+  ): Promise<{ startedAt: Date; lastSeenAt: Date; revoked: boolean }>
+  touchActivity(tenantId: string, sessionId: string, at: Date): Promise<void>
+  /** True only for the call that ended it. */
+  revokeActivity(
+    tenantId: string,
+    sessionId: string,
+    reason: string,
+    at: Date,
+  ): Promise<boolean>
 }

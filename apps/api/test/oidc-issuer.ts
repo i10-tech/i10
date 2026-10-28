@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import {
   SignJWT,
+  UnsecuredJWT,
   createLocalJWKSet,
   exportJWK,
   generateKeyPair,
@@ -72,7 +73,11 @@ export async function testIssuer(options: IssuerOptions = {}) {
     }
   >()
   const calls = { discovery: 0, jwks: 0, token: 0 }
-  const fail = { token: null as number | null, discovery: null as number | null }
+  const fail = {
+    token: null as number | null,
+    discovery: null as number | null,
+    jwks: null as number | null,
+  }
   const seen: { authorize: URLSearchParams[]; tokenBodies: URLSearchParams[] } = {
     authorize: [],
     tokenBodies: [],
@@ -155,6 +160,7 @@ export async function testIssuer(options: IssuerOptions = {}) {
     }
     if (url.pathname === "/jwks") {
       calls.jwks += 1
+      if (fail.jwks) return json({}, fail.jwks)
       return json({ keys: [publicJwk] })
     }
     if (url.pathname === "/token" && init?.method === "POST") {
@@ -229,12 +235,51 @@ export async function testIssuer(options: IssuerOptions = {}) {
     }
   }
 
+  /**
+   * A Back-Channel Logout token (#345) as the IdP would send it, with every
+   * way it can be wrong a knob: claims to change or leave out, a key the
+   * JWKS does not publish, or another algorithm (`HS256` with the client
+   * secret, `none`).
+   */
+  async function logoutToken(
+    claims: Record<string, unknown> = {},
+    knobs: {
+      omit?: string[]
+      rogueKey?: boolean
+      alg?: "RS256" | "HS256" | "none"
+      kid?: string
+    } = {},
+  ) {
+    const now = Math.floor(Date.now() / 1000)
+    const payload: Record<string, unknown> = {
+      iss: issuer,
+      aud: clientId,
+      iat: now,
+      exp: now + 120,
+      jti: randomBytes(12).toString("hex"),
+      sub: "idp|ada",
+      sid: "idp-session-1",
+      events: { "http://schemas.openid.net/event/backchannel-logout": {} },
+      ...claims,
+    }
+    for (const name of knobs.omit ?? []) delete payload[name]
+    if (knobs.alg === "none") return new UnsecuredJWT(payload).encode()
+    if (knobs.alg === "HS256")
+      return new SignJWT(payload)
+        .setProtectedHeader({ alg: "HS256", kid })
+        .sign(new TextEncoder().encode(clientSecret))
+    return new SignJWT(payload)
+      .setProtectedHeader({ alg: "RS256", kid: knobs.kid ?? kid })
+      .sign(knobs.rogueKey ? rogue.privateKey : signing.privateKey)
+  }
+
   return {
     issuer,
     clientId,
     clientSecret,
     fetch,
     authorize,
+    logoutToken,
     calls,
     fail,
     seen,

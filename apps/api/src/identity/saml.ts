@@ -230,8 +230,16 @@ export class ReplayUnavailable extends Error {
 /** The replay cache on our Redis: `SET key 1 PX ttl NX`. */
 export function redisReplayCache(redis: {
   set(key: string, value: string, px: "PX", ttl: number, nx: "NX"): Promise<unknown>
+  del(key: string): Promise<unknown>
 }): ReplayCache {
   return {
+    async release(key) {
+      try {
+        await redis.del(key)
+      } catch {
+        throw new ReplayUnavailable()
+      }
+    },
     async claim(key, ttlMs) {
       try {
         const done = await redis.set(

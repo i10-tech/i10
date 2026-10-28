@@ -37,6 +37,13 @@ export interface Limit {
 export const PER_IP: Limit = { max: 60, windowSeconds: 60 }
 /** Sign-in starts on one connection, from everybody together. */
 export const PER_CONNECTION_STARTS: Limit = { max: 1200, windowSeconds: 60 }
+/**
+ * Back-channel logouts (#345) come from an IdP's servers, not a browser: one
+ * address may send a company's whole morning of sign-outs, so it gets a wider
+ * window than a person does, and the connection's total is capped as well.
+ */
+export const LOGOUT_PER_IP: Limit = { max: 300, windowSeconds: 60 }
+export const LOGOUT_PER_CONNECTION: Limit = { max: 600, windowSeconds: 60 }
 
 export type Verdict = { ok: true } | { ok: false; retryAfter: number }
 
@@ -100,8 +107,16 @@ export function ssoRateLimit(deps: {
       )
     }
     const ip = trustedClientIp(c.req.raw.headers, deps.contextSecret)
+    const logoutOf = backchannelConnection(c.req.path)
     if (ip) {
-      const verdict = await deps.take(`ip:${ip}`, PER_IP)
+      const verdict = await deps.take(
+        logoutOf ? `logout-ip:${ip}` : `ip:${ip}`,
+        logoutOf ? LOGOUT_PER_IP : PER_IP,
+      )
+      if (!verdict.ok) return tooMany(verdict.retryAfter)
+    }
+    if (logoutOf) {
+      const verdict = await deps.take(`logout-conn:${logoutOf}`, LOGOUT_PER_CONNECTION)
       if (!verdict.ok) return tooMany(verdict.retryAfter)
     }
     /*
@@ -121,6 +136,12 @@ export function ssoRateLimit(deps: {
     }
     await next()
   }
+}
+
+/** The connection a back-channel logout URL names, or null for any other path. */
+export function backchannelConnection(path: string): string | null {
+  const match = /\/oidc\/backchannel\/([0-9a-f-]{36})$/i.exec(path)
+  return match ? match[1]!.toLowerCase() : null
 }
 
 /** `connection` from a start's JSON body, bounded, for the per-connection count. */

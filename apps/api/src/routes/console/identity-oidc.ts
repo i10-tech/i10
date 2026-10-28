@@ -51,6 +51,12 @@ export interface OidcConsoleDeps {
   engine: OidcEngine
   /** Where the IdP fetches our public keys: apps/auth's `/sso/jwks/:id`. */
   jwksUrl(connectionId: string): string
+  /**
+   * Where the IdP's server sends a Logout Token (#345): this API's own
+   * `/sso/oidc/backchannel/<id>`, not apps/auth's, because the IdP's call is
+   * form-encoded and carries no browser.
+   */
+  backchannelLogoutUrl(connectionId: string): string
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -195,6 +201,9 @@ export function oidcSetupView(
         ? o.engine.googleRedirectUri
         : o.engine.redirectUri,
     jwksUrl: o.jwksUrl(connection.id),
+    // Our Google client is shared by every workspace and Google sends no Logout Token.
+    backchannelLogoutUri:
+      connection.provider === "google" ? null : o.backchannelLogoutUrl(connection.id),
     issuerHint: preset?.issuerHint ?? null,
     requires: preset?.requires ?? [],
     clientAuthMethods: preset?.clientAuth ?? [],

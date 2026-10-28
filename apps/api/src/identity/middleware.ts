@@ -2,6 +2,7 @@ import type { ClerkClient } from "@clerk/backend"
 import type { FreshAuthReader, SsoGateReader } from "../middleware/session.js"
 import type { EnforcementGate } from "./enforcement.js"
 import type { SsoGateChecker } from "./gate.js"
+import type { WorkspaceGate } from "./workspace-policy.js"
 
 /**
  * The identity core, plugged into the middleware: the gate's reader for
@@ -66,31 +67,53 @@ export function startUrlFor(
 }
 
 /**
- * ⚠ WITH A TENANT IT ASKS ONLY THE WORKSPACE'S ENFORCEMENT (#340): the
+ * ⚠ WITH A TENANT IT ASKS ONLY THE WORKSPACE'S OWN RULES (#340, #345): the
  * managed-account check already ran for this request, without one, before
- * the workspace was resolved. No `enforcement` wired means none is enforced,
- * which is only ever a test's or a process without the identity core.
+ * the workspace was resolved. No `enforcement` or `workspace` wired means
+ * that part is not enforced, which is only ever a test's or a process
+ * without the identity core.
  */
 export function gateReader(
   sessionIds: SessionIdReader,
   checker: SsoGateChecker,
   startUrl: (connectionId: string | null) => string | null,
   enforcement?: EnforcementGate,
+  workspace?: WorkspaceGate,
 ): SsoGateReader {
   return async (request, userId, tenantId) => {
     const ids = await sessionIds(request)
     // ⚠ A DIFFERENT USER THAN THE VERIFIER SAW IS A CONTRADICTION, not a pass.
     if (ids.status !== "ok" || ids.userId !== userId) return { status: "unknown" }
     if (tenantId !== undefined) {
-      if (!enforcement) return { status: "pass" }
-      const enforced = await enforcement.check(tenantId, userId, ids.sessionId)
-      return enforced.status === "sso_required"
-        ? {
+      /*
+       * ⚠ THE WORKSPACE'S OWN RULES, IN THIS ORDER (#345): where the request
+       * comes from and how old the session is (nothing else is said to a
+       * caller the workspace does not admit), then SSO enforcement, then the
+       * second factor - last, so a covered member without a bound session is
+       * told to use SSO rather than to add a factor they will not need.
+       */
+      const req = {
+        tenantId,
+        userId,
+        sessionId: ids.sessionId,
+        headers: request.headers,
+        method: request.method,
+        path: new URL(request.url).pathname,
+      }
+      const admitted = await workspace?.admit(req)
+      if (admitted && admitted.status !== "pass") return admitted
+      if (enforcement) {
+        const enforced = await enforcement.check(tenantId, userId, ids.sessionId)
+        if (enforced.status === "sso_required")
+          return {
             status: "sso_required",
             startUrl: startUrl(enforced.connectionId),
             reason: "enforced",
           }
-        : enforced
+        if (enforced.status !== "pass") return enforced
+      }
+      const factor = await workspace?.secondFactor(req)
+      return factor && factor.status !== "pass" ? factor : { status: "pass" }
     }
     const verdict = await checker.check(userId, ids.sessionId)
     if (verdict.status === "sso_required")

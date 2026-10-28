@@ -68,6 +68,7 @@ import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
 import type { SessionVerifier, SsoGateReader } from "./middleware/session.js"
+import type { NetworkOutcome } from "./identity/workspace-policy.js"
 import type { MailboxProvisioning } from "./mailboxes/provision.js"
 
 /**
@@ -158,6 +159,8 @@ export interface AppDeps {
    * means no identity core in this process, so no managed accounts to gate.
    */
   ssoGate?: SsoGateReader
+  /** The workspace's API-key IP allowlist (#345), read by `requireApiKey`. */
+  apiKeyNetwork?: (tenantId: string, headers: Headers) => Promise<NetworkOutcome>
   /** The SSO bridge's routes (#337), at `/sso`. */
   sso?: SsoRouteDeps
   /** The SCIM server (#342), at `/scim/v2/<directory id>`. */
@@ -308,7 +311,8 @@ export function createApp(deps: AppDeps = {}) {
     deps.domains ||
     deps.sessionAuth ||
     deps.mailboxes ||
-    deps.ssoGate
+    deps.ssoGate ||
+    deps.apiKeyNetwork
   ) {
     const auth = deps.apiKeyAuth
     const sendPath = deps.sendPath
@@ -323,6 +327,7 @@ export function createApp(deps: AppDeps = {}) {
     const sessions = deps.sessionAuth
     const mailboxStore = deps.mailboxes
     const gate = deps.ssoGate
+    const network = deps.apiKeyNetwork
     app.use("*", async (c, next) => {
       if (auth) c.set("apiKeyAuth", auth)
       if (sendPath) c.set("sendPath", sendPath)
@@ -337,6 +342,7 @@ export function createApp(deps: AppDeps = {}) {
       if (sessions) c.set("sessionAuth", sessions)
       if (mailboxStore) c.set("mailboxes", mailboxStore)
       if (gate) c.set("ssoGate", gate)
+      if (network) c.set("apiKeyNetwork", network)
       await next()
     })
   }

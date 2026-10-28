@@ -90,6 +90,9 @@ import type { AuditEvent } from "./identity/ports.js"
 import { ssoGate } from "./identity/gate.js"
 import { enforcementGate } from "./identity/enforcement.js"
 import { ssoPolicyStore } from "./identity/policy-store.js"
+import { workspaceGate } from "./identity/workspace-policy.js"
+import { workspacePolicyStore } from "./identity/workspace-policy-store.js"
+import { backchannelLogout } from "./identity/oidc-logout.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
@@ -1265,6 +1268,21 @@ const gateChecker = ssoGate({ store: identity, clerk: identityClerk, log })
  */
 const ssoPolicy = ssoPolicyStore(db)
 const enforcement = enforcementGate({ store: ssoPolicy, clerk: identityClerk, log })
+/*
+ * The workspace's session policy, second-factor rule and IP allowlist (#345).
+ * Console requests meet it in `requireTenant` (through the gate reader below)
+ * and API keys in `requireApiKey`; see identity/workspace-policy.ts for what
+ * it costs and what a replica far from a change may still admit.
+ */
+const workspaceRules = workspacePolicyStore(db)
+const workspace = workspaceGate({
+  store: workspaceRules,
+  identity,
+  clerk: identityClerk,
+  forget: (input) => gateChecker.forget(input),
+  contextSecret: env.CLIENT_CONTEXT_SECRET,
+  log,
+})
 const sessionIds = clerkSessionIds(clerk, {
   authorizedParties: env.CONSOLE_ORIGINS,
   log,
@@ -1470,6 +1488,11 @@ const identityConsole = {
   gate: gateChecker,
   policy: ssoPolicy,
   enforcement,
+  workspacePolicy: {
+    store: workspaceRules,
+    gate: workspace,
+    contextSecret: env.CLIENT_CONTEXT_SECRET,
+  },
   protocols: [...engines.keys()],
   scim: {
     store: directories,
@@ -1516,6 +1539,9 @@ const identityConsole = {
           engine: oidc,
           jwksUrl: (connectionId: string) =>
             new URL(`/sso/jwks/${connectionId}`, authOrigin).href,
+          // This API's own origin (the one SCIM_BASE_URL names): the IdP's server calls it, form-encoded (#345).
+          backchannelLogoutUrl: (connectionId: string) =>
+            new URL(`/sso/oidc/backchannel/${connectionId}`, env.SCIM_BASE_URL).href,
         },
       }
     : {}),
@@ -1861,7 +1887,9 @@ const app = createApp({
    * a 501 that would claim mailboxes are not a feature.
    */
   sessionAuth: sessions,
-  ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl, enforcement),
+  ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl, enforcement, workspace),
+  apiKeyNetwork: (tenantId: string, headers: Headers) =>
+    workspace.admitApiKey(tenantId, headers),
   ...(env.AUTH_ORIGINS.length
     ? {
         sso: {
@@ -1878,7 +1906,27 @@ const app = createApp({
             contextSecret: env.CLIENT_CONTEXT_SECRET,
             perConnectionStarts: true,
           }),
-          ...(oidc ? { oidc } : {}),
+          ...(oidc
+            ? {
+                oidc,
+                oidcLogout: backchannelLogout(
+                  {
+                    store: identity,
+                    sessions: samlRows,
+                    clerk: identityClerk,
+                    replay,
+                    forget: (input: { userId?: string; sessionId?: string }) =>
+                      gateChecker.forget(input),
+                    fetch: guardedFetch({
+                      vet: (host, signal) =>
+                        vetHost(host, { allow: webhookEgressAllow, signal }),
+                    }),
+                    log,
+                  },
+                  oidc,
+                ),
+              }
+            : {}),
           ...(saml
             ? {
                 saml: {

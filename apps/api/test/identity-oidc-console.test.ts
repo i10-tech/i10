@@ -102,6 +102,8 @@ async function consoleApp(
         oidc: {
           engine,
           jwksUrl: (id: string) => `https://auth.i10.localhost/sso/jwks/${id}`,
+          backchannelLogoutUrl: (id: string) =>
+            `https://api.i10.localhost/sso/oidc/backchannel/${id}`,
         },
       },
     } as unknown as ConsoleDeps)
@@ -131,6 +133,7 @@ describe("OIDC settings", () => {
     expect(await res.json()).toMatchObject({
       redirectUri: "https://auth.i10.localhost/sso/callback",
       jwksUrl: `https://auth.i10.localhost/sso/jwks/${CONNECTION}`,
+      backchannelLogoutUri: `https://api.i10.localhost/sso/oidc/backchannel/${CONNECTION}`,
       label: "Okta",
       clientSecretSet: false,
       ready: false,

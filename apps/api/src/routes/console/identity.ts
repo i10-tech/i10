@@ -36,6 +36,10 @@ import { SAML_PRESETS, samlPresetOf } from "../../identity/saml-presets.js"
 import { mountIdentityMail, type MailConsoleDeps } from "./identity-mail.js"
 import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
 import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
+import {
+  mountIdentityWorkspacePolicy,
+  type WorkspacePolicyConsoleDeps,
+} from "./identity-workspace-policy.js"
 
 /**
  * The identity core's console API (#337). The screens are #340's; these are
@@ -60,6 +64,7 @@ import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
  *   ...    /identity/connections/:id/bypass[/:userId]     the bypass list (#340, identity-break-glass.ts)
  *   ...    /identity/owner-exemption[/...]               the owner exemption (#340, identity-break-glass.ts)
  *   ...    /identity/connections/:id/setup-links[/...]   setup links (#340, identity-setup-links.ts)
+ *   ...    /identity/session-policy, /second-factor-policy, /ip-allowlist (#345, identity-workspace-policy.ts)
  *
  * ⚠ EVERY ROUTE CHECKS OUR ROLES TABLE (#335): `sso:manage` for setup,
  * `owners:manage` for what deprovisioning does, and the removal rule
@@ -91,6 +96,11 @@ export interface IdentityConsoleDeps {
   policy?: SsoPolicyStore
   /** The enforcement gate's cache, dropped when a workspace's facts change. */
   enforcement?: Pick<EnforcementGate, "forgetTenant">
+  /**
+   * The workspace's session policy, second-factor rule and IP allowlist
+   * (#345). Absent: their routes answer 501.
+   */
+  workspacePolicy?: WorkspacePolicyConsoleDeps
   deprovision: DeprovisionDeps
   log: Logger
 }
@@ -214,6 +224,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentityLdap(app, d)
   mountIdentityBreakGlass(app, d)
   mountIdentitySetupLinks(app, d)
+  mountIdentityWorkspacePolicy(app, d)
   const allowed = async (c: Context, permission: Permission) => {
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")

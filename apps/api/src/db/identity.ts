@@ -765,6 +765,30 @@ export const workspaceSettings = identity.table(
     exemptionOffRequestedAt: timestamp("exemption_off_requested_at", {
       withTimezone: true,
     }),
+    /**
+     * The workspace's session policy (#345): every session in it, SSO or not,
+     * is refused past these. Null is "no limit". The bounds are the route's
+     * as well; the database is the net under it.
+     */
+    maxSessionSeconds: integer("max_session_seconds"),
+    idleTimeoutSeconds: integer("idle_timeout_seconds"),
+    /** Members outside SSO need a second factor at Clerk to reach the workspace. */
+    requireSecondFactor: boolean("require_second_factor").notNull().default(false),
+    /** The IP allowlist's two switches, and its ranges (canonical CIDR text, at most 100). */
+    ipAllowlistConsole: boolean("ip_allowlist_console").notNull().default(false),
+    ipAllowlistApiKeys: boolean("ip_allowlist_api_keys").notNull().default(false),
+    ipRanges: text("ip_ranges")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /**
+     * The owner who saved a console allowlist that left their own address out
+     * (after confirming), and that address: allowed for them alone until
+     * `ip_grace_until`, so saving a list never ends the saving session.
+     */
+    ipGraceUserId: text("ip_grace_user_id"),
+    ipGraceAddress: text("ip_grace_address"),
+    ipGraceUntil: timestamp("ip_grace_until", { withTimezone: true }),
     updatedBy: text("updated_by"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -781,7 +805,56 @@ export const workspaceSettings = identity.table(
       "workspace_settings_exemption_request_check",
       sql`("exemption_off_requested_by" is null) = ("exemption_off_requested_at" is null)`,
     ),
+    check(
+      "workspace_settings_session_bounds_check",
+      sql`("max_session_seconds" is null or "max_session_seconds" between 900 and 7776000)
+        and ("idle_timeout_seconds" is null or "idle_timeout_seconds" between 300 and 2592000)`,
+    ),
+    check("workspace_settings_ip_ranges_check", sql`cardinality("ip_ranges") <= 100`),
+    check(
+      "workspace_settings_ip_grace_check",
+      sql`("ip_grace_user_id" is null) = ("ip_grace_address" is null)
+        and ("ip_grace_user_id" is null) = ("ip_grace_until" is null)`,
+    ),
     pgPolicy("workspace_settings_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * When a session of a workspace that has a session policy (#345) started and
+ * was last used.
+ *
+ * ⚠ ONLY FOR SESSIONS NO SSO BIND TRACKS. A bound session is measured from
+ * `sso_sessions` (its bind and its `last_seen_at`, which the managed gate
+ * keeps); every other session in a workspace with limits gets a row here on
+ * first sight. `started_at` is CLERK'S creation time for the session, so the
+ * maximum length is the session's real age, not the age of our first look.
+ *
+ * ⚠ `last_seen_at` IS WRITTEN AT MOST ONCE A MINUTE PER SESSION, like the
+ * gate's, so the idle timeout is accurate to a minute (and may not be set
+ * below five).
+ */
+export const sessionActivity = identity.table(
+  "session_activity",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.sessionId] }),
+    index("session_activity_seen_idx").on(t.tenantId, t.lastSeenAt),
+    pgPolicy("session_activity_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

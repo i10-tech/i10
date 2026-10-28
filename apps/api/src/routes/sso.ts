@@ -34,6 +34,7 @@ import {
   type SamlEngine,
   type SloDeps,
 } from "../identity/saml.js"
+import type { BackchannelOutcome } from "../identity/oidc-logout.js"
 import type { IdentityReader } from "./devices.js"
 import { equalSecrets } from "../webhooks/signing.js"
 import { z } from "zod"
@@ -46,6 +47,7 @@ import { z } from "zod"
  *   POST /sso/test/assert   the TEST engine's "IdP" (dev only, 404 otherwise)
  *   POST /sso/oidc/callback { state, binding, query } -> as completeLogin (#338)
  *   GET  /sso/oidc/jwks/:id the public keys of a private_key_jwt connection
+ *   POST /sso/oidc/backchannel/:id  an IdP's form-encoded `logout_token` (#345)
  *   POST /sso/saml/acs      { connection, samlResponse, relayState, binding, freshBinding } (#339)
  *   GET  /sso/saml/metadata/:id   our SP metadata for a SAML connection
  *   POST /sso/saml/slo      an IdP's LogoutRequest or LogoutResponse, either binding
@@ -81,6 +83,11 @@ export interface SsoRouteDeps {
   rateLimit?: MiddlewareHandler
   /** The OIDC engine (#338), when wired. Absent: its routes are 404. */
   oidc?: OidcEngine
+  /** OIDC back-channel logout (#345). Absent: its route is 404. */
+  oidcLogout?: (input: {
+    connectionId: string
+    logoutToken: string
+  }) => Promise<BackchannelOutcome>
   /** The SAML engine and what its logout needs (#339). Absent: its routes are 404. */
   saml?: { engine: SamlEngine; slo: SloDeps }
   /** May this person manage this workspace's SSO (test runs)? */
@@ -150,6 +157,9 @@ const SloBody = z.discriminatedUnion("binding", [
     relayState: z.string().max(80).nullable().optional(),
   }),
 ])
+
+/** The one field of a back-channel logout request: a compact JWS, bounded. */
+const LogoutBody = z.string().min(1).max(8192)
 
 const unavailable = (c: Context) => {
   c.header("Retry-After", "5")
@@ -388,6 +398,48 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
       return c.json(publicJwks(connection), 200)
     } catch (error) {
       d.bridge.log.error({ err: String(error) }, "could not read a connection's JWKS")
+      return unavailable(c)
+    }
+  })
+
+  /*
+   * ⚠ AN IdP'S SERVER CALLS THIS, NOT A BROWSER (#345): form-encoded, with the
+   * signed `logout_token` and nothing else, and no cookie, session or header
+   * of ours. Everything it proves is in the token. The answer is 200 when the
+   * token was accepted, 400 with no detail when it was not (so a caller learns
+   * nothing about which check failed), 503 when we could not tell.
+   */
+  app.post("/oidc/backchannel/:connection", async (c) => {
+    const d = deps!
+    if (!d.oidcLogout) return notFound(c)
+    // Spec 2.8: a response to a logout request must never be cached.
+    c.header("Cache-Control", "no-store")
+    const rejected = () => c.json({ error: "invalid_request" }, 400)
+    const connectionId = UUID.safeParse(c.req.param("connection"))
+    if (!connectionId.success) return rejected()
+    if (
+      !(c.req.header("content-type") ?? "")
+        .toLowerCase()
+        .startsWith("application/x-www-form-urlencoded")
+    )
+      return rejected()
+    const fields = new URLSearchParams(await c.req.text().catch(() => ""))
+    const tokens = fields.getAll("logout_token")
+    const parsed = LogoutBody.safeParse(tokens.length === 1 ? tokens[0] : null)
+    if (!parsed.success) return rejected()
+    try {
+      const done = await d.oidcLogout({
+        connectionId: connectionId.data.toLowerCase(),
+        logoutToken: parsed.data,
+      })
+      if (done.outcome === "unavailable") return unavailable(c)
+      if (done.outcome === "refused") return rejected()
+      return c.body(null, 200)
+    } catch (error) {
+      d.bridge.log.error(
+        { err: error instanceof Error ? error.name : "unknown" },
+        "could not handle an OIDC back-channel logout",
+      )
       return unavailable(c)
     }
   })
