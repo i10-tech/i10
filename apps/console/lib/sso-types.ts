@@ -186,6 +186,8 @@ export interface SsoDirectory {
   name: string
   provider: "okta" | "entra" | "google" | "generic"
   enabled: boolean
+  /** Whether the directory gives each person it activates a mailbox (#344). */
+  createMailboxes: boolean
   /** SCIM base URL; null for a Google directory. */
   baseUrl: string | null
   adminEmail?: string | null
@@ -255,4 +257,87 @@ export interface SsoAbilities {
   /** `owners:manage`: an owner. */
   owner: boolean
   userId: string | null
+}
+
+// ── Directory mail (#344) ───────────────────────────────────────────────────
+
+export type MailboxNext = "keep" | "forward_manager" | "delegate" | "delete"
+export type LeaverAction = "keep" | "forward_manager" | "delete_after"
+
+export interface MailboxRow {
+  userId: string
+  address: string
+  state: "active" | "suspended"
+  suspendedAt: string | null
+  next: MailboxNext
+  targetUserId: string | null
+  deleteAfterDays: number | null
+  deleteAt: string | null
+}
+
+/** The workspace default for a person a directory switches off. */
+export interface LeaverDefault {
+  action: LeaverAction
+  days: number | null
+}
+
+/** `GET /identity/mailboxes`. */
+export interface Mailboxes {
+  data: MailboxRow[]
+  leavers: LeaverDefault
+  limits: { minDays: number; maxDays: number }
+}
+
+/** A choice for a suspended mailbox, as `PUT .../next` takes it. */
+export type NextChoice =
+  | { next: "keep" }
+  | { next: "forward_manager" }
+  | { next: "delegate"; delegateUserId: string }
+  | { next: "delete"; days: number }
+
+// ── Session, second factor and network policy (#345) ────────────────────────
+
+export interface Bounds {
+  min: number
+  max: number
+}
+
+export interface SessionPolicy {
+  maxSessionSeconds: number | null
+  idleTimeoutSeconds: number | null
+  bounds: { maxSessionSeconds: Bounds; idleTimeoutSeconds: Bounds }
+}
+
+export interface IpAllowlist {
+  console: boolean
+  apiKeys: boolean
+  ranges: string[]
+  maxRanges: number
+  /** The address this request came from, or null when it could not be told. */
+  yourAddress: string | null
+  yourAddressListed: boolean
+  /** When the saver's own grace ends (ISO), or null. */
+  graceUntil: string | null
+}
+
+/** What `PUT /identity/ip-allowlist` answers (a subset of the GET). */
+export interface SavedIpAllowlist {
+  console: boolean
+  apiKeys: boolean
+  ranges: string[]
+  graceUntil: string | null
+}
+
+// ── The identity audit log ──────────────────────────────────────────────────
+
+export interface IdentityEvent {
+  id: string
+  type: string
+  actorUserId: string | null
+  subjectUserId: string | null
+  connectionId: string | null
+  sessionId: string | null
+  reason: string | null
+  data: Record<string, unknown>
+  createdAt: string
 }

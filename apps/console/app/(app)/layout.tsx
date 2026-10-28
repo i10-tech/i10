@@ -17,9 +17,11 @@ import { UsageRail } from "@/components/usage-rail"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { AccountBar } from "@/components/account-bar"
 import { AccessGate } from "@/components/access-gate"
+import { MfaRequired, NetworkBlocked, SessionEnded } from "@/components/gate-refusals"
 import { NoWorkspace } from "@/components/no-workspace"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { tryApi } from "@/lib/api"
+import { gateRefusal } from "@/lib/identity-gate"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
 import { authOrigin } from "@/lib/sso-server"
 import type { Attention, Me } from "@/lib/types"
@@ -98,6 +100,34 @@ export default async function AppLayout({
         clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
       />
     )
+  }
+
+  /*
+   * ⚠ THE WORKSPACE'S SESSION AND NETWORK POLICIES REFUSE THE SAME WAY (#345):
+   * a session past its limits is sent to sign in again with the reason, an
+   * address off the allowlist sees one page, and a member with no second
+   * factor is pointed at their account (kept reachable inside the gate). Each
+   * replaces the shell, as the SSO gates above do.
+   */
+  if (!me.ok) {
+    const refusal = gateRefusal(me.error)
+    const clerkOn = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
+    if (refusal?.kind === "session_expired")
+      return (
+        <SessionEnded
+          reason={refusal.reason}
+          authOrigin={authOrigin()}
+          clerkEnabled={clerkOn}
+        />
+      )
+    if (refusal?.kind === "ip_not_allowed")
+      return <NetworkBlocked authOrigin={authOrigin()} clerkEnabled={clerkOn} />
+    if (refusal?.kind === "mfa_required")
+      return (
+        <MfaRequired authOrigin={authOrigin()} clerkEnabled={clerkOn}>
+          {children}
+        </MfaRequired>
+      )
   }
 
   if (!me.ok) {

@@ -1,8 +1,7 @@
 "use server"
 
-import { api, ApiRequestError } from "@/lib/api"
-import { safeFailure } from "@/lib/failure"
-import type { ActionResult } from "@/lib/actions"
+import { api } from "@/lib/api"
+import { run } from "@/lib/sso-run"
 import type {
   BypassEntry,
   CreatedSetupLink,
@@ -36,24 +35,6 @@ import type {
  * HERE: these routes refuse a stale session with Clerk's hint and the dialog
  * lives in the browser. The API stays the guard either way.
  */
-
-async function run<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
-  try {
-    return { ok: true, data: await fn() }
-  } catch (error) {
-    if (error instanceof ApiRequestError) {
-      return {
-        ok: false,
-        error: error.body.message,
-        name: error.body.name,
-        status: error.status,
-        body: error.body as unknown as Record<string, unknown>,
-      }
-    }
-    const safe = safeFailure(error, "server action")
-    return { ok: false, error: safe.message, name: safe.name, status: safe.statusCode }
-  }
-}
 
 const enc = encodeURIComponent
 const conn = (id: string) => `/console/identity/connections/${enc(id)}`
@@ -325,7 +306,13 @@ export async function createDirectory(input: {
 
 export async function changeDirectory(
   id: string,
-  change: { name?: string; enabled?: boolean; adminEmail?: string; domain?: string },
+  change: {
+    name?: string
+    enabled?: boolean
+    createMailboxes?: boolean
+    adminEmail?: string
+    domain?: string
+  },
 ) {
   return run(() =>
     api<SsoDirectory>(`/console/identity/directories/${enc(id)}`, {

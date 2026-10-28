@@ -26,6 +26,7 @@ import type {
   SsoDirectories,
   SsoDirectory,
 } from "@/lib/sso-types"
+import { DirectoryMail } from "./directory-mail"
 import { Loading, ShownOnce, ToggleRow, Value, useRemote, useSsoCall } from "./shared"
 
 /**
@@ -206,6 +207,13 @@ function Directory({
               toastDone(enabled ? "Directory enabled" : "Directory disabled")
             }
           }}
+        />
+
+        <DirectoryMail
+          directory={directory}
+          abilities={abilities}
+          onChange={onChange}
+          call={call}
         />
 
         {google ? (

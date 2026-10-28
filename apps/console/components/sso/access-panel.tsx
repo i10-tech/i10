@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useOrganization } from "@clerk/nextjs"
 import { Button } from "@repo/ui/components/button/button"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
@@ -37,6 +36,7 @@ import {
   useRemote,
   useSsoCall,
 } from "./shared"
+import { ClerkMembers, type Member } from "./members"
 
 /**
  * Who may sign in through the connection, and how it is held to account:
@@ -581,44 +581,6 @@ function GroupRules({
 }
 
 // ── Bypass list ─────────────────────────────────────────────────────────────
-
-interface Member {
-  userId: string
-  label: string
-}
-
-/**
- * The workspace's members from Clerk, for the picker.
- *
- * ⚠ RENDERED ONLY WHEN CLERK IS MOUNTED: its hooks throw outside the provider,
- * which the root layout mounts only with a publishable key.
- */
-function ClerkMembers({ onMembers }: { onMembers: (members: Member[]) => void }) {
-  const { memberships } = useOrganization({
-    memberships: { pageSize: 50, keepPreviousData: true },
-  })
-  const data = memberships?.data
-  React.useEffect(() => {
-    if (!data) return
-    onMembers(
-      data.flatMap((m) => {
-        const userId = m.publicUserData?.userId
-        if (!userId) return []
-        const name = [m.publicUserData?.firstName, m.publicUserData?.lastName]
-          .filter(Boolean)
-          .join(" ")
-        const email = m.publicUserData?.identifier
-        return [
-          {
-            userId,
-            label: name && email ? `${name} (${email})` : (email ?? name ?? userId),
-          },
-        ]
-      }),
-    )
-  }, [data, onMembers])
-  return null
-}
 
 function Bypass({
   connection,

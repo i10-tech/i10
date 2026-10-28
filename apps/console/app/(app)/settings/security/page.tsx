@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 import {
   Section,
   SectionContent,
@@ -8,7 +9,13 @@ import {
 import { PanelError } from "@/components/panel-error"
 import { ConnectionsPanel } from "@/components/sso/connections-panel"
 import { DirectoriesPanel } from "@/components/sso/directories-panel"
+import { IpAllowlistPanel } from "@/components/sso/ip-allowlist"
+import { MailboxesPanel } from "@/components/sso/mailboxes-panel"
 import { OwnerExemptionPanel } from "@/components/sso/owner-exemption"
+import {
+  SecondFactorPanel,
+  SessionPolicyPanel,
+} from "@/components/sso/workspace-policy"
 import { tryApi } from "@/lib/api"
 import { ssoAbilities } from "@/lib/sso-server"
 import type { SsoConnections } from "@/lib/sso-types"
@@ -83,6 +90,66 @@ export default async function SecuritySettingsPage() {
         </SectionDescription>
         <SectionContent>
           <DirectoriesPanel abilities={who.abilities} />
+        </SectionContent>
+      </Section>
+
+      <Section>
+        <SectionTitle>Mailboxes</SectionTitle>
+        <SectionDescription>
+          What happens to a person&rsquo;s mailbox when your directory switches them
+          off, and the mailboxes your directories gave.
+        </SectionDescription>
+        <SectionContent>
+          <MailboxesPanel
+            abilities={who.abilities}
+            clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+          />
+        </SectionContent>
+      </Section>
+
+      <Section>
+        <SectionTitle>Session policy</SectionTitle>
+        <SectionDescription>
+          How long anyone can stay signed in to this workspace, and how long they can
+          sit idle.
+        </SectionDescription>
+        <SectionContent>
+          <SessionPolicyPanel abilities={who.abilities} />
+        </SectionContent>
+      </Section>
+
+      <Section>
+        <SectionTitle>Second factor</SectionTitle>
+        <SectionDescription>
+          Require a second step at sign-in from members who do not use SSO.
+        </SectionDescription>
+        <SectionContent>
+          <SecondFactorPanel abilities={who.abilities} />
+        </SectionContent>
+      </Section>
+
+      <Section>
+        <SectionTitle>IP allowlist</SectionTitle>
+        <SectionDescription>
+          Limit the console and API keys to the networks you list.
+        </SectionDescription>
+        <SectionContent>
+          <IpAllowlistPanel abilities={who.abilities} />
+        </SectionContent>
+      </Section>
+
+      <Section>
+        <SectionTitle>Audit log</SectionTitle>
+        <SectionDescription>
+          Every change to sign-in settings, sessions and directories, with who made it.
+        </SectionDescription>
+        <SectionContent>
+          <Link
+            href="/settings/security/audit"
+            className="text-sm underline underline-offset-2"
+          >
+            Open the identity audit log
+          </Link>
         </SectionContent>
       </Section>
     </div>

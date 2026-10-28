@@ -83,6 +83,20 @@ export function useSsoCall() {
   )
 }
 
+/**
+ * The same step-up, but the outcome comes back untouched and nothing is
+ * toasted: for a caller that reads a particular refusal itself (the IP
+ * allowlist's `would_lock_out`). Null when the person declined the prompt.
+ */
+export function useSsoAttempt() {
+  const stepUp = useStepUp()
+  return React.useCallback(
+    async <T,>(fn: () => Promise<ActionResult<T>>): Promise<ActionResult<T> | null> =>
+      (await stepUp()) ? fn() : null,
+    [stepUp],
+  )
+}
+
 /** A value read once on mount through an action, with a way to set it from a write's answer. */
 export function useRemote<T>(load: () => Promise<ActionResult<T>>) {
   const [data, setData] = React.useState<T | null>(null)
