@@ -100,6 +100,18 @@ import { oidcEngine } from "./identity/oidc.js"
 import { redisReplayCache, samlEngine } from "./identity/saml.js"
 import { samlStore } from "./identity/saml-store.js"
 import { guardedFetch } from "./identity/oidc-fetch.js"
+import { auditTap, tapped } from "./identity/audit-tap.js"
+import { identityAlerts, identityMail } from "./identity/alerts.js"
+import { connectionHealthStore } from "./identity/health-store.js"
+import { featureGate } from "./identity/features.js"
+import { siemStore } from "./identity/siem-store.js"
+import { identityWebhooks } from "./webhooks/identity-events.js"
+import {
+  createSiemQueue,
+  siemScheduler,
+  startSiemScheduler,
+  startSiemWorker,
+} from "./queue/siem-queue.js"
 import { passthroughFor } from "./identity/ldap.js"
 import { ldapProbe } from "./identity/ldap-probe.js"
 import { fixedWindow, ssoRateLimit } from "./identity/rate-limit.js"
@@ -1258,8 +1270,50 @@ const teamDomains: TeamDomainDeps | null = domains
  * ⚠ THE TEST ENGINE ONLY WHERE env.ts LET IT ON (development, a dev Clerk
  * instance). Off, `test` connections cannot be made, started or finished.
  */
-const identity = identityStore(db, secrets)
+const identityBase = identityStore(db, secrets)
 const identityClerk = clerkIdentityApi(clerk, { secretKey: env.CLERK_SECRET_KEY })
+/*
+ * What the audit log's events set going (#345): customer webhooks (after the
+ * row committed), the connection failure alert, the certificate expiry email.
+ * `identity` is the store with that tap on `record`; everything that audits an
+ * identity change in this process goes through it.
+ */
+const identityHealth = connectionHealthStore(db)
+const identityFeatures = featureGate(db)
+const identityAlertsService =
+  systemSender && consoleUrl
+    ? identityAlerts({
+        mail: identityMail({ sender: systemSender, consoleUrl }),
+        roles: roleRows,
+        workspaceOrg: (tenantId) => identityBase.workspaceOrg(tenantId),
+        workspaceName: (tenantId) => identityBase.workspaceName(tenantId),
+        connectionName: async (tenantId, id) =>
+          (await identityBase.connection(tenantId, id))?.name ?? null,
+        addresses: (orgId, userIds) => clerkMembers(clerk).addresses(orgId, userIds),
+        addressOf: async (userId) => {
+          const user = await identityClerk.user(userId)
+          return (
+            user?.emails.find((e) => e.verified)?.address ??
+            user?.emails[0]?.address ??
+            null
+          )
+        },
+        log,
+      })
+    : undefined
+const identity = tapped(
+  identityBase,
+  auditTap({
+    ...(webhookQueue
+      ? { webhooks: identityWebhooks({ db, queue: webhookQueue, log }) }
+      : {}),
+    health: identityHealth,
+    ...(identityAlertsService ? { alerts: identityAlertsService } : {}),
+    connectionStatus: async (tenantId, id) =>
+      (await identityBase.connection(tenantId, id))?.status ?? null,
+    log,
+  }),
+)
 const gateChecker = ssoGate({ store: identity, clerk: identityClerk, log })
 /*
  * Enforcement, break-glass, setup links and discovery (#340). The enforcement
@@ -1267,7 +1321,20 @@ const gateChecker = ssoGate({ store: identity, clerk: identityClerk, log })
  * identity/enforcement.ts for what it costs.
  */
 const ssoPolicy = ssoPolicyStore(db)
-const enforcement = enforcementGate({ store: ssoPolicy, clerk: identityClerk, log })
+const enforcement = enforcementGate({
+  store: ssoPolicy,
+  clerk: identityClerk,
+  log,
+  ...(identityAlertsService
+    ? {
+        onBypass: (input) =>
+          identityAlertsService.bypassUsed(input.tenantId, {
+            userId: input.userId,
+            sessionId: input.sessionId,
+          }),
+      }
+    : {}),
+})
 /*
  * The workspace's session policy, second-factor rule and IP allowlist (#345).
  * Console requests meet it in `requireTenant` (through the gate reader below)
@@ -1482,10 +1549,27 @@ const bridge = {
     ssoJoinRequests.fileRequest(tenantId, { ...input, full: true }),
   log,
 }
+const apiKeyStore = keyStore(db)
+const siemRows = secrets ? siemStore(db, secrets) : null
+const siemFetch = guardedFetch({
+  vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+})
 const identityConsole = {
   store: identity,
   clerk: identityClerk,
   gate: gateChecker,
+  features: identityFeatures,
+  health: identityHealth,
+  ...(siemRows
+    ? {
+        siem: {
+          store: siemRows,
+          vet: (host: string, signal: AbortSignal) =>
+            vetHost(host, { allow: webhookEgressAllow, signal }),
+          fetch: siemFetch,
+        },
+      }
+    : {}),
   policy: ssoPolicy,
   enforcement,
   workspacePolicy: {
@@ -1559,6 +1643,12 @@ const identityConsole = {
   deprovision: {
     ...managedDeps,
     mail: mailLifecycle,
+    // ⚠ RECORDED ON THE DEPROVISION EVENT, NEVER REVOKED (#345).
+    keysCreatedBy: async (tenantId: string, userId: string) =>
+      (await apiKeyStore.createdBy(tenantId, userId)).map((k) => ({
+        id: k.id,
+        name: k.name,
+      })),
     workspaceOrg: (tenantId: string) => identity.workspaceOrg(tenantId),
     // ⚠ THE ACTOR'S ROLE, NOT THE PERSON'S OWN: deprovisioning is somebody
     // else taking them out, so it obeys the rule removing somebody obeys.
@@ -1651,6 +1741,32 @@ const googleDirectoryScheduler = googleTokens
     })
   : null
 
+/*
+ * The SIEM export (#345): every minute each replica asks which workspaces are
+ * due; groupmq runs one job per workspace across replicas; the database says
+ * whether the run is really due. See queue/siem-queue.ts.
+ */
+const siemQueue = createSiemQueue({ redis: queueRedis })
+const siemWorker = siemRows
+  ? startSiemWorker({
+      queue: siemQueue,
+      deps: {
+        store: siemRows,
+        fetch: siemFetch,
+        allowed: (tenantId) => identityFeatures.allows(tenantId, "siem_export"),
+        log,
+      },
+      name: `api-${process.pid}:siem-export`,
+    })
+  : null
+const siemSchedulerHandle = siemRows
+  ? startSiemScheduler({
+      due: (after, limit) => siemRows.due(after, limit),
+      enqueue: siemScheduler(siemQueue),
+      log,
+    })
+  : null
+
 const app = createApp({
   suppressions,
   trustedTemplates: risk.trustedTemplates,
@@ -1663,7 +1779,7 @@ const app = createApp({
     cache: redisKeyCache(cache),
     ttlSeconds: env.API_KEY_CACHE_TTL_SECONDS,
   },
-  apiKeys: { store: keyStore(db), cache: redisKeyCache(cache), log },
+  apiKeys: { store: apiKeyStore, cache: redisKeyCache(cache), log },
   /*
    * Saved accounts (#192). `identify` only with an auth origin to check `azp`
    * against - see AUTH_ORIGINS in env.ts.
@@ -2374,7 +2490,7 @@ const app = createApp({
           domains,
         }
       : {}),
-    keys: { store: keyStore(db), cache: redisKeyCache(cache) },
+    keys: { store: apiKeyStore, cache: redisKeyCache(cache) },
     ...(secrets
       ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
       : {}),
@@ -2488,7 +2604,13 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     // Clerk or Google calls and its marks before the pool and Redis go; an
     // interrupted one is retried either way, this just avoids doing half of it.
     googleDirectoryScheduler?.stop()
+    siemSchedulerHandle?.stop()
     void Promise.all([
+      siemWorker
+        ?.close(15_000)
+        .catch((err) =>
+          log.warn({ ...safeError(err) }, "could not close the SIEM export worker"),
+        ),
       directoryWorker
         .close(15_000)
         .catch((err) =>

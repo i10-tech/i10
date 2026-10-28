@@ -1023,6 +1023,20 @@
       "when": 1792889556881,
       "tag": "0145_workspace_session_network",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1793173279634,
+      "tag": "0146_identity_extras",
+      "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1793173286623,
+      "tag": "0147_siem_exports_due",
+      "breakpoints": true
     }
   ]
 }

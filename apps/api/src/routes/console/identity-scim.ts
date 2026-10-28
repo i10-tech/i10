@@ -21,6 +21,7 @@ import {
   type GoogleServiceAccount,
 } from "../../identity/google-directory.js"
 import { hashSecret, newSecret, normaliseEmail } from "../../identity/model.js"
+import { refuseFeature } from "./identity-features.js"
 import { TOKEN_PREFIX } from "../../identity/scim.js"
 
 /**
@@ -299,6 +300,14 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
         validation(`A workspace can have at most ${MAX_DIRECTORIES} directories.`),
         422,
       )
+    // ⚠ THE FLAG FOLLOWS THE PROVIDER: SCIM and Google's directory sync are
+    // separate features (sso.md decision 4).
+    const refused = await refuseFeature(
+      d,
+      c,
+      parsed.data.provider === "google" ? "google_directory" : "scim",
+    )
+    if (refused) return refused
     const made = await scim.store.createDirectory(tenantId, {
       name: parsed.data.name,
       provider: parsed.data.provider,

@@ -849,6 +849,51 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
   a shared mailbox is served like a list; group renames re-check the name only at
   list-sync time.
 
+### 2.21 What #345 slice B settled (2026-10-28)
+
+Identity webhooks, the two alert emails, deprovisioned people's API keys,
+connection health, the SIEM export and the plan flags.
+
+- **Webhooks ride the audit log.** `store.record` is wrapped once (`tapped`,
+  identity/audit-tap.ts), so the event is committed before anything is raised.
+  `managed.claimed` is `member.provisioned` (JIT, SCIM, Google directory, an
+  SSO claim or link: `source` is the audit reason), `member.deprovisioned`
+  carries mode, sessions, the actor and the API keys, `sso.certificate.expiring`
+  is the existing once-per-threshold audit event. Payloads are rebuilt field
+  by field against strict schemas in `@repo/contracts`. The nightly job writes
+  the delivery rows and the worker's sweep queues them.
+- **`sso.connection.failed`** counts `sign_in.failed` and
+  `sign_in.idp_unavailable`, not `wrong_browser` or `attempt_used` (a stranger
+  can make those). At most one per connection per 15 minutes, claimed in the
+  database (`sso.connection.failure_alerted` audit event under an advisory
+  lock). `trigger` says whether it was one failure, a spike or no success for a day.
+- **Health** is derived from `identity.events` on each read (new index on
+  tenant, connection, type, time), returned as `health` on the connection list.
+  Failing: more than max(10, 3 x trailing hourly average) failures in 15
+  minutes, or no success for 24 hours with failures in them. Only `active` connections can fail.
+- **Alert emails** go through the system sender: bypass to the other
+  `sso:manage` holders once per session, certificate expiry to all of them at
+  each threshold. A failed send is logged, never raised.
+- **API keys on deprovision** are listed on the audit event and by
+  `GET /identity/deprovisioned/:userId/api-keys` (only for somebody with a
+  `member.deprovisioned` event). Nothing is revoked automatically. Rotating or
+  revoking is an owner's move with step-up, through the console's own key path
+  (`auth/key-actions.ts`); a rotated key is attributed to the owner who holds it.
+- **SIEM export**: hourly NDJSON to an S3-compatible bucket, path-style
+  addressing, SigV4 by `@smithy/signature-v4` (already a dependency), through
+  the OIDC guarded fetch. Key sealed with the webhook secret box, never
+  returned. Cursor is the last event id, moved after each accepted PUT.
+  Schedule in `siem_exports.next_run_at`, re-checked by the claim; one groupmq
+  group per workspace, never a delayed job. Starts from the beginning of the log.
+- **Plan flags**: `identity/features.ts`, every flag on for every plan until
+  the split is set before launch (decision 4). Refused: 403 `plan_required`
+  with the feature. Turning a feature off is never refused.
+  `audit_retention_long` is defined but nothing prunes identity events yet, so it gates nothing.
+
+Unverified: any real S3 provider (AWS, R2, MinIO, B2: the signature is checked
+only against an independent SigV4 derivation), the IdP failure shapes a real
+Okta or Entra produces, and webhook delivery of these events end to end.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

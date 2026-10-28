@@ -55,6 +55,11 @@ import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
 import { sesStatusStore } from "./ses-status/store.js"
 import { identityStore } from "./identity/store.js"
+import { auditTap, tapped } from "./identity/audit-tap.js"
+import { identityAlerts, identityMail } from "./identity/alerts.js"
+import { identityWebhooks } from "./webhooks/identity-events.js"
+import { roleStore } from "./console/roles-db.js"
+import { clerkMembers } from "./console/clerk-members.js"
 import { samlStore } from "./identity/saml-store.js"
 import { fetchIdpMetadata } from "./identity/saml.js"
 import { dailySamlPass } from "./identity/saml-refresh.js"
@@ -165,12 +170,47 @@ await withMonitor(
         const fetch = guardedFetch({
           vet: (host, signal) => vetHost(host, { allow, signal }),
         })
-        const samlSummary = await dailySamlPass({
-          // Metadata and certificates are public: no secret box is needed.
-          store: identityStore(db, null),
-          saml: samlStore(db),
-          fetchMetadata: (url) => fetchIdpMetadata(fetch, url),
-          log,
+        const base = identityStore(db, null)
+        const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+        const consoleUrl = env.CONSOLE_ORIGINS[0]
+        const samlSummary = await withSystemSender(db, sql, (sender) => {
+          /*
+           * ⚠ A CERTIFICATE ALERT IS A WEBHOOK AND AN EMAIL (#345), through the
+           * same tap the API puts on `record`. The webhook rows are written and
+           * the worker's sweep queues them (this job has no delivery queue);
+           * the email needs our sender, and without one only the audit event
+           * and the webhook exist.
+           */
+          const tap = auditTap({
+            webhooks: identityWebhooks({ db, log }),
+            ...(sender && consoleUrl
+              ? {
+                  alerts: identityAlerts({
+                    mail: identityMail({ sender, consoleUrl }),
+                    roles: roleStore(db),
+                    workspaceOrg: (tenantId) => base.workspaceOrg(tenantId),
+                    workspaceName: (tenantId) => base.workspaceName(tenantId),
+                    connectionName: async (tenantId, id) =>
+                      (await base.connection(tenantId, id))?.name ?? null,
+                    addresses: (orgId, userIds) =>
+                      clerkMembers(clerk).addresses(orgId, userIds),
+                    // Not used by the certificate alert.
+                    addressOf: async () => null,
+                    log,
+                  }),
+                }
+              : {}),
+            connectionStatus: async (tenantId, id) =>
+              (await base.connection(tenantId, id))?.status ?? null,
+            log,
+          })
+          return dailySamlPass({
+            // Metadata and certificates are public: no secret box is needed.
+            store: tapped(base, tap),
+            saml: samlStore(db),
+            fetchMetadata: (url) => fetchIdpMetadata(fetch, url),
+            log,
+          })
         })
         log.info(samlSummary, "SAML metadata and certificate pass complete")
       } catch (error) {
@@ -202,6 +242,52 @@ await withMonitor(
 )
 
 /**
+ * Runs `run` with our system sender (or null where mail is not configured),
+ * over a send queue that is closed afterwards.
+ *
+ * ⚠ THE SAME SENDER THE API BUILDS, from the same helper (`systemSenderFor`),
+ * so a notice sent from this job cannot drift from one sent from the API.
+ */
+async function withSystemSender<T>(
+  db: ReturnType<typeof createDb>["db"],
+  sql: ReturnType<typeof createDb>["sql"],
+  run: (sender: Awaited<ReturnType<typeof systemSenderFor>>) => Promise<T>,
+): Promise<T> {
+  const redis = createQueueClient(env.REDIS_URL)
+  redis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+  try {
+    const queue = (cls: "transactional" | "bulk") =>
+      createSendQueue({
+        redis,
+        class: cls,
+        jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+        maxAttempts: env.WORKER_MAX_ATTEMPTS,
+      })
+    return await run(
+      await systemSenderFor({
+        sql,
+        db,
+        queues: { transactional: queue("transactional"), bulk: queue("bulk") },
+        metering: resilient(
+          postgresMetering({
+            db,
+            featureId: env.METERING_FEATURE_ID,
+            freePlanId: env.METERING_FREE_PLAN_ID,
+            log,
+          }),
+          log,
+        ),
+        from: env.AUTH_EMAIL_FROM,
+        tenantSlug: env.AUTH_EMAIL_TENANT_SLUG,
+        log,
+      }),
+    )
+  } finally {
+    await redis.quit().catch(() => {})
+  }
+}
+
+/**
  * The daily re-read of every SES tenant's sending status (#157) and
  * reputation (#158).
  *
@@ -218,89 +304,65 @@ async function pollSesStatuses(
   db: ReturnType<typeof createDb>["db"],
   sql: ReturnType<typeof createDb>["sql"],
 ) {
-  const redis = createQueueClient(env.REDIS_URL)
-  redis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
   try {
-    const queue = (cls: "transactional" | "bulk") =>
-      createSendQueue({
-        redis,
-        class: cls,
-        jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
-        maxAttempts: env.WORKER_MAX_ATTEMPTS,
-      })
-    const sender = await systemSenderFor({
-      sql,
-      db,
-      queues: { transactional: queue("transactional"), bulk: queue("bulk") },
-      metering: resilient(
-        postgresMetering({
-          db,
-          featureId: env.METERING_FEATURE_ID,
-          freePlanId: env.METERING_FREE_PLAN_ID,
+    await withSystemSender(db, sql, async (sender) => {
+      const consoleUrl = env.CONSOLE_ORIGINS[0]
+      const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+      const store = sesStatusStore(db)
+      const ses = new SESv2Client({ region: env.AWS_REGION })
+      const notice =
+        sender && consoleUrl
+          ? ownerNotice({ db, clerk, sender, consoleUrl })
+          : undefined
+
+      const summary = await pollTenantStatuses({
+        reader: sesTenantStatusReader(ses),
+        store,
+        service: sesStatusService({
+          store,
+          ...(notice ? { notice } : {}),
           log,
+          alert: captureError,
         }),
         log,
-      ),
-      from: env.AUTH_EMAIL_FROM,
-      tenantSlug: env.AUTH_EMAIL_TENANT_SLUG,
-      log,
-    })
-    const consoleUrl = env.CONSOLE_ORIGINS[0]
-    const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
-    const store = sesStatusStore(db)
-    const ses = new SESv2Client({ region: env.AWS_REGION })
-    const notice =
-      sender && consoleUrl ? ownerNotice({ db, clerk, sender, consoleUrl }) : undefined
+      })
+      log.info(summary, "SES tenant status poll complete")
+      if (summary.failed > 0) {
+        captureError(
+          new Error(`${summary.failed} SES tenant status(es) could not be read`),
+          {
+            phase: "recheck-ses-status",
+          },
+        )
+      }
 
-    const summary = await pollTenantStatuses({
-      reader: sesTenantStatusReader(ses),
-      store,
-      service: sesStatusService({
-        store,
-        ...(notice ? { notice } : {}),
-        log,
-        alert: captureError,
-      }),
-      log,
-    })
-    log.info(summary, "SES tenant status poll complete")
-    if (summary.failed > 0) {
-      captureError(
-        new Error(`${summary.failed} SES tenant status(es) could not be read`),
-        {
-          phase: "recheck-ses-status",
-        },
-      )
-    }
-
-    /*
-     * ⚠ REPUTATION AFTER STATUS, AND ITS OWN FAILURE COUNT (#158). A missing
-     * IAM grant for `ListRecommendations` must not stop the status poll that
-     * enforces pauses - so it runs second and reports separately.
-     */
-    const reputation = reputationStore(db)
-    const found = await pollReputation({
-      reader: sesReputationReader(ses),
-      store: reputation,
-      service: reputationService({
+      /*
+       * ⚠ REPUTATION AFTER STATUS, AND ITS OWN FAILURE COUNT (#158). A missing
+       * IAM grant for `ListRecommendations` must not stop the status poll that
+       * enforces pauses - so it runs second and reports separately.
+       */
+      const reputation = reputationStore(db)
+      const found = await pollReputation({
+        reader: sesReputationReader(ses),
         store: reputation,
-        ...(notice ? { notice } : {}),
+        service: reputationService({
+          store: reputation,
+          ...(notice ? { notice } : {}),
+          log,
+          alert: (message, level, context) => captureMessage(message, level, context),
+        }),
         log,
-        alert: (message, level, context) => captureMessage(message, level, context),
-      }),
-      log,
+      })
+      log.info(found, "SES reputation poll complete")
+      if (found.failed > 0) {
+        captureError(
+          new Error(`${found.failed} SES tenant reputation(s) could not be read`),
+          { phase: "recheck-ses-reputation" },
+        )
+      }
     })
-    log.info(found, "SES reputation poll complete")
-    if (found.failed > 0) {
-      captureError(
-        new Error(`${found.failed} SES tenant reputation(s) could not be read`),
-        { phase: "recheck-ses-reputation" },
-      )
-    }
   } catch (error) {
     log.error({ err: error }, "SES tenant status poll failed")
     captureError(error, { phase: "recheck-ses-status" })
-  } finally {
-    await redis.quit().catch(() => {})
   }
 }

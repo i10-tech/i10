@@ -131,6 +131,14 @@ export const webhookEventType = core.enum("webhook_event_type", [
   "webhook_endpoint.failing",
   "webhook_endpoint.disabled",
   "webhook_endpoint.recovered",
+  /**
+   * ⚠ NOT FROM SES EITHER: the identity core's (#345), raised after the audit
+   * event that records the change commits.
+   */
+  "member.provisioned",
+  "member.deprovisioned",
+  "sso.connection.failed",
+  "sso.certificate.expiring",
 ])
 
 /**

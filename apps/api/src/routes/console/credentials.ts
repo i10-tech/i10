@@ -13,6 +13,7 @@ import {
   updateWebhookEndpointSchema,
 } from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
+import { revokeKey, rotateKey } from "../../auth/key-actions.js"
 import { domainScope, scopedDomains } from "../../auth/scope.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
@@ -256,35 +257,20 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     if (!d.keys) return c.json(notWired("API keys"), 501)
     const { tenantId } = c.get("auth")
 
-    const revoked = await d.keys.store.revoke(tenantId, c.req.param("id"))
-    if (!revoked) return c.json(notFound("No key with that id."), 404)
-
-    /*
-     * ⚠ THE CACHE EVICTION IS HALF OF REVOCATION AND ITS FAILURE IS A 500.
-     * A verified key lives in Redis for the TTL; without deleting that entry
-     * the key keeps working for up to a minute after the customer was told it
-     * was dead. Reporting success while a leaked credential is still live is
-     * the worst possible answer - they stop looking. The row stays revoked, so
-     * a retry converges.
-     */
-    if (d.keys.cache) {
-      try {
-        await d.keys.cache.del(cacheKeyFor(revoked.secretHash))
-      } catch (error) {
-        d.log.error(
-          { err: String(error), tenantId, keyId: c.req.param("id") },
-          "revoked a key but could not evict it from the cache",
-        )
-        return c.json(
-          {
-            statusCode: 500,
-            name: "internal_server_error" as const,
-            message:
-              "The key was revoked but may stay usable for up to a minute. Retry to confirm.",
-          },
-          500,
-        )
-      }
+    const revoked = await revokeKey(d.keys, tenantId, c.req.param("id"), d.log)
+    if (revoked.status === "not_found")
+      return c.json(notFound("No key with that id."), 404)
+    // ⚠ A 500, NOT A SUCCESS: see `revokeKey` for why the cache half matters.
+    if (revoked.status === "cache_failed") {
+      return c.json(
+        {
+          statusCode: 500,
+          name: "internal_server_error" as const,
+          message:
+            "The key was revoked but may stay usable for up to a minute. Retry to confirm.",
+        },
+        500,
+      )
     }
 
     return c.json({ id: c.req.param("id"), deleted: true })
@@ -294,19 +280,9 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
     if (!d.keys) return c.json(notWired("API keys"), 501)
     const { tenantId } = c.get("auth")
 
-    const rotated = await d.keys.store.rotate(tenantId, c.req.param("id"))
-    if (!rotated) return c.json(notFound("No key with that id."), 404)
-
-    if (d.keys.cache) {
-      try {
-        await d.keys.cache.del(cacheKeyFor(rotated.revokedHash))
-      } catch (error) {
-        d.log.error(
-          { err: String(error), tenantId },
-          "rotated a key but could not evict the old one from the cache",
-        )
-      }
-    }
+    const rotated = await rotateKey(d.keys, tenantId, c.req.param("id"), d.log)
+    if (rotated.status === "not_found")
+      return c.json(notFound("No key with that id."), 404)
 
     return c.json(
       {

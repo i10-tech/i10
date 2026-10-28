@@ -53,6 +53,17 @@ export interface EnforcementDeps {
   store: Pick<SsoPolicyStore, "enforcementRead" | "noteBypassSignIn">
   clerk: Pick<ClerkIdentity, "user">
   log: Logger
+  /**
+   * Told once per bypass session, after the audit event committed (#345): the
+   * other owners and admins are emailed (identity/alerts.ts). It never throws
+   * and is not awaited by the request.
+   */
+  onBypass?: (input: {
+    tenantId: string
+    userId: string
+    sessionId: string
+    connectionIds: string[]
+  }) => Promise<void>
   now?: () => number
   tenantTtlMs?: number
   readTtlMs?: number
@@ -225,20 +236,25 @@ export function enforcementGate(d: EnforcementDeps): EnforcementGate {
             clerkUserId: userId,
             connectionIds: ordered.map((c) => c.id),
           })
-        )
+        ) {
           /*
-           * ⚠ THE ALERT TO THE OTHER ADMINS IS AN EMAIL, #345's. Until then
-           * the audit event and this line are what an admin can see.
+           * ⚠ THE ALERT TO THE OTHER ADMINS IS AN EMAIL (#345), ONCE PER
+           * SESSION: `noteBypassSignIn` returned true only for the first
+           * sign-in of this session, in the same transaction as its audit
+           * event. Fire and forget - the request never waits on mail, and a
+           * failure is the alert's to log.
            */
+          const connectionIds = ordered.map((c) => c.id)
           d.log.warn(
-            {
-              tenantId,
-              userId,
-              sessionId,
-              connectionIds: ordered.map((c) => c.id),
-            },
+            { tenantId, userId, sessionId, connectionIds },
             "a bypass sign-in passed the SSO requirement",
           )
+          void d
+            .onBypass?.({ tenantId, userId, sessionId, connectionIds })
+            .catch((error: unknown) =>
+              d.log.error({ err: String(error), tenantId }, "bypass alert failed"),
+            )
+        }
         boundedSet(noted, key, { value: true, until: now() + readTtl * 6 }, max)
       }
       return { status: "pass" }

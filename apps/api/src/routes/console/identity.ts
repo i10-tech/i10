@@ -25,6 +25,12 @@ import type {
 import type { SsoGateChecker } from "../../identity/gate.js"
 import type { EnforcementGate } from "../../identity/enforcement.js"
 import { mountIdentityBreakGlass } from "./identity-break-glass.js"
+import { mountIdentityFeatureGates, refuseFeature } from "./identity-features.js"
+import { mountIdentityApiKeys } from "./identity-api-keys.js"
+import { mountIdentitySiem, type SiemConsoleDeps } from "./identity-siem.js"
+import type { FeatureGate } from "../../identity/features.js"
+import type { ConnectionHealthStore } from "../../identity/health.js"
+import { healthOf } from "../../identity/health.js"
 import { mountIdentitySetupLinks } from "./identity-setup-links.js"
 import { oidcReady } from "../../identity/oidc.js"
 import { OIDC_PRESETS, presetOf } from "../../identity/oidc-presets.js"
@@ -101,6 +107,14 @@ export interface IdentityConsoleDeps {
    * (#345). Absent: their routes answer 501.
    */
   workspacePolicy?: WorkspacePolicyConsoleDeps
+  /**
+   * The plan flags (#345). Absent: no plan limits, as with every flag on.
+   */
+  features?: FeatureGate
+  /** Connection health, counted from the audit log (#345). Absent: no `health`. */
+  health?: ConnectionHealthStore
+  /** The SIEM export to the customer's bucket (#345). Absent: its routes answer 501. */
+  siem?: SiemConsoleDeps
   deprovision: DeprovisionDeps
   log: Logger
 }
@@ -165,6 +179,28 @@ function view(connection: Connection) {
   }
 }
 
+/**
+ * A connection's health for the console (#345), or null when it cannot be read.
+ *
+ * ⚠ A HEALTH READ THAT FAILS IS NULL, NOT AN ERROR: the connection list is how
+ * an admin fixes a connection, and it must load when the health query does not.
+ */
+async function healthView(
+  store: ConnectionHealthStore | undefined,
+  tenantId: string,
+  connection: Pick<Connection, "id" | "status">,
+  now: Date,
+  log: Logger,
+) {
+  if (!store) return null
+  try {
+    return healthOf(await store.counts(tenantId, connection.id), connection.status, now)
+  } catch (err) {
+    log.error({ err: String(err), tenantId }, "could not read connection health")
+    return null
+  }
+}
+
 /** Seconds, null, or invalid. At least five minutes, at most ninety days. */
 function seconds(value: unknown): number | null | undefined | "invalid" {
   if (value === undefined) return undefined
@@ -216,6 +252,11 @@ export function readPatch(body: Record<string, unknown>): ConnectionPatch | stri
 }
 
 export function mountIdentity(app: Hono, d: ConsoleDeps): void {
+  // ⚠ FIRST: Hono runs middleware in registration order, and the plan flags
+  // must refuse before any of the routes below runs.
+  mountIdentityFeatureGates(app, d)
+  mountIdentityApiKeys(app, d)
+  mountIdentitySiem(app, d)
   mountIdentityOidc(app, d)
   mountIdentityGroups(app, d)
   mountIdentitySaml(app, d)
@@ -266,8 +307,15 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       return c.json(forbidden("Only an admin can see SSO settings."), 403)
     const { tenantId } = c.get("auth")
     const rows = await id.store.connections(tenantId)
+    const now = new Date()
     return c.json({
-      data: rows.map((r) => ({ ...view(r), domains: r.domains })),
+      data: await Promise.all(
+        rows.map(async (r) => ({
+          ...view(r),
+          domains: r.domains,
+          health: await healthView(id.health, tenantId, r, now, d.identity!.log),
+        })),
+      ),
       protocols: id.protocols,
       presets: {
         oidc: Object.values(OIDC_PRESETS).map((p) => ({
@@ -346,6 +394,18 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     // A SAML connection is one of its presets too (#339).
     if (protocol === "saml" && !samlPresetOf(provider))
       return c.json(validation("provider is not valid for SAML."), 422)
+    // ⚠ THE PLAN FLAG FOLLOWS THE PROTOCOL: Google's one-click preset is its
+    // own flag, then OIDC and SAML (sso.md decision 4).
+    const refused = await refuseFeature(
+      d,
+      c,
+      protocol === "saml"
+        ? "sso_saml"
+        : provider === "google"
+          ? "sso_google"
+          : "sso_oidc",
+    )
+    if (refused) return refused
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
     const made = await id.store.createConnection(tenantId, {
@@ -376,6 +436,17 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     const { userId } = c.get("user")
     const before = await id.store.connection(tenantId, connectionId)
     if (!before) return c.json(notFound(), 404)
+    // ⚠ TURNING A FEATURE OFF IS NEVER REFUSED BY THE PLAN: only moving to
+    // enforcement above "off", or JIT on, needs the flag. A workspace that
+    // lost the feature must still be able to stand it down.
+    if (patch.enforcement !== undefined && patch.enforcement !== "off") {
+      const refused = await refuseFeature(d, c, "sso_enforcement")
+      if (refused) return refused
+    }
+    if (patch.jitEnabled === true) {
+      const refused = await refuseFeature(d, c, "jit_rules")
+      if (refused) return refused
+    }
     /*
      * ⚠ ACTIVATING NEEDS A LIVE DOMAIN. A connection with no domain would sign
      * nobody in, and one whose proof was displaced would claim accounts it no

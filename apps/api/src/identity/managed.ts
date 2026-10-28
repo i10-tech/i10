@@ -342,6 +342,18 @@ export interface DeprovisionDeps extends ManagedDeps {
   workspaceOrg(tenantId: string): Promise<string | null>
   /** The person's mailbox: suspended when they are deprovisioned (#344). */
   mail: MailboxLifecycle
+  /**
+   * The workspace's live API keys the person created (#345), recorded on the
+   * deprovision event so an admin knows what to rotate. Absent: not recorded.
+   *
+   * ⚠ NOTHING IS REVOKED FOR THEM. A key belongs to the workspace, not to its
+   * creator (core/api_keys `created_by` is audit only), and a production
+   * integration must not go down because an employee left; the admin decides.
+   */
+  keysCreatedBy?(
+    tenantId: string,
+    userId: string,
+  ): Promise<Array<{ id: string; name: string }>>
 }
 
 export type DeprovisionOutcome =
@@ -443,6 +455,28 @@ export async function deprovision(
   })
   await d.mail.leaveLists(input.tenantId, input.clerkUserId)
 
+  /*
+   * ⚠ LISTED BEFORE THE RELEASE, AND A FAILURE HERE IS RECORDED, NOT FATAL.
+   * Nothing about the keys may stop a person being deprovisioned; the event
+   * says the list is unknown, and the console route can list them again.
+   */
+  let apiKeys: Array<{ id: string; name: string }> = []
+  let apiKeysUnknown = false
+  if (d.keysCreatedBy) {
+    try {
+      apiKeys = (await d.keysCreatedBy(input.tenantId, input.clerkUserId)).map((k) => ({
+        id: k.id,
+        name: k.name,
+      }))
+    } catch (error) {
+      apiKeysUnknown = true
+      d.log.warn(
+        { tenantId: input.tenantId, err: String(error) },
+        "could not list the API keys of a deprovisioned member",
+      )
+    }
+  }
+
   if (mode === "account") await d.clerk.ban(input.clerkUserId)
   else await d.store.releaseManaged(input.tenantId, input.clerkUserId)
 
@@ -450,8 +484,15 @@ export async function deprovision(
     type: "member.deprovisioned",
     actorUserId: input.actorUserId,
     subjectUserId: input.clerkUserId,
+    connectionId: managed.connectionId,
     reason: input.cause,
-    data: { mode, sessions, mailbox },
+    data: {
+      mode,
+      sessions,
+      mailbox,
+      apiKeys,
+      ...(apiKeysUnknown ? { apiKeysUnknown: true } : {}),
+    },
   })
   return { outcome: mode, sessions }
 }

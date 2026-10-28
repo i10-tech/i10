@@ -718,6 +718,20 @@ export const events = identity.table(
   (t) => [
     index("events_tenant_created_idx").on(t.tenantId, t.createdAt),
     index("events_subject_idx").on(t.tenantId, t.subjectUserId),
+    // ⚠ CONNECTION HEALTH (#345, identity/health.ts): "failures of this
+    // connection in the last day" and "its last success" are both a range
+    // read on (connection, type, time), newest first.
+    index("events_connection_type_idx").on(
+      t.tenantId,
+      t.connectionId,
+      t.type,
+      t.createdAt.desc(),
+    ),
+    // ⚠ THE SIEM EXPORT'S CURSOR (#345): events after an id, in id order. Ids
+    // are UUIDv7, so id order is time order, and unlike `created_at` it is
+    // unique, so a cursor can never skip or repeat a row written in the same
+    // microsecond.
+    index("events_tenant_id_idx").on(t.tenantId, t.id),
     // ⚠ APPEND ONLY: a read policy and an insert policy, and none for update
     // or delete, so no request - whoever's - can rewrite or erase the log.
     // Only the workspace going takes it (the cascade, which RLS does not see).
@@ -727,6 +741,62 @@ export const events = identity.table(
     }),
     pgPolicy("events_workspace_insert", {
       for: "insert",
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Where a workspace's identity audit log is exported to (#345): its own
+ * S3-compatible bucket, hourly. One row per workspace.
+ *
+ * ⚠ THE SECRET ACCESS KEY IS SEALED WITH THE WEBHOOK SECRET BOX
+ * (`secret_ciphertext`, the box that keeps webhook signing secrets and the
+ * SQS endpoint keys), never stored plain and never returned by any read: the
+ * console sees `secret_hint` (its last four characters) and nothing else. The
+ * key should belong to a user that can do nothing but `s3:PutObject` under the
+ * prefix; the docs say so and we cannot check it.
+ *
+ * ⚠ THE CURSOR IS THE LAST EVENT ID WRITTEN TO THE BUCKET, advanced only after
+ * the PUT succeeded, so a failed run exports the same events again rather than
+ * skipping them. Event ids are UUIDv7: id order is time order and unique.
+ *
+ * ⚠ `next_run_at` IS THE SCHEDULE'S RECORD AND THE LEASE: a run claims the row
+ * by moving it forward, so two replicas never export the same window, and a
+ * run that died is retried when its lease lapses.
+ */
+export const siemExports = identity.table(
+  "siem_exports",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** https only, vetted by the webhook egress guard on write and on every run. */
+    endpoint: text("endpoint").notNull(),
+    bucket: text("bucket").notNull(),
+    region: text("region").notNull(),
+    /** Under the bucket; no leading or trailing slash. May be empty. */
+    prefix: text("prefix").notNull().default(""),
+    accessKeyId: text("access_key_id").notNull(),
+    /** Sealed. See above. */
+    secretCiphertext: text("secret_ciphertext").notNull(),
+    /** The last four characters of the secret, for the console to recognise it by. */
+    secretHint: text("secret_hint").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** The last event written to the bucket; null: nothing exported yet. */
+    lastEventId: uuid("last_event_id"),
+    lastExportAt: timestamp("last_export_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy("siem_exports_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
     }),
   ],

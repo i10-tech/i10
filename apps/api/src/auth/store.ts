@@ -122,10 +122,22 @@ export interface KeyStore {
   ): Promise<{ key: KeySummary; secretHash: string } | null>
   /** The revoked key's `secret_hash`, so the caller can evict its cache entry. */
   revoke(tenantId: string, id: string): Promise<{ secretHash: string } | null>
+  /**
+   * ⚠ `createdBy` OVERRIDES WHO THE NEW KEY IS ATTRIBUTED TO, and only the
+   * deprovisioning flow passes it (#345): a key rotated on behalf of somebody
+   * who left belongs to the admin who now holds the secret, or the list of
+   * "keys the person created" would still show it.
+   */
   rotate(
     tenantId: string,
     id: string,
+    options?: { createdBy?: string | null },
   ): Promise<{ created: CreatedKey; revokedHash: string } | null>
+  /**
+   * The live (not revoked) keys a person minted, newest first (#345): what an
+   * admin is shown when that person is deprovisioned.
+   */
+  createdBy(tenantId: string, userId: string): Promise<KeySummary[]>
 }
 
 const summaryOf = (row: typeof apiKeys.$inferSelect): KeySummary => ({
@@ -178,6 +190,23 @@ export function keyStore(db: Database): KeyStore {
           .select()
           .from(apiKeys)
           .where(eq(apiKeys.tenantId, tenantId))
+          .orderBy(desc(apiKeys.createdAt))
+        return rows.map(summaryOf)
+      })
+    },
+
+    async createdBy(tenantId, userId) {
+      return withTenant(db, tenantId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(apiKeys)
+          .where(
+            and(
+              eq(apiKeys.tenantId, tenantId),
+              eq(apiKeys.createdBy, userId),
+              isNull(apiKeys.revokedAt),
+            ),
+          )
           .orderBy(desc(apiKeys.createdAt))
         return rows.map(summaryOf)
       })
@@ -240,7 +269,7 @@ export function keyStore(db: Database): KeyStore {
      * treated as a fresh mint. That would hand back a working credential for a
      * key the customer believes is dead.
      */
-    async rotate(tenantId, id) {
+    async rotate(tenantId, id, options) {
       return withTenant(db, tenantId, async (tx) => {
         const [old] = await tx
           .update(apiKeys)
@@ -261,7 +290,10 @@ export function keyStore(db: Database): KeyStore {
           name: old.name,
           mode: old.mode === "test" ? "test" : "live",
           scopes: old.scopes,
-          createdBy: old.createdBy,
+          createdBy:
+            options && "createdBy" in options
+              ? (options.createdBy ?? null)
+              : old.createdBy,
           expiresAt: old.expiresAt,
         })
 
