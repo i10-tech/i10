@@ -590,17 +590,18 @@ function readAssertion(
   for (const block of childrenOf(assertion, NS.assertion, "AttributeStatement"))
     for (const attribute of childrenOf(block, NS.assertion, "Attribute")) {
       const name = attrOf(attribute, "Name")
-      if (
-        !name ||
-        name.length > 256 ||
-        Object.hasOwn(attributes, name) ||
-        ++count > 100
-      )
-        continue
-      attributes[name] = childrenOf(attribute, NS.assertion, "AttributeValue")
+      if (!name || name.length > 256 || ++count > 100) continue
+      /*
+       * ⚠ A REPEATED NAME ADDS VALUES, IT DOES NOT REPLACE OR GET DROPPED.
+       * Keycloak's group mapper (single off) sends one <Attribute> per group;
+       * keeping only the first lost every group after it, and the group rules
+       * with them (2026-11-01). The assertion is signed, so a repeat is the
+       * IdP's own statement; the 100-value cap still holds per name.
+       */
+      const values = childrenOf(attribute, NS.assertion, "AttributeValue")
         .map((v) => textOf(v))
         .filter((v): v is string => v !== null && v.length <= 1024)
-        .slice(0, 100)
+      attributes[name] = [...(attributes[name] ?? []), ...values].slice(0, 100)
     }
 
   const horizon = Math.min(

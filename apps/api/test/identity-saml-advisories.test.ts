@@ -95,6 +95,20 @@ describe("the baseline", () => {
     expect(v.assertion.attributes.groups).toEqual(["eng", "admins"])
   })
 
+  it("merges an attribute the IdP repeats, one element per value", () => {
+    // Keycloak's group mapper with "single" off sends one <Attribute> per group.
+    const one = (v: string) =>
+      `<saml:Attribute Name="groups"><saml:AttributeValue>${v}</saml:AttributeValue></saml:Attribute>`
+    const xml = assertionXml({ attributes: { email: ["ada@acme.test"] } }).replace(
+      "</saml:AttributeStatement>",
+      `${one("admins")}${one("engineering")}</saml:AttributeStatement>`,
+    )
+    const v = run(b64(sign(responseXml(xml), idp)))
+    expect(v.ok).toBe(true)
+    if (!v.ok) return
+    expect(v.assertion.attributes.groups).toEqual(["admins", "engineering"])
+  })
+
   it("keeps an attribute named __proto__ as a plain value, never a prototype", () => {
     const attributes = Object.fromEntries([
       ["__proto__", ["evil"]],
