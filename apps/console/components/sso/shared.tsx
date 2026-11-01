@@ -9,8 +9,10 @@ import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
 import { Switch } from "@repo/ui/components/i10/switch"
 import type { ActionResult } from "@/lib/actions"
 import { useStepUp } from "@/lib/step-up"
+import { remoteFailure, type RemoteFailure } from "@/lib/plan-required"
 import { toastFailure } from "@/lib/toast"
 import type { SsoAbilities, SsoEnforcement, SsoStatus } from "@/lib/sso-types"
+import { UpgradePrompt } from "./upgrade-prompt"
 
 /**
  * The small pieces every SSO screen shares (#340).
@@ -100,7 +102,7 @@ export function useSsoAttempt() {
 /** A value read once on mount through an action, with a way to set it from a write's answer. */
 export function useRemote<T>(load: () => Promise<ActionResult<T>>) {
   const [data, setData] = React.useState<T | null>(null)
-  const [failed, setFailed] = React.useState<string | null>(null)
+  const [failed, setFailed] = React.useState<RemoteFailure | null>(null)
   const loader = React.useRef(load)
   React.useEffect(() => {
     loader.current = load
@@ -111,7 +113,7 @@ export function useRemote<T>(load: () => Promise<ActionResult<T>>) {
     if (result.ok) {
       setData(result.data)
       setFailed(null)
-    } else setFailed(result.error)
+    } else setFailed(remoteFailure(result))
   }, [])
 
   React.useEffect(() => {
@@ -216,8 +218,19 @@ export function ShownOnce({
   )
 }
 
-export function Loading({ failed }: { failed: string | null }) {
-  return <p className="py-2 text-sm text-muted-foreground">{failed ?? "Loading…"}</p>
+/**
+ * The placeholder while a screen loads, or why it did not.
+ *
+ * ⚠ A PLAN REFUSAL IS THE UPGRADE STATE, NOT AN ERROR LINE: every identity
+ * screen that can hit a gated route gets it here, from `useRemote`, once.
+ */
+export function Loading({ failed }: { failed: RemoteFailure | null }) {
+  if (failed?.upgrade) return <UpgradePrompt feature={failed.upgrade.feature} />
+  return (
+    <p className="py-2 text-sm text-muted-foreground">
+      {failed?.message ?? "Loading…"}
+    </p>
+  )
 }
 
 /** A switch with its label and what it decides. */

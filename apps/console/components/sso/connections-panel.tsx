@@ -15,6 +15,8 @@ import { addSsoDomain, createSsoConnection } from "@/lib/sso-actions"
 import type { SsoAbilities, SsoConnections } from "@/lib/sso-types"
 import { useResetOnOpen } from "@/lib/react"
 import { toastDone } from "@/lib/toast"
+import { healthLabel, type HealthState } from "@/lib/connection-health"
+import { Badge, type BadgeTone } from "@repo/ui/components/badge/badge"
 import { ENFORCEMENT_LABEL, StatusBadge, useSsoCall } from "./shared"
 
 /**
@@ -44,6 +46,23 @@ function idpChoices(presets: SsoConnections["presets"]): IdpChoice[] {
   const generic = byId.get("generic")
   if (generic && generic.protocols.length > 1) generic.label = "Another provider"
   return [...byId.values()]
+}
+
+const HEALTH_TONE: Record<HealthState, BadgeTone> = {
+  healthy: "success",
+  degraded: "warning",
+  failing: "danger",
+}
+
+/** A live connection's sign-in health; nothing at all when there is none to show. */
+function Health({ connection }: { connection: SsoConnections["data"][number] }) {
+  const health = healthLabel(connection.health, connection.status)
+  if (!health) return null
+  return (
+    <Badge tone={HEALTH_TONE[health.state]} size="sm" title={health.reason}>
+      {health.label}
+    </Badge>
+  )
 }
 
 export function ConnectionsPanel({
@@ -88,6 +107,7 @@ export function ConnectionsPanel({
                       : "no domain yet"}
                   </span>
                 </span>
+                <Health connection={c} />
                 <StatusBadge status={c.status} />
                 <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
               </Link>

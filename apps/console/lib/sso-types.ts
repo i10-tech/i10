@@ -27,6 +27,17 @@ export interface SsoConnection {
   idleTimeoutSeconds: number | null
   attributeMapping: Record<string, string>
   domains: SsoDomain[]
+  /** Sign-in health (#345); null when the API could not read it, absent on older answers. */
+  health?: ConnectionHealth | null
+}
+
+/** `health` of a connection, as the API derives it from the audit log. */
+export interface ConnectionHealth {
+  lastSuccessAt: string | null
+  failuresLastHour: number
+  failuresLast24Hours: number
+  failing: boolean
+  reason: "failure_spike" | "no_success" | null
 }
 
 export interface OidcPresetInfo {
@@ -210,6 +221,13 @@ export interface SsoDirectories {
   google: GoogleSetup
 }
 
+/** A group of a directory, as the group-mail picker lists it (#344). */
+export interface DirectoryGroup {
+  id: string
+  displayName: string
+  memberCount: number
+}
+
 export interface DirectoryConflict {
   id: string
   userName: string
@@ -340,4 +358,55 @@ export interface IdentityEvent {
   reason: string | null
   data: Record<string, unknown>
   createdAt: string
+}
+
+// ── SIEM export and deprovisioned people's keys (#345) ──────────────────────
+
+/** `GET /identity/siem`'s settings. The key is only a hint (`••••abcd`). */
+export interface SiemView {
+  endpoint: string
+  bucket: string
+  region: string
+  prefix: string
+  accessKeyId: string
+  secretAccessKey: string
+  enabled: boolean
+  lastExportAt: string | null
+  lastError: string | null
+  lastErrorAt: string | null
+}
+
+export interface SiemSettingsAnswer {
+  configured: boolean
+  settings: SiemView | null
+}
+
+export type SiemTestResult = { ok: true; key: string } | { ok: false; error: string }
+
+/** A live API key a deprovisioned person created. */
+export interface DeprovisionedKey {
+  id: string
+  name: string
+  prefix: string
+  mode: string
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+}
+
+/** A removed person with the live keys they created. */
+export interface DeprovisionedPerson {
+  user_id: string
+  deprovisioned_at: string
+  keys: DeprovisionedKey[]
+}
+
+/** What rotating one answers; `secret` is shown once. */
+export interface RotatedDeprovisionedKey {
+  id: string
+  name: string
+  prefix: string
+  mode: string
+  created_at: string
+  secret: string
 }

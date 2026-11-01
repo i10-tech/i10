@@ -97,8 +97,10 @@ function OidcForm({
         body.discoveryUrl = form.discoveryUrl.trim() || null
       if (form.clientId.trim() !== (data.clientId ?? ""))
         body.clientId = form.clientId.trim()
-      if (form.clientAuth !== (data.clientAuth ?? data.clientAuthMethods[0]))
-        body.clientAuth = form.clientAuth
+      // ⚠ AGAINST WHAT IS STORED, NOT WHAT IS SHOWN. A new connection shows the
+      // first method as chosen while none is saved; comparing with the shown
+      // default never sent it, and the connection could never become ready.
+      if (form.clientAuth !== data.clientAuth) body.clientAuth = form.clientAuth
       const acr = form.mfaAcrValues
         .split(",")
         .map((v) => v.trim())

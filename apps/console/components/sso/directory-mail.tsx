@@ -5,10 +5,10 @@ import { Button } from "@repo/ui/components/button/button"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { changeDirectory } from "@/lib/sso-actions"
-import { clearGroupMail, setGroupMail } from "@/lib/sso-policy-actions"
+import { clearGroupMail, directoryGroups, setGroupMail } from "@/lib/sso-policy-actions"
 import { toastDone } from "@/lib/toast"
 import type { SsoAbilities, SsoDirectory } from "@/lib/sso-types"
-import { ToggleRow, type useSsoCall } from "./shared"
+import { Loading, ToggleRow, useRemote, type useSsoCall } from "./shared"
 
 /**
  * Mail from one directory (#344): whether it gives each person it activates a
@@ -19,9 +19,8 @@ import { ToggleRow, type useSsoCall } from "./shared"
  * is an admin's. The API refuses the rest; every refusal is shown in its own
  * words by the toast.
  *
- * ⚠ THE GROUP IS NAMED BY ITS ID. The API has no route that lists a
- * directory's groups, so there is nothing to pick from: the id is the one the
- * directory itself uses for the group.
+ * The group is picked from the directory's own list (GET .../groups); what is
+ * submitted is still its id.
  */
 
 const KINDS = [
@@ -80,11 +79,18 @@ function GroupMail({
   directory: SsoDirectory
   call: ReturnType<typeof useSsoCall>
 }) {
+  const { data, failed } = useRemote(() => directoryGroups(directory.id))
   const [groupId, setGroupId] = React.useState("")
   const [address, setAddress] = React.useState("")
   const [kind, setKind] = React.useState<"list" | "shared">("list")
   const [busy, setBusy] = React.useState<"in" | "out" | null>(null)
-  const id = groupId.trim()
+  const id = groupId
+  const groups = data?.data ?? null
+  const groupItems = (groups ?? []).map((g) => ({
+    value: g.id,
+    label: g.displayName,
+    meta: `${g.memberCount} ${g.memberCount === 1 ? "member" : "members"}`,
+  }))
 
   async function optIn() {
     setBusy("in")
@@ -121,12 +127,27 @@ function GroupMail({
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <FloatingInput
-          label="Group id"
-          hint="The id your directory uses for the group."
-          value={groupId}
-          onChange={(e) => setGroupId(e.target.value)}
-        />
+        {groups === null ? (
+          <Loading
+            failed={
+              failed && !failed.upgrade
+                ? { ...failed, message: `Could not load groups: ${failed.message}` }
+                : failed
+            }
+          />
+        ) : groups.length === 0 ? (
+          <p className="py-2 text-sm text-muted-foreground">
+            This directory has no groups yet
+          </p>
+        ) : (
+          <MorphSelect
+            label="Group"
+            placeholder="Choose a group"
+            value={groupId || null}
+            onValueChange={setGroupId}
+            items={groupItems}
+          />
+        )}
         <MorphSelect
           label="As a"
           value={kind}

@@ -96,7 +96,7 @@ export function ApiKeysTable({
 
   // Only a live key can be acted on; a revoked one stays listed, untickable.
   const selection = useListSelection(
-    shown.filter((k) => k.revoked_at === null),
+    shown.filter((k) => k.revoked_at === null && k.can_revoke),
     (k) => k.id,
   )
   const { picked } = selection
@@ -181,6 +181,7 @@ export function ApiKeysTable({
               <ListHead className="hidden w-[12rem] sm:table-cell">Sends from</ListHead>
               <ListHead className="hidden w-[10rem] md:table-cell">Last used</ListHead>
               <ListHead className="hidden w-[10rem] lg:table-cell">Created</ListHead>
+              <ListHead className="hidden w-[12rem] xl:table-cell">Created by</ListHead>
               <ListHead className="w-12">
                 <span className="sr-only">Actions</span>
               </ListHead>
@@ -197,7 +198,9 @@ export function ApiKeysTable({
                     )}
                   >
                     <td className="w-10 py-3 pl-4">
-                      {!revoked && selection.rowBox(key, `Select ${key.name}`)}
+                      {!revoked &&
+                        key.can_revoke &&
+                        selection.rowBox(key, `Select ${key.name}`)}
                     </td>
                     <ListCell className="pl-0 font-medium">
                       {key.name}
@@ -250,6 +253,11 @@ export function ApiKeysTable({
                     <ListCell className="hidden text-xs text-muted-foreground lg:table-cell">
                       <Time iso={key.created_at} />
                     </ListCell>
+                    <ListCell className="hidden truncate text-xs text-muted-foreground xl:table-cell">
+                      {key.created_by
+                        ? (key.created_by.name ?? key.created_by.email ?? "Unknown")
+                        : "Unknown"}
+                    </ListCell>
                     <ListCell className="py-1.5 text-right">
                       {!revoked && (
                         <RowMenu label={key.name}>
@@ -264,23 +272,33 @@ export function ApiKeysTable({
                             <Copy />
                             Copy ID
                           </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onSelect={() => setScoping(key)}>
-                            <Globe />
-                            Change scope
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => setRotating(key)}>
-                            <RefreshCw />
-                            Rotate
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => setRevoking(key)}
-                          >
-                            <Trash2 />
-                            Revoke
-                          </DropdownMenuItem>
+                          {(key.can_edit || key.can_rotate || key.can_revoke) && (
+                            <DropdownMenuSeparator />
+                          )}
+                          {key.can_edit && (
+                            <DropdownMenuItem onSelect={() => setScoping(key)}>
+                              <Globe />
+                              Change scope
+                            </DropdownMenuItem>
+                          )}
+                          {key.can_rotate && (
+                            <DropdownMenuItem onSelect={() => setRotating(key)}>
+                              <RefreshCw />
+                              Rotate
+                            </DropdownMenuItem>
+                          )}
+                          {key.can_revoke && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => setRevoking(key)}
+                              >
+                                <Trash2 />
+                                Revoke
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </RowMenu>
                       )}
                     </ListCell>
@@ -403,6 +421,8 @@ export function ApiKeysTable({
         destructive={false}
         onConfirm={async () => {
           if (!rotating) return false
+          // The API asks for a recent sign-in before it rotates; this is the prompt.
+          if (!(await stepUp())) return false
           const result = await rotateApiKey(rotating.id)
           if (!result.ok) {
             toastError("Could not rotate the key", { description: result.error })

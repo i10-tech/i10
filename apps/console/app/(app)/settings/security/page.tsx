@@ -9,8 +9,10 @@ import {
 import { PanelError } from "@/components/panel-error"
 import { ConnectionsPanel } from "@/components/sso/connections-panel"
 import { DirectoriesPanel } from "@/components/sso/directories-panel"
+import { DeprovisionedKeysPanel } from "@/components/sso/deprovisioned-keys"
 import { IpAllowlistPanel } from "@/components/sso/ip-allowlist"
 import { MailboxesPanel } from "@/components/sso/mailboxes-panel"
+import { SiemExportPanel } from "@/components/sso/siem-export"
 import { OwnerExemptionPanel } from "@/components/sso/owner-exemption"
 import {
   SecondFactorPanel,
@@ -135,6 +137,31 @@ export default async function SecuritySettingsPage() {
         </SectionDescription>
         <SectionContent>
           <IpAllowlistPanel abilities={who.abilities} />
+        </SectionContent>
+      </Section>
+
+      <Section>
+        <SectionTitle>Removed people&rsquo;s API keys</SectionTitle>
+        <SectionDescription>
+          Keys that people your directory removed created. Nothing is revoked for you,
+          since an integration may still depend on one.
+        </SectionDescription>
+        <SectionContent>
+          <DeprovisionedKeysPanel
+            abilities={who.abilities}
+            clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+          />
+        </SectionContent>
+      </Section>
+
+      <Section>
+        <SectionTitle>SIEM export</SectionTitle>
+        <SectionDescription>
+          Send the identity audit log to a bucket of your own so your security tools can
+          read it.
+        </SectionDescription>
+        <SectionContent>
+          <SiemExportPanel abilities={who.abilities} />
         </SectionContent>
       </Section>
 

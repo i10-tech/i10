@@ -1,14 +1,20 @@
 "use server"
 
 import { api } from "@/lib/api"
+import type { SiemBody } from "@/lib/siem"
 import { run } from "@/lib/sso-run"
 import type {
+  DirectoryGroup,
   IpAllowlist,
   LeaverDefault,
   Mailboxes,
+  DeprovisionedPerson,
   NextChoice,
+  RotatedDeprovisionedKey,
   SavedIpAllowlist,
   SessionPolicy,
+  SiemSettingsAnswer,
+  SiemTestResult,
 } from "@/lib/sso-types"
 
 /**
@@ -22,6 +28,14 @@ import type {
 const enc = encodeURIComponent
 
 // ── Directory mail ──────────────────────────────────────────────────────────
+
+export async function directoryGroups(directoryId: string) {
+  return run(() =>
+    api<{ data: DirectoryGroup[] }>(
+      `/console/identity/directories/${enc(directoryId)}/groups`,
+    ),
+  )
+}
 
 export async function setGroupMail(
   directoryId: string,
@@ -116,5 +130,56 @@ export async function saveIpAllowlist(input: {
       method: "PUT",
       body: input,
     }),
+  )
+}
+
+// ── SIEM export ─────────────────────────────────────────────────────────────
+
+export async function siemSettings() {
+  return run(() => api<SiemSettingsAnswer>("/console/identity/siem"))
+}
+
+export async function saveSiem(input: SiemBody) {
+  return run(() =>
+    api<SiemSettingsAnswer>("/console/identity/siem", { method: "PUT", body: input }),
+  )
+}
+
+export async function removeSiem() {
+  return run(() =>
+    api<{ configured: false }>("/console/identity/siem", { method: "DELETE" }),
+  )
+}
+
+export async function testSiem() {
+  return run(() =>
+    api<SiemTestResult>("/console/identity/siem/test", { method: "POST" }),
+  )
+}
+
+// ── API keys of a deprovisioned person ──────────────────────────────────────
+
+export async function rotateDeprovisionedKey(userId: string, keyId: string) {
+  return run(() =>
+    api<RotatedDeprovisionedKey>(
+      `/console/identity/deprovisioned/${enc(userId)}/api-keys/${enc(keyId)}/rotate`,
+      { method: "POST" },
+    ),
+  )
+}
+
+export async function revokeDeprovisionedKey(userId: string, keyId: string) {
+  return run(() =>
+    api<{ id: string; revoked: true }>(
+      `/console/identity/deprovisioned/${enc(userId)}/api-keys/${enc(keyId)}/revoke`,
+      { method: "POST" },
+    ),
+  )
+}
+
+/** Every removed person who still has a live key, with those keys. */
+export async function deprovisionedPeople() {
+  return run(() =>
+    api<{ data: DeprovisionedPerson[] }>("/console/identity/deprovisioned/api-keys"),
   )
 }
