@@ -44,6 +44,13 @@ def keycloak():
         c['secret'] = E('KEYCLOAK_OIDC_CLIENT_SECRET')
         call('PUT', f"{R}/clients/{c['id']}", c, h)
         print(f"keycloak: OIDC back-channel logout -> {CTR}/sso/oidc/backchannel/{oid}")
+        # `basic` carries `auth_time` (Keycloak 25+). Without it every step-up is
+        # refused `step_up_stale`: nothing proves the IdP asked again. Realms
+        # imported before the realm file listed it are fixed here.
+        basic = next((s for s in call('GET', f"{R}/client-scopes", headers=h) if s['name'] == 'basic'), None)
+        if basic:
+            call('PUT', f"{R}/clients/{c['id']}/default-client-scopes/{basic['id']}", None, h)
+            print("keycloak: OIDC client has the basic scope (auth_time)")
     if sid:
         c = next(c for c in clients if c['clientId'].startswith(f"{AUTH}/sso/saml/metadata/"))
         c = call('GET', f"{R}/clients/{c['id']}", headers=h)
