@@ -1,6 +1,6 @@
 import "server-only"
 import type { NextRequest } from "next/server"
-import { callApi } from "./devices-server"
+import { callApi, FINISH_SIGN_IN_MS } from "./devices-server"
 import { afterAuthUrl } from "./redirect"
 import {
   BINDING_COOKIE,
@@ -28,16 +28,21 @@ export async function finishCallback(request: NextRequest, via: "oidc" | "google
     message?: string
   }
   try {
-    const upstream = await callApi("/sso/oidc/callback", {
-      state: params.get("state") ?? "",
-      binding,
-      via,
-      query: {
-        code: params.get("code") ?? undefined,
-        iss: params.get("iss") ?? undefined,
-        error: params.get("error") ?? undefined,
+    const upstream = await callApi(
+      "/sso/oidc/callback",
+      {
+        state: params.get("state") ?? "",
+        binding,
+        via,
+        query: {
+          code: params.get("code") ?? undefined,
+          iss: params.get("iss") ?? undefined,
+          error: params.get("error") ?? undefined,
+        },
       },
-    })
+      {},
+      FINISH_SIGN_IN_MS,
+    )
     answer = (await upstream.json()) as typeof answer
     if (!upstream.ok)
       return leave(

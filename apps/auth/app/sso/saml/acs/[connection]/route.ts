@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { callApi } from "../../../../_lib/devices-server"
+import { callApi, FINISH_SIGN_IN_MS } from "../../../../_lib/devices-server"
 import { leave, outcomeRedirect } from "../../../../_lib/sso-callback"
 import {
   SAML_COOKIE,
@@ -51,13 +51,18 @@ export async function POST(
     message?: string
   }
   try {
-    const upstream = await callApi("/sso/saml/acs", {
-      connection,
-      samlResponse,
-      relayState: relayState && relayState.length <= 80 ? relayState : null,
-      binding: readCookie(request, SAML_COOKIE),
-      freshBinding,
-    })
+    const upstream = await callApi(
+      "/sso/saml/acs",
+      {
+        connection,
+        samlResponse,
+        relayState: relayState && relayState.length <= 80 ? relayState : null,
+        binding: readCookie(request, SAML_COOKIE),
+        freshBinding,
+      },
+      {},
+      FINISH_SIGN_IN_MS,
+    )
     answer = (await upstream.json()) as typeof answer
     if (!upstream.ok)
       return leave(

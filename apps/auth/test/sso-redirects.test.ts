@@ -9,6 +9,7 @@ mock.module("@clerk/nextjs/server", () => ({
 }))
 mock.module("../app/_lib/devices-server", () => ({
   callApi: async () => Response.json({ message: "No." }, { status: 403 }),
+  FINISH_SIGN_IN_MS: 30_000,
 }))
 
 const { failedUrl, redirectHere } = await import("../app/_lib/sso-server")

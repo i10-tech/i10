@@ -89,10 +89,21 @@ function apiBase(): string {
   return "http://localhost:3001"
 }
 
+/**
+ * How long a call that FINISHES an SSO sign-in may take (the OIDC callback,
+ * the SAML ACS). A first sign-in creates the Clerk user, claims and links the
+ * account and makes them a member, several Clerk round trips; one took 30 s
+ * on a freshly started API (2026-11-01) while the 5 s default gave up at 5,
+ * so the person saw "temporarily unavailable" for a sign-in that succeeded
+ * and was never handed over. Every other call stays short.
+ */
+export const FINISH_SIGN_IN_MS = 30_000
+
 export async function callApi(
   path: string,
   body: unknown,
   headers: Record<string, string> = {},
+  timeoutMs = 5000,
 ): Promise<Response> {
   const context = await clientContextHeader()
   return fetch(`${apiBase()}${path}`, {
@@ -104,7 +115,7 @@ export async function callApi(
     },
     body: JSON.stringify(body),
     cache: "no-store",
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
 }
 
