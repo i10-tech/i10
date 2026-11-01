@@ -1,0 +1,11 @@
+# What a new worktree copies from the primary checkout (gitignore patterns;
+# a file must be both gitignored and listed here). Read by `wt step
+# copy-ignored` and by Claude Code desktop's worktrees.
+#
+# ⚠ DEPENDENCIES AND BUILD OUTPUT ONLY, NEVER SECRETS. Env files, the SSO lab's
+# .env and CA key, .dev.vars and Terraform state stay in the checkout that owns
+# them; a worktree that needs one gets it from Doppler like everything else.
+node_modules/
+packages/*/node_modules/
+packages/*/dist/
+apps/api/models/
