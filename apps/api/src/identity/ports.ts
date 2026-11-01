@@ -107,7 +107,16 @@ export interface ConnectionDomain {
 export type GateRead =
   | { managed: null }
   | {
-      managed: { tenantId: string; connectionId: string | null }
+      managed: {
+        tenantId: string
+        /**
+         * The live connection to send this person through now: one covering
+         * a live proof of their address's domain (the one they were claimed
+         * through first, while it qualifies); for an owner or admin, only one
+         * they are linked on (#338). Null when none does.
+         */
+        connectionId: string | null
+      }
       session:
         | (BoundSession & {
             tenantId: string

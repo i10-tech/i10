@@ -228,10 +228,59 @@ suite("identity schema", () => {
     expect(await store().releaseManaged(rival, ada)).toBe(false)
   })
 
+  it("names the live connection that covers the person's domain now, not the one they were claimed through", async () => {
+    const route = async () =>
+      (
+        (await store().gateRead(ada, "sess_route")) as {
+          managed: { connectionId: string | null }
+        }
+      ).managed.connectionId
+    await owner`update identity.connections set status = 'active' where id = ${connectionId}`
+    expect(await route()).toBe(connectionId)
+
+    // The domain moves to another connection, which is not live yet: nobody
+    // can sign Ada in, so no connection is named (2026-11-01: the gate named
+    // the old one, which could no longer vouch for her address - a loop).
+    const moved = await store().createConnection(acme, {
+      name: "Moved",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "user_owner",
+    })
+    await owner`delete from identity.connection_domains where connection_id = ${connectionId}`
+    expect(await store().addDomain(acme, moved.id, liveProof)).toBe("added")
+    expect(await route()).toBeNull()
+    await owner`update identity.connections set status = 'active' where id = ${moved.id}`
+    expect(await route()).toBe(moved.id)
+
+    // An admin goes only where they are linked (#338): `moved` would refuse
+    // her `role_exempt`, so it is not named until she is linked on it.
+    await owner`insert into core.workspace_roles (tenant_id, clerk_user_id, role, source)
+                values (${acme}, ${ada}, 'admin', 'test')`
+    expect(await route()).toBeNull()
+    await owner`insert into identity.identities (tenant_id, connection_id, subject, clerk_user_id)
+                values (${acme}, ${moved.id}, 'ada-subject', ${ada})`
+    expect(await route()).toBe(moved.id)
+    await owner`delete from identity.identities where connection_id = ${moved.id}`
+    await owner`delete from core.workspace_roles where tenant_id = ${acme} and clerk_user_id = ${ada}`
+
+    // A displaced proof covers nothing.
+    await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
+    expect(await route()).toBeNull()
+    await owner`update core.join_domains set displaced_at = null where id = ${liveProof}`
+
+    // Back as the rest of the suite expects it.
+    await owner`delete from identity.connection_domains where connection_id = ${moved.id}`
+    await owner`delete from identity.connections where id = ${moved.id}`
+    expect(await store().addDomain(acme, connectionId, liveProof)).toBe("added")
+    await owner`update identity.connections set status = 'draft' where id = ${connectionId}`
+  })
+
   it("answers the gate in one read: unmanaged, unbound, bound with its connection", async () => {
     expect(await store().gateRead("user_nobody", "sess_x")).toEqual({ managed: null })
+    // The connection is still a draft: it can sign nobody in, so none is named.
     expect(await store().gateRead(ada, "sess_unbound")).toEqual({
-      managed: { tenantId: acme, connectionId },
+      managed: { tenantId: acme, connectionId: null },
       session: null,
     })
     const at = new Date()

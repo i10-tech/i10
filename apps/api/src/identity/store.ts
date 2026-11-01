@@ -1,6 +1,6 @@
 import { and, arrayContains, desc, eq, isNull, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
-import { joinDomains, joinExclusions, tenants } from "../db/core.js"
+import { joinDomains, joinExclusions, tenants, workspaceRoles } from "../db/core.js"
 import {
   connectionDomains,
   connections,
@@ -926,8 +926,56 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
             ),
           )
           .limit(1)
+        /*
+         * ⚠ WHERE TO SEND THEM IS THE LIVE CONNECTION THAT COVERS ONE OF THEIR
+         * ADDRESSES NOW, NOT THE ONE THEY WERE CLAIMED THROUGH. After a domain
+         * moves, the old connection can no longer vouch for the address, and
+         * naming it sent the person round a loop (2026-11-01). The claimed one
+         * wins while it still qualifies; none qualifying is null, and the
+         * console then offers no dead button.
+         *
+         * ⚠ AND AN OWNER OR ADMIN ONLY EVER TO A CONNECTION THEY ARE LINKED ON,
+         * the bridge's own rule (#338, `role_exempt` in bridge.ts): any other
+         * connection refuses them, so naming it is the same dead end. Once
+         * their linked connection loses the domain there is no SSO way back
+         * for them, by design, and the answer is null.
+         */
+        const [route] = await tx
+          .select({ id: connections.id })
+          .from(connections)
+          .innerJoin(
+            connectionDomains,
+            eq(connectionDomains.connectionId, connections.id),
+          )
+          .innerJoin(joinDomains, eq(joinDomains.id, connectionDomains.joinDomainId))
+          .innerJoin(managedAccounts, eq(managedAccounts.clerkUserId, clerkUserId))
+          .where(
+            and(
+              eq(connections.tenantId, managed.tenantId),
+              eq(connections.status, "active"),
+              liveProof,
+              sql`${joinDomains.name} = any (
+                select lower(split_part(address, '@', 2))
+                  from unnest(${managedAccounts.emails}) as address)`,
+              sql`(not exists (
+                     select 1 from ${workspaceRoles}
+                      where ${workspaceRoles.tenantId} = ${managed.tenantId}
+                        and ${workspaceRoles.clerkUserId} = ${clerkUserId}
+                        and ${workspaceRoles.role} in ('owner', 'admin'))
+                   or exists (
+                     select 1 from ${identities}
+                      where ${identities.tenantId} = ${managed.tenantId}
+                        and ${identities.connectionId} = ${connections.id}
+                        and ${identities.clerkUserId} = ${clerkUserId}))`,
+            ),
+          )
+          .orderBy(
+            sql`${connections.id} is distinct from ${managed.connectionId}`,
+            connections.createdAt,
+          )
+          .limit(1)
         return {
-          managed: { tenantId: managed.tenantId, connectionId: managed.connectionId },
+          managed: { tenantId: managed.tenantId, connectionId: route?.id ?? null },
           session: row
             ? {
                 ...toSession(row.session),
