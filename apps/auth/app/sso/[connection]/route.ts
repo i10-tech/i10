@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server"
+import { redirectHere } from "../../_lib/sso-server"
 
 export const dynamic = "force-dynamic"
 
@@ -19,9 +20,8 @@ export async function GET(
 ) {
   const { connection } = await params
   if (!UUID.test(connection)) return new Response("Not found.", { status: 404 })
-  const url = new URL("/sso/start", request.url)
-  url.searchParams.set("connection", connection)
+  const query = new URLSearchParams({ connection })
   const redirect = request.nextUrl.searchParams.get("redirect_url")
-  if (redirect) url.searchParams.set("redirect_url", redirect)
-  return Response.redirect(url, 303)
+  if (redirect) query.set("redirect_url", redirect)
+  return redirectHere(`/sso/start?${query.toString()}`)
 }

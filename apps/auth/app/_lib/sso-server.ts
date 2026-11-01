@@ -1,6 +1,7 @@
 import "server-only"
 import { randomBytes } from "node:crypto"
 import type { NextRequest } from "next/server"
+import { isAllowedOrigin } from "./redirect"
 
 /**
  * The SSO bridge's browser half, server side (#337). See the API's
@@ -58,11 +59,25 @@ export function readCookie(request: NextRequest, name: string): string | null {
   return value && /^[A-Za-z0-9_-]{32,128}$/.test(value) ? value : null
 }
 
-/** Where a refused or broken sign-in lands: the continue page shows why. */
-export function failedUrl(request: NextRequest, message: string): URL {
-  const url = new URL("/sso/continue", request.url)
-  url.hash = new URLSearchParams({ error: message }).toString()
-  return url
+/**
+ * Where a refused or broken sign-in lands: the continue page shows why.
+ *
+ * ⚠ A RELATIVE PATH, NEVER A URL BUILT FROM `request.url`. Behind the proxy
+ * that is the server's bind address (`https://localhost:3004` in dev,
+ * `http://0.0.0.0:3000` in the pod), not the host the browser asked for. The
+ * browser resolves a relative Location against the URL it actually requested.
+ * Nor is the Host header trusted to build an absolute one.
+ */
+export function failedUrl(message: string): string {
+  return `/sso/continue#${new URLSearchParams({ error: message }).toString()}`
+}
+
+/** A redirect to a path (and hash) of this same app: relative, see `failedUrl`. */
+export function redirectHere(pathAndHash: string, status = 303): Response {
+  return new Response(null, {
+    status,
+    headers: { Location: pathAndHash, "Cache-Control": "no-store" },
+  })
 }
 
 /**
@@ -73,10 +88,31 @@ export function failedUrl(request: NextRequest, message: string): URL {
  * sign-in through THEIR connection would end with this browser signed in to
  * their account (login CSRF). Browsers that send no Sec-Fetch-Site at all are
  * let through: they predate the header, and the binding cookie still holds.
+ *
+ * ⚠ OR CROSS-SITE WITH OUR CONSOLE AS THE REFERER. Chromium labels a click
+ * from dash.i10.localhost to auth.i10.localhost `cross-site` (measured
+ * 2026-10-31, while sibling *.lab.localhost hosts are same-site), so the
+ * header alone refused every start from the console. The Referer is set by the
+ * browser and another site cannot make it ours; a missing one still refuses.
  */
 export function startedByUs(request: NextRequest): boolean {
   const site = request.headers.get("sec-fetch-site")
-  return (
-    site === null || site === "same-origin" || site === "same-site" || site === "none"
+  if (
+    site === null ||
+    site === "same-origin" ||
+    site === "same-site" ||
+    site === "none"
   )
+    return true
+  return site === "cross-site" && isAllowedOrigin(refererOrigin(request))
+}
+
+function refererOrigin(request: NextRequest): string | null {
+  const referer = request.headers.get("referer")
+  if (!referer) return null
+  try {
+    return new URL(referer).origin
+  } catch {
+    return null
+  }
 }

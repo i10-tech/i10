@@ -21,12 +21,11 @@ async function finish(
   request: NextRequest,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  const signedOut = new URL("/sign-in", request.url)
+  const signedOut = "/sign-in"
   try {
     const upstream = await callApi("/sso/saml/slo", body)
     const answer = (await upstream.json()) as { redirectUrl?: string | null }
-    if (upstream.ok && answer.redirectUrl)
-      return leave(new URL(answer.redirectUrl), true)
+    if (upstream.ok && answer.redirectUrl) return leave(answer.redirectUrl, true)
     return leave(signedOut, true)
   } catch {
     return leave(signedOut, true)
@@ -40,7 +39,7 @@ export async function GET(
   const connection = connectionOf((await params).connection)
   const rawQuery = request.nextUrl.search.replace(/^\?/, "")
   if (!connection || !rawQuery || rawQuery.length > 96 * 1024)
-    return leave(new URL("/sign-in", request.url), true)
+    return leave("/sign-in", true)
   return finish(request, { connection, binding: "redirect", rawQuery })
 }
 
@@ -55,8 +54,7 @@ export async function POST(
     : form?.has("SAMLResponse")
       ? "SAMLResponse"
       : null
-  if (!connection || !form || !parameter)
-    return leave(new URL("/sign-in", request.url), true)
+  if (!connection || !form || !parameter) return leave("/sign-in", true)
   const relayState = form.get("RelayState")
   return finish(request, {
     connection,

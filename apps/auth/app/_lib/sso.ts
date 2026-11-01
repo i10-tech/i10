@@ -26,6 +26,16 @@ export async function finishSso(
   fallbackUrl: string,
 ): Promise<string | null> {
   const failed = "We could not finish signing you in. Start again."
+  /*
+   * ⚠ EVERY FAILURE NAMES ITS STEP, like `finalizeWithoutLeaving`. One run
+   * (2026-11-01) showed this message with an active session and no bind
+   * request, and could not be repeated; the dev servers forward the console,
+   * so the next one arrives with the step and Clerk's reason.
+   */
+  const fail = (step: string, detail?: unknown) => {
+    console.error(`[auth] sso finish failed at ${step}`, detail)
+    return failed
+  }
   try {
     const swap = await fetch("/api/sso/handoff", {
       method: "POST",
@@ -48,15 +58,16 @@ export async function finishSso(
     if (clerk?.session) await clerk.session.end()
 
     const { error } = await signIn.ticket({ ticket: swapped.ticket })
-    if (error || signIn.status !== "complete") return failed
+    if (error || signIn.status !== "complete")
+      return fail("ticket", error ?? signIn.status)
     const { result } = await finalizeWithoutLeaving(
       (params) => signIn.finalize(params),
       fallbackUrl,
     )
-    if (result.error) return failed
+    if (result.error) return fail("finalize", result.error)
 
     const token = await clerk?.session?.getToken()
-    if (!token) return failed
+    if (!token) return fail("token")
     const bound = await fetch("/api/sso/bind", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
@@ -65,11 +76,14 @@ export async function finishSso(
       returnTo?: string | null
       message?: string
     }
-    if (!bound.ok) return answer.message ?? failed
+    if (!bound.ok) {
+      fail("bind", bound.status)
+      return answer.message ?? failed
+    }
 
     leaveFor(answer.returnTo ?? fallbackUrl)
     return null
-  } catch {
-    return failed
+  } catch (error) {
+    return fail("threw", error)
   }
 }

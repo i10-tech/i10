@@ -2,7 +2,13 @@ import "server-only"
 import type { NextRequest } from "next/server"
 import { callApi } from "./devices-server"
 import { afterAuthUrl } from "./redirect"
-import { BINDING_COOKIE, clearCookies, failedUrl, readCookie } from "./sso-server"
+import {
+  BINDING_COOKIE,
+  clearCookies,
+  failedUrl,
+  readCookie,
+  redirectHere,
+} from "./sso-server"
 
 /**
  * Shared with `/sso/callback/google`. `via` says which redirect URI the browser
@@ -12,8 +18,7 @@ import { BINDING_COOKIE, clearCookies, failedUrl, readCookie } from "./sso-serve
 export async function finishCallback(request: NextRequest, via: "oidc" | "google") {
   const params = request.nextUrl.searchParams
   const binding = readCookie(request, BINDING_COOKIE)
-  if (!binding)
-    return leave(failedUrl(request, "This sign-in has expired. Start again."), true)
+  if (!binding) return leave(failedUrl("This sign-in has expired. Start again."), true)
 
   let answer: {
     outcome?: string
@@ -36,22 +41,21 @@ export async function finishCallback(request: NextRequest, via: "oidc" | "google
     answer = (await upstream.json()) as typeof answer
     if (!upstream.ok)
       return leave(
-        failedUrl(request, answer.message ?? "We could not sign you in. Start again."),
+        failedUrl(answer.message ?? "We could not sign you in. Start again."),
         true,
       )
   } catch {
     return leave(
-      failedUrl(request, "Sign-in is temporarily unavailable. Try again in a moment."),
+      failedUrl("Sign-in is temporarily unavailable. Try again in a moment."),
       true,
     )
   }
 
-  return outcomeRedirect(request, answer)
+  return outcomeRedirect(answer)
 }
 
 /** Where a finished callback sends the browser, OIDC or SAML. */
 export function outcomeRedirect(
-  request: NextRequest,
   answer: {
     outcome?: string
     code?: string
@@ -64,31 +68,30 @@ export function outcomeRedirect(
 ): Response {
   if (answer.outcome === "signed_in" && answer.code) {
     // The binding cookie stays: the continue page's handoff swap needs it.
-    const url = new URL("/sso/continue", request.url)
-    url.hash = new URLSearchParams({
+    const hash = new URLSearchParams({
       code: answer.code,
       ...(answer.confirmAs !== undefined ? { confirm: answer.confirmAs ?? "" } : {}),
     }).toString()
-    const response = leave(url, false)
+    const response = leave(`/sso/continue#${hash}`, false)
     if (setCookie) response.headers.append("Set-Cookie", setCookie)
     return response
   }
   if (answer.outcome === "stepped_up")
-    return leave(new URL(answer.returnTo ?? afterAuthUrl(undefined)), true)
+    return leave(answer.returnTo ?? afterAuthUrl(undefined), true)
   if (answer.outcome === "tested") {
     const result = answer.passed ? "passed" : "failed"
-    const url = answer.returnTo
-      ? new URL(answer.returnTo)
-      : new URL("/sso/continue", request.url)
-    url.hash = new URLSearchParams({ sso_test: result }).toString()
-    return leave(url, true)
+    const hash = new URLSearchParams({ sso_test: result }).toString()
+    if (!answer.returnTo) return leave(`/sso/continue#${hash}`, true)
+    const url = new URL(answer.returnTo)
+    url.hash = hash
+    return leave(url.href, true)
   }
-  return leave(failedUrl(request, "We could not sign you in. Start again."), true)
+  return leave(failedUrl("We could not sign you in. Start again."), true)
 }
 
-export function leave(to: URL, clear: boolean): Response {
-  const response = new Response(null, { status: 303, headers: { Location: to.href } })
-  response.headers.set("Cache-Control", "no-store")
+/** `to` is a path+hash of this app (relative) or an already-validated absolute URL. */
+export function leave(to: string, clear: boolean): Response {
+  const response = redirectHere(to)
   response.headers.set("Referrer-Policy", "no-referrer")
   if (clear) clearCookies(response)
   return response

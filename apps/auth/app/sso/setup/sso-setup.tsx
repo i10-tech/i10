@@ -441,7 +441,9 @@ function TestPart({
         onClick={async () => {
           setBusy(true)
           setMessage(null)
-          const answer = await ask(token, "test")
+          const answer = await ask(token, "test", {
+            returnTo: new URL("/sso/setup", window.location.origin).href,
+          })
           if (answer.ok && typeof answer.body.redirectUrl === "string") {
             window.location.assign(answer.body.redirectUrl)
             return

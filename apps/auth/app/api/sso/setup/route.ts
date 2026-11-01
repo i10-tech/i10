@@ -47,9 +47,13 @@ export async function POST(request: NextRequest) {
   try {
     if (body?.op === "test") {
       const binding = newBinding()
+      // The page names where to come back to: only the browser knows the public
+      // origin (request.url is the bind address). The API checks it against its
+      // allowed return origins, so a forged value gains nothing.
+      const returnTo = (payload as { returnTo?: unknown }).returnTo
       const upstream = await callApiAs("POST", `${base}/test`, {
         binding,
-        returnTo: new URL("/sso/setup", request.url).href,
+        returnTo: typeof returnTo === "string" ? returnTo : null,
       })
       const answer = (await upstream.json()) as {
         redirectUrl?: string

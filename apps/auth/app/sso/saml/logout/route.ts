@@ -16,9 +16,8 @@ export const dynamic = "force-dynamic"
  * sign somebody out of i10 by linking here.
  */
 export async function GET(request: NextRequest) {
-  const signedOut = new URL("/sign-in", request.url)
-  if (!startedByUs(request))
-    return leave(failedUrl(request, "Sign out from i10 itself."), true)
+  const signedOut = "/sign-in"
+  if (!startedByUs(request)) return leave(failedUrl("Sign out from i10 itself."), true)
   try {
     const token = await (await auth()).getToken()
     if (!token) return leave(signedOut, true)
@@ -28,13 +27,9 @@ export async function GET(request: NextRequest) {
       { authorization: `Bearer ${token}` },
     )
     const answer = (await upstream.json()) as { redirectUrl?: string | null }
-    if (upstream.ok && answer.redirectUrl)
-      return leave(new URL(answer.redirectUrl), true)
+    if (upstream.ok && answer.redirectUrl) return leave(answer.redirectUrl, true)
     return leave(signedOut, true)
   } catch {
-    return leave(
-      failedUrl(request, "Sign-out is temporarily unavailable. Try again."),
-      true,
-    )
+    return leave(failedUrl("Sign-out is temporarily unavailable. Try again."), true)
   }
 }

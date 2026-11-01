@@ -40,13 +40,13 @@ export async function POST(
   const samlResponse = form?.get("SAMLResponse") ?? null
   if (!connection || !form || !samlResponse)
     return leave(
-      failedUrl(request, "We could not read your company's sign-in. Start again."),
+      failedUrl("We could not read your company's sign-in. Start again."),
       true,
     )
   const relayState = form.get("RelayState")
   const freshBinding = newBinding()
 
-  let answer: Parameters<typeof outcomeRedirect>[1] & {
+  let answer: Parameters<typeof outcomeRedirect>[0] & {
     unsolicited?: boolean
     message?: string
   }
@@ -61,18 +61,17 @@ export async function POST(
     answer = (await upstream.json()) as typeof answer
     if (!upstream.ok)
       return leave(
-        failedUrl(request, answer.message ?? "We could not sign you in. Start again."),
+        failedUrl(answer.message ?? "We could not sign you in. Start again."),
         true,
       )
   } catch {
     return leave(
-      failedUrl(request, "Sign-in is temporarily unavailable. Try again in a moment."),
+      failedUrl("Sign-in is temporarily unavailable. Try again in a moment."),
       true,
     )
   }
   // The SAML cookie has done its one job; the Lax one carries on to the swap.
   const response = outcomeRedirect(
-    request,
     answer,
     answer.unsolicited ? bindingCookie(freshBinding) : undefined,
   )

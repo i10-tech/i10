@@ -1,6 +1,6 @@
 import "server-only"
-import { createHmac } from "node:crypto"
 import { headers } from "next/headers"
+import { signedContext } from "./edge-context"
 
 /**
  * The browser's address and country, for the API (#338's SSO rate limits).
@@ -12,6 +12,10 @@ import { headers } from "next/headers"
  * (apps/console/lib/client-context.ts), so a header anybody could set is never
  * believed.
  *
+ * ⚠ ONLY AN ADDRESS WE CAN PROVE: Cloudflare's headers are believed only with
+ * `x-i10-edge` equal to EDGE_SECRET (edge-context.ts); without it nothing is
+ * signed.
+ *
  * Never throws, and null without the secret or outside a request: the API
  * then simply cannot tell browsers apart and skips its per-address limit.
  */
@@ -20,17 +24,7 @@ export async function clientContextHeader(): Promise<string | null> {
   if (!secret) return null
   try {
     const h = await headers()
-    const ip = h.get("cf-connecting-ip")
-    if (!ip) return null
-    const ctx = {
-      ip,
-      country: h.get("cf-ipcountry") ?? undefined,
-      ua: h.get("user-agent")?.slice(0, 200) ?? undefined,
-      ts: Date.now(),
-    }
-    const payload = Buffer.from(JSON.stringify(ctx)).toString("base64url")
-    const sig = createHmac("sha256", secret).update(payload).digest("base64url")
-    return `${payload}.${sig}`
+    return signedContext(h, { context: secret, edge: process.env.EDGE_SECRET })
   } catch {
     return null
   }

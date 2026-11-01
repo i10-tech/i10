@@ -4,6 +4,7 @@ import { afterAuthUrl } from "../../_lib/redirect"
 import {
   bindingCookie,
   failedUrl,
+  redirectHere,
   samlBindingCookie,
   newBinding,
   startedByUs,
@@ -22,10 +23,7 @@ export const dynamic = "force-dynamic"
  */
 export async function GET(request: NextRequest) {
   if (!startedByUs(request))
-    return Response.redirect(
-      failedUrl(request, "Start your company's sign-in from i10."),
-      303,
-    )
+    return redirectHere(failedUrl("Start your company's sign-in from i10."))
   const connection = request.nextUrl.searchParams.get("connection") ?? ""
   const returnTo = afterAuthUrl(
     request.nextUrl.searchParams.get("redirect_url") ?? undefined,
@@ -42,17 +40,12 @@ export async function GET(request: NextRequest) {
     })
     answer = (await upstream.json()) as typeof answer
     if (!upstream.ok || !answer.redirectUrl)
-      return Response.redirect(
-        failedUrl(
-          request,
-          answer.message ?? "We could not start your company's sign-in.",
-        ),
-        303,
+      return redirectHere(
+        failedUrl(answer.message ?? "We could not start your company's sign-in."),
       )
   } catch {
-    return Response.redirect(
-      failedUrl(request, "Sign-in is temporarily unavailable. Try again in a moment."),
-      303,
+    return redirectHere(
+      failedUrl("Sign-in is temporarily unavailable. Try again in a moment."),
     )
   }
 

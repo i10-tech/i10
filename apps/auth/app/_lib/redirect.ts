@@ -32,6 +32,11 @@ const allowed = () =>
     .map((o) => o.trim())
     .filter(Boolean)
 
+/** Whether an origin is one of ours that sign-in may return to (the console). */
+export function isAllowedOrigin(origin: string | null): boolean {
+  return origin !== null && allowed().includes(origin)
+}
+
 export function afterAuthUrl(raw: string | string[] | undefined): string {
   const candidate = Array.isArray(raw) ? raw[0] : raw
   if (!candidate) return fallback()
