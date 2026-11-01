@@ -17,6 +17,7 @@ import {
   memoryStore,
 } from "./identity-fakes.js"
 import { memoryPolicy } from "./identity-policy-fakes.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * Setup links (#340): made by an admin for one draft or testing connection,
@@ -108,6 +109,7 @@ function world(
       returnOrigins: ["https://dash.i10.localhost"],
       take: fixedWindow(null),
       contextSecret: undefined,
+      edgeSecret: EDGE_SECRET,
       ...(limits
         ? {
             limits: {
@@ -287,7 +289,7 @@ describe("using a setup link", () => {
     await perLink.link(made.token, "GET")
     expect((await perLink.link(made.token, "GET")).status).toBe(429)
     const perIp = world({}, { perIp: 1 })
-    const ip = { "cf-connecting-ip": "203.0.113.9" }
+    const ip = { "cf-connecting-ip": "203.0.113.9", ...EDGE_PROOF }
     await perIp.link(`i10_setup_${"x".repeat(43)}`, "GET", "", undefined, ip)
     expect(
       (await perIp.link(`i10_setup_${"y".repeat(43)}`, "GET", "", undefined, ip))

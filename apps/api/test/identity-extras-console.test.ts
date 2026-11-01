@@ -28,6 +28,7 @@ const summary = (id: string, name: string): KeySummary => ({
   prefix: "i10_live_abcd",
   mode: "live",
   scopes: [],
+  createdBy: "user_gone",
   createdAt: new Date("2026-09-01T00:00:00Z"),
   lastUsedAt: new Date("2026-10-27T00:00:00Z"),
   expiresAt: null,
@@ -76,6 +77,13 @@ function app(
   const evicted: string[] = []
   const keyStore = {
     createdBy: async (_t: string, user: string) => (user === "user_gone" ? live : []),
+    createdByDeprovisioned: async () =>
+      opts.deprovisioned
+        ? live.map((key) => ({
+            key,
+            deprovisionedAt: new Date("2026-08-01T00:00:00Z"),
+          }))
+        : [],
     revoke: async (_t: string, id: string) => (revoked.push(id), { secretHash: "H1" }),
     rotate: async (_t: string, id: string, o?: { createdBy?: string | null }) => {
       rotations.push({ id, ...(o ?? {}) })
@@ -226,6 +234,36 @@ describe("the SIEM settings", () => {
     const res = await w.call("user_owner", "POST", "/identity/siem/test")
     expect(await res.json()).toMatchObject({ ok: true })
     expect(w.audit("siem.tested")).toHaveLength(1)
+  })
+})
+
+describe("every live key of the deprovisioned", () => {
+  const all = "/identity/deprovisioned/api-keys"
+
+  it("groups them by person with when they left, for an admin", async () => {
+    const w = app({ deprovisioned: true })
+    const res = await w.call("user_admin", "GET", all)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      data: Array<{ user_id: string; deprovisioned_at: string; keys: { id: string }[] }>
+    }
+    expect(body.data).toHaveLength(1)
+    expect(body.data[0]).toMatchObject({
+      user_id: "user_gone",
+      deprovisioned_at: "2026-08-01T00:00:00.000Z",
+    })
+    expect(body.data[0]!.keys.map((k) => k.id)).toEqual([KEY])
+  })
+
+  it("is empty when nobody with a live key was deprovisioned", async () => {
+    const w = app()
+    const res = await w.call("user_admin", "GET", all)
+    expect(await res.json()).toEqual({ data: [] })
+  })
+
+  it("refuses a member", async () => {
+    const w = app({ deprovisioned: true })
+    expect((await w.call("user_m", "GET", all)).status).toBe(403)
   })
 })
 

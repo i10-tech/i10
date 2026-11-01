@@ -482,6 +482,20 @@ export function memoryDirectories(
       )
       return g ? structuredClone(g) : null
     },
+    async groupSummaries(tenantId, did) {
+      return groups
+        .filter((g) => g.tenantId === tenantId && g.directoryId === did)
+        .map((g) => ({
+          id: g.id,
+          displayName: g.displayName,
+          memberCount: memberships.filter((m) => m.groupId === g.id).length,
+        }))
+        .sort(
+          (a, b) =>
+            a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()) ||
+            a.id.localeCompare(b.id),
+        )
+    },
     async membersOf(_t, groupIds) {
       const out = new Map<string, { id: string; display: string }[]>()
       for (const m of memberships)

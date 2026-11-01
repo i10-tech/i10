@@ -155,6 +155,61 @@ automated sync: their images do not exist until the first Build run, and
 automation would leave Argo permanently red on `ImagePullBackOff`. Turn it on
 in the same commit that first pins a real digest.
 
+## Edge proof: `x-i10-edge` and `EDGE_SECRET` (#345)
+
+The origin (Traefik on :443) answers the internet directly - grey-cloud hosts
+such as `mail.i10.tech` point at the same box - so `cf-connecting-ip` and the
+other `cf-*` headers are only as true as the caller who typed them. The API,
+console and auth app therefore believe them ONLY when the request carries
+`x-i10-edge` equal to `EDGE_SECRET` (compared in constant time). Without the
+proof the client address is unknown, and an unknown address is REFUSED by the
+API-key and console IP allowlists. Per-IP rate limits are skipped for an
+unknown address (the per-connection and per-directory caps still apply).
+
+**1. Generate the secret** (never paste it anywhere but Doppler and Cloudflare):
+
+    openssl rand -base64 48
+
+**2. Doppler.** Set `EDGE_SECRET` in the i10 project, `prod` (root) config. It
+reaches api, console and auth through `i10-shared`. ⚠ The API refuses to boot in
+production without it (32 characters or more), so it must be in Doppler BEFORE
+the code deploys. The operator syncs the Secret but no pod reloads; the deploy
+restarts them.
+
+**3. Cloudflare Transform Rule.** Rules > Transform Rules > Modify Request
+Header > Create rule > "Set static":
+
+- Rule name: `i10 edge proof`
+- Expression (edit expression):
+  `(http.host in {"api.i10.tech" "dash.i10.tech" "auth.i10.tech"})`
+- Set static header `x-i10-edge` to the secret.
+
+Do NOT include `clerk.i10.tech`: that host is a Worker which forwards headers
+to Clerk and needs no proof (the gateway also strips `x-i10-edge` as a second
+guard). Do not cover the mail, mta-sts or autoconfig hosts.
+
+**4. Rollout order, with no lockout window.** Doppler first, the Transform Rule
+second, the code deploy last. The old code ignores the header, so the first two
+steps change nothing. Reversing it is the unsafe order: between a deploy and
+the rule every address is unknown, and every IP-allowlisted API key and console
+session would be refused.
+
+**5. Verify.** Against the origin directly, forging an allowlisted address on a
+workspace that has the API-key allowlist on:
+
+    curl -si --resolve api.i10.tech:443:<origin-ip> \
+      -H 'cf-connecting-ip: <an allowlisted address>' \
+      -H "Authorization: Bearer $KEY" https://api.i10.tech/domains
+
+Expect `403 ip_not_allowed`. The same call through Cloudflare from an
+allowlisted address returns 200. The Logs page shows no address for the forged
+request.
+
+**Traefik allowlist.** `i10/workloads/edge-allowlist.yaml` defines
+`i10-cloudflare-only` but is NOT attached: Traefik's Service uses klipper-lb
+with `externalTrafficPolicy: Cluster`, which masquerades the source, so
+attaching it would 403 everything. The file says what the PSL repo needs first.
+
 ## Traps already paid for
 
 - **`kubectl apply` cannot create large CRDs** - they exceed the 262144-byte

@@ -295,6 +295,35 @@ suite("#345 identity extras", () => {
       expect(keys.map((k) => k.name)).toEqual(["Production"])
     })
 
+    it("finds every live key of the deprovisioned, in this workspace only", async () => {
+      const insert = (
+        tenant: string,
+        by: string,
+        name: string,
+        opts: { revoked?: boolean; expired?: boolean } = {},
+      ) =>
+        owner`insert into core.api_keys (tenant_id, name, secret_hash, prefix, mode, created_by, revoked_at, expires_at)
+              values (${tenant}, ${name}, ${crypto.randomUUID()}, 'i10_live_x', 'live', ${by},
+                      ${opts.revoked ? new Date() : null},
+                      ${opts.expired ? new Date(Date.now() - 86_400_000) : null})`
+      const left = async (tenant: string, user: string) =>
+        owner`insert into identity.events (tenant_id, type, subject_user_id)
+              values (${tenant}, 'member.deprovisioned', ${user})`
+      await insert(acme, "user_left", "Live")
+      await insert(acme, "user_left", "Revoked", { revoked: true })
+      await insert(acme, "user_left", "Expired", { expired: true })
+      await insert(acme, "user_stays", "Staying")
+      await insert(acme, "user_revoked_only", "Gone", { revoked: true })
+      await insert(rival, "user_rival", "Rival")
+      await left(acme, "user_left")
+      await left(acme, "user_revoked_only")
+      await left(rival, "user_rival")
+      const found = await keyStore(database).createdByDeprovisioned(acme)
+      expect(found.map((f) => f.key.name)).toEqual(["Live"])
+      expect(found[0]!.key.createdBy).toBe("user_left")
+      expect(found[0]!.deprovisionedAt).toBeInstanceOf(Date)
+    })
+
     it("rotates into the actor's name when asked", async () => {
       const store = keyStore(database)
       const [made] = await store.createdBy(acme, "user_gone")

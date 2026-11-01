@@ -23,6 +23,7 @@ import {
   user,
 } from "./identity-fakes.js"
 import { memoryWorkspacePolicy } from "./identity-workspace-fakes.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * The workspace policy gate (#345): the IP allowlist for console and API
@@ -35,7 +36,7 @@ const T0 = Date.parse("2026-10-24T09:00:00Z")
 const SESSION = "sess_ada"
 
 const headersFrom = (ip: string | null, extra: Record<string, string> = {}) =>
-  new Headers({ ...(ip ? { "cf-connecting-ip": ip } : {}), ...extra })
+  new Headers({ ...(ip ? { "cf-connecting-ip": ip, ...EDGE_PROOF } : {}), ...extra })
 
 function gateWorld(
   over: {
@@ -60,6 +61,7 @@ function gateWorld(
     clerk: clerk.clerk,
     forget: (input) => forgotten.push(input),
     contextSecret: undefined,
+    edgeSecret: EDGE_SECRET,
     log,
     now: () => clock,
     ...(over.factorTtlMs !== undefined ? { factorTtlMs: over.factorTtlMs } : {}),
@@ -363,13 +365,17 @@ describe("the IP allowlist for API keys", () => {
       await next()
     })
     app.get("/ping", requireApiKey, (c) => c.text("ok"))
-    const call = (ip: string | null) =>
+    const call = (ip: string | null, proof: Record<string, string> = EDGE_PROOF) =>
       app.request("/ping", {
         headers: {
           authorization: `Bearer ${minted.secret}`,
-          ...(ip ? { "cf-connecting-ip": ip } : {}),
+          ...(ip ? { "cf-connecting-ip": ip, ...proof } : {}),
         },
       })
+    // ⚠ A LISTED ADDRESS IS NOT ENOUGH ON ITS OWN: the origin is reachable
+    // without Cloudflare, so a forged cf-connecting-ip must not open the list.
+    expect((await call("203.0.113.7", {})).status).toBe(403)
+    expect((await call("203.0.113.7", { "x-i10-edge": "wrong" })).status).toBe(403)
     const outside = await call("198.51.100.9")
     expect(outside.status).toBe(403)
     expect(await outside.json()).toMatchObject({ name: "ip_not_allowed" })

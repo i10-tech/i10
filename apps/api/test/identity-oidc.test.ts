@@ -516,6 +516,17 @@ describe("Google Workspace", () => {
     expect(settingsFor(c, null)).toBeNull()
     expect(oidcReady(c, true)).toBe(true)
   })
+  it("reads an unset client authentication as the preset's first, so the connection is ready", () => {
+    const c = connection({
+      protocol: "oidc",
+      provider: "ping",
+      config: {
+        oidc: { issuer: "https://idp.acme.test", clientId: "c", clientSecretSet: true },
+      },
+    })
+    expect(settingsFor(c, null)?.clientAuth).toBe(OIDC_PRESETS.ping.clientAuth[0])
+    expect(oidcReady(c, false)).toBe(true)
+  })
 })
 
 describe("private_key_jwt", () => {

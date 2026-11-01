@@ -4,6 +4,7 @@ import {
   verifyClientContext,
   type SightingDeps,
 } from "./identity.js"
+import { edgeHeader } from "../identity/edge.js"
 import { markDirty, type RiskLockRedis } from "./runner.js"
 
 /**
@@ -13,7 +14,7 @@ import { markDirty, type RiskLockRedis } from "./runner.js"
  * in-cluster from the console's server, carrying the browser's view in the
  * signed `x-i10-client` header. A request that came through Cloudflare
  * directly (somebody calling `/console/*` with their own session) carries
- * Cloudflare's headers, which only Cloudflare can set on that path. Anything
+ * Cloudflare's headers, believed ONLY with the `x-i10-edge` proof. Anything
  * else - an unsigned context, a stale one - is not a sighting.
  *
  * ⚠ CLOUDFLARE'S `T1` IS TOR. Its country header says `T1` for a Tor exit,
@@ -23,6 +24,8 @@ import { markDirty, type RiskLockRedis } from "./runner.js"
 export function sessionObserver(
   deps: SightingDeps & {
     secret?: string
+    /** `EDGE_SECRET`: without it Cloudflare's headers are not believed. */
+    edgeSecret: string | undefined
     redis: SightingDeps["redis"] & Pick<RiskLockRedis, "sadd">
     log?: SightingDeps["log"]
   },
@@ -37,12 +40,15 @@ export function sessionObserver(
     request: Request
   }) => {
     const signed = verifyClientContext(request.headers.get(CLIENT_HEADER), deps.secret)
-    const direct = request.headers.get("cf-connecting-ip")
+    const direct = edgeHeader(request.headers, "cf-connecting-ip", deps.edgeSecret)
     const ip = signed?.ip ?? direct ?? null
     if (!ip) return
     let country =
-      (signed?.country ?? request.headers.get("cf-ipcountry") ?? "").toUpperCase() ||
-      null
+      (
+        signed?.country ??
+        edgeHeader(request.headers, "cf-ipcountry", deps.edgeSecret) ??
+        ""
+      ).toUpperCase() || null
     const tor = country === "T1"
     if (country === "T1" || country === "XX") country = null
 

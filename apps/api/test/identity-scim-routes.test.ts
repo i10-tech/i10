@@ -11,6 +11,7 @@ import {
   scimToken,
 } from "./identity-scim-fakes.js"
 import { OTHER_TENANT, TENANT } from "./identity-fakes.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * The SCIM server's HTTP surface (#342): every refusal of the token, the
@@ -54,6 +55,7 @@ function world(options: Options = {}) {
     },
     take: fixedWindow(null, () => clock.getTime()),
     contextSecret: undefined,
+    edgeSecret: EDGE_SECRET,
     ...(options.limits ? { limits: options.limits } : {}),
     log: {
       warn: (o, m) => logged.push({ level: "warn", o, m }),
@@ -321,7 +323,7 @@ const TOKEN_BODY_START = "i10_scim_".length
 // ── Limits ──────────────────────────────────────────────────────────────────
 
 describe("limits", () => {
-  const ip = { "cf-connecting-ip": "203.0.113.7" }
+  const ip = { "cf-connecting-ip": "203.0.113.7", ...EDGE_PROOF }
 
   it("limits requests per client address with a 429 and Retry-After, in SCIM's shape", async () => {
     const w = world({ limits: { perIp: { max: 3, windowSeconds: 60 } } })
@@ -335,7 +337,7 @@ describe("limits", () => {
     expect(
       (
         await w.call("GET", "/Users", {
-          headers: { "cf-connecting-ip": "203.0.113.8" },
+          headers: { "cf-connecting-ip": "203.0.113.8", ...EDGE_PROOF },
         })
       ).status,
     ).toBe(200)

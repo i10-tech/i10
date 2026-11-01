@@ -58,6 +58,7 @@ describe("the role map", () => {
         "workspace:manage",
         "workspace:delete",
         "sso:manage",
+        "api_keys:manage_all",
       ],
       admin: [
         "members:manage",
@@ -65,6 +66,7 @@ describe("the role map", () => {
         "roles:manage",
         "workspace:manage",
         "sso:manage",
+        "api_keys:manage_all",
       ],
       member: [],
     })

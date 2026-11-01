@@ -66,6 +66,7 @@ import {
   scimToken,
 } from "./identity-scim-fakes.js"
 import { ACME, row as roleRow, rolesDeps } from "./role-fixtures.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * Google Workspace directory sync (#343): domain-wide delegation credentials,
@@ -784,6 +785,7 @@ describe("console Google directory routes: refusals first, then owner flow", () 
       record: (t, e) => w.identity.store.record(t, e),
       take: fixedWindow(null),
       contextSecret: undefined,
+      edgeSecret: EDGE_SECRET,
       log,
     })
     const scimRes = await scimApp.request(`/${googleDir.id}/Users`, {
@@ -1879,6 +1881,7 @@ describe("POST /google/directory/notify: refusals first, then pull scheduling", 
         record: (tenantId, event) => identity.store.record(tenantId, event),
         take: fixedWindow(null, () => NOW.getTime()),
         contextSecret: undefined,
+        edgeSecret: EDGE_SECRET,
         limits: {
           ...(opts.limits?.perIp
             ? { perIp: { max: opts.limits.perIp, windowSeconds: 60 } }
@@ -2023,6 +2026,7 @@ describe("POST /google/directory/notify: refusals first, then pull scheduling", 
       method: "POST",
       headers: {
         "cf-connecting-ip": "203.0.113.9",
+        ...EDGE_PROOF,
         "x-goog-channel-id": CHANNEL_ID,
         "x-goog-channel-token": "wrong",
       },
@@ -2032,6 +2036,7 @@ describe("POST /google/directory/notify: refusals first, then pull scheduling", 
       method: "POST",
       headers: {
         "cf-connecting-ip": "203.0.113.9",
+        ...EDGE_PROOF,
         "x-goog-channel-id": CHANNEL_ID,
         "x-goog-channel-token": "wrong",
       },

@@ -84,6 +84,8 @@ export interface WorkspacePolicyConsoleDeps {
   gate: Pick<WorkspaceGate, "forgetTenant">
   /** `CLIENT_CONTEXT_SECRET`, for the saving owner's address. */
   contextSecret: string | undefined
+  /** `EDGE_SECRET`, so the saver's address is one we can prove. */
+  edgeSecret: string | undefined
 }
 
 export function mountIdentityWorkspacePolicy(app: Hono, d: ConsoleDeps): void {
@@ -186,7 +188,11 @@ export function mountIdentityWorkspacePolicy(app: Hono, d: ConsoleDeps): void {
     loaded: { wp: WorkspacePolicyConsoleDeps; tenantId: string },
   ) => ({
     policy: await loaded.wp.store.policy(loaded.tenantId),
-    address: clientAddress(c.req.raw.headers, loaded.wp.contextSecret),
+    address: clientAddress(
+      c.req.raw.headers,
+      loaded.wp.contextSecret,
+      loaded.wp.edgeSecret,
+    ),
   })
 
   app.get("/identity/ip-allowlist", async (c) => {
@@ -241,7 +247,7 @@ export function mountIdentityWorkspacePolicy(app: Hono, d: ConsoleDeps): void {
       )
 
     const { userId } = c.get("user")
-    const address = clientAddress(c.req.raw.headers, wp.contextSecret)
+    const address = clientAddress(c.req.raw.headers, wp.contextSecret, wp.edgeSecret)
     let grace: { userId: string; address: string; until: Date } | null = null
     let lockoutConfirmed = false
     if (body.console && !(address && inRanges(address, readRanges(normal.ranges)))) {

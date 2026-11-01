@@ -31,6 +31,7 @@ describe("forwarding", () => {
           forwarded: "for=6.6.6.6",
           "clerk-secret-key": "sk_live_attacker",
           "clerk-proxy-url": "https://evil.example",
+          "x-i10-edge": "an-edge-secret-that-must-not-reach-clerk",
           cookie: "__client=abc",
         }),
       },
@@ -50,6 +51,7 @@ describe("forwarding", () => {
     expect(h.get("forwarded")).toBeNull()
     expect(h.get("cf-connecting-ip")).toBeNull()
     expect(h.get("cf-ray")).toBeNull()
+    expect(h.get("x-i10-edge")).toBeNull()
     // The browser's own headers are Clerk's business and go through.
     expect(h.get("cookie")).toBe("__client=abc")
     expect(h.get("origin")).toBe("https://dash.i10.tech")

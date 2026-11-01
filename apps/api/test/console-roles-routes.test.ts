@@ -71,6 +71,7 @@ describe("GET /team/roles", () => {
           "roles:manage",
           "workspace:manage",
           "sso:manage",
+          "api_keys:manage_all",
         ],
         grantable: ["admin", "member"],
         invitable: ["member", "admin"],
@@ -289,6 +290,7 @@ describe("GET /console/me", () => {
         "roles:manage",
         "workspace:manage",
         "sso:manage",
+        "api_keys:manage_all",
       ],
     })
   })

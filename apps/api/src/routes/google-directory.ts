@@ -25,6 +25,8 @@ export interface GoogleDirectoryRouteDeps {
   record(tenantId: string, event: AuditEvent): Promise<void>
   take: ReturnType<typeof fixedWindow>
   contextSecret: string | undefined
+  /** `EDGE_SECRET`: what makes `cf-connecting-ip` believable. */
+  edgeSecret: string | undefined
   limits?: Partial<{ perIp: Limit; authFailures: Limit; perDirectory: Limit }>
   log: Pick<Logger, "warn" | "error">
   now?: () => Date
@@ -98,7 +100,7 @@ export function createGoogleDirectoryRoutes(deps?: GoogleDirectoryRouteDeps) {
     }
 
     try {
-      const ip = trustedClientIp(c.req.raw.headers, deps.contextSecret)
+      const ip = trustedClientIp(c.req.raw.headers, deps.contextSecret, deps.edgeSecret)
       if (ip) {
         const verdict = await deps.take(`google-notify:ip:${ip}`, limits.perIp)
         if (!verdict.ok) return tooMany(c, verdict.retryAfter)

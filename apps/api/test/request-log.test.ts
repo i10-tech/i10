@@ -41,9 +41,10 @@ const sessions: SessionVerifier = {
 }
 const tenants: TenantResolver = { resolve: async () => TENANT }
 
-function appWith(recorded: RequestRecord[], failRecord = false) {
+function appWith(recorded: RequestRecord[], failRecord = false, edgeSecret?: string) {
   return createApp({
     apiKeyAuth,
+    edgeSecret,
     // ⚠ NO `emailLookup`, SO `GET /emails/{id}` ANSWERS 501. That is deliberate:
     // what is under test is that the request is LOGGED, and a route that fails
     // is exactly the kind a customer opens this page to find.
@@ -91,6 +92,29 @@ describe("the API request log", () => {
       status: 501,
     })
     expect(recorded[0]?.durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it("records the Cloudflare address and country only with the edge proof", async () => {
+    const EDGE = "edge-secret-for-tests-0123456789abcdef"
+    const cf = { "cf-connecting-ip": "198.51.100.4", "cf-ipcountry": "DE" }
+    const path = "/emails/0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
+    const recorded: RequestRecord[] = []
+    const app = appWith(recorded, false, EDGE)
+    const send = (extra: Record<string, string>) =>
+      app.request(path, {
+        headers: { Authorization: `Bearer ${KEY}`, ...cf, ...extra },
+      })
+
+    await send({ "x-i10-edge": EDGE })
+    await send({})
+    await send({ "x-i10-edge": "wrong" })
+    await settle()
+
+    expect(recorded.map((r) => [r.clientIp, r.country])).toEqual([
+      ["198.51.100.4", "DE"],
+      [null, null],
+      [null, null],
+    ])
   })
 
   /**

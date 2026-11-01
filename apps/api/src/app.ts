@@ -1,4 +1,5 @@
 import type { Context } from "hono"
+import { edgeHeader } from "./identity/edge.js"
 import { bodyLimit } from "hono/body-limit"
 import pkg from "../package.json" with { type: "json" }
 import { OpenAPIHono } from "@hono/zod-openapi"
@@ -231,6 +232,12 @@ export interface AppDeps {
   console?: ConsoleDeps
 
   /**
+   * `EDGE_SECRET`: what makes Cloudflare's `cf-*` headers believable (the
+   * request log's address and country). Unset, they are recorded as unknown.
+   */
+  edgeSecret?: string | undefined
+
+  /**
    * Queue depth, for the autoscaler and for whoever is asking why mail is slow.
    *
    * ⚠ TOKEN-GUARDED AND OUTSIDE THE OPENAPI DOCUMENT. It is not a customer
@@ -396,11 +403,11 @@ export function createApp(deps: AppDeps = {}) {
           errorName: status >= 400 ? await errorNameOf(c.res) : null,
           userAgent: c.req.header("user-agent") ?? null,
           // ⚠ CLOUDFLARE'S, BECAUSE api.i10.tech IS PROXIED AND THE SOCKET IS
-          // CLOUDFLARE'S EDGE. A caller reaching the origin directly could forge
-          // these; the worst it buys them is hiding where a key is used from,
-          // which a proxy buys them anyway (#170).
-          clientIp: c.req.header("cf-connecting-ip") ?? null,
-          country: c.req.header("cf-ipcountry") ?? null,
+          // CLOUDFLARE'S EDGE - BELIEVED ONLY WITH THE `x-i10-edge` PROOF. A
+          // caller reaching the origin directly could forge these, so without
+          // the proof they are recorded as unknown.
+          clientIp: edgeHeader(c.req.raw.headers, "cf-connecting-ip", deps.edgeSecret),
+          country: edgeHeader(c.req.raw.headers, "cf-ipcountry", deps.edgeSecret),
         })
       })().catch((error: unknown) => {
         requestLogger?.warn(

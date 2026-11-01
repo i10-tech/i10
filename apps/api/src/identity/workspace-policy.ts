@@ -116,6 +116,8 @@ export interface WorkspaceGateDeps {
   forget(input: { userId?: string; sessionId?: string }): void
   /** `CLIENT_CONTEXT_SECRET`: the signed context carrying the browser's address. */
   contextSecret: string | undefined
+  /** `EDGE_SECRET`: without it no `cf-connecting-ip` is believed. */
+  edgeSecret: string | undefined
   log: Logger
   now?: () => number
   policyTtlMs?: number
@@ -244,7 +246,7 @@ export function workspaceGate(d: WorkspaceGateDeps): WorkspaceGate {
     const on = surface === "console" ? policy.network.console : policy.network.apiKeys
     if (!on) return "pass"
     // ⚠ UNKNOWN IS REFUSED, NOT ALLOWED: no address we trust is no address in the list.
-    const address = clientAddress(headers, d.contextSecret)
+    const address = clientAddress(headers, d.contextSecret, d.edgeSecret)
     if (address) {
       if (inRanges(address, ranges)) return "pass"
       const grace = policy.network.grace

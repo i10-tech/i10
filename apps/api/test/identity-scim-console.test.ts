@@ -6,7 +6,13 @@ import type { Role } from "../src/console/roles.js"
 import { MAX_DIRECTORIES } from "../src/routes/console/identity-scim.js"
 import { TOKEN_PREFIX, readToken } from "../src/identity/scim.js"
 import { hashSecret } from "../src/identity/model.js"
-import { TENANT, log, memoryClerk, memoryStore } from "./identity-fakes.js"
+import {
+  OTHER_TENANT,
+  TENANT,
+  log,
+  memoryClerk,
+  memoryStore,
+} from "./identity-fakes.js"
 import { DIRECTORY, memoryDirectories, scimToken } from "./identity-scim-fakes.js"
 
 /**
@@ -118,6 +124,7 @@ describe("directories: permissions", () => {
       ["POST", `/identity/directories/${DIRECTORY}/tokens`],
       ["DELETE", `/identity/directories/${DIRECTORY}/tokens/${MISSING}`],
       ["GET", `/identity/directories/${DIRECTORY}/conflicts`],
+      ["GET", `/identity/directories/${DIRECTORY}/groups`],
       ["POST", `/identity/directories/${DIRECTORY}/conflicts/${MISSING}/retry`],
     ] as const)
       expect((await w.call("user_owner", method, path, {})).status).toBe(501)
@@ -131,6 +138,10 @@ describe("directories: permissions", () => {
     ).toBe(403)
     expect(
       (await w.call("user_m", "GET", `/identity/directories/${DIRECTORY}/conflicts`))
+        .status,
+    ).toBe(403)
+    expect(
+      (await w.call("user_m", "GET", `/identity/directories/${DIRECTORY}/groups`))
         .status,
     ).toBe(403)
     expect((await w.call("user_admin", "GET", "/identity/directories")).status).toBe(
@@ -645,6 +656,114 @@ describe("directories: what they do", () => {
     expect(w.events("directory.user_retried")).toMatchObject([
       { actorUserId: "user_admin", data: { directoryUserId: made.row.id } },
     ])
+  })
+
+  it("lists a directory's groups with member counts, sorted by name ignoring case", async () => {
+    const w = consoleApp()
+    const person = async (userName: string) => {
+      const made = await w.dirs.store.createUser(
+        TENANT,
+        DIRECTORY,
+        {
+          userName,
+          externalId: null,
+          displayName: null,
+          givenName: null,
+          familyName: null,
+          email: userName,
+          active: true,
+          resource: {},
+        },
+        { type: "scim.user.created" },
+      )
+      if (made === "taken") throw new Error("taken")
+      return made.row.id
+    }
+    const ada = await person("ada@acme.test")
+    const bob = await person("bob@acme.test")
+    const group = (displayName: string, members: string[]) =>
+      w.dirs.store.createGroup(
+        TENANT,
+        DIRECTORY,
+        {
+          displayName,
+          externalId: null,
+          members,
+          resource: {},
+        },
+        { type: "scim.group.created" },
+      )
+    const zeta = await group("zeta", [ada, bob])
+    const alpha = await group("Alpha", [ada])
+    const mid = await group("beta", [])
+    // Neither another directory of this workspace nor another workspace's
+    // directory with the same shape leaks in.
+    await group("elsewhere-ignored", [])
+    const other = await w.dirs.store.createDirectory(OTHER_TENANT, {
+      name: "Theirs",
+      provider: "generic",
+      createdBy: "u",
+    })
+    await w.dirs.store.createGroup(
+      OTHER_TENANT,
+      other.id,
+      { displayName: "rival-secret", externalId: null, members: [], resource: {} },
+      { type: "scim.group.created" },
+    )
+
+    const res = await w.call(
+      "user_admin",
+      "GET",
+      `/identity/directories/${DIRECTORY}/groups`,
+    )
+    expect(res.status).toBe(200)
+    const body = await json(res)
+    expect(body.data.map((g: { displayName: string }) => g.displayName)).toEqual([
+      "Alpha",
+      "beta",
+      "elsewhere-ignored",
+      "zeta",
+    ])
+    expect(body.data).toContainEqual({
+      id: zeta.row.id,
+      displayName: "zeta",
+      memberCount: 2,
+    })
+    expect(body.data).toContainEqual({
+      id: alpha.row.id,
+      displayName: "Alpha",
+      memberCount: 1,
+    })
+    expect(body.data).toContainEqual({
+      id: mid.row.id,
+      displayName: "beta",
+      memberCount: 0,
+    })
+    expect(JSON.stringify(body)).not.toContain("rival-secret")
+  })
+
+  it("answers 404 for another workspace's directory and leaks none of its groups", async () => {
+    const w = consoleApp()
+    const other = await w.dirs.store.createDirectory(OTHER_TENANT, {
+      name: "Theirs",
+      provider: "generic",
+      createdBy: "u",
+    })
+    await w.dirs.store.createGroup(
+      OTHER_TENANT,
+      other.id,
+      { displayName: "rival-secret", externalId: null, members: [], resource: {} },
+      { type: "scim.group.created" },
+    )
+    for (const id of [other.id, MISSING, "banana"]) {
+      const res = await w.call(
+        "user_admin",
+        "GET",
+        `/identity/directories/${id}/groups`,
+      )
+      expect(res.status).toBe(404)
+      expect(JSON.stringify(await json(res))).not.toContain("rival-secret")
+    }
   })
 
   it("keeps a token's hash out of every response", async () => {

@@ -67,6 +67,8 @@ export interface SetupRouteDeps {
   returnOrigins: readonly string[]
   take: ReturnType<typeof fixedWindow>
   contextSecret: string | undefined
+  /** `EDGE_SECRET`: what makes `cf-connecting-ip` believable. */
+  edgeSecret: string | undefined
   limits?: Partial<{ perIp: Limit; perLink: Limit }>
   now?: () => Date
 }
@@ -134,7 +136,7 @@ export function createSetupRoutes(d: SetupRouteDeps) {
         429,
       )
     }
-    const ip = trustedClientIp(c.req.raw.headers, d.contextSecret)
+    const ip = trustedClientIp(c.req.raw.headers, d.contextSecret, d.edgeSecret)
     if (ip) {
       const verdict = await d.take(`setup:ip:${ip}`, limits.perIp)
       if (!verdict.ok) return tooMany(verdict.retryAfter)

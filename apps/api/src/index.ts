@@ -1121,6 +1121,7 @@ const observeSession = env.RISK_ENABLED
       ...(risk.takeover ? { takeover: risk.takeover } : {}),
       rescore: (tenantId, trigger) => rescore.rescore([tenantId], trigger),
       ...(env.CLIENT_CONTEXT_SECRET ? { secret: env.CLIENT_CONTEXT_SECRET } : {}),
+      edgeSecret: env.EDGE_SECRET,
       log,
     })
   : undefined
@@ -1348,6 +1349,7 @@ const workspace = workspaceGate({
   clerk: identityClerk,
   forget: (input) => gateChecker.forget(input),
   contextSecret: env.CLIENT_CONTEXT_SECRET,
+  edgeSecret: env.EDGE_SECRET,
   log,
 })
 const sessionIds = clerkSessionIds(clerk, {
@@ -1576,6 +1578,7 @@ const identityConsole = {
     store: workspaceRules,
     gate: workspace,
     contextSecret: env.CLIENT_CONTEXT_SECRET,
+    edgeSecret: env.EDGE_SECRET,
   },
   protocols: [...engines.keys()],
   scim: {
@@ -2020,6 +2023,7 @@ const app = createApp({
           rateLimit: ssoRateLimit({
             take: fixedWindow(cache),
             contextSecret: env.CLIENT_CONTEXT_SECRET,
+            edgeSecret: env.EDGE_SECRET,
             perConnectionStarts: true,
           }),
           ...(oidc
@@ -2071,6 +2075,7 @@ const app = createApp({
             returnOrigins: [...env.AUTH_ORIGINS, ...env.CONSOLE_ORIGINS],
             take: fixedWindow(cache),
             contextSecret: env.CLIENT_CONTEXT_SECRET,
+            edgeSecret: env.EDGE_SECRET,
           },
         },
       }
@@ -2083,6 +2088,7 @@ const app = createApp({
     record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
     take: fixedWindow(cache),
     contextSecret: env.CLIENT_CONTEXT_SECRET,
+    edgeSecret: env.EDGE_SECRET,
     log,
   },
   internalAuthd: {
@@ -2097,6 +2103,7 @@ const app = createApp({
     record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
     take: fixedWindow(cache),
     contextSecret: env.CLIENT_CONTEXT_SECRET,
+    edgeSecret: env.EDGE_SECRET,
     log,
   },
   internalIdentity: {
@@ -2115,6 +2122,8 @@ const app = createApp({
     },
     log,
   },
+
+  edgeSecret: env.EDGE_SECRET,
 
   /**
    * The dashboard, at `/console`.

@@ -51,6 +51,11 @@ export const PERMISSIONS = [
    * without billing.
    */
   "sso:manage",
+  /**
+   * See, rotate, revoke and re-scope EVERY API key of the workspace. Without
+   * it a member handles only the keys they created themselves.
+   */
+  "api_keys:manage_all",
 ] as const
 export type Permission = (typeof PERMISSIONS)[number]
 
@@ -68,6 +73,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "roles:manage",
     "workspace:manage",
     "sso:manage",
+    "api_keys:manage_all",
   ],
   member: [],
 }

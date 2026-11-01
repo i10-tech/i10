@@ -9,6 +9,7 @@ import {
   type Counter,
 } from "../src/identity/rate-limit.js"
 import { CLIENT_HEADER, signClientContext } from "../src/risk/identity.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /** The SSO routes' rate limits (#338): per trusted browser address, per connection. */
 
@@ -32,7 +33,15 @@ function memoryRedis(): Counter & { fail: boolean } {
 
 function app(take = fixedWindow(memoryRedis(), () => 1_000_000)) {
   const a = new Hono()
-  a.use("*", ssoRateLimit({ take, contextSecret: SECRET, perConnectionStarts: true }))
+  a.use(
+    "*",
+    ssoRateLimit({
+      take,
+      contextSecret: SECRET,
+      edgeSecret: EDGE_SECRET,
+      perConnectionStarts: true,
+    }),
+  )
   a.post("/sso/attempts", async (c) => c.json({ seen: await c.req.json() }))
   a.post("/sso/bind", (c) => c.json({ ok: true }))
   return a
@@ -43,18 +52,43 @@ const signed = (ip: string) => signClientContext({ ip, ts: Date.now() }, SECRET)
 describe("the address a limit is counted against", () => {
   it("is the signed context's, then Cloudflare's, and never a forged header", () => {
     const h = (o: Record<string, string>) => new Headers(o)
-    expect(trustedClientIp(h({ [CLIENT_HEADER]: signed("203.0.113.9") }), SECRET)).toBe(
-      "203.0.113.9",
-    )
-    expect(trustedClientIp(h({ "cf-connecting-ip": "198.51.100.4" }), SECRET)).toBe(
-      "198.51.100.4",
-    )
+    expect(
+      trustedClientIp(
+        h({ [CLIENT_HEADER]: signed("203.0.113.9") }),
+        SECRET,
+        EDGE_SECRET,
+      ),
+    ).toBe("203.0.113.9")
+    expect(
+      trustedClientIp(
+        h({ "cf-connecting-ip": "198.51.100.4", ...EDGE_PROOF }),
+        SECRET,
+        EDGE_SECRET,
+      ),
+    ).toBe("198.51.100.4")
     const forged = signClientContext(
       { ip: "203.0.113.9", ts: Date.now() },
       "x".repeat(40),
     )
-    expect(trustedClientIp(h({ [CLIENT_HEADER]: forged }), SECRET)).toBeNull()
-    expect(trustedClientIp(h({ "x-forwarded-for": "203.0.113.9" }), SECRET)).toBeNull()
+    expect(
+      trustedClientIp(h({ [CLIENT_HEADER]: forged }), SECRET, EDGE_SECRET),
+    ).toBeNull()
+    expect(
+      trustedClientIp(h({ "x-forwarded-for": "203.0.113.9" }), SECRET, EDGE_SECRET),
+    ).toBeNull()
+  })
+
+  it("does not count a forged cf-connecting-ip, so it cannot pick its own bucket", () => {
+    const h = (o: Record<string, string>) => new Headers(o)
+    const forged = { "cf-connecting-ip": "198.51.100.4" }
+    expect(trustedClientIp(h(forged), SECRET, EDGE_SECRET)).toBeNull()
+    expect(
+      trustedClientIp(
+        h({ ...forged, "x-i10-edge": "e".repeat(40) }),
+        SECRET,
+        EDGE_SECRET,
+      ),
+    ).toBeNull()
   })
 })
 
@@ -64,7 +98,7 @@ describe("the limits", () => {
     const call = () =>
       a.request("/sso/bind", {
         method: "POST",
-        headers: { "cf-connecting-ip": "198.51.100.4" },
+        headers: { "cf-connecting-ip": "198.51.100.4", ...EDGE_PROOF },
       })
     for (let i = 0; i < PER_IP.max; i++) expect((await call()).status).toBe(200)
     const refused = await call()
@@ -73,7 +107,7 @@ describe("the limits", () => {
     // Another address is not affected.
     const other = await a.request("/sso/bind", {
       method: "POST",
-      headers: { "cf-connecting-ip": "198.51.100.5" },
+      headers: { "cf-connecting-ip": "198.51.100.5", ...EDGE_PROOF },
     })
     expect(other.status).toBe(200)
   })

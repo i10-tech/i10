@@ -798,8 +798,8 @@ export async function finishSlo(
   if (read.kind === "response") return { outcome: "done" }
 
   const logout = read.logout
+  const key = `sso:saml:logout:${connection.id}:${createHash("sha256").update(logout.id).digest("hex")}`
   try {
-    const key = `sso:saml:logout:${connection.id}:${createHash("sha256").update(logout.id).digest("hex")}`
     if (!(await d.replay.claim(key, 10 * 60 * 1000))) {
       await d.store.record(connection.tenantId, {
         type: "logout.failed",
@@ -823,40 +823,53 @@ export async function finishSlo(
    * ⚠ WITH A SUBJECT ATTRIBUTE, THE NameID DOES NOT NAME THE LINK, so only the
    * SessionIndexes can: a request without any ends nothing rather than guess.
    */
-  const sessions =
-    subject || logout.sessionIndexes.length
-      ? await d.saml.sessionsForLogout(connection.tenantId, connection.id, {
-          subject,
-          sessionIndexes: logout.sessionIndexes,
-        })
-      : []
   let revoked = 0
-  for (const session of sessions) {
-    await d.clerk.revokeSession(session.sessionId)
-    if (
-      await d.store.revokeSessionRow(
-        connection.tenantId,
-        session.sessionId,
-        "idp_logout",
-        now,
-      )
-    ) {
-      revoked++
-      await d.store.record(connection.tenantId, {
-        type: "session.revoked",
-        subjectUserId: session.clerkUserId,
-        sessionId: session.sessionId,
-        connectionId: connection.id,
-        reason: "idp_logout",
-      })
+  try {
+    const sessions =
+      subject || logout.sessionIndexes.length
+        ? await d.saml.sessionsForLogout(connection.tenantId, connection.id, {
+            subject,
+            sessionIndexes: logout.sessionIndexes,
+          })
+        : []
+    for (const session of sessions) {
+      await d.clerk.revokeSession(session.sessionId)
+      if (
+        await d.store.revokeSessionRow(
+          connection.tenantId,
+          session.sessionId,
+          "idp_logout",
+          now,
+        )
+      ) {
+        revoked++
+        await d.store.record(connection.tenantId, {
+          type: "session.revoked",
+          subjectUserId: session.clerkUserId,
+          sessionId: session.sessionId,
+          connectionId: connection.id,
+          reason: "idp_logout",
+        })
+      }
+      d.forget({ userId: session.clerkUserId, sessionId: session.sessionId })
     }
-    d.forget({ userId: session.clerkUserId, sessionId: session.sessionId })
+    await d.store.record(connection.tenantId, {
+      type: "logout.idp",
+      connectionId: connection.id,
+      data: { revoked, sessionIndexes: logout.sessionIndexes.length },
+    })
+  } catch (error) {
+    // Revoking again is harmless, so the IdP's retry must be allowed in.
+    await d.replay
+      .release(key)
+      .catch(() =>
+        d.log.warn(
+          { connectionId: connection.id },
+          "could not release a logout request",
+        ),
+      )
+    throw error
   }
-  await d.store.record(connection.tenantId, {
-    type: "logout.idp",
-    connectionId: connection.id,
-    data: { revoked, sessionIndexes: logout.sessionIndexes.length },
-  })
 
   const answerTo = settings.sloResponseUrl ?? settings.sloUrl
   let redirect: string | null = null

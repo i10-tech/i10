@@ -48,6 +48,9 @@ const NEVER_FORWARDED = new Set([
   "forwarded",
   "x-real-ip",
   "true-client-ip",
+  // ⚠ OUR EDGE SECRET (#345). The Transform Rule is not meant to cover this host,
+  // but if it ever does, Clerk must never be sent a credential of ours.
+  "x-i10-edge",
   "cf-connecting-ip",
   "cf-connecting-ipv6",
   "cf-ipcountry",

@@ -3,11 +3,13 @@ import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired } from "./http.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import { can, type Permission } from "../../console/roles.js"
+import { wasDeprovisioned } from "../../console/api-key-access.js"
 import { revokeKey, rotateKey } from "../../auth/key-actions.js"
 
 /**
  * What to do about the API keys of somebody who was deprovisioned (#345).
  *
+ *   GET  /identity/deprovisioned/api-keys                           every live key of anybody deprovisioned
  *   GET  /identity/deprovisioned/:userId/api-keys                   the live keys they created
  *   POST /identity/deprovisioned/:userId/api-keys/:keyId/rotate     (owner, step-up)
  *   POST /identity/deprovisioned/:userId/api-keys/:keyId/revoke     (owner, step-up)
@@ -42,15 +44,6 @@ export function mountIdentityApiKeys(app: Hono, d: ConsoleDeps): void {
     return Boolean(d.roles && (await can(d.roles.store, tenantId, userId, permission)))
   }
 
-  /** Whether the audit log says this person was deprovisioned here. */
-  const wasDeprovisioned = async (tenantId: string, member: string) => {
-    const rows = await d.identity!.store.events(tenantId, {
-      limit: 200,
-      subjectUserId: member,
-    })
-    return rows.some((r) => r.type === "member.deprovisioned")
-  }
-
   const present = (k: {
     id: string
     name: string
@@ -69,13 +62,43 @@ export function mountIdentityApiKeys(app: Hono, d: ConsoleDeps): void {
     expires_at: k.expiresAt?.toISOString() ?? null,
   })
 
+  // ⚠ ONE QUERY IN THE STORE, NOT A PAGE OF EVENTS: a leaver from long ago whose
+  // key still works must be on this list. Same definition of "deprovisioned" as
+  // `wasDeprovisioned`, so this list and the per-person routes cannot disagree.
+  app.get("/identity/deprovisioned/api-keys", async (c) => {
+    if (!d.identity || !d.keys) return c.json(notWired("API keys"), 501)
+    if (!(await allowed(c, "sso:manage")))
+      return c.json(forbidden("Only an admin can see this."), 403)
+    const { tenantId } = c.get("auth")
+    const rows = await d.keys.store.createdByDeprovisioned(tenantId)
+    const people = new Map<
+      string,
+      { user_id: string; deprovisioned_at: string; keys: ReturnType<typeof present>[] }
+    >()
+    for (const { key, deprovisionedAt } of rows) {
+      if (!key.createdBy) continue
+      const person = people.get(key.createdBy) ?? {
+        user_id: key.createdBy,
+        deprovisioned_at: deprovisionedAt.toISOString(),
+        keys: [],
+      }
+      person.keys.push(present(key))
+      people.set(key.createdBy, person)
+    }
+    return c.json({
+      data: [...people.values()].sort((a, b) =>
+        a.deprovisioned_at < b.deprovisioned_at ? 1 : -1,
+      ),
+    })
+  })
+
   app.get("/identity/deprovisioned/:userId/api-keys", async (c) => {
     if (!d.identity || !d.keys) return c.json(notWired("API keys"), 501)
     if (!(await allowed(c, "sso:manage")))
       return c.json(forbidden("Only an admin can see this."), 403)
     const { tenantId } = c.get("auth")
     const member = c.req.param("userId")
-    if (!USER.test(member) || !(await wasDeprovisioned(tenantId, member)))
+    if (!USER.test(member) || !(await wasDeprovisioned(d, tenantId, member)))
       return c.json(notFound(), 404)
     const keys = await d.keys.store.createdBy(tenantId, member)
     return c.json({ data: keys.map(present) })
@@ -97,7 +120,8 @@ export function mountIdentityApiKeys(app: Hono, d: ConsoleDeps): void {
         const member = c.req.param("userId")
         const keyId = c.req.param("keyId")
         if (!USER.test(member) || !UUID.test(keyId)) return c.json(notFound(), 404)
-        if (!(await wasDeprovisioned(tenantId, member))) return c.json(notFound(), 404)
+        if (!(await wasDeprovisioned(d, tenantId, member)))
+          return c.json(notFound(), 404)
         // ⚠ THE KEY MUST BE ONE THEY CREATED AND THAT IS STILL LIVE: the route
         // is not a way to reach any other key of the workspace.
         const key = (await d.keys.store.createdBy(tenantId, member)).find(

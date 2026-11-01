@@ -23,6 +23,7 @@ import {
   memoryStore,
 } from "./identity-fakes.js"
 import { testIssuer } from "./oidc-issuer.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * OpenID Connect Back-Channel Logout (#345): an IdP's signed Logout Token ends
@@ -464,6 +465,7 @@ describe("POST /sso/oidc/backchannel/:connection", () => {
             rateLimit: ssoRateLimit({
               take: fixedWindow(null, () => 1_000_000),
               contextSecret: undefined,
+              edgeSecret: EDGE_SECRET,
             }),
           }
         : {}),
@@ -477,7 +479,7 @@ describe("POST /sso/oidc/backchannel/:connection", () => {
         method: "POST",
         headers: {
           "content-type": init.type ?? "application/x-www-form-urlencoded",
-          ...(init.ip ? { "cf-connecting-ip": init.ip } : {}),
+          ...(init.ip ? { "cf-connecting-ip": init.ip, ...EDGE_PROOF } : {}),
         },
         body:
           init.body ??

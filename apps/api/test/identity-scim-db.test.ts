@@ -912,4 +912,39 @@ suite("SCIM directories", () => {
       )[0]!.n,
     ).toBe(0)
   })
+
+  it("lists a directory's groups with member counts, never another tenant's or directory's", async () => {
+    const a = await store().createUser(acme, dirA, person("gs1"), event)
+    const b = await store().createUser(acme, dirA, person("gs2"), event)
+    if (a === "taken" || b === "taken") throw new Error("taken")
+    const mk = (t: string, d: string, displayName: string, ids: string[] = []) =>
+      store().createGroup(
+        t,
+        d,
+        readGroup({ displayName, members: ids.map((value) => ({ value })) }),
+        { type: "scim.group.created" },
+      )
+    await mk(acme, dirA, "zz-picker-last", [a.row.id, b.row.id])
+    await mk(acme, dirA, "AA-picker-first", [a.row.id])
+    await mk(acme, dirA, "mm-picker-empty")
+    await mk(acme, dirB, "zz-picker-other-directory")
+    await mk(rival, rivalDir, "zz-picker-rival")
+
+    const mine = (await store().groupSummaries(acme, dirA)).filter(
+      (g) =>
+        g.displayName.endsWith("picker-last") ||
+        g.displayName.includes("picker-first") ||
+        g.displayName.includes("picker-empty"),
+    )
+    expect(mine.map((g) => [g.displayName, g.memberCount])).toEqual([
+      ["AA-picker-first", 1],
+      ["mm-picker-empty", 0],
+      ["zz-picker-last", 2],
+    ])
+    const all = (await store().groupSummaries(acme, dirA)).map((g) => g.displayName)
+    expect(all).not.toContain("zz-picker-other-directory")
+    expect(all).not.toContain("zz-picker-rival")
+    // Another tenant asking for this tenant's directory id gets nothing.
+    expect(await store().groupSummaries(rival, dirA)).toEqual([])
+  })
 })

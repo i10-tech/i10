@@ -84,6 +84,8 @@ export interface ScimRouteDeps {
   record(tenantId: string, event: AuditEvent): Promise<void>
   take: ReturnType<typeof fixedWindow>
   contextSecret: string | undefined
+  /** `EDGE_SECRET`: what makes `cf-connecting-ip` believable. */
+  edgeSecret: string | undefined
   limits?: Partial<{ perIp: Limit; authFailures: Limit; perDirectory: Limit }>
   log: Pick<Logger, "warn" | "error">
   now?: () => Date
@@ -160,7 +162,7 @@ export function createScimRoutes(deps?: ScimRouteDeps) {
     c: Context<Env>,
     d: ScimRouteDeps,
   ): Promise<Response | null> {
-    const ip = trustedClientIp(c.req.raw.headers, d.contextSecret)
+    const ip = trustedClientIp(c.req.raw.headers, d.contextSecret, d.edgeSecret)
     if (ip) {
       const verdict = await d.take(`scim:ip:${ip}`, limits.perIp)
       if (!verdict.ok)

@@ -308,6 +308,14 @@ export interface DirectoryStore {
     directoryId: string,
     id: string,
   ): Promise<DirectoryGroupRow | null>
+  /**
+   * Every group of one directory with its member count, by display name
+   * (case-insensitive): what the console's group picker lists.
+   */
+  groupSummaries(
+    tenantId: string,
+    directoryId: string,
+  ): Promise<{ id: string; displayName: string; memberCount: number }[]>
   membersOf(
     tenantId: string,
     groupIds: string[],

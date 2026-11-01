@@ -36,6 +36,7 @@ import { TOKEN_PREFIX } from "../../identity/scim.js"
  *   POST   /identity/directories/:id/tokens           { overlapSeconds? } (owner, step-up)
  *   DELETE /identity/directories/:id/tokens/:tokenId  (step-up)
  *   GET    /identity/directories/:id/conflicts        who is not fully in, and why
+ *   GET    /identity/directories/:id/groups           its groups with member counts (sso:manage)
  *   POST   /identity/directories/:id/conflicts/:userId/retry
  *
  * ⚠ A DIRECTORY CREATES AND DEPROVISIONS ACCOUNTS, SO WHO CONTROLS IT IS AN
@@ -630,6 +631,17 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     return c.json({
       data: (await scim.store.conflicts(tenantId, directory.id)).map(conflictView),
     })
+  })
+
+  app.get("/identity/directories/:id/groups", async (c) => {
+    const scim = wired()
+    if (!scim) return c.json(notWired("SCIM directories"), 501)
+    if (!(await allowed(c, "sso:manage")))
+      return c.json(forbidden("Only an admin can see directories."), 403)
+    const directory = await directoryOf(c)
+    if (!directory) return c.json(notFound(), 404)
+    const { tenantId } = c.get("auth")
+    return c.json({ data: await scim.store.groupSummaries(tenantId, directory.id) })
   })
 
   app.post("/identity/directories/:id/conflicts/:userId/retry", async (c) => {

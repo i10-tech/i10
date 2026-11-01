@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono"
 import { verifyClientContext, CLIENT_HEADER } from "../risk/identity.js"
+import { edgeHeader } from "./edge.js"
 
 /**
  * Rate limits on the public SSO routes (#338): every `/sso/*` step a browser
@@ -10,7 +11,8 @@ import { verifyClientContext, CLIENT_HEADER } from "../risk/identity.js"
  * these in-cluster, so the API's socket is never the browser: apps/auth sends
  * the browser's address as the signed `x-i10-client` context (risk/
  * identity.ts), and a caller reaching api.i10.tech directly comes through
- * Cloudflare, whose `cf-connecting-ip` the edge sets. When neither is there
+ * Cloudflare, whose `cf-connecting-ip` is believed ONLY with the `x-i10-edge`
+ * proof (identity/edge.ts). When neither is there
  * (local development, or apps/auth without `CLIENT_CONTEXT_SECRET`) the
  * per-IP limit is skipped rather than putting every person into one bucket.
  *
@@ -76,18 +78,24 @@ export function fixedWindow(redis: Counter | null, now: () => number = Date.now)
   }
 }
 
-/** The browser's address, from the signed context or Cloudflare; null when neither. */
+/**
+ * The browser's address, from the signed context or from Cloudflare WITH the
+ * edge proof; null when neither (a forged `cf-connecting-ip` is unknown).
+ */
 export function trustedClientIp(
   headers: Headers,
   contextSecret: string | undefined,
+  edgeSecret: string | undefined,
 ): string | null {
   const signed = verifyClientContext(headers.get(CLIENT_HEADER), contextSecret)
-  return signed?.ip ?? headers.get("cf-connecting-ip")?.trim() ?? null
+  return signed?.ip ?? edgeHeader(headers, "cf-connecting-ip", edgeSecret)
 }
 
 export function ssoRateLimit(deps: {
   take: ReturnType<typeof fixedWindow>
   contextSecret: string | undefined
+  /** `EDGE_SECRET`: what makes a `cf-connecting-ip` believable. */
+  edgeSecret: string | undefined
   /**
    * Count starts per connection too. The body is read through Hono's
    * `c.req.json()`, which keeps it for the route to read again.
@@ -106,7 +114,7 @@ export function ssoRateLimit(deps: {
         429,
       )
     }
-    const ip = trustedClientIp(c.req.raw.headers, deps.contextSecret)
+    const ip = trustedClientIp(c.req.raw.headers, deps.contextSecret, deps.edgeSecret)
     const logoutOf = backchannelConnection(c.req.path)
     if (ip) {
       const verdict = await deps.take(

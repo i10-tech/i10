@@ -12,6 +12,7 @@ import {
 } from "../src/identity/workspace-policy.js"
 import { TENANT, connection, log, memoryClerk, memoryStore } from "./identity-fakes.js"
 import { memoryWorkspacePolicy } from "./identity-workspace-fakes.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * The console routes for the workspace session policy, the second-factor rule
@@ -51,6 +52,7 @@ function consoleApp(wired = true) {
               store: policy.store,
               gate: { forgetTenant: () => forgotten++ },
               contextSecret: undefined,
+              edgeSecret: EDGE_SECRET,
             },
           }
         : {}),
@@ -69,7 +71,7 @@ function consoleApp(wired = true) {
       headers: {
         "content-type": "application/json",
         "x-user": userId,
-        ...(ip ? { "cf-connecting-ip": ip } : {}),
+        ...(ip ? { "cf-connecting-ip": ip, ...EDGE_PROOF } : {}),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
@@ -305,6 +307,7 @@ describe("IP allowlist", () => {
           "x-user": "user_owner",
           "x-forwarded-for": "203.0.113.7",
           "cf-connecting-ip": "198.51.100.1",
+          ...EDGE_PROOF,
         },
         body: JSON.stringify(list()),
       })

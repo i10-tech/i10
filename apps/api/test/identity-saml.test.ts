@@ -726,6 +726,32 @@ describe("single logout", () => {
     ).toEqual({ outcome: "refused", failure: "replayed" })
   })
 
+  it("gives the LogoutRequest back when Clerk fails, so the IdP's retry is accepted", async () => {
+    const w = await world()
+    const { sessionId } = await w.signIn()
+    const q = signRedirect(logoutXml())
+    w.clerk.fail.revokeSession = true
+    const first = finishSlo(w.slo, w.engine, {
+      connectionId: CONNECTION,
+      binding: "redirect",
+      rawQuery: q,
+    })
+    expect(
+      await first.then(
+        () => "resolved",
+        () => "threw",
+      ),
+    ).toBe("threw")
+    w.clerk.fail.revokeSession = false
+    const retry = await finishSlo(w.slo, w.engine, {
+      connectionId: CONNECTION,
+      binding: "redirect",
+      rawQuery: q,
+    })
+    expect(retry).toMatchObject({ outcome: "logged_out", revoked: 1 })
+    expect(w.store.sessions.get(sessionId)!.revokedReason).toBe("idp_logout")
+  })
+
   it("answers 503 for a LogoutRequest when the replay cache is down", async () => {
     const w = await world()
     await w.signIn()

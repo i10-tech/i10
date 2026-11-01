@@ -213,7 +213,8 @@ export function readRanges(stored: readonly string[]): Cidr[] {
  * The address a request came from, or null when it cannot be known.
  *
  * ⚠ ONLY WHAT THE API ALREADY TRUSTS (`trustedClientIp`): the console's
- * signed context, else Cloudflare's `cf-connecting-ip`. Never
+ * signed context, else Cloudflare's `cf-connecting-ip` WITH the `x-i10-edge`
+ * proof (identity/edge.ts). Never
  * `x-forwarded-for` and never the socket (in-cluster it is the console's pod).
  * An address that does not parse is unknown, and unknown is refused under an
  * active allowlist.
@@ -221,7 +222,8 @@ export function readRanges(stored: readonly string[]): Cidr[] {
 export function clientAddress(
   headers: Headers,
   contextSecret: string | undefined,
+  edgeSecret: string | undefined,
 ): Address | null {
-  const ip = trustedClientIp(headers, contextSecret)
+  const ip = trustedClientIp(headers, contextSecret, edgeSecret)
   return ip ? parseAddress(ip) : null
 }

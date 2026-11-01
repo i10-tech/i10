@@ -30,6 +30,8 @@ const tenants: TenantResolver = { resolve: async () => TENANT }
 
 const store = {
   list: async () => [],
+  // The caller's own key: a member may revoke what they created.
+  get: async () => ({ id: KEY_ID, createdBy: "user_1" }),
   revoke: async () => ({ secretHash: "HASH" }),
 } as unknown as KeyStore
 

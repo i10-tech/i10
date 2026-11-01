@@ -994,6 +994,19 @@ const schema = z.object({
    */
   CLIENT_CONTEXT_SECRET: z.string().min(32).optional(),
 
+  /**
+   * The proof a request came through OUR Cloudflare zone. A Transform Rule
+   * stamps it as `x-i10-edge` on proxied requests; `cf-connecting-ip` and the
+   * other `cf-*` headers are believed only alongside it (identity/edge.ts).
+   * Shared with the console and apps/auth, which check the same header.
+   *
+   * ⚠ REQUIRED IN PRODUCTION, checked below. The origin is reachable without
+   * Cloudflare, so without it every client address is forgeable - the IP
+   * allowlists would be advisory. Unset elsewhere means every address is
+   * unknown, never trusted.
+   */
+  EDGE_SECRET: z.string().min(32).optional(),
+
   /** IPinfo Lite, for the network behind an IP. Unset: no hosting signal. */
   IPINFO_TOKEN: z.string().min(1).optional(),
 
@@ -1286,6 +1299,17 @@ const validated = schema.superRefine((env, ctx) => {
       code: "custom",
       path: [assets.find((k) => env[k] === undefined)!],
       message: `template images need all of ${assets.join(", ")} or none of them.`,
+    })
+  }
+
+  if (env.NODE_ENV === "production" && !env.EDGE_SECRET) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["EDGE_SECRET"],
+      message:
+        `is required when NODE_ENV is production (32 characters or more). Without ` +
+        `it no Cloudflare header can be believed, and the IP allowlists would ` +
+        `refuse every request.`,
     })
   }
 

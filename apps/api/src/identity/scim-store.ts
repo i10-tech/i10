@@ -764,6 +764,34 @@ export function directoryStore(db: Database): DirectoryStore {
       return row ? toGroup(row) : null
     },
 
+    async groupSummaries(tenantId, directoryId) {
+      return withTenant(db, tenantId, (tx) =>
+        tx
+          .select({
+            id: directoryGroups.id,
+            displayName: directoryGroups.displayName,
+            memberCount: count(directoryMemberships.userId),
+          })
+          .from(directoryGroups)
+          .leftJoin(
+            directoryMemberships,
+            and(
+              eq(directoryMemberships.groupId, directoryGroups.id),
+              eq(directoryMemberships.directoryId, directoryGroups.directoryId),
+              eq(directoryMemberships.tenantId, directoryGroups.tenantId),
+            ),
+          )
+          .where(
+            and(
+              eq(directoryGroups.tenantId, tenantId),
+              eq(directoryGroups.directoryId, directoryId),
+            ),
+          )
+          .groupBy(directoryGroups.id, directoryGroups.displayName)
+          .orderBy(sql`lower(${directoryGroups.displayName})`, asc(directoryGroups.id)),
+      )
+    },
+
     async membersOf(tenantId, groupIds) {
       const out = new Map<string, { id: string; display: string }[]>()
       if (groupIds.length === 0) return out

@@ -130,13 +130,19 @@ export function settingsFor(
       mfaAcrValues: [],
     }
   }
-  if (!stored.issuer || !stored.clientId || !stored.clientAuth) return null
+  /*
+   * ⚠ NO METHOD STORED MEANS THE PRESET'S FIRST, which is what the setup
+   * screen shows as chosen. Requiring it stored left a connection whose admin
+   * never touched the select permanently unready.
+   */
+  const clientAuth = stored.clientAuth ?? preset.clientAuth[0]
+  if (!stored.issuer || !stored.clientId || !clientAuth) return null
   return {
     provider: preset,
     issuer: stored.issuer,
     discoveryUrl: stored.discoveryUrl ?? null,
     clientId: stored.clientId,
-    clientAuth: stored.clientAuth,
+    clientAuth,
     scopes: scopes.length ? scopes : [...preset.scopes],
     acrValues: strings(stored.acrValues),
     mfaAcrValues: strings(stored.mfaAcrValues),

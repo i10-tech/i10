@@ -10,6 +10,7 @@ import {
   readRanges,
 } from "../src/identity/network.js"
 import { signClientContext } from "../src/risk/identity.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * The IP allowlist's address maths (#345): what counts as an address, what a
@@ -183,33 +184,49 @@ describe("the address a request came from", () => {
   it("is the signed context's, ahead of any header", () => {
     const signed = signClientContext({ ip: "203.0.113.7", ts: Date.now() }, SECRET)
     const a = clientAddress(
-      headers({ "x-i10-client": signed, "cf-connecting-ip": "198.51.100.1" }),
+      headers({
+        "x-i10-client": signed,
+        "cf-connecting-ip": "198.51.100.1",
+        ...EDGE_PROOF,
+      }),
       SECRET,
+      EDGE_SECRET,
     )
     expect(a && formatAddress(a)).toBe("203.0.113.7")
   })
 
   it("is Cloudflare's header when nothing is signed", () => {
-    const a = clientAddress(headers({ "cf-connecting-ip": "198.51.100.1" }), SECRET)
+    const a = clientAddress(
+      headers({ "cf-connecting-ip": "198.51.100.1", ...EDGE_PROOF }),
+      SECRET,
+      EDGE_SECRET,
+    )
     expect(a && formatAddress(a)).toBe("198.51.100.1")
   })
 
   it("is never x-forwarded-for, whoever sets it", () => {
     expect(
-      clientAddress(headers({ "x-forwarded-for": "203.0.113.7" }), SECRET),
+      clientAddress(headers({ "x-forwarded-for": "203.0.113.7" }), SECRET, EDGE_SECRET),
     ).toBeNull()
     expect(
       clientAddress(
         headers({
           "x-forwarded-for": "203.0.113.7",
           "cf-connecting-ip": "198.51.100.1",
+          ...EDGE_PROOF,
         }),
         SECRET,
+        EDGE_SECRET,
       ),
     ).toMatchObject({ family: 4 })
     const a = clientAddress(
-      headers({ "x-forwarded-for": "203.0.113.7", "cf-connecting-ip": "198.51.100.1" }),
+      headers({
+        "x-forwarded-for": "203.0.113.7",
+        "cf-connecting-ip": "198.51.100.1",
+        ...EDGE_PROOF,
+      }),
       SECRET,
+      EDGE_SECRET,
     )
     expect(a && formatAddress(a)).toBe("198.51.100.1")
   })
@@ -220,19 +237,44 @@ describe("the address a request came from", () => {
       "other-secret",
     )
     const a = clientAddress(
-      headers({ "x-i10-client": forged, "cf-connecting-ip": "198.51.100.1" }),
+      headers({
+        "x-i10-client": forged,
+        "cf-connecting-ip": "198.51.100.1",
+        ...EDGE_PROOF,
+      }),
       SECRET,
+      EDGE_SECRET,
     )
     expect(a && formatAddress(a)).toBe("198.51.100.1")
   })
 
   it("is unknown when there is nothing to trust, or it does not parse", () => {
-    expect(clientAddress(headers({}), SECRET)).toBeNull()
+    expect(clientAddress(headers({}), SECRET, EDGE_SECRET)).toBeNull()
     expect(
-      clientAddress(headers({ "cf-connecting-ip": "not-an-ip" }), SECRET),
+      clientAddress(
+        headers({ "cf-connecting-ip": "not-an-ip", ...EDGE_PROOF }),
+        SECRET,
+        EDGE_SECRET,
+      ),
     ).toBeNull()
     expect(
-      clientAddress(headers({ "cf-connecting-ip": "fe80::1%eth0" }), SECRET),
+      clientAddress(
+        headers({ "cf-connecting-ip": "fe80::1%eth0", ...EDGE_PROOF }),
+        SECRET,
+        EDGE_SECRET,
+      ),
+    ).toBeNull()
+  })
+
+  it("is unknown when Cloudflare's header comes without the edge proof", () => {
+    const forged = { "cf-connecting-ip": "198.51.100.1" }
+    expect(clientAddress(headers(forged), SECRET, EDGE_SECRET)).toBeNull()
+    expect(
+      clientAddress(headers({ ...forged, "x-i10-edge": "wrong" }), SECRET, EDGE_SECRET),
+    ).toBeNull()
+    // No secret configured: nothing can be proven, so nothing is believed.
+    expect(
+      clientAddress(headers({ ...forged, ...EDGE_PROOF }), SECRET, undefined),
     ).toBeNull()
   })
 })
