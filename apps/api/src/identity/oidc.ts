@@ -25,7 +25,8 @@ import {
  * the bridge (identity/bridge.ts) doing everything after "the IdP said this".
  *
  *   begin:   discovery (cached), then an authorization URL with PKCE S256,
- *            `state`, `nonce`, and for a step-up `prompt=login max_age=0`.
+ *            `state`, `nonce`, and for a step-up `prompt=login max_age=0`
+ *            (a forced login: `prompt=login` alone).
  *   verify:  the callback's `code` exchanged at the token endpoint with the
  *            attempt's verifier; RFC 9207 `iss` checked; the ID token's
  *            signature (JWKS), `iss`, `aud`, `exp` and `nonce` checked by
@@ -484,7 +485,12 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
         // gets `max_age=0` alone (inferred: unverified against Google itself).
         if (settings.provider.id !== "google") params.prompt = "login"
         params.max_age = "0"
+      } else if (attempt.forceLogin) {
+        // Any login will do, not a recent one: no `max_age`.
+        params.prompt = settings.provider.id === "google" ? "select_account" : "login"
       }
+      // A hint for the IdP's username box or account chooser, never a check.
+      if (attempt.loginHint) params.login_hint = attempt.loginHint
       // A hint for Google's account chooser, never a check: `hd` is checked in `verify`.
       if (settings.provider.id === "google") {
         const live = await deps.store.liveDomains(connection.tenantId, connection.id)

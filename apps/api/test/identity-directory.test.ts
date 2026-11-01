@@ -1362,6 +1362,103 @@ describe("scheduling and the kick", () => {
     void p
   })
 
+  describe("retrying the waiting list", () => {
+    /** Three people: two parked as workspace_full (dave first), one as role_exempt. */
+    async function parked() {
+      const w = world()
+      const at = new Date("2026-10-21T10:00:00Z")
+      w.dirs.setClock(at)
+      const dave = await push(
+        w,
+        person({ userName: "dave@acme.test", externalId: "d" }),
+      )
+      const erin = await push(
+        w,
+        person({ userName: "erin@acme.test", externalId: "e" }),
+      )
+      const admin = await push(
+        w,
+        person({ userName: "root@acme.test", externalId: "r" }),
+      )
+      stored(w, dave.id).conflict = "workspace_full"
+      stored(w, erin.id).conflict = "workspace_full"
+      stored(w, admin.id).conflict = "role_exempt"
+      // The real store answers newest first.
+      const store = { ...w.dirs.store }
+      store.conflicts = async (t, d) => (await w.dirs.store.conflicts(t, d)).reverse()
+      const requeued: string[] = []
+      store.requeue = async (t, d, id) => {
+        requeued.push(id)
+        return w.dirs.store.requeue(t, d, id)
+      }
+      return { store, requeued, dave, erin, at }
+    }
+    const jobs: string[] = []
+    const kicker = (
+      p: Awaited<ReturnType<typeof parked>>,
+      room?: (tenantId: string) => Promise<boolean>,
+    ) =>
+      directoryKicker({
+        store: p.store,
+        enqueue: async (job) =>
+          void jobs.push((job as { directoryUserId: string }).directoryUserId),
+        log: logger,
+        room,
+        now: () => p.at,
+      })
+
+    it("requeues the workspace_full rows, oldest first, once there is room", async () => {
+      jobs.length = 0
+      const p = await parked()
+      let asked = 0
+      const kick = kicker(p, async () => (asked++, true))
+      expect(await kick(TENANT, DIRECTORY, { force: true })).toBe(2)
+      expect(p.requeued).toEqual([p.dave.id, p.erin.id])
+      expect(jobs).toEqual([p.dave.id, p.erin.id])
+      expect(asked).toBe(1)
+    })
+
+    it("asks once and requeues nothing when the workspace is still full", async () => {
+      jobs.length = 0
+      const p = await parked()
+      let asked = 0
+      const kick = kicker(p, async () => (asked++, false))
+      expect(await kick(TENANT, DIRECTORY, { force: true })).toBe(0)
+      expect(p.requeued).toEqual([])
+      expect(jobs).toEqual([])
+      expect(asked).toBe(1)
+    })
+
+    it("does nothing about the waiting list without a room check", async () => {
+      jobs.length = 0
+      const p = await parked()
+      expect(await kicker(p)(TENANT, DIRECTORY, { force: true })).toBe(0)
+      expect(p.requeued).toEqual([])
+    })
+
+    it("does not ask for room when the kick is throttled", async () => {
+      jobs.length = 0
+      const p = await parked()
+      let asked = 0
+      const kick = kicker(p, async () => (asked++, true))
+      await kick(TENANT, DIRECTORY)
+      expect(asked).toBe(1)
+      expect(await kick(TENANT, DIRECTORY)).toBe(0)
+      expect(asked).toBe(1)
+    })
+
+    it("logs and returns zero when the room check fails", async () => {
+      jobs.length = 0
+      errors.length = 0
+      const p = await parked()
+      const kick = kicker(p, async () => {
+        throw new Error("clerk down")
+      })
+      expect(await kick(TENANT, DIRECTORY, { force: true })).toBe(0)
+      expect(errors).toHaveLength(1)
+    })
+  })
+
   it("never throws when the database or the queue fail", async () => {
     const w = world()
     await push(w)

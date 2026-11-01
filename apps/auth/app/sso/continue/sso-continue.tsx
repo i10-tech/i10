@@ -24,8 +24,16 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
    * this browser asked for it, so the person sees whose account it is before
    * the code is swapped: a colleague's assertion auto-posted from another
    * site would otherwise sign this browser in as them.
+   *
+   * And when the IdP answered for somebody other than the address typed on
+   * our sign-in page (its live session won): `typed` and `connection` offer a
+   * fresh login as the typed address instead.
    */
-  const [confirm, setConfirm] = useState<{ code: string; as: string } | null>(null)
+  const [confirm, setConfirm] = useState<{
+    code: string
+    as: string
+    retry: { typed: string; href: string } | null
+  } | null>(null)
 
   useEffect(() => {
     if (!signIn || started.current) return
@@ -43,9 +51,20 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
     const code = hash.get("code")
     const confirmAs = hash.get("confirm")
     if (code && confirmAs !== null) {
-      void Promise.resolve({ code, as: confirmAs || "your company account" }).then(
-        setConfirm,
-      )
+      const typed = hash.get("typed")
+      const connection = hash.get("connection")
+      const retry =
+        typed && connection
+          ? {
+              typed,
+              href: `/sso/start?${new URLSearchParams({ connection, login_hint: typed, fresh: "1" })}`,
+            }
+          : null
+      void Promise.resolve({
+        code,
+        as: confirmAs || "your company account",
+        retry,
+      }).then(setConfirm)
       return
     }
     const finished = code
@@ -60,7 +79,9 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
     return (
       <div className="flex flex-col items-center gap-6">
         <StepHeading title="Continue to i10?">
-          {`Your company's sign-in is asking to sign you in as ${confirm.as}. Continue only if you started this.`}
+          {confirm.retry
+            ? `You typed ${confirm.retry.typed}. Your company's sign-in answered as ${confirm.as}.`
+            : `Your company's sign-in is asking to sign you in as ${confirm.as}. Continue only if you started this.`}
         </StepHeading>
         <Button
           className="w-full"
@@ -73,11 +94,23 @@ export function SsoContinue({ fallbackUrl }: { fallbackUrl: string }) {
             })
           }}
         >
-          Continue
+          {confirm.retry ? `Continue as ${confirm.as}` : "Continue"}
         </Button>
-        <ButtonLink href="/sign-in" variant="secondary" className="w-full">
-          Cancel
-        </ButtonLink>
+        {confirm.retry ? (
+          // A route handler, not a page: the router must not intercept it.
+          <ButtonLink
+            native
+            href={confirm.retry.href}
+            variant="secondary"
+            className="w-full"
+          >
+            {`Sign in as ${confirm.retry.typed}`}
+          </ButtonLink>
+        ) : (
+          <ButtonLink href="/sign-in" variant="secondary" className="w-full">
+            Cancel
+          </ButtonLink>
+        )}
       </div>
     )
 

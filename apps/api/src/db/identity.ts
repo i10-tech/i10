@@ -307,6 +307,8 @@ export const loginAttempts = identity.table(
     bindingHash: text("binding_hash").notNull(),
     /** For `step_up`: the Clerk session being made fresh. */
     stepUpSessionId: text("step_up_session_id"),
+    /** For `sign_in`: the address typed on our sign-in page, lowercased. */
+    loginHint: text("login_hint"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     /** `signed_in`, `refused`, `tested`, `stepped_up`. */

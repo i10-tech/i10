@@ -2,7 +2,7 @@ import type { ClerkClient } from "@clerk/backend"
 import { notFound } from "../mailboxes/clerk.js"
 import { TICKET_SECONDS } from "./model.js"
 import type { ClerkProvisioning } from "./directory-ports.js"
-import type { ClerkIdentity, ClerkUserSnapshot } from "./ports.js"
+import type { ClerkIdentity, ClerkUserSnapshot, Logger } from "./ports.js"
 
 /**
  * `ClerkIdentity` on Clerk's backend API: the SDK where it covers the call,
@@ -269,6 +269,39 @@ export function clerkIdentityApi(
       await clerk.users.banUser(userId)
     },
   }
+}
+
+/** A Clerk call slower than this is logged with its name. Normal is about 0.5 s. */
+export const SLOW_CLERK_MS = 3_000
+
+/**
+ * `ClerkIdentity` with every call over `SLOW_CLERK_MS` logged by name.
+ *
+ * ⚠ A SIGN-IN MAKES ABOUT TWELVE CLERK CALLS IN A ROW, and the API logs
+ * nothing else on that path. A first SSO sign-in once took 30 s, 20 of them
+ * before the Clerk user existed, and nothing said which call it was; timed
+ * reruns took 5 s (2026-11-01, tools/sso-lab/FINDINGS.md). This names the
+ * next one.
+ */
+export function slowClerkLogged(
+  api: ClerkIdentity,
+  log: Logger,
+  slowMs = SLOW_CLERK_MS,
+): ClerkIdentity {
+  return Object.fromEntries(
+    Object.entries(api).map(([name, call]) => [
+      name,
+      async (...args: unknown[]) => {
+        const started = performance.now()
+        try {
+          return await (call as (...a: unknown[]) => Promise<unknown>)(...args)
+        } finally {
+          const ms = Math.round(performance.now() - started)
+          if (ms > slowMs) log.warn({ call: name, ms }, "slow Clerk call")
+        }
+      },
+    ]),
+  ) as unknown as ClerkIdentity
 }
 
 /**

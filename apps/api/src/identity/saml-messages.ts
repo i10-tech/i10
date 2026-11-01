@@ -77,6 +77,8 @@ export interface AuthnRequestInput {
    * `step_up_stale` rather than passing.
    */
   forceAuthn: boolean
+  /** The typed email as `Subject/NameID`, which IdPs such as Keycloak read as a login hint. A hint only, never a check. */
+  subjectNameId?: string
 }
 
 export function authnRequest(input: AuthnRequestInput): string {
@@ -88,6 +90,9 @@ export function authnRequest(input: AuthnRequestInput): string {
     ` ProtocolBinding="${POST}"` +
     (input.forceAuthn ? ` ForceAuthn="true"` : "") +
     `><saml:Issuer>${escapeXml(input.spEntityId)}</saml:Issuer>` +
+    (input.subjectNameId
+      ? `<saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">${escapeXml(input.subjectNameId)}</saml:NameID></saml:Subject>`
+      : "") +
     `<samlp:NameIDPolicy Format="${escapeXml(input.nameIdFormat)}" AllowCreate="true"/>` +
     `</samlp:AuthnRequest>`
   )

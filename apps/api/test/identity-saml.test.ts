@@ -151,12 +151,16 @@ async function world(
   async function start(
     purpose: "sign_in" | "test_run" | "step_up" = "sign_in",
     stepUp?: { userId: string; sessionId: string },
+    loginHint?: string,
+    forceLogin?: boolean,
   ) {
     const started = await startLogin(deps, {
       connectionId: CONNECTION,
       purpose,
       binding: BINDING,
       returnTo: "https://dash.i10.localhost/",
+      ...(loginHint ? { loginHint } : {}),
+      ...(forceLogin ? { forceLogin } : {}),
       ...(stepUp ? { stepUp } : {}),
     })
     if (started.outcome !== "redirect")
@@ -407,6 +411,29 @@ describe("refusals at the ACS, before and around verification", () => {
   })
 })
 
+describe("the login hint", () => {
+  it("is a Subject/NameID right after the Issuer, escaped, and absent without one", async () => {
+    const w = await world()
+    const hinted = await w.start("sign_in", undefined, `a&b+"x"@acme.test`)
+    const root = parseXml(hinted.xml).documentElement
+    const kids = Array.from(root.childNodes)
+      .filter((n) => n.nodeType === 1)
+      .map((n) => (n as Element).localName)
+    expect(kids).toEqual(["Issuer", "Subject", "NameIDPolicy"])
+    expect(hinted.xml).toContain(
+      `<saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">a&amp;b+&quot;x&quot;@acme.test</saml:NameID></saml:Subject>`,
+    )
+    expect((await w.start()).xml).not.toContain("Subject")
+  })
+
+  it("is never sent to Entra, which refuses a request with a Subject", async () => {
+    const w = await world({ connection: { ...samlConnection(), provider: "entra" } })
+    expect((await w.start("sign_in", undefined, "bob@acme.test")).xml).not.toContain(
+      "Subject",
+    )
+  })
+})
+
 describe("IdP-initiated sign-in", () => {
   const unsolicited = (a: AssertionKnobs = {}) =>
     b64(
@@ -559,6 +586,18 @@ describe("a SAML sign-in through the bridge", () => {
     })
     await w.signIn({ attributes: { email: ["ada@acme.test"], employeeId: ["E-1"] } })
     expect(w.store.identities[0]!.subject).toBe("attribute:E-1")
+  })
+})
+
+describe("a forced login", () => {
+  it("asks the IdP with ForceAuthn, and a plain sign-in does not", async () => {
+    const w = await world()
+    expect((await w.start("sign_in", undefined, "bob@acme.test", true)).xml).toContain(
+      `ForceAuthn="true"`,
+    )
+    expect((await w.start("sign_in", undefined, "bob@acme.test")).xml).not.toContain(
+      "ForceAuthn",
+    )
   })
 })
 

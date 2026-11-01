@@ -76,6 +76,10 @@ export interface Engine {
        * its own session and the step-up fails `step_up_stale`.
        */
       purpose: AttemptPurpose
+      /** The address typed on our sign-in page. A hint only, never a check: the asserted address is what is verified. */
+      loginHint?: string | null
+      /** Make the IdP ask who is signing in, over any session it holds: OIDC `prompt=login` (Google `select_account`), SAML `ForceAuthn`. */
+      forceLogin?: boolean
     },
   ): Promise<{ redirectUrl: string; requestId?: string | null }>
   /** Whether this engine needs a PKCE verifier kept for its callback. */
@@ -177,6 +181,10 @@ export async function startLogin(
     purpose: AttemptPurpose
     binding: string
     returnTo: string | null
+    /** The typed email, already validated by the route; see `Engine.begin`. */
+    loginHint?: string | null
+    /** For `sign_in`, from "Sign in as" on a hint mismatch; see `Engine.begin`. */
+    forceLogin?: boolean
     /** For `step_up`: the verified session being made fresh. */
     stepUp?: { userId: string; sessionId: string }
   },
@@ -212,6 +220,8 @@ export async function startLogin(
     nonce,
     pkceVerifier,
     purpose: input.purpose,
+    loginHint: input.loginHint ?? null,
+    forceLogin: input.forceLogin ?? false,
   })
   await d.store.createAttempt({
     tenantId: connection.tenantId,
@@ -224,6 +234,7 @@ export async function startLogin(
     requestId: begun.requestId ?? null,
     returnTo: input.returnTo,
     stepUpSessionId: input.stepUp?.sessionId ?? null,
+    loginHint: input.loginHint ?? null,
     expiresAt: new Date(clock(d).getTime() + ATTEMPT_TTL_MS),
   })
   return {
@@ -244,7 +255,20 @@ export async function attemptForCallback(
 // ── 3. Complete ──────────────────────────────────────────────────────────
 
 export type CompleteOutcome =
-  | { outcome: "signed_in"; code: string; returnTo: string | null }
+  | {
+      outcome: "signed_in"
+      code: string
+      returnTo: string | null
+      /**
+       * Set when the person should confirm before the code is swapped: the
+       * address the IdP signed in. With `typed`, the IdP answered for somebody
+       * other than the address typed on our sign-in page; `connectionId` lets
+       * the page start that connection again, forcing a fresh login.
+       */
+      confirmAs?: string | null
+      typed?: string
+      connectionId?: string
+    }
   | { outcome: "tested"; testRunId: string; passed: boolean; returnTo: string | null }
   | { outcome: "stepped_up"; returnTo: string | null }
   /** `message`, when set, is what the person is told instead of `refusalMessage`. */
@@ -635,6 +659,28 @@ export async function completeLogin(
     connectionId: connection.id,
     data: { attemptId: attempt.id, path: resolved.path },
   })
+  /*
+   * ⚠ AN IdP ANSWERING FOR SOMEBODY ELSE IS STILL A SIGN-IN. It vouched for
+   * that person, so everything above stands; the browser only asks before
+   * swapping the code, because the IdP's live session (not the typed address)
+   * decided who it is. Never the addresses in the audit data.
+   */
+  if (attempt.loginHint && attempt.loginHint !== resolved.email) {
+    await d.store.record(attempt.tenantId, {
+      type: "sign_in.hint_mismatch",
+      subjectUserId: resolved.userId,
+      connectionId: connection.id,
+      data: { attemptId: attempt.id },
+    })
+    return {
+      outcome: "signed_in",
+      code,
+      returnTo: attempt.returnTo,
+      confirmAs: resolved.email,
+      typed: attempt.loginHint,
+      connectionId: connection.id,
+    }
+  }
   return { outcome: "signed_in", code, returnTo: attempt.returnTo }
 }
 

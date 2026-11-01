@@ -20,10 +20,24 @@ export const FAILURE_TYPES = ["sign_in.failed", "sign_in.idp_unavailable"] as co
 /** The audit event type of a finished sign-in. */
 export const SUCCESS_TYPE = "sign_in.succeeded"
 
-/** Failure reasons that are not the connection's fault (see above). */
+/**
+ * Failure reasons that are not the connection's fault (see above).
+ *
+ * ⚠ AND NONE OF THE WORKSPACE'S OWN RULES. After these the IdP has vouched for
+ * the person and the connection did its job; the workspace said no (full, a
+ * block, a deprovisioned or banned account, an owner or admin who signs in
+ * another way). Counted, a full workspace turned its connection "Degraded"
+ * and sent `sso.connection.failed` for every waiting-list sign-in (2026-11-01).
+ */
 export const NOT_THE_CONNECTIONS_FAULT: readonly string[] = [
   "wrong_browser",
   "attempt_used",
+  "waiting_list",
+  "workspace_full",
+  "role_exempt",
+  "blocked",
+  "deprovisioned",
+  "account_banned",
 ]
 
 /** The window a spike is measured over, and the least failures that is one. */

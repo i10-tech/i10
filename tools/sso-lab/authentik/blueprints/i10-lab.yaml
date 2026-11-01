@@ -213,6 +213,8 @@ entries:
     identifiers: { name: i10 lab - SCIM user with manager }
     attrs:
       expression: |
+        # authentik passes the user as request.user to SCIM mappings
+        user = request.user
         mgr = user.attributes.get("manager", "")
         out = {
             "userName": user.email,

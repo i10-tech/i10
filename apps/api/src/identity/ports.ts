@@ -26,6 +26,8 @@ export interface AttemptRow {
   purpose: AttemptPurpose
   bindingHash: string
   stepUpSessionId: string | null
+  /** For `sign_in`: the address typed on our sign-in page, lowercased. */
+  loginHint: string | null
   returnTo: string | null
   nonce: string | null
   /** Opened from its seal. */
@@ -57,6 +59,7 @@ export interface NewAttempt {
   requestId?: string | null
   returnTo?: string | null
   stepUpSessionId?: string | null
+  loginHint?: string | null
   expiresAt: Date
 }
 

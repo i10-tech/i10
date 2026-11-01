@@ -1,0 +1,1 @@
+ALTER TABLE "identity"."login_attempts" ADD COLUMN "login_hint" text;

@@ -20,13 +20,8 @@ export async function finishCallback(request: NextRequest, via: "oidc" | "google
   const binding = readCookie(request, BINDING_COOKIE)
   if (!binding) return leave(failedUrl("This sign-in has expired. Start again."), true)
 
-  let answer: {
-    outcome?: string
-    code?: string
-    returnTo?: string | null
-    passed?: boolean
-    message?: string
-  }
+  // Passed whole to `outcomeRedirect`: `confirmAs`, `typed` and `connectionId` too.
+  let answer: Parameters<typeof outcomeRedirect>[0] & { message?: string }
   try {
     const upstream = await callApi(
       "/sso/oidc/callback",
@@ -68,6 +63,10 @@ export function outcomeRedirect(
     passed?: boolean
     /** SAML IdP-initiated (#339): ask before signing in as this address. */
     confirmAs?: string | null
+    /** With `confirmAs`: the IdP answered for somebody other than this typed address. */
+    typed?: string
+    /** With `typed`: the connection to start again, forcing a fresh login. */
+    connectionId?: string
   },
   setCookie?: string,
 ): Response {
@@ -76,6 +75,8 @@ export function outcomeRedirect(
     const hash = new URLSearchParams({
       code: answer.code,
       ...(answer.confirmAs !== undefined ? { confirm: answer.confirmAs ?? "" } : {}),
+      ...(answer.typed ? { typed: answer.typed } : {}),
+      ...(answer.connectionId ? { connection: answer.connectionId } : {}),
     }).toString()
     const response = leave(`/sso/continue#${hash}`, false)
     if (setCookie) response.headers.append("Set-Cookie", setCookie)

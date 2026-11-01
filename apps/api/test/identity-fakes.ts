@@ -290,6 +290,7 @@ export function memoryStore(
         purpose: input.purpose,
         bindingHash: input.bindingHash,
         stepUpSessionId: input.stepUpSessionId ?? null,
+        loginHint: input.loginHint ?? null,
         returnTo: input.returnTo ?? null,
         nonce: input.nonce ?? null,
         pkceVerifier: input.pkceVerifier ?? null,

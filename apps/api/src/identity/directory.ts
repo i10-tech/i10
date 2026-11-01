@@ -653,7 +653,9 @@ const KICK_LIMIT = 100
 /**
  * Re-schedules a directory's entries that nobody applied: the ones whose job
  * was lost (Redis down at write time), failed until the queue gave up, or were
- * skipped while the directory was disabled.
+ * skipped while the directory was disabled. A kick also retries the people the
+ * workspace was too full for (`workspace_full`), once `room` says there is a
+ * free seat - oldest waiting first, at most `KICK_LIMIT` a kick.
  *
  * ⚠ THERE IS NO SWEEPER ACROSS WORKSPACES - that would need a role that reads
  * every tenant. A directory is kicked when it talks to us (throttled, per
@@ -667,9 +669,51 @@ export function directoryKicker(d: {
   store: DirectoryStore
   enqueue: Enqueue
   log: Logger
+  /** Whether the workspace has a free seat now. Asked once a kick, only when someone waits. */
+  room?: (tenantId: string) => Promise<boolean>
   now?: () => Date
 }) {
   const last = new Map<string, number>()
+  /** Looks again at the people parked as `workspace_full`, if a seat is free. */
+  const retryWaiting = async (
+    tenantId: string,
+    directoryId: string,
+    bucket: number,
+  ): Promise<number> => {
+    if (!d.room) return 0
+    try {
+      // `conflicts` is newest first; the longest wait goes first.
+      const waiting = (await d.store.conflicts(tenantId, directoryId))
+        .filter((u) => u.conflict === "workspace_full")
+        .reverse()
+        .slice(0, KICK_LIMIT)
+      if (waiting.length === 0 || !(await d.room(tenantId))) return 0
+      const results = await Promise.allSettled(
+        waiting.map(async (u) => {
+          const entry = await d.store.requeue(tenantId, directoryId, u.id)
+          if (!entry) return false
+          await d.enqueue(
+            { tenantId, directoryUserId: entry.directoryUserId, entryId: entry.id },
+            bucket,
+          )
+          return true
+        }),
+      )
+      const failed = results.filter((r) => r.status === "rejected").length
+      if (failed > 0)
+        d.log.error(
+          { tenantId, directoryId, failed },
+          "a directory kick could not retry the waiting list",
+        )
+      return results.filter((r) => r.status === "fulfilled" && r.value).length
+    } catch (error) {
+      d.log.error(
+        { ...safeError(error), tenantId, directoryId },
+        "a directory kick could not retry the waiting list",
+      )
+      return 0
+    }
+  }
   return async (
     tenantId: string,
     directoryId: string,
@@ -701,7 +745,9 @@ export function directoryKicker(d: {
       const failed = results.filter((r) => r.status === "rejected").length
       if (failed > 0)
         d.log.error({ tenantId, directoryId, failed }, "a directory kick failed")
-      return entries.length - failed
+      return (
+        entries.length - failed + (await retryWaiting(tenantId, directoryId, bucket))
+      )
     } catch (error) {
       d.log.error(
         { ...safeError(error), tenantId, directoryId },

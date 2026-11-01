@@ -56,7 +56,7 @@ import {
  *
  *   begin:   an AuthnRequest on the HTTP-Redirect binding (signed with the
  *            connection's SP key when it signs requests), `ForceAuthn="true"`
- *            for a step-up, RelayState = the attempt's state, its ID kept on
+ *            for a step-up or a forced login, RelayState = the attempt's state, its ID kept on
  *            the attempt for InResponseTo.
  *   ACS:     the HTTP-POST binding to apps/auth's `/sso/saml/acs/<id>`,
  *            forwarded to `POST /sso/saml/acs`: `finishSaml` below.
@@ -339,7 +339,12 @@ export function samlEngine(deps: SamlEngineDeps): SamlEngine {
         acsUrl: at.acsUrl,
         spEntityId: at.entityId,
         nameIdFormat: settings.nameIdFormat,
-        forceAuthn: attempt.purpose === "step_up",
+        forceAuthn: attempt.purpose === "step_up" || attempt.forceLogin === true,
+        // ⚠ NOT TO ENTRA: it answers an AuthnRequest that carries a Subject
+        // with an error instead of ignoring it.
+        ...(attempt.loginHint && connection.provider !== "entra"
+          ? { subjectNameId: attempt.loginHint }
+          : {}),
       })
       let key: KeyObject | null = null
       if (settings.signRequests) {

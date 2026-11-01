@@ -284,6 +284,14 @@ describe("sso.connection.failed", () => {
     expect(w.emitted).toEqual([])
   })
 
+  it("does not count the workspace's own rules as the connection failing", async () => {
+    const w = world()
+    for (const reason of ["waiting_list", "role_exempt", "blocked", "deprovisioned"])
+      await w.tapped.record(TENANT, failure(reason))
+    expect(w.claims()).toBe(0)
+    expect(w.emitted).toEqual([])
+  })
+
   it("says nothing about a connection that is not live", async () => {
     const w = world({ status: "testing" })
     await w.tapped.record(TENANT, failure())

@@ -62,12 +62,17 @@ function world(
   }
   const now = () => new Date(clock)
 
-  async function start(purpose: "sign_in" | "test_run" = "sign_in", binding = BINDING) {
+  async function start(
+    purpose: "sign_in" | "test_run" = "sign_in",
+    binding = BINDING,
+    loginHint?: string,
+  ) {
     const started = await startLogin(deps, {
       connectionId: CONNECTION,
       purpose,
       binding,
       returnTo: "https://dash.i10.localhost/",
+      ...(loginHint ? { loginHint } : {}),
     })
     if (started.outcome !== "redirect")
       throw new Error(`not started: ${started.reason}`)
@@ -548,6 +553,89 @@ describe("completing", () => {
     expect(w.store.identities).toHaveLength(0)
     expect(w.store.managed.size).toBe(0)
     expect(w.joined).toHaveLength(0)
+  })
+})
+
+describe("an IdP answering for somebody other than the typed address", () => {
+  async function finish(w: ReturnType<typeof world>, state: string, email?: string) {
+    return completeLogin(w.deps, {
+      protocol: "test",
+      state,
+      binding: BINDING,
+      assertion: w.assertion(email ? { email } : {}),
+    })
+  }
+  const mismatches = (w: ReturnType<typeof world>) =>
+    w.store.events.filter((e) => e.type === "sign_in.hint_mismatch")
+
+  it("signs in without asking when the IdP answered as the typed address, in any case", async () => {
+    const w = world()
+    const { state } = await w.start("sign_in", BINDING, "ada@acme.test")
+    const done = await finish(w, state, "ADA@acme.TEST")
+    expect(done.outcome).toBe("signed_in")
+    expect(done).not.toHaveProperty("confirmAs")
+    expect(done).not.toHaveProperty("typed")
+    expect(mismatches(w)).toHaveLength(0)
+  })
+
+  it("still signs in, but asks: the asserted and typed addresses and the connection to restart", async () => {
+    const w = world()
+    const { state } = await w.start("sign_in", BINDING, "bob@acme.test")
+    const done = await finish(w, state)
+    expect(done).toMatchObject({
+      outcome: "signed_in",
+      returnTo: "https://dash.i10.localhost/",
+      confirmAs: "ada@acme.test",
+      typed: "bob@acme.test",
+      connectionId: CONNECTION,
+    })
+    // Everything a sign-in does still happened: the IdP vouched for Ada.
+    expect(w.joined).toEqual([{ orgId: ORG, userId: "user_ada" }])
+    expect(w.store.events.map((e) => e.type)).toContain("sign_in.verified")
+    const [event] = mismatches(w)
+    expect(event).toMatchObject({ subjectUserId: "user_ada", connectionId: CONNECTION })
+    // ⚠ Never an address in the audit data.
+    expect(event!.data).toEqual({ attemptId: [...w.store.attempts.values()][0]!.id })
+  })
+
+  it("does not ask when nothing was typed", async () => {
+    const w = world()
+    const { state } = await w.start()
+    const done = await finish(w, state)
+    expect(done.outcome).toBe("signed_in")
+    expect(done).not.toHaveProperty("confirmAs")
+    expect(done).not.toHaveProperty("typed")
+    expect(mismatches(w)).toHaveLength(0)
+  })
+
+  it("never asks on a test run or a step-up", async () => {
+    const t = world({ store: { connections: [connection({ status: "testing" })] } })
+    const run = await t.start("test_run", BINDING, "bob@acme.test")
+    const tested = await finish(t, run.state)
+    expect(tested.outcome).toBe("tested")
+    expect(tested).not.toHaveProperty("confirmAs")
+    expect(tested).not.toHaveProperty("typed")
+    expect(mismatches(t)).toHaveLength(0)
+
+    const w = world()
+    const { sessionId } = await w.signIn()
+    const started = await startLogin(w.deps, {
+      connectionId: CONNECTION,
+      purpose: "step_up",
+      binding: BINDING,
+      returnTo: null,
+      loginHint: "bob@acme.test",
+      stepUp: { userId: "user_ada", sessionId },
+    })
+    if (started.outcome !== "redirect") throw new Error("not started")
+    const stepped = await finish(
+      w,
+      new URL(started.redirectUrl).searchParams.get("state")!,
+    )
+    expect(stepped.outcome).toBe("stepped_up")
+    expect(stepped).not.toHaveProperty("confirmAs")
+    expect(stepped).not.toHaveProperty("typed")
+    expect(mismatches(w)).toHaveLength(0)
   })
 })
 

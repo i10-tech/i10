@@ -43,7 +43,11 @@ import {
   type RolesDeps,
 } from "./console/roles.js"
 import { identityStore } from "./identity/store.js"
-import { clerkIdentityApi, clerkProvisioningApi } from "./identity/clerk.js"
+import {
+  clerkIdentityApi,
+  clerkProvisioningApi,
+  slowClerkLogged,
+} from "./identity/clerk.js"
 import {
   mailboxLifecycle,
   runDeletion,
@@ -1272,7 +1276,10 @@ const teamDomains: TeamDomainDeps | null = domains
  * instance). Off, `test` connections cannot be made, started or finished.
  */
 const identityBase = identityStore(db, secrets)
-const identityClerk = clerkIdentityApi(clerk, { secretKey: env.CLERK_SECRET_KEY })
+const identityClerk = slowClerkLogged(
+  clerkIdentityApi(clerk, { secretKey: env.CLERK_SECRET_KEY }),
+  log,
+)
 /*
  * What the audit log's events set going (#345): customer webhooks (after the
  * row committed), the connection failure alert, the certificate expiry email.
@@ -1448,6 +1455,10 @@ const kickDirectory = directoryKicker({
   store: directories,
   enqueue: directoryEnqueue,
   log,
+  room: async (tenantId) => {
+    const orgId = await identityBase.workspaceOrg(tenantId)
+    return orgId ? !(await beforeSeatUse(members, tenantId, orgId)).full : false
+  },
 })
 /*
  * ⚠ ONE SET OF DEPS FOR BOTH WAYS A MAILBOX IS MADE: a person asking for their

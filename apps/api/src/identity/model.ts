@@ -130,6 +130,20 @@ export function readSecret(value: unknown): string | null {
     : null
 }
 
+/**
+ * The email typed on our sign-in page, as an IdP login hint: one `@` with
+ * something either side, no whitespace or control characters, at most 254
+ * long, lowercased. Anything else is dropped, never repaired.
+ */
+export function readLoginHint(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const hint = value.trim().toLowerCase()
+  if (hint.length > 254) return null
+  if (/[\s\p{Cc}]/u.test(hint)) return null
+  const parts = hint.split("@")
+  return parts.length === 2 && parts[0] && parts[1] ? hint : null
+}
+
 // ── Setup links (#340) ───────────────────────────────────────────────────
 
 /** The statuses a setup link serves: nobody signs in through either. */

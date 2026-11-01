@@ -16,6 +16,7 @@ import {
   startUrlFor,
   withSsoFreshness,
 } from "../src/identity/middleware.js"
+import type { Engine } from "../src/identity/bridge.js"
 import { ssoGate } from "../src/identity/gate.js"
 import { testEngine, testEngineOn } from "../src/identity/test-engine.js"
 import {
@@ -188,7 +189,13 @@ function ssoApp(
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
     })
-  return { app, post, store, clerk }
+  return {
+    app,
+    post,
+    store,
+    clerk,
+    engines: deps.bridge.engines as Map<string, Engine>,
+  }
 }
 
 describe("the bridge's routes", () => {
@@ -221,6 +228,52 @@ describe("the bridge's routes", () => {
     const bound = await w.post("/bind", { handoff }, { authorization: "Bearer t" })
     expect(bound.status).toBe(200)
     expect(await bound.json()).toEqual({ returnTo: "https://dash.i10.localhost/home" })
+  })
+
+  it("passes a valid login hint to the engine lowercased, and drops an invalid one", async () => {
+    const w = ssoApp()
+    const seen: (string | null | undefined)[] = []
+    const engine = w.engines.get("test")!
+    w.engines.set("test", {
+      ...engine,
+      begin: (connection, attempt) => {
+        seen.push(attempt.loginHint)
+        return engine.begin(connection, attempt)
+      },
+    })
+    const start = (loginHint: unknown, purpose = "sign_in") =>
+      w.post("/attempts", {
+        connection: CONNECTION,
+        binding: BINDING,
+        purpose,
+        loginHint,
+      })
+    await start("  Ada@Acme.Test ")
+    await start("no-at-sign")
+    await start("a b@acme.test")
+    await start(`${"a".repeat(250)}@acme.test`)
+    await start("a@b@acme.test")
+    await start(42)
+    expect(seen).toEqual(["ada@acme.test", null, null, null, null, null])
+  })
+
+  it("forces a fresh IdP login only for a sign-in that asks with `fresh: true`", async () => {
+    const w = ssoApp()
+    const seen: (boolean | undefined)[] = []
+    const engine = w.engines.get("test")!
+    w.engines.set("test", {
+      ...engine,
+      begin: (connection, attempt) => {
+        seen.push(attempt.forceLogin)
+        return engine.begin(connection, attempt)
+      },
+    })
+    const start = (fresh: unknown) =>
+      w.post("/attempts", { connection: CONNECTION, binding: BINDING, fresh })
+    await start(true)
+    await start("1")
+    await start(undefined)
+    expect(seen).toEqual([true, false, false])
   })
 
   it("drops a return path off our origins rather than redirecting there", async () => {

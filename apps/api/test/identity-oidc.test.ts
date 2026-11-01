@@ -112,12 +112,16 @@ async function world(
   async function start(
     purpose: "sign_in" | "test_run" | "step_up" = "sign_in",
     stepUp?: { userId: string; sessionId: string },
+    loginHint?: string,
+    forceLogin?: boolean,
   ) {
     const started = await startLogin(deps, {
       connectionId: CONNECTION,
       purpose,
       binding: BINDING,
       returnTo: "https://dash.i10.localhost/",
+      ...(loginHint ? { loginHint } : {}),
+      ...(forceLogin ? { forceLogin } : {}),
       ...(stepUp ? { stepUp } : {}),
     })
     if (started.outcome !== "redirect")
@@ -392,6 +396,17 @@ describe("step-up", () => {
   })
 })
 
+describe("a forced login", () => {
+  it("sends prompt=login and no max_age: any login will do, not a recent one", async () => {
+    const w = await world()
+    const p = new URL(await w.start("sign_in", undefined, "bob@acme.test", true))
+      .searchParams
+    expect(p.get("prompt")).toBe("login")
+    expect(p.get("max_age")).toBeNull()
+    expect(p.get("login_hint")).toBe("bob@acme.test")
+  })
+})
+
 describe("MFA at the IdP", () => {
   const mfa = (mfaAcrValues: string[] = []) =>
     world({ connection: oidcConnection({ mfaRequired: true }, { mfaAcrValues }) })
@@ -474,6 +489,15 @@ describe("Google Workspace", () => {
     // A hint for the account chooser, checked again on the way back.
     expect(new URL(redirectUrl).searchParams.get("hd")).toBe("acme.test")
   })
+  it("passes the typed address as a login hint, and none when there is not one", async () => {
+    const w = await world()
+    expect(
+      new URL(await w.start("sign_in", undefined, "ada@acme.test")).searchParams.get(
+        "login_hint",
+      ),
+    ).toBe("ada@acme.test")
+    expect(new URL(await w.start()).searchParams.has("login_hint")).toBe(false)
+  })
   it("sends Google to its own redirect URI, and refuses its callback anywhere else (mix-up)", async () => {
     const w = await google()
     const { done, redirectUrl } = await w.callback(
@@ -509,6 +533,12 @@ describe("Google Workspace", () => {
     )
     expect(url.searchParams.get("prompt")).toBeNull()
     expect(url.searchParams.get("max_age")).toBe("0")
+  })
+  it("asks Google for its account chooser on a forced login, with no max_age", async () => {
+    const w = await google()
+    const p = new URL(await w.start("sign_in", undefined, undefined, true)).searchParams
+    expect(p.get("prompt")).toBe("select_account")
+    expect(p.get("max_age")).toBeNull()
   })
   it("is not ready, and has no settings, without our Google client", () => {
     const c = connection({ protocol: "oidc", provider: "google" })
@@ -717,6 +747,18 @@ describe("POST /sso/oidc/callback", () => {
     expect(await res.json()).toMatchObject({
       outcome: "signed_in",
       returnTo: "https://dash.i10.localhost/",
+    })
+  })
+  it("answers a sign-in as somebody other than the typed address with both, and the connection", async () => {
+    const { w, post } = await route()
+    const at = w.idp.authorize(await w.start("sign_in", undefined, "bob@acme.test"))
+    const res = await post({ state: at.state, binding: BINDING, query: at.query })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      outcome: "signed_in",
+      confirmAs: "ada@acme.test",
+      typed: "bob@acme.test",
+      connectionId: CONNECTION,
     })
   })
   it("answers a refusal with 409 and a reason, an outage with 503", async () => {

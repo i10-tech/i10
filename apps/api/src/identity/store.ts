@@ -126,6 +126,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     purpose: r.purpose as AttemptPurpose,
     bindingHash: r.bindingHash,
     stepUpSessionId: r.stepUpSessionId,
+    loginHint: r.loginHint,
     returnTo: r.returnTo,
     nonce: r.nonce,
     pkceVerifier: r.pkceVerifier && secrets ? secrets.open(r.pkceVerifier) : null,
@@ -574,6 +575,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
             requestId: input.requestId ?? null,
             returnTo: input.returnTo ?? null,
             stepUpSessionId: input.stepUpSessionId ?? null,
+            loginHint: input.loginHint ?? null,
             expiresAt: input.expiresAt,
           })
           .returning({ id: loginAttempts.id })

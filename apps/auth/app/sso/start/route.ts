@@ -28,6 +28,9 @@ export async function GET(request: NextRequest) {
   const returnTo = afterAuthUrl(
     request.nextUrl.searchParams.get("redirect_url") ?? undefined,
   )
+  const loginHint = request.nextUrl.searchParams.get("login_hint") ?? ""
+  // "Sign in as" on the continue page: the IdP must ask, not reuse its session.
+  const fresh = request.nextUrl.searchParams.get("fresh") === "1"
   const binding = newBinding()
 
   let answer: { redirectUrl?: string; message?: string; protocol?: string }
@@ -37,6 +40,8 @@ export async function GET(request: NextRequest) {
       purpose: "sign_in",
       binding,
       returnTo,
+      loginHint,
+      ...(fresh ? { fresh: true } : {}),
     })
     answer = (await upstream.json()) as typeof answer
     if (!upstream.ok || !answer.redirectUrl)

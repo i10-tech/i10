@@ -10,6 +10,7 @@ import {
 import {
   emailDomain,
   normaliseEmail,
+  readLoginHint,
   readSecret,
   refusalMessage,
   safeReturnTo,
@@ -278,6 +279,10 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
     if (!binding || !connection)
       return invalid(c, "connection and binding are required.")
     const returnTo = safeReturnTo(b.returnTo, d.returnOrigins)
+    // ⚠ A step-up re-asks the same IdP session, so it never takes a hint.
+    const loginHint = purpose === "step_up" ? null : readLoginHint(b.loginHint)
+    // "Sign in as" after the IdP answered for somebody else (sso-continue.tsx).
+    const forceLogin = purpose === "sign_in" && b.fresh === true
 
     try {
       let stepUp: { userId: string; sessionId: string } | undefined
@@ -310,6 +315,8 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
         purpose,
         binding,
         returnTo,
+        loginHint,
+        forceLogin,
         ...(stepUp ? { stepUp } : {}),
       })
       if (started.outcome === "refused") return refused(c, started.reason)

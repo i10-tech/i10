@@ -172,7 +172,12 @@ export function SignInForm({
     name: string
   } | null>("signin.sso", null)
   const ssoHref = sso
-    ? `/sso/start?${new URLSearchParams({ connection: sso.connection, redirect_url: afterAuthUrl })}`
+    ? `/sso/start?${new URLSearchParams({
+        connection: sso.connection,
+        redirect_url: afterAuthUrl,
+        // The IdP starts from this account; the API validates it.
+        login_hint: identifier.trim(),
+      })}`
     : null
   const [direction, setDirection] = useState<"forward" | "back">("forward")
   // Browser Back from the password step returns to the email box - see
