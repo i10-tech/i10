@@ -2,10 +2,9 @@
 # `wt switch --create <branch>`; these hooks make it ready before anything runs
 # in it, so an agent started with `-x` never sees a cold checkout.
 #
-# ⚠ COPY FIRST, THEN INSTALL. The copy clones the primary checkout's
-# dependencies and build output (copy-on-write on APFS, so 2 GB of
-# node_modules costs nothing), limited to what .worktreeinclude lists. The
-# install then only fixes what this branch's lockfile changed.
+# ⚠ COPY, THEN INSTALL. The copy brings what bun cannot make (see
+# .worktreeinclude: build output and the embedding model); the install
+# clones dependencies from bun's cache, which is faster than copying them.
 #
 # ⚠ --require-include, BECAUSE THE LIST IS READ FROM THE SOURCE CHECKOUT, not
 # from the new worktree. A primary checkout on a branch older than
