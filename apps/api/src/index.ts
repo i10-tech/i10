@@ -1524,7 +1524,17 @@ const bridge = {
     role: JoinRole
   }) => {
     const held = await roles.store.roleOf(input.tenantId, input.userId)
-    if (held === null && !(await roles.clerk.isMember(input.orgId, input.userId))) {
+    const inClerk = await roles.clerk.isMember(input.orgId, input.userId)
+    /*
+     * ⚠ A MEMBER ALREADY IS NOT ADDED AGAIN, NOT EVEN ASKED. At the cap, Clerk
+     * answers a create for somebody who is already in with
+     * `organization_membership_quota_exceeded`, not "already a member": its
+     * quota check comes first. That read as "full" and put a member on the
+     * waiting list (2026-11-01). Their role still follows the group rules
+     * through `syncRole`, after this.
+     */
+    if (held !== null && inClerk) return "added" as const
+    if (held === null && !inClerk) {
       const room = await beforeSeatUse(members, input.tenantId, input.orgId)
       if (room.full) return "full" as const
     }
