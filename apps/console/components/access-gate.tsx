@@ -4,6 +4,7 @@ import { useClerk } from "@clerk/nextjs"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { Button } from "@repo/ui/components/button/button"
 import { useMounted } from "@/lib/react"
+import { ssoStartHref } from "@/lib/sso-start"
 
 /**
  * The screen a refused session sees instead of the console (#340): the API
@@ -38,10 +39,7 @@ export function AccessGate({
   const back = here ? `?${new URLSearchParams({ redirect_url: here })}` : ""
   const passkeyHref = authOrigin ? `${authOrigin}/add-passkey${back}` : null
   // ⚠ ONLY A START URL ON apps/auth'S OWN ORIGIN IS FOLLOWED: this URL arrives in an API answer.
-  const ssoHref =
-    startUrl && authOrigin && safeStart(startUrl, authOrigin) && here
-      ? `${startUrl}${startUrl.includes("?") ? "&" : "?"}${new URLSearchParams({ redirect_url: here })}`
-      : null
+  const ssoHref = here ? ssoStartHref(startUrl, authOrigin, "/sso/start", here) : null
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-6 py-12">
@@ -76,16 +74,6 @@ export function AccessGate({
       </div>
     </main>
   )
-}
-
-/** A start URL is followed only when it is on apps/auth's origin and is its SSO start route. */
-function safeStart(startUrl: string, authOrigin: string): boolean {
-  try {
-    const url = new URL(startUrl)
-    return url.origin === authOrigin && url.pathname === "/sso/start"
-  } catch {
-    return false
-  }
 }
 
 function SignOut({ redirectTo }: { redirectTo: string }) {

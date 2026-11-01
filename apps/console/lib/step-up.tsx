@@ -11,6 +11,7 @@ import {
 } from "@repo/ui/components/i10/step-up-dialog"
 import { CodeReservationContext } from "@repo/ui/components/i10/code-send"
 import { reserveCodeSend, stepUp } from "@/lib/actions"
+import { ssoStartHref, ssoStepUpOf } from "@/lib/sso-start"
 import { toastError } from "@/lib/toast"
 
 /**
@@ -62,7 +63,14 @@ const AskContext = React.createContext<Ask | null>(null)
  */
 const withoutClerk: StepUp = async () => (await stepUp()).ok
 
-export function StepUpProvider({ children }: { children: React.ReactNode }) {
+export function StepUpProvider({
+  children,
+  authOrigin,
+}: {
+  children: React.ReactNode
+  /** apps/auth's origin: the only place an SSO step-up is followed to. */
+  authOrigin: string | null
+}) {
   const [request, setRequest] = React.useState<StepUpRequest | null>(null)
   const [passkey, setPasskey] = React.useState(false)
   const pending = React.useRef<((proved: boolean) => void) | null>(null)
@@ -82,6 +90,28 @@ export function StepUpProvider({ children }: { children: React.ReactNode }) {
   const value = React.useCallback<StepUp>(async () => {
     const first = await stepUp()
     if (first.ok) return true
+
+    /*
+     * ⚠ A SESSION THAT CAME THROUGH THE COMPANY'S IdP PROVES IT THERE, NOT HERE.
+     * The API answers `sso_step_up_required` with the IdP round trip, which
+     * comes back to this page; the action is then pressed again on a fresh
+     * session. Returning false without this left the dialog open, silent,
+     * with the action never sent (2026-11-01: every step-up action of an
+     * SSO-signed-in admin).
+     */
+    const sso = ssoStepUpOf(first.body)
+    if (sso) {
+      const href = ssoStartHref(
+        sso.startUrl,
+        authOrigin,
+        "/sso/step-up",
+        window.location.href,
+      )
+      if (href) window.location.assign(href)
+      else toastError("Sign in with your company again", sso.message)
+      return false
+    }
+
     // Not "prove it again" but some other refusal: the action says why.
     if (!isReverificationHint(first.body)) return false
 
@@ -106,7 +136,7 @@ export function StepUpProvider({ children }: { children: React.ReactNode }) {
       "The check went through, but it was not accepted yet. Try again in a minute.",
     )
     return false
-  }, [ask])
+  }, [ask, authOrigin])
 
   return (
     <CodeReservationContext.Provider value={reserveCodeSend}>
