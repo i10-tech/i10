@@ -58,6 +58,8 @@ export const GOOGLE_FETCH_MAX_BYTES = 4 * 1024 * 1024
 /** Shrink guard: refuse a pull that removes more than both 20% and 5 live users. */
 export const GOOGLE_MAX_DROP_PERCENT = 20
 export const GOOGLE_MAX_DROP_USERS = 5
+/** An owner's go-ahead past the shrink guard is good for this long. */
+export const GOOGLE_DROP_ALLOWANCE_MS = 24 * 60 * 60_000
 
 const MAX_GOOGLE_PAGES = 1_000
 
@@ -1198,6 +1200,9 @@ export async function pullGoogleDirectory(
     return { outcome: "skipped", reason: "no_directory" }
   if (!directory.enabled) return { outcome: "skipped", reason: "directory_disabled" }
 
+  // Re-read after the network pages, so a go-ahead given mid-pull is seen.
+  let current = directory
+
   const failPull = async (
     code: GoogleDirectoryErrorCode,
     retryable: boolean,
@@ -1213,8 +1218,16 @@ export async function pullGoogleDirectory(
       status: "failed",
       error: code,
       at,
+      // A pull that reached the guard has spent any go-ahead, applied or not:
+      // a refusal again needs the owner to look at the new numbers.
+      clearDropAllowance: code === "large_drop" || code === "user_conflict",
     })
-    if (directory.lastSyncStatus !== "failed" || directory.lastSyncError !== code) {
+    if (
+      directory.lastSyncStatus !== "failed" ||
+      directory.lastSyncError !== code ||
+      // The counts may differ from the ones the owner confirmed, so say them again.
+      (code === "large_drop" && current.allowDropUpTo !== null)
+    ) {
       await deps.record(tenantId, {
         type: "directory.sync_failed",
         reason: code,
@@ -1304,6 +1317,7 @@ export async function pullGoogleDirectory(
   if (!latest || latest.provider !== "google")
     return { outcome: "skipped", reason: "no_directory" }
   if (!latest.enabled) return { outcome: "skipped", reason: "directory_disabled" }
+  current = latest
 
   const existingUsers = await loadAllLiveUsers(deps.store, tenantId, directoryId)
   const matchedRowIds = new Set<string>()
@@ -1338,9 +1352,18 @@ export async function pullGoogleDirectory(
   }
 
   const toDeleteUsers = existingUsers.filter((row) => !matchedRowIds.has(row.id))
+  // ⚠ THE GO-AHEAD COVERS AT MOST THE COUNT THE OWNER CONFIRMED, FOR A DAY. A
+  // pull that would remove more (the directory changed since) is refused again.
+  const allowedDrop =
+    latest.allowDropUpTo !== null &&
+    latest.allowDropAt !== null &&
+    clock().getTime() - latest.allowDropAt.getTime() < GOOGLE_DROP_ALLOWANCE_MS
+      ? latest.allowDropUpTo
+      : 0
   if (
     toDeleteUsers.length > GOOGLE_MAX_DROP_USERS &&
-    toDeleteUsers.length * 100 > existingUsers.length * GOOGLE_MAX_DROP_PERCENT
+    toDeleteUsers.length * 100 > existingUsers.length * GOOGLE_MAX_DROP_PERCENT &&
+    toDeleteUsers.length > allowedDrop
   ) {
     return failPull("large_drop", false, {
       existingUsers: existingUsers.length,

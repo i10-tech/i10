@@ -28,6 +28,21 @@ describe("what a test run says we would do", () => {
     )
   })
 
+  it("says a changed login would be relinked, or refused for an owner to approve", () => {
+    expect(
+      wouldDo(
+        run({
+          resolution: { path: "linked", wouldRelink: true, email: "a@acme.test" },
+        }),
+      ),
+    ).toContain("move their link")
+    const said = wouldDo(
+      run({ outcome: "failed", resolution: { refused: "subject_changed" } }),
+    )
+    expect(said).toContain("refuse")
+    expect(said).toContain("owner")
+  })
+
   it("warns when a new account would lack a name", () => {
     const said = wouldDo(
       run({

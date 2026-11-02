@@ -8,6 +8,7 @@ import type {
   Enforcement,
   ManagedReason,
   Protocol,
+  RelinkMode,
   SessionPolicy,
 } from "./model.js"
 
@@ -93,7 +94,31 @@ export interface ConnectionPatch {
   idleTimeoutSeconds?: number | null
   config?: Record<string, unknown>
   attributeMapping?: Record<string, string>
+  relink?: RelinkMode
+  upnAsEmail?: boolean
 }
+
+/** A person's new IdP subject waiting for an owner (sso.md 2.22). */
+export interface RelinkRequestRow {
+  id: string
+  connectionId: string
+  identityId: string
+  /** Who it is, as the console already shows an identity: the address last asserted. */
+  email: string | null
+  clerkUserId: string
+  createdAt: Date
+  expiresAt: Date
+}
+
+/**
+ * What moving a link did. `conflict`: the new subject is already linked to
+ * another identity on the connection; `gone`: the identity or request is no
+ * longer there (or its subject is no longer what the caller saw).
+ */
+export type RelinkResult =
+  | { outcome: "moved"; identityId: string; clerkUserId: string; from: string; to: string }
+  | { outcome: "conflict" }
+  | { outcome: "gone" }
 
 export interface ConnectionDomain {
   joinDomainId: string
@@ -330,6 +355,51 @@ export interface IdentityStore {
     email: string | null,
     at: Date,
   ): Promise<void>
+  /**
+   * Moves an identity's link to a new subject (sso.md 2.22), and drops its
+   * pending request. A compare-and-set on `from`: it moves only while the
+   * subject is still the one the caller read, so two movers cannot both win.
+   */
+  relinkIdentity(
+    tenantId: string,
+    input: { connectionId: string; identityId: string; from: string; to: string },
+  ): Promise<RelinkResult>
+  /**
+   * Files the request an owner approves; one pending per identity. `exists`:
+   * the same subject is already waiting (nothing changes, so nothing to
+   * audit); a different one replaces it, as does one that expired.
+   */
+  requestRelink(
+    tenantId: string,
+    input: {
+      connectionId: string
+      identityId: string
+      newSubject: string
+      emailHash: string
+      now: Date
+      expiresAt: Date
+    },
+  ): Promise<"created" | "exists">
+  /** Pending (unexpired) requests of a connection, oldest first. */
+  relinkRequests(
+    tenantId: string,
+    connectionId: string,
+    now: Date,
+  ): Promise<RelinkRequestRow[]>
+  /**
+   * An owner approves: the request's identity moves to its new subject and the
+   * request goes, in one transaction. `not_found`: no such pending request.
+   */
+  approveRelink(
+    tenantId: string,
+    input: { connectionId: string; requestId: string; now: Date },
+  ): Promise<RelinkResult | { outcome: "not_found" }>
+  /** The identity the deleted request was for, or null when there was none. */
+  rejectRelink(
+    tenantId: string,
+    connectionId: string,
+    requestId: string,
+  ): Promise<{ identityId: string } | null>
 
   // ── managed accounts ──
   /** With no workspace in scope: the user's own row, wherever it is. */

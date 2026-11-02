@@ -14,15 +14,18 @@ import {
   BIND_WINDOW_MS,
   CLOCK_SKEW_MS,
   HANDOFF_TTL_MS,
+  RELINK_REQUEST_TTL_MS,
   STEP_UP_FUTURE_SKEW_MS,
   STEP_UP_MAX_AGE_MS,
   emailDomain,
+  emailVouched,
   hashSecret,
   newSecret,
   normaliseEmail,
   onLiveDomain,
   assertionProvesMfa,
   sameHash,
+  subjectFingerprint,
   thirdPartyIssuerMatches,
   type Assertion,
   type AttemptPurpose,
@@ -307,9 +310,17 @@ type Resolved =
       managed: ManagedRow | null
       /** JIT made this Clerk user during this sign-in (#341). */
       created: boolean
+      /**
+       * The identity's subject is to move from `from` to the assertion's
+       * (sso.md 2.22). Applied by `completeLogin` only after every refusal
+       * that can still come has passed, so a refused sign-in moves nothing.
+       */
+      relink?: { from: string }
     }
   /** A test run that JIT would have created somebody for (#341): nobody is. */
   | { ok: "would_create"; orgId: string; email: string }
+  /** A test run that `relink: auto` would have moved the link for: nothing is moved. */
+  | { ok: "would_relink"; orgId: string; email: string; userId: string }
   | { ok: false; reason: Refusal; extra?: Record<string, unknown> }
 
 type Refuse = (
@@ -533,6 +544,17 @@ export async function completeLogin(
                 ? { ...unavailable, roleKept: true }
                 : {}),
             }
+          : resolved.ok === "would_relink"
+            ? {
+                path: "linked",
+                wouldRelink: true,
+                clerkUserId: resolved.userId,
+                email: resolved.email,
+                ...role,
+                ...(rules.length > 0 && !groupsUsable
+                  ? { ...unavailable, roleKept: true }
+                  : {}),
+              }
           : resolved.ok === "would_create"
             ? {
                 path: "jit",
@@ -595,6 +617,39 @@ export async function completeLogin(
   const exempt = await d.isExempt(attempt.tenantId, resolved.userId)
   if (exempt && (!existing || resolved.path !== "linked"))
     return refuse("role_exempt", { clerkUserId: resolved.userId })
+
+  /*
+   * ⚠ THE LINK MOVES HERE AND NOT EARLIER (sso.md 2.22): every refusal that
+   * can still come from `resolve` and the exempt rule has passed, so a
+   * refused sign-in changes nothing. The move is a compare-and-set on the
+   * subject we read, so a second sign-in or an owner's approval racing this
+   * one cannot move it twice; the loser is told `subject_changed`.
+   */
+  if (resolved.relink && resolved.identityId) {
+    const moved = await d.store.relinkIdentity(attempt.tenantId, {
+      connectionId: connection.id,
+      identityId: resolved.identityId,
+      from: resolved.relink.from,
+      to: assertion.subject,
+    })
+    if (moved.outcome !== "moved")
+      return refuse("subject_changed", { identityId: resolved.identityId })
+    await d.store.record(attempt.tenantId, {
+      type: "identity.relinked",
+      subjectUserId: resolved.userId,
+      connectionId: connection.id,
+      reason: "auto",
+      // ⚠ FINGERPRINTS, NEVER THE SUBJECTS: an Okta username or a Google
+      // address is the subject, and the log carries neither it nor the email.
+      data: {
+        identityId: resolved.identityId,
+        connectionId: connection.id,
+        from: subjectFingerprint(moved.from),
+        to: subjectFingerprint(moved.to),
+        via: "auto",
+      },
+    })
+  }
 
   const takeOver = () =>
     manage(d, {
@@ -928,7 +983,9 @@ async function syncProfile(
 /**
  * Who this is, by the only rules that may answer it.
  *
- *   1. An existing link `(connection, subject)`.
+ *   1. An existing link `(connection, subject)`. A person whose account is
+ *      linked under ANOTHER subject is `subject_changed` (sso.md 2.22): moved
+ *      by `relink: auto`, otherwise left for an owner.
  *   2. A person SCIM already provisioned for this subject (#342).
  *   3. An existing Clerk account holding this address VERIFIED, on one of the
  *      connection's live domains, claimed (sso.md 2.3).
@@ -964,6 +1021,8 @@ async function resolve(
    * and never creates.
    */
   for (let pass = 0; pass < 2; pass++) {
+    /** The account already holds an identity here under another subject (sso.md 2.22). */
+    let changed: { identityId: string; from: string } | null = null
     const linked = await d.store.identityBySubject(
       tenantId,
       connection.id,
@@ -975,7 +1034,9 @@ async function resolve(
     let created = false
 
     if (!userId) {
-      if (!assertion.emailVerified) return { ok: false, reason: "email_unverified" }
+      // ⚠ AN Entra UPN IS "VOUCHED" ONLY BY THE DOMAIN CHECK ABOVE (opt-in).
+      if (!emailVouched(connection, assertion))
+        return { ok: false, reason: "email_unverified" }
       const ctx: ResolveContext = { tenantId, connection, assertion, email }
       const pre = (await d.preProvisioned?.(ctx)) ?? null
       if (pre === "deprovisioned") return { ok: false, reason: "deprovisioned" }
@@ -1022,12 +1083,13 @@ async function resolve(
         }
       }
       if (!userId) return { ok: false, reason: "no_account" }
-      // Somebody else's subject already holds this account on this connection.
-      if (
-        identityId === null &&
-        (await d.store.identityByUser(tenantId, connection.id, userId))
-      )
-        return { ok: false, reason: "already_linked" }
+      // Another subject already holds this account on this connection: the
+      // IdP's subject changed (a rename, a recreated app). Decided below, once
+      // the account itself has passed its checks.
+      if (identityId === null) {
+        const held = await d.store.identityByUser(tenantId, connection.id, userId)
+        if (held) changed = { identityId: held.id, from: held.subject }
+      }
     }
 
     const user = await d.clerk.user(userId)
@@ -1040,6 +1102,37 @@ async function resolve(
     const managed = await d.store.managedByUser(userId)
     if (managed && managed.tenantId !== tenantId)
       return { ok: false, reason: "managed_elsewhere" }
+
+    if (changed) {
+      const decided = await subjectChanged(d, {
+        tenantId,
+        connection,
+        assertion,
+        email,
+        userId,
+        user,
+        live,
+        mode,
+        changed,
+      })
+      if (decided === "move") {
+        return {
+          ok: true,
+          userId,
+          user,
+          path: "linked",
+          identityId: changed.identityId,
+          orgId,
+          email,
+          managed,
+          created,
+          relink: { from: changed.from },
+        }
+      }
+      if (decided === "would_move")
+        return { ok: "would_relink", orgId, email, userId }
+      return decided
+    }
 
     return {
       ok: true,
@@ -1054,6 +1147,77 @@ async function resolve(
     }
   }
   return { ok: false, reason: "no_account", extra: { jit: "raced" } }
+}
+
+/**
+ * The IdP sent a new subject for somebody already linked on this connection
+ * (sso.md 2.22): `move` it, `would_move` it (a test run), or refuse with
+ * `subject_changed` and, for a real sign-in, file the request an owner
+ * approves.
+ *
+ * ⚠ `auto` MOVES THE LINK ONLY FOR AN ADDRESS THE WORKSPACE CAN STAND BEHIND:
+ * the IdP vouches for it (or it is an opted-in Entra UPN), it is on a domain
+ * this workspace proved for this connection, and the linked account holds it
+ * VERIFIED at Clerk - so it is that account's address, not merely one the
+ * IdP would like it to have. Anything short of all three, and any owner or
+ * admin (whose way in SSO never replaces, decision 7), is an owner's call.
+ * The same account the old subject proved is the one the new subject names,
+ * or nothing moves.
+ *
+ * ⚠ A TEST RUN FILES NOTHING AND MOVES NOTHING: it only says which of the
+ * two a real sign-in would do.
+ */
+async function subjectChanged(
+  d: BridgeDeps,
+  input: {
+    tenantId: string
+    connection: Connection
+    assertion: Assertion
+    email: string
+    userId: string
+    user: ClerkUserSnapshot
+    live: readonly string[]
+    mode: "sign_in" | "test_run"
+    changed: { identityId: string; from: string }
+  },
+): Promise<"move" | "would_move" | Extract<Resolved, { ok: false }>> {
+  const { tenantId, connection, assertion, email, userId, changed } = input
+  const automatic =
+    connection.relink === "auto" &&
+    emailVouched(connection, assertion) &&
+    onLiveDomain(email, input.live) &&
+    input.user.emails.some((e) => e.verified && e.address.toLowerCase() === email) &&
+    !(await d.isExempt(tenantId, userId))
+  if (automatic) return input.mode === "test_run" ? "would_move" : "move"
+  const refusal = {
+    ok: false as const,
+    reason: "subject_changed" as const,
+    extra: { identityId: changed.identityId },
+  }
+  if (input.mode === "test_run") return refusal
+  const now = clock(d)
+  const filed = await d.store.requestRelink(tenantId, {
+    connectionId: connection.id,
+    identityId: changed.identityId,
+    newSubject: assertion.subject,
+    emailHash: hashSecret(email),
+    now,
+    expiresAt: new Date(now.getTime() + RELINK_REQUEST_TTL_MS),
+  })
+  // Only a request that is new (or replaced) is news: a retry files nothing.
+  if (filed === "created")
+    await d.store.record(tenantId, {
+      type: "identity.relink_requested",
+      subjectUserId: userId,
+      connectionId: connection.id,
+      reason: connection.relink === "auto" ? "not_eligible" : "ask",
+      data: {
+        identityId: changed.identityId,
+        from: subjectFingerprint(changed.from),
+        to: subjectFingerprint(assertion.subject),
+      },
+    })
+  return refusal
 }
 
 /**
@@ -1081,6 +1245,8 @@ function claimsOf(assertion: Assertion): Record<string, unknown> {
     subject: assertion.subject,
     email: assertion.email,
     emailVerified: assertion.emailVerified,
+    // Which claim the address came from: the IdP's email, or Entra's UPN (opt-in).
+    emailSource: assertion.emailSource ?? (assertion.email ? "email" : null),
     givenName: assertion.givenName ?? null,
     familyName: assertion.familyName ?? null,
     groups: assertion.groups ?? [],

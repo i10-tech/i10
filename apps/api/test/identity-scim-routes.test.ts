@@ -506,6 +506,16 @@ describe("content rules", () => {
 // ── Discovery ───────────────────────────────────────────────────────────────
 
 describe("discovery", () => {
+  it("answers Entra's `/scim` suffix on the base URL as the plain path, auth included", async () => {
+    const w = world()
+    const plain = await w.call("GET", '/Users?filter=externalId eq "nobody"')
+    const suffixed = await w.call("GET", '/scim/Users?filter=externalId eq "nobody"')
+    expect(suffixed.status).toBe(200)
+    expect(await w.json(suffixed)).toEqual(await w.json(plain))
+    expect((await w.call("GET", "/scim/Users", { token: null })).status).toBe(401)
+    expect((await w.call("GET", "/scim/scim/Users")).status).toBe(404)
+  })
+
   it("serves ServiceProviderConfig, ResourceTypes and Schemas", async () => {
     const w = world()
     const config = await w.json(await w.call("GET", "/ServiceProviderConfig"))

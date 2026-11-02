@@ -1,7 +1,8 @@
-import type {
-  BoundSession,
-  Connection,
-  DeprovisionMode,
+import {
+  defaultMaxSessionSeconds,
+  type BoundSession,
+  type Connection,
+  type DeprovisionMode,
 } from "../src/identity/model.js"
 import type {
   AttemptRow,
@@ -13,6 +14,8 @@ import type {
   IdentityStore,
   ManagedRow,
   NewAttempt,
+  RelinkRequestRow,
+  RelinkResult,
   ReplayCache,
   SamlCertificateRow,
   SamlStore,
@@ -47,6 +50,8 @@ export function connection(over: Partial<Connection> = {}): Connection {
     config: {},
     attributeMapping: {},
     groupsLastSeenAt: null,
+    relink: "ask",
+    upnAsEmail: false,
     ...over,
   }
 }
@@ -99,6 +104,12 @@ export function memoryStore(
     email: string | null
     lastLoginAt: Date | null
   }[] = []
+  /** Pending relink requests (sso.md 2.22): one per identity, like the unique index. */
+  const relinks: (RelinkRequestRow & {
+    tenantId: string
+    newSubject: string
+    emailHash: string
+  })[] = []
   const managed = new Map<string, ManagedRow>()
   const sessions = new Map<
     string,
@@ -118,6 +129,37 @@ export function memoryStore(
   let n = 0
   const id = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`
   const fail = { gateRead: false }
+
+  /** The real store's `moveSubject`: compare-and-set on `from`, the unique `(connection, subject)`. */
+  function moveSubject(
+    tenantId: string,
+    input: { connectionId: string; identityId: string; from: string; to: string },
+  ): RelinkResult {
+    const row = identities.find(
+      (i) =>
+        i.id === input.identityId &&
+        i.tenantId === tenantId &&
+        i.connectionId === input.connectionId &&
+        i.subject === input.from,
+    )
+    if (!row) return { outcome: "gone" }
+    if (
+      identities.some(
+        (i) => i.connectionId === input.connectionId && i.subject === input.to,
+      )
+    )
+      return { outcome: "conflict" }
+    row.subject = input.to
+    for (let i = relinks.length - 1; i >= 0; i--)
+      if (relinks[i]!.identityId === input.identityId) relinks.splice(i, 1)
+    return {
+      outcome: "moved",
+      identityId: row.id,
+      clerkUserId: row.clerkUserId,
+      from: input.from,
+      to: input.to,
+    }
+  }
 
   const store: IdentityStore = {
     async connection(tenantId, cid) {
@@ -148,6 +190,7 @@ export function memoryStore(
         protocol: input.protocol,
         provider: input.provider,
         status: "draft",
+        maxSessionSeconds: defaultMaxSessionSeconds(input.provider),
       })
       connections.set(made.id, made)
       return made
@@ -397,6 +440,92 @@ export function memoryStore(
       row.email = email
       row.lastLoginAt = at
     },
+    async relinkIdentity(tenantId, input) {
+      return moveSubject(tenantId, input)
+    },
+    async requestRelink(tenantId, input) {
+      for (let i = relinks.length - 1; i >= 0; i--)
+        if (
+          relinks[i]!.identityId === input.identityId &&
+          relinks[i]!.expiresAt.getTime() <= input.now.getTime()
+        )
+          relinks.splice(i, 1)
+      const held = relinks.find((r) => r.identityId === input.identityId)
+      if (held?.newSubject === input.newSubject) return "exists"
+      if (held) {
+        Object.assign(held, {
+          newSubject: input.newSubject,
+          emailHash: input.emailHash,
+          createdAt: input.now,
+          expiresAt: input.expiresAt,
+        })
+        return "created"
+      }
+      const identity = identities.find(
+        (i) =>
+          i.id === input.identityId &&
+          i.tenantId === tenantId &&
+          i.connectionId === input.connectionId,
+      )
+      if (!identity) return "exists"
+      relinks.push({
+        id: id(),
+        tenantId,
+        connectionId: input.connectionId,
+        identityId: input.identityId,
+        email: identity.email,
+        clerkUserId: identity.clerkUserId,
+        newSubject: input.newSubject,
+        emailHash: input.emailHash,
+        createdAt: input.now,
+        expiresAt: input.expiresAt,
+      })
+      return "created"
+    },
+    async relinkRequests(tenantId, cid, now) {
+      return relinks
+        .filter(
+          (r) =>
+            r.tenantId === tenantId &&
+            r.connectionId === cid &&
+            r.expiresAt.getTime() > now.getTime(),
+        )
+        .map((r) => ({
+          id: r.id,
+          connectionId: r.connectionId,
+          identityId: r.identityId,
+          email: r.email,
+          clerkUserId: r.clerkUserId,
+          createdAt: r.createdAt,
+          expiresAt: r.expiresAt,
+        }))
+    },
+    async approveRelink(tenantId, input) {
+      const request = relinks.find(
+        (r) =>
+          r.tenantId === tenantId &&
+          r.connectionId === input.connectionId &&
+          r.id === input.requestId &&
+          r.expiresAt.getTime() > input.now.getTime(),
+      )
+      if (!request) return { outcome: "not_found" }
+      const identity = identities.find((i) => i.id === request.identityId)
+      if (!identity) return { outcome: "gone" }
+      return moveSubject(tenantId, {
+        connectionId: input.connectionId,
+        identityId: request.identityId,
+        from: identity.subject,
+        to: request.newSubject,
+      })
+    },
+    async rejectRelink(tenantId, cid, requestId) {
+      const at = relinks.findIndex(
+        (r) => r.tenantId === tenantId && r.connectionId === cid && r.id === requestId,
+      )
+      if (at < 0) return null
+      const [row] = relinks.splice(at, 1)
+      return { identityId: row!.identityId }
+    },
     async managedByUser(userId) {
       const row = managed.get(userId)
       return row ? { ...row } : null
@@ -532,6 +661,7 @@ export function memoryStore(
     live,
     attempts,
     identities,
+    relinks,
     managed,
     sessions,
     events,

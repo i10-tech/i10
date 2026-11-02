@@ -31,8 +31,10 @@ import { NAMEID } from "./saml-verify.js"
  *     Name ID "Basic Information > Primary email"; attribute mapping `email`,
  *     `firstName`, `lastName`. Entity id `https://accounts.google.com/o/saml2?idpid=<id>`.
  *     ⚠ GOOGLE'S NAME ID IS THE PRIMARY EMAIL, whatever format it is labelled:
- *     a Workspace admin who renames a user, or gives a departed user's address
- *     to somebody new, moves the i10 account with it (the nOAuth shape). Map
+ *     a Workspace admin who renames a user changes their subject (the
+ *     connection's `relink` setting handles it, sso.md 2.22), and one who gives
+ *     a departed user's address to somebody new lets them in as the old
+ *     person (the nOAuth shape). Map
  *     an immutable custom attribute (an employee id) as the subject if that
  *     matters; the connection's `subjectAttribute` does exactly that. Google
  *     does not encrypt assertions and does not take signed requests.
@@ -136,6 +138,7 @@ export const SAML_PRESETS: Readonly<Record<SamlProvider, SamlPreset>> = {
     encrypts: true,
     requires: [
       "An Enterprise application with SAML single sign-on.",
+      "Give us the App Federation Metadata URL, not a downloaded file: with the URL, a rotated Entra signing certificate is picked up on its own.",
       "Identifier (Entity ID) and Reply URL (ACS) as below, Logout URL as our SLO URL.",
       "Unique User Identifier (Name ID) = user.objectid with format Persistent.",
       "Signing option: sign the SAML assertion, with SHA-256.",
@@ -154,7 +157,7 @@ export const SAML_PRESETS: Readonly<Record<SamlProvider, SamlPreset>> = {
       "A custom SAML app with the ACS URL and Entity ID below.",
       "Name ID: Basic Information > Primary email (or an immutable custom attribute, set as the subject attribute here).",
       "Attribute mapping: email, firstName, lastName.",
-      "Google's Name ID is the primary email: renaming a user or reusing an address at Google moves the i10 account with it.",
+      "Google's Name ID is the primary email: renaming a user changes their subject, and the connection's relink setting decides whether i10 moves their link on its own or waits for an owner. An address given to somebody new is the same subject, so reuse needs offboarding first.",
     ],
   },
   generic: {

@@ -119,6 +119,26 @@ const notFound = (what: string) => new ScimError(404, `${what} not found.`)
 
 export function createScimRoutes(deps?: ScimRouteDeps) {
   const app = new Hono<Env>()
+
+  /*
+   * ⚠ ENTRA APPENDS `/scim` TO EVERY TENANT URL. Configured with our base
+   * `.../scim/v2/<directory>`, Entra's Test Connection and provisioning call
+   * `.../scim/v2/<directory>/scim/Users` (measured live 2026-11-02: a 404 from
+   * this API, and the same suffix on every base tried against an echo server).
+   * The suffix is dropped and the request answered as itself, through every
+   * check below; nothing else under a directory is reached this way.
+   */
+  app.all("/:directory/scim/*", (c) => {
+    const url = new URL(c.req.url)
+    const at = url.pathname.indexOf(`/${param(c, "directory")}/scim/`)
+    if (at < 0) return failure(c, notFound("Resource"))
+    url.pathname = url.pathname.slice(at).replace(/^(\/[^/]+)\/scim\//, "$1/")
+    // Once only: `/scim/scim/Users` is not a path anybody configured.
+    if (url.pathname.startsWith(`/${param(c, "directory")}/scim/`))
+      return failure(c, notFound("Resource"))
+    return app.fetch(new Request(url, c.req.raw), c.env)
+  })
+
   const now = () => (deps?.now ?? (() => new Date()))()
   const limits = {
     perIp: deps?.limits?.perIp ?? PER_IP,

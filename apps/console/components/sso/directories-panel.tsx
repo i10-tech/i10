@@ -7,11 +7,13 @@ import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
 import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { Time } from "@/components/time"
 import { useResetOnOpen } from "@/lib/react"
 import {
   changeDirectory,
   checkDirectory,
+  confirmDirectoryRemovals,
   createDirectory,
   directoryConflicts,
   issueDirectoryToken,
@@ -67,6 +69,8 @@ export interface GoogleErrorContext {
   missingScopes?: readonly string[]
   removedUsers?: number
   existingUsers?: number
+  /** The viewer is an owner, who can confirm a refused removal. */
+  canConfirmRemovals?: boolean
 }
 
 export const GOOGLE_ERROR_COPY: Record<
@@ -116,14 +120,19 @@ export const GOOGLE_ERROR_COPY: Record<
     "This Google Workspace has more groups or group members than a single directory sync supports; remove unused groups or contact support.",
   empty_directory: () =>
     "Google returned zero users on your verified domains while this directory already has people, so nothing was changed; check your verified domains and Google Workspace users.",
-  large_drop: ({ removedUsers, existingUsers }) => {
+  large_drop: ({ removedUsers, existingUsers, canConfirmRemovals }) => {
     const countPart =
       removedUsers !== undefined && existingUsers !== undefined
         ? `${removedUsers} of ${existingUsers} ${existingUsers === 1 ? "person" : "people"} would be removed`
         : removedUsers !== undefined
           ? `${removedUsers} ${removedUsers === 1 ? "person" : "people"} would be removed`
           : "A large share of your people would be removed"
-    return `${countPart}, so nothing was changed; check that every domain your people use is verified here.`
+    // The button is shown only to an owner, and only once the count is known.
+    const button =
+      canConfirmRemovals && removedUsers !== undefined
+        ? "; if these removals are expected, confirm them below, otherwise"
+        : ";"
+    return `${countPart}, so nothing was changed${button} check that every domain your people use is verified here.`
   },
   user_conflict: () =>
     "Some users could not be updated because an email address is still held by another directory entry; wait for the next sync or check Conflicts.",
@@ -252,8 +261,15 @@ function Directory({
   const [overlap, setOverlap] = React.useState(String(24 * 3600))
   const [checking, setChecking] = React.useState(false)
   const [conflicts, setConflicts] = React.useState(false)
+  const [confirming, setConfirming] = React.useState(false)
   const google = directory.provider === "google"
   const liveTokens = directory.tokens.filter((t) => !t.revokedAt)
+  // ⚠ ONLY THE COUNT THE API RECORDED CAN BE CONFIRMED, and only by an owner.
+  const refusedRemovals =
+    directory.lastSyncError === "large_drop"
+      ? directory.lastSyncDetail?.removedUsers
+      : undefined
+  const canConfirmRemovals = abilities.owner && refusedRemovals !== undefined
 
   return (
     <li className="rounded-lg border p-4">
@@ -339,8 +355,14 @@ function Directory({
                   missingScopes: directory.lastSyncDetail?.missingScopes,
                   removedUsers: directory.lastSyncDetail?.removedUsers,
                   existingUsers: directory.lastSyncDetail?.existingUsers,
+                  canConfirmRemovals,
                 })}
               </p>
+            )}
+            {canConfirmRemovals && (
+              <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>
+                Remove {refusedRemovals} {refusedRemovals === 1 ? "person" : "people"}
+              </Button>
             )}
             <Button
               variant="secondary"
@@ -465,6 +487,27 @@ function Directory({
           </>
         )}
       </div>
+      {refusedRemovals !== undefined && (
+        <ConfirmDialog
+          open={confirming}
+          onOpenChange={setConfirming}
+          title={`Remove ${refusedRemovals} ${refusedRemovals === 1 ? "person" : "people"}?`}
+          description={`The next pull from Google removes ${refusedRemovals} ${refusedRemovals === 1 ? "person" : "people"} from this workspace. If more people than that would go, it asks you again. This go-ahead lasts 24 hours.`}
+          confirmLabel={`Remove ${refusedRemovals}`}
+          doneLabel="Confirmed"
+          destructive
+          onConfirm={async () => {
+            const done = await call(
+              () => confirmDirectoryRemovals(directory.id, refusedRemovals),
+              { title: "Could not confirm the removals" },
+            )
+            if (!done) return false
+            toastDone("Removals confirmed", "Pulling from Google now.")
+            await reload()
+            return true
+          }}
+        />
+      )}
       <Conflicts
         directory={directory}
         open={conflicts}

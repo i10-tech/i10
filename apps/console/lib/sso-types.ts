@@ -34,6 +34,10 @@ export interface SsoConnection {
   enforcement: SsoEnforcement
   jitEnabled: boolean
   mfaRequired: boolean
+  /** A changed provider login: an owner approves (`ask`) or i10 moves the link (`auto`). */
+  relink: "ask" | "auto"
+  /** Entra only: the user principal name stands in for a missing email. */
+  upnAsEmail: boolean
   maxSessionSeconds: number | null
   idleTimeoutSeconds: number | null
   attributeMapping: Record<string, string>
@@ -158,6 +162,16 @@ export interface GroupRules {
   data: GroupRule[]
   defaultRole: "member"
   max: number
+}
+
+/** A person whose provider login changed and who waits for an owner. */
+export interface RelinkRequest {
+  id: string
+  identityId: string
+  clerkUserId: string
+  email: string | null
+  createdAt: string
+  expiresAt: string
 }
 
 export interface BypassEntry {

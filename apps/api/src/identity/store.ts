@@ -1,4 +1,4 @@
-import { and, arrayContains, desc, eq, isNull, sql } from "drizzle-orm"
+import { and, arrayContains, desc, eq, gt, isNull, lte, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { joinDomains, joinExclusions, tenants, workspaceRoles } from "../db/core.js"
 import {
@@ -9,25 +9,34 @@ import {
   identities,
   loginAttempts,
   managedAccounts,
+  relinkRequests,
   ssoSessions,
   testRuns,
   workspaceSettings,
 } from "../db/identity.js"
 import { NO_TENANT } from "../middleware/tenant.js"
 import type { SecretBox } from "../webhooks/signing.js"
-import type {
-  AttemptPurpose,
-  BoundSession,
-  Connection,
-  ConnectionStatus,
-  DeprovisionMode,
-  Enforcement,
-  ManagedReason,
-  Protocol,
+import {
+  defaultMaxSessionSeconds,
+  type AttemptPurpose,
+  type BoundSession,
+  type Connection,
+  type ConnectionStatus,
+  type DeprovisionMode,
+  type Enforcement,
+  type ManagedReason,
+  type Protocol,
+  type RelinkMode,
 } from "./model.js"
 import { readJoinRole } from "../console/roles.js"
 import { MAX_GROUP_RULES } from "./jit.js"
-import type { AttemptRow, GroupRoleRule, IdentityStore, ManagedRow } from "./ports.js"
+import type {
+  AttemptRow,
+  GroupRoleRule,
+  IdentityStore,
+  ManagedRow,
+  RelinkResult,
+} from "./ports.js"
 import { mirrorManaged, unmirrorManaged } from "./authd-mirror.js"
 
 const toRule = (r: typeof groupRoleRules.$inferSelect): GroupRoleRule => ({
@@ -93,6 +102,8 @@ const toConnection = (r: typeof connections.$inferSelect): Connection => ({
   config: r.config,
   attributeMapping: r.attributeMapping,
   groupsLastSeenAt: r.groupsLastSeenAt,
+  relink: r.relink as RelinkMode,
+  upnAsEmail: r.upnAsEmail,
 })
 
 const toSession = (
@@ -118,6 +129,35 @@ const toManaged = (r: typeof managedAccounts.$inferSelect): ManagedRow => ({
 
 /** A proof a sign-in may use: verified, not lapsed, not displaced. */
 const liveProof = sql`${joinDomains.verifiedAt} is not null and ${joinDomains.lapsedAt} is null and ${joinDomains.displacedAt} is null`
+
+/** Moves one identity's subject inside a tenant transaction; see `relinkIdentity`. */
+async function moveSubject(
+  tx: Tx,
+  tenantId: string,
+  input: { connectionId: string; identityId: string; from: string; to: string },
+): Promise<RelinkResult> {
+  const [moved] = await tx
+    .update(identities)
+    .set({ subject: input.to })
+    .where(
+      and(
+        eq(identities.tenantId, tenantId),
+        eq(identities.connectionId, input.connectionId),
+        eq(identities.id, input.identityId),
+        eq(identities.subject, input.from),
+      ),
+    )
+    .returning({ clerkUserId: identities.clerkUserId })
+  if (!moved) return { outcome: "gone" }
+  await tx.delete(relinkRequests).where(eq(relinkRequests.identityId, input.identityId))
+  return {
+    outcome: "moved",
+    identityId: input.identityId,
+    clerkUserId: moved.clerkUserId,
+    from: input.from,
+    to: input.to,
+  }
+}
 
 export function identityStore(db: Database, secrets: SecretBox | null): IdentityStore {
   const toAttempt = (r: typeof loginAttempts.$inferSelect): AttemptRow => ({
@@ -219,6 +259,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
             protocol: input.protocol,
             provider: input.provider,
             createdBy: input.createdBy,
+            maxSessionSeconds: defaultMaxSessionSeconds(input.provider),
           })
           .returning(),
       )
@@ -775,6 +816,164 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
           .set({ email, lastLoginAt: at })
           .where(and(eq(identities.tenantId, tenantId), eq(identities.id, id))),
       )
+    },
+
+    /**
+     * ⚠ THE SUBJECT MOVES ONLY WHILE IT IS STILL `from`, and the unique index
+     * on `(connection, subject)` is the last word on a clash: a violation is
+     * `conflict`, never an overwrite. The request for the identity goes with
+     * the move, in the same transaction.
+     */
+    async relinkIdentity(tenantId, input) {
+      try {
+        return await withTenant(db, tenantId, (tx) =>
+          moveSubject(tx, tenantId, input),
+        )
+      } catch (error) {
+        if (isUniqueViolation(error)) return { outcome: "conflict" }
+        throw error
+      }
+    },
+
+    async requestRelink(tenantId, input) {
+      return withTenant(db, tenantId, async (tx) => {
+        // An expired request is no request: the next attempt files a fresh one.
+        await tx
+          .delete(relinkRequests)
+          .where(
+            and(
+              eq(relinkRequests.tenantId, tenantId),
+              eq(relinkRequests.identityId, input.identityId),
+              lte(relinkRequests.expiresAt, input.now),
+            ),
+          )
+        const [held] = await tx
+          .select({
+            id: relinkRequests.id,
+            newSubject: relinkRequests.newSubject,
+          })
+          .from(relinkRequests)
+          .where(
+            and(
+              eq(relinkRequests.tenantId, tenantId),
+              eq(relinkRequests.identityId, input.identityId),
+            ),
+          )
+          .limit(1)
+        if (held?.newSubject === input.newSubject) return "exists" as const
+        const values = {
+          newSubject: input.newSubject,
+          emailHash: input.emailHash,
+          createdAt: input.now,
+          expiresAt: input.expiresAt,
+        }
+        if (held) {
+          await tx
+            .update(relinkRequests)
+            .set(values)
+            .where(eq(relinkRequests.id, held.id))
+          return "created" as const
+        }
+        // The identity must be this connection's own: a request is never
+        // filed for a row the caller merely named.
+        const [identity] = await tx
+          .select({ id: identities.id })
+          .from(identities)
+          .where(
+            and(
+              eq(identities.tenantId, tenantId),
+              eq(identities.connectionId, input.connectionId),
+              eq(identities.id, input.identityId),
+            ),
+          )
+          .limit(1)
+        if (!identity) return "exists" as const
+        await tx.insert(relinkRequests).values({
+          tenantId,
+          connectionId: input.connectionId,
+          identityId: input.identityId,
+          ...values,
+        })
+        return "created" as const
+      })
+    },
+
+    async relinkRequests(tenantId, connectionId, now) {
+      const rows = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({
+            id: relinkRequests.id,
+            connectionId: relinkRequests.connectionId,
+            identityId: relinkRequests.identityId,
+            email: identities.email,
+            clerkUserId: identities.clerkUserId,
+            createdAt: relinkRequests.createdAt,
+            expiresAt: relinkRequests.expiresAt,
+          })
+          .from(relinkRequests)
+          .innerJoin(identities, eq(identities.id, relinkRequests.identityId))
+          .where(
+            and(
+              eq(relinkRequests.tenantId, tenantId),
+              eq(relinkRequests.connectionId, connectionId),
+              gt(relinkRequests.expiresAt, now),
+            ),
+          )
+          .orderBy(relinkRequests.createdAt),
+      )
+      return rows
+    },
+
+    async approveRelink(tenantId, input) {
+      try {
+        return await withTenant(db, tenantId, async (tx) => {
+          const [request] = await tx
+            .select()
+            .from(relinkRequests)
+            .where(
+              and(
+                eq(relinkRequests.tenantId, tenantId),
+                eq(relinkRequests.connectionId, input.connectionId),
+                eq(relinkRequests.id, input.requestId),
+                gt(relinkRequests.expiresAt, input.now),
+              ),
+            )
+            .for("update")
+            .limit(1)
+          if (!request) return { outcome: "not_found" as const }
+          const [identity] = await tx
+            .select({ subject: identities.subject })
+            .from(identities)
+            .where(eq(identities.id, request.identityId))
+            .limit(1)
+          if (!identity) return { outcome: "gone" as const }
+          return moveSubject(tx, tenantId, {
+            connectionId: input.connectionId,
+            identityId: request.identityId,
+            from: identity.subject,
+            to: request.newSubject,
+          })
+        })
+      } catch (error) {
+        if (isUniqueViolation(error)) return { outcome: "conflict" }
+        throw error
+      }
+    },
+
+    async rejectRelink(tenantId, connectionId, requestId) {
+      const [gone] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .delete(relinkRequests)
+          .where(
+            and(
+              eq(relinkRequests.tenantId, tenantId),
+              eq(relinkRequests.connectionId, connectionId),
+              eq(relinkRequests.id, requestId),
+            ),
+          )
+          .returning({ identityId: relinkRequests.identityId }),
+      )
+      return gone ?? null
     },
 
     // ── managed ──

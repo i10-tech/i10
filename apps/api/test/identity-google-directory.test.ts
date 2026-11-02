@@ -2206,6 +2206,118 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
     })
     expect(w.dirs.users.filter((u) => u.deletedAt === null)).toHaveLength(29)
   })
+
+  describe("an owner's go-ahead past the shrink guard", () => {
+    const seededWorld = async (live: { count: number }) => {
+      const w = syncWorld({
+        googleHandler: (call) => {
+          if (call.url.href === GOOGLE_TOKEN_URL)
+            return jsonResponse({ access_token: "tok_drop", expires_in: 3600 })
+          if (call.url.pathname.endsWith("/users"))
+            return jsonResponse({
+              users: Array.from({ length: live.count }, (_, idx) => ({
+                id: `g_u${idx + 1}`,
+                primaryEmail: `u${idx + 1}@acme.test`,
+                name: { givenName: "User", familyName: `${idx + 1}` },
+              })),
+            })
+          return jsonResponse({})
+        },
+      })
+      live.count = 30
+      expect((await w.pull()).outcome).toBe("ok")
+      live.count = 23
+      expect((await w.pull()).outcome).toBe("failed")
+      return w
+    }
+    const liveCount = (w: Awaited<ReturnType<typeof seededWorld>>) =>
+      w.dirs.users.filter((u) => u.deletedAt === null).length
+    const dropEvents = (w: Awaited<ReturnType<typeof seededWorld>>) =>
+      w.identity.events.filter((e) => e.reason === "large_drop")
+
+    it("applies exactly the confirmed removal on the next pull and clears the allowance", async () => {
+      const live = { count: 30 }
+      const w = await seededWorld(live)
+      expect(liveCount(w)).toBe(30)
+      expect(
+        await w.dirs.store.allowDirectoryDrop(TENANT, DIRECTORY, {
+          users: 7,
+          at: new Date("2026-10-24T12:00:00Z"),
+        }),
+      ).toBe(true)
+
+      expect(await w.pull()).toEqual({
+        outcome: "ok",
+        users: { created: 0, updated: 0, deleted: 7, unchanged: 23 },
+        groups: { created: 0, updated: 0, deleted: 0, unchanged: 0 },
+      })
+      expect(liveCount(w)).toBe(23)
+      const dir = w.dirs.directories.get(DIRECTORY)!
+      expect(dir).toMatchObject({
+        lastSyncStatus: "ok",
+        lastSyncError: null,
+        allowDropUpTo: null,
+        allowDropAt: null,
+      })
+    })
+
+    it("refuses again, with the new counts, when more people would go than were confirmed", async () => {
+      const live = { count: 30 }
+      const w = await seededWorld(live)
+      await w.dirs.store.allowDirectoryDrop(TENANT, DIRECTORY, {
+        users: 7,
+        at: new Date("2026-10-24T12:00:00Z"),
+      })
+
+      live.count = 22
+      expect(await w.pull()).toEqual({
+        outcome: "failed",
+        error: "large_drop",
+        retryable: false,
+      })
+      expect(liveCount(w)).toBe(30)
+      // The same error code as before, yet the owner is told the new number.
+      expect(dropEvents(w).at(-1)).toMatchObject({
+        data: { existingUsers: 30, removedUsers: 8, keptUsers: 22 },
+      })
+      expect(dropEvents(w)).toHaveLength(2)
+      // The go-ahead is spent: the same pull again is refused with no new say-so.
+      expect(w.dirs.directories.get(DIRECTORY)).toMatchObject({
+        allowDropUpTo: null,
+        allowDropAt: null,
+      })
+    })
+
+    it("ignores an allowance older than 24 hours", async () => {
+      const live = { count: 30 }
+      const w = await seededWorld(live)
+      await w.dirs.store.allowDirectoryDrop(TENANT, DIRECTORY, {
+        users: 7,
+        at: new Date("2026-10-23T12:00:00Z"),
+      })
+
+      expect(await w.pull()).toEqual({
+        outcome: "failed",
+        error: "large_drop",
+        retryable: false,
+      })
+      expect(liveCount(w)).toBe(30)
+    })
+
+    it("is only stored for a Google directory whose last sync failed large_drop", async () => {
+      const live = { count: 30 }
+      const w = await seededWorld(live)
+      const dir = w.dirs.directories.get(DIRECTORY)!
+      dir.lastSyncError = "unreachable"
+      expect(
+        await w.dirs.store.allowDirectoryDrop(TENANT, DIRECTORY, {
+          users: 7,
+          at: new Date("2026-10-24T12:00:00Z"),
+        }),
+      ).toBe(false)
+      expect(dir.allowDropUpTo).toBeNull()
+    })
+  })
 })
 
 // ── 5. Schedule & `users.watch` channel lifecycle ───────────────────────────

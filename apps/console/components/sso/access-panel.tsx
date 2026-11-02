@@ -11,12 +11,15 @@ import { teamAccessDomains, type AccessDomain } from "@/lib/actions"
 import {
   addBypass,
   addSsoDomain,
+  approveRelink,
   bypassList,
   changeGroupRule,
   changeSsoConnection,
   createGroupRule,
   deleteGroupRule,
   groupRules,
+  rejectRelink,
+  relinkRequests,
   removeBypass,
   removeSsoDomain,
   ssoTestRuns,
@@ -49,6 +52,7 @@ const HOUR = 3600
 const MAX_SESSION: { value: string; label: string }[] = [
   { value: "none", label: "No limit" },
   { value: String(8 * HOUR), label: "8 hours" },
+  { value: String(12 * HOUR), label: "12 hours" },
   { value: String(24 * HOUR), label: "24 hours" },
   { value: String(7 * 24 * HOUR), label: "7 days" },
   { value: String(30 * 24 * HOUR), label: "30 days" },
@@ -90,6 +94,7 @@ export function AccessPanel({
       <Enforcement connection={connection} abilities={abilities} onChange={onChange} />
       <SignInRules connection={connection} abilities={abilities} onChange={onChange} />
       <Domains connection={connection} abilities={abilities} onChange={onChange} />
+      <LoginChanges connection={connection} abilities={abilities} onChange={onChange} />
       <GroupRules connection={connection} abilities={abilities} />
       <Bypass
         connection={connection}
@@ -336,7 +341,128 @@ function SignInRules({
           items={withCurrent(IDLE, connection.idleTimeoutSeconds)}
         />
       </div>
+      {connection.provider === "entra" && (
+        <p className="text-xs text-muted-foreground">
+          Signing out of Microsoft does not sign people out of i10. Sessions end at the
+          longest session limit, or when your directory deactivates someone.
+        </p>
+      )}
       <OwnerNote abilities={abilities} />
+    </Block>
+  )
+}
+
+// ── Changed provider logins ─────────────────────────────────────────────────
+
+const RELINK_HELP: Record<SsoConnection["relink"], string> = {
+  ask: "Someone whose provider login changed (a renamed username or email, a recreated app) is refused until an owner approves the new one below.",
+  auto: "When a provider login changes, i10 moves the person to the new one if their email is verified, on a domain above, and is the address on their account. It is recorded in the audit log.",
+}
+
+function LoginChanges({
+  connection,
+  abilities,
+  onChange,
+}: {
+  connection: SsoConnection
+  abilities: SsoAbilities
+  onChange: (connection: SsoConnection) => void
+}) {
+  const call = useSsoCall()
+  const { data, setData, failed } = useRemote(() => relinkRequests(connection.id))
+  const entra = connection.provider === "entra"
+
+  async function patch(change: ConnectionChange, done: string) {
+    const result = await call(() => changeSsoConnection(connection.id, change), {
+      title: "Could not save that",
+    })
+    if (result) {
+      onChange({ ...connection, ...result, domains: connection.domains })
+      toastDone(done)
+    }
+  }
+
+  async function decide(requestId: string, approve: boolean) {
+    const ok = await call(
+      () =>
+        approve
+          ? approveRelink(connection.id, requestId)
+          : rejectRelink(connection.id, requestId),
+      { title: approve ? "Could not approve that" : "Could not reject that" },
+    )
+    if (ok && data) {
+      setData({ data: data.data.filter((r) => r.id !== requestId) })
+      toastDone(approve ? "Login relinked" : "Request rejected")
+    }
+  }
+
+  return (
+    <Block
+      title="Changed logins"
+      description="What happens when your provider sends a new login for someone who is already linked."
+    >
+      <MorphSelect
+        label="When a login changes"
+        value={connection.relink}
+        disabled={!abilities.owner}
+        onValueChange={(v) =>
+          void patch({ relink: v as SsoConnection["relink"] }, "Saved")
+        }
+        items={[
+          { value: "ask", label: "Ask an owner" },
+          { value: "auto", label: "Relink automatically" },
+        ]}
+      />
+      <p className="text-sm text-muted-foreground">{RELINK_HELP[connection.relink]}</p>
+      {entra && (
+        <ToggleRow
+          label="Use the user principal name as the email when Entra sends none"
+          description="Entra sends no email for members whose mail field is empty. Off, they are refused. On, their user principal name is used, but only on a domain above. Guest accounts never count."
+          checked={connection.upnAsEmail}
+          disabled={!abilities.owner}
+          onChange={(v) =>
+            void patch({ upnAsEmail: v }, v ? "Using the principal name" : "Saved")
+          }
+        />
+      )}
+      {!abilities.owner && (
+        <p className="text-xs text-muted-foreground">
+          Only an owner can change these settings or approve a login.
+        </p>
+      )}
+      {!data ? (
+        <Loading failed={failed} />
+      ) : data.data.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No logins are waiting for approval.</p>
+      ) : (
+        <ul className="divide-y rounded-lg border">
+          {data.data.map((r) => (
+            <li key={r.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{r.email ?? r.clerkUserId}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  Asked <Time iso={r.createdAt} />, expires <Time iso={r.expiresAt} />
+                </span>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!abilities.owner}
+                onClick={() => void decide(r.id, false)}
+              >
+                Reject
+              </Button>
+              <Button
+                size="sm"
+                disabled={!abilities.owner}
+                onClick={() => void decide(r.id, true)}
+              >
+                Approve
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Block>
   )
 }

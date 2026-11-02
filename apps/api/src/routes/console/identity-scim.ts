@@ -33,6 +33,7 @@ import { TOKEN_PREFIX } from "../../identity/scim.js"
  *   GET    /identity/directories/:id
  *   PATCH  /identity/directories/:id                  { name?, enabled?, adminEmail?, domain? } (step-up)
  *   POST   /identity/directories/:id/check            Google Directory API check (sso:manage)
+ *   POST   /identity/directories/:id/confirm-removals { removedUsers } (owner, step-up)
  *   POST   /identity/directories/:id/tokens           { overlapSeconds? } (owner, step-up)
  *   DELETE /identity/directories/:id/tokens/:tokenId  (step-up)
  *   GET    /identity/directories/:id/conflicts        who is not fully in, and why
@@ -54,6 +55,9 @@ import { TOKEN_PREFIX } from "../../identity/scim.js"
 
 const forbidden = (message: string) =>
   ({ statusCode: 403, name: "forbidden" as const, message }) as const
+
+const conflict = (message: string) =>
+  ({ statusCode: 409, name: "conflict" as const, message }) as const
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -124,6 +128,11 @@ const patched = z
         "Change the name, Google Workspace settings, or whether the directory is enabled.",
     },
   )
+
+// An owner confirms the number they were shown, so it is the whole body.
+const confirmedRemovals = z
+  .object({ removedUsers: z.number().int().min(1).max(1_000_000) })
+  .strict()
 
 const issued = z
   .object({
@@ -613,6 +622,74 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     })
     return c.json(result)
   })
+
+  // ⚠ A BLANK CHEQUE IS NOT ACCEPTED. The shrink guard refused a pull that
+  // would remove most of a directory; an owner lets exactly the count they were
+  // shown through, once, and a pull that would remove more is refused again.
+  app.post(
+    "/identity/directories/:id/confirm-removals",
+    requireFreshAuth,
+    async (c) => {
+      const scim = wired()
+      if (!scim) return c.json(notWired("SCIM directories"), 501)
+      if (!(await allowed(c, "owners:manage")))
+        return c.json(
+          forbidden("Only an owner can confirm removing people from a directory."),
+          403,
+        )
+      const parsed = confirmedRemovals.safeParse((await readJson(c)) ?? {})
+      if (!parsed.success)
+        return c.json(
+          validation(parsed.error.issues[0]?.message ?? "Invalid request."),
+          422,
+        )
+      const directory = await directoryOf(c)
+      if (!directory || directory.provider !== "google") return c.json(notFound(), 404)
+      if (!scim.google) return c.json(notWired("Google directory sync"), 501)
+      const { tenantId } = c.get("auth")
+      const { userId } = c.get("user")
+      const shown = (await googleSyncDetailsByDirectory(d, scim, tenantId, [directory]))
+        .get(directory.id)?.removedUsers
+      if (
+        directory.lastSyncStatus !== "failed" ||
+        directory.lastSyncError !== "large_drop" ||
+        shown === undefined
+      )
+        return c.json(
+          conflict("This directory has no refused removal waiting for a go-ahead."),
+          409,
+        )
+      if (shown !== parsed.data.removedUsers)
+        return c.json(
+          conflict("The number of people to remove has changed; look at it again."),
+          409,
+        )
+      if (
+        !(await scim.store.allowDirectoryDrop(tenantId, directory.id, {
+          users: shown,
+          at: new Date(),
+        }))
+      )
+        return c.json(
+          conflict("This directory has no refused removal waiting for a go-ahead."),
+          409,
+        )
+      await d.identity!.store.record(tenantId, {
+        type: "directory.removals_confirmed",
+        actorUserId: userId,
+        data: { directoryId: directory.id, removedUsers: shown },
+      })
+      try {
+        await scim.google.schedulePull(tenantId, directory.id)
+      } catch (error) {
+        d.identity?.log.warn(
+          { ...safeError(error), directoryId: directory.id },
+          "could not schedule the Google directory pull after confirming removals",
+        )
+      }
+      return c.json({ ok: true })
+    },
+  )
 
   app.post("/identity/directories/:id/tokens", requireFreshAuth, async (c) => {
     const scim = wired()

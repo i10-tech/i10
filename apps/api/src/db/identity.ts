@@ -93,6 +93,18 @@ export const connections = identity.table(
      * existing roles (Google OIDC, an unmapped attribute, a missing scope).
      */
     groupsLastSeenAt: timestamp("groups_last_seen_at", { withTimezone: true }),
+    /**
+     * What a changed IdP subject does (sso.md 2.22): `ask` refuses the sign-in
+     * and files a request an owner approves; `auto` moves the link when the
+     * verified address matches. ⚠ `auto` IS TRUST, so an owner's to set.
+     */
+    relink: text("relink").notNull().default("ask"),
+    /**
+     * Entra only: the user principal name stands in for the email when the
+     * IdP sends none (a member whose `mail` is empty). Off unless an owner
+     * turns it on; the bridge still needs the UPN's domain to be proved.
+     */
+    upnAsEmail: boolean("upn_as_email").notNull().default(false),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -109,6 +121,7 @@ export const connections = identity.table(
       "connections_enforcement_check",
       sql`"enforcement" in ('off', 'optional', 'required_domain', 'required_all')`,
     ),
+    check("connections_relink_check", sql`"relink" in ('ask', 'auto')`),
     check(
       "connections_session_limits_check",
       sql`("max_session_seconds" is null or "max_session_seconds" >= 300) and ("idle_timeout_seconds" is null or "idle_timeout_seconds" >= 300)`,
@@ -263,6 +276,50 @@ export const identities = identity.table(
     uniqueIndex("identities_connection_user_unique").on(t.connectionId, t.clerkUserId),
     index("identities_user_idx").on(t.clerkUserId),
     pgPolicy("identities_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * A person's IdP sent a new subject and an owner has not approved it yet
+ * (sso.md 2.22): the minimum needed to move the link when they do.
+ *
+ * ⚠ ONE PENDING REQUEST PER IDENTITY, BY UNIQUE INDEX, so a person retrying
+ * a refused sign-in files nothing new. The new subject is kept in the clear
+ * (it is what the link becomes); the address only as a hash, and the audit log
+ * never carries either. Deleting the identity takes its request with it.
+ */
+export const relinkRequests = identity.table(
+  "relink_requests",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    newSubject: text("new_subject").notNull(),
+    /** SHA-256 of the normalised address the IdP asserted. */
+    emailHash: text("email_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "relink_requests_connection_fk",
+      columns: [t.connectionId, t.tenantId],
+      foreignColumns: [connections.id, connections.tenantId],
+    }).onDelete("cascade"),
+    uniqueIndex("relink_requests_identity_unique").on(t.identityId),
+    index("relink_requests_connection_idx").on(t.connectionId, t.createdAt),
+    pgPolicy("relink_requests_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
@@ -989,6 +1046,14 @@ export const directories = identity.table(
     lastSyncStatus: text("last_sync_status"),
     /** Fixed error code when `lastSyncStatus` is `failed`; never Google's message. */
     lastSyncError: text("last_sync_error"),
+    /**
+     * An owner's one-shot go-ahead for a Google pull the shrink guard refused
+     * (`large_drop`): the most people one pull may remove. Set only with
+     * `allowDropAt`; any pull that gets past the guard clears both, and it is
+     * ignored after 24 hours. Null when none is given.
+     */
+    allowDropUpTo: integer("allow_drop_up_to"),
+    allowDropAt: timestamp("allow_drop_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1003,6 +1068,10 @@ export const directories = identity.table(
     check(
       "directories_last_sync_status_check",
       sql`"last_sync_status" is null or "last_sync_status" in ('ok', 'failed')`,
+    ),
+    check(
+      "directories_allow_drop_check",
+      sql`("allow_drop_up_to" is null and "allow_drop_at" is null) or ("allow_drop_up_to" >= 0 and "allow_drop_at" is not null)`,
     ),
     pgPolicy("directories_workspace", {
       for: "all",

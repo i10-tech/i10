@@ -444,7 +444,7 @@ describe("completing", () => {
     expect(w.joined).toHaveLength(0)
   })
 
-  it("refuses an account already linked to another subject on this connection", async () => {
+  it("refuses an account already linked to another subject on this connection, as a changed subject", async () => {
     const w = world()
     await w.signIn()
     const { state } = await w.start()
@@ -455,7 +455,7 @@ describe("completing", () => {
         binding: BINDING,
         assertion: w.assertion({ subject: "okta|imposter" }),
       }),
-    ).toEqual({ outcome: "refused", reason: "already_linked" })
+    ).toEqual({ outcome: "refused", reason: "subject_changed" })
   })
 
   it("requires proof of IdP MFA when the connection asks for it", async () => {

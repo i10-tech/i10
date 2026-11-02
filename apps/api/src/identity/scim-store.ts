@@ -73,6 +73,8 @@ const toDirectory = (r: typeof directories.$inferSelect): Directory => ({
   lastSyncAt: r.lastSyncAt,
   lastSyncStatus: r.lastSyncStatus as DirectorySyncStatus | null,
   lastSyncError: r.lastSyncError,
+  allowDropUpTo: r.allowDropUpTo,
+  allowDropAt: r.allowDropAt,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
 })
@@ -321,10 +323,37 @@ export function directoryStore(db: Database): DirectoryStore {
             lastSyncAt: input.at,
             lastSyncStatus: input.status,
             lastSyncError: input.error,
+            ...(input.status === "ok" || input.clearDropAllowance
+              ? { allowDropUpTo: null, allowDropAt: null }
+              : {}),
             updatedAt: input.at,
           })
           .where(and(eq(directories.tenantId, tenantId), eq(directories.id, id))),
       )
+    },
+
+    async allowDirectoryDrop(tenantId, id, input) {
+      if (!UUID.test(id)) return false
+      const rows = await withTenant(db, tenantId, (tx) =>
+        tx
+          .update(directories)
+          .set({
+            allowDropUpTo: input.users,
+            allowDropAt: input.at,
+            updatedAt: input.at,
+          })
+          .where(
+            and(
+              eq(directories.tenantId, tenantId),
+              eq(directories.id, id),
+              eq(directories.provider, "google"),
+              eq(directories.lastSyncStatus, "failed"),
+              eq(directories.lastSyncError, "large_drop"),
+            ),
+          )
+          .returning({ id: directories.id }),
+      )
+      return rows.length > 0
     },
 
     async dueGoogleDirectories(after, limit) {

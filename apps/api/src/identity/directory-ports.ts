@@ -72,6 +72,9 @@ export interface Directory {
   lastSyncAt: Date | null
   lastSyncStatus: DirectorySyncStatus | null
   lastSyncError: string | null
+  /** See `directories.allowDropUpTo`: an owner's one-shot go-ahead past the shrink guard. */
+  allowDropUpTo: number | null
+  allowDropAt: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -199,8 +202,23 @@ export interface DirectoryStore {
   noteDirectorySync(
     tenantId: string,
     id: string,
-    input: { status: DirectorySyncStatus; error: string | null; at: Date },
+    input: {
+      status: DirectorySyncStatus
+      error: string | null
+      at: Date
+      /** Spend the shrink-guard allowance in the same write (always on `ok`). */
+      clearDropAllowance?: boolean
+    },
   ): Promise<void>
+  /**
+   * Stores the owner's allowance, only if the directory is a Google one whose
+   * last sync failed `large_drop`. False when it is not (nothing is written).
+   */
+  allowDirectoryDrop(
+    tenantId: string,
+    id: string,
+    input: { users: number; at: Date },
+  ): Promise<boolean>
   /** Enabled Google directories across workspaces, keyset-paged by id. */
   dueGoogleDirectories(
     after: string | null,

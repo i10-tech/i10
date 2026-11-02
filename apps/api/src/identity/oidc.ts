@@ -10,6 +10,7 @@ import {
   type CompleteOutcome,
   type Engine,
 } from "./bridge.js"
+import { upnAsAddress } from "./model.js"
 import type { Assertion, Connection, GroupsState, Refusal } from "./model.js"
 import type { AttemptRow, IdentityStore, Logger } from "./ports.js"
 import { IdpUnreachable, type OidcFetch } from "./oidc-fetch.js"
@@ -731,14 +732,27 @@ export function groupsStateOf(
  */
 export function toAssertion(
   claims: oidc.IDToken,
-  connection: Pick<Connection, "attributeMapping">,
+  connection: Pick<Connection, "attributeMapping"> &
+    Partial<Pick<Connection, "provider" | "upnAsEmail">>,
   settings: Pick<OidcSettings, "provider" | "mfaAcrValues">,
 ): Assertion | null {
   const subject = short(claims.sub, 255)
   if (!subject) return null
   const mapping = connection.attributeMapping
-  const email = short(claims[claimFor(mapping, "email", "email")], 320)
-  const verified = claims[verifiedClaimFor(connection, settings)]
+  const claimed = short(claims[claimFor(mapping, "email", "email")], 320)
+  /*
+   * ⚠ ENTRA SENDS NO `email` CLAIM FOR A MEMBER WHOSE `mail` IS EMPTY, ONLY
+   * `preferred_username` (the UPN). On an Entra connection that opted in
+   * (`upnAsEmail`) it stands in, and ONLY when no email claim came at all. It
+   * is never marked verified here: the IdP vouched for nothing, so the bridge
+   * accepts it only on a domain this workspace proved (`emailVouched`).
+   */
+  const upn =
+    claimed === null && connection.provider === "entra" && connection.upnAsEmail
+      ? upnAsAddress(claims.preferred_username)
+      : null
+  const email = claimed ?? upn
+  const verified = upn ? false : claims[verifiedClaimFor(connection, settings)]
   const groupsName = claimFor(mapping, "groups", "groups")
   const groupsClaim = claims[groupsName]
   const groups = (
@@ -762,6 +776,7 @@ export function toAssertion(
     email,
     // ⚠ ONLY A REAL true. A missing claim is "not vouched for", never "yes".
     emailVerified: verified === true || verified === "true",
+    ...(upn ? { emailSource: "upn" as const } : {}),
     givenName: short(claims[claimFor(mapping, "givenName", "given_name")], 256),
     familyName: short(claims[claimFor(mapping, "familyName", "family_name")], 256),
     attributes,

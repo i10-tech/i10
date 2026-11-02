@@ -14,6 +14,7 @@ import {
   newSecret,
   normaliseEmail,
   readSecret,
+  upnAsAddress,
   type Assertion,
   type Connection,
   type GroupsState,
@@ -306,10 +307,24 @@ export interface SamlEngineDeps {
   /** `guardedFetch(...)`. Never the global fetch. */
   fetch: OidcFetch
   replay: ReplayCache
+  /**
+   * Re-reads a connection's metadata after a signature failed (saml-refresh.ts
+   * `forceRefresh`). Null: nothing new to try. Absent: never refreshes.
+   */
+  forceRefresh?: (
+    connection: Connection,
+    before: SamlCertificateRow[],
+  ) => Promise<ForcedRefresh | null>
   /** apps/auth's origin: every URL we give an IdP is on it. */
   authOrigin: string
   log: Logger
   now?: () => Date
+}
+
+/** New certificates for a response that failed, and the way to report how the retry went. */
+export interface ForcedRefresh {
+  certificates: SamlCertificateRow[]
+  settle(retrySucceeded: boolean): Promise<void>
 }
 
 export function samlEngine(deps: SamlEngineDeps): SamlEngine {
@@ -393,16 +408,38 @@ export function samlEngine(deps: SamlEngineDeps): SamlEngine {
       )
       const decryptionKeys = await keys(connection)
       const t = now()
-      const verdict = verifySamlResponse(input.samlResponse, {
-        idpEntityId: settings.idpEntityId,
-        spEntityId: at.entityId,
-        acsUrl: at.acsUrl,
-        certificates,
-        decryptionKeys,
-        requireEncryption: settings.requireEncryption,
-        inResponseTo: input.inResponseTo,
-        now: t,
-      })
+      const run = (certs: SamlCertificateRow[]) =>
+        verifySamlResponse(input.samlResponse, {
+          idpEntityId: settings.idpEntityId,
+          spEntityId: at.entityId,
+          acsUrl: at.acsUrl,
+          certificates: certs,
+          decryptionKeys,
+          requireEncryption: settings.requireEncryption,
+          inResponseTo: input.inResponseTo,
+          now: t,
+        })
+      let verdict = run(certificates)
+      /*
+       * ⚠ A ROTATED IdP CERTIFICATE: only a failed SIGNATURE earns one fresh
+       * read of the metadata URL, then the SAME response is checked again
+       * against the new list. Everything else (audience, destination, times,
+       * replay) is asked as before, and the replay cache is still asked only
+       * below, for what verified, so the retry cannot be refused as a replay
+       * of itself and cannot be accepted twice.
+       */
+      if (
+        !verdict.ok &&
+        (verdict.failure === "bad_signature" ||
+          verdict.failure === "no_usable_certificate") &&
+        deps.forceRefresh
+      ) {
+        const forced = await deps.forceRefresh(connection, certificates)
+        if (forced) {
+          verdict = run(forced.certificates)
+          await forced.settle(verdict.ok)
+        }
+      }
       if (!verdict.ok) {
         // ⚠ THE IdP SAID NO (a non-Success status) is its answer, not a forgery.
         if (verdict.failure === "status")
@@ -500,6 +537,10 @@ function firstOf(
   return []
 }
 
+/** The attribute Entra puts the user principal name in (its `name` claim). */
+export const ENTRA_UPN_ATTRIBUTE =
+  "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+
 /** Entra's SAML group overage attribute past 150 groups (sso.md 2.15). */
 export const SAML_GROUPS_OVERAGE_ATTRIBUTE =
   "http://schemas.microsoft.com/claims/groups.link"
@@ -567,7 +608,8 @@ function samlAmrProvesMfa(
  */
 export function toSamlAssertion(
   verified: VerifiedAssertion,
-  connection: Pick<Connection, "attributeMapping">,
+  connection: Pick<Connection, "attributeMapping"> &
+    Partial<Pick<Connection, "provider" | "upnAsEmail">>,
   settings: Pick<SamlSettings, "preset" | "subjectAttribute" | "mfaContextClasses">,
 ): Assertion | null {
   const subject = subjectOf(verified, settings.subjectAttribute)
@@ -575,7 +617,18 @@ export function toSamlAssertion(
   const mapping = connection.attributeMapping
   const preset = settings.preset
   const [mailAttribute] = firstOf(verified, mapping, "email", preset.attributes.email)
-  const email = normaliseEmail(mailAttribute) ?? normaliseEmail(verified.nameId)
+  const claimed = normaliseEmail(mailAttribute) ?? normaliseEmail(verified.nameId)
+  /*
+   * ⚠ ENTRA SENDS NO `emailaddress` ATTRIBUTE FOR A MEMBER WHOSE `mail` IS
+   * EMPTY, only `name`, the UPN. On an Entra connection that opted in
+   * (`upnAsEmail`) it stands in, and only when no email came at all. It is not
+   * marked verified here: the bridge accepts it only on a proved domain.
+   */
+  const upn =
+    claimed === null && connection.provider === "entra" && connection.upnAsEmail
+      ? upnAsAddress(verified.attributes[ENTRA_UPN_ATTRIBUTE]?.[0])
+      : null
+  const email = claimed ?? upn
   const one = (values: string[]) =>
     values[0] && values[0].length <= 256 ? values[0] : null
   const amr =
@@ -591,7 +644,8 @@ export function toSamlAssertion(
   return {
     subject,
     email,
-    emailVerified: email !== null,
+    emailVerified: claimed !== null,
+    ...(upn ? { emailSource: "upn" as const } : {}),
     givenName: one(
       firstOf(verified, mapping, "givenName", preset.attributes.givenName),
     ),

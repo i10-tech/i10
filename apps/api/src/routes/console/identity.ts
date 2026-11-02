@@ -9,11 +9,13 @@ import {
   SETUP_STATUSES,
   ENFORCEMENTS,
   PROTOCOLS,
+  RELINK_MODES,
   STATUSES,
   type Connection,
   type Enforcement,
   type Protocol,
   type ConnectionStatus,
+  type RelinkMode,
 } from "../../identity/model.js"
 import type {
   ConnectionPatch,
@@ -40,6 +42,7 @@ import { oidcReady } from "../../identity/oidc.js"
 import { OIDC_PRESETS, presetOf } from "../../identity/oidc-presets.js"
 import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
 import { mountIdentityGroups } from "./identity-groups.js"
+import { mountIdentityRelinks } from "./identity-relinks.js"
 import { mountIdentitySaml, type SamlConsoleDeps } from "./identity-saml.js"
 import { samlReady } from "../../identity/saml.js"
 import { SAML_PRESETS, samlPresetOf } from "../../identity/saml-presets.js"
@@ -68,6 +71,7 @@ import {
  *   POST   /identity/members/:userId/deprovision         (step-up)
  *   ...    /identity/connections/:id/oidc[/secret|/keys] OIDC settings (#338, identity-oidc.ts)
  *   ...    /identity/connections/:id/group-rules[/:ruleId] group-to-role rules (#341, identity-groups.ts)
+ *   ...    /identity/connections/:id/relinks[/:requestId/...] changed-subject requests (sso.md 2.22, identity-relinks.ts)
  *   ...    /identity/connections/:id/saml[/...]         SAML settings (#339, identity-saml.ts)
  *   ...    /identity/directories[/:id[/tokens|/conflicts]] SCIM directories (#342, identity-scim.ts)
  *   ...    /identity/connections/:id/ldap[/service|/test] LDAP pass-through for IMAP (#344, identity-ldap.ts)
@@ -177,6 +181,8 @@ function view(connection: Connection) {
     enforcement: connection.enforcement,
     jitEnabled: connection.jitEnabled,
     mfaRequired: connection.mfaRequired,
+    relink: connection.relink,
+    upnAsEmail: connection.upnAsEmail,
     maxSessionSeconds: connection.maxSessionSeconds,
     idleTimeoutSeconds: connection.idleTimeoutSeconds,
     config: connection.config,
@@ -241,7 +247,12 @@ export function readPatch(body: Record<string, unknown>): ConnectionPatch | stri
       return "enforcement is not valid."
     patch.enforcement = body.enforcement as Enforcement
   }
-  for (const key of ["jitEnabled", "mfaRequired"] as const) {
+  if (body.relink !== undefined) {
+    if (!RELINK_MODES.includes(body.relink as RelinkMode))
+      return "relink must be ask or auto."
+    patch.relink = body.relink as RelinkMode
+  }
+  for (const key of ["jitEnabled", "mfaRequired", "upnAsEmail"] as const) {
     if (body[key] === undefined) continue
     if (typeof body[key] !== "boolean") return `${key} must be true or false.`
     patch[key] = body[key]
@@ -273,6 +284,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentitySiem(app, d)
   mountIdentityOidc(app, d)
   mountIdentityGroups(app, d)
+  mountIdentityRelinks(app, d)
   mountIdentitySaml(app, d)
   mountIdentityScim(app, d)
   mountIdentityMail(app, d)
@@ -469,6 +481,38 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
           422,
         )
     }
+    /*
+     * ⚠ THE UPN IS AN ADDRESS ONLY FOR ENTRA (sso.md 2.22): other IdPs send an
+     * email or nothing, and an opt-in with no meaning there would only be a
+     * switch nobody could reason about. Switching it off is always fine.
+     */
+    if (patch.upnAsEmail === true && before.provider !== "entra")
+      return c.json(
+        {
+          statusCode: 422,
+          name: "upn_not_supported",
+          code: "upn_not_supported",
+          message: "Using the user principal name as the email is only for Microsoft Entra.",
+        },
+        422,
+      )
+    /*
+     * ⚠ WHAT A CHANGED LOGIN OR A MISSING EMAIL MEANS IS AN OWNER'S TO SET,
+     * in either direction and on any status (sso.md 2.22): `auto` moves a
+     * person's link on the IdP's word, and the UPN turns an address nobody
+     * vouched for into a way to claim an account.
+     */
+    if (
+      ((patch.relink !== undefined && patch.relink !== before.relink) ||
+        (patch.upnAsEmail !== undefined && patch.upnAsEmail !== before.upnAsEmail)) &&
+      !(await allowed(c, "owners:manage"))
+    )
+      return c.json(
+        forbidden(
+          "Only an owner can change what happens when a person's company login changes, or which claim stands in for a missing email.",
+        ),
+        403,
+      )
     // ⚠ TURNING A FEATURE OFF IS NEVER REFUSED BY THE PLAN: only moving to
     // enforcement above "off", or JIT on, needs the flag. A workspace that
     // lost the feature must still be able to stand it down.

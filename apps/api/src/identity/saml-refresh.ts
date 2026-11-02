@@ -1,8 +1,20 @@
 import type { Connection } from "./model.js"
-import type { IdentityStore, Logger, SamlCertificateRow, SamlStore } from "./ports.js"
+import type {
+  IdentityStore,
+  Logger,
+  ReplayCache,
+  SamlCertificateRow,
+  SamlStore,
+} from "./ports.js"
 import { IdpUnreachable } from "./oidc-fetch.js"
 import type { IdpMetadata } from "./saml-messages.js"
-import { SamlMisconfigured, storedSaml, type StoredSaml } from "./saml.js"
+import {
+  ReplayUnavailable,
+  SamlMisconfigured,
+  storedSaml,
+  type ForcedRefresh,
+  type StoredSaml,
+} from "./saml.js"
 
 /**
  * The daily SAML pass (#339, sso.md 2.10): every SAML connection that is not
@@ -99,6 +111,87 @@ export async function refreshConnection(
       data: { ...certificates, moved },
     })
   return { outcome: "updated", ...certificates }
+}
+
+/** A connection's metadata is forced fresh by a failed signature at most this often. */
+export const FORCE_REFRESH_EVERY_MS = 10 * 60 * 1000
+
+export interface ForceRefreshDeps extends RefreshDeps {
+  fetchMetadata(url: string): Promise<IdpMetadata>
+  /** Redis: the 10-minute limit is one `claim`, shared by every API replica. */
+  replay: ReplayCache
+}
+
+/**
+ * The certificate-rotation path (the daily pass is up to a day late): a
+ * sign-in whose signature failed asks for the connection's metadata now.
+ * Returns the certificates to check the SAME response against again, or null
+ * when there is nothing new to try.
+ *
+ * ⚠ ONE READ PER 10 MINUTES PER CONNECTION, ATOMIC IN REDIS. A forged
+ * response from anyone can cause this, so it must not become a way to make us
+ * fetch an owner's URL on every POST. The claim is taken before the fetch and
+ * kept when the fetch fails: a failing IdP is not asked again for 10 minutes.
+ * The price is that someone can burn the window just before a real rotation;
+ * the daily pass and the next window still recover it.
+ *
+ * ⚠ ONLY NEW CERTIFICATES EARN A RETRY. A read that adds none (or names
+ * another entity id) changes nothing for this response, so there is no second
+ * read and no loop. An unreachable metadata URL or Redis refuses, as before.
+ */
+export async function forceRefresh(
+  d: ForceRefreshDeps,
+  connection: Connection,
+  before: SamlCertificateRow[],
+): Promise<ForcedRefresh | null> {
+  const url = storedSaml(connection).metadataUrl
+  if (!url) return null
+  let metadata: IdpMetadata
+  try {
+    if (
+      !(await d.replay.claim(
+        `sso:saml:force-refresh:${connection.id}`,
+        FORCE_REFRESH_EVERY_MS,
+      ))
+    )
+      return null
+    metadata = await d.fetchMetadata(url)
+  } catch (error) {
+    if (
+      !(
+        error instanceof IdpUnreachable ||
+        error instanceof SamlMisconfigured ||
+        error instanceof ReplayUnavailable
+      )
+    )
+      throw error
+    d.log.warn(
+      { connectionId: connection.id },
+      "SAML metadata could not be re-read after a failed signature",
+    )
+    return null
+  }
+  const applied = await refreshConnection(d, connection, metadata, null)
+  if (applied.outcome !== "updated") return null
+  const certificates = await d.saml.certificates(connection.tenantId, connection.id)
+  const audit = (retried: boolean, succeeded: boolean) =>
+    d.store.record(connection.tenantId, {
+      type: "saml.certificate_refreshed",
+      connectionId: connection.id,
+      data: {
+        retried,
+        retrySucceeded: succeeded,
+        certificatesBefore: before.length,
+        certificatesAfter: certificates.length,
+        added: applied.added.length,
+        removed: applied.removed.length,
+      },
+    })
+  if (applied.added.length === 0) {
+    await audit(false, false)
+    return null
+  }
+  return { certificates, settle: (ok) => audit(true, ok) }
 }
 
 /**

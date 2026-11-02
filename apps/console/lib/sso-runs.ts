@@ -16,6 +16,8 @@ const REASONS: Record<string, string> = {
     "No account exists for this person and JIT is off. Turn on JIT, or create them through SCIM.",
   ambiguous_account: "More than one account matches this person.",
   already_linked: "This person is already linked to a different identity.",
+  subject_changed:
+    "The provider sent a new login for someone already linked here. The connection asks an owner to approve it, so the person is refused until one does.",
   managed_elsewhere: "This person is managed by another workspace's connection.",
   deprovisioned: "This person was removed and is not allowed back by this connection.",
   blocked: "This address is on the workspace's block list.",
@@ -73,6 +75,8 @@ export function wouldDo(run: TestRun): string {
       : r.groupsUnavailable === "absent"
         ? "no groups received"
         : null
+  if (r.wouldRelink === true)
+    return `It would sign in ${email} and move their link to this new provider login, because the connection relinks automatically.`
   if (r.wouldCreate === true) {
     const names = r.names as { given?: boolean; family?: boolean } | undefined
     const missing =

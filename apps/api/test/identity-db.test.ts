@@ -91,6 +91,22 @@ suite("identity schema", () => {
     expect(await store().liveDomains(acme, connectionId)).toEqual([live])
   })
 
+  it("starts an Entra connection with a 12 hour session cap, and others with none", async () => {
+    const made = async (provider: string, protocol: "saml" | "oidc") =>
+      (
+        await store().createConnection(acme, {
+          name: provider,
+          protocol,
+          provider,
+          createdBy: "u",
+        })
+      ).maxSessionSeconds
+    expect(await made("entra", "saml")).toBe(43200)
+    expect(await made("entra", "oidc")).toBe(43200)
+    expect(await made("okta", "saml")).toBeNull()
+    expect(await made("google", "oidc")).toBeNull()
+  })
+
   it("stops counting a domain the moment its proof is displaced", async () => {
     await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
     expect(await store().liveDomains(acme, connectionId)).toEqual([])
@@ -753,5 +769,202 @@ suite("identity schema", () => {
     } finally {
       await owner`delete from identity.connections where id = ${mine.id}`
     }
+  })
+
+  it("defaults a connection to asking an owner, refuses a bad relink value, and keeps the UPN opt-in off (sso.md 2.22)", async () => {
+    const made = await store().createConnection(acme, {
+      name: "Relink Defaults",
+      protocol: "oidc",
+      provider: "entra",
+      createdBy: "u",
+    })
+    try {
+      expect(made.relink).toBe("ask")
+      expect(made.upnAsEmail).toBe(false)
+      const patched = await store().updateConnection(acme, made.id, {
+        relink: "auto",
+        upnAsEmail: true,
+      })
+      expect(patched).toMatchObject({ relink: "auto", upnAsEmail: true })
+      // ⚠ AWAITED INSIDE: a postgres.js query is lazy.
+      const refusal = async () => {
+        try {
+          await owner`update identity.connections set relink = 'whenever' where id = ${made.id}`
+          return "accepted"
+        } catch (error) {
+          return String(error)
+        }
+      }
+      expect(await refusal()).toMatch(/connections_relink_check/)
+    } finally {
+      await owner`delete from identity.connections where id = ${made.id}`
+    }
+  })
+
+  describe("changed IdP subjects (sso.md 2.22)", () => {
+    let conn = ""
+    let otherConn = ""
+    const ids: Record<string, string> = {}
+    const hour = 3_600_000
+    const at = new Date("2026-11-02T12:00:00.000Z")
+    const later = new Date(at.getTime() + 7 * 24 * hour)
+
+    beforeAll(async () => {
+      conn = (
+        await store().createConnection(acme, {
+          name: "Relinks",
+          protocol: "test",
+          provider: "generic",
+          createdBy: "u",
+        })
+      ).id
+      otherConn = (
+        await store().createConnection(acme, {
+          name: "Relinks other",
+          protocol: "test",
+          provider: "generic",
+          createdBy: "u",
+        })
+      ).id
+      for (const [name, subject, user, connection] of [
+        ["a", "okta|a", "user_a", conn],
+        ["b", "okta|b", "user_b", conn],
+        ["c", "okta|c", "user_c", otherConn],
+      ] as const)
+        ids[name] = (
+          await store().link(acme, {
+            connectionId: connection,
+            subject,
+            clerkUserId: `${user}_${suffix}`,
+            email: `${name}@${live}`,
+          })
+        ).id
+    })
+    afterAll(async () => {
+      await owner`delete from identity.connections where id in (${conn}, ${otherConn})`
+    })
+
+    const ask = (identityId: string, newSubject: string, over = {}) =>
+      store().requestRelink(acme, {
+        connectionId: conn,
+        identityId,
+        newSubject,
+        emailHash: hashSecret("a@x"),
+        now: at,
+        expiresAt: later,
+        ...over,
+      })
+
+    it("files one pending request per identity: the same subject changes nothing, another replaces it", async () => {
+      expect(await ask(ids.a!, "okta|a2")).toBe("created")
+      expect(await ask(ids.a!, "okta|a2")).toBe("exists")
+      expect(await ask(ids.a!, "okta|a3")).toBe("created")
+      const rows = await owner`select new_subject, email_hash from identity.relink_requests where identity_id = ${ids.a!}`
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.new_subject).toBe("okta|a3")
+      // The address is only a hash at rest.
+      expect(rows[0]!.email_hash).toBe(hashSecret("a@x"))
+    })
+
+    it("files nothing for an identity of another connection or workspace", async () => {
+      expect(await ask(ids.c!, "okta|c2")).toBe("exists")
+      expect(
+        await store().requestRelink(rival, {
+          connectionId: conn,
+          identityId: ids.b!,
+          newSubject: "okta|b2",
+          emailHash: "h",
+          now: at,
+          expiresAt: later,
+        }),
+      ).toBe("exists")
+      const rows = await owner`select 1 from identity.relink_requests where identity_id in (${ids.b!}, ${ids.c!})`
+      expect(rows).toHaveLength(0)
+    })
+
+    it("lists pending requests with the identity's address, for its own workspace only, never an expired one", async () => {
+      const [mine] = await store().relinkRequests(acme, conn, at)
+      expect(mine).toMatchObject({
+        identityId: ids.a!,
+        email: `a@${live}`,
+        connectionId: conn,
+      })
+      expect(await store().relinkRequests(rival, conn, at)).toEqual([])
+      expect(await store().relinkRequests(acme, otherConn, at)).toEqual([])
+      expect(await store().relinkRequests(acme, conn, later)).toEqual([])
+      // An expired request is no request: the same subject files a fresh one.
+      expect(
+        await ask(ids.a!, "okta|a3", {
+          now: later,
+          expiresAt: new Date(later.getTime() + 7 * 24 * hour),
+        }),
+      ).toBe("created")
+      expect(await store().relinkRequests(acme, conn, later)).toHaveLength(1)
+      await owner`delete from identity.relink_requests where identity_id = ${ids.a!}`
+      expect(await ask(ids.a!, "okta|a2")).toBe("created")
+    })
+
+    it("hides requests from another workspace's direct query", async () => {
+      const seen = await db.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${rival}, true)`
+        return tx`select id from identity.relink_requests`
+      })
+      expect(seen).toHaveLength(0)
+    })
+
+    it("moves a subject only while it is still the one read, and never onto one that is taken", async () => {
+      const move = (identityId: string, from: string, to: string, tenant = acme) =>
+        store().relinkIdentity(tenant, { connectionId: conn, identityId, from, to })
+      expect(await move(ids.a!, "okta|wrong", "okta|a9")).toEqual({ outcome: "gone" })
+      expect(await move(ids.a!, "okta|a", "okta|b")).toEqual({ outcome: "conflict" })
+      expect(await move(ids.a!, "okta|a", "okta|a9", rival)).toEqual({ outcome: "gone" })
+      expect((await store().identityBySubject(acme, conn, "okta|a"))?.id).toBe(ids.a!)
+      const moved = await move(ids.a!, "okta|a", "okta|a9")
+      expect(moved).toMatchObject({
+        outcome: "moved",
+        identityId: ids.a!,
+        from: "okta|a",
+        to: "okta|a9",
+      })
+      expect(await store().identityBySubject(acme, conn, "okta|a")).toBeNull()
+      expect((await store().identityBySubject(acme, conn, "okta|a9"))?.id).toBe(ids.a!)
+      // Its pending request went with the move.
+      expect(await store().relinkRequests(acme, conn, at)).toEqual([])
+      await move(ids.a!, "okta|a9", "okta|a")
+    })
+
+    it("approves a request in one step, refuses a clash without losing it, and rejects by deleting", async () => {
+      await ask(ids.a!, "okta|a2")
+      const [request] = await store().relinkRequests(acme, conn, at)
+      const approve = (requestId: string, tenant = acme, now = at) =>
+        store().approveRelink(tenant, { connectionId: conn, requestId, now })
+      expect(await approve(request!.id, rival)).toEqual({ outcome: "not_found" })
+      expect(await approve(request!.id, acme, later)).toEqual({ outcome: "not_found" })
+      const done = await approve(request!.id)
+      expect(done).toMatchObject({ outcome: "moved", from: "okta|a", to: "okta|a2" })
+      expect(await approve(request!.id)).toEqual({ outcome: "not_found" })
+      expect((await store().identityBySubject(acme, conn, "okta|a2"))?.id).toBe(ids.a!)
+
+      // The new subject already belongs to B: nothing moves, the request stays.
+      await ask(ids.a!, "okta|b")
+      const [clash] = await store().relinkRequests(acme, conn, at)
+      expect(await approve(clash!.id)).toEqual({ outcome: "conflict" })
+      expect((await store().identityBySubject(acme, conn, "okta|a2"))?.id).toBe(ids.a!)
+      expect(await store().relinkRequests(acme, conn, at)).toHaveLength(1)
+
+      expect(await store().rejectRelink(rival, conn, clash!.id)).toBeNull()
+      expect(await store().rejectRelink(acme, otherConn, clash!.id)).toBeNull()
+      expect(await store().rejectRelink(acme, conn, clash!.id)).toEqual({
+        identityId: ids.a!,
+      })
+      expect(await store().relinkRequests(acme, conn, at)).toEqual([])
+    })
+
+    it("takes a request with its identity", async () => {
+      await ask(ids.b!, "okta|b2")
+      expect(await store().relinkRequests(acme, conn, at)).toHaveLength(1)
+      await owner`delete from identity.identities where id = ${ids.b!}`
+      expect(await store().relinkRequests(acme, conn, at)).toEqual([])
+    })
   })
 })

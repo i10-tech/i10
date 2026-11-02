@@ -12,6 +12,7 @@ import type {
   LdapTestOutcome,
   OidcSetup,
   OwnerExemption,
+  RelinkRequest,
   SamlSetup,
   SetupLink,
   SsoConnection,
@@ -64,6 +65,8 @@ export interface ConnectionChange {
   enforcement?: SsoConnection["enforcement"]
   jitEnabled?: boolean
   mfaRequired?: boolean
+  relink?: SsoConnection["relink"]
+  upnAsEmail?: boolean
   maxSessionSeconds?: number | null
   idleTimeoutSeconds?: number | null
 }
@@ -229,6 +232,26 @@ export async function removeBypass(id: string, userId: string) {
   )
 }
 
+export async function relinkRequests(id: string) {
+  return run(() => api<{ data: RelinkRequest[] }>(`${conn(id)}/relinks`))
+}
+
+export async function approveRelink(id: string, requestId: string) {
+  return run(() =>
+    api<{ ok: true }>(`${conn(id)}/relinks/${enc(requestId)}/approve`, {
+      method: "POST",
+    }),
+  )
+}
+
+export async function rejectRelink(id: string, requestId: string) {
+  return run(() =>
+    api<{ ok: true }>(`${conn(id)}/relinks/${enc(requestId)}/reject`, {
+      method: "POST",
+    }),
+  )
+}
+
 export async function ownerExemption() {
   return run(() => api<OwnerExemption>("/console/identity/owner-exemption"))
 }
@@ -328,6 +351,16 @@ export async function checkDirectory(id: string) {
       `/console/identity/directories/${enc(id)}/check`,
       { method: "POST" },
     ),
+  )
+}
+
+/** An owner lets the removals a refused Google pull would make go through, once. */
+export async function confirmDirectoryRemovals(id: string, removedUsers: number) {
+  return run(() =>
+    api<{ ok: true }>(`/console/identity/directories/${enc(id)}/confirm-removals`, {
+      method: "POST",
+      body: { removedUsers },
+    }),
   )
 }
 

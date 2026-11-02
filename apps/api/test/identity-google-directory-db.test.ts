@@ -301,4 +301,58 @@ suite("Google Workspace directories in Postgres", () => {
     expect(refreshed?.lastSyncError).toBeNull()
     expect(refreshed?.lastSyncAt).toBeInstanceOf(Date)
   })
+
+  it("stores a shrink-guard allowance only after a large_drop failure, per tenant, and clears it on success", async () => {
+    const store = directoryStore(database)
+    const dir = await store.createDirectory(acme, {
+      name: "Acme drop",
+      provider: "google",
+      adminEmail: `admin@${liveDomain}`,
+      domain: liveDomain,
+      createdBy: "u_owner",
+    })
+    const at = new Date("2026-10-24T12:00:00Z")
+    const allow = (tenant: string) =>
+      store.allowDirectoryDrop(tenant, dir.id, { users: 7, at })
+
+    // Nothing failed yet, then a different failure: nothing is stored.
+    expect(await allow(acme)).toBe(false)
+    await store.noteDirectorySync(acme, dir.id, {
+      status: "failed",
+      error: "unreachable",
+      at,
+    })
+    expect(await allow(acme)).toBe(false)
+
+    await store.noteDirectorySync(acme, dir.id, {
+      status: "failed",
+      error: "large_drop",
+      at,
+    })
+    // Another workspace cannot give the go-ahead.
+    expect(await allow(rival)).toBe(false)
+    expect(await allow(acme)).toBe(true)
+    expect(await store.directory(acme, dir.id)).toMatchObject({
+      allowDropUpTo: 7,
+      allowDropAt: at,
+    })
+
+    // A refusal that spends it clears both columns; so does any success.
+    await store.noteDirectorySync(acme, dir.id, {
+      status: "failed",
+      error: "large_drop",
+      at,
+      clearDropAllowance: true,
+    })
+    expect(await store.directory(acme, dir.id)).toMatchObject({
+      allowDropUpTo: null,
+      allowDropAt: null,
+    })
+    expect(await allow(acme)).toBe(true)
+    await store.noteDirectorySync(acme, dir.id, { status: "ok", error: null, at })
+    expect(await store.directory(acme, dir.id)).toMatchObject({
+      allowDropUpTo: null,
+      allowDropAt: null,
+    })
+  })
 })

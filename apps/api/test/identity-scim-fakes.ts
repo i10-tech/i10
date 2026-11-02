@@ -83,6 +83,8 @@ export function memoryDirectories(
       lastSyncAt: null,
       lastSyncStatus: null,
       lastSyncError: null,
+      allowDropUpTo: null,
+      allowDropAt: null,
       createdAt: new Date("2026-10-01T00:00:00Z"),
       updatedAt: new Date("2026-10-01T00:00:00Z"),
       ...over,
@@ -217,6 +219,8 @@ export function memoryDirectories(
         lastSyncAt: null,
         lastSyncStatus: null,
         lastSyncError: null,
+        allowDropUpTo: null,
+        allowDropAt: null,
         createdAt: clock,
         updatedAt: clock,
       }
@@ -252,7 +256,26 @@ export function memoryDirectories(
       d.lastSyncAt = input.at
       d.lastSyncStatus = input.status
       d.lastSyncError = input.error
+      if (input.status === "ok" || input.clearDropAllowance) {
+        d.allowDropUpTo = null
+        d.allowDropAt = null
+      }
       d.updatedAt = input.at
+    },
+    async allowDirectoryDrop(tenantId, did, input) {
+      const d = directories.get(did)
+      if (
+        !d ||
+        d.tenantId !== tenantId ||
+        d.provider !== "google" ||
+        d.lastSyncStatus !== "failed" ||
+        d.lastSyncError !== "large_drop"
+      )
+        return false
+      d.allowDropUpTo = input.users
+      d.allowDropAt = input.at
+      d.updatedAt = input.at
+      return true
     },
     async dueGoogleDirectories(after, limit) {
       if (after !== null && !UUID.test(after)) return []

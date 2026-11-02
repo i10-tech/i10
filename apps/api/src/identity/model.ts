@@ -14,6 +14,9 @@ export type Enforcement = "off" | "optional" | "required_domain" | "required_all
 export type AttemptPurpose = "sign_in" | "test_run" | "step_up"
 export type ManagedReason = "scim" | "jit" | "claimed" | "linked"
 export type DeprovisionMode = "membership" | "account"
+/** What a changed IdP subject does on a connection (sso.md 2.22). */
+export type RelinkMode = "ask" | "auto"
+export const RELINK_MODES: readonly RelinkMode[] = ["ask", "auto"]
 
 /**
  * What an IdP told us about a person's groups (sso.md 2.15, P0 #3):
@@ -72,6 +75,25 @@ export interface Connection {
   attributeMapping: Record<string, string>
   /** When a real sign-in on this connection last carried `groupsState: "present"`. */
   groupsLastSeenAt?: Date | null
+  /** A changed IdP subject: `ask` files a request for an owner, `auto` moves the link (sso.md 2.22). */
+  relink: RelinkMode
+  /** Entra only: the UPN stands in for a missing email, on a proved domain. */
+  upnAsEmail: boolean
+}
+
+/** The longest session a new Microsoft Entra connection starts with: 12 hours. */
+export const ENTRA_DEFAULT_MAX_SESSION_SECONDS = 12 * 60 * 60
+
+/**
+ * The session cap a NEW connection starts with; owners can change it.
+ *
+ * ⚠ ENTRA ONLY, BECAUSE ENTRA NEVER TELLS US IT SIGNED SOMEONE OUT: probed
+ * live, an Entra sign-out sends nothing to the app's logout URL, so the
+ * longest session limit (or SCIM deactivation) is the only thing that ends an
+ * i10 session there. Every other provider keeps no cap by default.
+ */
+export function defaultMaxSessionSeconds(provider: string): number | null {
+  return provider === "entra" ? ENTRA_DEFAULT_MAX_SESSION_SECONDS : null
 }
 
 /**
@@ -86,6 +108,13 @@ export interface Assertion {
   email: string | null
   /** Whether the IdP vouches for the address (`email_verified`; SAML: by policy). */
   emailVerified: boolean
+  /**
+   * Set to `upn` when `email` is the Entra user principal name (opt-in,
+   * `upnAsEmail`); absent means the IdP's own email claim. ⚠ A UPN
+   * IS NEVER VOUCHED FOR BY THE IdP: `emailVerified` stays false for it and
+   * the bridge accepts it only on a domain this workspace proved.
+   */
+  emailSource?: EmailSource
   givenName?: string | null
   familyName?: string | null
   attributes?: Record<string, unknown>
@@ -109,6 +138,45 @@ export interface Assertion {
   mfaByAcr?: boolean
   /** OIDC `sid` / SAML SessionIndex, for IdP logout (#345). */
   idpSession?: string | null
+}
+
+export type EmailSource = "email" | "upn"
+
+/**
+ * An Entra user principal name as an address, or null.
+ *
+ * ⚠ A GUEST UPN NEVER COUNTS. `ada_gmail.com#EXT#@tenant.onmicrosoft.com` is
+ * an outsider invited into the tenant, not somebody the company's domain
+ * vouches for. Anything that does not parse as a plain address is dropped.
+ */
+export function upnAsAddress(value: unknown): string | null {
+  if (typeof value !== "string" || /#ext#/i.test(value)) return null
+  return normaliseEmail(value)
+}
+
+/**
+ * Whether the bridge may take an assertion's address as vouched for: the IdP
+ * said so, or it is an Entra UPN on a connection that opted in (the domain
+ * check in `resolve` has already run by then and refuses an unproved one).
+ */
+export function emailVouched(
+  connection: Pick<Connection, "provider" | "upnAsEmail">,
+  assertion: Pick<Assertion, "emailVerified" | "emailSource">,
+): boolean {
+  return (
+    assertion.emailVerified ||
+    (assertion.emailSource === "upn" &&
+      connection.upnAsEmail &&
+      connection.provider === "entra")
+  )
+}
+
+/**
+ * A subject, shortened to something an audit row may carry. Subjects can be
+ * a username or a primary email (Okta, Google), so the log never holds them.
+ */
+export function subjectFingerprint(subject: string): string {
+  return hashSecret(subject).slice(0, 16)
 }
 
 // ── Time ─────────────────────────────────────────────────────────────────
@@ -138,6 +206,8 @@ export const STEP_UP_MAX_AGE_MS = 5 * 60 * 1000
 export const STEP_UP_FUTURE_SKEW_MS = 2 * 60 * 1000
 /** The gate writes `last_seen_at` at most this often per session. */
 export const LAST_SEEN_EVERY_MS = 60 * 1000
+/** A relink request waits this long for an owner (sso.md 2.22). */
+export const RELINK_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000
 /** The sweeper's grace for a ticket session to be bound (sso.md 2.2). */
 export const SWEEP_AFTER_MS = 2 * 60 * 1000
 
@@ -302,6 +372,12 @@ export type Refusal =
   | "domain_not_verified"
   | "managed_elsewhere"
   | "already_linked"
+  /**
+   * The IdP sent a new subject for somebody already linked on this connection
+   * (a renamed Okta username or Google address, a recreated Entra app) and the
+   * connection's `relink` setting leaves the move to an owner (sso.md 2.22).
+   */
+  | "subject_changed"
   | "no_account"
   | "ambiguous_account"
   | "account_banned"
@@ -356,6 +432,8 @@ export function refusalMessage(reason: Refusal): string {
       return "Your company requires multi-factor sign-in. Sign in again with it."
     case "step_up_unsupported":
       return "Your company's sign-in cannot confirm it is you again. Use your passkey or a code instead."
+    case "subject_changed":
+      return "Your company login changed. An administrator needs to approve the new one before you can sign in."
     case "no_account":
       return "There is no i10 account for you yet. Ask your administrator."
     case "workspace_full":

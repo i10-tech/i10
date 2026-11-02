@@ -101,7 +101,8 @@ import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
 import { oidcEngine } from "./identity/oidc.js"
-import { redisReplayCache, samlEngine } from "./identity/saml.js"
+import { fetchIdpMetadata, redisReplayCache, samlEngine } from "./identity/saml.js"
+import { forceRefresh } from "./identity/saml-refresh.js"
 import { samlStore } from "./identity/saml-store.js"
 import { guardedFetch } from "./identity/oidc-fetch.js"
 import { auditTap, tapped } from "./identity/audit-tap.js"
@@ -1415,15 +1416,28 @@ else log.warn({}, "OIDC SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIG
  */
 const samlRows = samlStore(db)
 const replay = redisReplayCache(cache)
+const samlFetch = guardedFetch({
+  vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+})
 const saml =
   secrets && authOrigin
     ? samlEngine({
         store: identity,
         saml: samlRows,
-        fetch: guardedFetch({
-          vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
-        }),
+        fetch: samlFetch,
         replay,
+        forceRefresh: (connection, before) =>
+          forceRefresh(
+            {
+              store: identity,
+              saml: samlRows,
+              log,
+              replay,
+              fetchMetadata: (url) => fetchIdpMetadata(samlFetch, url),
+            },
+            connection,
+            before,
+          ),
         authOrigin,
         log,
       })

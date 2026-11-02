@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { Hono } from "hono"
+import type { Directory } from "../src/identity/directory-ports.js"
 import { mountIdentity } from "../src/routes/console/identity.js"
 import type { ConsoleDeps } from "../src/routes/console/deps.js"
 import type { Role } from "../src/console/roles.js"
@@ -29,12 +30,24 @@ const ROLES: Record<string, Role> = {
 const BASE = "https://api.test/scim/v2"
 const MISSING = "99999999-9999-4999-8999-999999999999"
 
-function consoleApp(options: { fresh?: boolean; wired?: boolean } = {}) {
+function consoleApp(
+  options: {
+    fresh?: boolean
+    wired?: boolean
+    directory?: Partial<Directory>
+    google?: boolean
+  } = {},
+) {
   const identity = memoryStore()
+  if (options.google)
+    // The fake store lists no events; the real one lists them newest first.
+    identity.store.events = (async () =>
+      [...identity.events].reverse()) as unknown as typeof identity.store.events
   const dirs = memoryDirectories({
-    directories: [{ id: DIRECTORY, name: "Okta" }],
+    directories: [{ id: DIRECTORY, name: "Okta", ...options.directory }],
     tokens: [],
   })
+  const pulls: string[] = []
   let fresh = options.fresh ?? true
   const kicks: { directoryId: string; force: boolean }[] = []
   const scheduled: string[] = []
@@ -82,6 +95,18 @@ function consoleApp(options: { fresh?: boolean; wired?: boolean } = {}) {
                 ) => {
                   scheduled.push(...entries.map((e) => e.directoryUserId))
                 },
+                ...(options.google
+                  ? {
+                      google: {
+                        serviceAccount: null,
+                        checkAccess: async () => ({ ok: true as const }),
+                        schedulePull: async (_t: string, directoryId: string) => {
+                          pulls.push(directoryId)
+                        },
+                        stopChannels: async () => {},
+                      },
+                    }
+                  : {}),
               },
             }),
         log,
@@ -104,6 +129,7 @@ function consoleApp(options: { fresh?: boolean; wired?: boolean } = {}) {
     events,
     kicks,
     scheduled,
+    pulls,
     setFresh: (value: boolean) => {
       fresh = value
     },
@@ -824,5 +850,93 @@ describe("directories: create mailboxes (#344)", () => {
     expect((await patch(w, "user_admin", { createMailboxes: "yes" })).status).toBe(422)
     expect((await patch(w, "user_admin", { createMailboxes: false })).status).toBe(200)
     expect(w.dirs.directories.get(DIRECTORY)!.createMailboxes).toBe(false)
+  })
+})
+
+describe("directories: confirming a refused Google removal", () => {
+  const PATH = `/identity/directories/${DIRECTORY}/confirm-removals`
+  const refused = (over: Partial<Directory> = {}) => ({
+    provider: "google" as const,
+    enabled: true,
+    adminEmail: "admin@acme.test",
+    domain: "acme.test",
+    lastSyncStatus: "failed" as const,
+    lastSyncError: "large_drop",
+    ...over,
+  })
+  const shown = (w: ReturnType<typeof consoleApp>, removedUsers = 7) =>
+    w.identity.store.record(TENANT, {
+      type: "directory.sync_failed",
+      reason: "large_drop",
+      data: { directoryId: DIRECTORY, existingUsers: 30, removedUsers, keptUsers: 23 },
+    })
+
+  it("stores the allowance, audits who confirmed what, and schedules a pull", async () => {
+    const w = consoleApp({ google: true, directory: refused() })
+    await shown(w)
+    const res = await w.call("user_owner", "POST", PATH, { removedUsers: 7 })
+    expect(res.status).toBe(200)
+    expect(w.dirs.directories.get(DIRECTORY)).toMatchObject({ allowDropUpTo: 7 })
+    expect(w.dirs.directories.get(DIRECTORY)!.allowDropAt).toBeInstanceOf(Date)
+    expect(w.events("directory.removals_confirmed")).toMatchObject([
+      {
+        actorUserId: "user_owner",
+        data: { directoryId: DIRECTORY, removedUsers: 7 },
+      },
+    ])
+    expect(w.pulls).toEqual([DIRECTORY])
+  })
+
+  it("refuses a count other than the one shown, and a body with anything else in it", async () => {
+    const w = consoleApp({ google: true, directory: refused() })
+    await shown(w)
+    for (const body of [{ removedUsers: 8 }, { removedUsers: 6 }]) {
+      const res = await w.call("user_owner", "POST", PATH, body)
+      expect(res.status).toBe(409)
+    }
+    for (const body of [{}, { removedUsers: "7" }, { removedUsers: 7, extra: 1 }]) {
+      expect((await w.call("user_owner", "POST", PATH, body)).status).toBe(422)
+    }
+    expect(w.dirs.directories.get(DIRECTORY)!.allowDropUpTo).toBeNull()
+    expect(w.events("directory.removals_confirmed")).toEqual([])
+    expect(w.pulls).toEqual([])
+  })
+
+  it("is an owner's, and needs a fresh sign-in", async () => {
+    const w = consoleApp({ google: true, directory: refused() })
+    await shown(w)
+    for (const who of ["user_admin", "user_m"])
+      expect((await w.call(who, "POST", PATH, { removedUsers: 7 })).status).toBe(403)
+    w.setFresh(false)
+    expect((await w.call("user_owner", "POST", PATH, { removedUsers: 7 })).status).not.toBe(
+      200,
+    )
+    expect(w.dirs.directories.get(DIRECTORY)!.allowDropUpTo).toBeNull()
+  })
+
+  it("refuses a directory that is not Google, or whose last failure was not large_drop", async () => {
+    const generic = consoleApp({ google: true })
+    expect(
+      (await generic.call("user_owner", "POST", PATH, { removedUsers: 7 })).status,
+    ).toBe(404)
+
+    for (const over of [
+      refused({ lastSyncError: "unreachable" }),
+      refused({ lastSyncStatus: "ok", lastSyncError: null }),
+    ]) {
+      const w = consoleApp({ google: true, directory: over })
+      await shown(w)
+      expect((await w.call("user_owner", "POST", PATH, { removedUsers: 7 })).status).toBe(
+        409,
+      )
+      expect(w.dirs.directories.get(DIRECTORY)!.allowDropUpTo).toBeNull()
+    }
+  })
+
+  it("refuses when no count was recorded for the failure", async () => {
+    const w = consoleApp({ google: true, directory: refused() })
+    expect((await w.call("user_owner", "POST", PATH, { removedUsers: 7 })).status).toBe(
+      409,
+    )
   })
 })
