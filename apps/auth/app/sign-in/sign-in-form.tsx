@@ -12,7 +12,12 @@ import { emailProblem } from "@repo/ui/checks"
 import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { PasswordInput } from "@repo/ui/components/i10/password-input"
 import { OAuthButtons, useSsoStart } from "../_components/oauth-buttons"
-import { isUnknownIdentifier, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import {
+  isPasswordNotAllowed,
+  isUnknownIdentifier,
+  messageFor,
+  TRANSPORT_FAILURE,
+} from "../_lib/errors"
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
 import { stepBack, useStepHistory } from "../_lib/step-history"
@@ -781,7 +786,15 @@ export function SignInForm({
       })
 
       if (error) {
-        toast.error(messageFor(error))
+        // ⚠ CLERK'S OWN SENTENCE HERE IS "The verification strategy is not
+        // valid for this account": true, and no help to anybody.
+        toast.error(
+          isPasswordNotAllowed(error)
+            ? sso
+              ? `This account signs in with ${sso.name} SSO. Continue with it below.`
+              : "This account has no password. Sign in the way it was set up."
+            : messageFor(error),
+        )
         setBusy(null)
         return
       }

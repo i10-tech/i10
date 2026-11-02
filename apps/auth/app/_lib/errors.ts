@@ -96,6 +96,15 @@ export function isUnknownIdentifier(error: FlowError): boolean {
 }
 
 /**
+ * Clerk saying this account has no password to check: it signs in another way.
+ * An SSO-managed account has its password taken away when it is claimed, so a
+ * password typed for it gets this rather than "incorrect password".
+ */
+export function isPasswordNotAllowed(error: FlowError): boolean {
+  return hasCode(error, "strategy_for_user_invalid")
+}
+
+/**
  * For the `catch` arm: a transport failure, not a verdict from Clerk.
  *
  * ⚠ IT MUST NOT MENTION CREDENTIALS. A dropped connection reported as
