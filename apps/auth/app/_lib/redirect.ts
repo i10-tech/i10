@@ -38,8 +38,17 @@ export function isAllowedOrigin(origin: string | null): boolean {
 }
 
 export function afterAuthUrl(raw: string | string[] | undefined): string {
+  return allowedReturnUrl(raw) ?? fallback()
+}
+
+/**
+ * Resolves a return URL candidate (`redirect_url` or OIDC `target_link_uri`)
+ * through the `afterAuthUrl` allowlist, returning null when absent or refused
+ * so callers can drop disallowed targets silently.
+ */
+export function allowedReturnUrl(raw: string | string[] | undefined): string | null {
   const candidate = Array.isArray(raw) ? raw[0] : raw
-  if (!candidate) return fallback()
+  if (!candidate || candidate.length > 2048) return null
 
   let url: URL
   try {
@@ -49,12 +58,13 @@ export function afterAuthUrl(raw: string | string[] | undefined): string {
     // app serves no page worth landing on after sign-in, so a relative target
     // is either a mistake or an attempt at one - and `//evil.example` parses as
     // a protocol-relative URL that many naive checks read as a path.
-    return fallback()
+    return null
   }
 
   // ⚠ NOT `!== "http:"`. Only https is allowed, so anything exotic a URL parser
-  // accepts - `javascript:`, `data:` - is refused by the same line.
-  if (url.protocol !== "https:") return fallback()
+  // accepts - `javascript:`, `data:` - is refused by the same line. Userinfo in
+  // the URL (`https://user:pw@dash.i10.tech`) is refused like `safeReturnTo`.
+  if (url.protocol !== "https:" || url.username || url.password) return null
 
-  return allowed().includes(url.origin) ? url.toString() : fallback()
+  return allowed().includes(url.origin) ? url.toString() : null
 }

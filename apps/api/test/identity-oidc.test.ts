@@ -587,7 +587,7 @@ describe("Google Workspace", () => {
     expect(refusal(done)).toBe("engine_mismatch")
     expect(w.idp.calls.token).toBe(0)
   })
-  it("never asks Google for prompt=login on a step-up, only max_age=0", async () => {
+  it("refuses SSO step-up on Google OIDC because Google never sends auth_time", async () => {
     const w = await google()
     await w.store.store.bindSession(TENANT, {
       sessionId: "sess_1",
@@ -599,11 +599,14 @@ describe("Google Workspace", () => {
       at: new Date(),
       freshAt: new Date(),
     })
-    const url = new URL(
-      await w.start("step_up", { userId: "user_ada", sessionId: "sess_1" }),
-    )
-    expect(url.searchParams.get("prompt")).toBeNull()
-    expect(url.searchParams.get("max_age")).toBe("0")
+    const started = await startLogin(w.deps, {
+      connectionId: CONNECTION,
+      purpose: "step_up",
+      binding: BINDING,
+      returnTo: "https://dash.i10.localhost/",
+      stepUp: { userId: "user_ada", sessionId: "sess_1" },
+    })
+    expect(started).toEqual({ outcome: "refused", reason: "step_up_unsupported" })
   })
   it("asks Google for its account chooser on a forced login, with no max_age", async () => {
     const w = await google()

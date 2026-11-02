@@ -130,6 +130,7 @@ function world(
     givenName: "Grace",
     familyName: "Hopper",
     groups: [],
+    groupsState: "present",
     authTime: now(),
     amr: ["pwd"],
     ...over,

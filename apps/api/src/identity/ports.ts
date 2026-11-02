@@ -267,6 +267,8 @@ export interface IdentityStore {
     connectionId: string,
     ruleId: string,
   ): Promise<GroupRoleRule | null>
+  /** Records that this connection delivered an explicit groups claim/attribute on a sign-in (P0 #3). */
+  noteGroupsSeen(tenantId: string, connectionId: string, at: Date): Promise<void>
 
   /**
    * Runs `fn` holding the JIT lock for one address, on every connection (#341):

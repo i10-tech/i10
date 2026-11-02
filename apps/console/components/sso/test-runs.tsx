@@ -9,7 +9,7 @@ import { useMounted } from "@/lib/react"
 import { ssoTestRuns } from "@/lib/sso-actions"
 import { toastDone, toastError } from "@/lib/toast"
 import type { SsoConnection, TestRun } from "@/lib/sso-types"
-import { DAY_MS, latestPass, wouldDo } from "@/lib/sso-runs"
+import { DAY_MS, groupsNote, latestPass, wouldDo } from "@/lib/sso-runs"
 import { Block, Loading, useRemote } from "./shared"
 
 /**
@@ -142,6 +142,12 @@ function Run({ run }: { run: TestRun }) {
             <p className="text-xs font-medium">What we would do</p>
             <p className="mt-1 text-muted-foreground">{wouldDo(run)}</p>
           </div>
+          {groupsNote(run) && (
+            <div>
+              <p className="text-xs font-medium">Groups</p>
+              <p className="mt-1 text-muted-foreground">{groupsNote(run)}</p>
+            </div>
+          )}
           <div>
             <p className="text-xs font-medium">What your provider said</p>
             <pre className="mt-1 max-h-72 overflow-auto rounded-md border bg-background p-3 font-mono text-xs">

@@ -1,4 +1,5 @@
 import type { JoinRole, SyncOutcome } from "../console/roles.js"
+import { capabilitiesOf } from "./idp-capabilities.js"
 import {
   jitAllowed,
   profileChanges,
@@ -13,6 +14,7 @@ import {
   BIND_WINDOW_MS,
   CLOCK_SKEW_MS,
   HANDOFF_TTL_MS,
+  STEP_UP_FUTURE_SKEW_MS,
   STEP_UP_MAX_AGE_MS,
   emailDomain,
   hashSecret,
@@ -21,6 +23,7 @@ import {
   onLiveDomain,
   assertionProvesMfa,
   sameHash,
+  thirdPartyIssuerMatches,
   type Assertion,
   type AttemptPurpose,
   type Connection,
@@ -185,6 +188,8 @@ export async function startLogin(
     loginHint?: string | null
     /** For `sign_in`, from "Sign in as" on a hint mismatch; see `Engine.begin`. */
     forceLogin?: boolean
+    /** OIDC third-party initiated login `iss`, when present on the start URL. */
+    iss?: string
     /** For `step_up`: the verified session being made fresh. */
     stepUp?: { userId: string; sessionId: string }
   },
@@ -196,10 +201,25 @@ export async function startLogin(
       ? connection.status === "testing" || connection.status === "active"
       : connection.status === "active"
   if (!usable) return { outcome: "refused", reason: "connection_inactive" }
+  // ⚠ RE-CHECK `iss` AT START TIME TOO: covers direct address-bar starts with
+  // `?iss=...` and closes any window between the interstitial and the click.
+  // Never store the caller's `iss` or `loginHint` in the audit row.
+  if (input.purpose === "sign_in" && !thirdPartyIssuerMatches(connection, input.iss)) {
+    await d.store.record(connection.tenantId, {
+      type: "sign_in.issuer_mismatch",
+      connectionId: connection.id,
+      data: {},
+    })
+    return { outcome: "refused", reason: "issuer_mismatch" }
+  }
   const engine = d.engines.get(connection.protocol)
   if (!engine) return { outcome: "refused", reason: "engine_disabled" }
 
   if (input.purpose === "step_up") {
+    if (
+      capabilitiesOf(connection.protocol, connection.provider).canProveFreshAuth === "no"
+    )
+      return { outcome: "refused", reason: "step_up_unsupported" }
     const session = input.stepUp
       ? await d.store.sessionRow(connection.tenantId, input.stepUp.sessionId)
       : null
@@ -459,17 +479,43 @@ export async function completeLogin(
   const mode = attempt.purpose === "test_run" ? "test_run" : "sign_in"
   const resolved = await resolve(d, attempt.tenantId, connection, assertion, mode)
   /*
-   * ⚠ THE ROLE IS THE IdP's GROUPS, READ AT EVERY SIGN-IN (#341). The rules
-   * are this connection's; no rule matching gives the default, member. A
-   * connection with no rules leaves roles to the Team page.
+   * ⚠ THE ROLE IS THE IdP's GROUPS, READ AT EVERY SIGN-IN (#341, P0 #3).
+   *
+   * Missing group data must never silently demote an admin to `member`, yet
+   * Okta (and some others) omit the `groups` claim entirely when a person
+   * matches no group in the app's filter:
+   *   - `present`: apply the group rules to `assertion.groups`.
+   *   - `overage` (Entra >200 OIDC / >150 SAML groups): keep the current
+   *     workspace role and audit `sign_in.groups_unavailable` (`overage`). We
+   *     do not call Microsoft Graph to resolve overage (we hold no Graph
+   *     credentials; an optional Graph permission is the future option).
+   *   - `absent`: if this connection has EVER delivered `present` groups on an
+   *     earlier sign-in (`groupsLastSeenAt != null`), the IdP sends groups for
+   *     this app, so omitted means zero matching groups - treat as `[]` and
+   *     apply the rules. Otherwise (never seen groups: Google OIDC, missing
+   *     scope, unmapped attribute) keep the current role and audit `absent`.
+   *   - A brand-new JIT person when groups are unavailable joins as the default
+   *     `member` role, as today, and still records `sign_in.groups_unavailable`.
    */
   const rules = await d.store.groupRules(attempt.tenantId, connection.id)
-  const mapped = roleFromGroups(rules, assertion.groups)
+  const groupsEverSeen = connection.groupsLastSeenAt != null
+  const groupsUsable =
+    assertion.groupsState === "present" ||
+    (assertion.groupsState === "absent" && groupsEverSeen)
+  const effectiveGroups =
+    assertion.groupsState === "present" ? (assertion.groups ?? []) : []
+  const mapped: MappedRole = groupsUsable
+    ? roleFromGroups(rules, effectiveGroups)
+    : { role: "member", rule: null }
 
   if (attempt.purpose === "test_run") {
     const passed = resolved.ok !== false
     const reason = resolved.ok === false ? resolved.reason : null
     const role = { role: mapped.role, rule: mapped.rule?.id ?? null }
+    const unavailable =
+      rules.length > 0 && !groupsUsable
+        ? { groupsUnavailable: assertion.groupsState }
+        : {}
     const run = await d.store.recordTestRun(attempt.tenantId, {
       connectionId: connection.id,
       attemptId: attempt.id,
@@ -483,6 +529,9 @@ export async function completeLogin(
               clerkUserId: resolved.userId,
               email: resolved.email,
               ...role,
+              ...(rules.length > 0 && !groupsUsable
+                ? { ...unavailable, roleKept: true }
+                : {}),
             }
           : resolved.ok === "would_create"
             ? {
@@ -496,6 +545,7 @@ export async function completeLogin(
                   family: readName(assertion.familyName) !== null,
                 },
                 ...role,
+                ...unavailable,
               }
             : { refused: resolved.reason },
     })
@@ -625,13 +675,27 @@ export async function completeLogin(
   if (!managedNow && (await takeOver()) === "elsewhere")
     return refuse("managed_elsewhere")
 
-  await syncRole(d, {
-    tenantId: attempt.tenantId,
-    connectionId: connection.id,
-    userId: resolved.userId,
-    mapped,
-    hasRules: rules.length > 0,
-  })
+  if (assertion.groupsState === "present")
+    await d.store.noteGroupsSeen(attempt.tenantId, connection.id, now)
+
+  if (groupsUsable) {
+    await syncRole(d, {
+      tenantId: attempt.tenantId,
+      connectionId: connection.id,
+      userId: resolved.userId,
+      mapped,
+      hasRules: rules.length > 0,
+    })
+  } else if (rules.length > 0) {
+    // Never include addresses in this audit event (P0 #3).
+    await d.store.record(attempt.tenantId, {
+      type: "sign_in.groups_unavailable",
+      subjectUserId: resolved.userId,
+      connectionId: connection.id,
+      reason: assertion.groupsState,
+      data: { attemptId: attempt.id },
+    })
+  }
   // A person JIT just made has the IdP's names already.
   if (!resolved.created)
     await syncProfile(d, {
@@ -1020,6 +1084,7 @@ function claimsOf(assertion: Assertion): Record<string, unknown> {
     givenName: assertion.givenName ?? null,
     familyName: assertion.familyName ?? null,
     groups: assertion.groups ?? [],
+    groupsState: assertion.groupsState,
     amr: assertion.amr ?? [],
     acr: assertion.acr ?? null,
     authTime: assertion.authTime?.toISOString() ?? null,
@@ -1043,6 +1108,10 @@ async function stepUp(
   assertion: Assertion,
   refuse: Refuse,
 ): Promise<CompleteOutcome> {
+  if (
+    capabilitiesOf(connection.protocol, connection.provider).canProveFreshAuth === "no"
+  )
+    return refuse("step_up_unsupported")
   const now = clock(d)
   const linked = await d.store.identityBySubject(
     attempt.tenantId,
@@ -1060,10 +1129,15 @@ async function stepUp(
   )
     return refuse("step_up_mismatch")
   const at = assertion.authTime
+  /*
+   * ⚠ FUTURE SKEW IS `STEP_UP_FUTURE_SKEW_MS` (120 s), NOT `CLOCK_SKEW_MS` (5 s):
+   * Entra OIDC v2 was probed issuing `auth_time` 39 seconds ahead of `iat` on a
+   * fresh sign-in (sso.md 2.22). Staleness stays `STEP_UP_MAX_AGE_MS` (5 min).
+   */
   if (
     !at ||
     now.getTime() - at.getTime() > STEP_UP_MAX_AGE_MS ||
-    at.getTime() > now.getTime() + CLOCK_SKEW_MS
+    at.getTime() > now.getTime() + STEP_UP_FUTURE_SKEW_MS
   )
     return refuse("step_up_stale")
   await d.store.setFresh(attempt.tenantId, session.sessionId, at)

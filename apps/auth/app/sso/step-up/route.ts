@@ -31,7 +31,12 @@ export async function GET(request: NextRequest) {
   )
   const binding = newBinding()
 
-  let answer: { redirectUrl?: string; message?: string; protocol?: string }
+  let answer: {
+    redirectUrl?: string
+    message?: string
+    protocol?: string
+    reason?: string
+  }
   try {
     const token = await (await auth()).getToken()
     if (!token) return redirectHere("/sign-in")
@@ -41,6 +46,10 @@ export async function GET(request: NextRequest) {
       { authorization: `Bearer ${token}` },
     )
     answer = (await upstream.json()) as typeof answer
+    // Providers that cannot prove fresh auth (Google OIDC/SAML) fall back to
+    // the app's own step-up verification at `returnTo` (sso.md 2.22).
+    if (!upstream.ok && answer.reason === "step_up_unsupported")
+      return redirectHere(returnTo)
     if (!upstream.ok || !answer.redirectUrl)
       return redirectHere(
         failedUrl(

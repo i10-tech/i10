@@ -8,6 +8,7 @@ import {
   type BridgeDeps,
 } from "../identity/bridge.js"
 import {
+  decideConnectionPrompt,
   emailDomain,
   normaliseEmail,
   readLoginHint,
@@ -45,6 +46,7 @@ import { z } from "zod"
  * which hold the browser-binding cookie; see apps/auth/app/sso.
  *
  *   POST /sso/attempts      start: { connection, purpose, binding, returnTo }
+ *   POST /sso/connection    outside-start interstitial: { connection, iss? } -> { name, protocol, provider }
  *   POST /sso/test/assert   the TEST engine's "IdP" (dev only, 404 otherwise)
  *   POST /sso/oidc/callback { state, binding, query } -> as completeLogin (#338)
  *   GET  /sso/oidc/jwks/:id the public keys of a private_key_jwt connection
@@ -126,6 +128,12 @@ const SAML_LARGE = new Set(["/saml/acs", "/saml/slo"])
 /** A setup link's SAML settings may carry the IdP's metadata file (256 KiB). */
 const SETUP_SAML = /^\/setup\/[A-Za-z0-9_-]+\/saml$/
 const DiscoverBody = z.object({ email: z.string().max(320) }).strict()
+const ConnectionLookupBody = z
+  .object({
+    connection: z.string().max(64),
+    iss: z.string().max(8192).optional(),
+  })
+  .strict()
 
 const UUID = z
   .string()
@@ -270,6 +278,64 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
 
   if (deps?.setup) app.route("/setup", createSetupRoutes(deps.setup))
 
+  /*
+   * ⚠ PUBLIC DISPLAY INFO ONLY, FOR `active` CONNECTIONS ONLY. Cross-site
+   * arrivals render an interstitial on apps/auth before any attempt is made;
+   * this supplies the connection's display name and checks OIDC `iss` without
+   * exposing the configured issuer URL. Unknown ids, non-active connections and
+   * `iss` mismatches all answer the same 404, so probing with a dummy `iss`
+   * cannot distinguish a wrong issuer from a nonexistent connection.
+   *
+   * ⚠ DEDICATED AUDIT TYPES (`sign_in.interstitial`, `sign_in.issuer_mismatch`),
+   * NEVER `sign_in.failed` AND NEVER EMAILS OR RAW `iss` STRINGS: strangers can
+   * hit `/sso/<id>?iss=wrong` at will, and counting that under `FAILURE_TYPES`
+   * would let an outsider trip failure alerts on a healthy connection.
+   */
+  app.post("/connection", async (c) => {
+    const d = deps!
+    const parsed = ConnectionLookupBody.safeParse(await body(c))
+    if (!parsed.success) return invalid(c, "connection is required.")
+    c.header("Cache-Control", "no-store")
+    const connectionId = UUID.safeParse(parsed.data.connection)
+    if (!connectionId.success) return notFound(c)
+    const rawIss = parsed.data.iss
+    const iss = rawIss === undefined ? undefined : rawIss.length <= 2048 ? rawIss : ""
+    try {
+      const connection = await d.bridge.store.connectionForStart(
+        connectionId.data.toLowerCase(),
+      )
+      const verdict = decideConnectionPrompt(connection, iss)
+      if (verdict.outcome === "invalid") return notFound(c)
+      if (verdict.outcome === "issuer_mismatch") {
+        await d.bridge.store.record(verdict.tenantId, {
+          type: "sign_in.issuer_mismatch",
+          connectionId: verdict.connectionId,
+          data: {},
+        })
+        return notFound(c)
+      }
+      await d.bridge.store.record(verdict.tenantId, {
+        type: "sign_in.interstitial",
+        connectionId: verdict.connectionId,
+        data: verdict.thirdPartyInitiated ? { thirdPartyInitiated: true } : {},
+      })
+      return c.json(
+        {
+          name: verdict.name,
+          protocol: verdict.protocol,
+          provider: verdict.provider,
+        },
+        200,
+      )
+    } catch (error) {
+      d.bridge.log.error(
+        { err: error instanceof Error ? error.name : "unknown" },
+        "could not read a connection for the SSO interstitial",
+      )
+      return unavailable(c)
+    }
+  })
+
   app.post("/attempts", async (c) => {
     const d = deps!
     const b = await body(c)
@@ -283,6 +349,12 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
     const loginHint = purpose === "step_up" ? null : readLoginHint(b.loginHint)
     // "Sign in as" after the IdP answered for somebody else (sso-continue.tsx).
     const forceLogin = purpose === "sign_in" && b.fresh === true
+    const iss =
+      b.iss === undefined || b.iss === null
+        ? undefined
+        : typeof b.iss === "string" && b.iss.length <= 2048
+          ? b.iss
+          : ""
 
     try {
       let stepUp: { userId: string; sessionId: string } | undefined
@@ -317,6 +389,7 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
         returnTo,
         loginHint,
         forceLogin,
+        ...(iss !== undefined ? { iss } : {}),
         ...(stepUp ? { stepUp } : {}),
       })
       if (started.outcome === "refused") return refused(c, started.reason)

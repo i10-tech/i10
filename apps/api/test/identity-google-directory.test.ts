@@ -9,7 +9,10 @@ import { applyDirectoryUser, type DirectoryDeps } from "../src/identity/director
 import { GOOGLE_WATCH_EVENTS } from "../src/identity/directory-ports.js"
 import {
   GOOGLE_DIRECTORY_API_BASE,
+  GOOGLE_DIRECTORY_ERRORS,
   GOOGLE_DIRECTORY_SCOPES,
+  GOOGLE_MAX_DROP_PERCENT,
+  GOOGLE_MAX_DROP_USERS,
   GOOGLE_TOKEN_URL,
   GOOGLE_WATCH_RENEW_BEFORE_MS,
   GOOGLE_WATCH_TTL_MS,
@@ -279,6 +282,15 @@ describe("token minting: refusals first, then RS256 claims, cache and expiry", (
           error_description:
             "Client is unauthorized to retrieve access tokens: RAW_SECRET_DETAIL",
         },
+        expected: "delegation_missing",
+        retryable: false,
+      },
+      {
+        status: 401,
+        body: {
+          error: "invalid_client",
+          error_description: "OAuth client was not found: RAW_CLIENT_DETAIL",
+        },
         expected: "unauthorized_client",
         retryable: false,
       },
@@ -297,7 +309,7 @@ describe("token minting: refusals first, then RS256 claims, cache and expiry", (
           error: "invalid_grant",
           error_description: "Invalid email or User ID: RAW_GOOGLE_MSG",
         },
-        expected: "unknown_customer",
+        expected: "admin_not_found",
         retryable: false,
       },
       {
@@ -513,7 +525,25 @@ describe("console Google directory routes: refusals first, then owner flow", () 
           store: { roleOf: async (_t: string, u: string) => ROLES[u] ?? null },
         },
         identity: {
-          store: identity.store,
+          store: {
+            ...identity.store,
+            events: async (tenantId: string, { limit }: { limit: number }) =>
+              identity.events
+                .filter((e) => e.tenantId === tenantId)
+                .map((e, i) => ({
+                  id: `evt-${i}`,
+                  type: e.type,
+                  actorUserId: e.actorUserId ?? null,
+                  subjectUserId: e.subjectUserId ?? null,
+                  connectionId: e.connectionId ?? null,
+                  sessionId: e.sessionId ?? null,
+                  reason: e.reason ?? null,
+                  data: e.data ?? {},
+                  createdAt: new Date(2026, 9, 24, 12, 0, i),
+                }))
+                .reverse()
+                .slice(0, limit),
+          },
           clerk: memoryClerk().clerk,
           gate: { forget: () => {} },
           protocols: ["test"],
@@ -844,7 +874,7 @@ describe("console Google directory routes: refusals first, then owner flow", () 
     )
 
     for (const [nextMode, expected] of [
-      ["unauth", "unauthorized_client"],
+      ["unauth", "delegation_missing"],
       ["scope", "missing_scope"],
       ["unknown", "unknown_customer"],
     ] as const) {
@@ -935,6 +965,273 @@ describe("console Google directory routes: refusals first, then owner flow", () 
       },
     })
   })
+
+  it("diagnoses delegation_missing vs scope_missing, classifies admin_not_found and subject_not_admin from Google's exact live bodies, and never leaks raw Google text", async () => {
+    for (const code of [
+      "admin_not_found",
+      "subject_not_admin",
+      "delegation_missing",
+      "scope_missing",
+      "large_drop",
+    ] as const) {
+      expect(GOOGLE_DIRECTORY_ERRORS).toContain(code)
+    }
+
+    const [userScope, groupScope] = GOOGLE_DIRECTORY_SCOPES
+    const rawUnauthDesc =
+      "Client is unauthorized to retrieve access tokens using this method, or client not authorized for any of the scopes requested."
+    const rawInvalidEmailDesc = "Invalid email or User ID"
+    const rawForbiddenMsg = "Not Authorized to access this resource/api"
+
+    type LiveMode =
+      | "delegation_missing"
+      | "scope_missing"
+      | "neither_probe_503"
+      | "neither_all_200"
+      | "admin_not_found"
+      | "subject_not_admin"
+    let mode: LiveMode = "delegation_missing"
+    const requestedScopes: string[] = []
+
+    const decodeAssertionScope = (body: string): string => {
+      const assertion = new URLSearchParams(body).get("assertion") ?? ""
+      const [, payloadB64] = assertion.split(".")
+      const payload = JSON.parse(
+        Buffer.from(payloadB64!, "base64url").toString("utf8"),
+      ) as { scope: string }
+      return payload.scope
+    }
+
+    const w = buildConsole({
+      googleHandler: (call) => {
+        if (call.url.href === GOOGLE_TOKEN_URL) {
+          const scope = decodeAssertionScope(call.body)
+          requestedScopes.push(scope)
+          if (mode === "delegation_missing") {
+            return jsonResponse(
+              { error: "unauthorized_client", error_description: rawUnauthDesc },
+              401,
+            )
+          }
+          if (mode === "scope_missing") {
+            if (scope === userScope) {
+              return jsonResponse({ access_token: "tok_single_user", expires_in: 3600 })
+            }
+            return jsonResponse(
+              { error: "unauthorized_client", error_description: rawUnauthDesc },
+              401,
+            )
+          }
+          if (mode === "neither_probe_503") {
+            if (scope.includes(" ")) {
+              return jsonResponse(
+                { error: "unauthorized_client", error_description: rawUnauthDesc },
+                401,
+              )
+            }
+            return jsonResponse({ error: "backend_failure" }, 503)
+          }
+          if (mode === "neither_all_200") {
+            if (scope.includes(" ")) {
+              return jsonResponse(
+                { error: "unauthorized_client", error_description: rawUnauthDesc },
+                401,
+              )
+            }
+            return jsonResponse({ access_token: "tok_probe", expires_in: 3600 })
+          }
+          if (mode === "admin_not_found") {
+            return jsonResponse(
+              { error: "invalid_grant", error_description: rawInvalidEmailDesc },
+              400,
+            )
+          }
+          return jsonResponse({ access_token: "tok_member", expires_in: 3600 })
+        }
+
+        // Directory API `users.list` for `subject_not_admin`.
+        return jsonResponse(
+          {
+            error: {
+              code: 403,
+              message: rawForbiddenMsg,
+              errors: [{ reason: "forbidden" }],
+            },
+          },
+          403,
+        )
+      },
+    })
+
+    const created = await readBody(
+      await w.call("user_owner", "POST", "/identity/directories", {
+        name: "Google Live Cases",
+        provider: "google",
+        adminEmail: "admin@acme.test",
+        domain: "acme.test",
+      }),
+    )
+    await w.call("user_owner", "PATCH", `/identity/directories/${created.id}`, {
+      enabled: true,
+    })
+
+    const assertNoRawGoogleText = (text: string) => {
+      expect(text).not.toContain(rawUnauthDesc)
+      expect(text).not.toContain("Client is unauthorized to retrieve access tokens")
+      expect(text).not.toContain(rawInvalidEmailDesc)
+      expect(text).not.toContain(rawForbiddenMsg)
+      expect(text).not.toContain("Not Authorized to access this resource")
+    }
+
+    // 1. No delegation: combined request fails + both single-scope probes fail -> `delegation_missing`.
+    mode = "delegation_missing"
+    requestedScopes.length = 0
+    const delRes = await w.call(
+      "user_admin",
+      "POST",
+      `/identity/directories/${created.id}/check`,
+    )
+    const delText = await delRes.text()
+    assertNoRawGoogleText(delText)
+    expect(JSON.parse(delText)).toEqual({ ok: false, error: "delegation_missing" })
+    expect(requestedScopes).toEqual([
+      GOOGLE_DIRECTORY_SCOPES.join(" "),
+      userScope,
+      groupScope,
+    ])
+
+    // 2. Partial scopes: `user.readonly` succeeds, `group.readonly` fails -> `scope_missing` with failing scope URL.
+    mode = "scope_missing"
+    requestedScopes.length = 0
+    const scopeRes = await w.call(
+      "user_admin",
+      "POST",
+      `/identity/directories/${created.id}/check`,
+    )
+    const scopeText = await scopeRes.text()
+    assertNoRawGoogleText(scopeText)
+    expect(JSON.parse(scopeText)).toEqual({
+      ok: false,
+      error: "scope_missing",
+      missingScopes: [groupScope],
+    })
+    expect(requestedScopes).toEqual([
+      GOOGLE_DIRECTORY_SCOPES.join(" "),
+      userScope,
+      groupScope,
+    ])
+
+    // Calling check again must NOT reuse the single-scope `tok_single_user` token from cache.
+    requestedScopes.length = 0
+    await w.call("user_admin", "POST", `/identity/directories/${created.id}/check`)
+    expect(requestedScopes[0]).toBe(GOOGLE_DIRECTORY_SCOPES.join(" "))
+
+    // Pulling in `scope_missing` mode records `missingScopes` and surfaces `lastSyncDetail` on GET.
+    const pullTokens = createGoogleTokenSource({ serviceAccount: sa, fetch: w.net.fetch })
+    const scopePull = await pullGoogleDirectory(
+      {
+        store: w.dirs.store,
+        tokens: pullTokens,
+        fetch: w.net.fetch,
+        schedule: async () => {},
+        record: (t, e) => w.identity.store.record(t, e),
+        log,
+      },
+      { tenantId: TENANT, directoryId: created.id },
+    )
+    expect(scopePull).toEqual({
+      outcome: "failed",
+      error: "scope_missing",
+      retryable: false,
+      missingScopes: [groupScope],
+    })
+    const getAfterScopeRes = await w.call(
+      "user_admin",
+      "GET",
+      `/identity/directories/${created.id}`,
+    )
+    const getAfterScopeText = await getAfterScopeRes.text()
+    assertNoRawGoogleText(getAfterScopeText)
+    expect(JSON.parse(getAfterScopeText)).toMatchObject({
+      lastSyncStatus: "failed",
+      lastSyncError: "scope_missing",
+      lastSyncDetail: { missingScopes: [groupScope] },
+    })
+
+    // 3. Fallback `unauthorized_client` when single-scope probes fit neither case.
+    for (const fallbackMode of ["neither_probe_503", "neither_all_200"] as const) {
+      mode = fallbackMode
+      const fbRes = await w.call(
+        "user_admin",
+        "POST",
+        `/identity/directories/${created.id}/check`,
+      )
+      const fbText = await fbRes.text()
+      assertNoRawGoogleText(fbText)
+      expect(JSON.parse(fbText)).toEqual({ ok: false, error: "unauthorized_client" })
+    }
+
+    // 4. Subject email does not exist -> `admin_not_found` (single token call, no scope probes).
+    mode = "admin_not_found"
+    requestedScopes.length = 0
+    const adminRes = await w.call(
+      "user_admin",
+      "POST",
+      `/identity/directories/${created.id}/check`,
+    )
+    const adminText = await adminRes.text()
+    assertNoRawGoogleText(adminText)
+    expect(JSON.parse(adminText)).toEqual({ ok: false, error: "admin_not_found" })
+    expect(requestedScopes).toEqual([GOOGLE_DIRECTORY_SCOPES.join(" ")])
+
+    const adminPull = await pullGoogleDirectory(
+      {
+        store: w.dirs.store,
+        tokens: pullTokens,
+        fetch: w.net.fetch,
+        schedule: async () => {},
+        record: (t, e) => w.identity.store.record(t, e),
+        log,
+      },
+      { tenantId: TENANT, directoryId: created.id },
+    )
+    expect(adminPull).toEqual({
+      outcome: "failed",
+      error: "admin_not_found",
+      retryable: false,
+    })
+
+    // 5. Subject exists, not an admin -> token 200, first `users.list` 403 `reason: "forbidden"` -> `subject_not_admin`.
+    mode = "subject_not_admin"
+    const nonAdminRes = await w.call(
+      "user_admin",
+      "POST",
+      `/identity/directories/${created.id}/check`,
+    )
+    const nonAdminText = await nonAdminRes.text()
+    assertNoRawGoogleText(nonAdminText)
+    expect(JSON.parse(nonAdminText)).toEqual({ ok: false, error: "subject_not_admin" })
+
+    const nonAdminPull = await pullGoogleDirectory(
+      {
+        store: w.dirs.store,
+        tokens: pullTokens,
+        fetch: w.net.fetch,
+        schedule: async () => {},
+        record: (t, e) => w.identity.store.record(t, e),
+        log,
+      },
+      { tenantId: TENANT, directoryId: created.id },
+    )
+    expect(nonAdminPull).toEqual({
+      outcome: "failed",
+      error: "subject_not_admin",
+      retryable: false,
+    })
+
+    assertNoRawGoogleText(JSON.stringify(w.identity.events))
+    assertNoRawGoogleText(JSON.stringify([...w.dirs.directories.values()]))
+  })
 })
 
 // ── 4. The pull, incomplete-pull safety, idempotency & downstream pipeline ──
@@ -944,25 +1241,29 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
 
   function syncWorld(opts: {
     domains?: string[]
+    adminEmail?: string
+    domain?: string
     owners?: string[]
     users?: ReturnType<typeof user>[]
     googleHandler: (call: RecordedCall) => Response | Promise<Response>
   }) {
+    const domains = opts.domains ?? ["acme.test"]
     const dirs = memoryDirectories({
-      domains: opts.domains ?? ["acme.test"],
+      domains,
       directories: [
         {
           id: DIRECTORY,
           name: "Acme Google",
           provider: "google",
           enabled: true,
-          adminEmail: "admin@acme.test",
-          domain: "acme.test",
+          adminEmail: opts.adminEmail ?? "admin@acme.test",
+          domain: opts.domain ?? "acme.test",
         },
       ],
     })
     const identity = memoryStore({
       connections: [connection({ id: CONNECTION, status: "active" })],
+      live: { [CONNECTION]: domains },
     })
     const clerk = memoryClerk({ users: opts.users ?? [] })
     const prov = memoryProvisioning(clerk)
@@ -1143,7 +1444,9 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
         if (scenario === "members_fail") {
           if (path.endsWith("/users")) return jsonResponse({})
           if (path.endsWith("/groups"))
-            return jsonResponse({ groups: [{ id: "grp_eng", name: "Engineers" }] })
+            return jsonResponse({
+              groups: [{ id: "grp_eng", email: "eng@acme.test", name: "Engineers" }],
+            })
           return jsonResponse({ error: { code: 502 } }, 502)
         }
 
@@ -1163,8 +1466,8 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
         if (path.endsWith("/users")) return jsonResponse({})
         return jsonResponse({
           groups: [
-            { id: "g1", name: "G1" },
-            { id: "g2", name: "G2" },
+            { id: "g1", email: "g1@acme.test", name: "G1" },
+            { id: "g2", email: "g2@acme.test", name: "G2" },
           ],
         })
       },
@@ -1372,7 +1675,7 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
             phase === "unchanged_reordered" ? reverseKeys(v) : v
           if (path.endsWith("/users")) {
             expect(call.url.searchParams.get("customer")).toBe("my_customer")
-            expect(call.url.searchParams.get("domain")).toBe("acme.test")
+            expect(call.url.searchParams.has("domain")).toBe(false)
             if (!page)
               return jsonResponse(
                 wrap({ users: initialUsersPage1, nextPageToken: "u_p2" }),
@@ -1380,6 +1683,8 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
             return jsonResponse(wrap({ users: initialUsersPage2 }))
           }
           if (path.endsWith("/groups")) {
+            expect(call.url.searchParams.get("customer")).toBe("my_customer")
+            expect(call.url.searchParams.has("domain")).toBe(false)
             return jsonResponse(
               wrap({
                 groups: [
@@ -1544,6 +1849,363 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
       canonicalJson({ a: { c: 3, d: 2 }, b: 1 }),
     )
   })
+
+  it("keeps a person renamed between two proved domains (same Google id, alias on old domain) without deprovisioning", async () => {
+    let renamed = false
+    const w = syncWorld({
+      domains: ["i10.tech", "gw2.i10.tech"],
+      adminEmail: "admin@i10.tech",
+      domain: "i10.tech",
+      googleHandler: (call) => {
+        if (call.url.href === GOOGLE_TOKEN_URL)
+          return jsonResponse({ access_token: "tok_rename", expires_in: 3600 })
+        if (call.url.pathname.endsWith("/users")) {
+          expect(call.url.searchParams.get("customer")).toBe("my_customer")
+          expect(call.url.searchParams.has("domain")).toBe(false)
+          return jsonResponse({
+            users: [
+              {
+                id: "g_admin",
+                primaryEmail: "admin@i10.tech",
+                name: { givenName: "Admin", familyName: "One" },
+              },
+              renamed
+                ? {
+                    id: "g_mover",
+                    primaryEmail: "mover@gw2.i10.tech",
+                    aliases: ["mover@i10.tech"],
+                    name: { givenName: "Mo", familyName: "Mover" },
+                  }
+                : {
+                    id: "g_mover",
+                    primaryEmail: "mover@i10.tech",
+                    name: { givenName: "Mo", familyName: "Mover" },
+                  },
+            ],
+          })
+        }
+        if (call.url.pathname.endsWith("/groups")) {
+          expect(call.url.searchParams.get("customer")).toBe("my_customer")
+          expect(call.url.searchParams.has("domain")).toBe(false)
+          return jsonResponse({
+            groups: [{ id: "grp_eng", email: "eng@i10.tech", name: "Engineering" }],
+          })
+        }
+        return jsonResponse({
+          members: [{ id: "g_mover", type: "USER", status: "ACTIVE" }],
+        })
+      },
+    })
+
+    expect(await w.pull()).toEqual({
+      outcome: "ok",
+      users: { created: 2, updated: 0, deleted: 0, unchanged: 0 },
+      groups: { created: 1, updated: 0, deleted: 0, unchanged: 0 },
+    })
+    await w.drainOutbox()
+
+    const beforeMover = w.dirs.users.find((u) => u.externalId === "g_mover")!
+    expect(beforeMover.email).toBe("mover@i10.tech")
+    expect(beforeMover.clerkUserId).toBeTruthy()
+    expect(w.members.has(beforeMover.clerkUserId!)).toBe(true)
+
+    renamed = true
+    expect(await w.pull()).toEqual({
+      outcome: "ok",
+      users: { created: 0, updated: 1, deleted: 0, unchanged: 1 },
+      groups: { created: 0, updated: 0, deleted: 0, unchanged: 1 },
+    })
+    await w.drainOutbox()
+
+    const afterMover = w.dirs.users.find((u) => u.externalId === "g_mover")!
+    expect(afterMover.id).toBe(beforeMover.id)
+    expect(afterMover.deletedAt).toBeNull()
+    expect(afterMover.userName).toBe("mover@gw2.i10.tech")
+    expect(afterMover.email).toBe("mover@gw2.i10.tech")
+    expect(afterMover.clerkUserId).toBe(beforeMover.clerkUserId)
+    expect(afterMover.conflict).toBeNull()
+    expect(w.members.has(beforeMover.clerkUserId!)).toBe(true)
+  })
+
+  it("uses the proved-domain alias when a kept user's primaryEmail moves to an unproved domain, and drops users only on unproved domains", async () => {
+    let phase: "seed" | "moved" = "seed"
+    const w = syncWorld({
+      domains: ["i10.tech"],
+      adminEmail: "admin@i10.tech",
+      domain: "i10.tech",
+      googleHandler: (call) => {
+        if (call.url.href === GOOGLE_TOKEN_URL)
+          return jsonResponse({ access_token: "tok_alias", expires_in: 3600 })
+        if (!call.url.pathname.endsWith("/users")) return jsonResponse({})
+        if (phase === "seed") {
+          return jsonResponse({
+            users: [
+              {
+                id: "g_admin",
+                primaryEmail: "admin@i10.tech",
+                name: { givenName: "Admin", familyName: "One" },
+              },
+              {
+                id: "g_mover",
+                primaryEmail: "mover@i10.tech",
+                name: { givenName: "Mo", familyName: "Mover" },
+              },
+            ],
+          })
+        }
+        return jsonResponse({
+          users: [
+            {
+              id: "g_admin",
+              primaryEmail: "admin@i10.tech",
+              name: { givenName: "Admin", familyName: "One" },
+            },
+            {
+              id: "g_mover",
+              primaryEmail: "mover@gw2.i10.tech",
+              aliases: ["mover@i10.tech"],
+              emails: [
+                { address: "mover@gw2.i10.tech", primary: true, type: "work" },
+              ],
+              name: { givenName: "Mo", familyName: "Mover" },
+            },
+            {
+              id: "g_nonedit",
+              primaryEmail: "legacy@gw2.i10.tech",
+              nonEditableAliases: ["legacy@i10.tech"],
+              name: { givenName: "Lee", familyName: "Legacy" },
+            },
+            {
+              id: "g_unproved",
+              primaryEmail: "contractor@outsider.test",
+              aliases: ["contractor@gw2.i10.tech"],
+              emails: [{ address: "spoof@i10.tech", type: "other" }],
+              name: { givenName: "Out", familyName: "Sider" },
+            },
+          ],
+        })
+      },
+    })
+
+    expect((await w.pull()).outcome).toBe("ok")
+    await w.drainOutbox()
+    const moverBefore = w.dirs.users.find((u) => u.externalId === "g_mover")!
+    expect(w.members.has(moverBefore.clerkUserId!)).toBe(true)
+
+    phase = "moved"
+    const res = await w.pull()
+    expect(res).toEqual({
+      outcome: "ok",
+      users: { created: 1, updated: 1, deleted: 0, unchanged: 1 },
+      groups: { created: 0, updated: 0, deleted: 0, unchanged: 0 },
+    })
+    await w.drainOutbox()
+
+    // User only on unproved domains (even with an arbitrary `emails` entry) is dropped.
+    expect(w.dirs.users.find((u) => u.externalId === "g_unproved")).toBeUndefined()
+
+    // Kept user whose primary moved to unproved `gw2.i10.tech` stays on `mover@i10.tech` and keeps their i10 account.
+    const moverAfter = w.dirs.users.find((u) => u.externalId === "g_mover")!
+    expect(moverAfter.id).toBe(moverBefore.id)
+    expect(moverAfter.deletedAt).toBeNull()
+    expect(moverAfter.userName).toBe("mover@i10.tech")
+    expect(moverAfter.email).toBe("mover@i10.tech")
+    expect(moverAfter.clerkUserId).toBe(moverBefore.clerkUserId)
+    expect(moverAfter.conflict).toBeNull()
+    expect(w.members.has(moverBefore.clerkUserId!)).toBe(true)
+
+    // User matched via `nonEditableAliases` on a proved domain is also kept under that alias.
+    const nonEditRow = w.dirs.users.find((u) => u.externalId === "g_nonedit")!
+    expect(nonEditRow.userName).toBe("legacy@i10.tech")
+    expect(nonEditRow.email).toBe("legacy@i10.tech")
+    expect(nonEditRow.conflict).toBeNull()
+    expect(w.members.has(nonEditRow.clerkUserId!)).toBe(true)
+  })
+
+  it("keeps groups whose email or alias is on a proved domain and drops unproved-domain groups without fetching their members", async () => {
+    let moveGroupOut = false
+    const memberRequests: string[] = []
+    const w = syncWorld({
+      domains: ["i10.tech"],
+      adminEmail: "admin@i10.tech",
+      domain: "i10.tech",
+      googleHandler: (call) => {
+        if (call.url.href === GOOGLE_TOKEN_URL)
+          return jsonResponse({ access_token: "tok_grp", expires_in: 3600 })
+        if (call.url.pathname.endsWith("/users")) {
+          return jsonResponse({
+            users: [
+              {
+                id: "g_ada",
+                primaryEmail: "ada@i10.tech",
+                name: { givenName: "Ada", familyName: "Lovelace" },
+              },
+            ],
+          })
+        }
+        if (call.url.pathname.endsWith("/groups")) {
+          return jsonResponse({
+            groups: [
+              { id: "grp_proved", email: "eng@i10.tech", name: "Engineering" },
+              {
+                id: "grp_alias",
+                email: "team@gw2.i10.tech",
+                aliases: ["team@i10.tech"],
+                name: "Alias Team",
+              },
+              moveGroupOut
+                ? { id: "grp_moving", email: "ops@outsider.test", name: "Ops" }
+                : { id: "grp_moving", email: "ops@i10.tech", name: "Ops" },
+              {
+                id: "grp_unproved",
+                email: "secret@outsider.test",
+                aliases: ["secret@gw2.i10.tech"],
+                name: "Unproved Group",
+              },
+            ],
+          })
+        }
+        memberRequests.push(call.url.pathname)
+        return jsonResponse({
+          members: [{ id: "g_ada", type: "USER", status: "ACTIVE" }],
+        })
+      },
+    })
+
+    expect(await w.pull()).toEqual({
+      outcome: "ok",
+      users: { created: 1, updated: 0, deleted: 0, unchanged: 0 },
+      groups: { created: 3, updated: 0, deleted: 0, unchanged: 0 },
+    })
+    expect(
+      memberRequests.some((pathname) => pathname.includes("grp_unproved")),
+    ).toBe(false)
+    expect(w.dirs.groups.map((g) => g.externalId).sort()).toEqual([
+      "grp_alias",
+      "grp_moving",
+      "grp_proved",
+    ])
+
+    moveGroupOut = true
+    expect(await w.pull()).toEqual({
+      outcome: "ok",
+      users: { created: 0, updated: 0, deleted: 0, unchanged: 1 },
+      groups: { created: 0, updated: 0, deleted: 1, unchanged: 2 },
+    })
+    expect(w.dirs.groups.map((g) => g.externalId).sort()).toEqual([
+      "grp_alias",
+      "grp_proved",
+    ])
+  })
+
+  it("enforces the shrink guard above 20% and 5 people with counts in the audit log, allows drops at or below either bound, and preserves empty_directory", async () => {
+    expect(GOOGLE_MAX_DROP_PERCENT).toBe(20)
+    expect(GOOGLE_MAX_DROP_USERS).toBe(5)
+
+    let activeCount = 10
+    const makeUsers = (count: number) =>
+      Array.from({ length: count }, (_, idx) => ({
+        id: `g_u${idx + 1}`,
+        primaryEmail: `u${idx + 1}@acme.test`,
+        name: { givenName: "User", familyName: `${idx + 1}` },
+      }))
+
+    const w = syncWorld({
+      googleHandler: (call) => {
+        if (call.url.href === GOOGLE_TOKEN_URL)
+          return jsonResponse({ access_token: "tok_shrink", expires_in: 3600 })
+        if (call.url.pathname.endsWith("/users"))
+          return jsonResponse({ users: makeUsers(activeCount) })
+        return jsonResponse({})
+      },
+    })
+
+    // Seed 10 live users.
+    expect((await w.pull()).outcome).toBe("ok")
+    expect(w.dirs.users.filter((u) => u.deletedAt === null)).toHaveLength(10)
+
+    // Removing 5 of 10 (50%, but not > 5 people) is allowed.
+    activeCount = 5
+    expect(await w.pull()).toEqual({
+      outcome: "ok",
+      users: { created: 0, updated: 0, deleted: 5, unchanged: 5 },
+      groups: { created: 0, updated: 0, deleted: 0, unchanged: 0 },
+    })
+
+    // Grow to 30 live users, then remove 6 of 30 (6 > 5, but 20% is not > 20%) -> allowed.
+    activeCount = 30
+    expect((await w.pull()).outcome).toBe("ok")
+    expect(w.dirs.users.filter((u) => u.deletedAt === null)).toHaveLength(30)
+
+    activeCount = 24
+    expect(await w.pull()).toEqual({
+      outcome: "ok",
+      users: { created: 0, updated: 0, deleted: 6, unchanged: 24 },
+      groups: { created: 0, updated: 0, deleted: 0, unchanged: 0 },
+    })
+
+    // Grow back to 30 live users, then try to remove 7 of 30 (7 > 5 and 23.3% > 20%) -> `large_drop`.
+    activeCount = 30
+    expect((await w.pull()).outcome).toBe("ok")
+    expect(w.dirs.users.filter((u) => u.deletedAt === null)).toHaveLength(30)
+    const outboxBefore30 = w.dirs.outbox.length
+
+    activeCount = 23
+    expect(await w.pull()).toEqual({
+      outcome: "failed",
+      error: "large_drop",
+      retryable: false,
+    })
+    expect(w.dirs.users.filter((u) => u.deletedAt === null)).toHaveLength(30)
+    expect(w.dirs.outbox).toHaveLength(outboxBefore30)
+    expect(w.identity.events.at(-1)).toMatchObject({
+      type: "directory.sync_failed",
+      reason: "large_drop",
+      data: {
+        directoryId: DIRECTORY,
+        existingUsers: 30,
+        removedUsers: 7,
+        keptUsers: 23,
+      },
+    })
+
+    // Remove 1 user cleanly to reach 29 live users, then try to remove 6 of 29 (6 > 5 and 20.69% > 20%) -> `large_drop`.
+    activeCount = 29
+    expect(await w.pull()).toEqual({
+      outcome: "ok",
+      users: { created: 0, updated: 0, deleted: 1, unchanged: 29 },
+      groups: { created: 0, updated: 0, deleted: 0, unchanged: 0 },
+    })
+    const outboxBefore29 = w.dirs.outbox.length
+
+    activeCount = 23
+    expect(await w.pull()).toEqual({
+      outcome: "failed",
+      error: "large_drop",
+      retryable: false,
+    })
+    expect(w.dirs.users.filter((u) => u.deletedAt === null)).toHaveLength(29)
+    expect(w.dirs.outbox).toHaveLength(outboxBefore29)
+    expect(w.identity.events.at(-1)).toMatchObject({
+      type: "directory.sync_failed",
+      reason: "large_drop",
+      data: {
+        directoryId: DIRECTORY,
+        existingUsers: 29,
+        removedUsers: 6,
+        keptUsers: 23,
+      },
+    })
+
+    // Returning 0 users still trips `empty_directory` before `large_drop`.
+    activeCount = 0
+    expect(await w.pull()).toEqual({
+      outcome: "failed",
+      error: "empty_directory",
+      retryable: false,
+    })
+    expect(w.dirs.users.filter((u) => u.deletedAt === null)).toHaveLength(29)
+  })
 })
 
 // ── 5. Schedule & `users.watch` channel lifecycle ───────────────────────────
@@ -1584,7 +2246,7 @@ describe("schedule and watch channel lifecycle", () => {
     ).toBe(0)
     expect(net.calls).toHaveLength(0)
 
-    // Permanent failure (`unauthorized_client`) resolves without throwing so groupmq does not spin.
+    // Permanent failure (`delegation_missing`) resolves without throwing so groupmq does not spin.
     const permanent = await runGoogleDirectoryJob(
       {
         store: dirs.store,
@@ -1599,7 +2261,7 @@ describe("schedule and watch channel lifecycle", () => {
     )
     expect(permanent).toEqual({
       outcome: "failed",
-      error: "unauthorized_client",
+      error: "delegation_missing",
       retryable: false,
     })
 

@@ -44,15 +44,16 @@ export default clerkMiddleware({
 })
 
 /*
- * ⚠ THE SAML ROUTES AN IdP DRIVES ARE OUTSIDE CLERK'S MIDDLEWARE (#339). The
- * ACS and SLO receive cross-site POSTs and redirects from the IdP and need no
- * Clerk context; a Clerk handshake redirect there would turn the IdP's POST
- * into a GET and lose the response. `/sso/saml/logout` stays inside: it reads
- * the session.
+ * ⚠ THE SAML ROUTES AN IdP DRIVES AND `/sso/start` ARE OUTSIDE CLERK'S
+ * MIDDLEWARE (#339). The ACS and SLO receive cross-site POSTs and redirects
+ * from the IdP, and `/sso/start` receives the interstitial's form POST, with
+ * neither needing a Clerk context; a Clerk handshake redirect there would turn
+ * a POST into a GET and lose the body. `/sso/saml/logout`, `/sso/step-up` and
+ * `/sso/test-run` stay inside: they read the session.
  */
 export const config = {
   matcher: [
-    "/((?!_next|sso/saml/(?:acs|slo|metadata)/|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/((?!_next|sso/(?:start$|saml/(?:acs|slo|metadata)/)|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
   ],
 }

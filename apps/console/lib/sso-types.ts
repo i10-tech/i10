@@ -14,6 +14,17 @@ export interface SsoDomain {
   live: boolean
 }
 
+export type SsoCapabilityLevel = "yes" | "with_setting" | "no"
+
+export interface SsoCapabilities {
+  label: string
+  canProveMfa: SsoCapabilityLevel
+  canProveFreshAuth: SsoCapabilityLevel
+  mfaSetting: string | null
+  freshAuthSetting: string | null
+  mfaUnprovableReason: string | null
+}
+
 export interface SsoConnection {
   id: string
   name: string
@@ -29,6 +40,8 @@ export interface SsoConnection {
   domains: SsoDomain[]
   /** Sign-in health (#345); null when the API could not read it, absent on older answers. */
   health?: ConnectionHealth | null
+  /** What this provider and protocol can prove for MFA and step-up (sso.md 2.22). */
+  capabilities?: SsoCapabilities
 }
 
 /** `health` of a connection, as the API derives it from the audit log. */
@@ -184,6 +197,41 @@ export interface DirectoryToken {
   lastUsedAt: string | null
 }
 
+export const GOOGLE_DIRECTORY_ERRORS = [
+  "not_configured",
+  "domain_not_verified",
+  "unauthorized_client",
+  "delegation_missing",
+  "scope_missing",
+  "missing_scope",
+  "admin_not_found",
+  "subject_not_admin",
+  "unknown_customer",
+  "rate_limited",
+  "too_many_users",
+  "too_many_groups",
+  "empty_directory",
+  "large_drop",
+  "user_conflict",
+  "invalid_response",
+  "unreachable",
+] as const
+
+export type GoogleDirectoryErrorCode = (typeof GOOGLE_DIRECTORY_ERRORS)[number]
+
+export interface GoogleSyncDetail {
+  missingScopes?: readonly string[]
+  removedUsers?: number
+  existingUsers?: number
+  keptUsers?: number
+}
+
+export interface GoogleCheckResult {
+  ok: boolean
+  error?: string
+  missingScopes?: readonly string[]
+}
+
 export interface GoogleSetup {
   available: boolean
   unavailableReason: string | null
@@ -206,6 +254,7 @@ export interface SsoDirectory {
   lastSyncAt?: string | null
   lastSyncStatus?: string | null
   lastSyncError?: string | null
+  lastSyncDetail?: GoogleSyncDetail
   google?: GoogleSetup
   createdAt: string
   tokens: DirectoryToken[]

@@ -1,4 +1,4 @@
-import type { TestRun } from "@/lib/sso-types"
+import type { SsoConnection, TestRun } from "@/lib/sso-types"
 
 /**
  * Reading a test run (#340): what a real sign-in would have done, and whether a
@@ -31,6 +31,35 @@ const REASONS: Record<string, string> = {
   hosted_domain: "The Google account is not on a verified domain of this workspace.",
 }
 
+/** Group state note for a test run when the provider sent no groups or an overage link. */
+export function groupsNote(run: TestRun): string | null {
+  const state =
+    typeof run.claims.groupsState === "string"
+      ? run.claims.groupsState
+      : typeof run.resolution.groupsUnavailable === "string"
+        ? run.resolution.groupsUnavailable
+        : null
+  if (state === "overage") {
+    const suffix =
+      run.resolution.roleKept === true
+        ? " Their current workspace role would be kept."
+        : run.resolution.groupsUnavailable === "overage"
+          ? " A new account would join with the default member role."
+          : ""
+    return `Too many groups (overage): the provider sent a group overage link instead of the group list.${suffix}`
+  }
+  if (state === "absent") {
+    const suffix =
+      run.resolution.roleKept === true
+        ? " Their current workspace role would be kept."
+        : run.resolution.groupsUnavailable === "absent"
+          ? " A new account would join with the default member role."
+          : ""
+    return `No groups received: the provider sent no group claim or attribute.${suffix}`
+  }
+  return null
+}
+
 /** What a real sign-in would do, in a sentence. */
 export function wouldDo(run: TestRun): string {
   const r = run.resolution
@@ -38,20 +67,52 @@ export function wouldDo(run: TestRun): string {
     return `It would refuse the sign-in. ${REASONS[r.refused] ?? "The provider's answer was not accepted."}`
   const email = typeof r.email === "string" ? r.email : "this person"
   const role = typeof r.role === "string" ? r.role : "member"
+  const unavailableLabel =
+    r.groupsUnavailable === "overage"
+      ? "too many groups (overage)"
+      : r.groupsUnavailable === "absent"
+        ? "no groups received"
+        : null
   if (r.wouldCreate === true) {
     const names = r.names as { given?: boolean; family?: boolean } | undefined
     const missing =
       names && (names.given === false || names.family === false)
         ? " The provider did not send a first and last name, and a new account needs both."
         : ""
-    return `It would create an account for ${email} as ${role} (JIT).${missing}`
+    const groupsMissing = unavailableLabel
+      ? ` Group rules could not run (${unavailableLabel}), so the default member role applies.`
+      : ""
+    return `It would create an account for ${email} as ${role} (JIT).${missing}${groupsMissing}`
   }
   const how: Record<string, string> = {
     linked: "the account already linked to this identity",
     scim: "the account its directory provisioned",
     claimed: "the existing account with this address, linking it",
   }
+  if (r.roleKept === true && unavailableLabel)
+    return `It would sign in ${email} to ${how[String(r.path)] ?? "their account"} and keep their current role (${unavailableLabel}).`
   return `It would sign in ${email} to ${how[String(r.path)] ?? "their account"} as ${role}.`
+}
+
+/** What to show next to the Require MFA toggle for a connection's provider capability. */
+export function mfaCapabilityNote(
+  connection: Pick<SsoConnection, "mfaRequired" | "capabilities">,
+): { tone: "warning" | "muted"; text: string } | null {
+  const caps = connection.capabilities
+  if (!caps) return null
+  if (caps.canProveMfa === "no") {
+    const reason =
+      caps.mfaUnprovableReason ?? `${caps.label} does not send MFA proof to i10.`
+    if (connection.mfaRequired)
+      return {
+        tone: "warning",
+        text: `Warning: ${reason} Sign-ins through this connection will be refused while this stays on.`,
+      }
+    return { tone: "muted", text: reason }
+  }
+  if (caps.canProveMfa === "with_setting" && caps.mfaSetting)
+    return { tone: "muted", text: `Provider setting required: ${caps.mfaSetting}` }
+  return null
 }
 
 /** The newest passed run within the day, if any. */

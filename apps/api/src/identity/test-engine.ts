@@ -1,5 +1,5 @@
 import type { Engine } from "./bridge.js"
-import { normaliseEmail, type Assertion } from "./model.js"
+import { normaliseEmail, type Assertion, type GroupsState } from "./model.js"
 
 /**
  * The TEST protocol (#337): an engine with no IdP behind it, so the whole
@@ -62,6 +62,14 @@ export function testAssertion(body: unknown, now: Date = new Date()): Assertion 
   const groups = Array.isArray(b.groups)
     ? b.groups.filter((v): v is string => typeof v === "string").slice(0, 50)
     : []
+  const groupsState: GroupsState =
+    b.groupsState === "present" ||
+    b.groupsState === "absent" ||
+    b.groupsState === "overage"
+      ? b.groupsState
+      : Array.isArray(b.groups)
+        ? "present"
+        : "absent"
   return {
     subject,
     email,
@@ -69,6 +77,7 @@ export function testAssertion(body: unknown, now: Date = new Date()): Assertion 
     givenName: typeof b.givenName === "string" ? b.givenName : null,
     familyName: typeof b.familyName === "string" ? b.familyName : null,
     groups,
+    groupsState,
     amr,
     authTime: now,
     idpSession: typeof b.idpSession === "string" ? b.idpSession.slice(0, 256) : null,

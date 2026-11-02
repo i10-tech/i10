@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { DAY_MS, latestPass, wouldDo } from "./sso-runs"
-import type { TestRun } from "./sso-types"
+import { DAY_MS, groupsNote, latestPass, mfaCapabilityNote, wouldDo } from "./sso-runs"
+import type { SsoCapabilities, TestRun } from "./sso-types"
 
 const run = (over: Partial<TestRun>): TestRun => ({
   id: "r",
@@ -67,5 +67,73 @@ describe("a passed run counts for a day", () => {
       createdAt: new Date(now - 3600_000).toISOString(),
     })
     expect(latestPass([fresh], now)?.id).toBe("fresh")
+  })
+})
+
+describe("group state and MFA capability notes (P0 #3 and P0 #5)", () => {
+  it("explains absent and overage group states on test runs", () => {
+    expect(groupsNote(run({ claims: { groupsState: "present" } }))).toBeNull()
+
+    const overage = run({
+      claims: { groupsState: "overage" },
+      resolution: {
+        path: "linked",
+        email: "ada@acme.test",
+        groupsUnavailable: "overage",
+        roleKept: true,
+      },
+    })
+    expect(groupsNote(overage)).toContain("Too many groups (overage)")
+    expect(groupsNote(overage)).toContain("current workspace role would be kept")
+    expect(wouldDo(overage)).toContain("keep their current role (too many groups (overage))")
+
+    const absentJit = run({
+      claims: { groupsState: "absent" },
+      resolution: {
+        path: "jit",
+        wouldCreate: true,
+        email: "new@acme.test",
+        role: "member",
+        groupsUnavailable: "absent",
+      },
+    })
+    expect(groupsNote(absentJit)).toContain("No groups received")
+    expect(groupsNote(absentJit)).toContain("default member role")
+    expect(wouldDo(absentJit)).toContain("no groups received")
+  })
+
+  it("shows refusal reason, legacy-on warning, and with_setting guidance for MFA", () => {
+    const googleCaps: SsoCapabilities = {
+      label: "Google Workspace",
+      canProveMfa: "no",
+      mfaSetting: null,
+      mfaUnprovableReason: "Google Workspace OIDC never sends amr or acr claims.",
+      canProveFreshAuth: "no",
+      freshAuthSetting: null,
+    }
+    expect(
+      mfaCapabilityNote({ mfaRequired: false, capabilities: googleCaps }),
+    ).toEqual({
+      tone: "muted",
+      text: "Google Workspace OIDC never sends amr or acr claims.",
+    })
+    const legacyOn = mfaCapabilityNote({ mfaRequired: true, capabilities: googleCaps })
+    expect(legacyOn?.tone).toBe("warning")
+    expect(legacyOn?.text).toContain("Warning:")
+
+    const oktaSamlCaps: SsoCapabilities = {
+      label: "Okta",
+      canProveMfa: "with_setting",
+      mfaSetting: "Send session.amr as an attribute named amr in your Okta SAML app.",
+      mfaUnprovableReason: null,
+      canProveFreshAuth: "with_setting",
+      freshAuthSetting: "Set Honor Force Authentication to Yes in your Okta SAML app.",
+    }
+    expect(
+      mfaCapabilityNote({ mfaRequired: false, capabilities: oktaSamlCaps }),
+    ).toEqual({
+      tone: "muted",
+      text: "Provider setting required: Send session.amr as an attribute named amr in your Okta SAML app.",
+    })
   })
 })

@@ -84,6 +84,7 @@ function world(
     subject: "okta|ada",
     email: "Ada@Acme.test",
     emailVerified: true,
+    groupsState: "present",
     authTime: now(),
     amr: ["pwd"],
     ...over,

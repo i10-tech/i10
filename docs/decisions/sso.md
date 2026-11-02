@@ -894,6 +894,27 @@ Unverified: any real S3 provider (AWS, R2, MinIO, B2: the signature is checked
 only against an independent SigV4 derivation), the IdP failure shapes a real
 Okta or Entra produces, and webhook delivery of these events end to end.
 
+### 2.22 What the live IdP probes settled (2026-11-02)
+
+The probes against real Okta, Entra and Google tenants are in
+`docs/research/sso-hardening/README.md`. Decided by the user:
+
+- **A changed subject relinks, by the owner's choice.** When an IdP sends a
+  new subject for someone already linked on the connection (an Okta username
+  or Google primary email renamed, an Entra app recreated), the connection's
+  `relink` setting decides: `auto` moves the link to the new subject when the
+  verified email matches the linked account on a domain the workspace proved,
+  and audits it; `ask` refuses the sign-in with a "your company login changed"
+  message and gives owners an audited one-click relink. Never silent.
+- **The UPN is an address only by opt-in.** An Entra connection may set "use
+  the UPN as the email when `mail` is empty"; off by default, and only for a
+  UPN on a proved domain. Entra sends no email claim at all for such members.
+- **Refuse what the IdP cannot prove.** "Require MFA" is refused on Google
+  connections (no `amr`, `acr` or `auth_time`, `ForceAuthn` ignored) and, for
+  Entra and Okta, allowed only with the exact IdP setting named in the console.
+  Step-up on a connection that cannot prove a fresh sign-in falls back to our
+  own step-up (passkey or 2FA) instead of SSO.
+
 ## Part 3. The options for the engine
 
 ### 3.0 Do we need SAML at all?

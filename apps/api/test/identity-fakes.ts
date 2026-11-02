@@ -46,6 +46,7 @@ export function connection(over: Partial<Connection> = {}): Connection {
     idleTimeoutSeconds: null,
     config: {},
     attributeMapping: {},
+    groupsLastSeenAt: null,
     ...over,
   }
 }
@@ -226,6 +227,11 @@ export function memoryStore(
       if (at < 0) return null
       const [row] = rules.splice(at, 1)
       return publicRule(row!)
+    },
+    async noteGroupsSeen(tenantId, cid, at) {
+      const c = connections.get(cid)
+      if (c && c.tenantId === tenantId)
+        connections.set(cid, { ...c, groupsLastSeenAt: at })
     },
     async provisionLocked(tenantId, key, fn) {
       const name = `${key.connectionId}:${key.email}`

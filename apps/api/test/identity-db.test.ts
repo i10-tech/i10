@@ -729,4 +729,29 @@ suite("identity schema", () => {
     }
     expect(await store().coveredDomains(acme)).toEqual([])
   })
+
+  it("records when a connection has ever delivered groups (groupsLastSeenAt, P0 #3)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Groups Seen",
+      protocol: "oidc",
+      provider: "okta",
+      createdBy: "u",
+    })
+    try {
+      expect(mine.groupsLastSeenAt).toBeNull()
+      const at = new Date("2026-11-02T12:00:00.000Z")
+      // Another workspace cannot stamp this connection's groups_last_seen_at.
+      await store().noteGroupsSeen(rival, mine.id, at)
+      expect((await store().connection(acme, mine.id))?.groupsLastSeenAt).toBeNull()
+
+      await store().noteGroupsSeen(acme, mine.id, at)
+      const after = await store().connection(acme, mine.id)
+      expect(after?.groupsLastSeenAt?.toISOString()).toBe(at.toISOString())
+      expect((await store().connectionForStart(mine.id))?.groupsLastSeenAt?.toISOString()).toBe(
+        at.toISOString(),
+      )
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
 })

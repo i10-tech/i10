@@ -20,6 +20,8 @@ import type { Engine } from "../src/identity/bridge.js"
 import { ssoGate } from "../src/identity/gate.js"
 import { testEngine, testEngineOn } from "../src/identity/test-engine.js"
 import {
+  configuredOidcIssuer,
+  decideConnectionPrompt,
   hashSecret,
   isFresh,
   onLiveDomain,
@@ -28,9 +30,20 @@ import {
   safeReturnTo,
   sameHash,
   sessionVerdict,
+  thirdPartyIssuerMatches,
 } from "../src/identity/model.js"
+import { FAILURE_TYPES } from "../src/identity/health.js"
+import { fixedWindow, ssoRateLimit } from "../src/identity/rate-limit.js"
 import { loadEnv } from "../src/env.js"
-import { CONNECTION, TENANT, log, memoryClerk, memoryStore } from "./identity-fakes.js"
+import {
+  CONNECTION,
+  OTHER_TENANT,
+  TENANT,
+  connection as makeConnection,
+  log,
+  memoryClerk,
+  memoryStore,
+} from "./identity-fakes.js"
 
 /**
  * The identity core's HTTP edges (#337): the bridge routes, the gateway's
@@ -90,7 +103,9 @@ describe("the small rules", () => {
     ).toBe("idle")
     expect(isFresh(t, later(10 * 60 * 1000))).toBe(true)
     expect(isFresh(t, later(10 * 60 * 1000 + 1))).toBe(false)
-    expect(isFresh(later(60_000), t)).toBe(false)
+    expect(isFresh(later(39_000), t)).toBe(true)
+    expect(isFresh(later(120_000), t)).toBe(true)
+    expect(isFresh(later(120_001), t)).toBe(false)
     expect(isFresh(null, t)).toBe(false)
   })
 
@@ -156,6 +171,7 @@ function ssoApp(
   options: {
     testEngine?: boolean
     signedIn?: { userId: string; sessionId: string } | "down"
+    rateLimit?: SsoRouteDeps["rateLimit"]
   } = {},
 ) {
   const store = memoryStore()
@@ -179,6 +195,7 @@ function ssoApp(
           : { status: "signed-out" },
     returnOrigins: ["https://dash.i10.localhost"],
     testEngine: options.testEngine ?? true,
+    ...(options.rateLimit ? { rateLimit: options.rateLimit } : {}),
     mayManage: async () => false,
     tenantOfConnection: async () => TENANT,
   }
@@ -519,5 +536,292 @@ describe("step-up for managed accounts", () => {
       startUrl: `https://auth.i10.localhost/sso/step-up?connection=${CONNECTION}`,
     })
     expect(body.clerk_error).toBeUndefined()
+  })
+})
+
+describe("outside starts and POST /sso/connection", () => {
+  const OKTA_ISS = "https://integrator-2590605.okta.com"
+  const UNKNOWN = "99999999-9999-4999-8999-999999999999"
+
+  it("resolves configuredOidcIssuer, thirdPartyIssuerMatches and decideConnectionPrompt purely", () => {
+    const oidcConn = makeConnection({
+      protocol: "oidc",
+      provider: "okta",
+      config: { oidc: { issuer: OKTA_ISS } },
+    })
+    const googleConn = makeConnection({
+      protocol: "oidc",
+      provider: "google",
+      config: { oidc: { issuer: "https://evil.example" } },
+    })
+    const samlConn = makeConnection({ protocol: "saml", provider: "entra" })
+
+    expect(configuredOidcIssuer(oidcConn)).toBe(OKTA_ISS)
+    expect(configuredOidcIssuer(googleConn)).toBe("https://accounts.google.com")
+    expect(configuredOidcIssuer(samlConn)).toBeNull()
+
+    expect(thirdPartyIssuerMatches(oidcConn, undefined)).toBe(true)
+    expect(thirdPartyIssuerMatches(oidcConn, OKTA_ISS)).toBe(true)
+    expect(thirdPartyIssuerMatches(oidcConn, `${OKTA_ISS}/`)).toBe(false)
+    expect(thirdPartyIssuerMatches(oidcConn, "")).toBe(false)
+    expect(thirdPartyIssuerMatches(googleConn, "https://accounts.google.com")).toBe(
+      true,
+    )
+    expect(thirdPartyIssuerMatches(googleConn, "https://evil.example")).toBe(false)
+    expect(thirdPartyIssuerMatches(samlConn, "https://anything.example")).toBe(true)
+
+    expect(decideConnectionPrompt(null, OKTA_ISS)).toEqual({ outcome: "invalid" })
+    expect(
+      decideConnectionPrompt({ ...oidcConn, status: "disabled" }, OKTA_ISS),
+    ).toEqual({ outcome: "invalid" })
+    expect(decideConnectionPrompt(oidcConn, "https://wrong.okta.com")).toEqual({
+      outcome: "issuer_mismatch",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+    })
+
+    // Outside-start audit events never count as connection failures for health alerts.
+    expect(FAILURE_TYPES).not.toContain("sign_in.interstitial")
+    expect(FAILURE_TYPES).not.toContain("sign_in.issuer_mismatch")
+  })
+
+  it("returns only name, protocol and provider for an active connection and audits the interstitial", async () => {
+    const { post, store } = ssoApp()
+    store.connections.set(
+      CONNECTION,
+      makeConnection({
+        name: "Acme Okta",
+        protocol: "oidc",
+        provider: "okta",
+        status: "active",
+        config: {
+          oidc: {
+            issuer: OKTA_ISS,
+            clientId: "secret-client-id",
+            discoveryUrl: `${OKTA_ISS}/.well-known/openid-configuration`,
+          },
+        },
+      }),
+    )
+
+    const res = await post("/connection", {
+      connection: CONNECTION.toUpperCase(),
+      iss: OKTA_ISS,
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get("cache-control")).toBe("no-store")
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body).toEqual({
+      name: "Acme Okta",
+      protocol: "oidc",
+      provider: "okta",
+    })
+    expect(store.events).toEqual([
+      {
+        tenantId: TENANT,
+        type: "sign_in.interstitial",
+        connectionId: CONNECTION,
+        data: { thirdPartyInitiated: true },
+      },
+    ])
+  })
+
+  it("audits sign_in.issuer_mismatch without storing untrusted strings and answers the same 404 as unknown ids", async () => {
+    const { post, store } = ssoApp()
+    store.connections.set(
+      CONNECTION,
+      makeConnection({
+        name: "Acme Okta",
+        protocol: "oidc",
+        provider: "okta",
+        status: "active",
+        config: { oidc: { issuer: OKTA_ISS } },
+      }),
+    )
+
+    const unknownRes = await post("/connection", { connection: UNKNOWN })
+    expect(unknownRes.status).toBe(404)
+    const unknownBody = await unknownRes.json()
+
+    const mismatchRes = await post("/connection", {
+      connection: CONNECTION,
+      iss: "https://attacker.okta.com",
+    })
+    expect(mismatchRes.status).toBe(404)
+    expect(await mismatchRes.json()).toEqual(unknownBody)
+
+    const overlongRes = await post("/connection", {
+      connection: CONNECTION,
+      iss: `https://${"a".repeat(2500)}.okta.com`,
+    })
+    expect(overlongRes.status).toBe(404)
+
+    expect(store.events).toEqual([
+      {
+        tenantId: TENANT,
+        type: "sign_in.issuer_mismatch",
+        connectionId: CONNECTION,
+        data: {},
+      },
+      {
+        tenantId: TENANT,
+        type: "sign_in.issuer_mismatch",
+        connectionId: CONNECTION,
+        data: {},
+      },
+    ])
+  })
+
+  it("ignores iss on SAML connections and hides draft, testing and disabled connections across workspaces", async () => {
+    const { post, store } = ssoApp()
+    store.connections.set(
+      CONNECTION,
+      makeConnection({
+        name: "Acme Entra",
+        protocol: "saml",
+        provider: "entra",
+        status: "active",
+      }),
+    )
+
+    const samlRes = await post("/connection", {
+      connection: CONNECTION,
+      iss: "https://ignored.example",
+    })
+    expect(samlRes.status).toBe(200)
+    expect(await samlRes.json()).toEqual({
+      name: "Acme Entra",
+      protocol: "saml",
+      provider: "entra",
+    })
+    expect(store.events.at(-1)).toEqual({
+      tenantId: TENANT,
+      type: "sign_in.interstitial",
+      connectionId: CONNECTION,
+      data: {},
+    })
+
+    for (const status of ["draft", "testing", "disabled"] as const) {
+      const otherId = "44444444-4444-4444-8444-444444444444"
+      store.connections.set(
+        otherId,
+        makeConnection({
+          id: otherId,
+          tenantId: OTHER_TENANT,
+          status,
+          protocol: "oidc",
+          provider: "okta",
+          config: { oidc: { issuer: OKTA_ISS } },
+        }),
+      )
+      const countBefore = store.events.length
+      const inactive = await post("/connection", {
+        connection: otherId,
+        iss: "https://wrong.okta.com",
+      })
+      expect(inactive.status).toBe(404)
+      expect(store.events.length).toBe(countBefore)
+    }
+
+    expect((await post("/connection", { connection: "not-a-uuid" })).status).toBe(404)
+    expect((await post("/connection", {})).status).toBe(422)
+    expect(
+      (await post("/connection", { connection: CONNECTION, extra: 1 })).status,
+    ).toBe(422)
+  })
+
+  it("checks iss on POST /sso/attempts as well and audits mismatches without creating an attempt", async () => {
+    const { post, store, engines } = ssoApp()
+    engines.set("oidc", {
+      protocol: "oidc",
+      pkce: true,
+      begin: async () => ({ redirectUrl: `${OKTA_ISS}/authorize?state=1` }),
+    })
+    store.connections.set(
+      CONNECTION,
+      makeConnection({
+        protocol: "oidc",
+        provider: "okta",
+        status: "active",
+        config: { oidc: { issuer: OKTA_ISS } },
+      }),
+    )
+
+    const bad = await post("/attempts", {
+      connection: CONNECTION,
+      purpose: "sign_in",
+      binding: BINDING,
+      iss: "https://wrong.okta.com",
+      loginHint: "ada@acme.test",
+    })
+    expect(bad.status).toBe(409)
+    expect(await bad.json()).toMatchObject({ reason: "issuer_mismatch" })
+    expect(store.attempts.size).toBe(0)
+    expect(store.events).toEqual([
+      {
+        tenantId: TENANT,
+        type: "sign_in.issuer_mismatch",
+        connectionId: CONNECTION,
+        data: {},
+      },
+    ])
+
+    const good = await post("/attempts", {
+      connection: CONNECTION,
+      purpose: "sign_in",
+      binding: BINDING,
+      iss: OKTA_ISS,
+      loginHint: "Ada@Acme.test",
+    })
+    expect(good.status).toBe(200)
+    expect(store.attempts.size).toBe(1)
+  })
+
+  it("applies the public /sso rate limit and 503 outage handling to POST /sso/connection", async () => {
+    const edgeSecret = "edge-secret-for-test"
+    const limiter = ssoRateLimit({
+      take: fixedWindow(null, () => 1_000),
+      contextSecret: undefined,
+      edgeSecret,
+      perConnectionStarts: true,
+    })
+    const { post } = ssoApp({ rateLimit: limiter })
+    const headers = {
+      "cf-connecting-ip": "203.0.113.10",
+      "x-i10-edge": edgeSecret,
+    }
+
+    for (let i = 0; i < 60; i++) {
+      const ok = await post("/connection", { connection: CONNECTION }, headers)
+      expect(ok.status).toBe(200)
+    }
+    const limited = await post("/connection", { connection: CONNECTION }, headers)
+    expect(limited.status).toBe(429)
+
+    // Per-connection cap applies even across distinct caller IPs.
+    const perConnKeys: string[] = []
+    const perConnLimiter = ssoRateLimit({
+      take: async (key) => {
+        perConnKeys.push(key)
+        return key.startsWith("conn:") ? { ok: false, retryAfter: 30 } : { ok: true }
+      },
+      contextSecret: undefined,
+      edgeSecret,
+      perConnectionStarts: true,
+    })
+    const perConnApp = ssoApp({ rateLimit: perConnLimiter })
+    const perConnRes = await perConnApp.post("/connection", {
+      connection: CONNECTION,
+    })
+    expect(perConnRes.status).toBe(429)
+    expect(perConnKeys).toContain(`conn:${CONNECTION}`)
+
+    // Store failure fails closed with 503.
+    const broken = ssoApp()
+    broken.store.store.connectionForStart = async () => {
+      throw new Error("db down")
+    }
+    const down = await broken.post("/connection", { connection: CONNECTION })
+    expect(down.status).toBe(503)
   })
 })

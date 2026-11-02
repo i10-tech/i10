@@ -4,11 +4,14 @@ import { NextRequest } from "next/server"
 mock.module("server-only", () => ({}))
 
 let token: string | null = null
+let apiHandler: (path: string, body: unknown) => Promise<Response> = async () =>
+  Response.json({ message: "No." }, { status: 403 })
+
 mock.module("@clerk/nextjs/server", () => ({
   auth: async () => ({ getToken: async () => token }),
 }))
 mock.module("../app/_lib/devices-server", () => ({
-  callApi: async () => Response.json({ message: "No." }, { status: 403 }),
+  callApi: (path: string, body: unknown) => apiHandler(path, body),
   FINISH_SIGN_IN_MS: 30_000,
 }))
 
@@ -16,6 +19,7 @@ const { failedUrl, redirectHere } = await import("../app/_lib/sso-server")
 const { leave, outcomeRedirect } = await import("../app/_lib/sso-callback")
 const testRun = await import("../app/sso/test-run/route")
 const connection = await import("../app/sso/[connection]/route")
+const start = await import("../app/sso/start/route")
 
 /** The bind address Next reports, which is NOT the host the browser used. */
 const BIND = "https://localhost:3004"
@@ -38,6 +42,7 @@ function expectRelative(response: Response) {
 describe("same-app SSO redirects are relative", () => {
   beforeEach(() => {
     token = null
+    apiHandler = async () => Response.json({ message: "No." }, { status: 403 })
   })
 
   it("failedUrl is a path with the reason in the hash", () => {
@@ -120,5 +125,128 @@ describe("same-app SSO redirects are relative", () => {
     )
     const location = expectRelative(response)
     expect(location).toStartWith(`/sso/start?connection=${ID}&redirect_url=`)
+  })
+
+  it("sends cross-site /sso/<id> and /sso/start arrivals to /sso/confirm instead of refusing", async () => {
+    const saved = process.env.AUTH_ALLOWED_REDIRECT_ORIGINS
+    process.env.AUTH_ALLOWED_REDIRECT_ORIGINS = "https://dash.i10.tech"
+    try {
+      const oktaTile = await connection.GET(
+        get(
+          `/sso/${ID}?iss=https%3A%2F%2Fintegrator-2590605.okta.com&login_hint=Ada%40Acme.com&target_link_uri=https%3A%2F%2Fdash.i10.tech%2Fprojects`,
+          {
+            "sec-fetch-site": "cross-site",
+            referer: "https://integrator-2590605.okta.com/app/UserHome",
+          },
+        ),
+        { params: Promise.resolve({ connection: ID }) },
+      )
+      expect(expectRelative(oktaTile)).toBe(
+        `/sso/confirm?connection=${ID}&redirect_url=https%3A%2F%2Fdash.i10.tech%2Fprojects&login_hint=ada%40acme.com&iss=https%3A%2F%2Fintegrator-2590605.okta.com`,
+      )
+
+      const crossSiteStart = await start.GET(
+        get(`/sso/start?connection=${ID}`, { "sec-fetch-site": "cross-site" }),
+      )
+      expect(expectRelative(crossSiteStart)).toBe(`/sso/confirm?connection=${ID}`)
+
+      // Console buttons still go straight through to the IdP with no interstitial.
+      let attemptBody: Record<string, unknown> | null = null
+      apiHandler = async (path, body) => {
+        expect(path).toBe("/sso/attempts")
+        attemptBody = body as Record<string, unknown>
+        return Response.json({
+          redirectUrl: "https://integrator-2590605.okta.com/authorize?state=s",
+          protocol: "oidc",
+        })
+      }
+      const fromConsole = await start.GET(
+        get(`/sso/start?connection=${ID}`, {
+          "sec-fetch-site": "cross-site",
+          referer: "https://dash.i10.tech/settings",
+        }),
+      )
+      expect(fromConsole.status).toBe(303)
+      expect(fromConsole.headers.get("location")).toBe(
+        "https://integrator-2590605.okta.com/authorize?state=s",
+      )
+      expect(fromConsole.headers.get("set-cookie")).toContain("__Host-i10_sso=")
+      expect(attemptBody).not.toBeNull()
+    } finally {
+      process.env.AUTH_ALLOWED_REDIRECT_ORIGINS = saved
+    }
+  })
+
+  it("starts the flow on a same-origin POST from the interstitial and refuses a cross-site POST", async () => {
+    const saved = process.env.AUTH_ALLOWED_REDIRECT_ORIGINS
+    process.env.AUTH_ALLOWED_REDIRECT_ORIGINS = "https://dash.i10.tech"
+    try {
+      let called = false
+      apiHandler = async (_path, body) => {
+        called = true
+        const b = body as Record<string, unknown>
+        expect(b.connection).toBe(ID)
+        expect(b.loginHint).toBe("ada@acme.com")
+        expect(b.returnTo).toBe("https://dash.i10.tech/projects")
+        expect(b.iss).toBe("https://integrator-2590605.okta.com")
+        return Response.json({
+          redirectUrl: "https://idp.example/saml",
+          protocol: "saml",
+        })
+      }
+
+      const crossSitePost = await start.POST(
+        new NextRequest(`${BIND}/sso/start`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "sec-fetch-site": "cross-site",
+            referer: "https://dash.i10.tech/",
+          },
+          body: new URLSearchParams({ connection: ID }).toString(),
+        }),
+      )
+      expect(expectRelative(crossSitePost)).toStartWith(
+        "/sso/continue#error=Start+your+company",
+      )
+      expect(called).toBe(false)
+
+      const sameOriginPost = await start.POST(
+        new NextRequest(`${BIND}/sso/start`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-dest": "document",
+          },
+          body: new URLSearchParams({
+            connection: ID,
+            redirect_url: "https://dash.i10.tech/projects",
+            login_hint: "Ada@Acme.com",
+            iss: "https://integrator-2590605.okta.com",
+          }).toString(),
+        }),
+      )
+      expect(sameOriginPost.status).toBe(303)
+      expect(sameOriginPost.headers.get("location")).toBe("https://idp.example/saml")
+      const setCookies = sameOriginPost.headers.getSetCookie().join("\n")
+      expect(setCookies).toContain("__Host-i10_sso=")
+      expect(setCookies).toContain("__Host-i10_sso_saml=")
+
+      // An issuer mismatch or inactive connection on start renders the invalid-link page.
+      apiHandler = async () =>
+        Response.json(
+          { reason: "issuer_mismatch", message: "This sign-in link is not valid." },
+          { status: 409 },
+        )
+      const mismatchStart = await start.GET(
+        get(`/sso/start?connection=${ID}&iss=https%3A%2F%2Fwrong.okta.com`, {
+          "sec-fetch-site": "none",
+        }),
+      )
+      expect(expectRelative(mismatchStart)).toBe("/sso/confirm")
+    } finally {
+      process.env.AUTH_ALLOWED_REDIRECT_ORIGINS = saved
+    }
   })
 })

@@ -2,6 +2,8 @@ import type { ClerkClient } from "@clerk/backend"
 import type { FreshAuthReader, SsoGateReader } from "../middleware/session.js"
 import type { EnforcementGate } from "./enforcement.js"
 import type { SsoGateChecker } from "./gate.js"
+import { capabilitiesOf } from "./idp-capabilities.js"
+import type { Protocol } from "./model.js"
 import type { WorkspaceGate } from "./workspace-policy.js"
 
 /**
@@ -126,23 +128,26 @@ export function gateReader(
   }
 }
 
+export type StepUpConnection =
+  | string
+  | { id: string; protocol: Protocol; provider: string }
+  | null
+
 /**
- * `requireFreshAuth` with SSO step-up (sso.md 2.4).
+ * `requireFreshAuth` with SSO step-up (sso.md 2.4, 2.22).
  *
- * ⚠ FOR A MANAGED ACCOUNT ONLY `sso_sessions.fresh_at` COUNTS, NOT CLERK'S
- * `strict`. The design reads "Clerk strict OR fresh_at"; for a managed account
- * Clerk's strict would be satisfiable with an email code (no password, no 2FA:
- * `strict` falls back to the first factor), which is not what their company
- * asked for. So the OR is by person: managed people go to their IdP, everyone
- * else to Clerk, unchanged. Right after an SSO sign-in both agree anyway: the
- * `fresh` ticket makes `fva [0,0]` and `fresh_at` is the IdP's `auth_time`.
+ * ⚠ FOR A MANAGED ACCOUNT WHOSE IdP CAN PROVE FRESH AUTH, ONLY
+ * `sso_sessions.fresh_at` COUNTS, NOT CLERK'S `strict`. When the connection's
+ * provider cannot prove a fresh sign-in (`canProveFreshAuth === "no"`, e.g.
+ * Google OIDC has no `auth_time` and Google SAML ignores `ForceAuthn`), SSO
+ * step-up is not offered and `inner` (our own step-up via Clerk) runs instead.
  */
 export function withSsoFreshness(
   inner: FreshAuthReader,
   sessionIds: SessionIdReader,
   checker: SsoGateChecker,
   startUrl: (connectionId: string | null) => string | null,
-  connectionOf: (userId: string) => Promise<string | null>,
+  connectionOf: (userId: string, sessionId: string) => Promise<StepUpConnection>,
   log: { error: (o: object, m: string) => void },
 ): FreshAuthReader {
   return async (request) => {
@@ -159,13 +164,23 @@ export function withSsoFreshness(
       return { status: "unknown" }
     }
     if (!managed.managed) return inner(request)
-    if (managed.fresh) return { status: "fresh" }
+    let connection: StepUpConnection = null
     try {
-      return { status: "sso_stale", startUrl: startUrl(await connectionOf(ids.userId)) }
+      connection = await connectionOf(ids.userId, ids.sessionId)
     } catch (error) {
-      // Still stale, only without a link: the refusal does not depend on it.
       log.error({ err: String(error) }, "could not find a managed account's connection")
-      return { status: "sso_stale", startUrl: null }
+      return managed.fresh
+        ? { status: "unknown" }
+        : { status: "sso_stale", startUrl: null }
     }
+    if (
+      connection &&
+      typeof connection === "object" &&
+      capabilitiesOf(connection.protocol, connection.provider).canProveFreshAuth === "no"
+    )
+      return inner(request)
+    if (managed.fresh) return { status: "fresh" }
+    const connectionId = typeof connection === "string" ? connection : (connection?.id ?? null)
+    return { status: "sso_stale", startUrl: startUrl(connectionId) }
   }
 }

@@ -86,6 +86,13 @@ export const connections = identity.table(
       .$type<Record<string, string>>()
       .notNull()
       .default({}),
+    /**
+     * When a sign-in on this connection last carried `groupsState: "present"`.
+     * Once set, an `absent` group claim is read as an empty list (Okta omits
+     * `groups` when nobody matches its filter); while null, `absent` keeps
+     * existing roles (Google OIDC, an unmapped attribute, a missing scope).
+     */
+    groupsLastSeenAt: timestamp("groups_last_seen_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

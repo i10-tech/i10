@@ -110,7 +110,7 @@ export const OIDC_PRESETS: Readonly<Record<OidcProvider, OidcPreset>> = {
       "The tenant issuer: https://login.microsoftonline.com/<tenant id>/v2.0, not common or organizations.",
       "Optional ID token claims email and xms_edov, or nobody can be signed in.",
       "A client secret: certificate credentials are not supported yet.",
-      "To require MFA: Entra v2 ID tokens often carry no amr or acr, so add the acr your policy sets (or the optional amr claim) and list it, or every sign-in will be refused.",
+      "For step-up re-verification: add the optional claim auth_time to the ID token.",
     ],
   },
   google: {

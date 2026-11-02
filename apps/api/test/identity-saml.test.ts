@@ -372,6 +372,7 @@ describe("refusals at the ACS, before and around verification", () => {
         subject: "x",
         email: "ada@acme.test",
         emailVerified: true,
+        groupsState: "present",
         authTime: new Date(),
       },
     })

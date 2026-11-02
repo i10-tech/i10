@@ -32,6 +32,10 @@ import type { FeatureGate } from "../../identity/features.js"
 import type { ConnectionHealthStore } from "../../identity/health.js"
 import { healthOf } from "../../identity/health.js"
 import { mountIdentitySetupLinks } from "./identity-setup-links.js"
+import {
+  capabilitiesOf,
+  mfaUnprovableMessage,
+} from "../../identity/idp-capabilities.js"
 import { oidcReady } from "../../identity/oidc.js"
 import { OIDC_PRESETS, presetOf } from "../../identity/oidc-presets.js"
 import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
@@ -163,6 +167,7 @@ export function enforcementChange(
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function view(connection: Connection) {
+  const caps = capabilitiesOf(connection.protocol, connection.provider)
   return {
     id: connection.id,
     name: connection.name,
@@ -176,6 +181,15 @@ function view(connection: Connection) {
     idleTimeoutSeconds: connection.idleTimeoutSeconds,
     config: connection.config,
     attributeMapping: connection.attributeMapping,
+    capabilities: {
+      label: caps.label,
+      canProveMfa: caps.canProveMfa,
+      canProveFreshAuth: caps.canProveFreshAuth,
+      mfaSetting: caps.mfaSetting,
+      freshAuthSetting: caps.freshAuthSetting,
+      mfaUnprovableReason:
+        caps.canProveMfa === "no" ? mfaUnprovableMessage(caps) : null,
+    },
   }
 }
 
@@ -436,6 +450,25 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     const { userId } = c.get("user")
     const before = await id.store.connection(tenantId, connectionId)
     if (!before) return c.json(notFound(), 404)
+    /*
+     * ⚠ REFUSE MFA REQUIREMENTS THE IdP CANNOT PROVE (P0 #5, sso.md 2.22).
+     * Turning `mfaRequired` on when `canProveMfa === "no"` would refuse every
+     * sign-in (`mfa_required`); existing rows that already have it on stay on
+     * when patching other fields so no data is silently migrated.
+     */
+    if (patch.mfaRequired === true && !before.mfaRequired) {
+      const caps = capabilitiesOf(before.protocol, before.provider)
+      if (caps.canProveMfa === "no")
+        return c.json(
+          {
+            statusCode: 422,
+            name: "mfa_unprovable",
+            code: "mfa_unprovable",
+            message: mfaUnprovableMessage(caps),
+          },
+          422,
+        )
+    }
     // ⚠ TURNING A FEATURE OFF IS NEVER REFUSED BY THE PLAN: only moving to
     // enforcement above "off", or JIT on, needs the flag. A workspace that
     // lost the feature must still be able to stand it down.

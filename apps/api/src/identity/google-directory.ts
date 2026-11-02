@@ -55,6 +55,12 @@ export const GOOGLE_FETCH_TIMEOUT_MS = 15_000
 export const GOOGLE_CHECK_TIMEOUT_MS = 5_000
 export const GOOGLE_FETCH_MAX_BYTES = 4 * 1024 * 1024
 
+/** Shrink guard: refuse a pull that removes more than both 20% and 5 live users. */
+export const GOOGLE_MAX_DROP_PERCENT = 20
+export const GOOGLE_MAX_DROP_USERS = 5
+
+const MAX_GOOGLE_PAGES = 1_000
+
 /** Refresh cached access tokens five minutes before Google expires them. */
 export const TOKEN_REFRESH_SKEW_MS = 5 * 60_000
 /** Google Admin SDK `users.watch` channels live at most six hours (21,600s). */
@@ -69,12 +75,17 @@ export const GOOGLE_DIRECTORY_ERRORS = [
   "not_configured",
   "domain_not_verified",
   "unauthorized_client",
+  "delegation_missing",
+  "scope_missing",
   "missing_scope",
+  "admin_not_found",
+  "subject_not_admin",
   "unknown_customer",
   "rate_limited",
   "too_many_users",
   "too_many_groups",
   "empty_directory",
+  "large_drop",
   "user_conflict",
   "invalid_response",
   "unreachable",
@@ -174,6 +185,7 @@ export function buildGoogleJwtAssertion(
   account: GoogleServiceAccount,
   adminEmail: string,
   now: Date,
+  scopes: readonly string[] = GOOGLE_DIRECTORY_SCOPES,
 ): string {
   const iat = Math.floor(now.getTime() / 1000)
   const header: Record<string, unknown> = {
@@ -184,7 +196,7 @@ export function buildGoogleJwtAssertion(
   const payload = {
     iss: account.clientEmail,
     sub: adminEmail,
-    scope: GOOGLE_DIRECTORY_SCOPES.join(" "),
+    scope: scopes.join(" "),
     aud: GOOGLE_TOKEN_URL,
     iat,
     exp: iat + 3600,
@@ -231,18 +243,22 @@ const googleApiErrorSchema = z.looseObject({
 })
 
 export class GoogleFailure extends Error {
+  readonly missingScopes?: readonly string[]
+
   constructor(
     readonly code: GoogleDirectoryErrorCode,
     readonly retryable: boolean,
+    missingScopes?: readonly string[],
   ) {
     super(code)
     this.name = "GoogleFailure"
+    if (missingScopes && missingScopes.length > 0) {
+      this.missingScopes = [...missingScopes]
+    }
   }
 }
 
-function classifyTokenFailure(status: number, rawBody: string): GoogleFailure {
-  if (status === 429) return new GoogleFailure("rate_limited", true)
-  if (status >= 500) return new GoogleFailure("unreachable", true)
+function parseOauthError(rawBody: string): { error?: string; description: string } {
   let body: unknown = null
   try {
     body = JSON.parse(rawBody)
@@ -250,10 +266,18 @@ function classifyTokenFailure(status: number, rawBody: string): GoogleFailure {
     body = null
   }
   const parsed = oauthErrorSchema.safeParse(body)
-  const err = parsed.success ? parsed.data.error?.toLowerCase() : undefined
-  const desc = parsed.success
-    ? (parsed.data.error_description?.toLowerCase() ?? "")
-    : ""
+  if (!parsed.success) return { description: "" }
+  const err = parsed.data.error?.toLowerCase()
+  return {
+    ...(err !== undefined ? { error: err } : {}),
+    description: parsed.data.error_description?.toLowerCase() ?? "",
+  }
+}
+
+function classifyTokenFailure(status: number, rawBody: string): GoogleFailure {
+  if (status === 429) return new GoogleFailure("rate_limited", true)
+  if (status >= 500) return new GoogleFailure("unreachable", true)
+  const { error: err, description: desc } = parseOauthError(rawBody)
   if (err === "invalid_scope" || err === "access_denied")
     return new GoogleFailure("missing_scope", false)
   if (err === "unauthorized_client") {
@@ -262,19 +286,20 @@ function classifyTokenFailure(status: number, rawBody: string): GoogleFailure {
     return new GoogleFailure("unauthorized_client", false)
   }
   if (err === "invalid_grant") {
-    if (
-      desc.includes("invalid email") ||
-      desc.includes("user id") ||
-      desc.includes("not exist") ||
-      desc.includes("unknown")
-    )
+    if (desc.includes("invalid email") || desc.includes("user id"))
+      return new GoogleFailure("admin_not_found", false)
+    if (desc.includes("not exist") || desc.includes("unknown"))
       return new GoogleFailure("unknown_customer", false)
     return new GoogleFailure("unauthorized_client", false)
   }
   return new GoogleFailure("unauthorized_client", false)
 }
 
-function classifyApiFailure(status: number, rawBody: string): GoogleFailure {
+function classifyApiFailure(
+  status: number,
+  rawBody: string,
+  options?: { firstUsersList?: boolean },
+): GoogleFailure {
   if (status === 429) return new GoogleFailure("rate_limited", true)
   if (status >= 500) return new GoogleFailure("unreachable", true)
   if (status === 404 || status === 400)
@@ -307,6 +332,78 @@ function classifyApiFailure(status: number, rawBody: string): GoogleFailure {
     return new GoogleFailure("missing_scope", false)
   if (reasons.has("notFound") || reasons.has("invalid"))
     return new GoogleFailure("unknown_customer", false)
+  if (status === 403 && options?.firstUsersList && reasons.has("forbidden"))
+    return new GoogleFailure("subject_not_admin", false)
+  return new GoogleFailure("unauthorized_client", false)
+}
+
+/**
+ * Probes each scope in `GOOGLE_DIRECTORY_SCOPES` individually (no retries,
+ * never cached) after Google rejects the combined request with
+ * `unauthorized_client`, distinguishing no delegation from partial scopes.
+ */
+async function diagnoseUnauthorizedScopes(
+  deps: { serviceAccount: GoogleServiceAccount; fetch: OidcFetch },
+  adminEmail: string,
+  now: Date,
+  timeoutMs: number,
+): Promise<GoogleFailure> {
+  const worked: string[] = []
+  const rejected: string[] = []
+  for (const scope of GOOGLE_DIRECTORY_SCOPES) {
+    const assertion = buildGoogleJwtAssertion(deps.serviceAccount, adminEmail, now, [
+      scope,
+    ])
+    const form = new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }).toString()
+    let response: Response
+    try {
+      response = await deps.fetch(GOOGLE_TOKEN_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+        },
+        body: form,
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+    } catch (error) {
+      if (error instanceof IdpUnreachable)
+        return new GoogleFailure("unauthorized_client", false)
+      throw error
+    }
+    const text = await response.text()
+    if (response.status === 200) {
+      let json: unknown
+      try {
+        json = JSON.parse(text)
+      } catch {
+        return new GoogleFailure("unauthorized_client", false)
+      }
+      if (!tokenResponseSchema.safeParse(json).success)
+        return new GoogleFailure("unauthorized_client", false)
+      worked.push(scope)
+      continue
+    }
+    if (response.status === 429 || response.status >= 500)
+      return new GoogleFailure("unauthorized_client", false)
+    const err = parseOauthError(text).error
+    if (
+      err === "unauthorized_client" ||
+      err === "invalid_scope" ||
+      err === "access_denied"
+    ) {
+      rejected.push(scope)
+      continue
+    }
+    return new GoogleFailure("unauthorized_client", false)
+  }
+  if (worked.length === 0 && rejected.length === GOOGLE_DIRECTORY_SCOPES.length)
+    return new GoogleFailure("delegation_missing", false)
+  if (worked.length > 0 && rejected.length > 0)
+    return new GoogleFailure("scope_missing", false, rejected)
   return new GoogleFailure("unauthorized_client", false)
 }
 
@@ -369,7 +466,21 @@ export function createGoogleTokenSource(deps: {
         }
 
         const text = await response.text()
-        if (response.status !== 200) throw classifyTokenFailure(response.status, text)
+        if (response.status !== 200) {
+          if (
+            response.status !== 429 &&
+            response.status < 500 &&
+            parseOauthError(text).error === "unauthorized_client"
+          ) {
+            throw await diagnoseUnauthorizedScopes(
+              deps,
+              clean,
+              clock(),
+              timeoutMs,
+            )
+          }
+          throw classifyTokenFailure(response.status, text)
+        }
 
         let json: unknown
         try {
@@ -440,6 +551,8 @@ const googleGroupSchema = z.looseObject({
   id: z.string().trim().min(1).max(LIMITS.name),
   email: z.string().trim().min(1).max(320).optional(),
   name: z.string().max(1024).optional(),
+  aliases: z.array(z.string().max(320)).max(200).optional(),
+  nonEditableAliases: z.array(z.string().max(320)).max(200).optional(),
 })
 
 const groupsPageSchema = z
@@ -486,12 +599,60 @@ const trimmedBounded = (
   return t.length > 0 ? t : null
 }
 
+/** The first address, in order, that is on a domain this workspace proved. */
+function firstOnProvedDomain(
+  addresses: readonly (string | undefined)[],
+  provedDomains: ReadonlySet<string>,
+): string | null {
+  for (const raw of addresses) {
+    const addr = normaliseEmail(raw)
+    if (addr && addr.length <= LIMITS.name && provedDomains.has(emailDomain(addr)))
+      return addr
+  }
+  return null
+}
+
+/**
+ * The address we keep someone under: their primary when it is on a proved
+ * domain, else their first alias (`aliases`, then `nonEditableAliases`) on
+ * one, or null when none of their Google addresses is ours to hold.
+ */
+function pickProvedUserEmail(
+  user: GoogleUserPayload,
+  provedDomains: ReadonlySet<string>,
+): string | null {
+  const primary = normaliseEmail(user.primaryEmail)
+  if (!primary || primary.length > LIMITS.name)
+    throw new GoogleFailure("invalid_response", false)
+  return firstOnProvedDomain(
+    [primary, ...(user.aliases ?? []), ...(user.nonEditableAliases ?? [])],
+    provedDomains,
+  )
+}
+
+function pickProvedGroupEmail(
+  group: GoogleGroupPayload,
+  provedDomains: ReadonlySet<string>,
+): string | null {
+  return firstOnProvedDomain(
+    [group.email, ...(group.aliases ?? []), ...(group.nonEditableAliases ?? [])],
+    provedDomains,
+  )
+}
+
 /**
  * Maps one Google Directory user to the exact `StoredUser` shape `scim.ts`
  * produces (`readUser`), so downstream provisioning behaves identically.
  */
-export function mapGoogleUser(user: GoogleUserPayload): StoredUser {
-  const primary = normaliseEmail(user.primaryEmail)
+export function mapGoogleUser(
+  user: GoogleUserPayload,
+  chosenEmail?: string,
+): StoredUser {
+  const googlePrimary = normaliseEmail(user.primaryEmail)
+  if (!googlePrimary || googlePrimary.length > LIMITS.name)
+    throw new GoogleFailure("invalid_response", false)
+  const primary =
+    chosenEmail !== undefined ? normaliseEmail(chosenEmail) : googlePrimary
   if (!primary || primary.length > LIMITS.name)
     throw new GoogleFailure("invalid_response", false)
 
@@ -518,6 +679,7 @@ export function mapGoogleUser(user: GoogleUserPayload): StoredUser {
     })
   }
 
+  if (googlePrimary !== primary) addEmail(googlePrimary, "work")
   for (const entry of user.emails ?? []) addEmail(entry.address, entry.type)
   for (const alias of user.aliases ?? []) addEmail(alias, "alias")
   for (const alias of user.nonEditableAliases ?? []) addEmail(alias, "alias")
@@ -597,7 +759,12 @@ async function googleRequest(
   deps: { tokens: GoogleTokenSource; fetch: OidcFetch },
   adminEmail: string,
   url: string,
-  init: { method: "GET" | "POST"; body?: string; timeoutMs: number },
+  init: {
+    method: "GET" | "POST"
+    body?: string
+    timeoutMs: number
+    firstUsersList?: boolean
+  },
 ): Promise<unknown> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const token = await deps.tokens.tokenFor(adminEmail, init.timeoutMs)
@@ -623,7 +790,11 @@ async function googleRequest(
       continue
     }
     if (response.status < 200 || response.status >= 300)
-      throw classifyApiFailure(response.status, text)
+      throw classifyApiFailure(
+        response.status,
+        text,
+        init.firstUsersList ? { firstUsersList: true } : undefined,
+      )
     if (text.trim() === "") return {}
     try {
       return JSON.parse(text)
@@ -635,7 +806,12 @@ async function googleRequest(
 }
 
 export type CheckAccessResult =
-  { ok: true } | { ok: false; error: GoogleDirectoryErrorCode }
+  | { ok: true }
+  | {
+      ok: false
+      error: GoogleDirectoryErrorCode
+      missingScopes?: readonly string[]
+    }
 
 /**
  * One cheap Directory API call (`users.list` with `maxResults=1`) for the
@@ -668,13 +844,23 @@ export async function checkGoogleDirectoryAccess(
       { tokens: deps.tokens, fetch: deps.fetch },
       adminEmail,
       `${GOOGLE_DIRECTORY_API_BASE}/users?${params.toString()}`,
-      { method: "GET", timeoutMs: deps.timeoutMs ?? GOOGLE_CHECK_TIMEOUT_MS },
+      {
+        method: "GET",
+        timeoutMs: deps.timeoutMs ?? GOOGLE_CHECK_TIMEOUT_MS,
+        firstUsersList: true,
+      },
     )
     const parsed = usersPageSchema.safeParse(raw)
     if (!parsed.success) return { ok: false, error: "invalid_response" }
     return { ok: true }
   } catch (error) {
-    if (error instanceof GoogleFailure) return { ok: false, error: error.code }
+    if (error instanceof GoogleFailure) {
+      return {
+        ok: false,
+        error: error.code,
+        ...(error.missingScopes ? { missingScopes: error.missingScopes } : {}),
+      }
+    }
     throw error
   }
 }
@@ -707,7 +893,12 @@ export type PullGoogleOutcome =
       groups: { created: number; updated: number; deleted: number; unchanged: number }
     }
   | { outcome: "skipped"; reason: "no_directory" | "directory_disabled" }
-  | { outcome: "failed"; error: GoogleDirectoryErrorCode; retryable: boolean }
+  | {
+      outcome: "failed"
+      error: GoogleDirectoryErrorCode
+      retryable: boolean
+      missingScopes?: readonly string[]
+    }
 
 async function loadAllLiveUsers(
   store: DirectoryStore,
@@ -770,22 +961,25 @@ async function loadAllGroups(
 async function fetchGoogleSnapshot(
   deps: { tokens: GoogleTokenSource; fetch: OidcFetch },
   adminEmail: string,
-  domain: string,
+  provedDomains: ReadonlySet<string>,
   bounds: Required<PullBounds>,
 ): Promise<{
   users: StoredUser[]
   groups: { group: GoogleGroupPayload; members: GoogleMemberPayload[] }[]
 }> {
   const users: StoredUser[] = []
+  const seenRawUserIds = new Set<string>()
   const seenExternalIds = new Set<string>()
   const seenUserNames = new Set<string>()
   const userTokens = new Set<string>()
   let nextUserToken: string | undefined
+  let userPages = 0
 
   for (;;) {
+    if (++userPages > MAX_GOOGLE_PAGES)
+      throw new GoogleFailure("too_many_users", false)
     const params = new URLSearchParams({
       customer: "my_customer",
-      domain,
       maxResults: String(bounds.pageSize),
       ...(nextUserToken ? { pageToken: nextUserToken } : {}),
     })
@@ -793,15 +987,24 @@ async function fetchGoogleSnapshot(
       deps,
       adminEmail,
       `${GOOGLE_DIRECTORY_API_BASE}/users?${params.toString()}`,
-      { method: "GET", timeoutMs: bounds.timeoutMs },
+      {
+        method: "GET",
+        timeoutMs: bounds.timeoutMs,
+        firstUsersList: !nextUserToken,
+      },
     )
     const parsed = usersPageSchema.safeParse(raw)
     if (!parsed.success) throw new GoogleFailure("invalid_response", false)
 
     for (const u of parsed.data.users ?? []) {
+      if (seenRawUserIds.has(u.id))
+        throw new GoogleFailure("invalid_response", false)
+      seenRawUserIds.add(u.id)
+      const chosenEmail = pickProvedUserEmail(u, provedDomains)
+      if (!chosenEmail) continue
       if (users.length >= bounds.maxUsers)
         throw new GoogleFailure("too_many_users", false)
-      const mapped = mapGoogleUser(u)
+      const mapped = mapGoogleUser(u, chosenEmail)
       const lower = mapped.userName.toLowerCase()
       if (
         (mapped.externalId && seenExternalIds.has(mapped.externalId)) ||
@@ -824,11 +1027,13 @@ async function fetchGoogleSnapshot(
   const seenGroupIds = new Set<string>()
   const groupTokens = new Set<string>()
   let nextGroupToken: string | undefined
+  let groupPages = 0
 
   for (;;) {
+    if (++groupPages > MAX_GOOGLE_PAGES)
+      throw new GoogleFailure("too_many_groups", false)
     const params = new URLSearchParams({
       customer: "my_customer",
-      domain,
       maxResults: String(bounds.pageSize),
       ...(nextGroupToken ? { pageToken: nextGroupToken } : {}),
     })
@@ -842,10 +1047,11 @@ async function fetchGoogleSnapshot(
     if (!parsed.success) throw new GoogleFailure("invalid_response", false)
 
     for (const g of parsed.data.groups ?? []) {
-      if (rawGroups.length >= bounds.maxGroups)
-        throw new GoogleFailure("too_many_groups", false)
       if (seenGroupIds.has(g.id)) throw new GoogleFailure("invalid_response", false)
       seenGroupIds.add(g.id)
+      if (!pickProvedGroupEmail(g, provedDomains)) continue
+      if (rawGroups.length >= bounds.maxGroups)
+        throw new GoogleFailure("too_many_groups", false)
       rawGroups.push(g)
     }
 
@@ -861,8 +1067,11 @@ async function fetchGoogleSnapshot(
     const members: GoogleMemberPayload[] = []
     const memberTokens = new Set<string>()
     let nextMemberToken: string | undefined
+    let memberPages = 0
 
     for (;;) {
+      if (++memberPages > MAX_GOOGLE_PAGES)
+        throw new GoogleFailure("too_many_groups", false)
       const params = new URLSearchParams({
         maxResults: String(bounds.pageSize),
         ...(nextMemberToken ? { pageToken: nextMemberToken } : {}),
@@ -896,6 +1105,7 @@ async function fetchGoogleSnapshot(
 
 function buildStoredGroups(
   fetched: readonly { group: GoogleGroupPayload; members: GoogleMemberPayload[] }[],
+  provedDomains: ReadonlySet<string>,
   byExternalId: ReadonlyMap<string, string>,
   byEmail: ReadonlyMap<string, string>,
   allUserIds: readonly string[],
@@ -907,8 +1117,13 @@ function buildStoredGroups(
   const byGroupEmail = new Map<string, string>()
   for (const entry of fetched) {
     byGroupId.set(entry.group.id, entry)
-    const email = normaliseEmail(entry.group.email)
-    if (email) byGroupEmail.set(email, entry.group.id)
+    const addGroupAddr = (raw: string | undefined) => {
+      const addr = normaliseEmail(raw)
+      if (addr && !byGroupEmail.has(addr)) byGroupEmail.set(addr, entry.group.id)
+    }
+    addGroupAddr(entry.group.email)
+    for (const alias of entry.group.aliases ?? []) addGroupAddr(alias)
+    for (const alias of entry.group.nonEditableAliases ?? []) addGroupAddr(alias)
   }
 
   const resolvedCache = new Map<string, string[]>()
@@ -928,14 +1143,14 @@ function buildStoredGroups(
         for (const uid of allUserIds) ids.add(uid)
         continue
       }
-      const nestedId =
-        kind === "GROUP"
-          ? m.id && byGroupId.has(m.id)
+      if (kind === "GROUP") {
+        const nestedId =
+          m.id && byGroupId.has(m.id)
             ? m.id
             : (byGroupEmail.get(normaliseEmail(m.email) ?? "") ?? null)
-          : null
-      if (nestedId) {
-        for (const uid of resolveMembers(nestedId, stack)) ids.add(uid)
+        if (nestedId) {
+          for (const uid of resolveMembers(nestedId, stack)) ids.add(uid)
+        }
         continue
       }
       const userId =
@@ -953,7 +1168,10 @@ function buildStoredGroups(
   return fetched.map(({ group }) => {
     const displayName =
       trimmedBounded(group.name, LIMITS.name) ??
-      trimmedBounded(group.email, LIMITS.name) ??
+      trimmedBounded(
+        pickProvedGroupEmail(group, provedDomains) ?? group.email,
+        LIMITS.name,
+      ) ??
       group.id
     const memberIds = resolveMembers(group.id, new Set())
     try {
@@ -983,6 +1201,12 @@ export async function pullGoogleDirectory(
   const failPull = async (
     code: GoogleDirectoryErrorCode,
     retryable: boolean,
+    extra?: {
+      missingScopes?: readonly string[]
+      existingUsers?: number
+      removedUsers?: number
+      keptUsers?: number
+    },
   ): Promise<PullGoogleOutcome> => {
     const at = clock()
     await deps.store.noteDirectorySync(tenantId, directoryId, {
@@ -994,10 +1218,31 @@ export async function pullGoogleDirectory(
       await deps.record(tenantId, {
         type: "directory.sync_failed",
         reason: code,
-        data: { directoryId },
+        data: {
+          directoryId,
+          ...(extra?.missingScopes && extra.missingScopes.length > 0
+            ? { missingScopes: [...extra.missingScopes] }
+            : {}),
+          ...(extra?.existingUsers !== undefined
+            ? { existingUsers: extra.existingUsers }
+            : {}),
+          ...(extra?.removedUsers !== undefined
+            ? { removedUsers: extra.removedUsers }
+            : {}),
+          ...(extra?.keptUsers !== undefined
+            ? { keptUsers: extra.keptUsers }
+            : {}),
+        },
       })
     }
-    return { outcome: "failed", error: code, retryable }
+    return {
+      outcome: "failed",
+      error: code,
+      retryable,
+      ...(extra?.missingScopes && extra.missingScopes.length > 0
+        ? { missingScopes: extra.missingScopes }
+        : {}),
+    }
   }
 
   if (!deps.tokens) return failPull("not_configured", false)
@@ -1006,10 +1251,11 @@ export async function pullGoogleDirectory(
   if (!adminEmail || !domain) return failPull("not_configured", false)
 
   const liveDomains = await deps.store.liveDomains(tenantId)
+  const provedDomains = new Set(liveDomains)
   // ⚠ THE ADMIN WE IMPERSONATE MUST BE OF A DOMAIN THIS WORKSPACE PROVED. Any
   // Workspace customer can authorise our client id, so an unchecked address
   // would let a workspace point the delegation at another company's admin.
-  if (!liveDomains.includes(domain) || !liveDomains.includes(emailDomain(adminEmail)))
+  if (!provedDomains.has(domain) || !provedDomains.has(emailDomain(adminEmail)))
     return failPull("domain_not_verified", false)
 
   const bounds: Required<PullBounds> = {
@@ -1026,14 +1272,20 @@ export async function pullGoogleDirectory(
     snapshot = await fetchGoogleSnapshot(
       { tokens: deps.tokens, fetch: deps.fetch },
       adminEmail,
-      domain,
+      provedDomains,
       bounds,
     )
     storedGroupsDraft = snapshot.groups
     // Validate group display names and shapes before touching any user row.
-    buildStoredGroups(storedGroupsDraft, new Map(), new Map(), [])
+    buildStoredGroups(storedGroupsDraft, provedDomains, new Map(), new Map(), [])
   } catch (error) {
-    if (error instanceof GoogleFailure) return failPull(error.code, error.retryable)
+    if (error instanceof GoogleFailure) {
+      return failPull(
+        error.code,
+        error.retryable,
+        error.missingScopes ? { missingScopes: error.missingScopes } : undefined,
+      )
+    }
     throw error
   }
 
@@ -1085,12 +1337,23 @@ export async function pullGoogleDirectory(
     }
   }
 
+  const toDeleteUsers = existingUsers.filter((row) => !matchedRowIds.has(row.id))
+  if (
+    toDeleteUsers.length > GOOGLE_MAX_DROP_USERS &&
+    toDeleteUsers.length * 100 > existingUsers.length * GOOGLE_MAX_DROP_PERCENT
+  ) {
+    return failPull("large_drop", false, {
+      existingUsers: existingUsers.length,
+      removedUsers: toDeleteUsers.length,
+      keptUsers: snapshot.users.length,
+    })
+  }
+
   const emittedOutbox: OutboxEntry[] = []
   const userCounts = { created: 0, updated: 0, deleted: 0, unchanged: 0 }
 
   // 1. Delete removed users first (only reached after every Google page succeeded).
-  for (const row of existingUsers) {
-    if (matchedRowIds.has(row.id)) continue
+  for (const row of toDeleteUsers) {
     const done = await deps.store.deleteUser(tenantId, directoryId, row.id, {
       type: "scim.user.deleted",
       data: { directoryId, directoryUserId: row.id, source: "google" },
@@ -1192,8 +1455,19 @@ export async function pullGoogleDirectory(
     if (u.email) userIdByEmail.set(u.email.toLowerCase(), u.id)
     userIdByEmail.set(u.userName.toLowerCase(), u.id)
   }
+  for (const u of finalUsers) {
+    const rawEmails = u.resource.emails
+    if (!Array.isArray(rawEmails)) continue
+    for (const entry of rawEmails) {
+      if (entry && typeof entry === "object" && "value" in entry && typeof entry.value === "string") {
+        const addr = normaliseEmail(entry.value)
+        if (addr && !userIdByEmail.has(addr)) userIdByEmail.set(addr, u.id)
+      }
+    }
+  }
   const desiredGroups = buildStoredGroups(
     storedGroupsDraft,
+    provedDomains,
     userIdByExternalId,
     userIdByEmail,
     finalUsers.map((u) => u.id),

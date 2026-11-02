@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
+import { GOOGLE_ISSUER } from "./oidc-presets.js"
 
 /**
  * The identity core's vocabulary and its pure decisions (#337, sso.md 2.1 to
@@ -13,6 +14,25 @@ export type Enforcement = "off" | "optional" | "required_domain" | "required_all
 export type AttemptPurpose = "sign_in" | "test_run" | "step_up"
 export type ManagedReason = "scim" | "jit" | "claimed" | "linked"
 export type DeprovisionMode = "membership" | "account"
+
+/**
+ * What an IdP told us about a person's groups (sso.md 2.15, P0 #3):
+ *
+ *   - `present`: a group claim or attribute arrived. It may be an explicit
+ *     empty list, which really says "no groups".
+ *   - `absent`: none arrived at all (Google OIDC never sends one, an Okta
+ *     custom authorization server without a `groups` scope sends none, a
+ *     Google SAML mapping can take about ten minutes to start appearing, and
+ *     Okta omits `groups` when nobody matches its filter).
+ *   - `overage`: the IdP left the list out because it was too long and sent a
+ *     pointer to it instead (Entra OIDC `_claim_names`, Entra SAML
+ *     `groups.link`).
+ *
+ * `overage` never changes a role. `absent` is treated as an empty list only
+ * once the connection has delivered `present` groups on an earlier sign-in
+ * (`groupsLastSeenAt`); before then, `absent` keeps existing roles too.
+ */
+export type GroupsState = "present" | "absent" | "overage"
 
 export const PROTOCOLS: readonly Protocol[] = ["oidc", "saml", "test"]
 export const STATUSES: readonly ConnectionStatus[] = [
@@ -50,6 +70,8 @@ export interface Connection {
   idleTimeoutSeconds: number | null
   config: Record<string, unknown>
   attributeMapping: Record<string, string>
+  /** When a real sign-in on this connection last carried `groupsState: "present"`. */
+  groupsLastSeenAt?: Date | null
 }
 
 /**
@@ -68,6 +90,12 @@ export interface Assertion {
   familyName?: string | null
   attributes?: Record<string, unknown>
   groups?: string[]
+  /**
+   * ⚠ `present` MEANS THE LIST ABOVE IS THE PERSON'S GROUPS. `overage` is
+   * never used to derive a role; `absent` is read as `[]` only when the
+   * connection has delivered `present` groups on an earlier sign-in.
+   */
+  groupsState: GroupsState
   /** When the person authenticated at the IdP. */
   authTime: Date | null
   /** OIDC `amr`, or SAML AuthnContextClassRef mapped to the same words. */
@@ -99,6 +127,15 @@ export const CLOCK_SKEW_MS = 5 * 1000
 export const FRESH_WINDOW_MS = 10 * 60 * 1000
 /** A step-up's `auth_time` must be this recent: the IdP really asked again. */
 export const STEP_UP_MAX_AGE_MS = 5 * 60 * 1000
+/**
+ * How far in the future a step-up's `auth_time` may be. Probed live on Entra
+ * (2026-11-02): with the optional `auth_time` claim added, it was 39 seconds
+ * after the token's own `iat`, so a correct token reads as "from the future"
+ * against our clock. Two minutes covers that with room to spare and still
+ * refuses a made-up time. This is the future bound only: `STEP_UP_MAX_AGE_MS`
+ * above, the staleness bound, is unchanged.
+ */
+export const STEP_UP_FUTURE_SKEW_MS = 2 * 60 * 1000
 /** The gate writes `last_seen_at` at most this often per session. */
 export const LAST_SEEN_EVERY_MS = 60 * 1000
 /** The sweeper's grace for a ticket session to be bound (sso.md 2.2). */
@@ -220,7 +257,7 @@ export function onLiveDomain(email: string, live: readonly string[]): boolean {
  * RFC 8176 values that mean a factor beyond a password. `mfa` itself, or any
  * one of these alongside the first factor.
  */
-const SECOND_FACTORS = new Set([
+export const SECOND_FACTORS: ReadonlySet<string> = new Set([
   "mfa",
   "otp",
   "hwk",
@@ -273,6 +310,11 @@ export type Refusal =
   | "workspace_gone"
   | "step_up_mismatch"
   | "step_up_stale"
+  /**
+   * The connection's IdP cannot prove a fresh sign-in (idp-capabilities.ts), so
+   * step-up is never sent there: the person confirms with our own step-up.
+   */
+  | "step_up_unsupported"
   | "engine_disabled"
   | "engine_mismatch"
   | "role_exempt"
@@ -299,6 +341,8 @@ export type Refusal =
    * while the directory that deactivated them still says so.
    */
   | "deprovisioned"
+  /** OIDC third-party initiated login: `iss` did not match the connection's configured issuer. */
+  | "issuer_mismatch"
 
 /** What the person is told. Never which check failed in detail. */
 export function refusalMessage(reason: Refusal): string {
@@ -310,6 +354,8 @@ export function refusalMessage(reason: Refusal): string {
       return "This sign-in has expired. Start again."
     case "mfa_required":
       return "Your company requires multi-factor sign-in. Sign in again with it."
+    case "step_up_unsupported":
+      return "Your company's sign-in cannot confirm it is you again. Use your passkey or a code instead."
     case "no_account":
       return "There is no i10 account for you yet. Ask your administrator."
     case "workspace_full":
@@ -329,6 +375,8 @@ export function refusalMessage(reason: Refusal): string {
       return "Your company's sign-in did not finish. Start again, or ask your administrator."
     case "hosted_domain":
       return "Sign in with your company's Google Workspace account, not a personal one."
+    case "issuer_mismatch":
+      return "This sign-in link is not valid."
     default:
       return "We could not sign you in with your company's SSO. Ask your administrator."
   }
@@ -386,7 +434,7 @@ export function needsTouch(lastSeenAt: Date, now: Date): boolean {
 export function isFresh(freshAt: Date | null, now: Date): boolean {
   if (!freshAt) return false
   const age = now.getTime() - freshAt.getTime()
-  return age >= -CLOCK_SKEW_MS && age <= FRESH_WINDOW_MS
+  return age >= -STEP_UP_FUTURE_SKEW_MS && age <= FRESH_WINDOW_MS
 }
 
 // ── Return paths ─────────────────────────────────────────────────────────
@@ -417,4 +465,83 @@ export function safeReturnTo(
   )
     return null
   return origins.includes(url.origin) ? url.href : null
+}
+
+// ── Outside starts and OIDC third-party login ────────────────────────────
+
+/**
+ * The configured OIDC issuer for an OIDC connection, or null.
+ *
+ * ⚠ GOOGLE IS PINNED TO OUR CONSTANT (`GOOGLE_ISSUER`), never `config.oidc`,
+ * matching `settingsFor` in `identity/oidc.ts`.
+ */
+export function configuredOidcIssuer(
+  connection: Pick<Connection, "protocol" | "provider" | "config">,
+): string | null {
+  if (connection.protocol !== "oidc") return null
+  if (connection.provider === "google") return GOOGLE_ISSUER
+  const oidc = connection.config.oidc
+  if (!oidc || typeof oidc !== "object" || Array.isArray(oidc)) return null
+  const issuer = (oidc as { issuer?: unknown }).issuer
+  return typeof issuer === "string" && issuer.length > 0 ? issuer : null
+}
+
+/**
+ * Whether an `iss` parameter from OIDC Core Section 4 ("Initiating Login from
+ * a Third Party") is accepted for this connection.
+ *
+ * ⚠ EXACT STRING EQUALITY ON OIDC, NO TRAILING-SLASH REPAIR. OIDC Core 3.1.3.7
+ * compares issuers byte for byte, so we refuse rather than normalize. SAML (and
+ * dev `test`) connections have no OIDC issuer and ignore `iss`.
+ */
+export function thirdPartyIssuerMatches(
+  connection: Pick<Connection, "protocol" | "provider" | "config">,
+  iss: string | undefined,
+): boolean {
+  if (iss === undefined) return true
+  if (connection.protocol !== "oidc") return true
+  const expected = configuredOidcIssuer(connection)
+  return expected !== null && iss.length > 0 && iss === expected
+}
+
+export type ConnectionPromptOutcome =
+  | { outcome: "invalid" }
+  | { outcome: "issuer_mismatch"; tenantId: string; connectionId: string }
+  | {
+      outcome: "ready"
+      tenantId: string
+      connectionId: string
+      name: string
+      protocol: Protocol
+      provider: string
+      thirdPartyInitiated: boolean
+    }
+
+/**
+ * Decides what `/sso/connection` reveals for a cross-site sign-in interstitial.
+ *
+ * ⚠ ONLY `active` CONNECTIONS ANSWER `ready`. Unknown ids, draft, testing and
+ * disabled connections all map to `invalid`, revealing no more about other
+ * workspaces than `startLogin` already does.
+ */
+export function decideConnectionPrompt(
+  connection: Connection | null,
+  iss: string | undefined,
+): ConnectionPromptOutcome {
+  if (!connection || connection.status !== "active") return { outcome: "invalid" }
+  if (!thirdPartyIssuerMatches(connection, iss))
+    return {
+      outcome: "issuer_mismatch",
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+    }
+  return {
+    outcome: "ready",
+    tenantId: connection.tenantId,
+    connectionId: connection.id,
+    name: connection.name,
+    protocol: connection.protocol,
+    provider: connection.provider,
+    thirdPartyInitiated: iss !== undefined && connection.protocol === "oidc",
+  }
 }

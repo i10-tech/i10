@@ -16,6 +16,7 @@ import {
   readSecret,
   type Assertion,
   type Connection,
+  type GroupsState,
   type Refusal,
 } from "./model.js"
 import type {
@@ -499,6 +500,62 @@ function firstOf(
   return []
 }
 
+/** Entra's SAML group overage attribute past 150 groups (sso.md 2.15). */
+export const SAML_GROUPS_OVERAGE_ATTRIBUTE =
+  "http://schemas.microsoft.com/claims/groups.link"
+
+/**
+ * Whether the SAML assertion carried the person's groups (P0 #3, sso.md 2.15).
+ *
+ *   - `overage`: Entra omits the groups attribute past 150 groups and sends
+ *     `http://schemas.microsoft.com/claims/groups.link` pointing at Microsoft
+ *     Graph instead.
+ *   - `present`: a mapped or default groups attribute was present in the
+ *     assertion (even with zero `<AttributeValue>` children: an explicit empty
+ *     list).
+ *   - `absent`: no groups attribute arrived at all (Google SAML with no group
+ *     mapping, or an Okta filter that matched no group).
+ *
+ * ⚠ WE DO NOT CALL MICROSOFT GRAPH TO RESOLVE `groups.link`: we hold no Graph
+ * credentials for the customer's tenant. An optional Graph app permission per
+ * Entra connection is the future option; until then the role is kept and the
+ * sign-in is audited.
+ */
+export function samlGroupsStateOf(
+  attributes: Record<string, string[]>,
+  mapping: Record<string, string>,
+  defaults: readonly string[],
+): GroupsState {
+  if (Object.hasOwn(attributes, SAML_GROUPS_OVERAGE_ATTRIBUTE)) return "overage"
+  const mapped = Object.entries(mapping)
+    .filter(([, ours]) => ours === "groups")
+    .map(([name]) => name)
+  const candidates = mapped.length ? mapped : defaults
+  return candidates.some((name) => Object.hasOwn(attributes, name))
+    ? "present"
+    : "absent"
+}
+
+function samlAmrProvesMfa(
+  attributes: Record<string, string[]>,
+  amr: NonNullable<SamlPreset["amr"]>,
+): boolean {
+  const raw = [
+    ...(attributes[amr.attribute] ?? []),
+    ...(amr.attribute === "amr" ? (attributes["session.amr"] ?? []) : []),
+  ]
+  for (const value of raw) {
+    if (amr.mfa.includes(value)) return true
+    const tokens = value
+      .replace(/^\[|\]$/g, "")
+      .split(/[\s,]+/)
+      .map((t) => t.replace(/^["']|["']$/g, "").toLowerCase())
+      .filter(Boolean)
+    if (tokens.some((t) => amr.mfa.includes(t))) return true
+  }
+  return false
+}
+
 /**
  * A verified assertion as the bridge's `Assertion`, or null without a subject.
  *
@@ -521,9 +578,13 @@ export function toSamlAssertion(
   const email = normaliseEmail(mailAttribute) ?? normaliseEmail(verified.nameId)
   const one = (values: string[]) =>
     values[0] && values[0].length <= 256 ? values[0] : null
-  const amrValues = preset.amr ? (verified.attributes[preset.amr.attribute] ?? []) : []
   const amr =
-    preset.amr && amrValues.some((v) => preset.amr!.mfa.includes(v)) ? ["mfa"] : []
+    preset.amr && samlAmrProvesMfa(verified.attributes, preset.amr) ? ["mfa"] : []
+  const groupsState = samlGroupsStateOf(
+    verified.attributes,
+    mapping,
+    preset.attributes.groups,
+  )
   const attributes: Record<string, unknown> = {}
   for (const [name, values] of Object.entries(verified.attributes).slice(0, 50))
     attributes[name] = values.length === 1 ? values[0] : values.slice(0, 50)
@@ -540,6 +601,7 @@ export function toSamlAssertion(
     groups: firstOf(verified, mapping, "groups", preset.attributes.groups)
       .filter((g) => g.length <= 256)
       .slice(0, 500),
+    groupsState,
     attributes,
     authTime: verified.authnInstant,
     amr,

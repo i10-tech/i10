@@ -25,6 +25,18 @@ const config: NextConfig = {
           { key: "Cache-Control", value: "no-store" },
         ],
       },
+      // ⚠ THE OUTSIDE-START INTERSTITIAL'S CLICK IS ITS CSRF DEFENCE, so it
+      // must never be framed (clickjacked) in any browser, cached, or leak its
+      // `login_hint` and `connection` parameters in a `Referer` header.
+      {
+        source: "/sso/confirm",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        ],
+      },
     ]
   },
 }

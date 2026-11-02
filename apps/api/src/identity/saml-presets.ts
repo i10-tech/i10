@@ -1,3 +1,4 @@
+import { SECOND_FACTORS } from "./model.js"
 import { NAMEID } from "./saml-verify.js"
 
 /**
@@ -38,10 +39,11 @@ import { NAMEID } from "./saml-verify.js"
  *   - Generic: any SAML 2.0 IdP with the HTTP-Redirect binding for requests,
  *     the HTTP-POST binding for responses, and signed assertions.
  *
- * Unverified against real tenants (inferred): that Google honours
- * `ForceAuthn` (a step-up then fails closed as `step_up_stale`), and that
- * Entra issues its pairwise persistent identifier when the NameIDPolicy asks
- * for persistent and the claim is left at its default.
+ * Google SAML ignores `ForceAuthn="true"` (probed: returns the old
+ * `AuthnInstant`), so Google SAML step-up falls back to i10's own verification
+ * (sso.md 2.22). Unverified against real tenants (inferred): that Entra issues
+ * its pairwise persistent identifier when the NameIDPolicy asks for persistent
+ * and the claim is left at its default.
  */
 
 export type SamlProvider = "okta" | "entra" | "google" | "generic"
@@ -107,6 +109,9 @@ export const SAML_PRESETS: Readonly<Record<SamlProvider, SamlPreset>> = {
     entityIdHint: "http://www.okta.com/exk...",
     nameIdFormat: NAMEID.persistent,
     attributes: COMMON,
+    // Okta's `session.amr` mapped to an attribute, read with the same RFC 8176
+    // words as an OIDC `amr` (`provedMfa`).
+    amr: { attribute: "amr", mfa: [...SECOND_FACTORS] },
     signsRequests: true,
     encrypts: true,
     requires: [

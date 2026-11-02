@@ -1437,7 +1437,20 @@ const consoleFreshAuth = withSsoFreshness(
   sessionIds,
   gateChecker,
   startUrlFor(authOrigin, "/sso/step-up"),
-  async (userId) => (await identity.managedByUser(userId))?.connectionId ?? null,
+  async (userId, sessionId) => {
+    const read = await identity.gateRead(userId, sessionId)
+    if (!read.managed) return null
+    const connectionId = read.session?.connectionId ?? read.managed.connectionId
+    if (!connectionId) return null
+    const connection = await identity.connectionForStart(connectionId)
+    return connection
+      ? {
+          id: connection.id,
+          protocol: connection.protocol,
+          provider: connection.provider,
+        }
+      : null
+  },
   log,
 )
 const ssoJoinRequests = joinStore(db)

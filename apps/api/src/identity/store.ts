@@ -92,6 +92,7 @@ const toConnection = (r: typeof connections.$inferSelect): Connection => ({
   idleTimeoutSeconds: r.idleTimeoutSeconds,
   config: r.config,
   attributeMapping: r.attributeMapping,
+  groupsLastSeenAt: r.groupsLastSeenAt,
 })
 
 const toSession = (
@@ -494,6 +495,17 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
           .returning(),
       )
       return row ? toRule(row) : null
+    },
+
+    async noteGroupsSeen(tenantId, connectionId, at) {
+      await withTenant(db, tenantId, (tx) =>
+        tx
+          .update(connections)
+          .set({ groupsLastSeenAt: at })
+          .where(
+            and(eq(connections.tenantId, tenantId), eq(connections.id, connectionId)),
+          ),
+      )
     },
 
     async provisionLocked(tenantId, key, fn) {

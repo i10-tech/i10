@@ -1,0 +1,212 @@
+# SSO hardening: Okta, Entra and Google Workspace, checked against our code
+
+2026-11-02. Three read-only audits, one per identity provider, each reading the
+provider's official docs and checking every requirement against our code
+(`okta.md`, `entra.md`, `google.md`, with doc URLs and file:line). This page
+merges them, removes duplicates, and ranks what to fix before any UI pass.
+
+Status words:
+
+- **Confirmed**: I read the code and the behaviour is as described.
+- **Probable**: the code is as described, but what the provider sends still
+  needs a check against a real tenant.
+
+Nothing here has been run against a live Okta, Entra or Google tenant yet.
+
+## P0: people get locked out or lose access silently
+
+| # | Problem | Providers | Status | Where |
+|---|---|---|---|---|
+| 1 | **A changed subject is a dead end.** A renamed Google primary email, a renamed Okta username (Persistent NameID = app username), or a recreated Entra app gives a new subject. `resolve` finds the old identity on the same account and refuses `already_linked` forever, with the generic message. No admin relink action exists. The Google preset copy says the account "moves", which is the opposite. | all three | Confirmed live (Okta SAML, Google SAML) | `bridge.ts:962-966`, `saml.ts:473`, `saml-presets.ts:152` |
+| 2 | **Starts from outside our sites are refused.** The Okta dashboard tile (OIDC third-party initiated login), the Entra My Apps tile, and our own shareable `/sso/<id>` link clicked from mail or chat all arrive cross-site. `startedByUs` only lets cross-site in with our console as Referer, so the person sees "Start your company's sign-in from i10." Probably the same root as the open FINDINGS bug about arriving from the IdP's logout page. Fix shape: a same-site Continue page, plus an OIDC initiate-login endpoint that checks `iss` and keeps `login_hint`. | Okta, Entra, all | Confirmed live (Okta tile) | `apps/auth/app/_lib/sso-server.ts:98-108` |
+| 3 | **Missing group data demotes people.** Entra drops `groups` past 150 (SAML) or 200 (JWT) and sends `groups.link` / `_claim_names` instead, which we never read. Google OIDC sends no groups, and Google SAML sends only mapped groups. A renamed Okta group stops matching. In each case group rules recompute to `member` and an admin silently loses the role. Fix shape: detect "no group data" vs "no groups", keep the current role when the data is missing, audit it, show it in test runs. | all three | Confirmed live (Entra OIDC and SAML) | group rules in `bridge.ts` / `workspace-policy.ts` |
+| 4 | **Google directory pull can deprovision people who still exist.** Users and groups are listed with `domain=`, which returns one domain. Someone moved to the company's other domain drops out of the list and is deprovisioned. Only an empty list is refused; there is no shrink guard (open item in `sso.md` 2.19). Needs a check against 2.19's per-domain scoping before fixing. | Google | Confirmed live (Google) | `google-directory.ts:786-790, 829-833, 1044-1048` |
+| 5 | **MFA and step-up settings that can never be satisfied.** Google ID tokens carry no `amr`/`acr`/`auth_time`, yet "Require MFA" can be switched on for a Google connection, locking out every non-exempt member. Entra v2 only sends `auth_time` as an optional claim, so OIDC step-up refuses `step_up_stale`. Okta SAML step-up needs "Honor Force Authentication: Yes". Fix shape: refuse settings the provider cannot prove, and say what to configure. | all three | Confirmed live (all three) | `bridge.ts:450, 1062-1068` |
+| 6 | **SCIM refuses a token pasted without `Bearer `.** The console tells admins to paste the token; if the provider sends it verbatim, every call is 401. The `i10_scim_` prefix makes accepting both safe. | Okta (others possible) | Confirmed live at Okta | `scim.ts:1302`, test `identity-scim.test.ts:1020`, copy `directories-panel.tsx:135` |
+| 7 | ~~We always ask for NameID format `persistent`, and Okta refuses a mismatch.~~ **Disproved live:** Okta ignores the requested format and answers with its own. No fix needed. | Okta | Disproved | `saml-messages.ts:96` |
+| 8 | **Certificate rotation is an outage of up to a day.** Metadata is re-read daily with a 20 h guard, never on a signature failure. Fix shape: refresh once (rate-limited) on `bad_signature` / `no_usable_certificate` and retry, alert owners, and tell Entra admins to use the app federation metadata URL. | Okta, Entra | Probable | `saml-refresh.ts:37, 148` |
+| 9 | **Entra SAML users with an empty `mail` cannot sign in** (`no_email`), while SCIM provisions the same people through `userName`. Fix shape: fall back to the UPN claim when it parses as an address, for the Entra preset only. | Entra | Confirmed live (Entra OIDC and SAML) | SAML email resolution |
+| 10 | **Entra sign-out never reaches us.** (Live: Entra sends no SAML LogoutRequest at all on sign-out; see the Entra probe section.) We match the LogoutRequest Issuer to one string and require a signature; Entra's issuer and signing on logout need a live check. Sessions survive an Entra sign-out and only the audit log shows it. | Entra | Confirmed live (reframed) | `saml-messages.ts:239, 304` |
+
+## P1: every failure says what happened and what to do
+
+| # | Problem | Where |
+|---|---|---|
+| 11 | Every SAML verification failure (audience, destination, bad signature, unsigned, algorithm, clock) and most refusals show "We could not sign you in with your company's SSO. Ask your administrator." The cause lives only in the audit JSON. A refused test run is not recorded, so the admin testing setup sees nothing. | `apps/console/lib/sso-runs.ts`, SAML verify path |
+| 12 | The IdP's own explanation is discarded: OIDC `error_description` (an Okta "user not assigned", an Entra AADSTS code) and SAML `StatusMessage`. People Okta refuses are told to "Start again", which cannot help. Keep a sanitised code and map it to a provider-specific next step. Confirmed. | `oidc.ts:855-869`, `saml-verify.ts:217` |
+| 13 | Google directory errors: `unauthorized_client` covers four different causes; the console has copy for 2 of 12 codes and prints the raw code; `directory.sync_failed` is audit-only with no admin alert. | `directories-panel.tsx:57-61` |
+| 14 | `hosted_domain` refusal tells a real Workspace member "not a personal one" when the fix is the admin's (verify the domain). | `model.ts:331` |
+| 15 | SCIM: expired, revoked and unknown tokens all say "The token is not valid."; duplicate group `displayName` is not a 409; some conflicts answer success so the Okta admin sees green. | `scim.ts` |
+
+## P1: setup guides miss steps the providers require
+
+| # | Missing |
+|---|---|
+| 16 | Okta: Honor Force Authentication, Name ID format, groups claim filter and the 100-group cap, scopes for a custom authorization server (no Scopes field today), adding the new certificate before activating it. |
+| 17 | Entra: optional claims (`given_name`, `family_name`, `auth_time`, `groups`), admin consent, "assign users and groups", the app federation metadata URL. |
+| 18 | Google: turn the SAML app ON for the OU or group, group mapping (only selected groups are sent, 75 cap), Start URL, IdP-initiated option; OIDC text says "Nothing at Google" though admins can block third-party apps. |
+
+## P2: operations and scale
+
+| # | Problem |
+|---|---|
+| 19 | Google pull: group members fetched one group at a time, no backoff on 403/429/5xx, 180 s job timeout against up to 2000 groups and 10k users. |
+| 20 | No expiry tracking for OIDC client secrets (Entra secrets expire) or SCIM tokens; no stale-sync alert. Reuse the 30/7/1/0 day certificate alerts. |
+| 21 | Entra SCIM filters we reject: `emails[type eq "work"].value eq "x"` and `and` (a test pins the refusal, `identity-scim.test.ts:111`). |
+| 22 | A failed Google watch registration is only logged, so updates arrive within 15 minutes, not instantly, and nobody knows. |
+| 23 | Without SCIM, Okta has no way to end an i10 session (no Okta-initiated SLO, Universal Logout not implemented, max session null by default). |
+| 24 | Smaller: Okta Basic-auth encoding of secrets containing `+ / ~`; SP key rotation vs Okta signed requests; login hint not sent to Entra SAML; single-string assertion Issuer match; `xms_edov` read only as `true`/`"true"`. |
+
+## What already holds
+
+- **SCIM for Okta:** path-less deactivation, group add/remove/replace, 409 on duplicate users, case-insensitive filters and stable pagination.
+- **SCIM for Entra:** its PATCH dialect and string booleans, plus the test-connection probe, soft delete and restore.
+- **OIDC:** encrypted assertions, a tenant-pinned issuer, and `sub` as the identity.
+- **Google:** the `hd` check, `email_verified` as a string, assertion-only signing, certificate expiry alerts, aliases, and the suspended and archived states.
+
+## Okta live probe results (2026-11-02, integrator-2590605)
+
+Setup: the existing OIDC app `i10 lab`, and a new SAML app `i10 SAML probe`
+whose ACS points at the lab echo server (`hooks.lab.localhost:8090/okta-acs`),
+so Okta's raw answers could be decoded. Requests were built like ours
+(`saml-messages.ts`).
+
+| Question | Answer | Effect on the list |
+|---|---|---|
+| What does the dashboard tile send (OIDC, "Either Okta or App")? | `GET /sso/<id>?iss=https://integrator-2590605.okta.com`, nothing else (no `login_hint`, no `target_link_uri`). We answer "Start your company's sign-in from i10." | **#2 confirmed live.** |
+| Does Okta refuse NameIDPolicy `persistent` when the app is Unspecified? | **No.** Okta answers Success and sends its own format (`unspecified`, value = the username, here an email). | **#7 is wrong, drop it.** Asking for `persistent` is harmless, but it never gets us a persistent id. |
+| So what subject do we store for Okta SAML users? | `unspecified:<okta username>`, a value an admin can rename. | **#1 confirmed for Okta SAML.** |
+| With "Honor Force Authentication" off, does `ForceAuthn="true"` re-prompt? | **No.** Okta returns the old `AuthnInstant` (the earlier sign-in) silently, so our step-up refuses `step_up_stale`. | **#5 confirmed for Okta SAML.** |
+| Does the SAML assertion show MFA? | **No.** The sign-in used Okta Verify, but `AuthnContextClassRef` was `PasswordProtectedTransport`, the app's fixed setting, not what happened. "Require MFA" on an Okta SAML connection can only pass if the admin maps something like `session.amr` into an attribute we read. | **New, joins #5.** |
+| Groups from a custom authorization server? | `default` server discovery has no `groups` scope (the org server has it), so we never ask and get none, silently. | **#3 / #16 confirmed.** |
+| Federation Broker Mode | On by default for the OIDC app: no assignments allowed, no dashboard tile, everyone in the org can sign in. Our guide never mentions it. | **New, joins #16.** |
+
+| Does Okta's SCIM header auth add `Bearer `? | **No.** Okta's "SCIM 2.0 Test App (Header Auth)" sent `Authorization: i10_scim_...` verbatim (`Okta SCIM Client 1.0.0`, `GET /scim/v2/Users`), seen through a temporary tunnel to the lab echo server. `readToken` would answer 401 to every call. | **#6 confirmed live, and it is a full SCIM outage for Okta.** |
+
+Not probed yet: Okta OIDC step-up and `auth_time`, certificate rotation.
+
+## Entra live probe results (2026-11-02, tenant midofc2008gmail.onmicrosoft.com)
+
+OIDC app `i10 OIDC probe` (v2 endpoint, `groupMembershipClaims:
+SecurityGroup`), ID tokens posted to the lab echo server and decoded. The
+signed-in admin is a guest (`#EXT#` UPN, `mail` null, home tenant is the
+consumer Microsoft account tenant).
+
+| Question | Answer | Effect on the list |
+|---|---|---|
+| `auth_time` by default? | **Absent.** Present only after adding the optional claim. | **#5 confirmed** for Entra OIDC step-up. |
+| `auth_time` vs `iat` | With the optional claim, `auth_time` was **39 s after `iat`** (Entra's clocks). Our step-up refuses an `auth_time` beyond `now + CLOCK_SKEW_MS`, so the skew allowance must cover this. | **New, small.** |
+| `email_verified` / `xms_edov` | No `email_verified`. `xms_edov: true` (a JSON boolean) only with the optional claim. | Preset guide must say to add `xms_edov`. |
+| `email` for a guest with empty `mail` | Present: the guest's home address (`@gmail.com`), from `idp` = the consumer tenant. | A guest's email is not on the company domain, so domain checks refuse them. That is right, but needs its own message. |
+| `groups` | Object ids (GUIDs), never names. | Group rules for Entra must be written against ids. **Check our rule UI and preset.** |
+| More than 200 groups | `groups` is **gone**, replaced by `_claim_names: {groups: "src1"}` and `_claim_sources.src1.endpoint` = `https://graph.windows.net/<tid>/users/<oid>/getMemberObjects` (the retired Azure AD Graph). | **#3 confirmed live.** |
+| `amr` / MFA | No `amr` in the v2 ID token. | "Require MFA" on Entra OIDC cannot pass; joins #5. |
+
+SAML app `i10 SAML probe` (non-gallery, reply URL to the echo server),
+SP-initiated with our usual `NameIDPolicy persistent`:
+
+| Question | Answer | Effect on the list |
+|---|---|---|
+| Does `persistent` work? | Yes: Success, NameID `persistent` = an opaque per-app id (`Xz3cDGx...`). Stable unless the app is recreated. | Entra SAML subjects are fine; the app-recreate case stays (low). |
+| Assertion Issuer | `https://sts.windows.net/<tid>/` | Matches what we pin. |
+| More than 150 groups | No `groups` attribute; `http://schemas.microsoft.com/claims/groups.link` = the same `graph.windows.net .../getMemberObjects` URL. | **#3 confirmed live for SAML too.** |
+| MFA | `AuthnContextClassRef` = `Password`, but `authnmethodsreferences` carries `multipleauthn`. Our Entra preset already reads that attribute (`saml-presets.ts:127`). | Entra SAML MFA is **OK**. |
+| Email for the guest | `emailaddress` = the guest's home address, although `mail` is null. | Same as OIDC. |
+
+SCIM, app `i10 SCIM probe` (non-gallery, provisioning configured through
+Graph), aimed at the lab echo server through a temporary tunnel:
+
+| Question | Answer | Effect on the list |
+|---|---|---|
+| Auth header | `Authorization: Bearer i10_scim_...` (with `Bearer `, unlike Okta). | Fine today. |
+| Test connection | `GET <base>/scim/Users?filter=externalId eq "<random guid>"`. | Our filter support must accept `externalId eq`. |
+| **Path** | For every base URL tried (`/probe-a/v2`, `/probe-b/scim/v2`, `/probe-c/v2`), Entra called `<base>/scim/Users`, both on test and on real provisioning. Microsoft does not document this (the only related item is a 2018 known issue). | **New, probably high:** given our base `.../scim/v2/<directory>`, Entra would call `.../scim/v2/<directory>/scim/Users`, which we do not route. **Must be re-checked against our real API before fixing** (and through the portal's Test Connection, not only Graph). |
+| Create for a member with empty `mail` | `GET ?filter=externalId eq "nomail.probe"`, then `POST /Users` with `externalId` = **mailNickname**, `userName` = the UPN, **no `emails` at all**. | `externalId` is not the object id by default, and an address-less user arrives with only a UPN: SCIM must take `userName` as the address (we do, per the audit) and SAML must match it (#9). |
+
+A member user with `mail` empty (`nomail.probe@...onmicrosoft.com`), signed
+in by you:
+
+| Question | Answer | Effect on the list |
+|---|---|---|
+| OIDC claims | **No `email` claim at all** (even with the optional claim configured), no `xms_edov`; only `preferred_username` = the UPN. | **#9 confirmed live for OIDC too:** we refuse `no_email`. Any UPN fallback must be explicit and per-preset, since `preferred_username` is not a verified address. |
+| SAML attributes | **No `emailaddress` attribute**; `name` = the UPN; NameID is the opaque persistent id. | **#9 confirmed live.** |
+
+| Entra-initiated SAML logout | The no-mail user (who had just signed in to the SAML app, whose `logoutUrl` points at the echo server) signed out through Entra's sign-out page. Entra finished ("You signed out of your account") and **sent nothing** to the app's logout URL: zero requests reached the echo server. | **#10 reframed:** the problem is not that we reject Entra's LogoutRequest but that Entra never sends one here. An Entra sign-out does not end an i10 session; only SCIM deactivation or our own max session does. Say so on the connection page and set a default max session for Entra. |
+
+## Google live probe results (2026-11-02, Cloud Identity Free on i10.tech)
+
+The account was set up on `i10.tech` itself because Google refused the sign-up
+for `gw.sso-lab.i10.tech`. There are no other `@i10.tech` Google accounts, so
+nothing conflicts. Secondary domain `gw2.i10.tech` was added; as a subdomain
+of the verified primary, it verified with no DNS record.
+
+| Question | Answer | Effect on the list |
+|---|---|---|
+| Google ID token claims | `iss` `https://accounts.google.com`, `sub`, `hd: i10.tech`, `email_verified: true` (boolean), names. **No `amr`, `acr` or `auth_time`.** Discovery's `claims_supported` lists none of them and no `acr_values_supported`. | **#5 confirmed:** "Require MFA" and step-up can never pass on Google OIDC. Refuse the settings. |
+| `customer=my_customer` together with `domain=` on `users.list` / `groups.list` | Accepted (200). | Not a bug by itself; the domain scoping is the question (#4). |
+| A user moved from `i10.tech` to `gw2.i10.tech` (`mover`, id `110450468521056671854`) | Before: `domain=i10.tech` lists `admin`, `mover`. After the rename: `domain=i10.tech` lists only `admin`. `customer=my_customer` alone lists both. Google keeps `mover@i10.tech` as an **alias** on the same account. | **#4 confirmed live.** Our pull (`domain=` on every page) drops a person who still exists, still answers to the old address, and has the same Google id, so the next sync deprovisions them. Fix shape: list by `customer` only, keep people whose primary or alias is on a proved domain, match on the Google id. |
+| SAML app left at Google's default "OFF for everyone" | Google shows its own page: `403. Error: app_not_enabled_for_user. Service is not enabled for this user.` and never comes back to us. | **#18 confirmed:** the guide must say "turn it ON for the OU or group", and our test run should explain that a run which never returns usually means this. |
+| SAML NameID with our `persistent` request | Success, `Format=persistent`, **value = the primary email** (`admin@i10.tech`). | **#1 confirmed for Google SAML:** a rename changes the "persistent" subject. |
+| SAML `AuthnContextClassRef` | `unspecified`. | No MFA signal from Google SAML either; joins #5. |
+| `ForceAuthn="true"` | **Ignored:** no prompt, and the same `AuthnInstant` came back 13 minutes later. | **#5 confirmed:** SAML step-up on Google is always stale. |
+
+| SAML group attribute | After mapping group `eng-probe@i10.tech` (display name "Engineering Probe") to app attribute `groups`: `groups = ["Engineering Probe"]`, the **display name**. The first answers after saving had no attribute at all; it appeared about 10 minutes later. | Group rules for Google must match display names, which an admin can rename, and a rule silently stops matching (joins #3). Our test run should warn when a mapping was just changed and no groups arrived. |
+
+| Service-account keys on a new org | Project `flash-energy-513515-k3`, service account `i10-directory-probe@...`: `iam.managed.disableServiceAccountKeyCreation` is **Enforced** by default (the legacy `iam.disableServiceAccountKeyCreation` is not). No JSON key can be created. | Customers are unaffected: our design uses **our** service account and the customer only authorises its Client ID for domain-wide delegation. It does affect **us**: `GOOGLE_DIRECTORY_SERVICE_ACCOUNT` is set in **no** Doppler config (dev or prod), so the Google directory has never run against real Google. Needs a decision: an org-policy exception for one project, or keyless signing. |
+
+Directory errors, run through **our own code** (`createGoogleTokenSource` +
+`checkGoogleDirectoryAccess`) with a real key (org policy overridden for
+project `flash-energy-513515-k3` only; key in Doppler `dev` as
+`GOOGLE_DIRECTORY_SERVICE_ACCOUNT`, Client ID `107677541438076637061`):
+
+| Case | Google answers | We report | Effect on the list |
+|---|---|---|---|
+| No domain-wide delegation yet | `401 unauthorized_client`: "Client is unauthorized to retrieve access tokens using this method, or client not authorized for any of the scopes requested." | `unauthorized_client` | Correct code, but the message must give both causes and the exact Client ID and scopes. |
+| Delegation present but missing one scope we ask for | **The same 401 and the same sentence.** | `unauthorized_client` | Our `missing_scope` branch for the token step can never fire. Fix: on `unauthorized_client`, ask for a token one scope at a time and name the scope that fails. |
+| Subject does not exist (`nobody@i10.tech`) | `400 invalid_grant`: "Invalid email or User ID". | `unknown_customer` | **Wrong label:** the customer exists, the admin address does not. Add `admin_not_found`. |
+| Subject exists but is not an admin (`mover`) | Token **granted**, then `403 forbidden` "Not Authorized to access this resource/api" on `users.list`. | `unauthorized_client` | **Wrong fix shown:** same code as missing delegation. Token OK + 403 forbidden means "this address is not an admin"; add `subject_not_admin`. |
+| Everything right (`admin@i10.tech`) | token 200, `users.list` 200. | `ok: true` | Works end to end. |
+| Delegation propagation | Worked on the first try right after you saved it. | | Google warns it can take up to 24 h; keep the wait in the copy. |
+
+Not probed on Google: the directory pull with a service account and domain-wide
+delegation (the Playground used the admin's own OAuth, so `unauthorized_client`
+and the scope errors were not reproduced), push notification channels.
+
+### Can the IdP sign-in page live inside our page (iframe)?
+
+Checked 2026-11-02 against the real pages:
+
+| IdP sign-in page | Framing header | Embeddable by us |
+|---|---|---|
+| Okta (`/app/.../sso/saml`, `/login/login.htm`) | `X-Frame-Options: SAMEORIGIN`, `frame-ancestors 'self'` | No, unless the customer's Okta admin turns on iframe embedding with our origin as trusted (their setting, per org) |
+| Google (`accounts.google.com`) | `X-Frame-Options: DENY` | No |
+| Entra (`login.microsoftonline.com`) | refuses framing for interactive sign-in (only `prompt=none` silent checks work in a frame, and those die with third-party cookie blocking) | No |
+
+What does work everywhere: a **popup** opened from our page on the user's
+click, which closes itself when the IdP answers and hands the result back to
+our page (`postMessage` to our origin plus our own server-side check of the
+attempt). The person never leaves our page. Fallback to a full redirect when
+the popup is blocked.
+
+What we must not do: proxy or re-host the IdP's page on our domain. It is the
+adversary-in-the-middle phishing pattern, passkeys and Okta FastPass refuse to
+work on a foreign origin, device-trust and conditional-access checks break,
+and IdPs' own abuse detection flags it.
+
+## Live probes still needed (one tenant each)
+
+- Okta dev org:
+  - Does the HTTP-header SCIM auth add `Bearer `?
+  - The NameIDPolicy mismatch.
+  - The tile and initiate-login URI.
+  - The groups claim on a custom authorization server.
+- Entra:
+  - `auth_time` with and without the optional claim.
+  - Overage markers on a user in more than 150 groups.
+  - Logout Issuer and signature.
+  - The empty-`mail` user.
+- Google:
+  - Do `amr`/`auth_time` ever appear?
+  - `customer` + `domain` together on list calls.
+  - A user moved between domains.
+  - The group attribute format.

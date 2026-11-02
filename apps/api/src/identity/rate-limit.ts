@@ -128,12 +128,15 @@ export function ssoRateLimit(deps: {
       if (!verdict.ok) return tooMany(verdict.retryAfter)
     }
     /*
-     * ⚠ A SAML ACS POST COUNTS AS A START TOO (#339): an IdP-initiated
-     * response makes its own attempt row, so it is capped like one.
+     * ⚠ A SAML ACS POST AND AN INTERSTITIAL LOOKUP COUNT AS STARTS TOO (#339):
+     * an IdP-initiated response makes its own attempt row, and `/sso/connection`
+     * writes an audit event, so both are capped per connection like `/attempts`.
      */
     if (
       c.req.method === "POST" &&
-      (c.req.path.endsWith("/attempts") || c.req.path.endsWith("/saml/acs")) &&
+      (c.req.path.endsWith("/attempts") ||
+        c.req.path.endsWith("/connection") ||
+        c.req.path.endsWith("/saml/acs")) &&
       deps.perConnectionStarts
     ) {
       const connection = connectionIn(await c.req.json().catch(() => null))

@@ -22,7 +22,7 @@ import {
   ssoTestRuns,
   type ConnectionChange,
 } from "@/lib/sso-actions"
-import { latestPass } from "@/lib/sso-runs"
+import { latestPass, mfaCapabilityNote } from "@/lib/sso-runs"
 import { toastDone } from "@/lib/toast"
 import type { SsoAbilities, SsoConnection, SsoEnforcement } from "@/lib/sso-types"
 import {
@@ -245,6 +245,9 @@ function SignInRules({
   const call = useSsoCall()
   const locked = isLocked(connection, abilities)
   const live = connection.status === "active" || connection.status === "disabled"
+  const caps = connection.capabilities
+  const mfaBlocked = caps?.canProveMfa === "no"
+  const mfaNote = mfaCapabilityNote(connection)
 
   async function patch(change: ConnectionChange, done: string) {
     const result = await call(() => changeSsoConnection(connection.id, change), {
@@ -265,15 +268,42 @@ function SignInRules({
         disabled={locked && !connection.jitEnabled}
         onChange={(v) => void patch({ jitEnabled: v }, v ? "JIT on" : "JIT off")}
       />
-      <ToggleRow
-        label="Require MFA at your provider"
-        description="Refuse a sign-in your provider did not prove with a second factor."
-        checked={connection.mfaRequired}
-        disabled={live && !abilities.owner && connection.mfaRequired}
-        onChange={(v) =>
-          void patch({ mfaRequired: v }, v ? "MFA required" : "MFA no longer required")
-        }
-      />
+      <div className="space-y-1.5">
+        <ToggleRow
+          label="Require MFA at your provider"
+          description="Refuse a sign-in your provider did not prove with a second factor."
+          checked={connection.mfaRequired}
+          disabled={
+            (live && !abilities.owner && connection.mfaRequired) ||
+            (mfaBlocked && !connection.mfaRequired)
+          }
+          onChange={(v) =>
+            void patch({ mfaRequired: v }, v ? "MFA required" : "MFA no longer required")
+          }
+        />
+        {mfaNote && (
+          <p
+            className={
+              mfaNote.tone === "warning"
+                ? "text-xs text-destructive"
+                : "text-xs text-muted-foreground"
+            }
+          >
+            {mfaNote.text}
+          </p>
+        )}
+        {caps?.canProveFreshAuth === "with_setting" && caps.freshAuthSetting && (
+          <p className="text-xs text-muted-foreground">
+            For step-up re-verification: {caps.freshAuthSetting}
+          </p>
+        )}
+        {caps?.canProveFreshAuth === "no" && (
+          <p className="text-xs text-muted-foreground">
+            {caps.label} cannot prove a fresh sign-in, so step-up prompts use i10&apos;s
+            own verification.
+          </p>
+        )}
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <MorphSelect
           label="Longest session"

@@ -1182,7 +1182,13 @@ describe("directory hooks for the sign-in bridge", () => {
   const ctx = (subject: string, email = "ada@acme.test") => ({
     tenantId: TENANT,
     connection: connection(),
-    assertion: { subject, email, emailVerified: true } as Assertion,
+    assertion: {
+      subject,
+      email,
+      emailVerified: true,
+      groupsState: "present",
+      authTime: null,
+    } as Assertion,
     email,
   })
   const warnings: object[] = []

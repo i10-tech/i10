@@ -10,7 +10,7 @@ import {
   type CompleteOutcome,
   type Engine,
 } from "./bridge.js"
-import type { Assertion, Connection, Refusal } from "./model.js"
+import type { Assertion, Connection, GroupsState, Refusal } from "./model.js"
 import type { AttemptRow, IdentityStore, Logger } from "./ports.js"
 import { IdpUnreachable, type OidcFetch } from "./oidc-fetch.js"
 import {
@@ -481,8 +481,9 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
        * `auth_time` to STEP_UP_MAX_AGE_MS instead, and refuses none at all.
        */
       if (attempt.purpose === "step_up") {
-        // Google documents `prompt` as none/consent/select_account only, so it
-        // gets `max_age=0` alone (inferred: unverified against Google itself).
+        // `startLogin` refuses Google step-up (`step_up_unsupported`: Google
+        // never sends `auth_time`, sso.md 2.22); keep the `prompt` guard in
+        // case `begin` is called directly.
         if (settings.provider.id !== "google") params.prompt = "login"
         params.max_age = "0"
       } else if (attempt.forceLogin) {
@@ -683,6 +684,44 @@ const short = (value: unknown, max: number): string | null =>
   typeof value === "string" && value.length > 0 && value.length <= max ? value : null
 
 /**
+ * Whether the ID token carried the person's groups (P0 #3, sso.md 2.15).
+ *
+ *   - `overage`: Entra leaves `groups` out past 200 and sends
+ *     `"_claim_names": {"groups": "src1"}` (with a `_claim_sources` endpoint)
+ *     instead. The marker wins even if some groups also arrived: a partial
+ *     list is not the person's groups.
+ *   - `present`: the claim is an array (an explicit empty one included: that
+ *     says "no groups") or a single string.
+ *   - `absent`: no claim, or one that is not a list. Google OIDC never sends
+ *     groups, and an Okta custom authorization server that does not list the
+ *     `groups` scope sends none. Okta also omits the claim when a person
+ *     matches no group in its filter: the bridge treats `absent` as an empty
+ *     list once the connection has ever delivered `present` groups, and keeps
+ *     the current role otherwise.
+ *
+ * ⚠ WE DO NOT FOLLOW THE OVERAGE POINTER. Resolving it means calling
+ * Microsoft Graph with credentials we do not hold (the `_claim_sources`
+ * endpoint wants a token for the customer's tenant). That is the future option
+ * (an optional Graph app permission per Entra connection); until then the role
+ * is kept and the sign-in is audited.
+ */
+export function groupsStateOf(
+  claims: Record<string, unknown>,
+  groupsName: string,
+): GroupsState {
+  const names = claims._claim_names
+  if (
+    names &&
+    typeof names === "object" &&
+    !Array.isArray(names) &&
+    (Object.hasOwn(names, groupsName) || Object.hasOwn(names, "groups"))
+  )
+    return "overage"
+  const claim = claims[groupsName]
+  return Array.isArray(claim) || typeof claim === "string" ? "present" : "absent"
+}
+
+/**
  * A verified ID token's claims as an `Assertion`, or null without a usable
  * `sub`.
  *
@@ -700,12 +739,14 @@ export function toAssertion(
   const mapping = connection.attributeMapping
   const email = short(claims[claimFor(mapping, "email", "email")], 320)
   const verified = claims[verifiedClaimFor(connection, settings)]
-  const groupsClaim = claims[claimFor(mapping, "groups", "groups")]
+  const groupsName = claimFor(mapping, "groups", "groups")
+  const groupsClaim = claims[groupsName]
   const groups = (
     typeof groupsClaim === "string" ? [groupsClaim] : strings(groupsClaim)
   )
     .filter((g) => g.length <= 256)
     .slice(0, 500)
+  const groupsState = groupsStateOf(claims, groupsName)
   const amr = strings(claims.amr).slice(0, 16)
   const acr = short(claims.acr, 256)
   const attributes: Record<string, unknown> = {}
@@ -725,6 +766,7 @@ export function toAssertion(
     familyName: short(claims[claimFor(mapping, "familyName", "family_name")], 256),
     attributes,
     groups,
+    groupsState,
     authTime:
       typeof claims.auth_time === "number" ? new Date(claims.auth_time * 1000) : null,
     amr,

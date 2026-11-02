@@ -137,6 +137,59 @@ const issued = z
   })
   .strict()
 
+interface GoogleSyncDetailView {
+  missingScopes?: readonly string[]
+  removedUsers?: number
+  existingUsers?: number
+  keptUsers?: number
+}
+
+const nonNegativeInt = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : undefined
+
+async function googleSyncDetailsByDirectory(
+  d: ConsoleDeps,
+  scim: ScimConsoleDeps,
+  tenantId: string,
+  directories: readonly Directory[],
+): Promise<ReadonlyMap<string, GoogleSyncDetailView>> {
+  const targets = directories.filter(
+    (dir) =>
+      dir.provider === "google" &&
+      dir.lastSyncStatus === "failed" &&
+      (dir.lastSyncError === "scope_missing" || dir.lastSyncError === "large_drop"),
+  )
+  const out = new Map<string, GoogleSyncDetailView>()
+  if (targets.length === 0 || !d.identity) return out
+  const allowedScopes = new Set(scim.google?.scopes ?? GOOGLE_DIRECTORY_SCOPES)
+  const events = await d.identity.store.events(tenantId, { limit: 100 })
+  for (const dir of targets) {
+    const match = events.find(
+      (e) =>
+        e.type === "directory.sync_failed" &&
+        e.reason === dir.lastSyncError &&
+        e.data.directoryId === dir.id,
+    )
+    if (!match) continue
+    const rawScopes = Array.isArray(match.data.missingScopes)
+      ? match.data.missingScopes.filter(
+          (s): s is string => typeof s === "string" && allowedScopes.has(s),
+        )
+      : []
+    const removedUsers = nonNegativeInt(match.data.removedUsers)
+    const existingUsers = nonNegativeInt(match.data.existingUsers)
+    const keptUsers = nonNegativeInt(match.data.keptUsers)
+    const detail: GoogleSyncDetailView = {
+      ...(rawScopes.length > 0 ? { missingScopes: rawScopes } : {}),
+      ...(removedUsers !== undefined ? { removedUsers } : {}),
+      ...(existingUsers !== undefined ? { existingUsers } : {}),
+      ...(keptUsers !== undefined ? { keptUsers } : {}),
+    }
+    if (Object.keys(detail).length > 0) out.set(dir.id, detail)
+  }
+  return out
+}
+
 const googleSetup = (scim: ScimConsoleDeps) => {
   const sa = scim.google?.serviceAccount ?? null
   return {
@@ -148,7 +201,11 @@ const googleSetup = (scim: ScimConsoleDeps) => {
   }
 }
 
-const view = (directory: Directory, scim: ScimConsoleDeps) =>
+const view = (
+  directory: Directory,
+  scim: ScimConsoleDeps,
+  syncDetail?: GoogleSyncDetailView,
+) =>
   directory.provider === "google"
     ? {
         id: directory.id,
@@ -162,6 +219,7 @@ const view = (directory: Directory, scim: ScimConsoleDeps) =>
         lastSyncAt: directory.lastSyncAt,
         lastSyncStatus: directory.lastSyncStatus,
         lastSyncError: directory.lastSyncError,
+        ...(syncDetail ? { lastSyncDetail: syncDetail } : {}),
         google: googleSetup(scim),
         createdAt: directory.createdAt,
       }
@@ -254,9 +312,10 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     const { tenantId } = c.get("auth")
     const rows = await scim.store.directories(tenantId)
     for (const row of rows) void scim.kick(tenantId, row.id)
+    const syncDetails = await googleSyncDetailsByDirectory(d, scim, tenantId, rows)
     return c.json({
       data: rows.map((r) => ({
-        ...view(r, scim),
+        ...view(r, scim, syncDetails.get(r.id)),
         tokens: r.tokens.map(tokenView),
         users: r.users,
         conflicts: r.conflicts,
@@ -351,8 +410,11 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     const summary = (await scim.store.directories(tenantId)).find(
       (r) => r.id === directory.id,
     )
+    const syncDetails = await googleSyncDetailsByDirectory(d, scim, tenantId, [
+      directory,
+    ])
     return c.json({
-      ...view(directory, scim),
+      ...view(directory, scim, syncDetails.get(directory.id)),
       tokens: (summary?.tokens ?? []).map(tokenView),
       users: summary?.users ?? 0,
       conflicts: summary?.conflicts ?? 0,
@@ -513,7 +575,8 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
         )
       }
     }
-    return c.json(view(after, scim))
+    const syncDetails = await googleSyncDetailsByDirectory(d, scim, tenantId, [after])
+    return c.json(view(after, scim, syncDetails.get(after.id)))
   })
 
   app.post("/identity/directories/:id/check", async (c) => {
@@ -538,7 +601,14 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
       data: {
         directoryId: directory.id,
         ok: result.ok,
-        ...(result.ok ? {} : { error: result.error }),
+        ...(result.ok
+          ? {}
+          : {
+              error: result.error,
+              ...(result.missingScopes
+                ? { missingScopes: [...result.missingScopes] }
+                : {}),
+            }),
       },
     })
     return c.json(result)
