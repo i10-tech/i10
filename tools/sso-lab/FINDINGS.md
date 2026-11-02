@@ -23,6 +23,13 @@ fixed as they are found; UX items wait for the UI/UX pass.
 | 2026-11-01 | Waiting-list, block, role-exempt and deprovisioned refusals counted as connection failures: a full workspace made its connection "Degraded" and sent `sso.connection.failed` | Workspace-rule refusals are out of the health counts and the alert (`NOT_THE_CONNECTIONS_FAULT`) |
 | 2026-11-01 | People a directory pushed into a full workspace stayed waiting forever: a freed seat or a plan upgrade retried nobody | The directory kick retries `workspace_full` people, oldest first, when the workspace has room (asked once a kick). Live: after the Pro upgrade the next sync let dave and erin in |
 | 2026-11-01 | Lab: authentik SCIM sync stopped on every user (`NameError: user`): its mapping gets `request.user` | Blueprint mapping reads `request.user` |
+| 2026-11-01 | Okta answered `invalid_client` to a correct secret: oauth4webapi's `ClientSecretBasic` percent-encodes `-`, `_`, `.` and `*`, and Okta does not decode them | `clientSecretBasic` form-encodes as RFC 6749 2.3.1 says; the fake issuer no longer decodes, so it is as strict as Okta |
+| 2026-11-01 | A token endpoint refusal was audited without its reason: openid-client throws on the 401 challenge before reading the body | The audit keeps the HTTP status and the OAuth `error`, read from the challenge or the body |
+| 2026-11-02 | Every Okta person was refused `email_unverified`, and a JIT account could not be made (no first and last name): with an access token in the response, Okta's ID token carries only base claims, and `email_verified`, `given_name`, `family_name` are only at /userinfo | The engine asks /userinfo once for whichever of those the ID token left out, and takes them only for the same `sub` and the same address; a 5xx is an outage, anything else stays unverified |
+| 2026-11-02 | Okta sent no groups: the preset never asked for the `groups` scope | Presets can name scopes asked for only when discovery lists them (`scopesIfSupported`); Okta's org server lists `groups`, a custom server without it would answer `invalid_scope` |
+| 2026-11-02 | A password typed for an SSO-managed account showed Clerk's "The verification strategy is not valid for this account" (claimed accounts have no password) | The sign-in page says the account signs in with the named SSO and points at its button (`isPasswordNotAllowed`) |
+| 2026-11-02 | Everybody who joined a workspace whose owner never finished onboarding was sent through the setup wizard on arrival (oscar, JIT member, and olivia, JIT admin, both landed on `/onboarding`) | `/console/me` answers `should_onboard` only for an owner, or with no team at all |
+| 2026-11-01 | Prod: inbound mail to every hosted mailbox looped: Stalwart's outbound route sent local recipients out by MX, back to itself | `plan.ndjson` routes local domains to local delivery before the `mailbox_route` lookup (applied live too) |
 
 ## Open bugs
 
@@ -32,6 +39,7 @@ fixed as they are found; UX items wait for the UI/UX pass.
 - **Removing a domain from a live connection locks its managed people out without warning.** With the new connection still in Testing, nobody at the domain has any way in. The console should warn (count the managed accounts on that domain) and, ideally, offer the move as one step: add to the new live connection, then remove from the old.
 - **Sign-outs never reach `identity.sso_sessions`.** Only `session.created` is subscribed, so a session ended in Clerk keeps `revoked_at` empty. Harmless for back-channel logout, wrong for anything that counts live SSO sessions. Subscribe `session.ended`/`session.removed`/`session.revoked` and stamp the row.
 - **No way to host mailboxes on a customer domain, so directory mail cannot be turned on.** Mailboxes need a verified domain with `hosts_mailboxes` (`core.mailbox_domains()`), and nothing writes that flag: the domains API makes every domain `sends: true, hosts_mailboxes: false` and there is no console toggle (`docs/decisions/metering.md`: `domains.mailbox` has no writer). Only `i10.tech` is hosted, through `MAIL_DOMAINS`. Every #344 feature (directory mailboxes, leaver suspend, forward to manager, delegate, delayed delete, the Directory mail group picker) is unreachable for a customer, and untested end to end here for the same reason. Needs a "host mail on this domain" switch, limit-checked against `domains.mailbox`.
+- **Signing out of i10 leaves the Okta session, so "Continue with Okta" goes straight back in.** Expected for IdP SSO (the IdP session is the company's), but there is no option to end it: Okta publishes `end_session_endpoint`, and an "also sign out of the IdP" setting (RP-initiated logout with `id_token_hint`) is not built. Needs a decision.
 
 ## UX (for the UI/UX pass)
 
@@ -46,9 +54,15 @@ fixed as they are found; UX items wait for the UI/UX pass.
 - Sign-in page shows saved accounts that were signed in through SSO; "Continue as alice@..." should go straight to her IdP.
 - Creating a connection whose domain another connection holds says "its domain was not added", which reads like the save failed. Say which connection holds the domain and how to move it.
 - The SSO step-up leaves the page and comes back with the action not done; the person presses it again. Resuming the action after the round trip would be smoother.
+- A refused test run lands on a generic dead-end page, and the connection's History still says "No test run yet". The test result (with the refusal reason, such as `email_unverified`) should be recorded and shown back on the connection.
+- The OIDC form has no Scopes field; scopes can only be set through the API (`config.oidc.scopes`).
 
 ## Passed
 
+- Okta OIDC sign-in, live with enforcement Optional: discovery offers "Continue with Okta (OIDC) SSO" with `login_hint` prefilled at Okta; olivia JIT as admin by rule `engineering`, oscar JIT as member (no rule); every session bound; later sign-ins take the linked path.
+- Okta hint mismatch: typed olivia, Okta answered as oscar; the continue page asked, "Sign in as olivia" restarted at Okta, "Continue as oscar" signed oscar in; `sign_in.hint_mismatch` audited without addresses.
+- Step-up NOT yet tested on Okta: the key revoke at 00:10 came a minute after sign-in, inside the 10 minute fresh window (`FRESH_WINDOW_MS`), so no step-up was due. Retest more than 10 minutes after signing in.
+- Okta OIDC test run (org server, `client_secret_basic`): `email_verified`, `given_name` and `family_name` from /userinfo, `groups` (`Everyone`, `engineering`) from the ID token; plans JIT as member (the default) with no rules, and as admin by rule `engineering` once added (test run resolution `role: admin`, rule id recorded).
 - SCIM from authentik: provision, update (rename reaches Clerk), deactivate (membership released, managed row freed), reactivate (claimed and member again), delete (deprovisioned, row and identity links purged), group add and remove both ways. 7 users and 6 groups with members; alice refused `role_exempt` (#338); new people get a Clerk account, a managed row and a join request at the seat cap.
 - `login_hint` live: a start from the sign-in page sends `Subject/NameID` (lowercased) to Keycloak.
 

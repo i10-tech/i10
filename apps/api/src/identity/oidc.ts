@@ -412,7 +412,7 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
   ): Promise<oidc.ClientAuth> {
     if (settings.provider.id === "google") {
       if (!deps.google) throw new OidcMisconfigured("Google sign-in is not configured.")
-      return oidc.ClientSecretBasic(deps.google.clientSecret)
+      return clientSecretBasic(deps.google.clientSecret)
     }
     const sealed = sealedOidc(
       await deps.store.connectionSecrets(connection.tenantId, connection.id),
@@ -441,7 +441,7 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
     if (!sealed.clientSecret) throw new OidcMisconfigured("No client secret is set.")
     return settings.clientAuth === "client_secret_post"
       ? oidc.ClientSecretPost(sealed.clientSecret)
-      : oidc.ClientSecretBasic(sealed.clientSecret)
+      : clientSecretBasic(sealed.clientSecret)
   }
 
   const google = deps.google !== null
@@ -467,7 +467,7 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
       const params: Record<string, string> = {
         redirect_uri: redirectFor(settings),
         response_type: "code",
-        scope: settings.scopes.join(" "),
+        scope: scopesFor(settings, meta).join(" "),
         state: attempt.state,
         nonce: attempt.nonce,
         code_challenge: await oidc.calculatePKCECodeChallenge(attempt.pkceVerifier),
@@ -540,7 +540,12 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
         })
       } catch (error) {
         if (isOutage(error)) throw outageOf(error)
-        return refuse("invalid_response", failureOf(error))
+        const failure = failureOf(error)
+        if (failure.oauthError === undefined) {
+          const named = await bodyErrorOf(error)
+          if (named) failure.oauthError = named
+        }
+        return refuse("invalid_response", failure)
       } finally {
         const fresh = oidc.getJwksCache(config)
         if (fresh) remember(jwks, jwksKey, fresh)
@@ -561,7 +566,14 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
           return refuse("hosted_domain", { hd, subject: claims.sub })
       }
 
-      const assertion = toAssertion(claims, connection, settings)
+      const vouched = await withUserinfo(
+        config,
+        tokens.access_token,
+        claims,
+        connection,
+        settings,
+      )
+      const assertion = toAssertion(vouched, connection, settings)
       if (!assertion) return refuse("invalid_response", { failure: "bad_subject" })
       return { ok: true, assertion }
     },
@@ -578,6 +590,74 @@ function claimFor(
 ): string {
   for (const [claim, ours] of Object.entries(mapping)) if (ours === field) return claim
   return fallback
+}
+
+/** The connection's scopes, plus the preset's extras this IdP says it supports. */
+function scopesFor(settings: OidcSettings, meta: oidc.ServerMetadata): string[] {
+  const supported = strings(meta.scopes_supported)
+  const extra = (settings.provider.scopesIfSupported ?? []).filter(
+    (s) => supported.includes(s) && !settings.scopes.includes(s),
+  )
+  return [...settings.scopes, ...extra]
+}
+
+/** The claim that vouches for the email: the mapping's, the preset's, or the standard one. */
+function verifiedClaimFor(
+  connection: Pick<Connection, "attributeMapping">,
+  settings: Pick<OidcSettings, "provider">,
+): string {
+  return claimFor(
+    connection.attributeMapping,
+    "emailVerified",
+    settings.provider.emailVerifiedClaim ?? "email_verified",
+  )
+}
+
+/**
+ * The ID token's claims, with what it leaves out about the person taken from
+ * userinfo: the email's verification and the first and last name. Okta's ID
+ * token carries only base claims when an access token comes with it, so
+ * `email_verified`, `given_name` and `family_name` are only at /userinfo.
+ *
+ * ⚠ ONLY CLAIMS THE ID TOKEN LEFT OUT, ONLY FOR THE SAME PERSON AND ADDRESS.
+ * openid-client refuses a userinfo answer for another `sub`; we refuse one for
+ * another address, so userinfo can only add to what the ID token said about
+ * that address, never change it. The subject, the address and everything else
+ * still come from the signed ID token.
+ */
+async function withUserinfo(
+  config: oidc.Configuration,
+  accessToken: string,
+  claims: oidc.IDToken,
+  connection: Pick<Connection, "attributeMapping">,
+  settings: Pick<OidcSettings, "provider">,
+): Promise<oidc.IDToken> {
+  const mapping = connection.attributeMapping
+  const missing = [
+    verifiedClaimFor(connection, settings),
+    claimFor(mapping, "givenName", "given_name"),
+    claimFor(mapping, "familyName", "family_name"),
+  ].filter((name) => claims[name] === undefined)
+  if (!missing.length || !config.serverMetadata().userinfo_endpoint) return claims
+  const emailClaim = claimFor(mapping, "email", "email")
+  const email = claims[emailClaim]
+  if (typeof email !== "string") return claims
+  let info: oidc.UserInfoResponse
+  try {
+    info = await oidc.fetchUserInfo(config, accessToken, claims.sub)
+  } catch (error) {
+    if (isOutage(error)) throw outageOf(error)
+    // Unanswered is unvouched: the person is refused as `email_unverified`.
+    return claims
+  }
+  const sameAddress =
+    typeof info[emailClaim] === "string" &&
+    (info[emailClaim] as string).toLowerCase() === email.toLowerCase()
+  if (!sameAddress) return claims
+  const added = Object.fromEntries(
+    missing.filter((name) => info[name] !== undefined).map((name) => [name, info[name]]),
+  )
+  return { ...claims, ...added }
 }
 
 /** Claims we never keep as attributes: protocol plumbing, not facts about the person. */
@@ -619,12 +699,7 @@ export function toAssertion(
   if (!subject) return null
   const mapping = connection.attributeMapping
   const email = short(claims[claimFor(mapping, "email", "email")], 320)
-  const verifiedClaim = claimFor(
-    mapping,
-    "emailVerified",
-    settings.provider.emailVerifiedClaim ?? "email_verified",
-  )
-  const verified = claims[verifiedClaim]
+  const verified = claims[verifiedClaimFor(connection, settings)]
   const groupsClaim = claims[claimFor(mapping, "groups", "groups")]
   const groups = (
     typeof groupsClaim === "string" ? [groupsClaim] : strings(groupsClaim)
@@ -696,6 +771,48 @@ function outageOf(error: unknown): Error {
 const CODE = /^[A-Za-z0-9_.:-]{1,80}$/
 
 /**
+ * `client_secret_basic` as the IdPs we meet actually read it.
+ *
+ * ⚠ openid-client's `ClientSecretBasic` PERCENT-ENCODES `-`, `_`, `.` AND `*`
+ * IN THE SECRET (`%2D`, `%5F`). RFC 6749 2.3.1 says to form-urlencode the id
+ * and secret, and the HTML form algorithm leaves exactly those four alone.
+ * Okta does not decode what it receives, so a secret with a hyphen or an
+ * underscore - which Okta's own generated secrets nearly always have - reached
+ * it as a different string and answered `invalid_client` while the same secret
+ * sent by hand (or as `client_secret_post`) worked. An IdP that does decode
+ * reads the unencoded form identically, so this is the safe side of both.
+ */
+function clientSecretBasic(secret: string): oidc.ClientAuth {
+  const formEncode = (value: string): string =>
+    new URLSearchParams({ v: value }).toString().slice(2)
+  return (_server, client, _body, headers) => {
+    const credentials = `${formEncode(client.client_id)}:${formEncode(secret)}`
+    headers.set("authorization", `Basic ${Buffer.from(credentials).toString("base64")}`)
+  }
+}
+
+/**
+ * The OAuth `error` in the body of a token response openid-client refused on
+ * its `WWW-Authenticate` challenge, which it throws before reading the body.
+ * Okta's 401 for a bad client secret is exactly that, and the body is the only
+ * place that says `invalid_client`. Only the error NAME is kept, and only when
+ * it is a plain code: the body of a failed exchange never holds a token.
+ */
+async function bodyErrorOf(error: unknown): Promise<string | undefined> {
+  for (const e of causes(error)) {
+    const response = (e as { response?: unknown }).response
+    if (!(response instanceof Response)) continue
+    try {
+      const body = (await response.clone().json()) as { error?: unknown }
+      if (typeof body.error === "string" && CODE.test(body.error)) return body.error
+    } catch {
+      // Not JSON, or already read: nothing to add.
+    }
+  }
+  return undefined
+}
+
+/**
  * What the audit log keeps of a verification failure: openid-client's error
  * code, the OAuth `error` the token endpoint sent, and the claim NAME that
  * failed. Never the parameters or the claims themselves - they carry the code.
@@ -706,13 +823,23 @@ function failureOf(error: unknown): Record<string, unknown> {
     const code = (e as { code?: unknown }).code
     if (out.failure === undefined && typeof code === "string" && CODE.test(code))
       out.failure = code
-    const oauthError = (e as { error?: unknown }).error
-    if (
-      out.oauthError === undefined &&
-      typeof oauthError === "string" &&
-      CODE.test(oauthError)
-    )
-      out.oauthError = oauthError
+    // A 401 with `WWW-Authenticate` surfaces as a bare challenge error whose
+    // `cause` is the parsed challenges: the OAuth `error` lives in their
+    // parameters, not on the error, so `invalid_client` was otherwise lost.
+    const challenges = Array.isArray(e)
+      ? e.map((c) => (c as { parameters?: { error?: unknown } }).parameters?.error)
+      : [(e as { error?: unknown }).error]
+    for (const oauthError of challenges) {
+      if (
+        out.oauthError === undefined &&
+        typeof oauthError === "string" &&
+        CODE.test(oauthError)
+      )
+        out.oauthError = oauthError
+    }
+    const status = (e as { status?: unknown }).status
+    if (out.status === undefined && Number.isInteger(status) && (status as number) >= 400)
+      out.status = status
     const claim = (e as { cause?: { claim?: unknown } }).cause?.claim
     if (out.claim === undefined && typeof claim === "string" && CODE.test(claim))
       out.claim = claim

@@ -31,6 +31,12 @@ export interface TokenKnobs {
   rogueKey?: boolean
   /** The callback's `iss` parameter: the issuer by default, null for none. */
   issParam?: string | null
+  /**
+   * What /userinfo answers for this grant's access token, over the ID token's
+   * claims before `omit` (Okta's userinfo keeps what its ID token leaves out).
+   * A number answers that status instead.
+   */
+  userinfo?: Record<string, unknown> | number
 }
 
 export interface IssuerOptions {
@@ -72,7 +78,9 @@ export async function testIssuer(options: IssuerOptions = {}) {
       used: boolean
     }
   >()
-  const calls = { discovery: 0, jwks: 0, token: 0 }
+  /** What /userinfo answers, by access token. */
+  const userinfo = new Map<string, Record<string, unknown> | number>()
+  const calls = { discovery: 0, jwks: 0, token: 0, userinfo: 0 }
   const fail = {
     token: null as number | null,
     discovery: null as number | null,
@@ -88,6 +96,7 @@ export async function testIssuer(options: IssuerOptions = {}) {
     authorization_endpoint: `${origin}/authorize`,
     token_endpoint: `${origin}/token`,
     jwks_uri: `${origin}/jwks`,
+    userinfo_endpoint: `${origin}/userinfo`,
     response_types_supported: ["code"],
     code_challenge_methods_supported: ["S256"],
     id_token_signing_alg_values_supported: ["RS256"],
@@ -102,10 +111,10 @@ export async function testIssuer(options: IssuerOptions = {}) {
     ...options.discovery,
   })
 
-  const json = (body: unknown, status = 200) =>
+  const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), {
       status,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...extra },
     })
 
   async function clientAuthenticated(
@@ -114,10 +123,11 @@ export async function testIssuer(options: IssuerOptions = {}) {
   ): Promise<boolean> {
     const basic = req.get("authorization")
     if (basic?.startsWith("Basic ")) {
+      // ⚠ NOT PERCENT-DECODED, AS OKTA'S IS NOT. A secret with `-` or `_` sent
+      // as `%2D` / `%5F` is a different string to it, and `invalid_client`.
       const [id, secret] = Buffer.from(basic.slice(6), "base64")
         .toString("utf8")
         .split(":")
-        .map(decodeURIComponent)
       return id === clientId && secret === clientSecret
     }
     if (body.get("client_secret") !== null)
@@ -163,13 +173,25 @@ export async function testIssuer(options: IssuerOptions = {}) {
       if (fail.jwks) return json({}, fail.jwks)
       return json({ keys: [publicJwk] })
     }
+    if (url.pathname === "/userinfo") {
+      calls.userinfo += 1
+      const token = headers.get("authorization")?.replace(/^Bearer /, "") ?? ""
+      const answer = userinfo.get(token)
+      if (answer === undefined) return json({ error: "invalid_token" }, 401)
+      return typeof answer === "number" ? json({}, answer) : json(answer)
+    }
     if (url.pathname === "/token" && init?.method === "POST") {
       calls.token += 1
       if (fail.token) return json({ error: "temporarily_unavailable" }, fail.token)
       const body = new URLSearchParams(String(init.body))
       seen.tokenBodies.push(body)
       if (!(await clientAuthenticated(headers, body)))
-        return json({ error: "invalid_client" }, 401)
+        // RFC 6749 5.2: a 401 from the token endpoint carries a challenge, as
+        // Okta's does, and the OAuth `error` only in the body. openid-client
+        // throws on the challenge before it reads that body.
+        return json({ error: "invalid_client" }, 401, {
+          "www-authenticate": 'Basic realm="idp"',
+        })
       const grant = issued.get(body.get("code") ?? "")
       if (!grant || grant.used) return json({ error: "invalid_grant" }, 400)
       grant.used = true
@@ -197,12 +219,18 @@ export async function testIssuer(options: IssuerOptions = {}) {
         sid: "idp-session-1",
         ...grant.knobs.claims,
       }
+      const accessToken = randomBytes(16).toString("hex")
+      const answer = grant.knobs.userinfo
+      userinfo.set(
+        accessToken,
+        typeof answer === "number" ? answer : { ...claims, ...answer },
+      )
       for (const name of grant.knobs.omit ?? []) delete claims[name]
       const idToken = await new SignJWT(claims)
         .setProtectedHeader({ alg: "RS256", kid })
         .sign(grant.knobs.rogueKey ? rogue.privateKey : signing.privateKey)
       return json({
-        access_token: randomBytes(16).toString("hex"),
+        access_token: accessToken,
         token_type: "Bearer",
         expires_in: 300,
         id_token: idToken,

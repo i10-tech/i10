@@ -216,12 +216,79 @@ describe("an OIDC sign-in through the bridge", () => {
     expect(attempt!.nonce).toBe(p.get("nonce"))
   })
 
+  it("asks Okta for `groups` only when its discovery lists the scope", async () => {
+    const orgServer = await world({
+      issuer: { discovery: { scopes_supported: ["openid", "email", "groups"] } },
+    })
+    expect(new URL(await orgServer.start()).searchParams.get("scope")).toBe(
+      "openid email profile groups",
+    )
+    const customServer = await world({
+      issuer: { discovery: { scopes_supported: ["openid", "email", "profile"] } },
+    })
+    expect(new URL(await customServer.start()).searchParams.get("scope")).toBe(
+      "openid email profile",
+    )
+  })
+
   it("links again by `sub` on the next sign-in, even after an email change", async () => {
     const w = await world()
     await w.signIn()
     const again = await w.callback({ claims: { email: "ada@acme.test" } })
     expect(again.done.outcome).toBe("signed_in")
     expect(w.store.identities).toHaveLength(1)
+  })
+})
+
+describe("email verification from userinfo, as Okta sends it", () => {
+  const noClaim = { omit: ["email_verified"] }
+
+  it("takes email_verified from userinfo when the ID token leaves it out", async () => {
+    const w = await world()
+    const { done } = await w.callback(noClaim)
+    expect(done.outcome).toBe("signed_in")
+    expect(w.idp.calls.userinfo).toBe(1)
+  })
+
+  it("takes the names it left out from userinfo too, in one call", async () => {
+    const w = await world()
+    const at = w.idp.authorize(await w.start(), {
+      omit: ["email_verified", "given_name", "family_name"],
+      userinfo: { given_name: "Olivia", family_name: "Test" },
+    })
+    const [attempt] = [...w.store.attempts.values()]
+    const verified = await w.engine.verify(oidcConnection(), attempt!, at.state, at.query)
+    expect(verified).toMatchObject({
+      ok: true,
+      assertion: { emailVerified: true, givenName: "Olivia", familyName: "Test" },
+    })
+    expect(w.idp.calls.userinfo).toBe(1)
+  })
+
+  it("does not ask userinfo when the ID token already says", async () => {
+    const w = await world()
+    const { done } = await w.callback({ claims: { email_verified: false } })
+    expect(refusal(done)).toBe("email_unverified")
+    expect(w.idp.calls.userinfo).toBe(0)
+  })
+
+  it("refuses userinfo's word for another person or another address", async () => {
+    for (const userinfo of [
+      { sub: "idp|mallory" },
+      { email: "mallory@acme.test" },
+      { email_verified: false },
+      401,
+    ]) {
+      const w = await world()
+      const { done } = await w.callback({ ...noClaim, userinfo })
+      expect(refusal(done)).toBe("email_unverified")
+    }
+  })
+
+  it("treats userinfo failing with a 5xx as the IdP being down", async () => {
+    const w = await world()
+    const { done } = await w.callback({ ...noClaim, userinfo: 503 })
+    expect(done.outcome).toBe("unavailable")
   })
 })
 
@@ -325,6 +392,10 @@ describe("what openid-client refuses", () => {
   it("a client secret the IdP does not accept", async () => {
     const w = await world({ secrets: { oidc: { clientSecret: "wrong-secret-value" } } })
     expect(refusal((await w.callback()).done)).toBe("invalid_response")
+    expect(w.store.events.at(-1)!.data).toMatchObject({
+      oauthError: "invalid_client",
+      status: 401,
+    })
   })
 
   it("an IdP `error=` redirect, cleanly and audited", async () => {

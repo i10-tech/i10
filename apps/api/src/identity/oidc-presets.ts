@@ -7,9 +7,11 @@
  *
  *   - Okta: an OIDC Web Application, grant type Authorization Code, the
  *     redirect URI below; issuer `https://<org>.okta.com` (org server) or
- *     `https://<org>.okta.com/oauth2/<id>` (custom server). Okta does send
- *     `email_verified`. For groups, add a `groups` claim and the `groups`
- *     scope. private_key_jwt: paste our JWKS URL as the client's key source.
+ *     `https://<org>.okta.com/oauth2/<id>` (custom server). Okta's ID token
+ *     carries no `email_verified` on the code flow; the engine reads it from
+ *     /userinfo. The org server sends groups once `groups` is asked for, which
+ *     the engine does when discovery lists it; a custom server needs a
+ *     `groups` claim and scope of its own. private_key_jwt: paste our JWKS URL as the client's key source.
  *   - Entra ID: an app registration (single tenant), a Web redirect URI, and
  *     the TENANT issuer `https://login.microsoftonline.com/<tenant id>/v2.0`;
  *     `common`, `organizations` and `consumers` are refused because their
@@ -49,6 +51,13 @@ export interface OidcPreset {
    */
   issuerPattern: RegExp | null
   scopes: readonly string[]
+  /**
+   * Scopes asked for too, but only when the IdP's discovery lists them in
+   * `scopes_supported`: Okta's org server knows `groups`, and a custom
+   * authorization server without it answers `invalid_scope` to the whole
+   * sign-in.
+   */
+  scopesIfSupported?: readonly string[]
   /** Client authentication this IdP supports with us. */
   clientAuth: readonly ClientAuthMethod[]
   /**
@@ -77,6 +86,7 @@ export const OIDC_PRESETS: Readonly<Record<OidcProvider, OidcPreset>> = {
     issuerHint: "https://your-org.okta.com",
     issuerPattern: null,
     scopes: DEFAULT_SCOPES,
+    scopesIfSupported: ["groups"],
     clientAuth: ALL_AUTH,
     assertionAudience: "token_endpoint",
     requires: [
