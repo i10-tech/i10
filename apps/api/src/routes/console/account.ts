@@ -75,7 +75,19 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       },
       tenant: profile,
       billing,
-      onboarding: onboardingState,
+      /*
+       * ⚠ ONLY AN OWNER IS SENT THROUGH ONBOARDING. It sets the workspace up,
+       * and the workspace's state is what decides it; somebody who joined
+       * (invited, by a team rule, or through SSO JIT) was handed the wizard
+       * for a workspace that is not theirs to set up whenever its owner had
+       * not finished it (2026-11-02, two Okta JIT sign-ins). No roles wired
+       * means no team, so the caller is the one who sets it up.
+       */
+      onboarding: {
+        ...onboardingState,
+        should_onboard:
+          onboardingState.should_onboard && (access === null || access.role === "owner"),
+      },
       access: access ? { role: access.role, permissions: access.permissions } : null,
     })
   })

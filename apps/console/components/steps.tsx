@@ -264,8 +264,17 @@ const RailReady = React.createContext<{ readonly current: boolean }>({ current: 
  * becomes current, the nearest scrolling box glides so that item sits at the
  * top - the answered step moves up and out, the new question arrives where the
  * eye already is. It waits for the answered step to finish folding, or it
- * would aim at where the new one was a moment ago. On the first render it goes
- * there at once, so a resumed flow opens on its step.
+ * would aim at where the new one was a moment ago.
+ *
+ * ⚠ A RESUMED FLOW OPENS ON ITS STEP BEFORE ANYTHING IS PAINTED (2026-11-02).
+ * The jump used to run once React mounted, after the server's page had
+ * already painted from the top, so a resumed flow showed its first steps and
+ * then leapt. A page that opens on a rail renders `OPEN_RAIL_ON_CURRENT`
+ * (lib/step-rail.ts) after it, from the server, which puts the step at the top
+ * as the HTML is parsed; a client-side
+ * navigation, which runs no such script, is placed by a layout effect, also
+ * before paint. Opening on the FIRST step still stays at the top (2026-10-13),
+ * so the heading and progress show.
  */
 export function StepRail({
   className,
@@ -284,37 +293,31 @@ export function StepRail({
     drawn.current = true
   }, [])
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const list = ref.current
     if (!follow || !list) return
     let current: Element | null = null
     let timer: ReturnType<typeof setTimeout> | undefined
 
-    const go = (instant: boolean) => {
+    const go = () => {
       const next = list.querySelector("[data-step-state=current]")
       if (!next || next === current) return
       const first = current === null
       current = next
-      /*
-       * ⚠ OPENING ON THE FIRST STEP, THE PAGE STAYS AT THE TOP (2026-10-13).
-       * Jumping to it hid the heading and the progress above it, so set-up for
-       * a new workspace opened mid-page; a resumed flow on a later step still
-       * opens on that step.
-       */
-      if (first && next === list.querySelector("[data-step-state]")) return
+      if (first) {
+        if (next !== list.querySelector("[data-step-state]"))
+          next.scrollIntoView({ behavior: "instant", block: "start" })
+        return
+      }
       clearTimeout(timer)
       timer = setTimeout(
-        () =>
-          next.scrollIntoView({
-            behavior: instant || first ? "instant" : "smooth",
-            block: "start",
-          }),
-        instant || first ? 0 : 480,
+        () => next.scrollIntoView({ behavior: "smooth", block: "start" }),
+        480,
       )
     }
 
-    go(true)
-    const watcher = new MutationObserver(() => go(false))
+    go()
+    const watcher = new MutationObserver(go)
     watcher.observe(list, {
       subtree: true,
       childList: true,
@@ -328,7 +331,11 @@ export function StepRail({
   }, [follow])
 
   return (
-    <ol ref={ref} className={cn("min-w-0", className)}>
+    <ol
+      ref={ref}
+      data-step-rail={follow ? "follow" : undefined}
+      className={cn("min-w-0", className)}
+    >
       <RailReady.Provider value={drawn}>{children}</RailReady.Provider>
     </ol>
   )

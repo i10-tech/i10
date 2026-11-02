@@ -203,7 +203,9 @@ function consoleApp(
       usage: {
         billing: async () => ({ plan: null }),
       } as unknown as ConsoleDeps["usage"],
-      onboarding: { get: async () => null } as unknown as ConsoleDeps["onboarding"],
+      onboarding: {
+        get: async () => ({ should_onboard: true }),
+      } as unknown as ConsoleDeps["onboarding"],
       profile: { get: async () => null } as unknown as ConsoleDeps["profile"],
       marketing: {} as ConsoleDeps["marketing"],
       log: { error: () => {}, warn: () => {} },
@@ -293,6 +295,16 @@ describe("GET /console/me", () => {
         "api_keys:manage_all",
       ],
     })
+  })
+  it("sends only the owner through onboarding, not people who joined", async () => {
+    const onboards = async (userId: string) => {
+      const res = await consoleApp(userId).app.request("/console/me", { headers: BEARER })
+      return ((await res.json()) as { onboarding: { should_onboard: boolean } })
+        .onboarding.should_onboard
+    }
+    expect(await onboards("user_owner")).toBe(true)
+    expect(await onboards("user_admin")).toBe(false)
+    expect(await onboards("user_m")).toBe(false)
   })
 })
 
