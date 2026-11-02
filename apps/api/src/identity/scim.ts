@@ -1298,10 +1298,16 @@ export const TOKEN_PREFIX = "i10_scim_"
 
 const TOKEN = /^i10_scim_[A-Za-z0-9_-]{43}$/
 
-/** A bearer token in our format, or null. Checked before it is hashed. */
+/**
+ * A token in our format, or null. Checked before it is hashed.
+ *
+ * ⚠ THE `Bearer ` PREFIX IS OPTIONAL. Okta's header-auth SCIM sends the field
+ * verbatim (`Authorization: i10_scim_...`, probed 2026-11-02), Entra sends
+ * `Bearer i10_scim_...`. Our prefix makes a bare value unambiguous.
+ */
 export function readToken(header: string | undefined): string | null {
   if (!header || header.length > 128) return null
-  const match = /^Bearer\s+(\S+)\s*$/i.exec(header)
+  const match = /^(?:Bearer\s+)?(\S+)\s*$/i.exec(header)
   const token = match?.[1]
   return token && TOKEN.test(token) ? token : null
 }

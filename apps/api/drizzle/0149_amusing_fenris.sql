@@ -1,0 +1,1 @@
+ALTER TABLE "identity"."connections" ADD COLUMN "groups_last_seen_at" timestamp with time zone;

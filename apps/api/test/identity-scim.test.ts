@@ -1008,16 +1008,16 @@ describe("views and discovery", () => {
 describe("bearer tokens", () => {
   const good = `${TOKEN_PREFIX}${"a".repeat(43)}`
 
-  it("accepts only our format, in a Bearer header", () => {
+  it("accepts only our format, with or without Bearer (Okta header auth sends it bare)", () => {
     expect(readToken(`Bearer ${good}`)).toBe(good)
     expect(readToken(`bearer ${good}`)).toBe(good)
     expect(readToken(`Bearer   ${good}  `)).toBe(good)
+    expect(readToken(good)).toBe(good)
   })
 
   it("refuses everything else: missing, other schemes, wrong prefix, wrong length, odd characters, oversized", () => {
     expect(readToken(undefined)).toBeNull()
     expect(readToken("")).toBeNull()
-    expect(readToken(good)).toBeNull()
     expect(readToken(`Basic ${good}`)).toBeNull()
     expect(readToken(`Bearer sk_live_${"a".repeat(43)}`)).toBeNull()
     expect(readToken(`Bearer ${TOKEN_PREFIX}${"a".repeat(42)}`)).toBeNull()
