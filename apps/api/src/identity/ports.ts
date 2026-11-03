@@ -116,7 +116,13 @@ export interface RelinkRequestRow {
  * longer there (or its subject is no longer what the caller saw).
  */
 export type RelinkResult =
-  | { outcome: "moved"; identityId: string; clerkUserId: string; from: string; to: string }
+  | {
+      outcome: "moved"
+      identityId: string
+      clerkUserId: string
+      from: string
+      to: string
+    }
   | { outcome: "conflict" }
   | { outcome: "gone" }
 
@@ -215,6 +221,11 @@ export interface IdentityStore {
     id: string,
     patch: ConnectionPatch,
   ): Promise<Connection | null>
+  /** Deletes a draft nobody has used. Atomic with the status check. */
+  deleteDraftConnection(
+    tenantId: string,
+    id: string,
+  ): Promise<"deleted" | "not_found" | "not_draft" | "in_use">
   /** `not_found`: no such verified proof in this workspace; `taken`: another connection has it. */
   addDomain(
     tenantId: string,

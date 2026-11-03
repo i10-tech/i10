@@ -416,6 +416,11 @@ function SamlForm({
       >
         <FloatingInput
           label="Metadata URL"
+          hint={
+            connection.provider === "okta"
+              ? "In Okta: the app's Sign On tab, Metadata URL. It looks like https://your-org.okta.com/app/exk.../sso/saml/metadata"
+              : undefined
+          }
           value={form.metadataUrl}
           disabled={locked}
           onChange={(e) => setForm({ ...form, metadataUrl: e.target.value })}

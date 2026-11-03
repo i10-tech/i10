@@ -8,16 +8,21 @@ import { Button } from "@repo/ui/components/button/button"
 import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
 import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
-import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
 import { teamAccessDomains, type AccessDomain } from "@/lib/actions"
-import { addSsoDomain, createSsoConnection } from "@/lib/sso-actions"
+import { addSsoDomain, createSsoConnection, ssoConnections } from "@/lib/sso-actions"
 import type { SsoAbilities, SsoConnections } from "@/lib/sso-types"
 import { useResetOnOpen } from "@/lib/react"
-import { toastDone } from "@/lib/toast"
+import { toastDone, toastFailure } from "@/lib/toast"
 import { healthLabel, type HealthState } from "@/lib/connection-health"
 import { Badge, type BadgeTone } from "@repo/ui/components/badge/badge"
-import { ENFORCEMENT_LABEL, StatusBadge, useSsoCall } from "./shared"
+import { domainChoices } from "@/lib/sso-domain-choices"
+import {
+  defaultConnectionName,
+  idpChoices,
+  protocolOptions,
+} from "@/lib/sso-setup-choices"
+import { ENFORCEMENT_LABEL, StatusBadge, useSsoAttempt, useSsoCall } from "./shared"
 
 /**
  * The workspace's SSO connections, and the wizard that makes one (sso.md 2.10):
@@ -28,25 +33,6 @@ import { ENFORCEMENT_LABEL, StatusBadge, useSsoCall } from "./shared"
  * the Team page (a TXT record or a verified sending domain); this lists those
  * and links to where a new one is proved. The API checks it again.
  */
-
-type IdpChoice = { idp: string; label: string; protocols: ("oidc" | "saml")[] }
-
-/** The identity providers, merged across the two protocols' presets. */
-function idpChoices(presets: SsoConnections["presets"]): IdpChoice[] {
-  const byId = new Map<string, IdpChoice>()
-  for (const p of presets.oidc)
-    byId.set(p.id, { idp: p.id, label: p.label, protocols: ["oidc"] })
-  for (const p of presets.saml) {
-    const existing = byId.get(p.id)
-    if (existing) existing.protocols.push("saml")
-    else byId.set(p.id, { idp: p.id, label: p.label, protocols: ["saml"] })
-  }
-  // The generic presets are one choice for both protocols, so neither
-  // preset's own label ("Other OpenID Connect provider") fits it.
-  const generic = byId.get("generic")
-  if (generic && generic.protocols.length > 1) generic.label = "Another provider"
-  return [...byId.values()]
-}
 
 const HEALTH_TONE: Record<HealthState, BadgeTone> = {
   healthy: "success",
@@ -146,9 +132,11 @@ function NewConnection({
 }) {
   const router = useRouter()
   const call = useSsoCall()
+  const attempt = useSsoAttempt()
   const choices = React.useMemo(() => idpChoices(presets), [presets])
   const [step, setStep] = React.useState<"domain" | "idp" | "name">("domain")
   const [domains, setDomains] = React.useState<AccessDomain[] | null>(null)
+  const [connections, setConnections] = React.useState<SsoConnections["data"]>([])
   const [domain, setDomain] = React.useState<string | null>(null)
   const [idp, setIdp] = React.useState<string | null>(null)
   const [protocol, setProtocol] = React.useState<"oidc" | "saml">("oidc")
@@ -163,6 +151,7 @@ function NewConnection({
     setName("")
     setBusy(false)
     setDomains(null)
+    setConnections([])
   })
 
   // ⚠ AN EFFECT, NOT THE RESET: `useResetOnOpen` runs during render, and a
@@ -170,10 +159,17 @@ function NewConnection({
   React.useEffect(() => {
     if (!open) return
     let live = true
-    void teamAccessDomains().then((r) => {
-      if (live)
-        setDomains(r.ok ? r.data.data.filter((d) => d.status === "verified") : [])
-    })
+    void Promise.all([teamAccessDomains(), ssoConnections()]).then(
+      ([domainsResult, connectionsResult]) => {
+        if (!live) return
+        setDomains(
+          domainsResult.ok
+            ? domainsResult.data.data.filter((d) => d.status === "verified")
+            : [],
+        )
+        setConnections(connectionsResult.ok ? connectionsResult.data.data : [])
+      },
+    )
     return () => {
       live = false
     }
@@ -193,7 +189,7 @@ function NewConnection({
       ? protocol
       : (c?.protocols[0] ?? "oidc")
     setProtocol(chosen)
-    setName(`${c?.label ?? next} (${chosen === "oidc" ? "OIDC" : "SAML"})`)
+    setName(defaultConnectionName(c?.label ?? next, chosen))
   }
 
   async function create() {
@@ -207,10 +203,22 @@ function NewConnection({
       )
       if (!made) return
       if (domain) {
-        const joined = await call(() => addSsoDomain(made.id, domain), {
-          title: "The connection was created, but its domain was not added",
-        })
+        const joined = await attempt(() => addSsoDomain(made.id, domain))
         if (joined === null) {
+          toastFailure(
+            {
+              error: "Add it on the connection's Access tab.",
+              name: "declined",
+              status: 400,
+            },
+            { title: "The connection was created without its domain" },
+          )
+        } else if (!joined.ok) {
+          toastFailure(joined, {
+            title: "The connection was created, but its domain was not added",
+          })
+        }
+        if (joined === null || !joined.ok) {
           router.push(`/settings/security/${made.id}`)
           onOpenChange(false)
           return
@@ -260,13 +268,17 @@ function NewConnection({
                   layout="list"
                   value={domain}
                   onValueChange={setDomain}
-                  options={domains.map((d) => ({
+                  options={domainChoices(domains, connections, null).map((d) => ({
                     value: d.id,
                     label: d.name,
                     description:
                       d.source === "txt"
                         ? "Proved with a TXT record"
                         : "A verified sending domain",
+                    disabled: d.coveredBy !== null,
+                    disabledReason: d.coveredBy
+                      ? `Covered by ${d.coveredBy.name}`
+                      : undefined,
                   }))}
                 />
               )}
@@ -291,18 +303,20 @@ function NewConnection({
                 }))}
               />
               {choice && choice.protocols.length > 1 && (
-                <MorphSelect
-                  label="Protocol"
-                  value={protocol}
-                  onValueChange={(v) => {
-                    setProtocol(v as "oidc" | "saml")
-                    setName(`${choice.label} (${v === "oidc" ? "OIDC" : "SAML"})`)
-                  }}
-                  items={choice.protocols.map((p) => ({
-                    value: p,
-                    label: p === "oidc" ? "OpenID Connect (recommended)" : "SAML 2.0",
-                  }))}
-                />
+                <>
+                  <p className="text-xs font-medium">Protocol</p>
+                  <RadioCards
+                    aria-label="Protocol"
+                    layout="grid"
+                    value={protocol}
+                    onValueChange={(v) => {
+                      const next = v as "oidc" | "saml"
+                      setProtocol(next)
+                      setName(defaultConnectionName(choice.label, next))
+                    }}
+                    options={protocolOptions(choice.protocols)}
+                  />
+                </>
               )}
               {guide && guide.length > 0 && (
                 <div className="rounded-lg border bg-muted/40 p-3">

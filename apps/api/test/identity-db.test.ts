@@ -107,6 +107,57 @@ suite("identity schema", () => {
     expect(await made("google", "oidc")).toBeNull()
   })
 
+  it("deletes only an unused draft and leaves its audit event", async () => {
+    const [proof] =
+      await owner`insert into core.join_domains (tenant_id, name, clerk_org_id, source, verified_at)
+                  values (${acme}, ${`delete-${suffix}.test`}, 'org_a', 'txt', now()) returning id`
+    const draft = await store().createConnection(acme, {
+      name: "Delete me",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    expect(await store().addDomain(acme, draft.id, proof!.id as string)).toBe("added")
+    await store().record(acme, { type: "draft.before_delete", connectionId: draft.id })
+    expect(await store().deleteDraftConnection(acme, draft.id)).toBe("deleted")
+    expect(await store().connection(acme, draft.id)).toBeNull()
+    expect(
+      (await store().events(acme, { limit: 20 })).some(
+        (event) => event.type === "draft.before_delete",
+      ),
+    ).toBe(true)
+    const replacement = await store().createConnection(acme, {
+      name: "Replacement",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    expect(await store().addDomain(acme, replacement.id, proof!.id as string)).toBe(
+      "added",
+    )
+
+    const liveConnection = await store().createConnection(acme, {
+      name: "Live",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    await owner`update identity.connections set status = 'active' where id = ${liveConnection.id}`
+    expect(await store().deleteDraftConnection(acme, liveConnection.id)).toBe(
+      "not_draft",
+    )
+
+    const used = await store().createConnection(acme, {
+      name: "Used",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    await owner`insert into identity.identities (tenant_id, connection_id, subject, clerk_user_id)
+                values (${acme}, ${used.id}, 'used-subject', 'user_used')`
+    expect(await store().deleteDraftConnection(acme, used.id)).toBe("in_use")
+  })
+
   it("stops counting a domain the moment its proof is displaced", async () => {
     await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
     expect(await store().liveDomains(acme, connectionId)).toEqual([])
@@ -763,9 +814,9 @@ suite("identity schema", () => {
       await store().noteGroupsSeen(acme, mine.id, at)
       const after = await store().connection(acme, mine.id)
       expect(after?.groupsLastSeenAt?.toISOString()).toBe(at.toISOString())
-      expect((await store().connectionForStart(mine.id))?.groupsLastSeenAt?.toISOString()).toBe(
-        at.toISOString(),
-      )
+      expect(
+        (await store().connectionForStart(mine.id))?.groupsLastSeenAt?.toISOString(),
+      ).toBe(at.toISOString())
     } finally {
       await owner`delete from identity.connections where id = ${mine.id}`
     }
@@ -859,7 +910,8 @@ suite("identity schema", () => {
       expect(await ask(ids.a!, "okta|a2")).toBe("created")
       expect(await ask(ids.a!, "okta|a2")).toBe("exists")
       expect(await ask(ids.a!, "okta|a3")).toBe("created")
-      const rows = await owner`select new_subject, email_hash from identity.relink_requests where identity_id = ${ids.a!}`
+      const rows =
+        await owner`select new_subject, email_hash from identity.relink_requests where identity_id = ${ids.a!}`
       expect(rows).toHaveLength(1)
       expect(rows[0]!.new_subject).toBe("okta|a3")
       // The address is only a hash at rest.
@@ -878,7 +930,8 @@ suite("identity schema", () => {
           expiresAt: later,
         }),
       ).toBe("exists")
-      const rows = await owner`select 1 from identity.relink_requests where identity_id in (${ids.b!}, ${ids.c!})`
+      const rows =
+        await owner`select 1 from identity.relink_requests where identity_id in (${ids.b!}, ${ids.c!})`
       expect(rows).toHaveLength(0)
     })
 
@@ -917,7 +970,9 @@ suite("identity schema", () => {
         store().relinkIdentity(tenant, { connectionId: conn, identityId, from, to })
       expect(await move(ids.a!, "okta|wrong", "okta|a9")).toEqual({ outcome: "gone" })
       expect(await move(ids.a!, "okta|a", "okta|b")).toEqual({ outcome: "conflict" })
-      expect(await move(ids.a!, "okta|a", "okta|a9", rival)).toEqual({ outcome: "gone" })
+      expect(await move(ids.a!, "okta|a", "okta|a9", rival)).toEqual({
+        outcome: "gone",
+      })
       expect((await store().identityBySubject(acme, conn, "okta|a"))?.id).toBe(ids.a!)
       const moved = await move(ids.a!, "okta|a", "okta|a9")
       expect(moved).toMatchObject({

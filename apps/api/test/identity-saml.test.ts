@@ -13,15 +13,17 @@ import {
   type BridgeDeps,
 } from "../src/identity/bridge.js"
 import type { Connection } from "../src/identity/model.js"
-import { guardedFetch } from "../src/identity/oidc-fetch.js"
+import { guardedFetch, IdpUnreachable } from "../src/identity/oidc-fetch.js"
 import { newSpKey } from "../src/identity/saml-crypto.js"
 import { parseIdpMetadata } from "../src/identity/saml-messages.js"
 import {
   finishSaml,
   finishSlo,
   nameIdOfSubject,
+  oktaMetadataUrlProblem,
   samlEngine,
   samlReady,
+  SamlMisconfigured,
   startLogout,
   subjectOf,
   type SloDeps,
@@ -909,6 +911,7 @@ describe("metadata and settings", () => {
       entityId: ENTITY,
       ssoUrl: "https://idp.acme.test/sso",
     })
+
     expect(parseIdpMetadata(meta("http://idp.acme.test/sso"))).toHaveProperty("error")
     expect(
       parseIdpMetadata(`<!DOCTYPE x>${meta("https://idp.acme.test/sso")}`),
@@ -932,6 +935,72 @@ describe("metadata and settings", () => {
     expect((await ok.engine.fetchMetadata("https://idp.acme.test/meta")).entityId).toBe(
       ENTITY,
     )
+  })
+
+  it("explains Okta metadata URLs before making a request", async () => {
+    expect(
+      oktaMetadataUrlProblem(
+        "https://dev-1-admin.okta.com/api/v1/apps/abc/sso/saml/metadata",
+      ),
+    ).toBe(
+      "That is Okta's admin API address, which needs an Okta API token. Use the Metadata URL from the app's Sign On tab. It looks like https://dev-1.okta.com/app/exk.../sso/saml/metadata.",
+    )
+    expect(
+      oktaMetadataUrlProblem("https://dev-1.okta.com/app/0oa123/sso/saml/metadata"),
+    ).toContain("uses the app id (0oa...), which Okta answers with a 404")
+    expect(oktaMetadataUrlProblem("https://dev-1-admin.okta.com/admin/apps")).toContain(
+      "Okta admin console address",
+    )
+    expect(
+      oktaMetadataUrlProblem("https://dev-1.okta.com/app/exk123/sso/saml/metadata"),
+    ).toBeNull()
+    expect(oktaMetadataUrlProblem("not a url")).toBeNull()
+    expect(oktaMetadataUrlProblem("https://idp.example.test/admin/apps")).toBeNull()
+
+    let calls = 0
+    const refused = await world({
+      fetch: (async () => {
+        calls++
+        return new Response(null, { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    for (const url of [
+      "https://dev-1-admin.okta.com/api/v1/apps/abc/sso/saml/metadata",
+      "https://dev-1.okta.com/app/0oa123/sso/saml/metadata",
+      "https://dev-1-admin.okta.com/admin/apps",
+    ])
+      await expect(refused.engine.fetchMetadata(url)).rejects.toBeInstanceOf(
+        SamlMisconfigured,
+      )
+    expect(calls).toBe(0)
+  })
+
+  it("turns metadata 404 and 410 responses into configuration guidance", async () => {
+    const okta = await world({
+      fetch: (async () =>
+        new Response(null, { status: 404 })) as unknown as typeof fetch,
+    })
+    await expect(
+      okta.engine.fetchMetadata("https://dev-1.okta.com/app/exk123/sso/saml/metadata"),
+    ).rejects.toThrow(
+      "Okta answered 404 for that metadata address. Use the Metadata URL from the app's Sign On tab.",
+    )
+    const other = await world({
+      fetch: (async () =>
+        new Response(null, { status: 410 })) as unknown as typeof fetch,
+    })
+    await expect(
+      other.engine.fetchMetadata("https://idp.example.test/meta"),
+    ).rejects.toThrow(
+      "That metadata URL answered 410. Check the address with your identity provider.",
+    )
+    const failed = await world({
+      fetch: (async () =>
+        new Response(null, { status: 500 })) as unknown as typeof fetch,
+    })
+    await expect(
+      failed.engine.fetchMetadata("https://idp.example.test/meta"),
+    ).rejects.toBeInstanceOf(IdpUnreachable)
   })
 
   it("is ready only with settings, a certificate valid today, and a key when needed", async () => {

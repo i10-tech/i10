@@ -61,6 +61,7 @@ import {
  *   GET    /identity/connections                         list, with domains, and the IdP presets
  *   POST   /identity/connections                         create a draft
  *   PATCH  /identity/connections/:id                     status, policy, mapping
+ *   DELETE /identity/connections/:id                     delete a draft (owner, step-up)
  *   GET    /identity/connections/:id/test-runs            its test runs, newest first (#340)
  *   POST   /identity/connections/:id/domains             cover an access domain
  *   DELETE /identity/connections/:id/domains/:domainId   stop covering it
@@ -492,7 +493,8 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
           statusCode: 422,
           name: "upn_not_supported",
           code: "upn_not_supported",
-          message: "Using the user principal name as the email is only for Microsoft Entra.",
+          message:
+            "Using the user principal name as the email is only for Microsoft Entra.",
         },
         422,
       )
@@ -684,6 +686,49 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
         })
     }
     return c.json(view(after))
+  })
+
+  app.delete("/identity/connections/:id", requireFreshAuth, async (c) => {
+    const id = d.identity
+    if (!id) return c.json(notWired("SSO connections"), 501)
+    if (!(await allowed(c, "owners:manage")))
+      return c.json(forbidden("Only an owner can delete a connection."), 403)
+    const connectionId = c.req.param("id")
+    if (!UUID.test(connectionId)) return c.json(notFound(), 404)
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const before = await id.store.connection(tenantId, connectionId)
+    if (!before) return c.json(notFound(), 404)
+    const deleted = await id.store.deleteDraftConnection(tenantId, connectionId)
+    if (deleted === "not_found") return c.json(notFound(), 404)
+    if (deleted === "not_draft")
+      return c.json(
+        {
+          statusCode: 409,
+          name: "connection_not_draft",
+          message:
+            "Only a draft connection can be deleted. Disable a live one, or move it back to draft first.",
+        },
+        409,
+      )
+    if (deleted === "in_use")
+      return c.json(
+        {
+          statusCode: 409,
+          name: "connection_in_use",
+          message:
+            "People have signed in through this connection, so it cannot be deleted. Disable it instead.",
+        },
+        409,
+      )
+    id.enforcement?.forgetTenant(tenantId)
+    await id.store.record(tenantId, {
+      type: "connection.deleted",
+      actorUserId: userId,
+      connectionId,
+      data: { name: before.name, protocol: before.protocol, provider: before.provider },
+    })
+    return c.json({ ok: true })
   })
 
   app.post("/identity/connections/:id/domains", requireFreshAuth, async (c) => {

@@ -57,6 +57,33 @@ Every P0 item was then probed live against real Okta, Entra and Google tenants (
 | 23 | Without SCIM, Okta has no way to end an i10 session (no Okta-initiated SLO, Universal Logout not implemented, max session null by default). |
 | 24 | Smaller: Okta Basic-auth encoding of secrets containing `+ / ~`; SP key rotation vs Okta signed requests; login hint not sent to Entra SAML; single-string assertion Issuer match; `xms_edov` read only as `true`/`"true"`. |
 
+## Setup decisions still open (proposed 2026-11-03, nothing built)
+
+### A tenant's `onmicrosoft.com` domain
+
+Every Entra tenant has one, and it is the UPN domain of every cloud-only member. Microsoft owns the DNS, so our TXT proof can never pass, and without a proved domain nobody on it can sign in. A probe had to set the proof by hand in the dev database. The domain proof exists to stop a workspace claiming addresses it does not control, so any replacement has to prove control of the tenant, not only membership of it. A plain member of a tenant can sign in and pass a test run, so a passed test run alone is not enough.
+
+| Option | How it works | Cost | Risk |
+|---|---|---|---|
+| **A. Guide only** | The setup guide says to add a real domain in Entra and move members' UPNs to it, and the console explains why `onmicrosoft.com` cannot be added. | Copy only. | Small cloud-only tenants without a domain of their own cannot connect. |
+| **B. Admin consent** | A multi-tenant i10 app in Entra. A tenant admin approves it in one redirect, and the consent answer names the tenant id. That is the proof for that tenant's `onmicrosoft.com` domain. | One app registration and one callback route, and probably Microsoft publisher verification so the consent screen looks right. | Strongest: only a tenant admin can grant it. |
+| **C. Test run by a directory admin** | A signed test run whose token carries the tenant id and a global admin role in `wids`, with Microsoft's public discovery document confirming the domain belongs to that tenant. | No Microsoft app, but the customer adds an optional claim. | More setup steps. Depends on two behaviours we have not probed. |
+| **D. Staff sets the proof** | We check by hand and set it from the admin app (#217). | A support step per customer. | Does not scale, and adds a human to a trust decision. |
+
+**Recommendation: A now, B when a real customer needs it.** A is part of the Entra guide work (#17) and blocks nobody with a company domain. B is the only option that adds no setup step for the admin. Neither B's nor C's behaviour has been checked against a real tenant.
+
+### Fewer repeated passkey prompts in a first setup
+
+Step-up lasts ten minutes (`middleware/session.ts`), and every setup write asks for it, so a slower first setup (metadata, domain, JIT, enforcement, activate) asks more than once. A setup link already lets an outside IT contact change a draft's IdP settings with no passkey at all, so those writes are not treated as dangerous on that path.
+
+| Option | How it works | Cost | Risk |
+|---|---|---|---|
+| **A. No step-up while nothing is live** | Writes to a `draft` or `testing` connection need no step-up. Activating, requiring SSO, and anything on an `active` or `disabled` connection still do. | A status check in the routes and in `useSsoCall`. | A stolen session could edit a draft, but cannot make it live without the passkey. The activate prompt must show what is about to go live (issuer, domains, JIT). |
+| **B. A longer window for setup** | Setup routes accept a 30 or 60 minute step-up. | One more freshness level. | Every step-up in that window also counts for other setup work, and it still prompts during a long setup. |
+| **C. One review and activate step** | Keep the prompts on live changes, drop them from setup, and collect everything into one final screen. | A again, plus a new screen for the UI pass. | Same as A. |
+
+**Recommendation: A, with the activate dialog listing what goes live.** That gives one passkey prompt in a normal setup, at the moment that matters. C can follow in the UI pass if the dialog is not enough.
+
 ## What already holds
 
 - **SCIM for Okta:** path-less deactivation, group add/remove/replace, 409 on duplicate users, case-insensitive filters and stable pagination.

@@ -23,10 +23,12 @@ import {
   removeBypass,
   removeSsoDomain,
   ssoTestRuns,
+  ssoConnections,
   type ConnectionChange,
 } from "@/lib/sso-actions"
+import { domainChoices } from "@/lib/sso-domain-choices"
 import { latestPass, mfaCapabilityNote } from "@/lib/sso-runs"
-import { toastDone } from "@/lib/toast"
+import { toastDone, toastFailure } from "@/lib/toast"
 import type { SsoAbilities, SsoConnection, SsoEnforcement } from "@/lib/sso-types"
 import {
   Block,
@@ -37,6 +39,7 @@ import {
   ToggleRow,
   isLocked,
   useRemote,
+  useSsoAttempt,
   useSsoCall,
 } from "./shared"
 import { ClerkMembers, type Member } from "./members"
@@ -283,7 +286,10 @@ function SignInRules({
             (mfaBlocked && !connection.mfaRequired)
           }
           onChange={(v) =>
-            void patch({ mfaRequired: v }, v ? "MFA required" : "MFA no longer required")
+            void patch(
+              { mfaRequired: v },
+              v ? "MFA required" : "MFA no longer required",
+            )
           }
         />
         {mfaNote && (
@@ -433,7 +439,9 @@ function LoginChanges({
       {!data ? (
         <Loading failed={failed} />
       ) : data.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No logins are waiting for approval.</p>
+        <p className="text-sm text-muted-foreground">
+          No logins are waiting for approval.
+        </p>
       ) : (
         <ul className="divide-y rounded-lg border">
           {data.data.map((r) => (
@@ -479,26 +487,45 @@ function Domains({
   onChange: (connection: SsoConnection) => void
 }) {
   const call = useSsoCall()
+  const attempt = useSsoAttempt()
   const locked = isLocked(connection, abilities)
   const [options, setOptions] = React.useState<AccessDomain[] | null>(null)
+  const [connections, setConnections] = React.useState<SsoConnection[]>([])
   const [choice, setChoice] = React.useState<string | null>(null)
+  const [refusal, setRefusal] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    void teamAccessDomains().then((r) =>
-      setOptions(r.ok ? r.data.data.filter((d) => d.status === "verified") : []),
+    void Promise.all([teamAccessDomains(), ssoConnections()]).then(
+      ([domainsResult, connectionsResult]) => {
+        setOptions(
+          domainsResult.ok
+            ? domainsResult.data.data.filter((d) => d.status === "verified")
+            : [],
+        )
+        setConnections(connectionsResult.ok ? connectionsResult.data.data : [])
+      },
     )
   }, [])
 
-  const covered = new Set(connection.domains.map((d) => d.joinDomainId))
-  const addable = (options ?? []).filter((d) => !covered.has(d.id))
+  const choices = domainChoices(options ?? [], connections, connection)
 
   async function add() {
     if (!choice) return
-    const domain = addable.find((d) => d.id === choice)
-    const ok = await call(() => addSsoDomain(connection.id, choice), {
-      title: "Could not add the domain",
-    })
-    if (ok && domain) {
+    setRefusal(null)
+    const domain = choices.find((d) => d.id === choice && !d.coveredBy)
+    const result = await attempt(() => addSsoDomain(connection.id, choice))
+    if (result === null) return
+    if (!result.ok) {
+      toastFailure(result, { title: "Could not add the domain" })
+      setRefusal(result.error)
+      if (result.status === 409) {
+        const latest = await ssoConnections()
+        if (latest.ok) setConnections(latest.data.data)
+        setChoice(null)
+      }
+      return
+    }
+    if (domain) {
       onChange({
         ...connection,
         domains: [
@@ -558,15 +585,24 @@ function Domains({
           ))}
         </ul>
       )}
-      {addable.length > 0 && (
+      {choices.length > 0 && (
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
             <MorphSelect
               label="Add a verified domain"
               value={choice}
               disabled={locked}
-              onValueChange={setChoice}
-              items={addable.map((d) => ({ value: d.id, label: d.name }))}
+              onValueChange={(value) => {
+                setChoice(value)
+                setRefusal(null)
+              }}
+              items={choices.map((d) => ({
+                value: d.id,
+                label: d.coveredBy
+                  ? `${d.name} (covered by ${d.coveredBy.name})`
+                  : d.name,
+                disabled: d.coveredBy !== null,
+              }))}
             />
           </div>
           <Button variant="secondary" disabled={locked || !choice} onClick={add}>
@@ -574,6 +610,13 @@ function Domains({
           </Button>
         </div>
       )}
+      {choices.some((d) => d.coveredBy) && (
+        <p className="text-xs text-muted-foreground">
+          A domain belongs to one connection. To move one here, remove it from the other
+          connection first.
+        </p>
+      )}
+      {refusal && <p className="text-xs text-destructive">{refusal}</p>}
       <p className="text-xs text-muted-foreground">
         Need another domain? Prove it on the{" "}
         <Link

@@ -221,6 +221,47 @@ export class SamlMisconfigured extends Error {
   }
 }
 
+const oktaHost = (hostname: string): boolean =>
+  /(^|\.)(okta|oktapreview|okta-emea|okta-gov)\.com$/i.test(hostname) ||
+  hostname.endsWith(".okta.mil")
+
+function publicOktaHost(hostname: string): string {
+  const labels = hostname.split(".")
+  labels[0] = labels[0]!.replace(/-admin$/i, "")
+  return labels.join(".")
+}
+
+function oktaMetadataRemedy(hostname: string): string {
+  return `Use the Metadata URL from the app's Sign On tab. It looks like https://${publicOktaHost(hostname)}/app/exk.../sso/saml/metadata.`
+}
+
+/** Explains Okta metadata addresses that are valid URLs but not public metadata endpoints. */
+export function oktaMetadataUrlProblem(url: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (!oktaHost(parsed.hostname)) return null
+  const path = parsed.pathname
+  if (/^\/api\/v1\/apps\/[^/]+\/sso\/saml\/metadata\/?$/i.test(path))
+    return `That is Okta's admin API address, which needs an Okta API token. ${oktaMetadataRemedy(parsed.hostname)}`
+  if (/^\/app\/0oa[^/]+\/sso\/saml\/metadata\/?$/i.test(path))
+    return `That address uses the app id (0oa...), which Okta answers with a 404. ${oktaMetadataRemedy(parsed.hostname)}`
+  if (parsed.hostname.split(".")[0]!.endsWith("-admin") || path.startsWith("/admin/"))
+    return `That is an Okta admin console address. ${oktaMetadataRemedy(parsed.hostname)}`
+  return null
+}
+
+/** A URL that answered 404 or 410 is wrong, not unreachable: the admin can fix it. */
+function metadataGoneProblem(url: string, status: number): string {
+  const { hostname } = new URL(url)
+  return oktaHost(hostname)
+    ? `Okta answered ${status} for that metadata address. ${oktaMetadataRemedy(hostname)}`
+    : `That metadata URL answered ${status}. Check the address with your identity provider.`
+}
+
 /** Redis could not say whether an assertion was seen. Always a 503. */
 export class ReplayUnavailable extends Error {
   constructor() {
@@ -268,6 +309,8 @@ export async function fetchIdpMetadata(
   fetch: OidcFetch,
   url: string,
 ): Promise<IdpMetadata> {
+  const problem = oktaMetadataUrlProblem(url)
+  if (problem) throw new SamlMisconfigured(problem)
   const response = await fetch(url, {
     method: "GET",
     headers: { accept: "application/samlmetadata+xml, application/xml, text/xml" },
@@ -275,6 +318,8 @@ export async function fetchIdpMetadata(
   })
   if (response.status >= 300 && response.status < 400)
     throw new SamlMisconfigured("The metadata URL redirects; give the final URL.")
+  if (response.status === 404 || response.status === 410)
+    throw new SamlMisconfigured(metadataGoneProblem(url, response.status))
   if (!response.ok)
     throw new IdpUnreachable(`metadata answered ${response.status}`, "network")
   const parsed = parseIdpMetadata(await response.text())

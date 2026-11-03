@@ -202,6 +202,23 @@ export function memoryStore(
       connections.set(cid, next)
       return next
     },
+    async deleteDraftConnection(tenantId, cid) {
+      const current = connections.get(cid)
+      if (!current || current.tenantId !== tenantId) return "not_found"
+      if (current.status !== "draft") return "not_draft"
+      if (
+        identities.some(
+          (identity) => identity.tenantId === tenantId && identity.connectionId === cid,
+        ) ||
+        [...managed.values()].some(
+          (account) => account.tenantId === tenantId && account.connectionId === cid,
+        )
+      )
+        return "in_use"
+      connections.delete(cid)
+      delete live[cid]
+      return "deleted"
+    },
     async addDomain() {
       return "added"
     },

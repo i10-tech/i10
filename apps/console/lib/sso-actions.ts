@@ -92,6 +92,10 @@ export async function removeSsoDomain(id: string, joinDomainId: string) {
   )
 }
 
+export async function deleteSsoConnection(id: string) {
+  return run(() => api<{ ok: true }>(conn(id), { method: "DELETE" }))
+}
+
 export async function ssoTestRuns(id: string) {
   return run(() => api<{ data: TestRun[] }>(`${conn(id)}/test-runs`))
 }

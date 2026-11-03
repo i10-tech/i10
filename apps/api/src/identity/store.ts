@@ -277,6 +277,44 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
       return row ? toConnection(row) : null
     },
 
+    async deleteDraftConnection(tenantId, id) {
+      return withTenant(db, tenantId, async (tx) => {
+        const [connection] = await tx
+          .select({ id: connections.id, status: connections.status })
+          .from(connections)
+          .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
+          .for("update")
+          .limit(1)
+        if (!connection) return "not_found"
+        if (connection.status !== "draft") return "not_draft"
+        const [identity] = await tx
+          .select({ id: identities.id })
+          .from(identities)
+          .where(
+            and(eq(identities.tenantId, tenantId), eq(identities.connectionId, id)),
+          )
+          .limit(1)
+        const [managed] = await tx
+          .select({ id: managedAccounts.clerkUserId })
+          .from(managedAccounts)
+          .where(
+            and(
+              eq(managedAccounts.tenantId, tenantId),
+              eq(managedAccounts.connectionId, id),
+            ),
+          )
+          .limit(1)
+        // ⚠ AN OWNER CAN MOVE A LIVE CONNECTION BACK TO DRAFT, AND DELETING THAT
+        // ONE would cascade away people's identity links and bound sessions and
+        // leave its managed accounts with no connection.
+        if (identity || managed) return "in_use"
+        await tx
+          .delete(connections)
+          .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
+        return "deleted"
+      })
+    },
+
     async addDomain(tenantId, connectionId, joinDomainId) {
       return withTenant(db, tenantId, async (tx) => {
         const [proof] = await tx
@@ -826,9 +864,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
      */
     async relinkIdentity(tenantId, input) {
       try {
-        return await withTenant(db, tenantId, (tx) =>
-          moveSubject(tx, tenantId, input),
-        )
+        return await withTenant(db, tenantId, (tx) => moveSubject(tx, tenantId, input))
       } catch (error) {
         if (isUniqueViolation(error)) return { outcome: "conflict" }
         throw error

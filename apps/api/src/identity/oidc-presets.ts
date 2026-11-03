@@ -93,6 +93,7 @@ export const OIDC_PRESETS: Readonly<Record<OidcProvider, OidcPreset>> = {
       "An OIDC Web Application with the Authorization Code grant.",
       "The redirect URI below as a sign-in redirect URI.",
       "For groups: a groups claim on the ID token and the groups scope.",
+      "The app's authentication policy decides whether a first sign-in asks for another factor. A new app gets your org's default policy, so people may be asked for a new factor or to enrol a passkey. Pick the policy you want on the app's Sign On tab.",
     ],
   },
   entra: {

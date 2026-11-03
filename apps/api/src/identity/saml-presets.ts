@@ -16,7 +16,10 @@ import { NAMEID } from "./saml-verify.js"
  *     rules. Entity id looks like `http://www.okta.com/<id>` - http, not
  *     https, and that is Okta's real value. Signed requests: upload our
  *     certificate under "Signature Certificate". Encryption: upload it as the
- *     encryption certificate, AES256-GCM.
+ *     encryption certificate, AES256-GCM. The public metadata URL is
+ *     `/app/<exk...>/sso/saml/metadata`; the app id (`0oa...`) gives a 404. The
+ *     app's authentication policy decides whether a first sign-in asks for
+ *     another factor, and a new app gets the org default.
  *   - Microsoft Entra ID: an Enterprise application, "Set up single sign on"
  *     with SAML. Identifier (Entity ID) = our entity id, Reply URL = our ACS
  *     URL, Logout URL = our SLO URL. Unique User Identifier (Name ID) =
@@ -122,6 +125,8 @@ export const SAML_PRESETS: Readonly<Record<SamlProvider, SamlPreset>> = {
       "Name ID format Persistent, and signed assertions with RSA-SHA256.",
       "Attribute statements email, firstName and lastName; a groups attribute statement for group rules.",
       "To sign requests or encrypt assertions: our certificate below, uploaded in the app's SAML settings.",
+      "Copy the Metadata URL from the app's Sign On tab. It looks like https://your-org.okta.com/app/exk.../sso/saml/metadata; the app id (0oa...) gives a 404.",
+      "The app's authentication policy decides whether a first sign-in asks for another factor. A new app gets your org's default policy, so people may be asked for a new factor or to enrol a passkey. Pick the policy you want on the app's Sign On tab.",
     ],
   },
   entra: {

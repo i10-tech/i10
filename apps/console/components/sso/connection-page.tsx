@@ -2,12 +2,13 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
 import { Button } from "@repo/ui/components/button/button"
 import { TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { UrlTabs } from "@/components/list/url-tabs"
-import { changeSsoConnection } from "@/lib/sso-actions"
+import { changeSsoConnection, deleteSsoConnection } from "@/lib/sso-actions"
 import { toastDone } from "@/lib/toast"
 import type { SsoAbilities, SsoConnection, SsoStatus } from "@/lib/sso-types"
 import { AccessPanel } from "./access-panel"
@@ -70,9 +71,11 @@ export function ConnectionPage({
   tab: string | undefined
 }) {
   const call = useSsoCall()
+  const router = useRouter()
   const [connection, setConnection] = React.useState(initial)
   const [moving, setMoving] = React.useState<Move | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
   const { primary, others } = movesFrom(connection.status)
   const live = connection.status === "active" || connection.status === "disabled"
 
@@ -107,6 +110,16 @@ export function ConnectionPage({
           <StatusBadge status={connection.status} />
         </div>
         <div className="flex items-center gap-2">
+          {connection.status === "draft" && abilities.owner && (
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={busy}
+              onClick={() => setDeleting(true)}
+            >
+              Delete
+            </Button>
+          )}
           {others.map((m) => (
             <Button
               key={m.to}
@@ -170,6 +183,31 @@ export function ConnectionPage({
           <LdapPanel connection={connection} abilities={abilities} />
         </TabsContent>
       </UrlTabs>
+
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={(open) => !open && setDeleting(false)}
+        title="Delete this draft?"
+        description="It is removed for good, with its settings and test runs. The audit log keeps a record."
+        confirmLabel="Delete"
+        doneLabel="Deleted"
+        destructive
+        onConfirm={async () => {
+          setBusy(true)
+          try {
+            const deleted = await call(() => deleteSsoConnection(connection.id), {
+              title: "Could not delete the connection",
+            })
+            if (!deleted) return false
+            toastDone("Connection deleted")
+            router.push("/settings/security")
+            router.refresh()
+            return true
+          } finally {
+            setBusy(false)
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={moving !== null}
