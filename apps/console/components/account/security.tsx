@@ -352,18 +352,28 @@ function Passkeys({ user }: { user: UserResource }) {
   const [name, setName] = React.useState("")
   const [removing, setRemoving] = React.useState<PasskeyResource | null>(null)
 
+  /*
+   * ⚠ THE PASSKEY SCREEN ONLY WHILE THE DEVICE IS ACTUALLY ASKED. Raised
+   * around the whole call, it also covered "prove it is you" when Clerk wanted
+   * that first, and the person was asked for a passkey with a password field
+   * hidden underneath it (2026-11-04).
+   */
   async function add() {
-    setMaking(true)
     try {
-      const made = await reverify(() => user.createPasskey())
+      const made = await reverify(async () => {
+        setMaking(true)
+        try {
+          return await user.createPasskey()
+        } finally {
+          setMaking(false)
+        }
+      })
       if (made) toastDone("Passkey added")
     } catch (error) {
       const cancelled = /NotAllowed|cancel|abort/i.test(
         String((error as Error)?.name ?? error),
       )
       if (!cancelled) toastError("Could not add a passkey", clerkReason(error))
-    } finally {
-      setMaking(false)
     }
   }
 

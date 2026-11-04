@@ -139,6 +139,13 @@ export function DialogContent({
   }, [open])
   const pressOutside: DialogContentProps["onPointerDownOutside"] = (event) => {
     onPointerDownOutside?.(event)
+    // Only the backdrop means "dismiss". A press on anything else outside the content is
+    // a password manager's list or a toast, and must not close what they are helping with.
+    const target = event.detail.originalEvent.target
+    if (!(target instanceof Element && target.classList.contains(styles.overlay ?? ""))) {
+      event.preventDefault()
+      return
+    }
     if (
       open !== null &&
       (!change.current.open || event.detail.originalEvent.timeStamp < change.current.at)

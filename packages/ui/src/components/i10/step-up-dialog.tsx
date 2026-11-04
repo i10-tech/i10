@@ -8,6 +8,7 @@ import type {
   SessionVerificationLevel,
   SessionVerificationResource,
   SessionVerificationSecondFactor,
+  UserResource,
 } from "@clerk/shared/types"
 import {
   ArrowLeft,
@@ -91,6 +92,12 @@ function methodsFor(
   verification: SessionVerificationResource | null,
   hasPasskey: boolean,
   hasEmail = false,
+  account: {
+    user: UserResource | null | undefined
+    level?: SessionVerificationLevel
+  } = {
+    user: null,
+  },
 ): Method[] {
   const first = verification?.supportedFirstFactors ?? []
   const second = verification?.supportedSecondFactors ?? []
@@ -98,10 +105,7 @@ function methodsFor(
     hasPasskey || first.some((factor) => factor.strategy === "passkey")
       ? (["passkey"] as Method[])
       : []
-  // Before Clerk answers: what needs nothing from it - so the dialog opens
-  // complete, "Use another method" included, rather than growing a moment later.
-  if (!verification)
-    return [...passkey, ...(hasEmail ? (["email_code"] as Method[]) : [])]
+  if (!verification) return [...passkey, ...fromAccount(account.user, account.level)]
   if (verification.status === "needs_second_factor") {
     const offered = new Set<Method>(
       second.map((factor) =>
@@ -124,6 +128,39 @@ function methodsFor(
   const offered = new Set(first.map((factor) => factor.strategy as string))
   if (hasEmail) offered.add("email_code")
   return [...passkey, ...FIRST_ORDER.filter((method) => offered.has(method))]
+}
+
+/**
+ * ⚠ BEFORE CLERK ANSWERS, THE ACCOUNT ITSELF SAYS WHAT TO ASK FOR. The dialog
+ * used to open on "Checking your session" until `startVerification` came back,
+ * then swap in the password field (2026-11-04). The signed-in user already
+ * lists every factor it has, and Clerk's answer is built from the same list in
+ * the same order, so the dialog opens on the method and Clerk's answer only
+ * corrects it in the rare case they differ.
+ *
+ * `second_factor` (Clerk's `strict`) asks only the second factor of an account
+ * that has one and falls back to the first otherwise; `multi_factor` starts
+ * with the first.
+ */
+function fromAccount(
+  user: UserResource | null | undefined,
+  level: SessionVerificationLevel | undefined,
+): Method[] {
+  if (!user) return []
+  if (level === "second_factor" && user.twoFactorEnabled) {
+    const texted = user.phoneNumbers.some((phone) => phone.reservedForSecondFactor)
+    return [
+      ...(user.totpEnabled ? (["totp"] as Method[]) : []),
+      ...(texted ? (["phone_code_2fa"] as Method[]) : []),
+      ...(user.backupCodeEnabled ? (["backup_code"] as Method[]) : []),
+      ...(user.primaryEmailAddress ? (["email_code"] as Method[]) : []),
+    ]
+  }
+  return [
+    ...(user.passwordEnabled ? (["password"] as Method[]) : []),
+    ...(user.primaryEmailAddress ? (["email_code"] as Method[]) : []),
+    ...(user.primaryPhoneNumber ? (["phone_code"] as Method[]) : []),
+  ]
 }
 
 /** Clerk's own wording for a refusal, or ours when it gives none. */
@@ -199,7 +236,12 @@ export function StepUpDialog({
   const [then, setThen] = React.useState(false)
 
   const primaryEmail = user?.primaryEmailAddress ?? null
-  const methods = methodsFor(verification, hasPasskey, primaryEmail !== null)
+  const methods = methodsFor(verification, hasPasskey, primaryEmail !== null, {
+    user,
+    level: request?.level,
+  })
+  /** The verification this ask started, so a quick submit waits for it. */
+  const starting = React.useRef<Promise<unknown> | null>(null)
 
   const go = React.useCallback((next: Screen, way: "forward" | "back" = "forward") => {
     setDirection(way)
@@ -228,22 +270,30 @@ export function StepUpDialog({
     setSecret("")
     setAccepted(false)
     setThen(false)
-    // A passkey needs nothing from Clerk to be offered: show it at once.
-    setScreen(hasPasskey ? "passkey" : "loading")
+    // Nothing waits on Clerk to open: the passkey, or the account's own first method.
+    setScreen(
+      hasPasskey ? "passkey" : (fromAccount(user, request?.level)[0] ?? "loading"),
+    )
   }
   React.useEffect(() => {
     if (id === undefined || !level || !session) return
     let alive = true
     settled.current = false
     atLevel.current = false
-    session
-      .startVerification({ level })
+    const guess = hasPasskey ? null : (fromAccount(user, level)[0] ?? null)
+    const run = session.startVerification({ level })
+    starting.current = run.catch(() => {})
+    run
       .then((started) => {
         if (!alive) return
         if (started.status === "complete") return finish(false)
         atLevel.current = true
         setVerification(started)
-        if (!hasPasskey) go(methodsFor(started, false)[0] ?? "failed")
+        if (hasPasskey) return
+        // Clerk's first choice wins, but only moves a screen nobody has left.
+        const clerks = methodsFor(started, false)[0] ?? "failed"
+        if (clerks !== guess)
+          setScreen((now) => (now === (guess ?? "loading") ? clerks : now))
       })
       .catch((cause: unknown) => {
         if (!alive || hasPasskey) return
@@ -283,6 +333,8 @@ export function StepUpDialog({
 
   /** Clerk's verification at the API's level, restarted if the passkey replaced it. */
   async function levelled() {
+    // A submit faster than the opening verification waits for it, not a second one.
+    if (!atLevel.current && starting.current) await starting.current
     if (atLevel.current || !session || !level) return
     const started = await session.startVerification({ level })
     atLevel.current = true
@@ -392,11 +444,13 @@ export function StepUpDialog({
     }
     await levelled()
     if (screen === "phone_code") {
-      const factor = firstFactor("phone_code")
-      if (factor?.phoneNumberId)
+      // The account's own number when Clerk's list has not reached this render.
+      const phoneNumberId =
+        firstFactor("phone_code")?.phoneNumberId ?? user?.primaryPhoneNumber?.id
+      if (phoneNumberId)
         await session.prepareFirstFactorVerification({
           strategy: "phone_code",
-          phoneNumberId: factor.phoneNumberId,
+          phoneNumberId,
         })
     } else if (screen === "phone_code_2fa") {
       const factor = secondFactor("phone_code")
@@ -573,6 +627,10 @@ export function StepUpDialog({
                   }}
                   required="Enter your password."
                   refused={error ?? undefined}
+                  // A wrong password is the likely answer here, so its line has
+                  // a row of its own instead of landing in the gap and touching
+                  // Continue.
+                  reserveHint
                 />
                 <Button
                   type="submit"
