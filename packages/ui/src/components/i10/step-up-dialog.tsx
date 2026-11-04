@@ -602,7 +602,9 @@ export function StepUpDialog({
 
             {screen === "password" && (
               <form
-                className="flex flex-col gap-5"
+                // ⚠ `gap-7`, FieldGroup's gap: a refusal is drawn into it (see
+                // `reserveHint` in floating-field), and at gap-5 it touched Continue.
+                className="flex flex-col gap-7"
                 noValidate
                 onSubmit={(event) => {
                   event.preventDefault()
@@ -627,10 +629,6 @@ export function StepUpDialog({
                   }}
                   required="Enter your password."
                   refused={error ?? undefined}
-                  // A wrong password is the likely answer here, so its line has
-                  // a row of its own instead of landing in the gap and touching
-                  // Continue.
-                  reserveHint
                 />
                 <Button
                   type="submit"
@@ -689,7 +687,7 @@ export function StepUpDialog({
 
             {screen === "backup_code" && (
               <form
-                className="flex flex-col gap-5"
+                className="flex flex-col gap-7"
                 noValidate
                 onSubmit={(event) => {
                   event.preventDefault()
