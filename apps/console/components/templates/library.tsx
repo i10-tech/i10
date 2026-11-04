@@ -24,6 +24,7 @@ import {
 } from "@repo/ui/components/i10/menu"
 import { Kbd } from "@repo/ui/components/i10/kbd"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { cn } from "cn"
 import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { BulkBar } from "@/components/list/bulk-bar"
@@ -35,6 +36,7 @@ import {
   rowClass,
   rowMenuClass,
   selectedRowClass,
+  SWAP,
 } from "@/components/list/table"
 import {
   FilterSelect,
@@ -477,84 +479,98 @@ export function TemplateLibrary({
 
       {/* What is here - and the space a selection box is drawn in. */}
       <div ref={area} className="min-h-[60vh] pt-6 pb-24">
-        {empty ? (
-          <EmptyLibrary />
-        ) : nothingShown ? (
-          folderId && !searching && status === "all" ? (
-            <EmptyFolder folderId={folderId} />
+        <AnimatePresence mode="wait" initial={false}>
+          {empty ? (
+            <motion.div key="empty-library" {...SWAP}>
+              <EmptyLibrary />
+            </motion.div>
+          ) : nothingShown ? (
+            folderId && !searching && status === "all" ? (
+              <motion.div key="empty-folder" {...SWAP}>
+                <EmptyFolder folderId={folderId} />
+              </motion.div>
+            ) : (
+              <motion.p
+                key="nothing-shown"
+                {...SWAP}
+                className="rounded-2xl border border-dashed px-4 py-16 text-center text-sm text-muted-foreground"
+              >
+                {searching
+                  ? `No template matches “${query.trim()}”.`
+                  : `No ${STATUS_LABEL[status as TemplateStatus].toLowerCase()} templates here.`}
+              </motion.p>
+            )
+          ) : view === "grid" ? (
+            <motion.div key="grid" {...SWAP}>
+              <LayoutGroup>
+                <ul className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {shownFolders.map((f) => (
+                      <li key={`f-${f.id}`} data-select-key={folderKey(f.id)}>
+                        <FolderCard
+                          folder={f}
+                          selected={selected.has(folderKey(f.id))}
+                          selecting={selecting}
+                          onSelect={(e) => select(folderKey(f.id), e)}
+                          {...dropTarget(f.id, f.id)}
+                          onRename={() =>
+                            setDialog({ kind: "rename-folder", folder: f })
+                          }
+                          onDelete={() =>
+                            setDialog({ kind: "delete-folder", folder: f })
+                          }
+                        />
+                      </li>
+                    ))}
+                    {shownTemplates.map((t) => (
+                      <li key={t.id} data-select-key={t.id}>
+                        <TemplateCard
+                          template={t}
+                          folders={liveFolders}
+                          imagesFrom={imagesFrom}
+                          selected={selected.has(t.id)}
+                          selecting={selecting}
+                          onSelect={(e) => select(t.id, e)}
+                          onAction={(a) => void act(t, a)}
+                          onDragStart={(e) => startDrag(t.id, e)}
+                          onDragEnd={() => {
+                            setDragIds(null)
+                            setOver(null)
+                          }}
+                          dragging={dragIds?.includes(t.id) ?? false}
+                        />
+                      </li>
+                    ))}
+                  </AnimatePresence>
+                </ul>
+              </LayoutGroup>
+            </motion.div>
           ) : (
-            <motion.p
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-dashed px-4 py-16 text-center text-sm text-muted-foreground"
-            >
-              {searching
-                ? `No template matches “${query.trim()}”.`
-                : `No ${STATUS_LABEL[status as TemplateStatus].toLowerCase()} templates here.`}
-            </motion.p>
-          )
-        ) : view === "grid" ? (
-          <LayoutGroup>
-            <ul className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              <AnimatePresence mode="popLayout" initial={false}>
-                {shownFolders.map((f) => (
-                  <li key={`f-${f.id}`} data-select-key={folderKey(f.id)}>
-                    <FolderCard
-                      folder={f}
-                      selected={selected.has(folderKey(f.id))}
-                      selecting={selecting}
-                      onSelect={(e) => select(folderKey(f.id), e)}
-                      {...dropTarget(f.id, f.id)}
-                      onRename={() => setDialog({ kind: "rename-folder", folder: f })}
-                      onDelete={() => setDialog({ kind: "delete-folder", folder: f })}
-                    />
-                  </li>
-                ))}
-                {shownTemplates.map((t) => (
-                  <li key={t.id} data-select-key={t.id}>
-                    <TemplateCard
-                      template={t}
-                      folders={liveFolders}
-                      imagesFrom={imagesFrom}
-                      selected={selected.has(t.id)}
-                      selecting={selecting}
-                      onSelect={(e) => select(t.id, e)}
-                      onAction={(a) => void act(t, a)}
-                      onDragStart={(e) => startDrag(t.id, e)}
-                      onDragEnd={() => {
-                        setDragIds(null)
-                        setOver(null)
-                      }}
-                      dragging={dragIds?.includes(t.id) ?? false}
-                    />
-                  </li>
-                ))}
-              </AnimatePresence>
-            </ul>
-          </LayoutGroup>
-        ) : (
-          <TemplateTable
-            folders={shownFolders}
-            allFolders={liveFolders}
-            imagesFrom={imagesFrom}
-            templates={shownTemplates}
-            selected={selected}
-            selecting={selecting}
-            onSelect={select}
-            onSelectAll={(checked) =>
-              setSelected(checked ? new Set(visibleIds) : new Set())
-            }
-            onAction={(t, a) => void act(t, a)}
-            dropTarget={dropTarget}
-            onDragStart={startDrag}
-            onDragEnd={() => {
-              setDragIds(null)
-              setOver(null)
-            }}
-            onFolderRename={(f) => setDialog({ kind: "rename-folder", folder: f })}
-            onFolderDelete={(f) => setDialog({ kind: "delete-folder", folder: f })}
-          />
-        )}
+            <motion.div key="table" {...SWAP}>
+              <TemplateTable
+                folders={shownFolders}
+                allFolders={liveFolders}
+                imagesFrom={imagesFrom}
+                templates={shownTemplates}
+                selected={selected}
+                selecting={selecting}
+                onSelect={select}
+                onSelectAll={(checked) =>
+                  setSelected(checked ? new Set(visibleIds) : new Set())
+                }
+                onAction={(t, a) => void act(t, a)}
+                dropTarget={dropTarget}
+                onDragStart={startDrag}
+                onDragEnd={() => {
+                  setDragIds(null)
+                  setOver(null)
+                }}
+                onFolderRename={(f) => setDialog({ kind: "rename-folder", folder: f })}
+                onFolderDelete={(f) => setDialog({ kind: "delete-folder", folder: f })}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* The bar for what is ticked */}
@@ -659,7 +675,10 @@ function EmptyLibrary() {
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+      transition={{
+        duration: motionTokens.duration.standard,
+        ease: [...motionTokens.ease.standard],
+      }}
       className="flex flex-col items-center rounded-2xl border border-dashed px-6 py-16 text-center"
     >
       <FolderArt count={2} raised over={false} className="w-40" />
@@ -680,6 +699,10 @@ function EmptyFolder({ folderId }: { folderId: string }) {
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: motionTokens.duration.standard,
+        ease: [...motionTokens.ease.standard],
+      }}
       className="flex flex-col items-center rounded-2xl border border-dashed px-6 py-16 text-center"
     >
       <FolderArt count={0} raised={false} over={false} className="w-36" />
@@ -768,9 +791,14 @@ function TemplateTable({
                 key={`f-${f.id}`}
                 data-select-key={folderKey(f.id)}
                 layout
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
+                exit={{
+                  opacity: 0,
+                  transition: {
+                    duration: motionTokens.duration.instant,
+                    ease: [...motionTokens.ease.exit],
+                  },
+                }}
+                transition={motionTokens.spring.responsive}
                 onDragOver={drop.onDragOver}
                 onDragLeave={drop.onDragLeave}
                 onDrop={drop.onDrop}
@@ -869,9 +897,14 @@ function TemplateTable({
                 key={t.id}
                 data-select-key={t.id}
                 layout
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
+                exit={{
+                  opacity: 0,
+                  transition: {
+                    duration: motionTokens.duration.instant,
+                    ease: [...motionTokens.ease.exit],
+                  },
+                }}
+                transition={motionTokens.spring.responsive}
                 draggable
                 onDragStart={(e) => onDragStart(t.id, e as unknown as React.DragEvent)}
                 onDragEnd={onDragEnd}

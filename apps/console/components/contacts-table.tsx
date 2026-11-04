@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { AnimatePresence, motion } from "motion/react"
 import { Layers, SearchX, Trash2, Users } from "lucide-react"
 import { cn } from "cn"
 import { Badge } from "@repo/ui/components/badge/badge"
@@ -22,6 +23,7 @@ import {
   ListHeader,
   ListTable,
   rowClass,
+  SWAP,
 } from "@/components/list/table"
 import {
   ListToolbar,
@@ -153,109 +155,113 @@ function ContactRows({
 
   return (
     <div className="space-y-4">
-      {contacts.length === 0 ? (
-        <EmptyState
-          icon={filtered ? <SearchX /> : <Users />}
-          title={filtered ? "No matching contacts" : "No contacts yet"}
-          description={
-            filtered
-              ? "Try a different search, or clear the filters."
-              : "Import a CSV or add someone by hand. Custom columns become merge fields you can use in a broadcast."
-          }
-          secondary={
-            filtered ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => commit((p) => FILTERS.forEach((f) => p.delete(f)))}
-              >
-                Clear filters
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <>
-          <ListTable>
-            <ListHeader>
-              <th className="w-10 py-2.5 pl-4">
-                <Checkbox
-                  checked={
-                    allOnPageSelected ? true : someSelected ? "indeterminate" : false
-                  }
-                  aria-label="Select all contacts on this page"
-                  onCheckedChange={(checked) =>
-                    setSelected(checked === true ? new Set(ids) : new Set())
-                  }
-                />
-              </th>
-              <ListHead>Email</ListHead>
-              <ListHead className="hidden md:table-cell">Name</ListHead>
-              <ListHead className="w-[9rem]">Status</ListHead>
-              <ListHead className="w-[9rem] text-right">Added</ListHead>
-            </ListHeader>
-            <tbody className="divide-y">
-              {contacts.map((contact) => {
-                const ticked = selected.has(contact.id)
-                return (
-                  <tr
-                    key={contact.id}
-                    // A shift-click picks a range; without this it also selects text.
-                    onMouseDown={(event) => event.shiftKey && event.preventDefault()}
-                    onClick={(event) => {
-                      if ((event.target as HTMLElement).closest("button, a, input"))
-                        return
-                      toggle(contact.id, event.shiftKey)
-                    }}
-                    className={cn(
-                      rowClass,
-                      "cursor-pointer animate-in fade-in-0 duration-300",
-                      ticked && "bg-primary/[0.05] hover:bg-primary/[0.08]",
-                    )}
+      <AnimatePresence mode="wait" initial={false}>
+        {contacts.length === 0 ? (
+          <motion.div key="empty" {...SWAP}>
+            <EmptyState
+              icon={filtered ? <SearchX /> : <Users />}
+              title={filtered ? "No matching contacts" : "No contacts yet"}
+              description={
+                filtered
+                  ? "Try a different search, or clear the filters."
+                  : "Import a CSV or add someone by hand. Custom columns become merge fields you can use in a broadcast."
+              }
+              secondary={
+                filtered ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => commit((p) => FILTERS.forEach((f) => p.delete(f)))}
                   >
-                    <td className="w-10 py-3 pl-4">
-                      <Checkbox
-                        checked={ticked}
-                        aria-label={`Select ${contact.email}`}
-                        onClick={(event) => {
-                          event.preventDefault()
-                          toggle(contact.id, event.shiftKey)
-                        }}
-                      />
-                    </td>
-                    <ListCell className="max-w-0">
-                      <span className="block truncate font-mono text-xs">
-                        {contact.email}
-                      </span>
-                    </ListCell>
-                    <ListCell className="hidden max-w-0 md:table-cell">
-                      <span className="block truncate text-sm">
-                        {[contact.first_name, contact.last_name]
-                          .filter(Boolean)
-                          .join(" ") || (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </span>
-                    </ListCell>
-                    <ListCell>
-                      {contact.unsubscribed ? (
-                        <Badge tone="neutral">Unsubscribed</Badge>
-                      ) : (
-                        <Badge tone="neutral">Subscribed</Badge>
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            />
+          </motion.div>
+        ) : (
+          <motion.div key="table" {...SWAP}>
+            <ListTable>
+              <ListHeader>
+                <th className="w-10 py-2.5 pl-4">
+                  <Checkbox
+                    checked={
+                      allOnPageSelected ? true : someSelected ? "indeterminate" : false
+                    }
+                    aria-label="Select all contacts on this page"
+                    onCheckedChange={(checked) =>
+                      setSelected(checked === true ? new Set(ids) : new Set())
+                    }
+                  />
+                </th>
+                <ListHead>Email</ListHead>
+                <ListHead className="hidden md:table-cell">Name</ListHead>
+                <ListHead className="w-[9rem]">Status</ListHead>
+                <ListHead className="w-[9rem] text-right">Added</ListHead>
+              </ListHeader>
+              <tbody className="divide-y">
+                {contacts.map((contact) => {
+                  const ticked = selected.has(contact.id)
+                  return (
+                    <tr
+                      key={contact.id}
+                      // A shift-click picks a range; without this it also selects text.
+                      onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest("button, a, input"))
+                          return
+                        toggle(contact.id, event.shiftKey)
+                      }}
+                      className={cn(
+                        rowClass,
+                        "cursor-pointer",
+                        ticked && "bg-primary/[0.05] hover:bg-primary/[0.08]",
                       )}
-                    </ListCell>
-                    <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
-                      <Time iso={contact.created_at} />
-                    </ListCell>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </ListTable>
+                    >
+                      <td className="w-10 py-3 pl-4">
+                        <Checkbox
+                          checked={ticked}
+                          aria-label={`Select ${contact.email}`}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            toggle(contact.id, event.shiftKey)
+                          }}
+                        />
+                      </td>
+                      <ListCell className="max-w-0">
+                        <span className="block truncate font-mono text-xs">
+                          {contact.email}
+                        </span>
+                      </ListCell>
+                      <ListCell className="hidden max-w-0 md:table-cell">
+                        <span className="block truncate text-sm">
+                          {[contact.first_name, contact.last_name]
+                            .filter(Boolean)
+                            .join(" ") || (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </span>
+                      </ListCell>
+                      <ListCell>
+                        {contact.unsubscribed ? (
+                          <Badge tone="neutral">Unsubscribed</Badge>
+                        ) : (
+                          <Badge tone="neutral">Subscribed</Badge>
+                        )}
+                      </ListCell>
+                      <ListCell className="text-right text-xs whitespace-nowrap text-muted-foreground">
+                        <Time iso={contact.created_at} />
+                      </ListCell>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </ListTable>
 
-          <LoadMore cursor={nextCursor} />
-        </>
-      )}
+            <LoadMore cursor={nextCursor} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/*
        * ⚠ SELECTION IS PER PAGE AND THE BAR SAYS SO: "select all" means the

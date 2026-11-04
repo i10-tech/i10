@@ -7,6 +7,7 @@ import { DetailHero } from "@/components/detail-hero"
 import { DnsRecordsCard } from "@/components/dns-records"
 import { Journey } from "@/components/journey"
 import { Status, describeStatus } from "@/components/status"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { PAGE_WATCH_MS, watchUntilVerified } from "@/lib/domain-activation"
 import { domainJourney, domainNotice } from "@/lib/journey"
 import { useResetWhen } from "@/lib/react"
@@ -268,9 +269,11 @@ export function LiveDomainJourney({
       }
       footer={
         <>
-          {connect && (
-            <ConnectProgress view={connect} verified={domain.status === "verified"} />
-          )}
+          <Reveal show={Boolean(connect)} spacing="">
+            {connect && (
+              <ConnectProgress view={connect} verified={domain.status === "verified"} />
+            )}
+          </Reveal>
           {children}
         </>
       }
@@ -286,5 +289,9 @@ export function LiveDomainRecords({ actions }: { actions?: React.ReactNode }) {
 /** Renders its children only while the domain is not yet verified. */
 export function WhileUnverified({ children }: { children: React.ReactNode }) {
   const { domain } = useLive()
-  return domain.status === "verified" ? null : children
+  return (
+    <Reveal show={domain.status !== "verified"} spacing="">
+      {children}
+    </Reveal>
+  )
 }

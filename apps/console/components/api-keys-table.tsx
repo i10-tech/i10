@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { cn } from "cn"
+import { AnimatePresence, motion } from "motion/react"
 import { Copy, Globe, KeyRound, RefreshCw, SearchX, Trash2 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
@@ -16,6 +17,7 @@ import {
   ListHeader,
   ListTable,
   selectedRowClass,
+  SWAP,
 } from "@/components/list/table"
 import { BulkBar } from "@/components/list/bulk-bar"
 import { forEachPicked, useListSelection } from "@/components/list/selection"
@@ -152,162 +154,176 @@ export function ApiKeysTable({
       />
 
       <div className="pt-4">
-        {shown.length === 0 ? (
-          <EmptyState
-            icon={<SearchX />}
-            title="No key matches"
-            description="Try another name, or clear the filters."
-            secondary={
-              <Button size="sm" variant="secondary" onClick={clear}>
-                Clear filters
-              </Button>
-            }
-          />
-        ) : (
-          <ListTable>
-            <ListHeader>
-              <th className="w-10 py-2.5 pl-4">
-                {selection.headerBox("Select all live keys")}
-              </th>
-              <ListHead className="pl-0">Name</ListHead>
-              <ListHead className="w-[10rem]">Key</ListHead>
-              <ListHead className="w-[6rem]">Mode</ListHead>
-              {/*
-               * ⚠ IT EARNS A COLUMN RATHER THAN A BADGE BESIDE THE NAME. "Which
-               * of my keys can reach production" is the question somebody asks
-               * this table during an incident, and a value that is only visible
-               * on the row you happen to be reading does not answer it.
-               */}
-              <ListHead className="hidden w-[12rem] sm:table-cell">Sends from</ListHead>
-              <ListHead className="hidden w-[10rem] md:table-cell">Last used</ListHead>
-              <ListHead className="hidden w-[10rem] lg:table-cell">Created</ListHead>
-              <ListHead className="hidden w-[12rem] xl:table-cell">Created by</ListHead>
-              <ListHead className="w-12">
-                <span className="sr-only">Actions</span>
-              </ListHead>
-            </ListHeader>
-            <MotionBody>
-              {shown.map((key) => {
-                const revoked = key.revoked_at !== null
-                return (
-                  <MotionRow
-                    key={key.id}
-                    className={cn(
-                      revoked && "opacity-50",
-                      selection.isTicked(key) && selectedRowClass,
-                    )}
-                  >
-                    <td className="w-10 py-3 pl-4">
-                      {!revoked &&
-                        key.can_revoke &&
-                        selection.rowBox(key, `Select ${key.name}`)}
-                    </td>
-                    <ListCell className="pl-0 font-medium">
-                      {key.name}
-                      {revoked && (
-                        <Badge tone="neutral" className="ml-2">
-                          Revoked
-                        </Badge>
-                      )}
-                    </ListCell>
-                    <ListCell>
-                      {/*
-                       * ⚠ THE PREFIX ONLY, AND IT IS ALL WE HAVE. Nothing stores
-                       * the key, so this is not a redaction of something we could
-                       * show - it is the whole of what exists. The trailing dots
-                       * say so without claiming there is a reveal.
-                       */}
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {key.prefix}…
-                      </span>
-                    </ListCell>
-                    <ListCell>
-                      <Badge tone={key.mode === "live" ? "info" : "neutral"}>
-                        {key.mode}
-                      </Badge>
-                    </ListCell>
-                    <ListCell className="hidden sm:table-cell">
-                      {key.domains.length > 0 ? (
-                        <span className="font-mono text-xs">
-                          {key.domains.join(", ")}
-                        </span>
-                      ) : (
-                        // ⚠ "Any domain" RATHER THAN A DASH. A dash reads as
-                        // "not set", and the most important thing this column can
-                        // say is that a key is unrestricted.
-                        <span className="text-xs text-muted-foreground">
-                          Any domain
-                        </span>
-                      )}
-                    </ListCell>
-                    <ListCell className="hidden text-xs text-muted-foreground md:table-cell">
-                      {key.last_used_at ? (
-                        <Time iso={key.last_used_at} />
-                      ) : (
-                        // ⚠ "Never" IS AN ANSWER AND A DASH IS NOT. A key that
-                        // has never been used is the single most common thing
-                        // worth deleting.
-                        <span className="text-muted-foreground">Never</span>
-                      )}
-                    </ListCell>
-                    <ListCell className="hidden text-xs text-muted-foreground lg:table-cell">
-                      <Time iso={key.created_at} />
-                    </ListCell>
-                    <ListCell className="hidden truncate text-xs text-muted-foreground xl:table-cell">
-                      {key.created_by
-                        ? (key.created_by.name ?? key.created_by.email ?? "Unknown")
-                        : "Unknown"}
-                    </ListCell>
-                    <ListCell className="py-1.5 text-right">
-                      {!revoked && (
-                        <RowMenu label={key.name}>
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              void navigator.clipboard.writeText(key.id).then(
-                                () => toastDone("Key ID copied"),
-                                () => toastError("Could not copy the ID"),
-                              )
-                            }
-                          >
-                            <Copy />
-                            Copy ID
-                          </DropdownMenuItem>
-                          {(key.can_edit || key.can_rotate || key.can_revoke) && (
-                            <DropdownMenuSeparator />
+        <AnimatePresence mode="wait" initial={false}>
+          {shown.length === 0 ? (
+            <motion.div key="empty" {...SWAP}>
+              <EmptyState
+                icon={<SearchX />}
+                title="No key matches"
+                description="Try another name, or clear the filters."
+                secondary={
+                  <Button size="sm" variant="secondary" onClick={clear}>
+                    Clear filters
+                  </Button>
+                }
+              />
+            </motion.div>
+          ) : (
+            <motion.div key="table" {...SWAP}>
+              <ListTable>
+                <ListHeader>
+                  <th className="w-10 py-2.5 pl-4">
+                    {selection.headerBox("Select all live keys")}
+                  </th>
+                  <ListHead className="pl-0">Name</ListHead>
+                  <ListHead className="w-[10rem]">Key</ListHead>
+                  <ListHead className="w-[6rem]">Mode</ListHead>
+                  {/*
+                   * ⚠ IT EARNS A COLUMN RATHER THAN A BADGE BESIDE THE NAME. "Which
+                   * of my keys can reach production" is the question somebody asks
+                   * this table during an incident, and a value that is only visible
+                   * on the row you happen to be reading does not answer it.
+                   */}
+                  <ListHead className="hidden w-[12rem] sm:table-cell">
+                    Sends from
+                  </ListHead>
+                  <ListHead className="hidden w-[10rem] md:table-cell">
+                    Last used
+                  </ListHead>
+                  <ListHead className="hidden w-[10rem] lg:table-cell">
+                    Created
+                  </ListHead>
+                  <ListHead className="hidden w-[12rem] xl:table-cell">
+                    Created by
+                  </ListHead>
+                  <ListHead className="w-12">
+                    <span className="sr-only">Actions</span>
+                  </ListHead>
+                </ListHeader>
+                <MotionBody>
+                  {shown.map((key) => {
+                    const revoked = key.revoked_at !== null
+                    return (
+                      <MotionRow
+                        key={key.id}
+                        className={cn(
+                          revoked && "opacity-50",
+                          selection.isTicked(key) && selectedRowClass,
+                        )}
+                      >
+                        <td className="w-10 py-3 pl-4">
+                          {!revoked &&
+                            key.can_revoke &&
+                            selection.rowBox(key, `Select ${key.name}`)}
+                        </td>
+                        <ListCell className="pl-0 font-medium">
+                          {key.name}
+                          {revoked && (
+                            <Badge tone="neutral" className="ml-2">
+                              Revoked
+                            </Badge>
                           )}
-                          {key.can_edit && (
-                            <DropdownMenuItem onSelect={() => setScoping(key)}>
-                              <Globe />
-                              Change scope
-                            </DropdownMenuItem>
+                        </ListCell>
+                        <ListCell>
+                          {/*
+                           * ⚠ THE PREFIX ONLY, AND IT IS ALL WE HAVE. Nothing stores
+                           * the key, so this is not a redaction of something we could
+                           * show - it is the whole of what exists. The trailing dots
+                           * say so without claiming there is a reveal.
+                           */}
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {key.prefix}…
+                          </span>
+                        </ListCell>
+                        <ListCell>
+                          <Badge tone={key.mode === "live" ? "info" : "neutral"}>
+                            {key.mode}
+                          </Badge>
+                        </ListCell>
+                        <ListCell className="hidden sm:table-cell">
+                          {key.domains.length > 0 ? (
+                            <span className="font-mono text-xs">
+                              {key.domains.join(", ")}
+                            </span>
+                          ) : (
+                            // ⚠ "Any domain" RATHER THAN A DASH. A dash reads as
+                            // "not set", and the most important thing this column can
+                            // say is that a key is unrestricted.
+                            <span className="text-xs text-muted-foreground">
+                              Any domain
+                            </span>
                           )}
-                          {key.can_rotate && (
-                            <DropdownMenuItem onSelect={() => setRotating(key)}>
-                              <RefreshCw />
-                              Rotate
-                            </DropdownMenuItem>
+                        </ListCell>
+                        <ListCell className="hidden text-xs text-muted-foreground md:table-cell">
+                          {key.last_used_at ? (
+                            <Time iso={key.last_used_at} />
+                          ) : (
+                            // ⚠ "Never" IS AN ANSWER AND A DASH IS NOT. A key that
+                            // has never been used is the single most common thing
+                            // worth deleting.
+                            <span className="text-muted-foreground">Never</span>
                           )}
-                          {key.can_revoke && (
-                            <>
-                              <DropdownMenuSeparator />
+                        </ListCell>
+                        <ListCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                          <Time iso={key.created_at} />
+                        </ListCell>
+                        <ListCell className="hidden truncate text-xs text-muted-foreground xl:table-cell">
+                          {key.created_by
+                            ? (key.created_by.name ?? key.created_by.email ?? "Unknown")
+                            : "Unknown"}
+                        </ListCell>
+                        <ListCell className="py-1.5 text-right">
+                          {!revoked && (
+                            <RowMenu label={key.name}>
                               <DropdownMenuItem
-                                variant="destructive"
-                                onSelect={() => setRevoking(key)}
+                                onSelect={() =>
+                                  void navigator.clipboard.writeText(key.id).then(
+                                    () => toastDone("Key ID copied"),
+                                    () => toastError("Could not copy the ID"),
+                                  )
+                                }
                               >
-                                <Trash2 />
-                                Revoke
+                                <Copy />
+                                Copy ID
                               </DropdownMenuItem>
-                            </>
+                              {(key.can_edit || key.can_rotate || key.can_revoke) && (
+                                <DropdownMenuSeparator />
+                              )}
+                              {key.can_edit && (
+                                <DropdownMenuItem onSelect={() => setScoping(key)}>
+                                  <Globe />
+                                  Change scope
+                                </DropdownMenuItem>
+                              )}
+                              {key.can_rotate && (
+                                <DropdownMenuItem onSelect={() => setRotating(key)}>
+                                  <RefreshCw />
+                                  Rotate
+                                </DropdownMenuItem>
+                              )}
+                              {key.can_revoke && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    variant="destructive"
+                                    onSelect={() => setRevoking(key)}
+                                  >
+                                    <Trash2 />
+                                    Revoke
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </RowMenu>
                           )}
-                        </RowMenu>
-                      )}
-                    </ListCell>
-                  </MotionRow>
-                )
-              })}
-            </MotionBody>
-          </ListTable>
-        )}
+                        </ListCell>
+                      </MotionRow>
+                    )
+                  })}
+                </MotionBody>
+              </ListTable>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <ApiKeyScopeDialog
