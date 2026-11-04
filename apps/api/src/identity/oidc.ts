@@ -10,7 +10,7 @@ import {
   type CompleteOutcome,
   type Engine,
 } from "./bridge.js"
-import { upnAsAddress } from "./model.js"
+import { subjectFingerprint, upnAsAddress } from "./model.js"
 import type { Assertion, Connection, GroupsState, Refusal } from "./model.js"
 import { aadstsCode, oidcErrorCode } from "./failure.js"
 import type { AttemptRow, IdentityStore, Logger } from "./ports.js"
@@ -571,7 +571,10 @@ export function oidcEngine(deps: OidcEngineDeps): OidcEngine {
         const hd = typeof claims.hd === "string" ? claims.hd.toLowerCase() : null
         const live = await deps.store.liveDomains(connection.tenantId, connection.id)
         if (!hd || !live.includes(hd))
-          return refuse("hosted_domain", { hd, subject: claims.sub })
+          return refuse("hosted_domain", {
+            hd,
+            subjectFingerprint: subjectFingerprint(claims.sub),
+          })
       }
 
       const vouched = await withUserinfo(

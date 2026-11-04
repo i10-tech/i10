@@ -10,6 +10,7 @@ import { testEngine } from "../src/identity/test-engine.js"
 import {
   normaliseEmail,
   refusalMessage,
+  subjectFingerprint,
   type Assertion,
 } from "../src/identity/model.js"
 import { mayRemove } from "../src/console/roles.js"
@@ -419,6 +420,24 @@ describe("completing", () => {
       expect(w.store.events.at(-1)).toMatchObject({ type: "sign_in.failed", reason })
     })
   }
+
+  it("audits a refusal with the subject's fingerprint, never the subject", async () => {
+    const w = world({ join: "full" })
+    const { state } = await w.start()
+    const subject = "ada@acme.test"
+    await completeLogin(w.deps, {
+      protocol: "test",
+      state,
+      binding: BINDING,
+      assertion: w.assertion({ subject }),
+    })
+    const failed = w.store.events.at(-1)!
+    expect(failed).toMatchObject({
+      type: "sign_in.failed",
+      data: { subjectFingerprint: subjectFingerprint(subject) },
+    })
+    expect(JSON.stringify(failed)).not.toContain(subject)
+  })
 
   it("refuses an account another workspace manages", async () => {
     const w = world()

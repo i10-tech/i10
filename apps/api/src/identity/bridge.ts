@@ -413,7 +413,10 @@ async function openAttempt(
       reason,
       data: {
         attemptId: attempt.id,
-        ...(input.subject !== undefined ? { subject: input.subject } : {}),
+        // Never the subject itself: for Okta and Google SAML it is a username or email.
+        ...(input.subject !== undefined
+          ? { subjectFingerprint: subjectFingerprint(input.subject) }
+          : {}),
         ...extra,
       },
     })
