@@ -6,78 +6,12 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { cn } from "cn"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { Reveal } from "@repo/ui/components/i10/reveal"
+import { glideIntoView } from "@repo/ui/components/lib/glide-scroll"
 
-/** How long Reveal's open spring takes to settle, as `useFollowOpen` waits. */
+/** How long Reveal's open spring takes to settle. */
 const SETTLE_MS = 420
 
 const StepScroll = React.createContext<() => void>(() => {})
-
-// The person taking the scroll over, including dragging the scrollbar.
-const INTERRUPTS = ["wheel", "touchstart", "keydown", "pointerdown"] as const
-
-/**
- * Scroll `el`'s nearest scrolling ancestor until `el` sits at its scroll margin
- * from the top, on a critically damped spring that re-reads the target every
- * frame. While the page is still too short the browser clamps the scroll, so
- * the glide moves with the growth and carries on as soon as there is room.
- * Any wheel, touch or key from the person stops it. Returns a stop function.
- */
-function glideToTop(el: HTMLElement): () => void {
-  let pane = el.parentElement
-  while (pane && !/(auto|scroll)/.test(getComputedStyle(pane).overflowY))
-    pane = pane.parentElement
-  const scroller = pane ?? document.scrollingElement ?? document.documentElement
-  const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0
-
-  const STIFFNESS = 170
-  const DAMPING = 2 * Math.sqrt(STIFFNESS)
-  const GIVE_UP_MS = 1500
-  // ⚠ THE POSITION IS OURS, NOT READ BACK: the browser rounds scrollTop, and
-  // near the end each frame's step rounds to nothing, which reads as stopped.
-  let position = scroller.scrollTop
-  let velocity = 0
-  let last = performance.now()
-  const started = last
-  let frame = 0
-
-  const stop = () => {
-    cancelAnimationFrame(frame)
-    for (const type of INTERRUPTS) window.removeEventListener(type, stop)
-  }
-  for (const type of INTERRUPTS) window.addEventListener(type, stop, { passive: true })
-
-  const tick = (now: number) => {
-    const dt = Math.min((now - last) / 1000, 1 / 30)
-    last = now
-    const actual = scroller.scrollTop
-    const top =
-      scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top
-    const target = actual + el.getBoundingClientRect().top - top - margin
-    const room = scroller.scrollHeight - scroller.clientHeight
-    velocity += (STIFFNESS * (target - position) - DAMPING * velocity) * dt
-    position += velocity * dt
-    // At the bottom of a page that is still growing: hold there and carry only
-    // the speed the growth allows, so the glide does not lunge when it stops.
-    if (position > room) {
-      velocity = dt > 0 ? Math.max(0, Math.min(velocity, (room - actual) / dt)) : 0
-      position = room
-    }
-    scroller.scrollTop = position
-    const settled = Math.abs(target - position) < 0.5 && Math.abs(velocity) < 5
-    if (settled && target <= room) {
-      scroller.scrollTop = target
-      stop()
-      return
-    }
-    if (now - started > (target > room ? GIVE_UP_MS : GIVE_UP_MS * 2)) {
-      stop()
-      return
-    }
-    frame = requestAnimationFrame(tick)
-  }
-  frame = requestAnimationFrame(tick)
-  return stop
-}
 
 /**
  * Bring the step this is inside up to the top of the page, for an action that
@@ -139,7 +73,7 @@ export function TimelineStep({
       window.setTimeout(go, SETTLE_MS)
       return
     }
-    stopGlide.current = glideToTop(el)
+    stopGlide.current = glideIntoView(el, "start")
   }, [reduced])
 
   // A step that opens taller than what is left of the screen is brought up too.
