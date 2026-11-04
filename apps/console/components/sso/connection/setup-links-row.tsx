@@ -12,16 +12,8 @@ import { useResetOnOpen } from "@/lib/react"
 import { createSetupLink, revokeSetupLink, setupLinks } from "@/lib/sso-actions"
 import { toastDone } from "@/lib/toast"
 import type { SetupLink, SsoConnection } from "@/lib/sso-types"
-import { Block, Loading, ShownOnce, useRemote, useSsoCall } from "./shared"
-
-/**
- * Setup links (sso.md 2.10): a link for the company's IT contact, who has no
- * account here, to enter the provider's settings and run a test. It can never
- * activate the connection, change enforcement, add domains or read a secret.
- *
- * ⚠ THE LINK IS SHOWN ONCE, when it is made. The API keeps only its hash, so
- * there is no way to see it again; make another and revoke the lost one.
- */
+import { Advanced } from "../settings-card"
+import { Loading, ShownOnce, useRemote, useSsoCall } from "../shared"
 
 const HOURS = [
   { value: "24", label: "1 day" },
@@ -29,7 +21,7 @@ const HOURS = [
   { value: "168", label: "7 days" },
 ]
 
-export function SetupLinks({
+export function SetupLinksRow({
   connection,
   authOrigin,
 }: {
@@ -43,120 +35,132 @@ export function SetupLinks({
   const [shown, setShown] = React.useState<string | null>(null)
   const inSetup = connection.status === "draft" || connection.status === "testing"
 
+  const liveLinksCount = data?.data.filter((l) => l.live).length ?? 0
+
   return (
-    <Block
-      title="Setup links"
-      description="Send your IT contact a link to enter the provider's settings and run a test without an account. It works only while the connection is in draft or testing."
-      action={
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={!inSetup || !authOrigin}
-          onClick={() => setMaking(true)}
-        >
-          New link
-        </Button>
+    <Advanced
+      label="Setup links"
+      summary={
+        liveLinksCount > 0
+          ? `${liveLinksCount} active link${liveLinksCount === 1 ? "" : "s"}`
+          : "Link for an outside IT contact to enter settings"
       }
     >
-      {!inSetup && (
-        <p className="text-sm text-muted-foreground">
-          This connection has left setup, so its links were revoked. Move it back to
-          setup to make a new one.
-        </p>
-      )}
-      {!data ? (
-        <Loading failed={failed} />
-      ) : data.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No link made yet.</p>
-      ) : (
-        <ul className="divide-y rounded-lg border">
-          {data.data.map((link) => (
-            <li key={link.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">
-                  {link.contactEmail ?? "No contact named"}
-                </span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  Made <Time iso={link.createdAt} />
-                  {link.revokedAt
-                    ? ` - revoked: ${link.revokedReason ?? ""}`
-                    : link.live
-                      ? ""
-                      : " - expired"}
-                  {link.usedAt ? " - opened" : ""}
-                </span>
-              </span>
-              {link.live ? (
-                <>
-                  <Badge tone="success" size="sm">
-                    Live
-                  </Badge>
-                  <Button variant="ghost" size="sm" onClick={() => setRevoking(link)}>
-                    Revoke
-                  </Button>
-                </>
-              ) : (
-                <Badge tone="neutral" size="sm">
-                  {link.revokedAt ? "Revoked" : "Expired"}
-                </Badge>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="space-y-3 pt-2">
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            Send your IT contact a link to enter the provider&apos;s settings and run a test
+            without an account. It works only while the connection is in draft or testing.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!inSetup || !authOrigin}
+            onClick={() => setMaking(true)}
+          >
+            New link
+          </Button>
+        </div>
 
-      <MakeLink
-        open={making}
-        onOpenChange={setMaking}
-        onMake={async (hours, email) => {
-          const made = await call(
-            () =>
-              createSetupLink(connection.id, {
-                expiresInHours: hours,
-                contactEmail: email || null,
-              }),
-            { title: "Could not make the link" },
-          )
-          if (!made || !data) return false
-          // ⚠ THE TOKEN LEAVES THE ROW AT ONCE: the list keeps no copy, and the
-          // URL lives only in the dialog's state until it is closed.
-          const { token, ...row } = made
-          setData({ data: [row, ...data.data] })
-          // ⚠ THE FRAGMENT, NEVER THE PATH: a fragment never reaches a server or
-          // a proxy log; the setup page reads it and clears the address at once.
-          setShown(`${authOrigin}/sso/setup#token=${token}`)
-          return true
-        }}
-      />
-      <Revoke
-        link={revoking}
-        onClose={() => setRevoking(null)}
-        onRevoke={async (link, reason) => {
-          const after = await call(
-            () => revokeSetupLink(connection.id, link.id, reason),
-            {
-              stepUp: false,
-              title: "Could not revoke the link",
-            },
-          )
-          if (!after || !data) return false
-          setData({ data: data.data.map((l) => (l.id === link.id ? after : l)) })
-          toastDone("Link revoked")
-          return true
-        }}
-      />
-      <ShownOnce
-        open={shown !== null}
-        title="Your setup link"
-        description="Send it to your IT contact. It is shown once and cannot be found again; if you lose it, make another."
-        fields={shown ? [{ label: "Link", value: shown }] : []}
-        onClose={() => setShown(null)}
-      />
-    </Block>
+        {!inSetup && (
+          <p className="text-xs text-muted-foreground">
+            This connection has left setup, so its links were revoked. Move it back to
+            setup to make a new one.
+          </p>
+        )}
+
+        {!data ? (
+          <Loading failed={failed} />
+        ) : data.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No link made yet.</p>
+        ) : (
+          <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+            {data.data.map((link) => (
+              <li key={link.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">
+                    {link.contactEmail ?? "No contact named"}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    Made <Time iso={link.createdAt} />
+                    {link.revokedAt
+                      ? ` - revoked: ${link.revokedReason ?? ""}`
+                      : link.live
+                        ? ""
+                        : " - expired"}
+                    {link.usedAt ? " - opened" : ""}
+                  </span>
+                </span>
+                {link.live ? (
+                  <>
+                    <Badge tone="success" size="sm">
+                      Live
+                    </Badge>
+                    <Button variant="ghost" size="sm" onClick={() => setRevoking(link)}>
+                      Revoke
+                    </Button>
+                  </>
+                ) : (
+                  <Badge tone="neutral" size="sm">
+                    {link.revokedAt ? "Revoked" : "Expired"}
+                  </Badge>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <MakeLinkDialog
+          open={making}
+          onOpenChange={setMaking}
+          onMake={async (hours, email) => {
+            const made = await call(
+              () =>
+                createSetupLink(connection.id, {
+                  expiresInHours: hours,
+                  contactEmail: email || null,
+                }),
+              { title: "Could not make the link" },
+            )
+            if (!made || !data) return false
+            const { token, ...row } = made
+            setData({ data: [row, ...data.data] })
+            setShown(`${authOrigin}/sso/setup#token=${token}`)
+            return true
+          }}
+        />
+
+        <RevokeDialog
+          link={revoking}
+          onClose={() => setRevoking(null)}
+          onRevoke={async (link, reason) => {
+            const after = await call(
+              () => revokeSetupLink(connection.id, link.id, reason),
+              {
+                stepUp: false,
+                title: "Could not revoke the link",
+              },
+            )
+            if (!after || !data) return false
+            setData({ data: data.data.map((l) => (l.id === link.id ? after : l)) })
+            toastDone("Link revoked")
+            return true
+          }}
+        />
+
+        <ShownOnce
+          open={shown !== null}
+          title="Your setup link"
+          description="Send it to your IT contact. It is shown once and cannot be found again; if you lose it, make another."
+          fields={shown ? [{ label: "Link", value: shown }] : []}
+          onClose={() => setShown(null)}
+        />
+      </div>
+    </Advanced>
   )
 }
 
-function MakeLink({
+function MakeLinkDialog({
   open,
   onOpenChange,
   onMake,
@@ -173,6 +177,7 @@ function MakeLink({
     setEmail("")
     setBusy(false)
   })
+
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent
@@ -219,7 +224,7 @@ function MakeLink({
   )
 }
 
-function Revoke({
+function RevokeDialog({
   link,
   onClose,
   onRevoke,
@@ -234,6 +239,7 @@ function Revoke({
     setReason("")
     setBusy(false)
   })
+
   return (
     <Dialog open={link !== null} onOpenChange={(next) => !busy && !next && onClose()}>
       <DialogContent

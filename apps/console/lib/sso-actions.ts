@@ -102,6 +102,11 @@ export async function ssoTestRuns(id: string) {
 
 // ── OIDC ────────────────────────────────────────────────────────────────────
 
+/** Records a passed test. Only preview's fixtures answer this; the API has no such route. */
+export async function previewPassTest(id: string) {
+  return run(() => api<TestRun>(`${conn(id)}/test-runs`, { method: "POST" }))
+}
+
 export async function oidcSetup(id: string) {
   return run(() => api<OidcSetup>(`${conn(id)}/oidc`))
 }

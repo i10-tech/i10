@@ -21,9 +21,6 @@ const STEPS = [50, 100, 200]
  * Everything that changed about how people sign in and who they are: SSO and
  * directory settings, sessions, mailboxes, policies. An admin's page; the API
  * checks `sso:manage`.
- *
- * ⚠ THE ROUTE TAKES `limit` (at most 200) AND `user` AND NOTHING ELSE, so
- * there is no cursor: "show more" asks for a longer list of the newest events.
  */
 export default async function AuditPage({
   searchParams,
@@ -63,10 +60,16 @@ export default async function AuditPage({
             Only a workspace admin or owner can see the audit log.
           </p>
         ) : !events.ok ? (
-          <PanelError
-            title="Could not load the audit log"
-            message={events.error.message}
-          />
+          events.error.statusCode === 501 ? (
+            <p className="text-sm text-muted-foreground">
+              The identity audit log is not available on this deployment.
+            </p>
+          ) : (
+            <PanelError
+              title="Could not load the audit log"
+              message={events.error.message}
+            />
+          )
         ) : (
           <AuditLog
             events={events.data.data}

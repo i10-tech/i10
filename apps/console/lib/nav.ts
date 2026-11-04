@@ -188,22 +188,21 @@ export const SETTINGS_NAV: NavGroup[] = [
       },
       { href: "/settings/team", label: "Team", icon: Building2 },
       {
+        href: "/settings/sso",
+        label: "Single sign-on",
+        icon: KeyRound,
+        keywords: [
+          "sso", "saml", "oidc", "okta", "entra", "scim", "google workspace",
+          "single sign-on", "directory", "directories",
+        ],
+      },
+      {
         href: "/settings/security",
         label: "Security",
         icon: ShieldCheck,
         keywords: [
-          "sso",
-          "saml",
-          "oidc",
-          "okta",
-          "entra",
-          "scim",
-          "single sign-on",
-          "session",
-          "ip allowlist",
-          "second factor",
-          "2fa",
-          "directory mail",
+          "session", "2fa", "second factor", "ip allowlist", "owner exemption",
+          "siem", "security",
         ],
       },
       {

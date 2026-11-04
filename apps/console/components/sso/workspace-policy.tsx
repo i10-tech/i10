@@ -4,6 +4,7 @@ import * as React from "react"
 import { Button } from "@repo/ui/components/button/button"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { Switch } from "@repo/ui/components/i10/switch"
 import {
   DURATION_UNITS,
@@ -21,135 +22,189 @@ import {
 } from "@/lib/sso-policy-actions"
 import { toastDone } from "@/lib/toast"
 import type { Bounds, SessionPolicy, SsoAbilities } from "@/lib/sso-types"
-import { Loading, ToggleRow, useRemote, useSsoCall } from "./shared"
-
-/**
- * The workspace's session policy and second-factor rule (#345). Anyone with
- * `sso:manage` reads them; changing either is an owner's, with step-up.
- *
- * ⚠ THE SCREEN SHOWS HUMAN UNITS AND SENDS SECONDS. The bounds come from the
- * GET, never from this file, so the page and the API cannot disagree about
- * them; the API still refuses a value outside them.
- */
+import { InlineError } from "./setup/inline-error"
+import { SettingsRow } from "./settings-card"
+import { Loading, useRemote, useSsoCall } from "./shared"
 
 const OWNER_ONLY = "Only an owner can change this. Ask an owner."
 
-export function SessionPolicyPanel({ abilities }: { abilities: SsoAbilities }) {
-  const { data, setData, failed } = useRemote(sessionPolicy)
+function formatDuration(
+  seconds: number | null,
+  fallback: { value: number; unit: DurationUnit },
+): string {
+  if (seconds === null) return "No limit"
+  const draft = draftOf(seconds, fallback)
+  const unit = Number(draft.value) === 1 ? draft.unit.replace(/s$/, "") : draft.unit
+  return `${draft.value} ${unit}`
+}
+
+export function SessionPolicyPanel({
+  abilities,
+  initial,
+}: {
+  abilities: SsoAbilities
+  initial?: SessionPolicy | null
+}) {
+  const call = useSsoCall()
+  const { data, setData, failed } = useRemote(sessionPolicy, initial)
   if (!data) return <Loading failed={failed} />
+
+  const update = (patch: Partial<SessionPolicy>) => {
+    setData({ ...data, ...patch })
+    toastDone("Session policy saved")
+  }
+
   return (
-    <SessionForm
-      // Remount on a saved change so the fields start from what the API holds.
-      key={`${data.maxSessionSeconds}:${data.idleTimeoutSeconds}`}
-      policy={data}
-      abilities={abilities}
-      onSaved={(saved) => setData({ ...data, ...saved })}
-    />
+    <>
+      <SessionLimitRow
+        key={`max:${data.maxSessionSeconds}`}
+        title="Longest session"
+        description="Everyone is signed out this long after they signed in, however active they are."
+        currentSeconds={data.maxSessionSeconds}
+        bounds={data.bounds.maxSessionSeconds}
+        fallback={{ value: 7, unit: "days" }}
+        saveLabel="Save longest session"
+        abilities={abilities}
+        onSave={async (seconds) => {
+          const saved = await call(
+            () =>
+              saveSessionPolicy({
+                maxSessionSeconds: seconds,
+                idleTimeoutSeconds: data.idleTimeoutSeconds,
+              }),
+            { title: "Could not save the session policy" },
+          )
+          if (saved) {
+            update(saved)
+            return true
+          }
+          return false
+        }}
+      />
+      <SessionLimitRow
+        key={`idle:${data.idleTimeoutSeconds}`}
+        title="Sign out when idle"
+        description="Everyone is signed out after this long without using the console."
+        currentSeconds={data.idleTimeoutSeconds}
+        bounds={data.bounds.idleTimeoutSeconds}
+        fallback={{ value: 1, unit: "hours" }}
+        note="An SSO connection can set shorter limits of its own for the people who sign in through it. The shorter one applies."
+        saveLabel="Save idle timeout"
+        abilities={abilities}
+        onSave={async (seconds) => {
+          const saved = await call(
+            () =>
+              saveSessionPolicy({
+                maxSessionSeconds: data.maxSessionSeconds,
+                idleTimeoutSeconds: seconds,
+              }),
+            { title: "Could not save the idle timeout" },
+          )
+          if (saved) {
+            update(saved)
+            return true
+          }
+          return false
+        }}
+      />
+    </>
   )
 }
 
-function SessionForm({
-  policy,
+function SessionLimitRow({
+  title,
+  description,
+  currentSeconds,
+  bounds,
+  fallback,
+  note,
+  saveLabel,
   abilities,
-  onSaved,
+  onSave,
 }: {
-  policy: SessionPolicy
+  title: string
+  description: string
+  currentSeconds: number | null
+  bounds: Bounds
+  fallback: { value: number; unit: DurationUnit }
+  note?: string
+  saveLabel: string
   abilities: SsoAbilities
-  onSaved: (saved: {
-    maxSessionSeconds: number | null
-    idleTimeoutSeconds: number | null
-  }) => void
+  onSave: (seconds: number | null) => Promise<boolean>
 }) {
-  const call = useSsoCall()
-  const [longest, setLongest] = React.useState(() =>
-    draftOf(policy.maxSessionSeconds, { value: 7, unit: "days" }),
-  )
-  const [idle, setIdle] = React.useState(() =>
-    draftOf(policy.idleTimeoutSeconds, { value: 1, unit: "hours" }),
-  )
+  const [editing, setEditing] = React.useState(false)
+  const [draft, setDraft] = React.useState(() => draftOf(currentSeconds, fallback))
   const [busy, setBusy] = React.useState(false)
-  const maxResult = draftSeconds(longest, policy.bounds.maxSessionSeconds)
-  const idleResult = draftSeconds(idle, policy.bounds.idleTimeoutSeconds)
-  const changed =
-    maxResult.ok &&
-    idleResult.ok &&
-    (maxResult.seconds !== policy.maxSessionSeconds ||
-      idleResult.seconds !== policy.idleTimeoutSeconds)
+  const [error, setError] = React.useState<string | null>(null)
 
-  async function save() {
-    if (!maxResult.ok || !idleResult.ok) return
+  const result = draftSeconds(draft, bounds)
+  const changed = result.ok && result.seconds !== currentSeconds
+  const currentText = formatDuration(currentSeconds, fallback)
+
+  async function handleSave() {
+    if (!result.ok) return
     setBusy(true)
+    setError(null)
     try {
-      const saved = await call(
-        () =>
-          saveSessionPolicy({
-            maxSessionSeconds: maxResult.seconds,
-            idleTimeoutSeconds: idleResult.seconds,
-          }),
-        { title: "Could not save the session policy" },
-      )
-      if (saved) {
-        onSaved(saved)
-        toastDone("Session policy saved")
-      }
+      const ok = await onSave(result.seconds)
+      if (ok) setEditing(false)
+      else setError("Could not save.")
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="space-y-4">
-      <LimitField
-        label="Longest session"
-        description="Everyone is signed out this long after they signed in, however active they are."
-        draft={longest}
-        bounds={policy.bounds.maxSessionSeconds}
-        problem={maxResult.ok ? null : maxResult.reason}
-        disabled={!abilities.owner}
-        onChange={setLongest}
-      />
-      <LimitField
-        label="Sign out when idle"
-        description="Everyone is signed out after this long without using the console."
-        draft={idle}
-        bounds={policy.bounds.idleTimeoutSeconds}
-        problem={idleResult.ok ? null : idleResult.reason}
-        disabled={!abilities.owner}
-        onChange={setIdle}
-      />
-      <p className="max-w-prose text-sm text-muted-foreground">
-        An SSO connection can set shorter limits of its own for the people who sign in
-        through it. The shorter one applies.
-      </p>
-      <div className="flex items-center gap-3">
-        <Button
-          variant="secondary"
-          size="sm"
-          loading={busy}
-          disabled={!abilities.owner || !changed}
-          onClick={() => void save()}
-        >
-          Save session policy
-        </Button>
-        {!abilities.owner && (
-          <p className="text-xs text-muted-foreground">{OWNER_ONLY}</p>
-        )}
-      </div>
-    </div>
+    <SettingsRow
+      title={title}
+      description={description}
+      action={
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">{currentText}</span>
+          <Button variant="ghost" size="sm" onClick={() => setEditing(!editing)}>
+            {editing ? "Cancel" : "Edit"}
+          </Button>
+        </div>
+      }
+    >
+      <Reveal show={editing} spacing="pt-3">
+        <div className="space-y-4">
+          <DurationLimitEditor
+            draft={draft}
+            bounds={bounds}
+            problem={result.ok ? null : result.reason}
+            disabled={!abilities.owner}
+            onChange={setDraft}
+          />
+          {note && <p className="max-w-prose text-sm text-muted-foreground">{note}</p>}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={busy}
+              disabled={!abilities.owner || !changed || !result.ok}
+              onClick={() => void handleSave()}
+            >
+              {saveLabel}
+            </Button>
+            {!abilities.owner && (
+              <p className="text-xs text-muted-foreground">{OWNER_ONLY}</p>
+            )}
+          </div>
+          <InlineError message={error} />
+        </div>
+      </Reveal>
+    </SettingsRow>
   )
 }
 
-function LimitField({
-  label,
-  description,
+function DurationLimitEditor({
   draft,
   bounds,
   problem,
   disabled,
   onChange,
 }: {
-  label: string
-  description: string
   draft: LimitDraft
   bounds: Bounds
   problem: "empty" | "below" | "above" | null
@@ -159,14 +214,11 @@ function LimitField({
   const id = React.useId()
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between gap-4">
-        <label htmlFor={id} className="min-w-0">
-          <span className="block text-sm font-medium">{label}</span>
-          <span className="block max-w-prose text-sm text-muted-foreground">
-            {description}
-          </span>
+      <div className="flex items-center justify-between gap-4">
+        <label htmlFor={id} className="text-sm font-medium">
+          Limit duration
         </label>
-        <div className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span aria-hidden>{draft.on ? "Limited" : "No limit"}</span>
           <Switch
             id={id}
@@ -176,7 +228,7 @@ function LimitField({
           />
         </div>
       </div>
-      {draft.on && (
+      <Reveal show={draft.on} spacing="pt-1">
         <div className="grid gap-3 sm:grid-cols-2">
           <FloatingInput
             label="Length"
@@ -201,44 +253,62 @@ function LimitField({
             items={DURATION_UNITS.map((u) => ({ value: u.unit, label: u.label }))}
           />
         </div>
-      )}
+      </Reveal>
     </div>
   )
 }
 
-// ── Second factor ───────────────────────────────────────────────────────────
-
-export function SecondFactorPanel({ abilities }: { abilities: SsoAbilities }) {
+export function SecondFactorPanel({
+  abilities,
+  initial,
+}: {
+  abilities: SsoAbilities
+  initial?: { required: boolean } | null
+}) {
   const call = useSsoCall()
-  const { data, setData, failed } = useRemote(secondFactorPolicy)
+  const { data, setData, failed } = useRemote(secondFactorPolicy, initial)
+  const id = React.useId()
+
   if (!data) return <Loading failed={failed} />
+
   return (
-    <div className="space-y-3">
-      <ToggleRow
-        label="Require a second factor"
-        description="Members who sign in with a password or an email code must have a second step on their account, such as an authenticator app. Until they add one, the console asks them to."
-        checked={data.required}
-        disabled={!abilities.owner}
-        onChange={async (required) => {
-          const saved = await call(() => saveSecondFactorPolicy(required), {
-            title: "Could not save that",
-          })
-          if (saved) {
-            setData(saved)
-            toastDone(
-              saved.required ? "Second factor required" : "Second factor optional",
-            )
-          }
-        }}
-      />
-      <p className="max-w-prose text-sm text-muted-foreground">
-        Members who sign in through SSO are exempt: their identity provider is the
-        second step. Passkeys alone do not count, so a member who only has a passkey is
-        still asked to add one.
-      </p>
-      {!abilities.owner && (
-        <p className="text-xs text-muted-foreground">{OWNER_ONLY}</p>
-      )}
-    </div>
+    <SettingsRow
+      title="Second factor"
+      description="Require a second step at sign-in from members who do not use SSO."
+      action={
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            {data.required ? "Required" : "Optional"}
+          </span>
+          <Switch
+            id={id}
+            checked={data.required}
+            disabled={!abilities.owner}
+            onCheckedChange={async (required) => {
+              const saved = await call(() => saveSecondFactorPolicy(required), {
+                title: "Could not save that",
+              })
+              if (saved) {
+                setData(saved)
+                toastDone(
+                  saved.required ? "Second factor required" : "Second factor optional",
+                )
+              }
+            }}
+          />
+        </div>
+      }
+    >
+      <div className="space-y-1">
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Members who sign in through SSO are exempt: their identity provider is the
+          second step. Passkeys alone do not count, so a member who only has a passkey
+          is still asked to add one.
+        </p>
+        {!abilities.owner && (
+          <p className="text-xs text-muted-foreground">{OWNER_ONLY}</p>
+        )}
+      </div>
+    </SettingsRow>
   )
 }

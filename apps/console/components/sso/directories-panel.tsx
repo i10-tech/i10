@@ -1,61 +1,17 @@
 "use client"
 
 import * as React from "react"
-import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
-import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
-import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
-import { FloatingInput } from "@repo/ui/components/i10/floating-field"
-import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
-import { ConfirmDialog } from "@/components/confirm-dialog"
-import { Time } from "@/components/time"
-import { useResetOnOpen } from "@/lib/react"
-import {
-  changeDirectory,
-  checkDirectory,
-  confirmDirectoryRemovals,
-  createDirectory,
-  directoryConflicts,
-  issueDirectoryToken,
-  retryDirectoryUser,
-  revokeDirectoryToken,
-  ssoDirectories,
-} from "@/lib/sso-actions"
-import { toastDone, toastError } from "@/lib/toast"
-import type {
-  DirectoryConflict,
-  GoogleCheckResult,
-  SsoAbilities,
-  SsoDirectories,
-  SsoDirectory,
-} from "@/lib/sso-types"
-import { DirectoryMail } from "./directory-mail"
-import { Loading, ShownOnce, ToggleRow, Value, useRemote, useSsoCall } from "./shared"
-
-/**
- * Directories (sso.md 2.7 and 2.9): SCIM from Okta, Entra or any provider, and
- * Google Workspace through domain-wide delegation. A directory creates and
- * removes accounts, so making one, issuing its token and enabling it are an
- * owner's; an admin can read, rename, disable and revoke.
- *
- * ⚠ A SCIM TOKEN IS SHOWN ONCE, when it is made. Only its hash is kept; to
- * "rotate", issue a new one - the old ones keep working for the overlap you
- * choose, so the provider can be updated without a gap - then revoke them.
- */
-
-const PROVIDER_LABEL: Record<string, string> = {
-  okta: "Okta (SCIM)",
-  entra: "Microsoft Entra ID (SCIM)",
-  google: "Google Workspace",
-  generic: "Other SCIM provider",
-}
-
-const OVERLAP = [
-  { value: "0", label: "End the old tokens now" },
-  { value: String(3600), label: "Keep them for 1 hour" },
-  { value: String(24 * 3600), label: "Keep them for 1 day" },
-  { value: String(7 * 24 * 3600), label: "Keep them for 7 days" },
-]
+import { Reveal } from "@repo/ui/components/i10/reveal"
+import { ssoDirectories } from "@/lib/sso-actions"
+import type { SsoAbilities, SsoDirectories, SsoDirectory } from "@/lib/sso-types"
+import { DeprovisionedKeysPanel } from "./deprovisioned-keys"
+import { AddDirectoryFlow } from "./directories/add-directory-flow"
+import { DirectoryRow } from "./directories/directory-row"
+import { IdpMark } from "./idp-mark"
+import { MailboxesPanel } from "./mailboxes-panel"
+import { SettingsGroup, SettingsRow } from "./settings-card"
+import { Loading, useRemote, useSsoCall } from "./shared"
 
 export {
   DEFAULT_GOOGLE_SCOPES,
@@ -64,565 +20,165 @@ export {
   isGoogleDirectoryErrorCode,
   describeGoogleError,
 } from "@/lib/google-directory-errors"
-import { describeGoogleError } from "@/lib/google-directory-errors"
 
-export function DirectoriesPanel({ abilities }: { abilities: SsoAbilities }) {
+const MARKS = ["okta", "entra", "google"]
+
+export function DirectoriesPanel({
+  abilities,
+  initial,
+}: {
+  abilities: SsoAbilities
+  initial?: SsoDirectories | null
+}) {
   const call = useSsoCall()
-  const { data, setData, failed, reload } = useRemote(ssoDirectories)
-  const [making, setMaking] = React.useState(false)
-  const [issued, setIssued] = React.useState<{ token: string; baseUrl: string } | null>(
-    null,
-  )
+  const { data, setData, failed, reload } = useRemote(ssoDirectories, initial)
+  const [adding, setAdding] = React.useState(false)
 
   if (!data) return <Loading failed={failed} />
 
-  return (
-    <div className="space-y-3">
-      {data.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No directory yet. A directory keeps this workspace&rsquo;s members in step
-          with your company&rsquo;s: people are added, changed and removed there.
-        </p>
-      ) : (
-        <ul className="space-y-3">
-          {data.data.map((d) => (
-            <Directory
-              key={d.id}
-              directory={d}
-              abilities={abilities}
-              onChange={(next) =>
-                setData({
-                  ...data,
-                  data: data.data.map((x) => (x.id === next.id ? next : x)),
-                })
-              }
-              onIssued={setIssued}
-              reload={reload}
-              call={call}
-            />
-          ))}
-        </ul>
-      )}
-      <div className="flex items-center gap-3">
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={!abilities.owner || data.data.length >= data.max}
-          onClick={() => setMaking(true)}
-        >
-          New directory
-        </Button>
-        {!abilities.owner && (
-          <p className="text-xs text-muted-foreground">
-            Only an owner can make a directory: it creates and removes accounts.
-          </p>
-        )}
+  const directories = data.data
+
+  if (directories.length === 0) {
+    return (
+      <div>
+        <Reveal show={!adding} spacing="">
+          <div className="flex flex-col items-start gap-4 rounded-2xl border border-border p-5 sm:flex-row sm:items-center">
+            <div className="flex -space-x-2">
+              {MARKS.map((idp) => (
+                <IdpMark key={idp} idp={idp} className="ring-2 ring-background" />
+              ))}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Add and remove people automatically</p>
+              <p className="text-sm text-muted-foreground">
+                Keep members in step with your company&rsquo;s directory: Okta,
+                Microsoft Entra, Google Workspace, or Custom SCIM.
+              </p>
+            </div>
+            {abilities.owner && (
+              <Button size="sm" onClick={() => setAdding(true)}>
+                Set up
+              </Button>
+            )}
+          </div>
+        </Reveal>
+        <Reveal show={adding} spacing="">
+          <AddDirectoryFlow
+            data={data}
+            call={call}
+            onDone={async () => {
+              await reload()
+              setAdding(false)
+            }}
+            onCancel={() => setAdding(false)}
+          />
+        </Reveal>
       </div>
-      <NewDirectory
-        open={making}
-        onOpenChange={setMaking}
-        data={data}
-        onMake={async (input) => {
-          const made = await call(() => createDirectory(input), {
-            title: "Could not make the directory",
-          })
-          if (!made) return false
-          await reload()
-          toastDone(
-            "Directory made",
-            made.provider === "google" ? undefined : "Issue its token next.",
-          )
-          return true
-        }}
-      />
-      <ShownOnce
-        open={issued !== null}
-        title="Your directory token"
-        description="Paste it into your provider as the SCIM token (Okta calls it the API token, Entra the secret token). It is shown once and cannot be found again."
-        fields={
-          issued
-            ? [
-                { label: "Base URL", value: issued.baseUrl },
-                { label: "Token", value: issued.token },
-              ]
-            : []
-        }
-        onClose={() => setIssued(null)}
-      />
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
+        {directories.map((d) => (
+          <DirectoryRow
+            key={d.id}
+            directory={d}
+            abilities={abilities}
+            onChange={(next: SsoDirectory) =>
+              setData({
+                ...data,
+                data: directories.map((x) => (x.id === next.id ? next : x)),
+              })
+            }
+            reload={reload}
+            call={call}
+          />
+        ))}
+      </ul>
+
+      {abilities.owner && directories.length < data.max && !adding && (
+        <Button variant="secondary" size="sm" onClick={() => setAdding(true)}>
+          Add a directory
+        </Button>
+      )}
+
+      <Reveal show={adding}>
+        <AddDirectoryFlow
+          data={data}
+          call={call}
+          onDone={async () => {
+            await reload()
+            setAdding(false)
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      </Reveal>
+
+      <div className="pt-2">
+        <SettingsGroup>
+          <MailboxesRow
+            abilities={abilities}
+            clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+          />
+          <DeprovisionedKeysRow
+            abilities={abilities}
+            clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+          />
+        </SettingsGroup>
+      </div>
     </div>
   )
 }
 
-function Directory({
-  directory,
+function MailboxesRow({
   abilities,
-  onChange,
-  onIssued,
-  reload,
-  call,
+  clerkEnabled,
 }: {
-  directory: SsoDirectory
   abilities: SsoAbilities
-  onChange: (directory: SsoDirectory) => void
-  onIssued: (value: { token: string; baseUrl: string }) => void
-  reload: () => Promise<void>
-  call: ReturnType<typeof useSsoCall>
+  clerkEnabled: boolean
 }) {
-  const [overlap, setOverlap] = React.useState(String(24 * 3600))
-  const [checking, setChecking] = React.useState(false)
-  const [conflicts, setConflicts] = React.useState(false)
-  const [confirming, setConfirming] = React.useState(false)
-  const google = directory.provider === "google"
-  const liveTokens = directory.tokens.filter((t) => !t.revokedAt)
-  // ⚠ ONLY THE COUNT THE API RECORDED CAN BE CONFIRMED, and only by an owner.
-  const refusedRemovals =
-    directory.lastSyncError === "large_drop"
-      ? directory.lastSyncDetail?.removedUsers
-      : undefined
-  const canConfirmRemovals = abilities.owner && refusedRemovals !== undefined
+  const [open, setOpen] = React.useState(false)
 
   return (
-    <li className="rounded-lg border p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{directory.name}</p>
-          <p className="text-xs text-muted-foreground">
-            {PROVIDER_LABEL[directory.provider] ?? directory.provider} &middot;{" "}
-            {directory.users} {directory.users === 1 ? "person" : "people"}
-            {directory.pending > 0 ? ` - ${directory.pending} waiting` : ""}
-          </p>
-        </div>
-        {directory.conflicts > 0 && (
-          <Button variant="secondary" size="sm" onClick={() => setConflicts(true)}>
-            {directory.conflicts} {directory.conflicts === 1 ? "conflict" : "conflicts"}
-          </Button>
-        )}
-      </div>
-
-      <div className="mt-4 space-y-3">
-        <ToggleRow
-          label="Enabled"
-          description={
-            directory.enabled
-              ? "Changes from your provider are applied."
-              : abilities.owner
-                ? "Changes are ignored. Enabling it starts applying them."
-                : "Only an owner can enable a directory."
-          }
-          checked={directory.enabled}
-          disabled={!directory.enabled && !abilities.owner}
-          onChange={async (enabled) => {
-            const after = await call(() => changeDirectory(directory.id, { enabled }), {
-              title: enabled ? "Could not enable it" : "Could not disable it",
-            })
-            if (after) {
-              onChange({ ...directory, ...after, tokens: directory.tokens })
-              toastDone(enabled ? "Directory enabled" : "Directory disabled")
-            }
-          }}
-        />
-
-        <DirectoryMail
-          directory={directory}
-          abilities={abilities}
-          onChange={onChange}
-          call={call}
-        />
-
-        {google ? (
-          <>
-            {directory.google && !directory.google.available && (
-              <p className="text-sm text-muted-foreground">
-                {directory.google.unavailableReason}
-              </p>
-            )}
-            {directory.google?.available && directory.google.clientId && (
-              <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
-                <p className="text-xs font-medium">
-                  In your Google Admin console, authorise this client for domain-wide
-                  delegation with the scopes below.
-                </p>
-                <Value label="Client ID" value={directory.google.clientId} />
-                <Value label="Scopes" value={directory.google.scopes.join(",")} />
-              </div>
-            )}
-            <p className="text-sm text-muted-foreground">
-              Acting as {directory.adminEmail ?? "-"} for {directory.domain ?? "-"}.{" "}
-              {directory.lastSyncAt ? (
-                <>
-                  Last pull <Time iso={directory.lastSyncAt} />
-                  {directory.lastSyncStatus ? `: ${directory.lastSyncStatus}` : ""}.
-                </>
-              ) : (
-                "Not pulled yet."
-              )}
-            </p>
-            {directory.enabled && directory.liveUpdates === false && (
-              <p className="text-sm text-muted-foreground">
-                Live updates off, changes arrive within 15 minutes.
-              </p>
-            )}
-            {(directory.lastSyncError || directory.lastSyncStatus === "failed") && (
-              <p className="text-sm text-destructive">
-                {describeGoogleError(directory.lastSyncError, {
-                  clientId: directory.google?.clientId,
-                  scopes: directory.google?.scopes,
-                  missingScopes: directory.lastSyncDetail?.missingScopes,
-                  removedUsers: directory.lastSyncDetail?.removedUsers,
-                  existingUsers: directory.lastSyncDetail?.existingUsers,
-                  canConfirmRemovals,
-                })}
-              </p>
-            )}
-            {canConfirmRemovals && (
-              <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>
-                Remove {refusedRemovals} {refusedRemovals === 1 ? "person" : "people"}
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              size="sm"
-              loading={checking}
-              onClick={async () => {
-                setChecking(true)
-                try {
-                  const result = await call(() => checkDirectory(directory.id), {
-                    stepUp: false,
-                    title: "Could not check access",
-                  })
-                  if (!result) return
-                  const checked: GoogleCheckResult = result
-                  if (checked.ok) toastDone("Google access works")
-                  else
-                    toastError(
-                      "Google refused",
-                      describeGoogleError(checked.error, {
-                        clientId: directory.google?.clientId,
-                        scopes: directory.google?.scopes,
-                        missingScopes: Array.isArray(checked.missingScopes)
-                          ? checked.missingScopes
-                          : undefined,
-                      }),
-                    )
-                } finally {
-                  setChecking(false)
-                }
-              }}
-            >
-              Check access
-            </Button>
-          </>
-        ) : (
-          <>
-            {directory.baseUrl && (
-              <Value label="SCIM base URL" value={directory.baseUrl} />
-            )}
-            {liveTokens.length > 0 && (
-              <ul className="divide-y rounded-lg border">
-                {liveTokens.map((t) => (
-                  <li key={t.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-mono text-xs">{t.hint}…</span>
-                      <span className="block text-xs text-muted-foreground">
-                        Made <Time iso={t.createdAt} />
-                        {t.lastUsedAt ? (
-                          <>
-                            {" "}
-                            - used <Time iso={t.lastUsedAt} />
-                          </>
-                        ) : (
-                          " - never used"
-                        )}
-                        {t.expiresAt ? (
-                          <>
-                            {" "}
-                            - ends <Time iso={t.expiresAt} mode="exact" />
-                          </>
-                        ) : (
-                          ""
-                        )}
-                      </span>
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        const ok = await call(
-                          () => revokeDirectoryToken(directory.id, t.id),
-                          {
-                            title: "Could not revoke the token",
-                          },
-                        )
-                        if (ok) {
-                          toastDone("Token revoked")
-                          await reload()
-                        }
-                      }}
-                    >
-                      Revoke
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="flex flex-wrap items-end gap-2">
-              {liveTokens.length > 0 && (
-                <div className="w-56">
-                  <MorphSelect
-                    label="When rotating"
-                    value={overlap}
-                    onValueChange={setOverlap}
-                    items={OVERLAP}
-                  />
-                </div>
-              )}
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!abilities.owner}
-                onClick={async () => {
-                  const made = await call(
-                    () => issueDirectoryToken(directory.id, Number(overlap)),
-                    { title: "Could not issue a token" },
-                  )
-                  if (made) {
-                    onIssued({ token: made.token, baseUrl: made.baseUrl })
-                    await reload()
-                  }
-                }}
-              >
-                {liveTokens.length > 0 ? "Rotate token" : "Issue token"}
-              </Button>
-            </div>
-            {!abilities.owner && (
-              <p className="text-xs text-muted-foreground">
-                Only an owner can issue a token: it is the credential itself.
-              </p>
-            )}
-          </>
-        )}
-      </div>
-      {refusedRemovals !== undefined && (
-        <ConfirmDialog
-          open={confirming}
-          onOpenChange={setConfirming}
-          title={`Remove ${refusedRemovals} ${refusedRemovals === 1 ? "person" : "people"}?`}
-          description={`The next pull from Google removes ${refusedRemovals} ${refusedRemovals === 1 ? "person" : "people"} from this workspace. If more people than that would go, it asks you again. This go-ahead lasts 24 hours.`}
-          confirmLabel={`Remove ${refusedRemovals}`}
-          doneLabel="Confirmed"
-          destructive
-          onConfirm={async () => {
-            const done = await call(
-              () => confirmDirectoryRemovals(directory.id, refusedRemovals),
-              { title: "Could not confirm the removals" },
-            )
-            if (!done) return false
-            toastDone("Removals confirmed", "Pulling from Google now.")
-            await reload()
-            return true
-          }}
-        />
-      )}
-      <Conflicts
-        directory={directory}
-        open={conflicts}
-        onOpenChange={setConflicts}
-        call={call}
-        reload={reload}
-      />
-    </li>
+    <SettingsRow
+      title="Mailboxes"
+      description="What happens to a person's mailbox when your directory switches them off."
+      action={
+        <Button variant="ghost" size="sm" onClick={() => setOpen(!open)}>
+          {open ? "Close" : "Manage"}
+        </Button>
+      }
+    >
+      <Reveal show={open} spacing="pt-3">
+        <MailboxesPanel abilities={abilities} clerkEnabled={clerkEnabled} />
+      </Reveal>
+    </SettingsRow>
   )
 }
 
-function NewDirectory({
-  open,
-  onOpenChange,
-  data,
-  onMake,
+function DeprovisionedKeysRow({
+  abilities,
+  clerkEnabled,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  data: SsoDirectories
-  onMake: (input: {
-    name: string
-    provider: string
-    adminEmail?: string
-    domain?: string
-  }) => Promise<boolean>
+  abilities: SsoAbilities
+  clerkEnabled: boolean
 }) {
-  const [name, setName] = React.useState("")
-  const [provider, setProvider] = React.useState("generic")
-  const [adminEmail, setAdminEmail] = React.useState("")
-  const [domain, setDomain] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
-  useResetOnOpen(open, () => {
-    setName("")
-    setProvider("generic")
-    setAdminEmail("")
-    setDomain("")
-    setBusy(false)
-  })
-  const google = provider === "google"
-  return (
-    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <DialogContent
-        title="New directory"
-        description="Keeps this workspace's members in step with your company's directory."
-        style={{ width: "min(calc(100vw - 2rem), 448px)" }}
-      >
-        <div className="space-y-4 py-4">
-          <MorphSelect
-            label="Directory"
-            value={provider}
-            onValueChange={setProvider}
-            items={data.providers.map((p) => ({
-              value: p,
-              label: PROVIDER_LABEL[p] ?? p,
-              disabled: p === "google" && !data.google.available,
-            }))}
-          />
-          {google && !data.google.available && (
-            <p className="text-sm text-muted-foreground">
-              {data.google.unavailableReason}
-            </p>
-          )}
-          <FloatingInput
-            label="Name"
-            value={name}
-            maxLength={100}
-            onChange={(e) => setName(e.target.value)}
-          />
-          {google && (
-            <>
-              <FloatingInput
-                label="Google admin to act as"
-                hint="An admin address on a verified domain of this workspace."
-                type="email"
-                value={adminEmail}
-                onChange={(e) => setAdminEmail(e.target.value)}
-              />
-              <FloatingInput
-                label="Google domain"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-              />
-            </>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            loading={busy}
-            disabled={
-              !name.trim() || (google && (!adminEmail.trim() || !domain.trim()))
-            }
-            onClick={async () => {
-              setBusy(true)
-              try {
-                const ok = await onMake({
-                  name: name.trim(),
-                  provider,
-                  ...(google
-                    ? { adminEmail: adminEmail.trim(), domain: domain.trim() }
-                    : {}),
-                })
-                if (ok) onOpenChange(false)
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            Make directory
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
+  const [open, setOpen] = React.useState(false)
 
-function Conflicts({
-  directory,
-  open,
-  onOpenChange,
-  call,
-  reload,
-}: {
-  directory: SsoDirectory
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  call: ReturnType<typeof useSsoCall>
-  reload: () => Promise<void>
-}) {
-  const [rows, setRows] = React.useState<DirectoryConflict[] | null>(null)
-  useResetOnOpen(open, () => setRows(null))
-  // An effect, not the reset: `useResetOnOpen` runs during render.
-  React.useEffect(() => {
-    if (!open) return
-    let live = true
-    void directoryConflicts(directory.id).then((r) => {
-      if (live) setRows(r.ok ? r.data.data : [])
-    })
-    return () => {
-      live = false
-    }
-  }, [open, directory.id])
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        title="Conflicts"
-        description="People your directory sends that could not be fully applied, and why. Fix the cause, then retry."
-        style={{ width: "min(calc(100vw - 2rem), 560px)" }}
-      >
-        <div className="max-h-96 overflow-auto py-4">
-          {rows === null ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No conflicts.</p>
-          ) : (
-            <ul className="divide-y rounded-lg border">
-              {rows.map((row) => (
-                <li key={row.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">
-                      {row.displayName ?? row.userName}
-                      {row.email ? ` (${row.email})` : ""}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {row.conflict ?? "Waiting to be applied"}
-                      {row.deleted ? " - removed in the directory" : ""}
-                    </span>
-                  </span>
-                  {!row.active && <Badge size="sm">Inactive</Badge>}
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={async () => {
-                      const ok = await call(
-                        () => retryDirectoryUser(directory.id, row.id),
-                        {
-                          stepUp: false,
-                          title: "Could not retry",
-                        },
-                      )
-                      if (ok) {
-                        toastDone("Retrying")
-                        await reload()
-                      }
-                    }}
-                  >
-                    Retry
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <SettingsRow
+      title="Removed people's API keys"
+      description="Keys created by people your directory removed."
+      action={
+        <Button variant="ghost" size="sm" onClick={() => setOpen(!open)}>
+          {open ? "Close" : "Manage"}
+        </Button>
+      }
+    >
+      <Reveal show={open} spacing="pt-3">
+        <DeprovisionedKeysPanel abilities={abilities} clerkEnabled={clerkEnabled} />
+      </Reveal>
+    </SettingsRow>
   )
 }
