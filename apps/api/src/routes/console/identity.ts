@@ -370,13 +370,15 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       ),
       protocols: id.protocols,
       presets: {
-        oidc: Object.values(OIDC_PRESETS).map((p) => ({
-          id: p.id,
-          label: p.label,
-          issuerHint: p.issuerHint,
-          requires: p.requires,
-          clientAuthMethods: p.clientAuth,
-        })),
+        oidc: Object.values(OIDC_PRESETS)
+          .filter((p) => p.id !== "google" || Boolean(id.oidc?.engine.google))
+          .map((p) => ({
+            id: p.id,
+            label: p.label,
+            issuerHint: p.issuerHint,
+            requires: p.requires,
+            clientAuthMethods: p.clientAuth,
+          })),
         saml: Object.values(SAML_PRESETS).map((p) => ({
           id: p.id,
           label: p.label,
@@ -717,7 +719,9 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     return c.json(toView(after))
   })
 
-  app.delete("/identity/connections/:id", requireFreshAuth, async (c) => {
+  // ⚠ NO FRESH AUTH: only an unused draft can go, and step-up guards what goes
+  // live. Still an owner's move, still audited.
+  app.delete("/identity/connections/:id", async (c) => {
     const id = d.identity
     if (!id) return c.json(notWired("SSO connections"), 501)
     if (!(await allowed(c, "owners:manage")))

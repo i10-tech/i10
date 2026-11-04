@@ -507,4 +507,15 @@ describe("creating OIDC connections", () => {
     expect((await create("google")).status).toBe(422)
     expect((await create("google", true)).status).toBe(201)
   })
+  it("omits Google from OIDC presets when our Google client is not configured", async () => {
+    const withoutGoogle = await consoleApp({ google: false })
+    const resWithout = await withoutGoogle.call("user_admin", "GET", "/identity/connections")
+    const bodyWithout = (await resWithout.json()) as { presets: { oidc: { id: string }[] } }
+    expect(bodyWithout.presets.oidc.some((p) => p.id === "google")).toBe(false)
+
+    const withGoogle = await consoleApp({ google: true })
+    const resWith = await withGoogle.call("user_admin", "GET", "/identity/connections")
+    const bodyWith = (await resWith.json()) as { presets: { oidc: { id: string }[] } }
+    expect(bodyWith.presets.oidc.some((p) => p.id === "google")).toBe(true)
+  })
 })
