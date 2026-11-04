@@ -12,6 +12,12 @@ export function afterSwitch(pathname: string, search = ""): string {
   const scoped = new Set(["domains", "emails", "broadcasts", "templates", "webhooks"])
   if (section && scoped.has(section) && rest.length > 0 && rest[0] !== "new")
     return `/${section}`
+  if (section === "settings") {
+    if (rest[0] === "sso" && rest.length > 1 && rest[1] !== "connect")
+      return "/settings/sso"
+    if (rest[0] === "security" && rest.length > 1 && rest[1] !== "audit")
+      return "/settings/security"
+  }
   const tab = new URLSearchParams(search).get("tab")
   return tab ? `${pathname}?tab=${encodeURIComponent(tab)}` : pathname
 }

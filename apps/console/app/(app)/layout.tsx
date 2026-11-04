@@ -1,4 +1,4 @@
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-block"
@@ -9,6 +9,7 @@ import { parseCounts } from "@/lib/list-counts"
 import { Rail } from "@/components/rail"
 import { SendingStatusNotice } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
+import { OnboardingGate } from "@/components/onboarding-gate"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { ShellBar } from "@/components/shell-bar"
 import { CommandMenu } from "@/components/command-menu"
@@ -148,10 +149,18 @@ export default async function AppLayout({
   // Without it "Skip to the console" was a link to a page that immediately sent
   // people back, which is indistinguishable from a broken button. See
   // lib/onboarding-skip.ts for why this is a cookie and not a stored fact.
-  if (
+  //
+  // ⚠ SETTINGS PAGES STAY REACHABLE: switching workspace from the settings
+  // picker keeps you on settings rather than bouncing to onboarding. The
+  // `x-pathname` header populated by middleware identifies whether this request
+  // is for settings; leaving settings on the client triggers `OnboardingGate`.
+  const reqHeaders = await headers()
+  const pathname = reqHeaders.get("x-pathname") ?? ""
+  const isSettings = pathname.startsWith("/settings")
+  const needsOnboarding =
     me.data.onboarding.should_onboard &&
     !(await hasSkippedOnboarding(me.data.tenant?.id ?? ""))
-  ) {
+  if (!isSettings && needsOnboarding) {
     redirect("/onboarding")
   }
 
@@ -320,6 +329,7 @@ export default async function AppLayout({
             <SendingStatusNotice className="mx-4 mt-3 lg:hidden" />
           </Suspense>
           <ClientContext />
+          <OnboardingGate enabled={needsOnboarding} />
           <div className="hidden lg:block">
             <ShellBar workspace={me.data.tenant?.name ?? "Workspace"} />
           </div>
