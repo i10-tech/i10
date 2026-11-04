@@ -248,6 +248,15 @@ export function useStepUp(): StepUp {
 }
 
 /**
+ * Whether Clerk would run one of its sensitive account actions right now
+ * without asking first - for work that can start ahead of the press, like
+ * minting the authenticator secret, and must not raise a dialog unasked.
+ */
+export function useSessionFresh() {
+  return React.useContext(FreshContext)
+}
+
+/**
  * Open the dialog unconditionally, whatever the session's freshness - for the
  * reference page, which walks every method on purpose. Resolves whether the
  * person finished it.

@@ -9,7 +9,7 @@ import type {
   TOTPResource,
   UserResource,
 } from "@clerk/shared/types"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { motion, useReducedMotion } from "motion/react"
 import { Download, Smartphone } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
@@ -27,6 +27,7 @@ import { PasskeyIcon } from "@repo/ui/components/i10/passkey-icons"
 import { PasswordInput } from "@repo/ui/components/i10/password-input"
 import { PasswordRules } from "@repo/ui/components/i10/password-rules"
 import { QrCode } from "@repo/ui/components/i10/qr-code"
+import { holdScrollFloor } from "@repo/ui/components/lib/glide-scroll"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { SkeletonBlock } from "@repo/ui/components/i10/skeleton-block"
 import { StepStage } from "@repo/ui/components/i10/step-stage"
@@ -39,6 +40,7 @@ import {
   MotionList,
   ProfileBlock,
   ProfileRow,
+  RowAction,
   clerkReason,
   shortDate,
 } from "@/components/account/shared"
@@ -46,7 +48,7 @@ import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { DeletionWarning } from "@/components/deletion-warning"
 import { RowMenu } from "@/components/list/row-menu"
 import { deleteAccount, verifyPassword } from "@/lib/actions"
-import { useReverify, useStepUp } from "@/lib/step-up"
+import { useReverify, useSessionFresh, useStepUp } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 import type { BillingState } from "@/lib/types"
 
@@ -222,15 +224,21 @@ function PasswordEditor({
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3">
+      {/*
+       * ⚠ `min-h-8`: THE ROW IS AS TALL WITHOUT ITS BUTTON AS WITH IT
+       * (2026-11-04). It was 20px while the form was open and 32px once the
+       * button came back, so Cancel first pushed everything below down 12px and
+       * only then folded it up: the stutter at the start of every close.
+       */}
+      <div className="flex min-h-8 items-center justify-between gap-3">
         <span className="font-mono text-sm tracking-widest text-muted-foreground">
           {user.passwordEnabled ? "••••••••••" : "Not set"}
         </span>
-        {!open && (
+        <RowAction show={!open}>
           <Button variant="ghost" size="sm" onClick={start}>
             {user.passwordEnabled ? "Update password" : "Set password"}
           </Button>
-        )}
+        </RowAction>
       </div>
       <Reveal show={open} spacing="pt-4">
         <form
@@ -513,6 +521,9 @@ function Passkeys({ user }: { user: UserResource }) {
  * code or copy the key, enter its code, save the backup codes; remove), and
  * backup codes (regenerate). The add flow is three steps of one card.
  */
+/** How long a secret minted ahead of "Set up" is trusted at the press. */
+const HELD_FOR_MS = 5 * 60_000
+
 function TwoStep({ user }: { user: UserResource }) {
   const reverify = useReverify()
   /*
@@ -548,10 +559,83 @@ function TwoStep({ user }: { user: UserResource }) {
   const follow = useFollowOpen<HTMLDivElement>(open)
   const on = user.totpEnabled && !open && folded
 
-  function start() {
-    setRound((n) => n + 1)
-    setFolded(false)
-    setOpen(true)
+  /*
+   * ⚠ THE SECRET IS MINTED BEFORE THE PRESS, SO THE CARD OPENS WITH IT
+   * (2026-11-04). The card used to ask Clerk on open and hold the QR and key
+   * as placeholders for about a second. Now it is asked for as soon as this
+   * row shows "Not set up", and again on hover or focus of "Set up", but only
+   * while Clerk would answer without a step-up: a dialog must never open
+   * unasked. A stale session asks on the press, and the button spins through
+   * the step-up and the secret instead of the card waiting open.
+   *
+   * An unconfirmed secret does not turn anything on; Clerk replaces it the next
+   * time one is asked for, and the same one is reused if the card is reopened.
+   *
+   * ⚠ A HELD SECRET IS USED ONLY WHILE IT IS SAFE TO (2026-11-04):
+   * - Dropped whenever two-step turns on or off, so a secret already confirmed
+   *   is never offered again after removing two-step.
+   * - At the press, only if the session is still fresh and it is under
+   *   `HELD_FOR_MS` old. Clerk guards confirming the code by the same window,
+   *   and a secret replaced from another tab or device would leave a dead QR;
+   *   past either, a new one is minted, behind the step-up if needed.
+   */
+  const fresh = useSessionFresh()
+  const [secret, setSecret] = React.useState<TOTPResource | null>(null)
+  const [starting, setStarting] = React.useState(false)
+  const minting = React.useRef<Promise<TOTPResource | null> | null>(null)
+  const mintedAt = React.useRef(0)
+  // ⚠ NEVER WHILE THE CARD IS OPEN: every mint replaces Clerk's pending
+  // secret, which would kill the QR somebody may already have scanned.
+  const cardOpen = React.useRef(false)
+  React.useEffect(() => {
+    cardOpen.current = open || !folded
+  }, [open, folded])
+  const prefetch = React.useCallback(() => {
+    if (minting.current || cardOpen.current || user.totpEnabled || !fresh()) return
+    mintedAt.current = Date.now()
+    const run = user.createTOTP().catch(() => {
+      if (minting.current === run) minting.current = null
+      return null
+    })
+    minting.current = run
+  }, [user, fresh])
+  /*
+   * ⚠ KEYED ON `totpEnabled` ALONE. `user` and the session are new objects on
+   * every Clerk refresh (a token refresh is about once a minute); with them in
+   * the deps this dropped the held secret and minted again each time.
+   */
+  const prefetchRef = React.useRef(prefetch)
+  React.useEffect(() => {
+    prefetchRef.current = prefetch
+  })
+  React.useEffect(() => {
+    minting.current = null
+    if (!user.totpEnabled) prefetchRef.current()
+  }, [user.totpEnabled])
+
+  async function start() {
+    setStarting(true)
+    try {
+      const usable =
+        minting.current && fresh() && Date.now() - mintedAt.current < HELD_FOR_MS
+      let made = usable ? await minting.current : null
+      if (!made) {
+        minting.current = null
+        made = await reverify(() => user.createTOTP())
+        if (!made) return
+        mintedAt.current = Date.now()
+        minting.current = Promise.resolve(made)
+      }
+      // Set here, from the secret this press used, never by a late prefetch.
+      setSecret(made)
+      setRound((n) => n + 1)
+      setFolded(false)
+      setOpen(true)
+    } catch (error) {
+      toastError("Could not start two-step verification", clerkReason(error))
+    } finally {
+      setStarting(false)
+    }
   }
 
   async function regenerate() {
@@ -568,22 +652,22 @@ function TwoStep({ user }: { user: UserResource }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3">
+      {/* `min-h-8`, as the password row: the line never changes height. */}
+      <div className="flex min-h-8 items-center justify-between gap-3">
         <span className="flex min-w-0 items-center gap-2 text-sm">
           <Smartphone className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className={on ? undefined : "text-muted-foreground"}>
             <TextMorph>{on ? "Authenticator app" : "Not set up"}</TextMorph>
           </span>
-          {on && (
+          <RowAction show={on}>
             <Badge size="sm" tone="info">
               Default
             </Badge>
-          )}
+          </RowAction>
         </span>
         {/* Nothing on the right while the card folds: the line changes once, after. */}
-        {!open &&
-          folded &&
-          (on ? (
+        <RowAction show={!open && folded} swap={on ? "menu" : "setup"}>
+          {on ? (
             <RowMenu visible label="Authenticator app">
               <DropdownMenuItem
                 className="text-danger"
@@ -593,14 +677,28 @@ function TwoStep({ user }: { user: UserResource }) {
               </DropdownMenuItem>
             </RowMenu>
           ) : (
-            <Button variant="ghost" size="sm" onClick={start}>
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={starting}
+              onPointerEnter={prefetch}
+              onFocus={prefetch}
+              onClick={() => void start()}
+            >
               Set up
             </Button>
-          ))}
+          )}
+        </RowAction>
       </div>
       <Reveal show={open} spacing="pt-4" onClosed={() => setFolded(true)}>
-        {round > 0 && (
-          <AddTotp key={round} ref={follow} user={user} onDone={() => setOpen(false)} />
+        {round > 0 && secret && (
+          <AddTotp
+            key={round}
+            ref={follow}
+            user={user}
+            totp={secret}
+            onDone={() => setOpen(false)}
+          />
         )}
       </Reveal>
 
@@ -662,52 +760,39 @@ function TwoStep({ user }: { user: UserResource }) {
  * Clerk's add-authenticator flow: scan or type the key, enter the code, save
  * the backup codes - two steps of one card.
  *
- * ⚠ THE SCAN STEP IS THERE ON THE PRESS (2026-10-12). It used to open on
- * "Preparing a code…" for as long as Clerk took to mint the secret, then
- * swap to the real step and jump in height. Now the step is drawn at once
- * at its final size - the QR's square and the key's chip held by
- * placeholders - and the code and key fade in where they sit when Clerk
- * answers. Nothing moves but the placeholder's shimmer.
+ * ⚠ THE SECRET ARRIVES WITH THE CARD (2026-11-04). It is minted by `TwoStep`
+ * before the card opens, so the QR and the key are drawn from the first frame;
+ * there is nothing here to wait for.
  */
 function AddTotp({
   user,
+  totp,
   onDone,
   ref,
 }: {
   user: UserResource
+  /** The secret `TwoStep` minted before opening this. */
+  totp: TOTPResource
   onDone: () => void
   /** The parent's follow-into-view ref, as the password form takes it. */
   ref?: React.Ref<HTMLDivElement>
 }) {
-  const reverify = useReverify()
-  const reduced = useReducedMotion() ?? false
-  const [totp, setTotp] = React.useState<TOTPResource | null>(null)
   const [codes, setCodes] = React.useState<string[] | null>(null)
   const [code, setCode] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [accepted, setAccepted] = React.useState(false)
-  const started = React.useRef(false)
   const keyRow = React.useRef<HTMLDivElement>(null)
-
-  React.useEffect(() => {
-    if (started.current) return
-    started.current = true
-    void reverify(() => user.createTOTP()).then(
-      (made) => (made ? setTotp(made) : onDone()),
-      (error: unknown) => {
-        toastError("Could not start two-step verification", clerkReason(error))
-        onDone()
-      },
-    )
-  }, [reverify, user, onDone])
+  const reverify = useReverify()
 
   async function verify() {
-    if (!totp || code.length < OTP_LENGTH || busy) return
+    if (code.length < OTP_LENGTH || busy) return
     setBusy(true)
     setError(null)
     try {
-      const verified = await user.verifyTOTP({ code })
+      // Clerk guards this by the same window as minting; past it, step up first.
+      const verified = await reverify(() => user.verifyTOTP({ code }))
+      if (!verified) return
       setAccepted(true)
       window.setTimeout(() => setCodes(verified.backupCodes ?? []), 650)
     } catch (error) {
@@ -715,15 +800,6 @@ function AddTotp({
     } finally {
       setBusy(false)
     }
-  }
-
-  // The secret arriving: a soft fade and focus-pull where the placeholder was.
-  const arrive = {
-    initial: reduced
-      ? { opacity: 0 }
-      : { opacity: 0, filter: "blur(6px)", scale: 0.98 },
-    animate: { opacity: 1, filter: "blur(0px)", scale: 1 },
-    transition: { duration: 0.32, ease: [0.16, 1, 0.3, 1] as const },
   }
 
   return (
@@ -743,54 +819,31 @@ function AddTotp({
               the six digits it shows.
             </p>
             <div className="flex flex-col items-center gap-3">
-              {/* The QR's own size, so the card is final from the first frame. */}
-              <div className="relative size-44">
-                <AnimatePresence initial={false}>
-                  {totp ? (
-                    <motion.div key="qr" className="absolute inset-0" {...arrive}>
-                      <QrCode
-                        value={totp.uri ?? ""}
-                        title="Two-step verification setup code"
-                      />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="qr-wait"
-                      className="absolute inset-0"
-                      exit={{ opacity: 0, transition: { duration: 0.16 } }}
-                    >
-                      <SkeletonBlock className="size-full rounded-xl" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+              <div className="size-44">
+                <QrCode
+                  value={totp.uri ?? ""}
+                  title="Two-step verification setup code"
+                />
               </div>
               <div className="flex h-8 items-center gap-1">
-                {totp ? (
-                  <motion.div
-                    ref={keyRow}
-                    className="flex items-center gap-1"
-                    {...arrive}
+                <div ref={keyRow} className="flex items-center gap-1">
+                  {/*
+                   * The key copies when it is clicked, through the copy
+                   * button beside it, so the same tick answers either way.
+                   */}
+                  <code
+                    onClick={() => keyRow.current?.querySelector("button")?.click()}
+                    className="cursor-pointer rounded-pill bg-muted px-3 py-1 font-mono text-xs tracking-wider break-all transition-colors duration-(--duration-fast) hover:bg-accent"
                   >
-                    {/*
-                     * The key copies when it is clicked, through the copy
-                     * button beside it, so the same tick answers either way.
-                     */}
-                    <code
-                      onClick={() => keyRow.current?.querySelector("button")?.click()}
-                      className="cursor-pointer rounded-pill bg-muted px-3 py-1 font-mono text-xs tracking-wider break-all transition-colors duration-(--duration-fast) hover:bg-accent"
-                    >
-                      {totp.secret}
-                    </code>
-                    <CopyButton
-                      value={totp.secret ?? ""}
-                      label="Copy key"
-                      iconOnly
-                      variant="plain"
-                    />
-                  </motion.div>
-                ) : (
-                  <SkeletonBlock className="h-6 w-64 rounded-pill" />
-                )}
+                    {totp.secret}
+                  </code>
+                  <CopyButton
+                    value={totp.secret ?? ""}
+                    label="Copy key"
+                    iconOnly
+                    variant="plain"
+                  />
+                </div>
               </div>
             </div>
             <OtpField
@@ -810,11 +863,7 @@ function AddTotp({
               <Button type="button" variant="ghost" onClick={onDone}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                loading={busy}
-                disabled={!totp || code.length < OTP_LENGTH}
-              >
+              <Button type="submit" loading={busy} disabled={code.length < OTP_LENGTH}>
                 Verify
               </Button>
             </div>
@@ -948,21 +997,43 @@ function BackupCodes({
  * device, address and place, "This device" on the current one, and "Sign out
  * of device" on the others.
  */
+/**
+ * The last device list per user, for as long as the page lives.
+ *
+ * ⚠ SO SWITCHING TABS DOES NOT LOAD IT AGAIN (2026-11-04). Each switch to
+ * Security remounted this list, which fetched afresh behind a one-row skeleton;
+ * the tab's height animation aimed at the skeleton's height, the real rows
+ * arrived clipped inside it, and the panel snapped 234px when it let go.
+ * Remounted, the list now draws what it had and refreshes quietly.
+ */
+const knownSessions = new Map<string, SessionWithActivitiesResource[]>()
+
 function Devices({ user }: { user: UserResource }) {
   const { session: current } = useSession()
   const reverify = useReverify()
   const [sessions, setSessions] = React.useState<
     SessionWithActivitiesResource[] | null
-  >(null)
+  >(() => knownSessions.get(user.id) ?? null)
+  const keep = React.useCallback(
+    (list: SessionWithActivitiesResource[]) => {
+      knownSessions.set(user.id, list)
+      setSessions(list)
+    },
+    [user.id],
+  )
   const load = React.useCallback(() => {
-    void user.getSessions().then(setSessions, () => setSessions([]))
-  }, [user])
+    void user.getSessions().then(keep, () => setSessions((list) => list ?? []))
+  }, [user, keep])
   React.useEffect(load, [load])
+  const box = React.useRef<HTMLDivElement>(null)
 
   async function signOut(session: SessionWithActivitiesResource) {
     try {
       const done = await reverify(() => session.revoke())
-      if (done) setSessions((list) => list?.filter((s) => s.id !== session.id) ?? null)
+      if (!done) return
+      // The row folds near the end of the page: hold the view, as a panel closing does.
+      if (box.current) holdScrollFloor(box.current)
+      keep((sessions ?? []).filter((s) => s.id !== session.id))
     } catch (error) {
       toastError("Could not sign that device out", clerkReason(error))
     }
@@ -971,14 +1042,22 @@ function Devices({ user }: { user: UserResource }) {
   /*
    * ⚠ A SKELETON OF A DEVICE ROW, NOT "LOADING DEVICES…" (2026-10-12): the
    * same picture box and four 20px lines in the same wrappers the real row
-   * uses, so the device that arrives takes its place without anything below
-   * moving. There is always at least this device.
+   * uses. There is always at least this device.
+   *
+   * ⚠ AND IT IS A ROW OF THE SAME LIST (2026-11-04), so the list is mounted
+   * from the first frame and the arrival animates: the skeleton folds away as
+   * the devices grow in, and what is below glides. Swapped as two lists, the
+   * real one mounted with every row already in it, and the rows past the first
+   * appeared at full size in one frame.
    */
-  if (!sessions)
-    return (
-      <ul className="flex flex-col" aria-busy="true" aria-label="Loading devices">
-        <li>
-          <div className="py-1.5">
+  const ordered = [...(sessions ?? [])].sort((a, b) =>
+    a.id === current?.id ? -1 : b.id === current?.id ? 1 : 0,
+  )
+  return (
+    <div ref={box}>
+      <MotionList busy={!sessions} label={sessions ? undefined : "Loading devices"}>
+        {!sessions && (
+          <MotionItem key="loading">
             <div className="flex items-start gap-4 py-1.5">
               <SkeletonBlock className="mt-1 size-12 shrink-0 rounded-lg" />
               <span className="flex min-w-0 flex-col gap-1">
@@ -989,64 +1068,57 @@ function Devices({ user }: { user: UserResource }) {
                 ))}
               </span>
             </div>
-          </div>
-        </li>
-      </ul>
-    )
-
-  const ordered = [...sessions].sort((a, b) =>
-    a.id === current?.id ? -1 : b.id === current?.id ? 1 : 0,
-  )
-  return (
-    <MotionList>
-      {ordered.map((session) => {
-        const activity = session.latestActivity
-        const place = [activity?.city, activity?.country].filter(Boolean).join(", ")
-        return (
-          <MotionItem key={session.id}>
-            {/* Clerk's layout: the device drawn, then four quiet lines. */}
-            <div className="flex items-start justify-between gap-3 py-1.5">
-              <span className="flex min-w-0 items-start gap-4">
-                <DeviceArt mobile={activity?.isMobile === true} />
-                <span className="min-w-0 space-y-1 text-sm leading-5">
-                  <span className="flex items-center gap-2 font-medium">
-                    {activity?.deviceType ||
-                      (activity?.isMobile ? "Mobile" : "Computer")}
-                    {session.id === current?.id && (
-                      <Badge size="sm" tone="success" className="font-normal">
-                        This device
-                      </Badge>
-                    )}
-                  </span>
-                  <span className="block truncate text-muted-foreground">
-                    {[activity?.browserName, activity?.browserVersion]
-                      .filter(Boolean)
-                      .join(" ")}
-                  </span>
-                  <span className="block truncate text-muted-foreground">
-                    {activity?.ipAddress}
-                    {place ? ` (${place})` : ""}
-                  </span>
-                  <span className="block text-muted-foreground">
-                    {whenActive(session.lastActiveAt)}
+          </MotionItem>
+        )}
+        {ordered.map((session) => {
+          const activity = session.latestActivity
+          const place = [activity?.city, activity?.country].filter(Boolean).join(", ")
+          return (
+            <MotionItem key={session.id}>
+              {/* Clerk's layout: the device drawn, then four quiet lines. */}
+              <div className="flex items-start justify-between gap-3 py-1.5">
+                <span className="flex min-w-0 items-start gap-4">
+                  <DeviceArt mobile={activity?.isMobile === true} />
+                  <span className="min-w-0 space-y-1 text-sm leading-5">
+                    <span className="flex items-center gap-2 font-medium">
+                      {activity?.deviceType ||
+                        (activity?.isMobile ? "Mobile" : "Computer")}
+                      {session.id === current?.id && (
+                        <Badge size="sm" tone="success" className="font-normal">
+                          This device
+                        </Badge>
+                      )}
+                    </span>
+                    <span className="block truncate text-muted-foreground">
+                      {[activity?.browserName, activity?.browserVersion]
+                        .filter(Boolean)
+                        .join(" ")}
+                    </span>
+                    <span className="block truncate text-muted-foreground">
+                      {activity?.ipAddress}
+                      {place ? ` (${place})` : ""}
+                    </span>
+                    <span className="block text-muted-foreground">
+                      {whenActive(session.lastActiveAt)}
+                    </span>
                   </span>
                 </span>
-              </span>
-              {session.id !== current?.id && (
-                <RowMenu visible label={activity?.deviceType ?? "Device"}>
-                  <DropdownMenuItem
-                    className="text-danger"
-                    onSelect={() => void signOut(session)}
-                  >
-                    Sign out of device
-                  </DropdownMenuItem>
-                </RowMenu>
-              )}
-            </div>
-          </MotionItem>
-        )
-      })}
-    </MotionList>
+                {session.id !== current?.id && (
+                  <RowMenu visible label={activity?.deviceType ?? "Device"}>
+                    <DropdownMenuItem
+                      className="text-danger"
+                      onSelect={() => void signOut(session)}
+                    >
+                      Sign out of device
+                    </DropdownMenuItem>
+                  </RowMenu>
+                )}
+              </div>
+            </MotionItem>
+          )
+        })}
+      </MotionList>
+    </div>
   )
 }
 
