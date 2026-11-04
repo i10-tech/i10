@@ -1,3 +1,5 @@
+import { MICROSOFT_DOMAIN_ADVICE } from "./microsoft-domain.js"
+
 /**
  * The OIDC providers the setup screen knows by name (#338, sso.md Option A).
  * A preset only shapes the defaults and the hints; every connection is checked
@@ -93,6 +95,8 @@ export const OIDC_PRESETS: Readonly<Record<OidcProvider, OidcPreset>> = {
       "An OIDC Web Application with the Authorization Code grant.",
       "The redirect URI below as a sign-in redirect URI.",
       "For groups: a groups claim on the ID token and the groups scope.",
+      "If using a custom authorization server, configure the groups claim and required custom scopes in Okta.",
+      "Federation Broker Mode is on by default for OIDC apps: everyone in the org can sign in, with no assignments and no dashboard tile. Turn it off under the app's Sign On tab to assign people.",
       "The app's authentication policy decides whether a first sign-in asks for another factor. A new app gets your org's default policy, so people may be asked for a new factor or to enrol a passkey. Pick the policy you want on the app's Sign On tab.",
     ],
   },
@@ -110,8 +114,12 @@ export const OIDC_PRESETS: Readonly<Record<OidcProvider, OidcPreset>> = {
       "A single-tenant app registration with the redirect URI below as a Web redirect URI.",
       "The tenant issuer: https://login.microsoftonline.com/<tenant id>/v2.0, not common or organizations.",
       "Optional ID token claims email and xms_edov, or nobody can be signed in.",
+      "Optional ID token claims: add given_name and family_name for names, and groups for group rules.",
+      "For group rules: Entra emits group object IDs, so match rules against object IDs.",
       "A client secret: certificate credentials are not supported yet.",
+      "Grant admin consent for the configured permissions, and assign users and groups under Enterprise applications.",
       "For step-up re-verification: add the optional claim auth_time to the ID token.",
+      MICROSOFT_DOMAIN_ADVICE,
     ],
   },
   google: {
@@ -125,6 +133,7 @@ export const OIDC_PRESETS: Readonly<Record<OidcProvider, OidcPreset>> = {
     requires: [
       "Nothing at Google: i10's own Google client is used.",
       "The workspace's Google primary domain verified here as an access domain.",
+      "If your Workspace restricts third-party apps, allow i10 under Security > API controls.",
     ],
   },
   jumpcloud: {

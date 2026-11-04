@@ -246,16 +246,85 @@ const googleApiErrorSchema = z.looseObject({
 
 export class GoogleFailure extends Error {
   readonly missingScopes?: readonly string[]
+  readonly retryAfterMs?: number
 
   constructor(
     readonly code: GoogleDirectoryErrorCode,
     readonly retryable: boolean,
     missingScopes?: readonly string[],
+    retryAfterMs?: number,
   ) {
     super(code)
     this.name = "GoogleFailure"
     if (missingScopes && missingScopes.length > 0) {
       this.missingScopes = [...missingScopes]
+    }
+    if (
+      typeof retryAfterMs === "number" &&
+      Number.isFinite(retryAfterMs) &&
+      retryAfterMs > 0
+    ) {
+      this.retryAfterMs = retryAfterMs
+    }
+  }
+}
+
+export function parseRetryAfterMs(header: string | null | undefined): number | null {
+  if (!header) return null
+  const trimmed = header.trim()
+  if (!trimmed) return null
+  const seconds = Number(trimmed)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000)
+  }
+  const date = Date.parse(trimmed)
+  if (Number.isFinite(date)) {
+    return Math.max(0, date - Date.now())
+  }
+  return null
+}
+
+export async function withGoogleRetry<T>(
+  operation: () => Promise<T>,
+  options?: {
+    maxAttempts?: number
+    baseDelayMs?: number
+    maxDelayMs?: number
+    sleep?: (ms: number) => Promise<void>
+  },
+): Promise<T> {
+  const maxAttempts = options?.maxAttempts ?? 4
+  const baseDelayMs = options?.baseDelayMs ?? 500
+  const maxDelayMs = options?.maxDelayMs ?? 15_000
+  const sleepFn =
+    options?.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      const isRetryable =
+        (error instanceof GoogleFailure && error.retryable) ||
+        error instanceof IdpUnreachable
+
+      if (!isRetryable || attempt >= maxAttempts) {
+        throw error
+      }
+
+      let delayMs: number
+      if (
+        error instanceof GoogleFailure &&
+        typeof error.retryAfterMs === "number" &&
+        error.retryAfterMs > 0
+      ) {
+        delayMs = Math.min(error.retryAfterMs, maxDelayMs)
+      } else {
+        const exp = baseDelayMs * Math.pow(2, attempt - 1)
+        const jitter = Math.random() * (exp * 0.2)
+        delayMs = Math.min(Math.round(exp + jitter), maxDelayMs)
+      }
+
+      await sleepFn(delayMs)
     }
   }
 }
@@ -276,9 +345,15 @@ function parseOauthError(rawBody: string): { error?: string; description: string
   }
 }
 
-function classifyTokenFailure(status: number, rawBody: string): GoogleFailure {
-  if (status === 429) return new GoogleFailure("rate_limited", true)
-  if (status >= 500) return new GoogleFailure("unreachable", true)
+function classifyTokenFailure(
+  status: number,
+  rawBody: string,
+  retryAfterMs?: number,
+): GoogleFailure {
+  if (status === 429)
+    return new GoogleFailure("rate_limited", true, undefined, retryAfterMs)
+  if (status >= 500)
+    return new GoogleFailure("unreachable", true, undefined, retryAfterMs)
   const { error: err, description: desc } = parseOauthError(rawBody)
   if (err === "invalid_scope" || err === "access_denied")
     return new GoogleFailure("missing_scope", false)
@@ -301,9 +376,12 @@ function classifyApiFailure(
   status: number,
   rawBody: string,
   options?: { firstUsersList?: boolean },
+  retryAfterMs?: number,
 ): GoogleFailure {
-  if (status === 429) return new GoogleFailure("rate_limited", true)
-  if (status >= 500) return new GoogleFailure("unreachable", true)
+  if (status === 429)
+    return new GoogleFailure("rate_limited", true, undefined, retryAfterMs)
+  if (status >= 500)
+    return new GoogleFailure("unreachable", true, undefined, retryAfterMs)
   if (status === 404 || status === 400)
     return new GoogleFailure("unknown_customer", false)
   if (status === 401) return new GoogleFailure("unauthorized_client", false)
@@ -326,7 +404,7 @@ function classifyApiFailure(
     reasons.has("userRateLimitExceeded") ||
     reasons.has("quotaExceeded")
   )
-    return new GoogleFailure("rate_limited", true)
+    return new GoogleFailure("rate_limited", true, undefined, retryAfterMs)
   if (
     reasons.has("insufficientPermissions") ||
     reasons.has("ACCESS_TOKEN_SCOPE_INSUFFICIENT")
@@ -418,6 +496,7 @@ export function createGoogleTokenSource(deps: {
   serviceAccount: GoogleServiceAccount
   fetch: OidcFetch
   now?: () => Date
+  sleep?: (ms: number) => Promise<void>
 }): GoogleTokenSource {
   const clock = deps.now ?? (() => new Date())
   const cache = new Map<string, { token: string; refreshAtMs: number }>()
@@ -450,57 +529,59 @@ export function createGoogleTokenSource(deps: {
           assertion,
         }).toString()
 
-        let response: Response
-        try {
-          response = await deps.fetch(GOOGLE_TOKEN_URL, {
-            method: "POST",
-            headers: {
-              "content-type": "application/x-www-form-urlencoded",
-              accept: "application/json",
-            },
-            body: form,
-            signal: AbortSignal.timeout(timeoutMs),
-          })
-        } catch (error) {
-          if (error instanceof IdpUnreachable)
-            throw new GoogleFailure("unreachable", true)
-          throw error
-        }
+        return await withGoogleRetry(
+          async () => {
+            let response: Response
+            try {
+              response = await deps.fetch(GOOGLE_TOKEN_URL, {
+                method: "POST",
+                headers: {
+                  "content-type": "application/x-www-form-urlencoded",
+                  accept: "application/json",
+                },
+                body: form,
+                signal: AbortSignal.timeout(timeoutMs),
+              })
+            } catch (error) {
+              if (error instanceof IdpUnreachable)
+                throw new GoogleFailure("unreachable", true)
+              throw error
+            }
 
-        const text = await response.text()
-        if (response.status !== 200) {
-          if (
-            response.status !== 429 &&
-            response.status < 500 &&
-            parseOauthError(text).error === "unauthorized_client"
-          ) {
-            throw await diagnoseUnauthorizedScopes(
-              deps,
-              clean,
-              clock(),
-              timeoutMs,
-            )
-          }
-          throw classifyTokenFailure(response.status, text)
-        }
+            const text = await response.text()
+            const retryAfterMs =
+              parseRetryAfterMs(response.headers.get("retry-after")) ?? undefined
+            if (response.status !== 200) {
+              if (
+                response.status !== 429 &&
+                response.status < 500 &&
+                parseOauthError(text).error === "unauthorized_client"
+              ) {
+                throw await diagnoseUnauthorizedScopes(deps, clean, clock(), timeoutMs)
+              }
+              throw classifyTokenFailure(response.status, text, retryAfterMs)
+            }
 
-        let json: unknown
-        try {
-          json = JSON.parse(text)
-        } catch {
-          throw new GoogleFailure("invalid_response", false)
-        }
-        const parsed = tokenResponseSchema.safeParse(json)
-        if (!parsed.success) throw new GoogleFailure("invalid_response", false)
+            let json: unknown
+            try {
+              json = JSON.parse(text)
+            } catch {
+              throw new GoogleFailure("invalid_response", false)
+            }
+            const parsed = tokenResponseSchema.safeParse(json)
+            if (!parsed.success) throw new GoogleFailure("invalid_response", false)
 
-        const ttlMs = parsed.data.expires_in * 1000
-        const skewMs = Math.min(TOKEN_REFRESH_SKEW_MS, Math.floor(ttlMs / 2))
-        if (cache.size >= 1_000) cache.delete(cache.keys().next().value!)
-        cache.set(key, {
-          token: parsed.data.access_token,
-          refreshAtMs: issuedAt.getTime() + ttlMs - skewMs,
-        })
-        return parsed.data.access_token
+            const ttlMs = parsed.data.expires_in * 1000
+            const skewMs = Math.min(TOKEN_REFRESH_SKEW_MS, Math.floor(ttlMs / 2))
+            if (cache.size >= 1_000) cache.delete(cache.keys().next().value!)
+            cache.set(key, {
+              token: parsed.data.access_token,
+              refreshAtMs: issuedAt.getTime() + ttlMs - skewMs,
+            })
+            return parsed.data.access_token
+          },
+          { sleep: deps.sleep },
+        )
       })()
 
       inflight.set(key, task)
@@ -758,7 +839,11 @@ export function sameStoredGroup(
 // ── Authenticated Directory API client helpers ──────────────────────────────
 
 async function googleRequest(
-  deps: { tokens: GoogleTokenSource; fetch: OidcFetch },
+  deps: {
+    tokens: GoogleTokenSource
+    fetch: OidcFetch
+    sleep?: (ms: number) => Promise<void>
+  },
   adminEmail: string,
   url: string,
   init: {
@@ -768,43 +853,54 @@ async function googleRequest(
     firstUsersList?: boolean
   },
 ): Promise<unknown> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const token = await deps.tokens.tokenFor(adminEmail, init.timeoutMs)
-    let response: Response
-    try {
-      response = await deps.fetch(url, {
-        method: init.method,
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/json",
-          ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
-        },
-        ...(init.body !== undefined ? { body: init.body } : {}),
-        signal: AbortSignal.timeout(init.timeoutMs),
-      })
-    } catch (error) {
-      if (error instanceof IdpUnreachable) throw new GoogleFailure("unreachable", true)
-      throw error
-    }
-    const text = await response.text()
-    if (response.status === 401 && attempt === 0) {
-      deps.tokens.forget(adminEmail)
-      continue
-    }
-    if (response.status < 200 || response.status >= 300)
-      throw classifyApiFailure(
-        response.status,
-        text,
-        init.firstUsersList ? { firstUsersList: true } : undefined,
-      )
-    if (text.trim() === "") return {}
-    try {
-      return JSON.parse(text)
-    } catch {
-      throw new GoogleFailure("invalid_response", false)
-    }
-  }
-  throw new GoogleFailure("unauthorized_client", false)
+  return withGoogleRetry(
+    async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const token = await deps.tokens.tokenFor(adminEmail, init.timeoutMs)
+        let response: Response
+        try {
+          response = await deps.fetch(url, {
+            method: init.method,
+            headers: {
+              authorization: `Bearer ${token}`,
+              accept: "application/json",
+              ...(init.body !== undefined
+                ? { "content-type": "application/json" }
+                : {}),
+            },
+            ...(init.body !== undefined ? { body: init.body } : {}),
+            signal: AbortSignal.timeout(init.timeoutMs),
+          })
+        } catch (error) {
+          if (error instanceof IdpUnreachable)
+            throw new GoogleFailure("unreachable", true)
+          throw error
+        }
+        const text = await response.text()
+        if (response.status === 401 && attempt === 0) {
+          deps.tokens.forget(adminEmail)
+          continue
+        }
+        const retryAfterMs =
+          parseRetryAfterMs(response.headers.get("retry-after")) ?? undefined
+        if (response.status < 200 || response.status >= 300)
+          throw classifyApiFailure(
+            response.status,
+            text,
+            init.firstUsersList ? { firstUsersList: true } : undefined,
+            retryAfterMs,
+          )
+        if (text.trim() === "") return {}
+        try {
+          return JSON.parse(text)
+        } catch {
+          throw new GoogleFailure("invalid_response", false)
+        }
+      }
+      throw new GoogleFailure("unauthorized_client", false)
+    },
+    { sleep: deps.sleep },
+  )
 }
 
 export type CheckAccessResult =
@@ -886,6 +982,7 @@ export interface PullGoogleDeps {
   log: Pick<Logger, "info" | "warn" | "error">
   bounds?: PullBounds
   now?: () => Date
+  sleep?: (ms: number) => Promise<void>
 }
 
 export type PullGoogleOutcome =
@@ -960,8 +1057,35 @@ async function loadAllGroups(
   return { rows, members }
 }
 
+export const GOOGLE_GROUP_MEMBERS_CONCURRENCY = 6
+
+export async function mapConcurrent<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return []
+  const results: R[] = new Array(items.length)
+  let nextIndex = 0
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const idx = nextIndex++
+        results[idx] = await fn(items[idx]!)
+      }
+    },
+  )
+  await Promise.all(workers)
+  return results
+}
+
 async function fetchGoogleSnapshot(
-  deps: { tokens: GoogleTokenSource; fetch: OidcFetch },
+  deps: {
+    tokens: GoogleTokenSource
+    fetch: OidcFetch
+    sleep?: (ms: number) => Promise<void>
+  },
   adminEmail: string,
   provedDomains: ReadonlySet<string>,
   bounds: Required<PullBounds>,
@@ -978,8 +1102,7 @@ async function fetchGoogleSnapshot(
   let userPages = 0
 
   for (;;) {
-    if (++userPages > MAX_GOOGLE_PAGES)
-      throw new GoogleFailure("too_many_users", false)
+    if (++userPages > MAX_GOOGLE_PAGES) throw new GoogleFailure("too_many_users", false)
     const params = new URLSearchParams({
       customer: "my_customer",
       maxResults: String(bounds.pageSize),
@@ -999,8 +1122,7 @@ async function fetchGoogleSnapshot(
     if (!parsed.success) throw new GoogleFailure("invalid_response", false)
 
     for (const u of parsed.data.users ?? []) {
-      if (seenRawUserIds.has(u.id))
-        throw new GoogleFailure("invalid_response", false)
+      if (seenRawUserIds.has(u.id)) throw new GoogleFailure("invalid_response", false)
       seenRawUserIds.add(u.id)
       const chosenEmail = pickProvedUserEmail(u, provedDomains)
       if (!chosenEmail) continue
@@ -1064,43 +1186,46 @@ async function fetchGoogleSnapshot(
     nextGroupToken = token
   }
 
-  const groups: { group: GoogleGroupPayload; members: GoogleMemberPayload[] }[] = []
-  for (const group of rawGroups) {
-    const members: GoogleMemberPayload[] = []
-    const memberTokens = new Set<string>()
-    let nextMemberToken: string | undefined
-    let memberPages = 0
+  const groups = await mapConcurrent(
+    rawGroups,
+    GOOGLE_GROUP_MEMBERS_CONCURRENCY,
+    async (group) => {
+      const members: GoogleMemberPayload[] = []
+      const memberTokens = new Set<string>()
+      let nextMemberToken: string | undefined
+      let memberPages = 0
 
-    for (;;) {
-      if (++memberPages > MAX_GOOGLE_PAGES)
-        throw new GoogleFailure("too_many_groups", false)
-      const params = new URLSearchParams({
-        maxResults: String(bounds.pageSize),
-        ...(nextMemberToken ? { pageToken: nextMemberToken } : {}),
-      })
-      const raw = await googleRequest(
-        deps,
-        adminEmail,
-        `${GOOGLE_DIRECTORY_API_BASE}/groups/${encodeURIComponent(group.id)}/members?${params.toString()}`,
-        { method: "GET", timeoutMs: bounds.timeoutMs },
-      )
-      const parsed = membersPageSchema.safeParse(raw)
-      if (!parsed.success) throw new GoogleFailure("invalid_response", false)
-
-      for (const m of parsed.data.members ?? []) {
-        if (members.length >= bounds.maxGroupMembers)
+      for (;;) {
+        if (++memberPages > MAX_GOOGLE_PAGES)
           throw new GoogleFailure("too_many_groups", false)
-        members.push(m)
-      }
+        const params = new URLSearchParams({
+          maxResults: String(bounds.pageSize),
+          ...(nextMemberToken ? { pageToken: nextMemberToken } : {}),
+        })
+        const raw = await googleRequest(
+          deps,
+          adminEmail,
+          `${GOOGLE_DIRECTORY_API_BASE}/groups/${encodeURIComponent(group.id)}/members?${params.toString()}`,
+          { method: "GET", timeoutMs: bounds.timeoutMs },
+        )
+        const parsed = membersPageSchema.safeParse(raw)
+        if (!parsed.success) throw new GoogleFailure("invalid_response", false)
 
-      const token = parsed.data.nextPageToken?.trim()
-      if (!token) break
-      if (memberTokens.has(token)) throw new GoogleFailure("invalid_response", false)
-      memberTokens.add(token)
-      nextMemberToken = token
-    }
-    groups.push({ group, members })
-  }
+        for (const m of parsed.data.members ?? []) {
+          if (members.length >= bounds.maxGroupMembers)
+            throw new GoogleFailure("too_many_groups", false)
+          members.push(m)
+        }
+
+        const token = parsed.data.nextPageToken?.trim()
+        if (!token) break
+        if (memberTokens.has(token)) throw new GoogleFailure("invalid_response", false)
+        memberTokens.add(token)
+        nextMemberToken = token
+      }
+      return { group, members }
+    },
+  )
 
   return { users, groups }
 }
@@ -1167,14 +1292,28 @@ function buildStoredGroups(
     return out
   }
 
+  const addressOf = (group: GoogleGroupPayload) =>
+    pickProvedGroupEmail(group, provedDomains) ?? group.email
+  const baseName = (group: GoogleGroupPayload) =>
+    trimmedBounded(group.name, LIMITS.name) ??
+    trimmedBounded(addressOf(group), LIMITS.name) ??
+    group.id
+  const nameCounts = new Map<string, number>()
+  for (const { group } of fetched) {
+    const key = baseName(group).toLowerCase()
+    nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1)
+  }
+
   return fetched.map(({ group }) => {
+    // ⚠ GOOGLE ONLY MAKES A GROUP'S ADDRESS UNIQUE, AND WE KEEP ONE NAME PER
+    // DIRECTORY: two groups called "Sales" must both arrive, or the second one's
+    // members lose whatever its group rule gives them.
+    const base = baseName(group)
     const displayName =
-      trimmedBounded(group.name, LIMITS.name) ??
-      trimmedBounded(
-        pickProvedGroupEmail(group, provedDomains) ?? group.email,
-        LIMITS.name,
-      ) ??
-      group.id
+      (nameCounts.get(base.toLowerCase()) ?? 0) > 1
+        ? (trimmedBounded(`${base} (${addressOf(group) ?? group.id})`, LIMITS.name) ??
+          base)
+        : base
     const memberIds = resolveMembers(group.id, new Set())
     try {
       return readGroup({
@@ -1242,9 +1381,7 @@ export async function pullGoogleDirectory(
           ...(extra?.removedUsers !== undefined
             ? { removedUsers: extra.removedUsers }
             : {}),
-          ...(extra?.keptUsers !== undefined
-            ? { keptUsers: extra.keptUsers }
-            : {}),
+          ...(extra?.keptUsers !== undefined ? { keptUsers: extra.keptUsers } : {}),
         },
       })
     }
@@ -1283,7 +1420,7 @@ export async function pullGoogleDirectory(
   let storedGroupsDraft: { group: GoogleGroupPayload; members: GoogleMemberPayload[] }[]
   try {
     snapshot = await fetchGoogleSnapshot(
-      { tokens: deps.tokens, fetch: deps.fetch },
+      { tokens: deps.tokens, fetch: deps.fetch, sleep: deps.sleep },
       adminEmail,
       provedDomains,
       bounds,
@@ -1482,7 +1619,12 @@ export async function pullGoogleDirectory(
     const rawEmails = u.resource.emails
     if (!Array.isArray(rawEmails)) continue
     for (const entry of rawEmails) {
-      if (entry && typeof entry === "object" && "value" in entry && typeof entry.value === "string") {
+      if (
+        entry &&
+        typeof entry === "object" &&
+        "value" in entry &&
+        typeof entry.value === "string"
+      ) {
         const addr = normaliseEmail(entry.value)
         if (addr && !userIdByEmail.has(addr)) userIdByEmail.set(addr, u.id)
       }
@@ -1550,6 +1692,11 @@ export async function pullGoogleDirectory(
       type: "scim.group.updated",
       data: { directoryId, source: "google" },
     })
+    // Two groups swapping names in one pull: the next pull settles it.
+    if (done && done.kind === "duplicate") {
+      deps.log.warn({ directoryId }, "a Google group kept its old name for now")
+      continue
+    }
     if (done) {
       groupCounts.updated += 1
       emittedOutbox.push(...done.outbox)
@@ -1561,6 +1708,12 @@ export async function pullGoogleDirectory(
       type: "scim.group.created",
       data: { directoryId, source: "google" },
     })
+    // Only an old row still holding the name, renamed earlier in this pull or by
+    // the next one. Names are made unique above.
+    if (made.kind === "duplicate") {
+      deps.log.warn({ directoryId }, "a Google group waits for its name to free up")
+      continue
+    }
     groupCounts.created += 1
     emittedOutbox.push(...made.outbox)
   }
@@ -1583,7 +1736,12 @@ export async function pullGoogleDirectory(
 // ── Push notification watch channels (`users.watch` and `channels.stop`) ────
 
 async function stopRemoteChannel(
-  deps: { tokens: GoogleTokenSource; fetch: OidcFetch; log: Pick<Logger, "warn"> },
+  deps: {
+    tokens: GoogleTokenSource
+    fetch: OidcFetch
+    log: Pick<Logger, "warn">
+    sleep?: (ms: number) => Promise<void>
+  },
   adminEmail: string,
   channel: { id: string; resourceId: string },
   timeoutMs: number,
@@ -1621,8 +1779,10 @@ export async function ensureGoogleWatchChannels(
     fetch: OidcFetch
     notifyUrl: string | null
     log: Pick<Logger, "warn">
+    record?: (tenantId: string, event: AuditEvent) => Promise<void>
     timeoutMs?: number
     now?: () => Date
+    sleep?: (ms: number) => Promise<void>
   },
   directory: Pick<Directory, "id" | "tenantId" | "enabled" | "adminEmail" | "domain">,
 ): Promise<number> {
@@ -1664,7 +1824,12 @@ export async function ensureGoogleWatchChannels(
         for (const old of extras)
           if (old.expiresAt.getTime() > now.getTime())
             await stopRemoteChannel(
-              { tokens: deps.tokens, fetch: deps.fetch, log: deps.log },
+              {
+                tokens: deps.tokens,
+                fetch: deps.fetch,
+                log: deps.log,
+                sleep: deps.sleep,
+              },
               adminEmail,
               old,
               timeoutMs,
@@ -1685,7 +1850,7 @@ export async function ensureGoogleWatchChannels(
     let parsed: z.infer<typeof watchResponseSchema>
     try {
       const raw = await googleRequest(
-        { tokens: deps.tokens, fetch: deps.fetch },
+        { tokens: deps.tokens, fetch: deps.fetch, sleep: deps.sleep },
         adminEmail,
         `${GOOGLE_DIRECTORY_API_BASE}/users/watch?${params.toString()}`,
         {
@@ -1707,6 +1872,15 @@ export async function ensureGoogleWatchChannels(
           { directoryId: directory.id, event },
           "Google users.watch returned an unexpected payload",
         )
+        if (deps.record) {
+          await deps
+            .record(directory.tenantId, {
+              type: "directory.watch_failed",
+              reason: "invalid_response",
+              data: { directoryId: directory.id, event },
+            })
+            .catch(() => {})
+        }
         continue
       }
       parsed = ok.data
@@ -1715,6 +1889,16 @@ export async function ensureGoogleWatchChannels(
         { ...safeError(error), directoryId: directory.id, event },
         "could not register a Google directory watch channel",
       )
+      if (deps.record) {
+        await deps
+          .record(directory.tenantId, {
+            type: "directory.watch_failed",
+            reason:
+              error instanceof GoogleFailure ? error.code : "watch_registration_failed",
+            data: { directoryId: directory.id, event },
+          })
+          .catch(() => {})
+      }
       continue
     }
 

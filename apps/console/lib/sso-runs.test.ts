@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test"
-import { DAY_MS, groupsNote, latestPass, mfaCapabilityNote, wouldDo } from "./sso-runs"
+import {
+  DAY_MS,
+  groupsNote,
+  latestPass,
+  mfaCapabilityNote,
+  providerFailure,
+  wouldDo,
+} from "./sso-runs"
 import type { SsoCapabilities, TestRun } from "./sso-types"
 
 const run = (over: Partial<TestRun>): TestRun => ({
@@ -14,6 +21,26 @@ const run = (over: Partial<TestRun>): TestRun => ({
 })
 
 describe("what a test run says we would do", () => {
+  it("formats a sanitized provider failure for admins", () => {
+    expect(
+      providerFailure(
+        run({
+          outcome: "failed",
+          resolution: {
+            refused: "idp_error",
+            providerFailure: {
+              protocol: "oidc",
+              code: "AADSTS50011",
+              adminNextStep: "Check the application registration.",
+              endUserMessage: "Ask your administrator.",
+              retry: false,
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({ code: "AADSTS50011", retry: false })
+  })
+
   it("names the refusal and its reason first", () => {
     const said = wouldDo(
       run({ outcome: "failed", resolution: { refused: "email_unverified" } }),
@@ -100,7 +127,9 @@ describe("group state and MFA capability notes (P0 #3 and P0 #5)", () => {
     })
     expect(groupsNote(overage)).toContain("Too many groups (overage)")
     expect(groupsNote(overage)).toContain("current workspace role would be kept")
-    expect(wouldDo(overage)).toContain("keep their current role (too many groups (overage))")
+    expect(wouldDo(overage)).toContain(
+      "keep their current role (too many groups (overage))",
+    )
 
     const absentJit = run({
       claims: { groupsState: "absent" },
@@ -126,12 +155,12 @@ describe("group state and MFA capability notes (P0 #3 and P0 #5)", () => {
       canProveFreshAuth: "no",
       freshAuthSetting: null,
     }
-    expect(
-      mfaCapabilityNote({ mfaRequired: false, capabilities: googleCaps }),
-    ).toEqual({
-      tone: "muted",
-      text: "Google Workspace OIDC never sends amr or acr claims.",
-    })
+    expect(mfaCapabilityNote({ mfaRequired: false, capabilities: googleCaps })).toEqual(
+      {
+        tone: "muted",
+        text: "Google Workspace OIDC never sends amr or acr claims.",
+      },
+    )
     const legacyOn = mfaCapabilityNote({ mfaRequired: true, capabilities: googleCaps })
     expect(legacyOn?.tone).toBe("warning")
     expect(legacyOn?.text).toContain("Warning:")

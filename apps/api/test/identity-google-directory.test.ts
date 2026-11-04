@@ -1,6 +1,6 @@
 import { memoryMail } from "./identity-mail-fakes.js"
 import { createVerify, generateKeyPairSync } from "node:crypto"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, afterAll, beforeAll, spyOn } from "bun:test"
 import { Hono } from "hono"
 import { createApp } from "../src/app.js"
 import { addMember, type Role } from "../src/console/roles.js"
@@ -11,6 +11,7 @@ import {
   GOOGLE_DIRECTORY_API_BASE,
   GOOGLE_DIRECTORY_ERRORS,
   GOOGLE_DIRECTORY_SCOPES,
+  GOOGLE_GROUP_MEMBERS_CONCURRENCY,
   GOOGLE_MAX_DROP_PERCENT,
   GOOGLE_MAX_DROP_USERS,
   GOOGLE_TOKEN_URL,
@@ -23,13 +24,17 @@ import {
   checkGoogleDirectoryAccess,
   createGoogleTokenSource,
   ensureGoogleWatchChannels,
+  mapConcurrent,
   mapGoogleUser,
   parseGoogleServiceAccount,
+  parseRetryAfterMs,
   pullGoogleDirectory,
   stopGoogleWatchChannels,
+  withGoogleRetry,
   type GoogleDirectoryErrorCode,
 } from "../src/identity/google-directory.js"
 import type { DeprovisionDeps } from "../src/identity/managed.js"
+import type { AuditEvent } from "../src/identity/ports.js"
 import { hashSecret } from "../src/identity/model.js"
 import { guardedFetch } from "../src/identity/oidc-fetch.js"
 import { fixedWindow } from "../src/identity/rate-limit.js"
@@ -70,6 +75,16 @@ import {
 } from "./identity-scim-fakes.js"
 import { ACME, row as roleRow, rolesDeps } from "./role-fixtures.js"
 import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
+
+// The retry backoff waits for real; a suite of refused calls must not.
+const retryWaits = spyOn(globalThis, "setTimeout")
+beforeAll(() => {
+  retryWaits.mockImplementation(((run: () => void) => {
+    queueMicrotask(run)
+    return 0
+  }) as unknown as typeof setTimeout)
+})
+afterAll(() => retryWaits.mockRestore())
 
 /**
  * Google Workspace directory sync (#343): domain-wide delegation credentials,
@@ -1127,7 +1142,10 @@ describe("console Google directory routes: refusals first, then owner flow", () 
     expect(requestedScopes[0]).toBe(GOOGLE_DIRECTORY_SCOPES.join(" "))
 
     // Pulling in `scope_missing` mode records `missingScopes` and surfaces `lastSyncDetail` on GET.
-    const pullTokens = createGoogleTokenSource({ serviceAccount: sa, fetch: w.net.fetch })
+    const pullTokens = createGoogleTokenSource({
+      serviceAccount: sa,
+      fetch: w.net.fetch,
+    })
     const scopePull = await pullGoogleDirectory(
       {
         store: w.dirs.store,
@@ -1964,9 +1982,7 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
               id: "g_mover",
               primaryEmail: "mover@gw2.i10.tech",
               aliases: ["mover@i10.tech"],
-              emails: [
-                { address: "mover@gw2.i10.tech", primary: true, type: "work" },
-              ],
+              emails: [{ address: "mover@gw2.i10.tech", primary: true, type: "work" }],
               name: { givenName: "Mo", familyName: "Mover" },
             },
             {
@@ -2077,9 +2093,9 @@ describe("pullGoogleDirectory: incomplete-pull safety first, then mapping, idemp
       users: { created: 1, updated: 0, deleted: 0, unchanged: 0 },
       groups: { created: 3, updated: 0, deleted: 0, unchanged: 0 },
     })
-    expect(
-      memberRequests.some((pathname) => pathname.includes("grp_unproved")),
-    ).toBe(false)
+    expect(memberRequests.some((pathname) => pathname.includes("grp_unproved"))).toBe(
+      false,
+    )
     expect(w.dirs.groups.map((g) => g.externalId).sort()).toEqual([
       "grp_alias",
       "grp_moving",
@@ -2864,5 +2880,150 @@ describe("POST /google/directory/notify: refusals first, then pull scheduling", 
       },
     })
     expect(burst.status).toBe(429)
+  })
+})
+
+describe("Part 2: Google directory retry, concurrency and watch failure (#13, #19, #22)", () => {
+  describe("withGoogleRetry and parseRetryAfterMs", () => {
+    it("parses retry-after header correctly", () => {
+      expect(parseRetryAfterMs("5")).toBe(5000)
+      expect(parseRetryAfterMs("0")).toBe(0)
+      expect(parseRetryAfterMs(null)).toBeNull()
+      expect(parseRetryAfterMs("invalid")).toBeNull()
+    })
+
+    it("honours retry-after on 429 / rate_limited failures", async () => {
+      let attempts = 0
+      const delays: number[] = []
+      const fakeSleep = async (ms: number) => {
+        delays.push(ms)
+      }
+
+      const res = await withGoogleRetry(
+        async () => {
+          attempts++
+          if (attempts === 1) {
+            throw new GoogleFailure("rate_limited", true, undefined, 3500)
+          }
+          return "ok"
+        },
+        { sleep: fakeSleep },
+      )
+
+      expect(res).toBe("ok")
+      expect(attempts).toBe(2)
+      expect(delays).toEqual([3500])
+    })
+
+    it("gives up after max attempts on continuous retryable failure", async () => {
+      let attempts = 0
+      const fakeSleep = async () => {}
+
+      let caught: unknown
+      await withGoogleRetry(
+        async () => {
+          attempts++
+          throw new GoogleFailure("unreachable", true)
+        },
+        { maxAttempts: 3, sleep: fakeSleep },
+      ).catch((err) => {
+        caught = err
+      })
+
+      expect(attempts).toBe(3)
+      expect(caught).toBeInstanceOf(GoogleFailure)
+      expect((caught as GoogleFailure).code).toBe("unreachable")
+    })
+
+    it("does not retry on fatal non-retryable failures", async () => {
+      let attempts = 0
+      let caught: unknown
+      await withGoogleRetry(
+        async () => {
+          attempts++
+          throw new GoogleFailure("unauthorized_client", false)
+        },
+        { maxAttempts: 4 },
+      ).catch((err) => {
+        caught = err
+      })
+
+      expect(attempts).toBe(1)
+      expect((caught as GoogleFailure).code).toBe("unauthorized_client")
+    })
+  })
+
+  describe("group members concurrency", () => {
+    it("bounds concurrency to GOOGLE_GROUP_MEMBERS_CONCURRENCY", async () => {
+      expect(GOOGLE_GROUP_MEMBERS_CONCURRENCY).toBe(6)
+
+      let active = 0
+      let maxActive = 0
+      const items = Array.from({ length: 20 }, (_, i) => i)
+
+      const results = await mapConcurrent(
+        items,
+        GOOGLE_GROUP_MEMBERS_CONCURRENCY,
+        async (item) => {
+          active++
+          if (active > maxActive) maxActive = active
+          await new Promise((resolve) => setTimeout(resolve, 5))
+          active--
+          return item * 2
+        },
+      )
+
+      expect(results).toEqual(items.map((i) => i * 2))
+      expect(maxActive).toBeLessThanOrEqual(GOOGLE_GROUP_MEMBERS_CONCURRENCY)
+      expect(maxActive).toBeGreaterThan(1)
+    })
+  })
+
+  describe("watch failure auditing and visibility", () => {
+    it("audits directory.watch_failed when channel registration throws", async () => {
+      const audited: Array<{
+        tenantId: string
+        event: AuditEvent
+      }> = []
+      const fakeStore = {
+        watchChannels: async () => [],
+        saveWatchChannel: async () => {},
+      }
+
+      await ensureGoogleWatchChannels(
+        {
+          store: fakeStore as unknown as Parameters<
+            typeof ensureGoogleWatchChannels
+          >[0]["store"],
+          tokens: {
+            token: async () => "token_abc",
+          } as unknown as Parameters<typeof ensureGoogleWatchChannels>[0]["tokens"],
+          fetch: async () => {
+            throw new Error("Google watch endpoint 503")
+          },
+          notifyUrl: "https://api.acme.test/google/directory/notify",
+          log,
+          record: async (tenantId, event) => {
+            audited.push({ tenantId, event })
+          },
+        },
+        {
+          id: DIRECTORY,
+          tenantId: TENANT,
+          enabled: true,
+          adminEmail: "admin@acme.test",
+          domain: "acme.test",
+        },
+      )
+
+      expect(audited.length).toBe(4)
+      for (const item of audited) {
+        expect(item.tenantId).toBe(TENANT)
+        expect(item.event.type).toBe("directory.watch_failed")
+        expect(item.event.data).toMatchObject({
+          directoryId: DIRECTORY,
+        })
+      }
+    })
   })
 })

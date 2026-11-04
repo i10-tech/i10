@@ -97,6 +97,7 @@ import { ssoPolicyStore } from "./identity/policy-store.js"
 import { workspaceGate } from "./identity/workspace-policy.js"
 import { workspacePolicyStore } from "./identity/workspace-policy-store.js"
 import { backchannelLogout } from "./identity/oidc-logout.js"
+import { universalLogout } from "./identity/universal-logout.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
@@ -1298,6 +1299,8 @@ const identityAlertsService =
         workspaceName: (tenantId) => identityBase.workspaceName(tenantId),
         connectionName: async (tenantId, id) =>
           (await identityBase.connection(tenantId, id))?.name ?? null,
+        directoryName: async (tenantId, id) =>
+          (await directories.directory(tenantId, id))?.name ?? null,
         addresses: (orgId, userIds) => clerkMembers(clerk).addresses(orgId, userIds),
         addressOf: async (userId) => {
           const user = await identityClerk.user(userId)
@@ -1307,6 +1310,7 @@ const identityAlertsService =
             null
           )
         },
+        consoleUrl,
         log,
       })
     : undefined
@@ -1318,6 +1322,7 @@ const identity = tapped(
       : {}),
     health: identityHealth,
     ...(identityAlertsService ? { alerts: identityAlertsService } : {}),
+    store: identityBase,
     connectionStatus: async (tenantId, id) =>
       (await identityBase.connection(tenantId, id))?.status ?? null,
     log,
@@ -1629,6 +1634,8 @@ const identityConsole = {
     edgeSecret: env.EDGE_SECRET,
   },
   protocols: [...engines.keys()],
+  universalLogoutUrl: (connectionId: string) =>
+    new URL(`/sso/universal-logout/${connectionId}`, env.SCIM_BASE_URL).href,
   scim: {
     store: directories,
     baseUrl: scimBaseUrl,
@@ -2111,6 +2118,26 @@ const app = createApp({
                 },
               }
             : {}),
+          universalLogout: universalLogout(
+            {
+              store: identity,
+              sessions: samlRows,
+              samlStore: samlRows,
+              clerk: identityClerk,
+              replay,
+              forget: (input: { userId?: string; sessionId?: string }) =>
+                gateChecker.forget(input),
+              fetch: guardedFetch({
+                vet: (host, signal) =>
+                  vetHost(host, { allow: webhookEgressAllow, signal }),
+              }),
+              log,
+              endpointUrl: (connectionId: string) =>
+                new URL(`/sso/universal-logout/${connectionId}`, env.SCIM_BASE_URL)
+                  .href,
+            },
+            oidc ?? undefined,
+          ),
           mayManage: (tenantId: string, userId: string) =>
             can(roleRows, tenantId, userId, "sso:manage"),
           tenantOfConnection: async (connectionId: string) =>

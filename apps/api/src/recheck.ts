@@ -62,7 +62,15 @@ import { roleStore } from "./console/roles-db.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { samlStore } from "./identity/saml-store.js"
 import { fetchIdpMetadata } from "./identity/saml.js"
-import { dailySamlPass } from "./identity/saml-refresh.js"
+import {
+  checkDirectoryStaleSync,
+  checkDirectoryTokens,
+  checkOidcSecret,
+  dailySamlPass,
+} from "./identity/saml-refresh.js"
+import { connectionHealthStore } from "./identity/health-store.js"
+import { directoryStore } from "./identity/scim-store.js"
+import { sql as dsql } from "drizzle-orm"
 import { guardedFetch } from "./identity/oidc-fetch.js"
 import { parseAllowList, vetHost } from "./webhooks/egress.js"
 
@@ -173,7 +181,7 @@ await withMonitor(
         const base = identityStore(db, null)
         const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
         const consoleUrl = env.CONSOLE_ORIGINS[0]
-        const samlSummary = await withSystemSender(db, sql, (sender) => {
+        const samlSummary = await withSystemSender(db, sql, async (sender) => {
           /*
            * ⚠ A CERTIFICATE ALERT IS A WEBHOOK AND AN EMAIL (#345), through the
            * same tap the API puts on `record`. The webhook rows are written and
@@ -181,6 +189,8 @@ await withMonitor(
            * the email needs our sender, and without one only the audit event
            * and the webhook exist.
            */
+          const health = connectionHealthStore(db)
+          const scim = directoryStore(db)
           const tap = auditTap({
             webhooks: identityWebhooks({ db, log }),
             ...(sender && consoleUrl
@@ -192,25 +202,64 @@ await withMonitor(
                     workspaceName: (tenantId) => base.workspaceName(tenantId),
                     connectionName: async (tenantId, id) =>
                       (await base.connection(tenantId, id))?.name ?? null,
+                    directoryName: async (tenantId, id) =>
+                      (await scim.directory(tenantId, id))?.name ?? null,
                     addresses: (orgId, userIds) =>
                       clerkMembers(clerk).addresses(orgId, userIds),
                     // Not used by the certificate alert.
                     addressOf: async () => null,
+                    consoleUrl,
                     log,
                   }),
                 }
               : {}),
+            health,
+            store: base,
             connectionStatus: async (tenantId, id) =>
               (await base.connection(tenantId, id))?.status ?? null,
             log,
           })
-          return dailySamlPass({
+          const tappedStore = tapped(base, tap)
+          const summary = await dailySamlPass({
             // Metadata and certificates are public: no secret box is needed.
-            store: tapped(base, tap),
+            store: tappedStore,
             saml: samlStore(db),
             fetchMetadata: (url) => fetchIdpMetadata(fetch, url),
             log,
           })
+
+          const now = new Date()
+          try {
+            const tenantRows = (await db.execute(
+              dsql`select id from core.tenants`,
+            )) as unknown as { id: string }[]
+            for (const { id: tenantId } of tenantRows) {
+              try {
+                const conns = await base.connections(tenantId)
+                for (const conn of conns) {
+                  if (conn.protocol === "oidc") {
+                    await checkOidcSecret({ store: tappedStore, log }, conn, now)
+                  }
+                }
+                const dirs = await scim.directories(tenantId)
+                for (const dir of dirs) {
+                  await checkDirectoryStaleSync({ store: tappedStore, log }, dir, now)
+                  await checkDirectoryTokens(
+                    { store: tappedStore, health, log },
+                    dir,
+                    dir.tokens,
+                    now,
+                  )
+                }
+              } catch (err) {
+                log.error({ err, tenantId }, "failed identity expiry check for tenant")
+              }
+            }
+          } catch (err) {
+            log.error({ err }, "failed reading tenants for identity expiry check")
+          }
+
+          return summary
         })
         log.info(samlSummary, "SAML metadata and certificate pass complete")
       } catch (error) {

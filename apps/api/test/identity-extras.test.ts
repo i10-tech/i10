@@ -32,7 +32,7 @@ function world(over: { counts?: Partial<HealthCounts>; status?: string | null } 
   const store = memoryStore()
   const emitted: Emitted[] = []
   let claims = 0
-  let allowClaim = true
+  const claimedKeys = new Set<string>()
   const webhooks: IdentityWebhooks = {
     async emit(_tenantId, type, data, at = NOW) {
       emitted.push({ type, data: { ...data, created_at: at.toISOString() } })
@@ -48,20 +48,40 @@ function world(over: { counts?: Partial<HealthCounts>; status?: string | null } 
         ...over.counts,
       }
     },
-    async claimAlert() {
+    async claimAlert(_tenantId, target) {
       claims++
-      const ok = allowClaim
-      allowClaim = false
-      return ok
+      const key =
+        typeof target === "string"
+          ? target
+          : typeof target?.directoryId === "string"
+            ? target.directoryId
+            : typeof target?.connectionId === "string"
+              ? target.connectionId
+              : "target"
+      if (claimedKeys.has(key)) return false
+      claimedKeys.add(key)
+      return true
     },
   }
   const certificateAlerts: unknown[] = []
+  const dirSyncAlerts: Array<{
+    tenantId: string
+    input: { directoryId: string; error: string }
+  }> = []
+  const relinkAlerts: Array<{
+    tenantId: string
+    input: { connectionId: string; count: number }
+  }> = []
   const tap = auditTap({
     webhooks,
     health,
     alerts: {
       bypassUsed: async () => {},
       certificateExpiring: async (_t, input) => void certificateAlerts.push(input),
+      directorySyncFailed: async (tenantId, input) =>
+        void dirSyncAlerts.push({ tenantId, input }),
+      relinkRequested: async (tenantId, input) =>
+        void relinkAlerts.push({ tenantId, input }),
     },
     connectionStatus: async () => (over.status === undefined ? "active" : over.status),
     log,
@@ -71,6 +91,8 @@ function world(over: { counts?: Partial<HealthCounts>; status?: string | null } 
     store,
     emitted,
     certificateAlerts,
+    dirSyncAlerts,
+    relinkAlerts,
     tap,
     claims: () => claims,
     tapped: tapped(store.store, tap),
@@ -286,7 +308,13 @@ describe("sso.connection.failed", () => {
 
   it("does not count the workspace's own rules as the connection failing", async () => {
     const w = world()
-    for (const reason of ["waiting_list", "role_exempt", "blocked", "deprovisioned"])
+    for (const reason of [
+      "waiting_list",
+      "role_exempt",
+      "blocked",
+      "deprovisioned",
+      "subject_changed",
+    ])
       await w.tapped.record(TENANT, failure(reason))
     expect(w.claims()).toBe(0)
     expect(w.emitted).toEqual([])
@@ -330,8 +358,66 @@ describe("sso.certificate.expiring", () => {
         fingerprint: "ab".repeat(32),
         notAfter: new Date("2026-11-04T12:00:00.000Z"),
         days: 7,
+        credential: "certificate",
       },
     ])
+  })
+
+  it("handles client_secret and scim_token credentials", async () => {
+    const w = world()
+    await w.tapped.record(TENANT, {
+      type: "sso.certificate.expiring",
+      connectionId: CONNECTION,
+      reason: "30_days",
+      data: {
+        kind: "client_secret",
+        notAfter: "2026-12-04T00:00:00.000Z",
+        days: 30,
+      },
+    })
+    expect(w.certificateAlerts).toHaveLength(1)
+    expect(w.certificateAlerts[0]).toMatchObject({
+      connectionId: CONNECTION,
+      credential: "client secret",
+      days: 30,
+    })
+
+    await w.tapped.record(TENANT, {
+      type: "sso.certificate.expiring",
+      reason: "1_days",
+      data: {
+        kind: "scim_token",
+        directoryId: "dir_scim_1",
+        tokenId: "tok_1",
+        hint: "tok_abc",
+        notAfter: "2026-11-05T00:00:00.000Z",
+        days: 1,
+      },
+    })
+    expect(w.certificateAlerts).toHaveLength(2)
+    expect(w.certificateAlerts[1]).toMatchObject({
+      connectionId: "dir_scim_1",
+      credential: "SCIM token",
+      days: 1,
+    })
+  })
+
+  it("taps identity.relink_requested and alerts owners at most once per hour", async () => {
+    const w = world()
+    await w.tapped.record(TENANT, {
+      type: "identity.relink_requested",
+      connectionId: CONNECTION,
+    })
+    expect(w.relinkAlerts).toEqual([
+      { tenantId: TENANT, input: { connectionId: CONNECTION, count: 1 } },
+    ])
+
+    // Second time within the hour is deduped by claimAlert
+    await w.tapped.record(TENANT, {
+      type: "identity.relink_requested",
+      connectionId: CONNECTION,
+    })
+    expect(w.relinkAlerts).toHaveLength(1)
   })
 
   it("ignores an event that is missing what the payload needs", async () => {
@@ -359,6 +445,8 @@ describe("a failing follow-up never fails the flow", () => {
         certificateExpiring: async () => {
           throw new Error("mail down")
         },
+        directorySyncFailed: async () => {},
+        relinkRequested: async () => {},
       },
       connectionStatus: async () => "active",
       log,
@@ -448,5 +536,36 @@ describe("connection health", () => {
     const bad = counts({ failuresLast15Minutes: 50, failuresLast24Hours: 50 })
     for (const status of ["draft", "testing", "disabled"])
       expect(healthOf(bad, status, NOW).failing).toBe(false)
+  })
+})
+
+describe("directory.sync_failed", () => {
+  it("alerts managers once per directory per 24 hours via claimAlert deduplication", async () => {
+    const w = world()
+    await w.tapped.record(TENANT, {
+      type: "directory.sync_failed",
+      data: { directoryId: "dir_google", error: "unauthorized_client" },
+    })
+
+    expect(w.dirSyncAlerts).toEqual([
+      {
+        tenantId: TENANT,
+        input: { directoryId: "dir_google", error: "unauthorized_client" },
+      },
+    ])
+
+    // Second failure within the 24 hour window is deduplicated
+    await w.tapped.record(TENANT, {
+      type: "directory.sync_failed",
+      data: { directoryId: "dir_google", error: "rate_limited" },
+    })
+    expect(w.dirSyncAlerts).toHaveLength(1)
+
+    // A different directory claims its own alert
+    await w.tapped.record(TENANT, {
+      type: "directory.sync_failed",
+      data: { directoryId: "dir_other", error: "unreachable" },
+    })
+    expect(w.dirSyncAlerts).toHaveLength(2)
   })
 })

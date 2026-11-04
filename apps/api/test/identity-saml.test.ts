@@ -429,11 +429,11 @@ describe("the login hint", () => {
     expect((await w.start()).xml).not.toContain("Subject")
   })
 
-  it("is never sent to Entra, which refuses a request with a Subject", async () => {
+  it("is never sent to Entra, which refuses a request with a Subject, but passes login_hint as query param", async () => {
     const w = await world({ connection: { ...samlConnection(), provider: "entra" } })
-    expect((await w.start("sign_in", undefined, "bob@acme.test")).xml).not.toContain(
-      "Subject",
-    )
+    const started = await w.start("sign_in", undefined, "bob@acme.test")
+    expect(started.xml).not.toContain("Subject")
+    expect(started.url.searchParams.get("login_hint")).toBe("bob@acme.test")
   })
 })
 

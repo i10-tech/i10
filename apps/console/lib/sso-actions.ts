@@ -115,16 +115,24 @@ export async function saveOidc(
     clientAuth?: string
     scopes?: string[]
     mfaAcrValues?: string[]
+    secretExpiresAt?: string | null
   },
 ) {
   return run(() => api<OidcSetup>(`${conn(id)}/oidc`, { method: "PUT", body }))
 }
 
-export async function saveOidcSecret(id: string, clientSecret: string) {
+export async function saveOidcSecret(
+  id: string,
+  clientSecret: string,
+  secretExpiresAt?: string | null,
+) {
   return run(() =>
     api<OidcSetup>(`${conn(id)}/oidc/secret`, {
       method: "PUT",
-      body: { clientSecret },
+      body: {
+        clientSecret,
+        ...(secretExpiresAt !== undefined ? { secretExpiresAt } : {}),
+      },
     }),
   )
 }

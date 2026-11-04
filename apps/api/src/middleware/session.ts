@@ -547,7 +547,7 @@ export function clerkFreshAuth(
  * `clerk_error` would surface as an empty toast anywhere the hint was not
  * handled - which is every call site that has not been converted yet.
  */
-export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
+export async function freshAuthRefusal(c: Context): Promise<Response | null> {
   const reader = c.get("freshAuth")
   /*
    * ⚠ NOT WIRED MEANS REFUSE, NOT ALLOW. Every other optional dependency in
@@ -570,8 +570,7 @@ export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
   const outcome = await reader(c.req.raw)
 
   if (outcome.status === "fresh") {
-    await next()
-    return
+    return null
   }
 
   if (outcome.status === "unknown") {
@@ -614,4 +613,10 @@ export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
     },
     403,
   )
+}
+
+export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
+  const refusal = await freshAuthRefusal(c)
+  if (refusal) return refusal
+  await next()
 }

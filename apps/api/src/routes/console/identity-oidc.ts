@@ -2,7 +2,8 @@ import type { Context, Hono } from "hono"
 import { isIP } from "node:net"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
-import { requireFreshAuth } from "../../middleware/session.js"
+import { freshAuthRefusal } from "../../middleware/session.js"
+import { connectionWriteNeedsFreshAuth } from "../../identity/authorization.js"
 import { can, type Permission } from "../../console/roles.js"
 import { isPermittedAddress } from "../../webhooks/egress.js"
 import { OWNER_GUARDED, type Connection } from "../../identity/model.js"
@@ -180,7 +181,21 @@ export function readOidcInput(
     if (!Array.isArray(values)) return values.error
     next[key] = values
   }
-  const changed = ([...TRUST_FIELDS, "scopes", "acrValues"] as const).filter(
+  if (body.secretExpiresAt !== undefined) {
+    if (body.secretExpiresAt === null || body.secretExpiresAt === "") {
+      next.secretExpiresAt = null
+    } else if (typeof body.secretExpiresAt === "string") {
+      const d = new Date(body.secretExpiresAt)
+      if (Number.isNaN(d.getTime())) return "secretExpiresAt must be a valid date."
+      next.secretExpiresAt = d.toISOString()
+      next.secretAlertedDays = null
+    } else {
+      return "secretExpiresAt must be a valid date or null."
+    }
+  }
+  const changed = (
+    [...TRUST_FIELDS, "scopes", "acrValues", "secretExpiresAt"] as const
+  ).filter(
     (k) => JSON.stringify(next[k] ?? null) !== JSON.stringify(current[k] ?? null),
   )
   return { next, changed }
@@ -216,6 +231,7 @@ export function oidcSetupView(
     acrValues: stored.acrValues ?? [],
     mfaAcrValues: stored.mfaAcrValues ?? [],
     clientSecretSet: stored.clientSecretSet === true,
+    secretExpiresAt: stored.secretExpiresAt ?? null,
     keys: (stored.keys ?? []).map((k) => ({ kid: k.kid, createdAt: k.createdAt })),
     ready: oidcReady(connection, o.engine.google),
   }
@@ -256,6 +272,8 @@ export function mountIdentityOidc(app: Hono, d: ConsoleDeps): void {
       403,
     )
   }
+  const setupStepUp = async (c: Context, connection: Connection) =>
+    connectionWriteNeedsFreshAuth(connection) ? freshAuthRefusal(c) : null
 
   app.get("/identity/connections/:id/oidc", async (c) => {
     const loaded = await load(c)
@@ -263,9 +281,11 @@ export function mountIdentityOidc(app: Hono, d: ConsoleDeps): void {
     return c.json(oidcSetupView(loaded.connection, loaded.oidc))
   })
 
-  app.put("/identity/connections/:id/oidc", requireFreshAuth, async (c) => {
+  app.put("/identity/connections/:id/oidc", async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
+    const refusal = await setupStepUp(c, loaded.connection)
+    if (refusal) return refusal
     return putOidcSettings(
       c,
       loaded,
@@ -275,9 +295,11 @@ export function mountIdentityOidc(app: Hono, d: ConsoleDeps): void {
     )
   })
 
-  app.put("/identity/connections/:id/oidc/secret", requireFreshAuth, async (c) => {
+  app.put("/identity/connections/:id/oidc/secret", async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
+    const refusal = await setupStepUp(c, loaded.connection)
+    if (refusal) return refusal
     return putOidcSecret(
       c,
       loaded,
@@ -287,17 +309,19 @@ export function mountIdentityOidc(app: Hono, d: ConsoleDeps): void {
     )
   })
 
-  app.post("/identity/connections/:id/oidc/keys", requireFreshAuth, async (c) => {
+  app.post("/identity/connections/:id/oidc/keys", async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
+    const refusal = await setupStepUp(c, loaded.connection)
+    if (refusal) return refusal
     const { id, oidc, connection, tenantId } = loaded
     if (connection.provider === "google")
       return c.json(
         validation("A Google Workspace connection has no key to make."),
         422,
       )
-    const refusal = await trustRefusal(c, connection)
-    if (refusal) return refusal
+    const trust = await trustRefusal(c, connection)
+    if (trust) return trust
     const stored = storedOidc(connection)
     const made = await newSigningKey()
     /*
@@ -475,6 +499,19 @@ export async function putOidcSecret(
     !secret.trim()
   )
     return c.json(validation("clientSecret must be 1 to 1024 visible characters."), 422)
+  let secretExpiresAt: string | null | undefined = undefined
+  if (body.secretExpiresAt !== undefined) {
+    if (body.secretExpiresAt === null || body.secretExpiresAt === "") {
+      secretExpiresAt = null
+    } else if (typeof body.secretExpiresAt === "string") {
+      const d = new Date(body.secretExpiresAt)
+      if (Number.isNaN(d.getTime()))
+        return c.json(validation("secretExpiresAt must be a valid date."), 422)
+      secretExpiresAt = d.toISOString()
+    } else {
+      return c.json(validation("secretExpiresAt must be a valid date or null."), 422)
+    }
+  }
   const stored = storedOidc(connection)
   const after = await id.store.setConnectionSecrets(tenantId, connection.id, (now) => ({
     secrets: {
@@ -483,7 +520,13 @@ export async function putOidcSecret(
     },
     config: {
       ...now.config,
-      oidc: { ...storedOidc({ config: now.config }), clientSecretSet: true },
+      oidc: {
+        ...storedOidc({ config: now.config }),
+        clientSecretSet: true,
+        ...(secretExpiresAt !== undefined
+          ? { secretExpiresAt, secretAlertedDays: null }
+          : {}),
+      },
     },
   }))
   if (!after) return c.json(notFound(), 404)

@@ -32,6 +32,7 @@ import { toastDone, toastFailure } from "@/lib/toast"
 import type { SsoAbilities, SsoConnection, SsoEnforcement } from "@/lib/sso-types"
 import {
   Block,
+  connectionWriteNeedsStepUp,
   ENFORCEMENT_HELP,
   ENFORCEMENT_LABEL,
   Loading,
@@ -132,6 +133,7 @@ function Enforcement({
     const result = await call(
       () => changeSsoConnection(connection.id, { enforcement: mode }),
       {
+        stepUp: connectionWriteNeedsStepUp(connection, { enforcement: mode }),
         title: "Could not change enforcement",
       },
     )
@@ -206,7 +208,10 @@ function Enforcement({
           if (!pending) return false
           const result = await call(
             () => changeSsoConnection(connection.id, { enforcement: pending }),
-            { title: "Could not require SSO" },
+            {
+              stepUp: connectionWriteNeedsStepUp(connection, { enforcement: pending }),
+              title: "Could not require SSO",
+            },
           )
           if (!result) {
             setRefusal(
@@ -259,6 +264,7 @@ function SignInRules({
 
   async function patch(change: ConnectionChange, done: string) {
     const result = await call(() => changeSsoConnection(connection.id, change), {
+      stepUp: connectionWriteNeedsStepUp(connection, change),
       title: "Could not save that",
     })
     if (result) {
@@ -380,6 +386,7 @@ function LoginChanges({
 
   async function patch(change: ConnectionChange, done: string) {
     const result = await call(() => changeSsoConnection(connection.id, change), {
+      stepUp: connectionWriteNeedsStepUp(connection, change),
       title: "Could not save that",
     })
     if (result) {
@@ -513,7 +520,9 @@ function Domains({
     if (!choice) return
     setRefusal(null)
     const domain = choices.find((d) => d.id === choice && !d.coveredBy)
-    const result = await attempt(() => addSsoDomain(connection.id, choice))
+    const result = await attempt(() => addSsoDomain(connection.id, choice), {
+      stepUp: connectionWriteNeedsStepUp(connection),
+    })
     if (result === null) return
     if (!result.ok) {
       toastFailure(result, { title: "Could not add the domain" })
@@ -540,6 +549,7 @@ function Domains({
 
   async function remove(joinDomainId: string, name: string) {
     const ok = await call(() => removeSsoDomain(connection.id, joinDomainId), {
+      stepUp: connectionWriteNeedsStepUp(connection),
       title: "Could not remove the domain",
     })
     if (ok) {
@@ -665,7 +675,10 @@ function GroupRules({
           role,
           precedence: nextPrecedence,
         }),
-      { title: "Could not add the rule" },
+      {
+        stepUp: connectionWriteNeedsStepUp(connection),
+        title: "Could not add the rule",
+      },
     )
     if (made && data) {
       setData({
@@ -708,7 +721,10 @@ function GroupRules({
                             changeGroupRule(connection.id, r.id, {
                               role: v as "member" | "admin",
                             }),
-                          { title: "Could not change the rule" },
+                          {
+                            stepUp: connectionWriteNeedsStepUp(connection),
+                            title: "Could not change the rule",
+                          },
                         )
                         if (after)
                           setData({
@@ -727,6 +743,7 @@ function GroupRules({
                       const ok = await call(
                         () => deleteGroupRule(connection.id, r.id),
                         {
+                          stepUp: connectionWriteNeedsStepUp(connection),
                           title: "Could not delete the rule",
                         },
                       )

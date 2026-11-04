@@ -1,7 +1,8 @@
 import type { Context, Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
-import { requireFreshAuth } from "../../middleware/session.js"
+import { freshAuthRefusal } from "../../middleware/session.js"
+import { connectionWriteNeedsFreshAuth } from "../../identity/authorization.js"
 import {
   can,
   parseJoinRole,
@@ -134,12 +135,16 @@ export function mountIdentityGroups(app: Hono, d: ConsoleDeps): void {
     })
   })
 
-  app.post("/identity/connections/:id/group-rules", requireFreshAuth, async (c) => {
+  app.post("/identity/connections/:id/group-rules", async (c) => {
     const id = d.identity
     if (!id) return c.json(notWired("SSO group rules"), 501)
     const connectionId = c.req.param("id")
     const guarded = await guard(c, connectionId)
     if ("refusal" in guarded) return guarded.refusal
+    if (connectionWriteNeedsFreshAuth(guarded.connection)) {
+      const refusal = await freshAuthRefusal(c)
+      if (refusal) return refusal
+    }
     const input = readRule((await readJson(c)) ?? {}, false)
     if ("error" in input) return c.json(validation(input.error), 422)
     const { tenantId } = c.get("auth")
@@ -168,69 +173,61 @@ export function mountIdentityGroups(app: Hono, d: ConsoleDeps): void {
     return c.json(view(made), 201)
   })
 
-  app.patch(
-    "/identity/connections/:id/group-rules/:ruleId",
-    requireFreshAuth,
-    async (c) => {
-      const id = d.identity
-      if (!id) return c.json(notWired("SSO group rules"), 501)
-      const connectionId = c.req.param("id")
-      const ruleId = c.req.param("ruleId")
-      const guarded = await guard(c, connectionId)
-      if ("refusal" in guarded) return guarded.refusal
-      if (!UUID.test(ruleId)) return c.json(notFound(), 404)
-      const patch = readRule((await readJson(c)) ?? {}, true)
-      if ("error" in patch) return c.json(validation(patch.error), 422)
-      const { tenantId } = c.get("auth")
-      const { userId } = c.get("user")
-      const before = (await id.store.groupRules(tenantId, connectionId)).find(
-        (r) => r.id === ruleId,
-      )
-      if (!before) return c.json(notFound(), 404)
-      const after = await id.store.updateGroupRule(
-        tenantId,
-        connectionId,
-        ruleId,
-        patch,
-      )
-      if (after === null) return c.json(notFound(), 404)
-      if (after === "exists")
-        return c.json(
-          conflict("That group already has a rule on this connection."),
-          409,
-        )
-      await id.store.record(tenantId, {
-        type: "group_rule.updated",
-        actorUserId: userId,
-        connectionId,
-        data: { from: view(before), to: view(after) },
-      })
-      return c.json(view(after))
-    },
-  )
+  app.patch("/identity/connections/:id/group-rules/:ruleId", async (c) => {
+    const id = d.identity
+    if (!id) return c.json(notWired("SSO group rules"), 501)
+    const connectionId = c.req.param("id")
+    const ruleId = c.req.param("ruleId")
+    const guarded = await guard(c, connectionId)
+    if ("refusal" in guarded) return guarded.refusal
+    if (connectionWriteNeedsFreshAuth(guarded.connection)) {
+      const refusal = await freshAuthRefusal(c)
+      if (refusal) return refusal
+    }
+    if (!UUID.test(ruleId)) return c.json(notFound(), 404)
+    const patch = readRule((await readJson(c)) ?? {}, true)
+    if ("error" in patch) return c.json(validation(patch.error), 422)
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const before = (await id.store.groupRules(tenantId, connectionId)).find(
+      (r) => r.id === ruleId,
+    )
+    if (!before) return c.json(notFound(), 404)
+    const after = await id.store.updateGroupRule(tenantId, connectionId, ruleId, patch)
+    if (after === null) return c.json(notFound(), 404)
+    if (after === "exists")
+      return c.json(conflict("That group already has a rule on this connection."), 409)
+    await id.store.record(tenantId, {
+      type: "group_rule.updated",
+      actorUserId: userId,
+      connectionId,
+      data: { from: view(before), to: view(after) },
+    })
+    return c.json(view(after))
+  })
 
-  app.delete(
-    "/identity/connections/:id/group-rules/:ruleId",
-    requireFreshAuth,
-    async (c) => {
-      const id = d.identity
-      if (!id) return c.json(notWired("SSO group rules"), 501)
-      const connectionId = c.req.param("id")
-      const ruleId = c.req.param("ruleId")
-      const guarded = await guard(c, connectionId)
-      if ("refusal" in guarded) return guarded.refusal
-      if (!UUID.test(ruleId)) return c.json(notFound(), 404)
-      const { tenantId } = c.get("auth")
-      const { userId } = c.get("user")
-      const gone = await id.store.deleteGroupRule(tenantId, connectionId, ruleId)
-      if (!gone) return c.json(notFound(), 404)
-      await id.store.record(tenantId, {
-        type: "group_rule.deleted",
-        actorUserId: userId,
-        connectionId,
-        data: { rule: view(gone) },
-      })
-      return c.json({ ok: true })
-    },
-  )
+  app.delete("/identity/connections/:id/group-rules/:ruleId", async (c) => {
+    const id = d.identity
+    if (!id) return c.json(notWired("SSO group rules"), 501)
+    const connectionId = c.req.param("id")
+    const ruleId = c.req.param("ruleId")
+    const guarded = await guard(c, connectionId)
+    if ("refusal" in guarded) return guarded.refusal
+    if (connectionWriteNeedsFreshAuth(guarded.connection)) {
+      const refusal = await freshAuthRefusal(c)
+      if (refusal) return refusal
+    }
+    if (!UUID.test(ruleId)) return c.json(notFound(), 404)
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const gone = await id.store.deleteGroupRule(tenantId, connectionId, ruleId)
+    if (!gone) return c.json(notFound(), 404)
+    await id.store.record(tenantId, {
+      type: "group_rule.deleted",
+      actorUserId: userId,
+      connectionId,
+      data: { rule: view(gone) },
+    })
+    return c.json({ ok: true })
+  })
 }

@@ -151,7 +151,7 @@ export function ssoRateLimit(deps: {
 
 /** The connection a back-channel logout URL names, or null for any other path. */
 export function backchannelConnection(path: string): string | null {
-  const match = /\/oidc\/backchannel\/([0-9a-f-]{36})$/i.exec(path)
+  const match = /\/(?:oidc\/backchannel|universal-logout)\/([0-9a-f-]{36})$/i.exec(path)
   return match ? match[1]!.toLowerCase() : null
 }
 

@@ -13,6 +13,10 @@ import { remoteFailure, type RemoteFailure } from "@/lib/plan-required"
 import { toastFailure } from "@/lib/toast"
 import type { SsoAbilities, SsoEnforcement, SsoStatus } from "@/lib/sso-types"
 import { UpgradePrompt } from "./upgrade-prompt"
+export {
+  connectionWriteNeedsStepUp,
+  scimSessionLimitNote,
+} from "@/lib/sso-authorization"
 
 /**
  * The small pieces every SSO screen shares (#340).
@@ -93,8 +97,11 @@ export function useSsoCall() {
 export function useSsoAttempt() {
   const stepUp = useStepUp()
   return React.useCallback(
-    async <T,>(fn: () => Promise<ActionResult<T>>): Promise<ActionResult<T> | null> =>
-      (await stepUp()) ? fn() : null,
+    async <T,>(
+      fn: () => Promise<ActionResult<T>>,
+      options: { stepUp?: boolean } = {},
+    ): Promise<ActionResult<T> | null> =>
+      options.stepUp === false || (await stepUp()) ? fn() : null,
     [stepUp],
   )
 }

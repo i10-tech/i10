@@ -3,7 +3,8 @@ import { z } from "zod"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
 import { readIdpUrl, type SettingsActor } from "./identity-oidc.js"
-import { requireFreshAuth } from "../../middleware/session.js"
+import { freshAuthRefusal } from "../../middleware/session.js"
+import { connectionWriteNeedsFreshAuth } from "../../identity/authorization.js"
 import { can, type Permission } from "../../console/roles.js"
 import { OWNER_GUARDED, type Connection } from "../../identity/model.js"
 import type { Logger, SamlStore } from "../../identity/ports.js"
@@ -452,6 +453,8 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
       403,
     )
   }
+  const setupStepUp = async (c: Context, connection: Connection) =>
+    connectionWriteNeedsFreshAuth(connection) ? freshAuthRefusal(c) : null
 
   app.get("/identity/connections/:id/saml", async (c) => {
     const loaded = await load(c)
@@ -459,9 +462,11 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
     return c.json(await samlSetupView(loaded.connection, loaded.saml))
   })
 
-  app.put("/identity/connections/:id/saml", requireFreshAuth, async (c) => {
+  app.put("/identity/connections/:id/saml", async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
+    const refusal = await setupStepUp(c, loaded.connection)
+    if (refusal) return refusal
     return putSamlSettings(
       c,
       loaded,
@@ -471,31 +476,30 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
     )
   })
 
-  app.post(
-    "/identity/connections/:id/saml/certificates",
-    requireFreshAuth,
-    async (c) => {
-      const loaded = await load(c)
-      if ("error" in loaded) return loaded.error
-      return addSamlCertificate(
-        c,
-        loaded,
-        (await readJson(c)) ?? {},
-        { userId: c.get("user").userId },
-        () => trustRefusal(c, loaded.connection),
-      )
-    },
-  )
+  app.post("/identity/connections/:id/saml/certificates", async (c) => {
+    const loaded = await load(c)
+    if ("error" in loaded) return loaded.error
+    const refusal = await setupStepUp(c, loaded.connection)
+    if (refusal) return refusal
+    return addSamlCertificate(
+      c,
+      loaded,
+      (await readJson(c)) ?? {},
+      { userId: c.get("user").userId },
+      () => trustRefusal(c, loaded.connection),
+    )
+  })
 
   app.delete(
     "/identity/connections/:id/saml/certificates/:certificateId",
-    requireFreshAuth,
     async (c) => {
       const loaded = await load(c)
       if ("error" in loaded) return loaded.error
       const { id, saml, connection, tenantId } = loaded
       const certificateId = c.req.param("certificateId")
       if (!UUID.test(certificateId)) return c.json(notFound(), 404)
+      const stepUp = await setupStepUp(c, connection)
+      if (stepUp) return stepUp
       const refusal = await trustRefusal(c, connection)
       if (refusal) return refusal
       if (!(await saml.store.removeCertificate(tenantId, connection.id, certificateId)))
@@ -510,10 +514,12 @@ export function mountIdentitySaml(app: Hono, d: ConsoleDeps): void {
     },
   )
 
-  app.post("/identity/connections/:id/saml/sp-key", requireFreshAuth, async (c) => {
+  app.post("/identity/connections/:id/saml/sp-key", async (c) => {
     const loaded = await load(c)
     if ("error" in loaded) return loaded.error
     const { id, saml, connection, tenantId } = loaded
+    const stepUp = await setupStepUp(c, connection)
+    if (stepUp) return stepUp
     const refusal = await trustRefusal(c, connection)
     if (refusal) return refusal
     const made = await newSpKey(`i10 SAML ${connection.id}`)

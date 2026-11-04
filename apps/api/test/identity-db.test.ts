@@ -91,7 +91,7 @@ suite("identity schema", () => {
     expect(await store().liveDomains(acme, connectionId)).toEqual([live])
   })
 
-  it("starts an Entra connection with a 12 hour session cap, and others with none", async () => {
+  it("starts Entra and Okta connections with a 7 day session cap, and others with none", async () => {
     const made = async (provider: string, protocol: "saml" | "oidc") =>
       (
         await store().createConnection(acme, {
@@ -101,9 +101,9 @@ suite("identity schema", () => {
           createdBy: "u",
         })
       ).maxSessionSeconds
-    expect(await made("entra", "saml")).toBe(43200)
-    expect(await made("entra", "oidc")).toBe(43200)
-    expect(await made("okta", "saml")).toBeNull()
+    expect(await made("entra", "saml")).toBe(604800)
+    expect(await made("okta", "saml")).toBe(604800)
+    expect(await made("entra", "oidc")).toBe(604800)
     expect(await made("google", "oidc")).toBeNull()
   })
 

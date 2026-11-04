@@ -55,26 +55,47 @@ export function connectionHealthStore(db: Database): ConnectionHealthStore {
       })
     },
 
-    async claimAlert(tenantId, connectionId, snapshot, everyMs) {
+    async claimAlert(
+      tenantId,
+      target,
+      snapshot,
+      everyMs,
+      eventType = FAILURE_ALERT_TYPE,
+    ) {
+      const connId = typeof target === "string" ? target : target.connectionId
+      const dirId = typeof target === "object" ? target.directoryId : undefined
+      const lockKey = dirId
+        ? `sso-directory-alert:${dirId}`
+        : `sso-failure-alert:${connId}`
       return withTenant(db, tenantId, async (tx) => {
         await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtextextended(${`sso-failure-alert:${connectionId}`}, 0))`,
+          sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
         )
-        const [recent] = (await tx.execute(sql`
-          select 1 as one
-            from identity.events
-           where tenant_id = ${tenantId}::uuid
-             and connection_id = ${connectionId}::uuid
-             and type = ${FAILURE_ALERT_TYPE}
-             and created_at > now() - ${`${Math.ceil(everyMs / 1000)} seconds`}::interval
-           limit 1
-        `)) as unknown as Row[]
+        const [recent] = (connId
+          ? await tx.execute(sql`
+                select 1 as one
+                  from identity.events
+                 where tenant_id = ${tenantId}::uuid
+                   and connection_id = ${connId}::uuid
+                   and type = ${eventType}
+                   and created_at > now() - ${`${Math.ceil(everyMs / 1000)} seconds`}::interval
+                 limit 1
+              `)
+          : await tx.execute(sql`
+                select 1 as one
+                  from identity.events
+                 where tenant_id = ${tenantId}::uuid
+                   and type = ${eventType}
+                   and data->>'directoryId' = ${dirId}
+                   and created_at > now() - ${`${Math.ceil(everyMs / 1000)} seconds`}::interval
+                 limit 1
+              `)) as unknown as Row[]
         if (recent) return false
         await tx.insert(events).values({
           tenantId,
-          type: FAILURE_ALERT_TYPE,
-          connectionId,
-          data: snapshot,
+          type: eventType,
+          connectionId: connId ?? null,
+          data: { ...snapshot, ...(dirId ? { directoryId: dirId } : {}) },
         })
         return true
       })

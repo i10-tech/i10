@@ -6,6 +6,7 @@ import { requireFreshAuth } from "../../middleware/session.js"
 import { can, type Permission } from "../../console/roles.js"
 import {
   DIRECTORY_PROVIDERS,
+  GOOGLE_WATCH_EVENTS,
   type Directory,
   type DirectoryStore,
   type DirectoryToken,
@@ -199,6 +200,34 @@ async function googleSyncDetailsByDirectory(
   return out
 }
 
+async function googleWatchInfoByDirectory(
+  scim: ScimConsoleDeps,
+  tenantId: string,
+  directories: readonly Directory[],
+  now: Date,
+): Promise<Map<string, { liveUpdates: boolean; watchStatus: "ok" | "failed" | null }>> {
+  const out = new Map<
+    string,
+    { liveUpdates: boolean; watchStatus: "ok" | "failed" | null }
+  >()
+  const targets = directories.filter((dir) => dir.provider === "google")
+  for (const dir of targets) {
+    if (!dir.enabled) {
+      out.set(dir.id, { liveUpdates: false, watchStatus: null })
+      continue
+    }
+    const channels = await scim.store.watchChannels(tenantId, dir.id)
+    const active = channels.filter((c) => c.expiresAt.getTime() > now.getTime())
+    const events = new Set(active.map((c) => c.event))
+    const isLive = GOOGLE_WATCH_EVENTS.every((e) => events.has(e))
+    out.set(dir.id, {
+      liveUpdates: isLive,
+      watchStatus: isLive ? "ok" : "failed",
+    })
+  }
+  return out
+}
+
 const googleSetup = (scim: ScimConsoleDeps) => {
   const sa = scim.google?.serviceAccount ?? null
   return {
@@ -214,6 +243,7 @@ const view = (
   directory: Directory,
   scim: ScimConsoleDeps,
   syncDetail?: GoogleSyncDetailView,
+  watchInfo?: { liveUpdates: boolean; watchStatus: "ok" | "failed" | null },
 ) =>
   directory.provider === "google"
     ? {
@@ -229,6 +259,12 @@ const view = (
         lastSyncStatus: directory.lastSyncStatus,
         lastSyncError: directory.lastSyncError,
         ...(syncDetail ? { lastSyncDetail: syncDetail } : {}),
+        ...(watchInfo
+          ? {
+              liveUpdates: watchInfo.liveUpdates,
+              watchStatus: watchInfo.watchStatus,
+            }
+          : {}),
         google: googleSetup(scim),
         createdAt: directory.createdAt,
       }
@@ -322,9 +358,15 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     const rows = await scim.store.directories(tenantId)
     for (const row of rows) void scim.kick(tenantId, row.id)
     const syncDetails = await googleSyncDetailsByDirectory(d, scim, tenantId, rows)
+    const watchInfos = await googleWatchInfoByDirectory(
+      scim,
+      tenantId,
+      rows,
+      new Date(),
+    )
     return c.json({
       data: rows.map((r) => ({
-        ...view(r, scim, syncDetails.get(r.id)),
+        ...view(r, scim, syncDetails.get(r.id), watchInfos.get(r.id)),
         tokens: r.tokens.map(tokenView),
         users: r.users,
         conflicts: r.conflicts,
@@ -396,7 +438,13 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
           : {}),
       },
     })
-    return c.json(view(made, scim), 201)
+    const watchInfos = await googleWatchInfoByDirectory(
+      scim,
+      tenantId,
+      [made],
+      new Date(),
+    )
+    return c.json(view(made, scim, undefined, watchInfos.get(made.id)), 201)
   })
 
   const directoryOf = async (c: Context) => {
@@ -422,8 +470,19 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
     const syncDetails = await googleSyncDetailsByDirectory(d, scim, tenantId, [
       directory,
     ])
+    const watchInfos = await googleWatchInfoByDirectory(
+      scim,
+      tenantId,
+      [directory],
+      new Date(),
+    )
     return c.json({
-      ...view(directory, scim, syncDetails.get(directory.id)),
+      ...view(
+        directory,
+        scim,
+        syncDetails.get(directory.id),
+        watchInfos.get(directory.id),
+      ),
       tokens: (summary?.tokens ?? []).map(tokenView),
       users: summary?.users ?? 0,
       conflicts: summary?.conflicts ?? 0,
@@ -585,7 +644,15 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
       }
     }
     const syncDetails = await googleSyncDetailsByDirectory(d, scim, tenantId, [after])
-    return c.json(view(after, scim, syncDetails.get(after.id)))
+    const watchInfos = await googleWatchInfoByDirectory(
+      scim,
+      tenantId,
+      [after],
+      new Date(),
+    )
+    return c.json(
+      view(after, scim, syncDetails.get(after.id), watchInfos.get(after.id)),
+    )
   })
 
   app.post("/identity/directories/:id/check", async (c) => {
@@ -648,8 +715,9 @@ export function mountIdentityScim(app: Hono, d: ConsoleDeps): void {
       if (!scim.google) return c.json(notWired("Google directory sync"), 501)
       const { tenantId } = c.get("auth")
       const { userId } = c.get("user")
-      const shown = (await googleSyncDetailsByDirectory(d, scim, tenantId, [directory]))
-        .get(directory.id)?.removedUsers
+      const shown = (
+        await googleSyncDetailsByDirectory(d, scim, tenantId, [directory])
+      ).get(directory.id)?.removedUsers
       if (
         directory.lastSyncStatus !== "failed" ||
         directory.lastSyncError !== "large_drop" ||

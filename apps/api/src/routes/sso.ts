@@ -37,6 +37,7 @@ import {
   type SloDeps,
 } from "../identity/saml.js"
 import type { BackchannelOutcome } from "../identity/oidc-logout.js"
+import type { UniversalLogoutOutcome } from "../identity/universal-logout.js"
 import type { IdentityReader } from "./devices.js"
 import { equalSecrets } from "../webhooks/signing.js"
 import { z } from "zod"
@@ -91,6 +92,12 @@ export interface SsoRouteDeps {
     connectionId: string
     logoutToken: string
   }) => Promise<BackchannelOutcome>
+  /** Okta Universal Logout (#23). Absent: its route is 404. */
+  universalLogout?: (input: {
+    connectionId: string
+    authHeader?: string | null
+    body: unknown
+  }) => Promise<UniversalLogoutOutcome>
   /** The SAML engine and what its logout needs (#339). Absent: its routes are 404. */
   saml?: { engine: SamlEngine; slo: SloDeps }
   /** May this person manage this workspace's SSO (test runs)? */
@@ -522,6 +529,38 @@ export function createSsoRoutes(deps?: SsoRouteDeps) {
       )
       return unavailable(c)
     }
+  })
+
+  /*
+   * ⚠ OKTA'S UNIVERSAL LOGOUT (#23). Server-to-server POST from Okta to end a
+   * person's sessions. Authenticated with Authorization: Bearer <JWT>
+   * signed by Okta (typ: global-token-revocation+jwt).
+   */
+  app.post("/universal-logout/:connection", small, async (c) => {
+    const d = deps!
+    if (!d.universalLogout) return notFound(c)
+    c.header("Cache-Control", "no-store")
+    const connectionParam = c.req.param("connection")
+    const connectionId = UUID.safeParse(connectionParam)
+    if (!connectionId.success) return c.json({ error: "invalid_request" }, 400)
+
+    const authHeader = c.req.header("authorization") ?? null
+    // Unreadable JSON is `malformed`, answered only after the token is checked.
+    const rawBody: unknown = await c.req.json().catch(() => null)
+
+    const done = await d.universalLogout({
+      connectionId: connectionId.data.toLowerCase(),
+      authHeader,
+      body: rawBody,
+    })
+
+    if (done.outcome === "unavailable") return unavailable(c)
+    if (done.outcome === "bad_auth") return c.json({ error: "unauthorized" }, 401)
+    if (done.outcome === "malformed") return c.json({ error: "invalid_request" }, 400)
+    if (done.outcome === "not_found") return c.json({ error: "not_found" }, 404)
+    if (done.outcome === "cannot_log_out")
+      return c.json({ error: "cannot_log_out" }, 422)
+    return c.body(null, 204)
   })
 
   app.post("/saml/acs", async (c) => {

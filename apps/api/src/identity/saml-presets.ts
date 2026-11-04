@@ -1,3 +1,4 @@
+import { MICROSOFT_DOMAIN_ADVICE } from "./microsoft-domain.js"
 import { SECOND_FACTORS } from "./model.js"
 import { NAMEID } from "./saml-verify.js"
 
@@ -123,9 +124,12 @@ export const SAML_PRESETS: Readonly<Record<SamlProvider, SamlPreset>> = {
       "A SAML 2.0 app integration with the ACS URL below as the Single sign-on URL, used for Recipient and Destination.",
       "The entity id below as the Audience URI (SP Entity ID).",
       "Name ID format Persistent, and signed assertions with RSA-SHA256.",
+      "Set Honor Force Authentication to Yes under Advanced Settings so step-up authentication works.",
       "Attribute statements email, firstName and lastName; a groups attribute statement for group rules.",
+      "For group rules: add a group attribute statement with a filter such as Starts with; Okta caps assertions at 100 matching groups.",
       "To sign requests or encrypt assertions: our certificate below, uploaded in the app's SAML settings.",
       "Copy the Metadata URL from the app's Sign On tab. It looks like https://your-org.okta.com/app/exk.../sso/saml/metadata; the app id (0oa...) gives a 404.",
+      "When rotating SAML certificates in Okta, add the new certificate in i10 before activating it in Okta to avoid downtime.",
       "The app's authentication policy decides whether a first sign-in asks for another factor. A new app gets your org's default policy, so people may be asked for a new factor or to enrol a passkey. Pick the policy you want on the app's Sign On tab.",
     ],
   },
@@ -148,6 +152,10 @@ export const SAML_PRESETS: Readonly<Record<SamlProvider, SamlPreset>> = {
       "Unique User Identifier (Name ID) = user.objectid with format Persistent.",
       "Signing option: sign the SAML assertion, with SHA-256.",
       "To encrypt assertions: our certificate below under Token encryption.",
+      "Assign the users and groups who should have access under Users and groups.",
+      "For group rules: add a group claim; Entra sends directory object IDs, so write rules against object IDs.",
+      "Grant admin consent if required by your tenant's user consent settings.",
+      MICROSOFT_DOMAIN_ADVICE,
     ],
   },
   google: {
@@ -162,6 +170,9 @@ export const SAML_PRESETS: Readonly<Record<SamlProvider, SamlPreset>> = {
       "A custom SAML app with the ACS URL and Entity ID below.",
       "Name ID: Basic Information > Primary email (or an immutable custom attribute, set as the subject attribute here).",
       "Attribute mapping: email, firstName, lastName.",
+      "Turn User access to ON for the organizational unit or group that should have access.",
+      "For group rules: map groups under Group membership; Google sends only selected groups and caps at 75 groups.",
+      "Optional: set the Start URL to your i10 workspace URL to allow IdP-initiated sign-in from the Google app launcher.",
       "Google's Name ID is the primary email: renaming a user changes their subject, and the connection's relink setting decides whether i10 moves their link on its own or waits for an owner. An address given to somebody new is the same subject, so reuse needs offboarding first.",
     ],
   },

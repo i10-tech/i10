@@ -1,3 +1,4 @@
+import { isMicrosoftOwnedDomain } from "./microsoft-domain.js"
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
 import { GOOGLE_ISSUER } from "./oidc-presets.js"
 
@@ -81,19 +82,23 @@ export interface Connection {
   upnAsEmail: boolean
 }
 
-/** The longest session a new Microsoft Entra connection starts with: 12 hours. */
-export const ENTRA_DEFAULT_MAX_SESSION_SECONDS = 12 * 60 * 60
+/**
+ * The longest session a new Entra or Okta connection starts with: 7 days. Long
+ * enough that nobody signs in every morning; an owner can tighten it.
+ */
+export const DEFAULT_MAX_SESSION_SECONDS = 7 * 24 * 60 * 60
 
 /**
  * The session cap a NEW connection starts with; owners can change it.
  *
- * ⚠ ENTRA ONLY, BECAUSE ENTRA NEVER TELLS US IT SIGNED SOMEONE OUT: probed
- * live, an Entra sign-out sends nothing to the app's logout URL, so the
- * longest session limit (or SCIM deactivation) is the only thing that ends an
- * i10 session there. Every other provider keeps no cap by default.
+ * ⚠ ENTRA AND OKTA, BECAUSE THEIR SIGN-OUTS DO NOT END AN I10 SESSION: the
+ * longest session limit (or SCIM deactivation) is the fallback that ends one.
+ * Existing rows are not migrated.
  */
 export function defaultMaxSessionSeconds(provider: string): number | null {
-  return provider === "entra" ? ENTRA_DEFAULT_MAX_SESSION_SECONDS : null
+  return provider === "entra" || provider === "okta"
+    ? DEFAULT_MAX_SESSION_SECONDS
+    : null
 }
 
 /**
@@ -452,12 +457,26 @@ export function refusalMessage(reason: Refusal): string {
     case "idp_error":
       return "Your company's sign-in did not finish. Start again, or ask your administrator."
     case "hosted_domain":
-      return "Sign in with your company's Google Workspace account, not a personal one."
+      return "This Google account is not on a domain your company has verified for i10. Use your work account, or ask your administrator to verify the domain."
     case "issuer_mismatch":
       return "This sign-in link is not valid."
     default:
       return "We could not sign you in with your company's SSO. Ask your administrator."
   }
+}
+
+/** A refusal's message when this person's case has a better one than the reason's. */
+export function specificRefusalMessage(
+  reason: Refusal,
+  input: { provider: string; email: string | null },
+): string | undefined {
+  const domain = input.email ? emailDomain(input.email) : null
+  return reason === "domain_not_verified" &&
+    input.provider === "entra" &&
+    domain &&
+    isMicrosoftOwnedDomain(domain)
+    ? "Your login is on a Microsoft onmicrosoft.com address, which cannot be used for SSO here. Ask your administrator to add your company's domain in Entra and move your login to it."
+    : undefined
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────

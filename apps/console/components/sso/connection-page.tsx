@@ -15,7 +15,13 @@ import { AccessPanel } from "./access-panel"
 import { IdpSetup } from "./idp-setup"
 import { LdapPanel } from "./ldap"
 import { SetupLinks } from "./setup-links"
-import { StatusBadge, Value, useSsoCall } from "./shared"
+import {
+  ENFORCEMENT_LABEL,
+  scimSessionLimitNote,
+  StatusBadge,
+  Value,
+  useSsoCall,
+} from "./shared"
 import { TestRuns } from "./test-runs"
 
 /**
@@ -78,6 +84,7 @@ export function ConnectionPage({
   const [deleting, setDeleting] = React.useState(false)
   const { primary, others } = movesFrom(connection.status)
   const live = connection.status === "active" || connection.status === "disabled"
+  const sessionNote = scimSessionLimitNote(connection.directoryState)
 
   const onChange = React.useCallback((next: SsoConnection) => setConnection(next), [])
 
@@ -147,11 +154,26 @@ export function ConnectionPage({
           />
         </div>
       )}
+      {connection.provider === "okta" && connection.universalLogoutUrl && (
+        <div className="pb-4 space-y-1">
+          <Value
+            label="Universal Logout endpoint URL"
+            value={connection.universalLogoutUrl}
+          />
+          <p className="text-xs text-muted-foreground">
+            Set it in Okta under the app&rsquo;s Universal Logout settings; it needs
+            Adaptive MFA or Identity Threat Protection, so it is optional.
+          </p>
+        </div>
+      )}
       {live && !abilities.owner && (
         <p className="pb-4 text-sm text-muted-foreground">
           This connection is live. Changes to who it trusts are an owner&rsquo;s; you
           can still disable it.
         </p>
+      )}
+      {sessionNote && (
+        <p className="pb-4 text-sm text-muted-foreground">{sessionNote}</p>
       )}
 
       <UrlTabs value={TABS.find((t) => t === tab)} fallback="setup">
@@ -237,13 +259,34 @@ function describe(move: Move | null, connection: SsoConnection): string {
     case "testing":
       return "Nobody signs in through it yet. You can run test sign-ins and edit every setting."
     case "active":
-      return connection.enforcement === "required_domain" ||
-        connection.enforcement === "required_all"
-        ? "People will sign in through it, and the enforcement you set applies at once. Requiring SSO needs a test that passed in the last 24 hours."
-        : "People at its domains can sign in through it. From now on its trust settings are an owner's to change."
+      return activationSummary(connection)
     case "disabled":
       return "Nobody can sign in through it, and people it manages cannot sign in until you enable it again. Their accounts are kept."
     case "draft":
       return "Back to setup. It is not testable until you start testing again."
   }
+}
+
+function activationSummary(connection: SsoConnection): string {
+  const config = connection.config ?? {}
+  const protocolConfig =
+    config[connection.protocol] && typeof config[connection.protocol] === "object"
+      ? (config[connection.protocol] as Record<string, unknown>)
+      : {}
+  const identifier =
+    (typeof protocolConfig.issuer === "string" && protocolConfig.issuer) ||
+    (typeof protocolConfig.idpEntityId === "string" && protocolConfig.idpEntityId) ||
+    "the configured issuer or entity id"
+  const domains = connection.domains.length
+    ? connection.domains.map((domain) => domain.name).join(", ")
+    : "no domains"
+  const enforcement = ENFORCEMENT_LABEL[connection.enforcement]
+  const required =
+    connection.enforcement === "required_domain" ||
+    connection.enforcement === "required_all"
+  return `About to go live with issuer or entity id ${identifier}; domains ${domains}; JIT ${connection.jitEnabled ? "on" : "off"}; enforcement ${enforcement}. ${
+    required
+      ? "Requiring SSO needs a test that passed in the last 24 hours."
+      : "People at its domains can sign in through it."
+  }`
 }

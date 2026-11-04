@@ -161,7 +161,13 @@ export type AddAccessOutcome =
   | { outcome: "ok"; id: string; existed: boolean }
   | {
       outcome:
-        "no_org" | "forbidden" | "invalid" | "free_mail" | "not_verified" | "personal"
+        | "no_org"
+        | "forbidden"
+        | "invalid"
+        | "free_mail"
+        | "not_verified"
+        | "personal"
+        | "microsoft_owned"
     }
 
 export async function addAccessDomain(
@@ -172,6 +178,8 @@ export async function addAccessDomain(
   if (allowed !== "ok") return { outcome: allowed }
   const name = normalizeName(input.name)
   if (!isHostname(name)) return { outcome: "invalid" }
+  if (name === "onmicrosoft.com" || name.endsWith(".onmicrosoft.com"))
+    return { outcome: "microsoft_owned" }
   // ⚠ BEFORE ANY PROOF: no proof makes gmail.com somebody's team.
   if (isFreeMail(name)) return { outcome: "free_mail" }
   // A Personal workspace has one member and never takes anybody in.

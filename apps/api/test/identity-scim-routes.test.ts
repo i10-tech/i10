@@ -718,7 +718,7 @@ describe("Users: the happy paths", () => {
       await seed(w, {
         userName: `${n}@acme.test`,
         externalId: `ext-${n}`,
-        emails: [{ value: `${n}@acme.test`, primary: true }],
+        emails: [{ value: `${n}@acme.test`, type: "work", primary: true }],
       })
     const all = await w.json(await w.call("GET", "/Users"))
     expect(all).toMatchObject({
@@ -753,6 +753,21 @@ describe("Users: the happy paths", () => {
       ),
     )
     expect(byEmail.Resources[0].userName).toBe("b@acme.test")
+    const byWorkEmail = await w.json(
+      await w.call(
+        "GET",
+        `/Users?filter=${encodeURIComponent('emails[type eq "work"].value eq "B@acme.test"')}`,
+      ),
+    )
+    expect(byWorkEmail.totalResults).toBe(1)
+    expect(byWorkEmail.Resources[0].userName).toBe("b@acme.test")
+    const both = await w.json(
+      await w.call(
+        "GET",
+        `/Users?filter=${encodeURIComponent('userName eq "b@acme.test" and externalId eq "ext-b"')}`,
+      ),
+    )
+    expect(both.totalResults).toBe(1)
   })
 
   it("answers Entra's probe for a GUID userName with an empty list, and ignores aadOptscim062020", async () => {
@@ -975,6 +990,36 @@ describe("Groups", () => {
         })
       ).status,
     ).toBe(404)
+  })
+
+  it("answers 409 for a duplicate displayName on create, rename and patch", async () => {
+    const w = world()
+    const first = await w.json(
+      await w.call("POST", "/Groups", { body: { displayName: "Engineers" } }),
+    )
+    const duplicate = await w.call("POST", "/Groups", {
+      body: { displayName: "engineers" },
+    })
+    expect(duplicate.status).toBe(409)
+    expect(await w.json(duplicate)).toMatchObject({
+      scimType: "uniqueness",
+      status: "409",
+    })
+    const second = await w.json(
+      await w.call("POST", "/Groups", { body: { displayName: "Sales" } }),
+    )
+    const renamed = await w.call("PUT", `/Groups/${second.id}`, {
+      body: { displayName: "ENGINEERS" },
+    })
+    expect(renamed.status).toBe(409)
+    const patched = await w.call("PATCH", `/Groups/${second.id}`, {
+      body: patch({ op: "replace", path: "displayName", value: "Engineers" }),
+    })
+    expect(patched.status).toBe(409)
+    expect(
+      (await w.json(await w.call("GET", `/Groups/${second.id}`))).displayName,
+    ).toBe("Sales")
+    expect(first.id).toBeTruthy()
   })
 
   it("refuses a group without a displayName and a bad PATCH", async () => {

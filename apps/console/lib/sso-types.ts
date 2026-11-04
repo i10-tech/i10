@@ -41,7 +41,11 @@ export interface SsoConnection {
   maxSessionSeconds: number | null
   idleTimeoutSeconds: number | null
   attributeMapping: Record<string, string>
+  config?: Record<string, unknown>
   domains: SsoDomain[]
+  directoryState?: "enabled" | "none" | null
+  /** Okta Universal Logout (#23). Endpoint URL shown on Okta connections. */
+  universalLogoutUrl?: string | null
   /** Sign-in health (#345); null when the API could not read it, absent on older answers. */
   health?: ConnectionHealth | null
   /** What this provider and protocol can prove for MFA and step-up (sso.md 2.22). */
@@ -96,6 +100,7 @@ export interface OidcSetup {
   acrValues: string[]
   mfaAcrValues: string[]
   clientSecretSet: boolean
+  secretExpiresAt?: string | null
   keys: { kid: string; createdAt: string }[]
   ready: boolean
 }
@@ -269,6 +274,8 @@ export interface SsoDirectory {
   lastSyncStatus?: string | null
   lastSyncError?: string | null
   lastSyncDetail?: GoogleSyncDetail
+  liveUpdates?: boolean
+  watchStatus?: "ok" | "failed" | null
   google?: GoogleSetup
   createdAt: string
   tokens: DirectoryToken[]

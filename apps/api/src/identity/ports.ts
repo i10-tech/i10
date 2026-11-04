@@ -231,7 +231,7 @@ export interface IdentityStore {
     tenantId: string,
     connectionId: string,
     joinDomainId: string,
-  ): Promise<"added" | "not_found" | "taken">
+  ): Promise<"added" | "not_found" | "taken" | "microsoft_owned">
   removeDomain(
     tenantId: string,
     connectionId: string,
@@ -351,6 +351,11 @@ export interface IdentityStore {
     connectionId: string,
     clerkUserId: string,
   ): Promise<{ id: string; subject: string } | null>
+  identityByEmail(
+    tenantId: string,
+    connectionId: string,
+    email: string,
+  ): Promise<{ id: string; clerkUserId: string; subject: string } | null>
   link(
     tenantId: string,
     input: {

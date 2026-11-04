@@ -9,7 +9,13 @@ import { useMounted } from "@/lib/react"
 import { ssoTestRuns } from "@/lib/sso-actions"
 import { toastDone, toastError } from "@/lib/toast"
 import type { SsoConnection, TestRun } from "@/lib/sso-types"
-import { DAY_MS, groupsNote, latestPass, wouldDo } from "@/lib/sso-runs"
+import {
+  DAY_MS,
+  groupsNote,
+  latestPass,
+  providerFailure,
+  wouldDo,
+} from "@/lib/sso-runs"
 import { Block, Loading, useRemote } from "./shared"
 
 /**
@@ -146,6 +152,17 @@ function Run({ run }: { run: TestRun }) {
             <div>
               <p className="text-xs font-medium">Groups</p>
               <p className="mt-1 text-muted-foreground">{groupsNote(run)}</p>
+            </div>
+          )}
+          {providerFailure(run) && (
+            <div>
+              <p className="text-xs font-medium">What to fix</p>
+              <p className="mt-1 text-muted-foreground">
+                {providerFailure(run)!.adminNextStep}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Provider code: {providerFailure(run)!.code}
+              </p>
             </div>
           )}
           <div>

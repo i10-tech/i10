@@ -33,6 +33,36 @@ const REASONS: Record<string, string> = {
   hosted_domain: "The Google account is not on a verified domain of this workspace.",
 }
 
+export interface SsoFailure {
+  protocol: "oidc" | "saml"
+  code: string
+  adminNextStep: string
+  endUserMessage: string
+  retry: boolean
+}
+
+export function providerFailure(run: TestRun): SsoFailure | null {
+  const value = run.resolution.providerFailure
+  if (!value || typeof value !== "object") return null
+  const failure = value as Partial<SsoFailure>
+  if (
+    (failure.protocol !== "oidc" && failure.protocol !== "saml") ||
+    typeof failure.code !== "string" ||
+    typeof failure.adminNextStep !== "string"
+  )
+    return null
+  return {
+    protocol: failure.protocol,
+    code: failure.code,
+    adminNextStep: failure.adminNextStep,
+    endUserMessage:
+      typeof failure.endUserMessage === "string"
+        ? failure.endUserMessage
+        : "Your administrator needs to correct the identity provider sign-in settings.",
+    retry: failure.retry === true,
+  }
+}
+
 /** Group state note for a test run when the provider sent no groups or an overage link. */
 export function groupsNote(run: TestRun): string | null {
   const state =

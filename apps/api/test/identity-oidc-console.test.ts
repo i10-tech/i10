@@ -213,6 +213,29 @@ describe("OIDC settings", () => {
       changed: ["discoveryUrl"],
     })
     expect(
+      readOidcInput({ scopes: ["openid", "profile", "email", "groups"] }, okta, {}),
+    ).toMatchObject({
+      next: { scopes: ["openid", "profile", "email", "groups"] },
+      changed: ["scopes"],
+    })
+    expect(
+      readOidcInput({ secretExpiresAt: "2027-06-01T00:00:00.000Z" }, okta, {}),
+    ).toMatchObject({
+      next: { secretExpiresAt: "2027-06-01T00:00:00.000Z" },
+      changed: ["secretExpiresAt"],
+    })
+    expect(
+      readOidcInput({ secretExpiresAt: null }, okta, {
+        secretExpiresAt: "2027-06-01T00:00:00.000Z",
+      }),
+    ).toMatchObject({
+      next: { secretExpiresAt: null },
+      changed: ["secretExpiresAt"],
+    })
+    expect(typeof readOidcInput({ secretExpiresAt: "not-a-date" }, okta, {})).toBe(
+      "string",
+    )
+    expect(
       typeof readIdpUrl("https://idp.acme.test/oauth2/default", "issuer", {
         query: false,
       }),
@@ -273,6 +296,30 @@ describe("secrets are write-only", () => {
       type: "connection.secret_set",
       data: { kind: "client_secret", rotated: false },
     })
+  })
+
+  it("saves secretExpiresAt when setting a client secret, without putting it in sealed secrets", async () => {
+    const w = await consoleApp()
+    await w.call("user_admin", "PUT", w.path, w.settings)
+    const secret = "secret-with-expiry-123"
+    const expiry = "2027-11-01T00:00:00.000Z"
+    const set = await w.call("user_admin", "PUT", `${w.path}/secret`, {
+      clientSecret: secret,
+      secretExpiresAt: expiry,
+    })
+    expect(set.status).toBe(200)
+    const json = (await set.json()) as {
+      clientSecretSet: boolean
+      secretExpiresAt?: string
+    }
+    expect(json).toMatchObject({ clientSecretSet: true, secretExpiresAt: expiry })
+    const conn = w.store.connections.get(CONNECTION)!
+    expect((conn.config.oidc as { secretExpiresAt?: string })?.secretExpiresAt).toBe(
+      expiry,
+    )
+    const sealed = w.store.secrets.get(CONNECTION) as { oidc: Record<string, unknown> }
+    expect(sealed.oidc.clientSecret).toBe(secret)
+    expect(sealed.oidc.secretExpiresAt).toBeUndefined()
   })
 
   it("never returns a private key, and keeps the previous public key for a rotation", async () => {

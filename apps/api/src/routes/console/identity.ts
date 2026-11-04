@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
-import { requireFreshAuth } from "../../middleware/session.js"
+import { freshAuthRefusal, requireFreshAuth } from "../../middleware/session.js"
 import { can, mayRemove, type Permission } from "../../console/roles.js"
 import { deprovision, type DeprovisionDeps } from "../../identity/managed.js"
 import {
@@ -44,7 +44,9 @@ import { mountIdentityOidc, type OidcConsoleDeps } from "./identity-oidc.js"
 import { mountIdentityGroups } from "./identity-groups.js"
 import { mountIdentityRelinks } from "./identity-relinks.js"
 import { mountIdentitySaml, type SamlConsoleDeps } from "./identity-saml.js"
+import { MICROSOFT_DOMAIN_ADVICE } from "../../identity/microsoft-domain.js"
 import { samlReady } from "../../identity/saml.js"
+import { connectionWriteNeedsFreshAuth } from "../../identity/authorization.js"
 import { SAML_PRESETS, samlPresetOf } from "../../identity/saml-presets.js"
 import { mountIdentityMail, type MailConsoleDeps } from "./identity-mail.js"
 import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
@@ -104,6 +106,8 @@ export interface IdentityConsoleDeps {
   mail?: MailConsoleDeps
   /** LDAP pass-through for managed accounts' IMAP (#344). Absent: its routes answer 501. */
   ldap?: LdapConsoleDeps
+  /** The universal logout endpoint URL for an Okta connection. */
+  universalLogoutUrl?: (connectionId: string) => string
   /**
    * Enforcement, break-glass and setup links (#340). Absent: their routes
    * answer 501, and no connection can be made "required".
@@ -171,7 +175,10 @@ export function enforcementChange(
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function view(connection: Connection) {
+function view(
+  connection: Connection,
+  universalLogoutUrl?: (connectionId: string) => string,
+) {
   const caps = capabilitiesOf(connection.protocol, connection.provider)
   return {
     id: connection.id,
@@ -188,6 +195,10 @@ function view(connection: Connection) {
     idleTimeoutSeconds: connection.idleTimeoutSeconds,
     config: connection.config,
     attributeMapping: connection.attributeMapping,
+    universalLogoutUrl:
+      connection.provider === "okta" && universalLogoutUrl
+        ? universalLogoutUrl(connection.id)
+        : null,
     capabilities: {
       label: caps.label,
       canProveMfa: caps.canProveMfa,
@@ -278,6 +289,7 @@ export function readPatch(body: Record<string, unknown>): ConnectionPatch | stri
 }
 
 export function mountIdentity(app: Hono, d: ConsoleDeps): void {
+  const toView = (conn: Connection) => view(conn, d.identity?.universalLogoutUrl)
   // ⚠ FIRST: Hono runs middleware in registration order, and the plan flags
   // must refuse before any of the routes below runs.
   mountIdentityFeatureGates(app, d)
@@ -335,11 +347,24 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     const { tenantId } = c.get("auth")
     const rows = await id.store.connections(tenantId)
     const now = new Date()
+    let directoryState: "enabled" | "none" | null = null
+    if (id.scim) {
+      try {
+        directoryState = (await id.scim.store.directories(tenantId)).some(
+          (directory) => directory.enabled,
+        )
+          ? "enabled"
+          : "none"
+      } catch (error) {
+        id.log.error({ err: String(error), tenantId }, "could not read directory state")
+      }
+    }
     return c.json({
       data: await Promise.all(
         rows.map(async (r) => ({
-          ...view(r),
+          ...toView(r),
           domains: r.domains,
+          directoryState,
           health: await healthView(id.health, tenantId, r, now, d.identity!.log),
         })),
       ),
@@ -447,10 +472,10 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       connectionId: made.id,
       data: { protocol, provider, name },
     })
-    return c.json(view(made), 201)
+    return c.json(toView(made), 201)
   })
 
-  app.patch("/identity/connections/:id", requireFreshAuth, async (c) => {
+  app.patch("/identity/connections/:id", async (c) => {
     const id = d.identity
     if (!id) return c.json(notWired("SSO connections"), 501)
     if (!(await allowed(c, "sso:manage")))
@@ -463,6 +488,10 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     const { userId } = c.get("user")
     const before = await id.store.connection(tenantId, connectionId)
     if (!before) return c.json(notFound(), 404)
+    if (connectionWriteNeedsFreshAuth(before, patch)) {
+      const refusal = await freshAuthRefusal(c)
+      if (refusal) return refusal
+    }
     /*
      * ⚠ REFUSE MFA REQUIREMENTS THE IdP CANNOT PROVE (P0 #5, sso.md 2.22).
      * Turning `mfaRequired` on when `canProveMfa === "no"` would refuse every
@@ -685,7 +714,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
           data: { setupLinkId: linkId, status: after.status },
         })
     }
-    return c.json(view(after))
+    return c.json(toView(after))
   })
 
   app.delete("/identity/connections/:id", requireFreshAuth, async (c) => {
@@ -731,7 +760,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     return c.json({ ok: true })
   })
 
-  app.post("/identity/connections/:id/domains", requireFreshAuth, async (c) => {
+  app.post("/identity/connections/:id/domains", async (c) => {
     const id = d.identity
     if (!id) return c.json(notWired("SSO connections"), 501)
     if (!(await allowed(c, "sso:manage")))
@@ -746,11 +775,19 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
       )
     const { tenantId } = c.get("auth")
     const { userId } = c.get("user")
+    const connection = await id.store.connection(tenantId, connectionId)
+    if (!connection) return c.json(notFound(), 404)
+    if (connectionWriteNeedsFreshAuth(connection)) {
+      const refusal = await freshAuthRefusal(c)
+      if (refusal) return refusal
+    }
     const guarded = await domainGuard(c, tenantId, connectionId)
     if (guarded) return guarded
     const added = await id.store.addDomain(tenantId, connectionId, joinDomainId)
     if (added === "not_found")
       return c.json(validation("Use a verified access domain of this workspace."), 422)
+    if (added === "microsoft_owned")
+      return c.json(validation(MICROSOFT_DOMAIN_ADVICE), 422)
     if (added === "taken")
       return c.json(
         {
@@ -770,34 +807,36 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
     return c.json({ ok: true })
   })
 
-  app.delete(
-    "/identity/connections/:id/domains/:domainId",
-    requireFreshAuth,
-    async (c) => {
-      const id = d.identity
-      if (!id) return c.json(notWired("SSO connections"), 501)
-      if (!(await allowed(c, "sso:manage")))
-        return c.json(forbidden("Only an admin can change SSO settings."), 403)
-      const connectionId = c.req.param("id")
-      const joinDomainId = c.req.param("domainId")
-      if (!UUID.test(connectionId) || !UUID.test(joinDomainId))
-        return c.json(notFound(), 404)
-      const { tenantId } = c.get("auth")
-      const { userId } = c.get("user")
-      const guarded = await domainGuard(c, tenantId, connectionId)
-      if (guarded) return guarded
-      if (!(await id.store.removeDomain(tenantId, connectionId, joinDomainId)))
-        return c.json(notFound(), 404)
-      id.enforcement?.forgetTenant(tenantId)
-      await id.store.record(tenantId, {
-        type: "connection.domain_removed",
-        actorUserId: userId,
-        connectionId,
-        data: { joinDomainId },
-      })
-      return c.json({ ok: true })
-    },
-  )
+  app.delete("/identity/connections/:id/domains/:domainId", async (c) => {
+    const id = d.identity
+    if (!id) return c.json(notWired("SSO connections"), 501)
+    if (!(await allowed(c, "sso:manage")))
+      return c.json(forbidden("Only an admin can change SSO settings."), 403)
+    const connectionId = c.req.param("id")
+    const joinDomainId = c.req.param("domainId")
+    if (!UUID.test(connectionId) || !UUID.test(joinDomainId))
+      return c.json(notFound(), 404)
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const connection = await id.store.connection(tenantId, connectionId)
+    if (!connection) return c.json(notFound(), 404)
+    if (connectionWriteNeedsFreshAuth(connection)) {
+      const refusal = await freshAuthRefusal(c)
+      if (refusal) return refusal
+    }
+    const guarded = await domainGuard(c, tenantId, connectionId)
+    if (guarded) return guarded
+    if (!(await id.store.removeDomain(tenantId, connectionId, joinDomainId)))
+      return c.json(notFound(), 404)
+    id.enforcement?.forgetTenant(tenantId)
+    await id.store.record(tenantId, {
+      type: "connection.domain_removed",
+      actorUserId: userId,
+      connectionId,
+      data: { joinDomainId },
+    })
+    return c.json({ ok: true })
+  })
 
   app.get("/identity/settings", async (c) => {
     const id = d.identity

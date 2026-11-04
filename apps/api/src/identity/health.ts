@@ -28,6 +28,9 @@ export const SUCCESS_TYPE = "sign_in.succeeded"
  * block, a deprovisioned or banned account, an owner or admin who signs in
  * another way). Counted, a full workspace turned its connection "Degraded"
  * and sent `sso.connection.failed` for every waiting-list sign-in (2026-11-01).
+ * `subject_changed` is the relink rule holding a renamed login for an owner to
+ * approve on the connection's Access tab: a waiting login, not a broken
+ * connection (2026-11-03).
  */
 export const NOT_THE_CONNECTIONS_FAULT: readonly string[] = [
   "wrong_browser",
@@ -38,6 +41,7 @@ export const NOT_THE_CONNECTIONS_FAULT: readonly string[] = [
   "blocked",
   "deprovisioned",
   "account_banned",
+  "subject_changed",
 ]
 
 /** The window a spike is measured over, and the least failures that is one. */
@@ -109,19 +113,25 @@ export const FAILURE_ALERT_EVERY_MS = 15 * 60_000
 /** The audit event type that records a failure alert having gone out. */
 export const FAILURE_ALERT_TYPE = "sso.connection.failure_alerted"
 
+export interface ClaimAlertTarget {
+  connectionId?: string
+  directoryId?: string
+}
+
 export interface ConnectionHealthStore {
   counts(tenantId: string, connectionId: string): Promise<HealthCounts>
   /**
-   * Records that a failure alert is going out for this connection, unless one
+   * Records that an alert is going out for this connection or directory, unless one
    * did within `everyMs`. True: this caller owns the alert.
    *
-   * ⚠ THE CHECK AND THE RECORD ARE ONE STEP UNDER A LOCK ON THE CONNECTION,
+   * ⚠ THE CHECK AND THE RECORD ARE ONE STEP UNDER A LOCK ON THE TARGET,
    * so two replicas seeing the same failure at once send one alert.
    */
   claimAlert(
     tenantId: string,
-    connectionId: string,
+    target: string | ClaimAlertTarget,
     snapshot: Record<string, unknown>,
     everyMs: number,
+    eventType?: string,
   ): Promise<boolean>
 }

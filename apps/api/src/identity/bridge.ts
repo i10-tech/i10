@@ -24,6 +24,7 @@ import {
   normaliseEmail,
   onLiveDomain,
   assertionProvesMfa,
+  specificRefusalMessage,
   sameHash,
   subjectFingerprint,
   thirdPartyIssuerMatches,
@@ -34,6 +35,7 @@ import {
   type Protocol,
   type Refusal,
 } from "./model.js"
+import { ssoFailure, type SsoFailure } from "./failure.js"
 import type {
   AttemptRow,
   ClerkIdentity,
@@ -220,7 +222,8 @@ export async function startLogin(
 
   if (input.purpose === "step_up") {
     if (
-      capabilitiesOf(connection.protocol, connection.provider).canProveFreshAuth === "no"
+      capabilitiesOf(connection.protocol, connection.provider).canProveFreshAuth ===
+      "no"
     )
       return { outcome: "refused", reason: "step_up_unsupported" }
     const session = input.stepUp
@@ -327,7 +330,7 @@ type Refuse = (
   reason: Refusal,
   extra?: Record<string, unknown>,
   message?: string,
-) => Promise<{ outcome: "refused"; reason: Refusal; message?: string }>
+) => Promise<CompleteOutcome>
 
 type Opened =
   | { ok: true; attempt: AttemptRow; refuse: Refuse }
@@ -370,6 +373,36 @@ async function openAttempt(
     return { ok: false, outcome: { outcome: "refused", reason: "attempt_unknown" } }
   }
   const refuse: Refuse = async (reason, extra = {}, message) => {
+    const providerFailure = extra.providerFailure as SsoFailure | undefined
+    if (attempt.purpose === "test_run") {
+      const run = await d.store.recordTestRun(attempt.tenantId, {
+        connectionId: attempt.connectionId,
+        attemptId: attempt.id,
+        outcome: "failed",
+        reason,
+        claims: {},
+        resolution: {
+          refused: reason,
+          ...(providerFailure ? { providerFailure } : {}),
+        },
+      })
+      await d.store.finishAttempt(attempt.tenantId, attempt.id, {
+        outcome: "tested",
+        failureReason: reason,
+      })
+      await d.store.record(attempt.tenantId, {
+        type: "test_run.completed",
+        connectionId: attempt.connectionId,
+        reason,
+        data: { testRunId: run.id, passed: false },
+      })
+      return {
+        outcome: "tested" as const,
+        testRunId: run.id,
+        passed: false,
+        returnTo: attempt.returnTo,
+      }
+    }
     await d.store.finishAttempt(attempt.tenantId, attempt.id, {
       outcome: "refused",
       failureReason: reason,
@@ -439,7 +472,23 @@ export async function refuseLogin(
 ): Promise<CompleteOutcome> {
   const opened = await openAttempt(d, input, clock(d))
   if (!opened.ok) return opened.outcome
-  return opened.refuse(input.reason, input.extra)
+  const providerFailure =
+    input.extra?.provider && input.extra.protocol
+      ? ssoFailure({
+          protocol: input.extra.protocol as "oidc" | "saml",
+          provider: String(input.extra.provider),
+          reason: input.reason,
+          extra: input.extra,
+        })
+      : undefined
+  return opened.refuse(
+    input.reason,
+    {
+      ...input.extra,
+      ...(providerFailure ? { providerFailure } : {}),
+    },
+    providerFailure?.endUserMessage,
+  )
 }
 
 /** Called by an engine AFTER it verified the IdP's response. */
@@ -555,21 +604,21 @@ export async function completeLogin(
                   ? { ...unavailable, roleKept: true }
                   : {}),
               }
-          : resolved.ok === "would_create"
-            ? {
-                path: "jit",
-                wouldCreate: true,
-                email: resolved.email,
-                // What Clerk will require of the new person: the console says
-                // so before going live, instead of a refused first sign-in.
-                names: {
-                  given: readName(assertion.givenName) !== null,
-                  family: readName(assertion.familyName) !== null,
-                },
-                ...role,
-                ...unavailable,
-              }
-            : { refused: resolved.reason },
+            : resolved.ok === "would_create"
+              ? {
+                  path: "jit",
+                  wouldCreate: true,
+                  email: resolved.email,
+                  // What Clerk will require of the new person: the console says
+                  // so before going live, instead of a refused first sign-in.
+                  names: {
+                    given: readName(assertion.givenName) !== null,
+                    family: readName(assertion.familyName) !== null,
+                  },
+                  ...role,
+                  ...unavailable,
+                }
+              : { refused: resolved.reason },
     })
     await d.store.finishAttempt(attempt.tenantId, attempt.id, {
       outcome: "tested",
@@ -589,7 +638,17 @@ export async function completeLogin(
     }
   }
 
-  if (resolved.ok === false) return refuse(resolved.reason, resolved.extra)
+  if (resolved.ok === false)
+    return refuse(
+      resolved.reason,
+      resolved.extra,
+      attempt.purpose === "sign_in"
+        ? specificRefusalMessage(resolved.reason, {
+            provider: connection.provider,
+            email: assertion.email,
+          })
+        : undefined,
+    )
   // A sign-in never resolves to "would create"; refused rather than trusted.
   if (resolved.ok !== true) return refuse("no_account")
 
@@ -1129,8 +1188,7 @@ async function resolve(
           relink: { from: changed.from },
         }
       }
-      if (decided === "would_move")
-        return { ok: "would_relink", orgId, email, userId }
+      if (decided === "would_move") return { ok: "would_relink", orgId, email, userId }
       return decided
     }
 

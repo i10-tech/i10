@@ -12,6 +12,7 @@ import {
 } from "./bridge.js"
 import { upnAsAddress } from "./model.js"
 import type { Assertion, Connection, GroupsState, Refusal } from "./model.js"
+import { aadstsCode, oidcErrorCode } from "./failure.js"
 import type { AttemptRow, IdentityStore, Logger } from "./ports.js"
 import { IdpUnreachable, type OidcFetch } from "./oidc-fetch.js"
 import {
@@ -61,6 +62,10 @@ export interface StoredOidc {
   acrValues?: string[]
   mfaAcrValues?: string[]
   clientSecretSet?: boolean
+  /** When the client secret expires (optional, for alerts). */
+  secretExpiresAt?: string | null
+  /** The smallest expiry threshold (days) already alerted for this secret. */
+  secretAlertedDays?: number | null
   /** Newest first: the first signs, the second stays published for a rotation. */
   keys?: OidcPublicKey[]
 }
@@ -270,6 +275,7 @@ export interface CallbackQuery {
   code: string | null
   iss: string | null
   error: string | null
+  aadsts?: string | null
 }
 
 export type Verified =
@@ -657,7 +663,9 @@ async function withUserinfo(
     (info[emailClaim] as string).toLowerCase() === email.toLowerCase()
   if (!sameAddress) return claims
   const added = Object.fromEntries(
-    missing.filter((name) => info[name] !== undefined).map((name) => [name, info[name]]),
+    missing
+      .filter((name) => info[name] !== undefined)
+      .map((name) => [name, info[name]]),
   )
   return { ...claims, ...added }
 }
@@ -774,8 +782,9 @@ export function toAssertion(
   return {
     subject,
     email,
-    // ⚠ ONLY A REAL true. A missing claim is "not vouched for", never "yes".
-    emailVerified: verified === true || verified === "true",
+    // ⚠ ONLY A REAL true (or 1 / "1" as Microsoft's xms_edov allows). A missing claim is "not vouched for", never "yes".
+    emailVerified:
+      verified === true || verified === "true" || verified === 1 || verified === "1",
     ...(upn ? { emailSource: "upn" as const } : {}),
     givenName: short(claims[claimFor(mapping, "givenName", "given_name")], 256),
     familyName: short(claims[claimFor(mapping, "familyName", "family_name")], 256),
@@ -839,7 +848,7 @@ const CODE = /^[A-Za-z0-9_.:-]{1,80}$/
  * sent by hand (or as `client_secret_post`) worked. An IdP that does decode
  * reads the unencoded form identically, so this is the safe side of both.
  */
-function clientSecretBasic(secret: string): oidc.ClientAuth {
+export function clientSecretBasic(secret: string): oidc.ClientAuth {
   const formEncode = (value: string): string =>
     new URLSearchParams({ v: value }).toString().slice(2)
   return (_server, client, _body, headers) => {
@@ -895,7 +904,11 @@ function failureOf(error: unknown): Record<string, unknown> {
         out.oauthError = oauthError
     }
     const status = (e as { status?: unknown }).status
-    if (out.status === undefined && Number.isInteger(status) && (status as number) >= 400)
+    if (
+      out.status === undefined &&
+      Number.isInteger(status) &&
+      (status as number) >= 400
+    )
       out.status = status
     const claim = (e as { cause?: { claim?: unknown } }).cause?.claim
     if (out.claim === undefined && typeof claim === "string" && CODE.test(claim))
@@ -916,14 +929,15 @@ export function readCallbackQuery(value: unknown): CallbackQuery | null {
   const code = text(q.code, 4096)
   const iss = text(q.iss, 512)
   const rawError = text(q.error, 256)
+  const aadsts = aadstsCode(q.error_description)
   // ⚠ THE IdP's `error` IS AUDITED, SO ONLY A WELL-FORMED CODE IS KEPT AS IS.
   const error = rawError
     ? /^[a-z0-9_]{1,64}$/.test(rawError)
       ? rawError
       : "invalid"
     : null
-  if (!code && !error) return null
-  return { code, iss, error }
+  if (!code && !error && !aadsts) return null
+  return aadsts ? { code, iss, error, aadsts } : { code, iss, error }
 }
 
 export type OidcCallbackOutcome = CompleteOutcome | { outcome: "unavailable" }
@@ -956,11 +970,16 @@ export async function finishOidc(
   if (!attempt) return refuseLogin(d, { ...base, reason: "attempt_unknown" })
   const early = precheckAttempt(attempt, input.binding, now)
   if (early) return refuseLogin(d, { ...base, reason: early })
-  if (input.query.error)
+  if (input.query.error || input.query.aadsts)
     return refuseLogin(d, {
       ...base,
       reason: "idp_error",
-      extra: { error: input.query.error },
+      extra: {
+        provider: "unknown",
+        protocol: "oidc",
+        ...(input.query.error ? { error: oidcErrorCode(input.query.error) } : {}),
+        ...(input.query.aadsts ? { aadsts: input.query.aadsts } : {}),
+      },
     })
 
   const connection = await d.store.connection(attempt.tenantId, attempt.connectionId)
@@ -1002,6 +1021,10 @@ export async function finishOidc(
     return { outcome: "unavailable" }
   }
   if (!verified.ok)
-    return refuseLogin(d, { ...base, reason: verified.reason, extra: verified.extra })
+    return refuseLogin(d, {
+      ...base,
+      reason: verified.reason,
+      extra: { ...verified.extra, provider: connection.provider, protocol: "oidc" },
+    })
   return completeLogin(d, { ...base, assertion: verified.assertion, protocol: "oidc" })
 }

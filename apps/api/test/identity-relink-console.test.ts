@@ -83,19 +83,21 @@ describe("the two connection settings", () => {
   it("lets only an owner change relink, in either direction, on any status", async () => {
     for (const status of ["draft", "active"] as const) {
       const w = consoleApp({ status })
-      expect((await w.call("user_admin", "PATCH", w.base, { relink: "auto" })).status).toBe(
+      expect(
+        (await w.call("user_admin", "PATCH", w.base, { relink: "auto" })).status,
+      ).toBe(403)
+      expect((await w.call("user_m", "PATCH", w.base, { relink: "auto" })).status).toBe(
         403,
       )
-      expect((await w.call("user_m", "PATCH", w.base, { relink: "auto" })).status).toBe(403)
       const res = await w.call("user_owner", "PATCH", w.base, { relink: "auto" })
       expect(res.status).toBe(200)
       expect(((await res.json()) as { relink: string }).relink).toBe("auto")
-      expect((await w.call("user_admin", "PATCH", w.base, { relink: "ask" })).status).toBe(
-        403,
-      )
-      expect((await w.call("user_owner", "PATCH", w.base, { relink: "ask" })).status).toBe(
-        200,
-      )
+      expect(
+        (await w.call("user_admin", "PATCH", w.base, { relink: "ask" })).status,
+      ).toBe(403)
+      expect(
+        (await w.call("user_owner", "PATCH", w.base, { relink: "ask" })).status,
+      ).toBe(200)
       const [changed] = w.events("connection.updated")
       expect(changed).toMatchObject({
         actorUserId: "user_owner",
@@ -119,28 +121,36 @@ describe("the two connection settings", () => {
   })
 
   it("needs a fresh sign-in to change them", async () => {
-    const w = consoleApp({}, { fresh: false })
-    expect((await w.call("user_owner", "PATCH", w.base, { relink: "auto" })).status).not.toBe(
-      200,
-    )
+    const live = consoleApp({ status: "active" }, { fresh: false })
+    expect(
+      (await live.call("user_owner", "PATCH", live.base, { relink: "auto" })).status,
+    ).toBe(403)
+    // Nothing is live on a draft, so a setup write needs no step-up (D1).
+    const draft = consoleApp({}, { fresh: false })
+    expect(
+      (await draft.call("user_owner", "PATCH", draft.base, { relink: "auto" })).status,
+    ).toBe(200)
   })
 
   it("lets an owner turn the UPN on for Entra only, and refuses it on any other provider", async () => {
     const entra = consoleApp({ provider: "entra", protocol: "oidc" })
     expect(
-      (await entra.call("user_admin", "PATCH", entra.base, { upnAsEmail: true })).status,
+      (await entra.call("user_admin", "PATCH", entra.base, { upnAsEmail: true }))
+        .status,
     ).toBe(403)
     const on = await entra.call("user_owner", "PATCH", entra.base, { upnAsEmail: true })
     expect(on.status).toBe(200)
     expect(((await on.json()) as { upnAsEmail: boolean }).upnAsEmail).toBe(true)
 
     const okta = consoleApp({ provider: "okta", protocol: "oidc" })
-    const refused = await okta.call("user_owner", "PATCH", okta.base, { upnAsEmail: true })
+    const refused = await okta.call("user_owner", "PATCH", okta.base, {
+      upnAsEmail: true,
+    })
     expect(refused.status).toBe(422)
     expect(await refused.json()).toMatchObject({ code: "upn_not_supported" })
-    expect((await okta.call("user_owner", "PATCH", okta.base, { upnAsEmail: "yes" })).status).toBe(
-      422,
-    )
+    expect(
+      (await okta.call("user_owner", "PATCH", okta.base, { upnAsEmail: "yes" })).status,
+    ).toBe(422)
     // Off is never a problem.
     expect(
       (await okta.call("user_owner", "PATCH", okta.base, { upnAsEmail: false })).status,
@@ -174,8 +184,13 @@ describe("pending relinks", () => {
       expiresAt: new Date(now.getTime() + 7 * 24 * HOUR),
     })
     const [request] = w.world.relinks
-    return { ...w, ada, bob, request: request!, url: (tail: string) =>
-      `${w.base}/relinks/${request!.id}/${tail}` }
+    return {
+      ...w,
+      ada,
+      bob,
+      request: request!,
+      url: (tail: string) => `${w.base}/relinks/${request!.id}/${tail}`,
+    }
   }
 
   it("lists them for an admin, with who they are and nothing else of the subjects", async () => {
@@ -264,7 +279,8 @@ describe("pending relinks", () => {
     const other = `/identity/connections/${MISSING}/relinks/${w.request.id}/approve`
     expect((await w.call("user_owner", "POST", other)).status).toBe(404)
     expect(
-      (await w.call("user_owner", "POST", `${w.base}/relinks/not-a-uuid/approve`)).status,
+      (await w.call("user_owner", "POST", `${w.base}/relinks/not-a-uuid/approve`))
+        .status,
     ).toBe(404)
     expect(w.world.relinks).toHaveLength(1)
   })

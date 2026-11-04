@@ -23,6 +23,7 @@ import type { OidcSetup, SamlSetup } from "@/lib/sso-types"
 import type { SsoAbilities, SsoConnection } from "@/lib/sso-types"
 import {
   Block,
+  connectionWriteNeedsStepUp,
   Loading,
   OwnerNote,
   ToggleRow,
@@ -81,9 +82,13 @@ function OidcForm({
     discoveryUrl: data.discoveryUrl ?? "",
     clientId: data.clientId ?? "",
     clientAuth: data.clientAuth ?? data.clientAuthMethods[0] ?? "client_secret_basic",
+    scopes: (data.scopes ?? data.defaults.scopes ?? []).join(" "),
     mfaAcrValues: data.mfaAcrValues.join(", "),
   })
   const [secret, setSecret] = React.useState("")
+  const [secretExpiresAt, setSecretExpiresAt] = React.useState(
+    data.secretExpiresAt ? data.secretExpiresAt.slice(0, 10) : "",
+  )
   const [busy, setBusy] = React.useState<string | null>(null)
 
   const google = data.provider === "google"
@@ -101,16 +106,28 @@ function OidcForm({
       // first method as chosen while none is saved; comparing with the shown
       // default never sent it, and the connection could never become ready.
       if (form.clientAuth !== data.clientAuth) body.clientAuth = form.clientAuth
+      const sc = form.scopes
+        .split(/\s+/)
+        .map((v) => v.trim())
+        .filter(Boolean)
+      const currentSc = data.scopes ?? data.defaults.scopes ?? []
+      if (sc.join(" ") !== currentSc.join(" ")) body.scopes = sc
       const acr = form.mfaAcrValues
         .split(",")
         .map((v) => v.trim())
         .filter(Boolean)
       if (acr.join(",") !== data.mfaAcrValues.join(",")) body.mfaAcrValues = acr
+      const currentExp = data.secretExpiresAt ? data.secretExpiresAt.slice(0, 10) : ""
+      if (secretExpiresAt !== currentExp)
+        body.secretExpiresAt = secretExpiresAt.trim()
+          ? new Date(secretExpiresAt.trim()).toISOString()
+          : null
       if (Object.keys(body).length === 0) {
         toastDone("Nothing to save", "These are already the saved settings.")
         return
       }
       const after = await call(() => saveOidc(connection.id, body), {
+        stepUp: connectionWriteNeedsStepUp(connection),
         title: "Could not save the settings",
       })
       if (after) {
@@ -125,7 +142,11 @@ function OidcForm({
   async function saveSecret() {
     setBusy("secret")
     try {
-      const after = await call(() => saveOidcSecret(connection.id, secret), {
+      const exp = secretExpiresAt.trim()
+        ? new Date(secretExpiresAt.trim()).toISOString()
+        : null
+      const after = await call(() => saveOidcSecret(connection.id, secret, exp), {
+        stepUp: connectionWriteNeedsStepUp(connection),
         title: "Could not save the secret",
       })
       if (after) {
@@ -142,6 +163,7 @@ function OidcForm({
     setBusy("key")
     try {
       const after = await call(() => makeOidcKey(connection.id), {
+        stepUp: connectionWriteNeedsStepUp(connection),
         title: "Could not make a key",
       })
       if (after) {
@@ -213,6 +235,13 @@ function OidcForm({
               }))}
             />
             <FloatingInput
+              label="Scopes (optional)"
+              hint="Space separated list of scopes. Must include openid."
+              value={form.scopes}
+              disabled={locked}
+              onChange={(e) => setForm({ ...form, scopes: e.target.value })}
+            />
+            <FloatingInput
               label="Authentication context values that prove MFA (optional)"
               hint="Comma separated. Needed only when you require MFA at the provider and it sends an acr."
               value={form.mfaAcrValues}
@@ -271,6 +300,18 @@ function OidcForm({
                 disabled={locked}
                 onChange={(e) => setSecret(e.target.value)}
               />
+              <FloatingInput
+                label="Secret expiry date (optional)"
+                type="date"
+                value={secretExpiresAt}
+                disabled={locked}
+                onChange={(e) => setSecretExpiresAt(e.target.value)}
+              />
+              {data.secretExpiresAt && (
+                <p className="text-xs text-muted-foreground">
+                  Expires on <Time iso={data.secretExpiresAt} />
+                </p>
+              )}
               <Button
                 onClick={saveSecret}
                 loading={busy === "secret"}
@@ -339,7 +380,10 @@ function SamlForm({
   ) {
     setBusy(label)
     try {
-      const after = await call(fn, { title: "Could not save the settings" })
+      const after = await call(fn, {
+        stepUp: connectionWriteNeedsStepUp(connection),
+        title: "Could not save the settings",
+      })
       if (after) {
         setData(after)
         toastDone(done)
@@ -564,7 +608,10 @@ function SamlForm({
                   onClick={async () => {
                     const after = await call(
                       () => removeSamlCertificate(connection.id, c.id),
-                      { title: "Could not remove the certificate" },
+                      {
+                        stepUp: connectionWriteNeedsStepUp(connection),
+                        title: "Could not remove the certificate",
+                      },
                     )
                     if (after) {
                       setData(after)
@@ -628,6 +675,7 @@ function SamlForm({
               setBusy("spkey")
               try {
                 const after = await call(() => makeSamlSpKey(connection.id), {
+                  stepUp: connectionWriteNeedsStepUp(connection),
                   title: "Could not rotate our certificate",
                 })
                 if (after) {

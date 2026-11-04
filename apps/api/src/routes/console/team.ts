@@ -1,3 +1,4 @@
+import { MICROSOFT_DOMAIN_ADVICE } from "../../identity/microsoft-domain.js"
 import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
 import { asId, notFound, notWired, readJson, validation } from "./http.js"
@@ -109,6 +110,8 @@ export function mountTeam(app: Hono, d: ConsoleDeps): void {
           ),
           422,
         )
+      case "microsoft_owned":
+        return c.json(validation(MICROSOFT_DOMAIN_ADVICE), 422)
       case "invalid":
         return c.json(validation("That is not a domain name."), 422)
       default:

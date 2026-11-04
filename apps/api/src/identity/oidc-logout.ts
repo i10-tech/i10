@@ -48,14 +48,14 @@ export const LOGOUT_SKEW_MS = 2 * 60 * 1000
 /** A Logout Token older than this is refused whatever its `exp` says. */
 export const LOGOUT_MAX_AGE_MS = 10 * 60 * 1000
 /** A `jti` is remembered for the whole time its token could still be accepted. */
-const REPLAY_TTL_MS = LOGOUT_MAX_AGE_MS + 2 * LOGOUT_SKEW_MS + 60 * 1000
+export const REPLAY_TTL_MS = LOGOUT_MAX_AGE_MS + 2 * LOGOUT_SKEW_MS + 60 * 1000
 const JWKS_TTL_MS = 5 * 60 * 1000
 /** A key id we have never seen is worth a refetch, but not more often than this. */
 const JWKS_REFETCH_MS = 30 * 1000
 const MAX_KEYS = 100
 const MAX_TOKEN_LENGTH = 8192
-const AUDIT_EVERY_MS = 60 * 1000
-const CACHE_LIMIT = 1000
+export const AUDIT_EVERY_MS = 60 * 1000
+export const CACHE_LIMIT = 1000
 
 export type LogoutFailure =
   | "malformed"
@@ -223,7 +223,101 @@ export type BackchannelOutcome =
   | { outcome: "unavailable" }
 
 /** Statuses whose bound sessions an IdP may end: an active connection and a paused one. */
-const LOGOUT_STATUSES: readonly Connection["status"][] = ["active", "disabled"]
+export const LOGOUT_STATUSES: readonly Connection["status"][] = ["active", "disabled"]
+
+export interface RevokeBoundSessionsDeps {
+  store: Pick<IdentityStore, "revokeSessionRow" | "record">
+  sessions: Pick<SamlStore, "sessionsForLogout">
+  clerk: Pick<ClerkIdentity, "revokeSession">
+  forget(input: { userId?: string; sessionId?: string }): void
+}
+
+/**
+ * Revokes every session bound to a subject and/or session id on this connection.
+ * Used by OIDC Back-Channel Logout (#345) and Okta Universal Logout (#23).
+ */
+export async function revokeBoundSessions(
+  d: RevokeBoundSessionsDeps,
+  input: {
+    tenantId: string
+    connectionId: string
+    subject: string | null
+    sessionIndexes?: string[]
+    at: Date
+    by?: string
+  },
+): Promise<number> {
+  const sessions = await d.sessions.sessionsForLogout(
+    input.tenantId,
+    input.connectionId,
+    { subject: input.subject, sessionIndexes: input.sessionIndexes ?? [] },
+  )
+  let revoked = 0
+  for (const session of sessions) {
+    await d.clerk.revokeSession(session.sessionId)
+    if (
+      await d.store.revokeSessionRow(
+        input.tenantId,
+        session.sessionId,
+        "idp_logout",
+        input.at,
+      )
+    ) {
+      revoked += 1
+      await d.store.record(input.tenantId, {
+        type: "session.revoked",
+        subjectUserId: session.clerkUserId,
+        sessionId: session.sessionId,
+        connectionId: input.connectionId,
+        reason: "idp_logout",
+      })
+    }
+    d.forget({ userId: session.clerkUserId, sessionId: session.sessionId })
+  }
+  await d.store.record(input.tenantId, {
+    type: "logout.idp",
+    connectionId: input.connectionId,
+    data: {
+      revoked,
+      by:
+        input.by ??
+        (input.sessionIndexes?.length
+          ? input.subject
+            ? "sid_and_sub"
+            : "sid"
+          : "sub"),
+    },
+  })
+  return revoked
+}
+
+/**
+ * Audit failures rate-limited per connection and failure reason so an
+ * unauthenticated caller cannot fill the log.
+ */
+export function rateLimitedAuditor(
+  record: (
+    tenantId: string,
+    event: { type: string; connectionId: string; reason: string },
+  ) => Promise<void>,
+  now: () => number,
+) {
+  const audited = new Map<string, number>()
+  return async (connection: Connection, failure: string): Promise<void> => {
+    const key = `${connection.id}:${failure}`
+    const at = now()
+    const last = audited.get(key)
+    if (last === undefined || at - last >= AUDIT_EVERY_MS) {
+      if (audited.size >= CACHE_LIMIT) audited.delete(audited.keys().next().value!)
+      audited.set(key, at)
+      await record(connection.tenantId, {
+        type: "logout.failed",
+        connectionId: connection.id,
+        reason: failure,
+      })
+    }
+  }
+}
 
 export function backchannelLogout(
   d: BackchannelDeps,
@@ -231,25 +325,13 @@ export function backchannelLogout(
 ) {
   const now = () => (d.now ?? (() => new Date()))()
   const keysOf = jwksReader(d.fetch, () => now().getTime())
-  /** Failures audited recently, so an unauthenticated caller cannot fill the log. */
-  const audited = new Map<string, number>()
+  const auditFail = rateLimitedAuditor(d.store.record, () => now().getTime())
 
   async function fail(
     connection: Connection,
     failure: LogoutFailure,
   ): Promise<BackchannelOutcome> {
-    const key = `${connection.id}:${failure}`
-    const at = now().getTime()
-    const last = audited.get(key)
-    if (last === undefined || at - last >= AUDIT_EVERY_MS) {
-      if (audited.size >= CACHE_LIMIT) audited.delete(audited.keys().next().value!)
-      audited.set(key, at)
-      await d.store.record(connection.tenantId, {
-        type: "logout.failed",
-        connectionId: connection.id,
-        reason: failure,
-      })
-    }
+    await auditFail(connection, failure)
     return { outcome: "refused", failure }
   }
 
@@ -309,36 +391,12 @@ export function backchannelLogout(
     const at = now()
     let revoked = 0
     try {
-      const sessions = await d.sessions.sessionsForLogout(
-        connection.tenantId,
-        connection.id,
-        { subject: sub, sessionIndexes: sid ? [sid] : [] },
-      )
-      for (const session of sessions) {
-        await d.clerk.revokeSession(session.sessionId)
-        if (
-          await d.store.revokeSessionRow(
-            connection.tenantId,
-            session.sessionId,
-            "idp_logout",
-            at,
-          )
-        ) {
-          revoked += 1
-          await d.store.record(connection.tenantId, {
-            type: "session.revoked",
-            subjectUserId: session.clerkUserId,
-            sessionId: session.sessionId,
-            connectionId: connection.id,
-            reason: "idp_logout",
-          })
-        }
-        d.forget({ userId: session.clerkUserId, sessionId: session.sessionId })
-      }
-      await d.store.record(connection.tenantId, {
-        type: "logout.idp",
+      revoked = await revokeBoundSessions(d, {
+        tenantId: connection.tenantId,
         connectionId: connection.id,
-        data: { revoked, by: sid ? (sub ? "sid_and_sub" : "sid") : "sub" },
+        subject: sub,
+        sessionIndexes: sid ? [sid] : [],
+        at,
       })
     } catch (error) {
       // Revoking again is harmless, so the IdP's retry must be allowed in.

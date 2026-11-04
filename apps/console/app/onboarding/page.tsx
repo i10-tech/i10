@@ -250,7 +250,12 @@ export default async function OnboardingPage({
         billing={billing}
         checkoutId={checkoutId}
         // Somebody who joined a workspace its owner already named and set up.
-        joined={!creating && me.ok && me.data.access !== null && me.data.access.role !== "owner"}
+        joined={
+          !creating &&
+          me.ok &&
+          me.data.access !== null &&
+          me.data.access.role !== "owner"
+        }
         // ⚠ HOW THEY LAND ON THE STEP THEY LEFT FROM - a reload, or a return
         // from checkout, would otherwise re-derive from the facts and put
         // somebody who paid on the last step back on "Verify". From a cookie,
@@ -269,6 +274,7 @@ export default async function OnboardingPage({
         }
       />
       {/* Opens a resumed flow on its step before the first paint. */}
+      {/* eslint-disable-next-line react/no-danger -- static script, no user data */}
       <script dangerouslySetInnerHTML={{ __html: OPEN_RAIL_ON_CURRENT }} />
     </main>
   )

@@ -311,5 +311,8 @@ export async function testIssuer(options: IssuerOptions = {}) {
     calls,
     fail,
     seen,
+    signing,
+    rogue,
+    kid,
   }
 }

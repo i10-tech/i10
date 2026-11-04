@@ -401,8 +401,8 @@ export function samlEngine(deps: SamlEngineDeps): SamlEngine {
         spEntityId: at.entityId,
         nameIdFormat: settings.nameIdFormat,
         forceAuthn: attempt.purpose === "step_up" || attempt.forceLogin === true,
-        // ⚠ NOT TO ENTRA: it answers an AuthnRequest that carries a Subject
-        // with an error instead of ignoring it.
+        // ⚠ NOT TO ENTRA IN THE XML: it answers an AuthnRequest that carries a Subject
+        // with an error instead of ignoring it. Entra accepts login_hint on the SSO URL instead.
         ...(attempt.loginHint && connection.provider !== "entra"
           ? { subjectNameId: attempt.loginHint }
           : {}),
@@ -413,14 +413,19 @@ export function samlEngine(deps: SamlEngineDeps): SamlEngine {
         if (!key)
           throw new SamlMisconfigured("Signed requests need the connection's SP key.")
       }
+      let ssoUrl = settings.ssoUrl
+      if (attempt.loginHint && connection.provider === "entra") {
+        try {
+          const u = new URL(ssoUrl)
+          u.searchParams.set("login_hint", attempt.loginHint)
+          ssoUrl = u.toString()
+        } catch {
+          const sep = ssoUrl.includes("?") ? "&" : "?"
+          ssoUrl = `${ssoUrl}${sep}login_hint=${encodeURIComponent(attempt.loginHint)}`
+        }
+      }
       return {
-        redirectUrl: redirectUrl(
-          settings.ssoUrl,
-          "SAMLRequest",
-          xml,
-          attempt.state,
-          key,
-        ),
+        redirectUrl: redirectUrl(ssoUrl, "SAMLRequest", xml, attempt.state, key),
         requestId: id,
       }
     },
@@ -807,7 +812,11 @@ export async function finishSaml(
       return unavailable(d, attempt.tenantId, connection.id, error, attempt.id)
     }
     if (!verified.ok)
-      return refuseLogin(d, { ...base, reason: verified.reason, extra: verified.extra })
+      return refuseLogin(d, {
+        ...base,
+        reason: verified.reason,
+        extra: { ...verified.extra, provider: connection.provider, protocol: "saml" },
+      })
     return completeLogin(d, {
       ...base,
       assertion: verified.assertion,

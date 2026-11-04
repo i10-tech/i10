@@ -108,7 +108,7 @@ describe("filters: what is refused", () => {
     'userName eq "a" or userName eq "b"',
     '(userName eq "a")',
     'not (userName eq "a")',
-    'emails[type eq "work"].value eq "a@b.test"',
+    'emails[type eq "other"].value eq "a@b.test"',
     'name.givenName eq "Ada"',
     "active eq true",
     "userName eq ada",
@@ -117,6 +117,7 @@ describe("filters: what is refused", () => {
     "   ",
     "eq",
     'userName eq "a" garbage',
+    'userName eq "a" and',
   ])
     it(`refuses ${JSON.stringify(filter)} as invalidFilter, never as "no filter"`, () => {
       const error = refusal(() => parseFilter(filter, "User"))
@@ -155,37 +156,67 @@ describe("filters: what is refused", () => {
 describe("filters: what is answered", () => {
   it("reads the comparisons the three IdPs send", () => {
     expect(parseFilter('userName eq "ada@acme.test"', "User")).toEqual({
-      attr: "userName",
-      value: "ada@acme.test",
+      terms: [{ attr: "userName", value: "ada@acme.test" }],
     })
     // Entra probes a GUID as a userName and expects an empty list.
     expect(
       parseFilter('userName eq "8b0e5b2c-5a41-4a5f-9a52-2c2f3b6c1a10"', "User"),
     ).toEqual({
-      attr: "userName",
-      value: "8b0e5b2c-5a41-4a5f-9a52-2c2f3b6c1a10",
+      terms: [{ attr: "userName", value: "8b0e5b2c-5a41-4a5f-9a52-2c2f3b6c1a10" }],
     })
-    expect(parseFilter('externalId eq "00u1abcd2EFGhij3k4l5"', "User")?.attr).toBe(
+    expect(
+      parseFilter('externalId eq "00u1abcd2EFGhij3k4l5"', "User")?.terms[0]?.attr,
+    ).toBe("externalId")
+    expect(parseFilter('emails.value eq "a@b.test"', "User")?.terms[0]?.attr).toBe(
+      "emails.value",
+    )
+    expect(parseFilter('displayName eq "Engineers"', "Group")).toEqual({
+      terms: [{ attr: "displayName", value: "Engineers" }],
+    })
+    expect(parseFilter('externalId eq "g-1"', "Group")?.terms[0]?.attr).toBe(
       "externalId",
     )
-    expect(parseFilter('emails.value eq "a@b.test"', "User")?.attr).toBe("emails.value")
-    expect(parseFilter('displayName eq "Engineers"', "Group")).toEqual({
-      attr: "displayName",
-      value: "Engineers",
+  })
+
+  it("accepts Entra's bracketed work email and joins eq terms with and", () => {
+    expect(
+      parseFilter('emails[type eq "work"].value eq "ada@acme.test"', "User"),
+    ).toEqual({
+      terms: [{ attr: "workEmail", value: "ada@acme.test" }],
     })
-    expect(parseFilter('externalId eq "g-1"', "Group")?.attr).toBe("externalId")
+    expect(
+      parseFilter(
+        'userName eq "ada@acme.test" and emails[type eq "work"].value eq "ada@acme.test"',
+        "User",
+      ),
+    ).toEqual({
+      terms: [
+        { attr: "userName", value: "ada@acme.test" },
+        { attr: "workEmail", value: "ada@acme.test" },
+      ],
+    })
+    expect(
+      parseFilter('displayName eq "Engineers" and externalId eq "g-1"', "Group"),
+    ).toEqual({
+      terms: [
+        { attr: "displayName", value: "Engineers" },
+        { attr: "externalId", value: "g-1" },
+      ],
+    })
   })
 
   it("is case-insensitive about the attribute and the operator, and accepts the core URN prefix", () => {
-    expect(parseFilter('USERNAME EQ "x"', "User")?.attr).toBe("userName")
-    expect(parseFilter(`${SCHEMA.user}:userName eq "x"`, "User")?.attr).toBe("userName")
-    expect(parseFilter(`${SCHEMA.group}:displayName eq "x"`, "Group")?.attr).toBe(
-      "displayName",
+    expect(parseFilter('USERNAME EQ "x"', "User")?.terms[0]?.attr).toBe("userName")
+    expect(parseFilter(`${SCHEMA.user}:userName eq "x"`, "User")?.terms[0]?.attr).toBe(
+      "userName",
     )
+    expect(
+      parseFilter(`${SCHEMA.group}:displayName eq "x"`, "Group")?.terms[0]?.attr,
+    ).toBe("displayName")
   })
 
   it("keeps escapes in the value and answers no filter for none", () => {
-    expect(parseFilter('userName eq "a\\"b"', "User")?.value).toBe('a"b')
+    expect(parseFilter('userName eq "a\\"b"', "User")?.terms[0]?.value).toBe('a"b')
     expect(parseFilter(undefined, "User")).toBeNull()
   })
 })

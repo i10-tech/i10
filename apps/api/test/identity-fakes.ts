@@ -447,6 +447,17 @@ export function memoryStore(
       )
       return row ? { id: row.id, subject: row.subject } : null
     },
+    async identityByEmail(tenantId, cid, email) {
+      const row = identities.find(
+        (i) =>
+          i.tenantId === tenantId &&
+          i.connectionId === cid &&
+          i.email?.toLowerCase() === email.toLowerCase(),
+      )
+      return row
+        ? { id: row.id, clerkUserId: row.clerkUserId, subject: row.subject }
+        : null
+    },
     async link(tenantId, input) {
       const row = { id: id(), tenantId, ...input, lastLoginAt: null }
       identities.push(row)

@@ -6,6 +6,7 @@ import type {
   SamlCertificateRow,
   SamlStore,
 } from "./ports.js"
+import type { ConnectionHealthStore } from "./health.js"
 import { IdpUnreachable } from "./oidc-fetch.js"
 import type { IdpMetadata } from "./saml-messages.js"
 import {
@@ -15,6 +16,12 @@ import {
   type ForcedRefresh,
   type StoredSaml,
 } from "./saml.js"
+import type { StoredOidc } from "./oidc.js"
+import type {
+  DirectoryProvider,
+  DirectorySyncStatus,
+  DirectoryToken,
+} from "./directory-ports.js"
 
 /**
  * The daily SAML pass (#339, sso.md 2.10): every SAML connection that is not
@@ -157,13 +164,11 @@ export async function forceRefresh(
       return null
     metadata = await d.fetchMetadata(url)
   } catch (error) {
-    if (
-      !(
-        error instanceof IdpUnreachable ||
-        error instanceof SamlMisconfigured ||
-        error instanceof ReplayUnavailable
-      )
-    )
+    if (!(
+      error instanceof IdpUnreachable ||
+      error instanceof SamlMisconfigured ||
+      error instanceof ReplayUnavailable
+    ))
       throw error
     d.log.warn(
       { connectionId: connection.id },
@@ -298,4 +303,162 @@ export async function dailySamlPass(d: DailyDeps): Promise<DailySummary> {
     }
   }
   return summary
+}
+
+export async function checkOidcSecret(
+  d: {
+    store: Pick<IdentityStore, "updateConnection" | "record">
+    log: Logger
+  },
+  connection: Connection,
+  now: Date,
+): Promise<boolean> {
+  if (connection.protocol !== "oidc") return false
+  const oidc = connection.config.oidc as StoredOidc | undefined
+  if (!oidc?.secretExpiresAt) return false
+  const notAfter = new Date(oidc.secretExpiresAt)
+  if (Number.isNaN(notAfter.getTime())) return false
+
+  const days = crossedThreshold(
+    { notAfter, alertedDays: oidc.secretAlertedDays ?? null },
+    now,
+  )
+  if (days === null) return false
+
+  await d.store.record(connection.tenantId, {
+    type: "sso.certificate.expiring",
+    connectionId: connection.id,
+    reason: days === 0 ? "expired" : `${days}_days`,
+    data: {
+      kind: "client_secret",
+      notAfter: oidc.secretExpiresAt,
+      days,
+    },
+  })
+  d.log.warn(
+    {
+      tenantId: connection.tenantId,
+      connectionId: connection.id,
+      days,
+    },
+    days === 0
+      ? "an OIDC client secret has expired"
+      : "an OIDC client secret expires soon",
+  )
+  await d.store.updateConnection(connection.tenantId, connection.id, {
+    config: {
+      ...connection.config,
+      oidc: {
+        ...oidc,
+        secretAlertedDays: days,
+      },
+    },
+  })
+  return true
+}
+
+export async function checkDirectoryTokens(
+  d: {
+    store: Pick<IdentityStore, "record">
+    health?: ConnectionHealthStore
+    log: Logger
+  },
+  directory: { id: string; tenantId: string },
+  tokens: DirectoryToken[],
+  now: Date,
+): Promise<number> {
+  let alerted = 0
+  for (const token of tokens) {
+    if (!token.expiresAt || token.revokedAt) continue
+    const notAfter = token.expiresAt
+    if (Number.isNaN(notAfter.getTime())) continue
+    const left = (notAfter.getTime() - now.getTime()) / DAY_MS
+    let crossed: number | null = null
+    for (const days of EXPIRY_ALERT_DAYS) if (left <= days) crossed = days
+    if (crossed === null) continue
+
+    if (d.health) {
+      const claimed = await d.health.claimAlert(
+        directory.tenantId,
+        { directoryId: directory.id },
+        { kind: "scim_token", tokenId: token.id, days: crossed },
+        // ⚠ ONCE PER TOKEN AND THRESHOLD: the 30-day one stays crossed for 23 nights.
+        400 * DAY_MS,
+        `sso-scim-token:${token.id}:${crossed}`,
+      )
+      if (!claimed) continue
+    }
+
+    alerted++
+    await d.store.record(directory.tenantId, {
+      type: "sso.certificate.expiring",
+      reason: crossed === 0 ? "expired" : `${crossed}_days`,
+      data: {
+        kind: "scim_token",
+        directoryId: directory.id,
+        tokenId: token.id,
+        hint: token.hint,
+        notAfter: notAfter.toISOString(),
+        days: crossed,
+      },
+    })
+    d.log.warn(
+      {
+        tenantId: directory.tenantId,
+        directoryId: directory.id,
+        tokenId: token.id,
+        days: crossed,
+      },
+      crossed === 0
+        ? "a SCIM directory token has expired"
+        : "a SCIM directory token expires soon",
+    )
+  }
+  return alerted
+}
+
+export async function checkDirectoryStaleSync(
+  d: {
+    store: Pick<IdentityStore, "record">
+    log: Logger
+  },
+  directory: {
+    id: string
+    tenantId: string
+    provider: DirectoryProvider
+    enabled: boolean
+    createdAt: Date
+    lastSyncAt: Date | null
+    lastSyncStatus: DirectorySyncStatus | null
+  },
+  now: Date,
+): Promise<boolean> {
+  // ⚠ ONLY A DIRECTORY WE PULL: SCIM is pushed to us and never "syncs" on our side.
+  if (!directory.enabled || directory.provider !== "google") return false
+  const lastSuccessTime =
+    directory.lastSyncStatus === "ok" && directory.lastSyncAt
+      ? directory.lastSyncAt.getTime()
+      : null
+
+  const referenceTime = lastSuccessTime ?? directory.createdAt.getTime()
+  const isStale = now.getTime() - referenceTime >= 24 * 60 * 60 * 1000
+
+  if (!isStale) return false
+
+  await d.store.record(directory.tenantId, {
+    type: "directory.sync_failed",
+    reason: "stale_sync",
+    data: {
+      directoryId: directory.id,
+      error: "stale_sync",
+    },
+  })
+  d.log.warn(
+    {
+      tenantId: directory.tenantId,
+      directoryId: directory.id,
+    },
+    "directory has had no successful sync for 24 hours",
+  )
+  return true
 }

@@ -1,4 +1,10 @@
-import { renderSsoBypassUsed, renderSsoCertificateExpiring } from "@repo/emails"
+import {
+  renderSsoBypassUsed,
+  renderSsoCertificateExpiring,
+  renderSsoDirectorySyncFailed,
+  renderSsoRelinkRequested,
+  type ExpiringCredentialKind,
+} from "@repo/emails"
 import type { AuthEmailSender } from "../auth-email/deliver.js"
 import { formatWhen } from "../webhooks/health-notice.js"
 import { may, type RoleStore } from "../console/roles.js"
@@ -36,6 +42,23 @@ export interface IdentityMail {
     days: number
     notAfter: Date
     idempotencyKey: string
+    credential?: ExpiringCredentialKind
+    url?: string
+  }): Promise<void>
+  directorySyncFailed(input: {
+    to: string
+    workspace: string
+    directory: string
+    error: string
+    idempotencyKey: string
+  }): Promise<void>
+  relinkRequested(input: {
+    to: string
+    workspace: string
+    connection: string
+    count: number
+    url: string
+    idempotencyKey: string
   }): Promise<void>
 }
 
@@ -46,7 +69,7 @@ export function identityMail({
   sender: AuthEmailSender
   consoleUrl: string
 }): IdentityMail {
-  const url = `${consoleUrl.replace(/\/$/, "")}/settings/sso`
+  const url = `${consoleUrl.replace(/\/$/, "")}/settings/security`
   return {
     async bypassUsed(input) {
       const rendered = await renderSsoBypassUsed({
@@ -72,7 +95,34 @@ export function identityMail({
           year: "numeric",
           timeZone: "UTC",
         }),
+        url: input.url ?? url,
+        ...(input.credential ? { credential: input.credential } : {}),
+      })
+      await sender.send({
+        to: input.to,
+        ...rendered,
+        idempotencyKey: input.idempotencyKey,
+      })
+    },
+    async directorySyncFailed(input) {
+      const rendered = await renderSsoDirectorySyncFailed({
+        workspace: input.workspace,
+        directory: input.directory,
+        error: input.error,
         url,
+      })
+      await sender.send({
+        to: input.to,
+        ...rendered,
+        idempotencyKey: input.idempotencyKey,
+      })
+    },
+    async relinkRequested(input) {
+      const rendered = await renderSsoRelinkRequested({
+        workspace: input.workspace,
+        connection: input.connection,
+        count: input.count,
+        url: input.url,
       })
       await sender.send({
         to: input.to,
@@ -89,12 +139,14 @@ export interface AlertDeps {
   workspaceOrg(tenantId: string): Promise<string | null>
   workspaceName(tenantId: string): Promise<string | null>
   connectionName(tenantId: string, connectionId: string): Promise<string | null>
+  directoryName?(tenantId: string, directoryId: string): Promise<string | null>
   /** Clerk's sign-in addresses of these members. */
   addresses(orgId: string, userIds: string[]): Promise<string[]>
   /** A person's primary address, for naming them in the mail. */
   addressOf(userId: string): Promise<string | null>
   log: Logger
   now?: () => Date
+  consoleUrl?: string
 }
 
 export interface IdentityAlerts {
@@ -111,7 +163,18 @@ export interface IdentityAlerts {
       fingerprint: string
       notAfter: Date
       days: number
+      credential?: ExpiringCredentialKind
     },
+  ): Promise<void>
+  /** `directory.sync_failed`: owners and SSO admins hear of it. */
+  directorySyncFailed(
+    tenantId: string,
+    input: { directoryId: string; error: string },
+  ): Promise<void>
+  /** `identity.relink_requested`: owners hear of waiting logins. */
+  relinkRequested(
+    tenantId: string,
+    input: { connectionId: string; count: number },
   ): Promise<void>
 }
 
@@ -120,6 +183,16 @@ export function identityAlerts(d: AlertDeps): IdentityAlerts {
   async function managers(tenantId: string, except?: string): Promise<string[]> {
     const ids = (await d.roles.list(tenantId))
       .filter((r) => may(r.role, "sso:manage") && r.userId !== except)
+      .map((r) => r.userId)
+    if (ids.length === 0) return []
+    const orgId = await d.workspaceOrg(tenantId)
+    return orgId ? d.addresses(orgId, ids) : []
+  }
+
+  /** Workspace owners only, as addresses. */
+  async function owners(tenantId: string): Promise<string[]> {
+    const ids = (await d.roles.list(tenantId))
+      .filter((r) => r.role === "owner")
       .map((r) => r.userId)
     if (ids.length === 0) return []
     const orgId = await d.workspaceOrg(tenantId)
@@ -161,19 +234,29 @@ export function identityAlerts(d: AlertDeps): IdentityAlerts {
       try {
         const to = await managers(tenantId)
         if (to.length === 0) return
-        const [workspace, connection] = await Promise.all([
+        const isScim = input.credential === "SCIM token"
+        const [workspace, name] = await Promise.all([
           d.workspaceName(tenantId),
-          d.connectionName(tenantId, input.connectionId),
+          isScim && d.directoryName
+            ? d.directoryName(tenantId, input.connectionId)
+            : d.connectionName(tenantId, input.connectionId),
         ])
+        const prefix =
+          input.credential === "client secret"
+            ? "sso-oidc-secret"
+            : input.credential === "SCIM token"
+              ? "sso-scim-token"
+              : "sso-cert"
         for (const address of to) {
           await d.mail
             .certificateExpiring({
               to: address,
               workspace: workspace ?? "your workspace",
-              connection: connection ?? "your SSO connection",
+              connection: name ?? (isScim ? "your directory" : "your SSO connection"),
               days: input.days,
               notAfter: input.notAfter,
-              idempotencyKey: `sso-cert:${tenantId}:${input.fingerprint}:${input.days}:${address.toLowerCase()}`,
+              idempotencyKey: `${prefix}:${tenantId}:${input.fingerprint}:${input.days}:${address.toLowerCase()}`,
+              ...(input.credential ? { credential: input.credential } : {}),
             })
             .catch((err: unknown) =>
               d.log.error(
@@ -186,6 +269,77 @@ export function identityAlerts(d: AlertDeps): IdentityAlerts {
         d.log.error(
           { err: String(err), tenantId },
           "could not send the certificate expiry alert",
+        )
+      }
+    },
+
+    async directorySyncFailed(tenantId, input) {
+      try {
+        const to = await managers(tenantId)
+        if (to.length === 0) return
+        const [workspace, directory] = await Promise.all([
+          d.workspaceName(tenantId),
+          d.directoryName ? d.directoryName(tenantId, input.directoryId) : null,
+        ])
+        const at = (d.now ?? (() => new Date()))()
+        const day = Math.floor(at.getTime() / (24 * 60 * 60_000))
+        for (const address of to) {
+          await d.mail
+            .directorySyncFailed({
+              to: address,
+              workspace: workspace ?? "your workspace",
+              directory: directory ?? "your directory",
+              error: input.error,
+              idempotencyKey: `sso-dir-sync:${tenantId}:${input.directoryId}:${day}:${address.toLowerCase()}`,
+            })
+            .catch((err: unknown) =>
+              d.log.error(
+                { err: String(err), tenantId, directoryId: input.directoryId },
+                "directory sync failure email failed",
+              ),
+            )
+        }
+      } catch (err) {
+        d.log.error(
+          { err: String(err), tenantId, directoryId: input.directoryId },
+          "could not send the directory sync failure alert",
+        )
+      }
+    },
+
+    async relinkRequested(tenantId, input) {
+      try {
+        const to = await owners(tenantId)
+        if (to.length === 0) return
+        const [workspace, connection] = await Promise.all([
+          d.workspaceName(tenantId),
+          d.connectionName(tenantId, input.connectionId),
+        ])
+        const at = (d.now ?? (() => new Date()))()
+        const hour = Math.floor(at.getTime() / (60 * 60_000))
+        const base = (d.consoleUrl ?? "https://console.i10.tech").replace(/\/$/, "")
+        const url = `${base}/settings/security/${input.connectionId}?tab=access`
+        for (const address of to) {
+          await d.mail
+            .relinkRequested({
+              to: address,
+              workspace: workspace ?? "your workspace",
+              connection: connection ?? "your SSO connection",
+              count: input.count,
+              url,
+              idempotencyKey: `sso-relink:${tenantId}:${input.connectionId}:${hour}:${address.toLowerCase()}`,
+            })
+            .catch((err: unknown) =>
+              d.log.error(
+                { err: String(err), tenantId, connectionId: input.connectionId },
+                "relink requested alert email failed",
+              ),
+            )
+        }
+      } catch (err) {
+        d.log.error(
+          { err: String(err), tenantId, connectionId: input.connectionId },
+          "could not send the relink requested alert",
         )
       }
     },

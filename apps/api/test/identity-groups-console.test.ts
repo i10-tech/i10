@@ -372,8 +372,8 @@ describe("group rules: who may change them", () => {
     )
   })
 
-  it("needs a fresh step-up for every write, and reads without one", async () => {
-    const w = consoleApp({ fresh: false })
+  it("needs a fresh step-up for every write on a live connection, and reads without one", async () => {
+    const w = consoleApp({ status: "active", fresh: false })
     expect((await w.call("user_owner", "POST", w.base, RULE)).status).toBe(403)
     expect(
       (await w.call("user_owner", "PATCH", `${w.base}/${MISSING}`, { precedence: 1 }))

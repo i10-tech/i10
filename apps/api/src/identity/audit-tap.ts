@@ -32,6 +32,7 @@ export interface TapDeps {
   webhooks?: IdentityWebhooks
   health?: ConnectionHealthStore
   alerts?: IdentityAlerts
+  store?: Pick<IdentityStore, "relinkRequests">
   /** The connection's status: only an active one can be failing. */
   connectionStatus(tenantId: string, connectionId: string): Promise<string | null>
   log: Pick<Logger, "warn" | "error">
@@ -115,24 +116,85 @@ export function auditTap(d: TapDeps): AuditTap {
       }
       case "sso.certificate.expiring": {
         const connectionId = event.connectionId
+        const dataDirId = str(data.directoryId)
+        const targetId = connectionId ?? dataDirId
         const fingerprint = str(data.fingerprint)
         const notAfter = str(data.notAfter)
         const days = typeof data.days === "number" ? data.days : null
-        if (!connectionId || !fingerprint || !notAfter || days === null) return
+        const credential =
+          data.kind === "client_secret"
+            ? "client secret"
+            : data.kind === "scim_token"
+              ? "SCIM token"
+              : "certificate"
+        const idOrFingerprint =
+          fingerprint ??
+          (data.kind === "client_secret"
+            ? `${connectionId}:${notAfter}`
+            : data.kind === "scim_token"
+              ? (str(data.hint) ?? str(data.tokenId) ?? "token")
+              : connectionId)
+        if (!targetId || !idOrFingerprint || !notAfter || days === null) return
         await Promise.all([
-          d.webhooks?.emit(tenantId, "sso.certificate.expiring", {
-            connection_id: connectionId,
-            fingerprint,
-            not_after: notAfter,
-            days,
-          }),
+          connectionId && fingerprint
+            ? d.webhooks?.emit(tenantId, "sso.certificate.expiring", {
+                connection_id: connectionId,
+                fingerprint,
+                not_after: notAfter,
+                days,
+              })
+            : Promise.resolve(),
           d.alerts?.certificateExpiring(tenantId, {
-            connectionId,
-            fingerprint,
+            connectionId: targetId,
+            fingerprint: idOrFingerprint,
             notAfter: new Date(notAfter),
             days,
+            credential,
           }),
         ])
+        return
+      }
+      case "identity.relink_requested": {
+        const connectionId = event.connectionId
+        if (!d.alerts || !d.health || !connectionId) return
+        const claimed = await d.health.claimAlert(
+          tenantId,
+          connectionId,
+          { connectionId },
+          60 * 60_000,
+          "identity.relink_requested_alert",
+        )
+        if (!claimed) return
+        const count = d.store
+          ? (await d.store.relinkRequests(tenantId, connectionId, now())).length
+          : 1
+        await d.alerts.relinkRequested(tenantId, {
+          connectionId,
+          count: count > 0 ? count : 1,
+        })
+        return
+      }
+      case "directory.sync_failed": {
+        if (!d.alerts || !d.health) return
+        const directoryId =
+          typeof data.directoryId === "string" ? data.directoryId : null
+        if (!directoryId) return
+        const error =
+          event.reason ??
+          (typeof data.error === "string" ? data.error : undefined) ??
+          "unknown"
+        const claimed = await d.health.claimAlert(
+          tenantId,
+          { directoryId },
+          { directoryId, reason: error, error },
+          24 * 60 * 60_000,
+          "directory.sync_failed_alert",
+        )
+        if (!claimed) return
+        await d.alerts.directorySyncFailed(tenantId, {
+          directoryId,
+          error,
+        })
         return
       }
       default:

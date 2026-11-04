@@ -407,13 +407,21 @@ export function memoryDirectories(
           u.directoryId === did &&
           !u.deletedAt &&
           (f === null ||
-            (f.attr === "userName" &&
-              u.userName.toLowerCase() === f.value.toLowerCase()) ||
-            (f.attr === "externalId" && u.externalId === f.value) ||
-            (f.attr === "emails.value" &&
-              ((u.resource.emails as { value?: string }[] | undefined) ?? []).some(
-                (e) => e.value?.toLowerCase() === f.value.toLowerCase(),
-              ))),
+            f.terms.every((term) =>
+              term.attr === "userName"
+                ? u.userName.toLowerCase() === term.value.toLowerCase()
+                : term.attr === "externalId"
+                  ? u.externalId === term.value
+                  : (
+                      (u.resource.emails as
+                        { value?: string; type?: string }[] | undefined) ?? []
+                    ).some(
+                      (e) =>
+                        e.value?.toLowerCase() === term.value.toLowerCase() &&
+                        (term.attr === "emails.value" ||
+                          e.type?.toLowerCase() === "work"),
+                    ),
+            )),
       )
       return {
         total: all.length,
@@ -487,9 +495,11 @@ export function memoryDirectories(
           g.tenantId === tenantId &&
           g.directoryId === did &&
           (f === null ||
-            (f.attr === "displayName" &&
-              g.displayName.toLowerCase() === f.value.toLowerCase()) ||
-            (f.attr === "externalId" && g.externalId === f.value)),
+            f.terms.every((term) =>
+              term.attr === "displayName"
+                ? g.displayName.toLowerCase() === term.value.toLowerCase()
+                : g.externalId === term.value,
+            )),
       )
       return {
         total: all.length,
@@ -532,6 +542,15 @@ export function memoryDirectories(
       return out
     },
     async createGroup(tenantId, did, input: StoredGroup, event) {
+      if (
+        groups.some(
+          (g) =>
+            g.tenantId === tenantId &&
+            g.directoryId === did &&
+            g.displayName.toLowerCase() === input.displayName.toLowerCase(),
+        )
+      )
+        return { kind: "duplicate" }
       const row: DirectoryGroupRow = {
         id: id(),
         tenantId,
@@ -552,7 +571,12 @@ export function memoryDirectories(
         ...event,
         data: { ...event.data, groupId: row.id, members: members.length, skipped },
       })
-      return { row: structuredClone(row), outbox: outboxEntries, skipped }
+      return {
+        row: structuredClone(row),
+        outbox: outboxEntries,
+        skipped,
+        kind: "written" as const,
+      }
     },
     async editGroup(tenantId, did, gid, edit, event) {
       if (!UUID.test(gid)) return null
@@ -562,6 +586,16 @@ export function memoryDirectories(
       if (!row) return null
       const had = memberships.filter((m) => m.groupId === gid).map((m) => m.userId)
       const next = edit({ row: structuredClone(row), members: [...had] })
+      if (
+        groups.some(
+          (g) =>
+            g.tenantId === tenantId &&
+            g.directoryId === did &&
+            g.id !== gid &&
+            g.displayName.toLowerCase() === next.displayName.toLowerCase(),
+        )
+      )
+        return { kind: "duplicate" }
       const wanted = live(tenantId, did, next.members)
       const added = wanted.filter((u) => !had.includes(u))
       const removed = had.filter((u) => !wanted.includes(u))
@@ -596,7 +630,12 @@ export function memoryDirectories(
           skipped,
         },
       })
-      return { row: structuredClone(row), outbox: outboxEntries, skipped }
+      return {
+        row: structuredClone(row),
+        outbox: outboxEntries,
+        skipped,
+        kind: "written" as const,
+      }
     },
     async deleteGroup(tenantId, did, gid, event) {
       if (!UUID.test(gid)) return null

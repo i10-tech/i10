@@ -1272,6 +1272,12 @@ export const directoryGroups = identity.table(
     uniqueIndex("directory_groups_mail_address_unique")
       .on(sql`lower(${t.mailAddress})`)
       .where(sql`${t.mailAddress} is not null`),
+    // ⚠ ONE NAME PER DIRECTORY, CASE-INSENSITIVELY, AS SCIM's displayName IS
+    // (RFC 7643 4.2): a duplicate is a 409, not a second group.
+    uniqueIndex("directory_groups_display_name_unique").on(
+      t.directoryId,
+      sql`lower(${t.displayName})`,
+    ),
     foreignKey({
       name: "directory_groups_directory_fk",
       columns: [t.directoryId, t.tenantId],

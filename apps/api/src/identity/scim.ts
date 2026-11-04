@@ -17,10 +17,10 @@ import { normaliseEmail } from "./model.js"
  * resource, and every rule below says which dialect it is for.
  *
  * ⚠ STRICT WHERE IT DECIDES WHAT IS READ, LENIENT WHERE AN IdP WOULD WEDGE.
- * A filter is exactly `<attribute> eq "<value>"` on four attributes, anything
- * else is `invalidFilter`. A PATCH that targets a value that is not there yet
- * makes it (Entra's dialect relies on it), and removing what is already gone
- * is a no-op (Okta retries removals).
+ * A filter is `eq` on the attributes Entra, Okta and Google send, joined by
+ * `and`; anything else is `invalidFilter`. A PATCH that targets a value that
+ * is not there yet makes it (Entra's dialect relies on it), and removing what
+ * is already gone is a no-op (Okta retries removals).
  */
 
 export const SCHEMA = {
@@ -234,22 +234,32 @@ export type Kind = "User" | "Group"
 
 // ── Filters (RFC 7644 3.4.2.2), strictly ────────────────────────────────────
 
-export type UserFilter = {
-  attr: "userName" | "externalId" | "emails.value"
+export type UserFilterTerm = {
+  attr: "userName" | "externalId" | "emails.value" | "workEmail"
   value: string
 }
-export type GroupFilter = { attr: "displayName" | "externalId"; value: string }
+export type GroupFilterTerm = {
+  attr: "displayName" | "externalId"
+  value: string
+}
+export type UserFilter = { terms: readonly UserFilterTerm[] }
+export type GroupFilter = { terms: readonly GroupFilterTerm[] }
 
-const FILTER = /^\s*(\S+)\s+(\S+)\s+("(?:[^"\\]|\\.)*")\s*$/
+/**
+ * One `eq` term and the `and` after it, if any. The path may be namespaced by
+ * a schema URN and may be Entra's bracketed work-email form.
+ */
+const FILTER_TERM =
+  /^\s*((?:[\w.-]+:)*[\w.-]+(?:\[\s*[\w.-]+\s+eq\s+"(?:[^"\\]|\\.)*"\s*\])?(?:\.[\w.-]+)?)\s+([A-Za-z]+)\s+("(?:[^"\\]|\\.)*")\s*(?:(and)\s+|$)/i
 
 /**
  * `filter=` as one of the comparisons we answer, or `invalidFilter`.
  *
- * ⚠ ONLY `eq`, ONLY ONE COMPARISON, ONLY THESE ATTRIBUTES. That is what Okta,
- * Entra and Google send to find a resource before creating it, and nothing
- * else is answered: `or`, `pr`, `co`, another attribute or a malformed value
- * is refused, never read as "no filter" (which would list everybody and lead
- * an IdP to match the wrong person).
+ * ⚠ ONLY `eq`, ONLY THESE ATTRIBUTES, AND `and` BETWEEN TERMS. That is what
+ * Entra and Okta send to find a resource before creating it, and nothing else
+ * is answered: `or`, `pr`, `co`, another attribute or a malformed value is
+ * refused, never read as "no filter" (which would list everybody and lead an
+ * IdP to match the wrong person).
  */
 export function parseFilter(raw: string | undefined, kind: "User"): UserFilter | null
 export function parseFilter(raw: string | undefined, kind: "Group"): GroupFilter | null
@@ -259,38 +269,61 @@ export function parseFilter(
 ): UserFilter | GroupFilter | null {
   if (raw === undefined) return null
   if (raw.length > LIMITS.filter) throw bad("The filter is too long.", "invalidFilter")
-  const match = FILTER.exec(raw)
-  if (!match)
-    throw bad(
-      'Only filters of the form attribute eq "value" are supported.',
-      "invalidFilter",
-    )
-  const [, path, op, literal] = match as unknown as [string, string, string, string]
-  if (op.toLowerCase() !== "eq")
-    throw bad(`The ${op} operator is not supported; use eq.`, "invalidFilter")
-  let value: unknown
-  try {
-    value = JSON.parse(literal)
-  } catch {
-    throw bad("The filter's value is not a valid string.", "invalidFilter")
+  const terms: (UserFilterTerm | GroupFilterTerm)[] = []
+  let rest = raw
+  for (;;) {
+    const match = FILTER_TERM.exec(rest)
+    if (!match)
+      throw bad(
+        'Only supported eq filters joined by "and" are allowed.',
+        "invalidFilter",
+      )
+    const [, path, op, literal, and] = match
+    if (op!.toLowerCase() !== "eq")
+      throw bad(`The ${op} operator is not supported; use eq.`, "invalidFilter")
+    let value: unknown
+    try {
+      value = JSON.parse(literal!)
+    } catch {
+      throw bad("The filter's value is not a valid string.", "invalidFilter")
+    }
+    if (typeof value !== "string" || value.length > LIMITS.string)
+      throw bad("The filter's value is not a valid string.", "invalidFilter")
+    const core = kind === "User" ? SCHEMA.user : SCHEMA.group
+    const prefixed = path!.toLowerCase().startsWith(`${core.toLowerCase()}:`)
+    const attr = prefixed ? path!.slice(core.length + 1) : path!
+    if (kind === "User") {
+      const parsed = userFilterAttr(attr)
+      if (parsed) terms.push({ attr: parsed, value })
+      else throw bad(`Filtering on ${path} is not supported.`, "invalidFilter")
+    } else {
+      const parsed = groupFilterAttr(attr)
+      if (parsed) terms.push({ attr: parsed, value })
+      else throw bad(`Filtering on ${path} is not supported.`, "invalidFilter")
+    }
+    rest = rest.slice(match[0].length)
+    if (!and) break
   }
-  if (typeof value !== "string" || value.length > LIMITS.string)
-    throw bad("The filter's value is not a valid string.", "invalidFilter")
-  const core = kind === "User" ? SCHEMA.user : SCHEMA.group
-  const attr = (
-    path.toLowerCase().startsWith(`${core.toLowerCase()}:`)
-      ? path.slice(core.length + 1)
-      : path
-  ).toLowerCase()
-  if (kind === "User") {
-    if (attr === "username") return { attr: "userName", value }
-    if (attr === "externalid") return { attr: "externalId", value }
-    if (attr === "emails.value") return { attr: "emails.value", value }
-  } else {
-    if (attr === "displayname") return { attr: "displayName", value }
-    if (attr === "externalid") return { attr: "externalId", value }
-  }
-  throw bad(`Filtering on ${path} is not supported.`, "invalidFilter")
+  return kind === "User"
+    ? { terms: terms as UserFilterTerm[] }
+    : { terms: terms as GroupFilterTerm[] }
+}
+
+/** The User paths this endpoint answers, including Entra's work-email form. */
+function userFilterAttr(path: string): UserFilterTerm["attr"] | null {
+  const lower = path.toLowerCase()
+  if (lower === "username") return "userName"
+  if (lower === "externalid") return "externalId"
+  if (lower === "emails.value") return "emails.value"
+  if (/^emails\[\s*type\s+eq\s+"work"\s*\]\.value$/i.test(path)) return "workEmail"
+  return null
+}
+
+function groupFilterAttr(path: string): GroupFilterTerm["attr"] | null {
+  const lower = path.toLowerCase()
+  if (lower === "displayname") return "displayName"
+  if (lower === "externalid") return "externalId"
+  return null
 }
 
 // ── Pagination and projection ───────────────────────────────────────────────

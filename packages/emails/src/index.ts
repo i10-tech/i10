@@ -25,7 +25,14 @@ import JoinAccepted, { joinAcceptedSubject } from "./templates/join-accepted.js"
 import SsoBypassUsed, { ssoBypassUsedSubject } from "./templates/sso-bypass-used.js"
 import SsoCertificateExpiring, {
   ssoCertificateExpiringSubject,
+  type ExpiringCredentialKind,
 } from "./templates/sso-certificate-expiring.js"
+import SsoDirectorySyncFailed, {
+  ssoDirectorySyncFailedSubject,
+} from "./templates/sso-directory-sync-failed.js"
+import SsoRelinkRequested, {
+  ssoRelinkRequestedSubject,
+} from "./templates/sso-relink-requested.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -438,16 +445,53 @@ export async function renderSsoBypassUsed(
   }
 }
 
+export { ssoCertificateExpiringSubject, type ExpiringCredentialKind }
+export { ssoRelinkRequestedSubject }
+
 /**
- * A SAML identity provider certificate is expiring or expired (#345). To the
- * workspace's owners and SSO admins; see apps/api/src/identity/alerts.ts.
+ * A SAML identity provider certificate or credential is expiring or expired (#345).
+ * To the workspace's owners and SSO admins; see apps/api/src/identity/alerts.ts.
  */
 export async function renderSsoCertificateExpiring(
   props: React.ComponentProps<typeof SsoCertificateExpiring>,
 ): Promise<RenderedEmail> {
   const element = SsoCertificateExpiring(props)
   return {
-    subject: ssoCertificateExpiringSubject(props.days, props.connection),
+    subject: ssoCertificateExpiringSubject(
+      props.days,
+      props.connection,
+      props.credential,
+    ),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * A directory sync pull failed (#343). To the workspace's owners and SSO
+ * admins; see apps/api/src/identity/alerts.ts.
+ */
+export async function renderSsoDirectorySyncFailed(
+  props: React.ComponentProps<typeof SsoDirectorySyncFailed>,
+): Promise<RenderedEmail> {
+  const element = SsoDirectorySyncFailed(props)
+  return {
+    subject: ssoDirectorySyncFailedSubject(props.directory),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * One or more changed logins are waiting for approval after an IdP subject change (#345).
+ * Sent only to workspace owners; see apps/api/src/identity/alerts.ts.
+ */
+export async function renderSsoRelinkRequested(
+  props: React.ComponentProps<typeof SsoRelinkRequested>,
+): Promise<RenderedEmail> {
+  const element = SsoRelinkRequested(props)
+  return {
+    subject: ssoRelinkRequestedSubject(props.count, props.connection),
     html: await render(element),
     text: await render(element, { plainText: true }),
   }

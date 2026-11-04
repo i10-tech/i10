@@ -8,6 +8,7 @@ import {
 } from "../src/identity/bridge.js"
 import type { Connection } from "../src/identity/model.js"
 import {
+  clientSecretBasic,
   finishOidc,
   newSigningKey,
   oidcEngine,
@@ -257,7 +258,12 @@ describe("email verification from userinfo, as Okta sends it", () => {
       userinfo: { given_name: "Olivia", family_name: "Test" },
     })
     const [attempt] = [...w.store.attempts.values()]
-    const verified = await w.engine.verify(oidcConnection(), attempt!, at.state, at.query)
+    const verified = await w.engine.verify(
+      oidcConnection(),
+      attempt!,
+      at.state,
+      at.query,
+    )
     expect(verified).toMatchObject({
       ok: true,
       assertion: { emailVerified: true, givenName: "Olivia", familyName: "Test" },
@@ -908,6 +914,44 @@ describe("claims", () => {
         entra,
       )!.emailVerified,
     ).toBe(true)
+    expect(
+      toAssertion(
+        { ...base, xms_edov: "true" } as never,
+        { attributeMapping: {} },
+        entra,
+      )!.emailVerified,
+    ).toBe(true)
+    expect(
+      toAssertion({ ...base, xms_edov: 1 } as never, { attributeMapping: {} }, entra)!
+        .emailVerified,
+    ).toBe(true)
+    expect(
+      toAssertion({ ...base, xms_edov: "1" } as never, { attributeMapping: {} }, entra)!
+        .emailVerified,
+    ).toBe(true)
+    expect(
+      toAssertion({ ...base, xms_edov: 0 } as never, { attributeMapping: {} }, entra)!
+        .emailVerified,
+    ).toBe(false)
+    expect(
+      toAssertion({ ...base, xms_edov: "0" } as never, { attributeMapping: {} }, entra)!
+        .emailVerified,
+    ).toBe(false)
+  })
+  it("encodes clientSecretBasic credentials containing +, /, ~ per RFC 6749 Section 2.3.1", () => {
+    const auth = clientSecretBasic("secret+with/special~chars")
+    const headers = new Headers()
+    const client = { client_id: "client+id/with~chars" } as never
+    auth({} as never, client, {} as never, headers)
+    const header = headers.get("authorization")
+    expect(header).toBeTruthy()
+    expect(header!.startsWith("Basic ")).toBe(true)
+    const decoded = Buffer.from(header!.slice(6), "base64").toString("utf8")
+    // URL-encoded credentials: + -> %2B, / -> %2F, ~ -> %7E
+    expect(decoded).toBe("client%2Bid%2Fwith%7Echars:secret%2Bwith%2Fspecial%7Echars")
+    expect(decodeURIComponent(decoded)).toBe(
+      "client+id/with~chars:secret+with/special~chars",
+    )
   })
   it("treats a missing email_verified as not verified", () => {
     const a = toAssertion(

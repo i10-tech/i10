@@ -167,6 +167,9 @@ export interface Page<T> {
   rows: T[]
 }
 
+export type GroupWriteResult<T> =
+  (Written<T> & { kind: "written"; skipped: number }) | { kind: "duplicate" }
+
 export interface ListInput<F> {
   filter: F | null
   startIndex: number
@@ -341,20 +344,22 @@ export interface DirectoryStore {
   /**
    * `skipped`: member ids that name nobody live in this directory, left out
    * (an IdP may push a group before, or without, some of its members).
+   * `duplicate`: another group of the directory holds that displayName,
+   * case-insensitively (SCIM's 409).
    */
   createGroup(
     tenantId: string,
     directoryId: string,
     input: StoredGroup,
     audit: AuditEvent,
-  ): Promise<Written<DirectoryGroupRow> & { skipped: number }>
+  ): Promise<GroupWriteResult<DirectoryGroupRow>>
   editGroup(
     tenantId: string,
     directoryId: string,
     id: string,
     edit: (current: { row: DirectoryGroupRow; members: string[] }) => StoredGroup,
     audit: AuditEvent,
-  ): Promise<(Written<DirectoryGroupRow> & { skipped: number }) | null>
+  ): Promise<GroupWriteResult<DirectoryGroupRow> | null>
   deleteGroup(
     tenantId: string,
     directoryId: string,

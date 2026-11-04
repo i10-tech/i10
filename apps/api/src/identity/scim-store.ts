@@ -580,13 +580,15 @@ export function directoryStore(db: Database): DirectoryStore {
         eq(directoryUsers.tenantId, tenantId),
         eq(directoryUsers.directoryId, directoryId),
         isNull(directoryUsers.deletedAt),
-        f?.attr === "userName"
-          ? sql`lower(${directoryUsers.userName}) = lower(${f.value})`
-          : f?.attr === "externalId"
-            ? eq(directoryUsers.externalId, f.value)
-            : f?.attr === "emails.value"
-              ? sql`exists (select 1 from jsonb_array_elements(case when jsonb_typeof(${directoryUsers.resource}->'emails') = 'array' then ${directoryUsers.resource}->'emails' else '[]'::jsonb end) e where lower(e->>'value') = lower(${f.value}))`
-              : undefined,
+        ...(f?.terms.map((term) =>
+          term.attr === "userName"
+            ? sql`lower(${directoryUsers.userName}) = lower(${term.value})`
+            : term.attr === "externalId"
+              ? eq(directoryUsers.externalId, term.value)
+              : term.attr === "emails.value"
+                ? sql`exists (select 1 from jsonb_array_elements(case when jsonb_typeof(${directoryUsers.resource}->'emails') = 'array' then ${directoryUsers.resource}->'emails' else '[]'::jsonb end) e where lower(e->>'value') = lower(${term.value}))`
+                : sql`exists (select 1 from jsonb_array_elements(case when jsonb_typeof(${directoryUsers.resource}->'emails') = 'array' then ${directoryUsers.resource}->'emails' else '[]'::jsonb end) e where lower(e->>'type') = 'work' and lower(e->>'value') = lower(${term.value}))`,
+        ) ?? []),
       )
       return withTenant(db, tenantId, async (tx) => {
         const [total] = await tx
@@ -750,11 +752,11 @@ export function directoryStore(db: Database): DirectoryStore {
       const where = and(
         eq(directoryGroups.tenantId, tenantId),
         eq(directoryGroups.directoryId, directoryId),
-        f?.attr === "displayName"
-          ? sql`lower(${directoryGroups.displayName}) = lower(${f.value})`
-          : f?.attr === "externalId"
-            ? eq(directoryGroups.externalId, f.value)
-            : undefined,
+        ...(f?.terms.map((term) =>
+          term.attr === "displayName"
+            ? sql`lower(${directoryGroups.displayName}) = lower(${term.value})`
+            : eq(directoryGroups.externalId, term.value),
+        ) ?? []),
       )
       return withTenant(db, tenantId, async (tx) => {
         const [total] = await tx
@@ -851,119 +853,141 @@ export function directoryStore(db: Database): DirectoryStore {
     },
 
     async createGroup(tenantId, directoryId, input, event) {
-      return withTenant(db, tenantId, async (tx) => {
-        const [row] = await tx
-          .insert(directoryGroups)
-          .values({
-            tenantId,
-            directoryId,
-            displayName: input.displayName,
-            externalId: input.externalId,
-            resource: input.resource,
-          })
-          .returning()
-        const members = await liveMembers(tx, tenantId, directoryId, input.members)
-        if (members.length > 0)
-          await tx.insert(directoryMemberships).values(
-            members.map((userId) => ({
-              groupId: row!.id,
-              userId,
-              directoryId,
+      try {
+        return await withTenant(db, tenantId, async (tx) => {
+          const [row] = await tx
+            .insert(directoryGroups)
+            .values({
               tenantId,
-            })),
-          )
-        const entries = await outbox(tx, tenantId, directoryId, members, "group")
-        const skipped = input.members.length - members.length
-        await audit(tx, tenantId, {
-          ...event,
-          data: { ...event.data, groupId: row!.id, members: members.length, skipped },
+              directoryId,
+              displayName: input.displayName,
+              externalId: input.externalId,
+              resource: input.resource,
+            })
+            .returning()
+          const members = await liveMembers(tx, tenantId, directoryId, input.members)
+          if (members.length > 0)
+            await tx.insert(directoryMemberships).values(
+              members.map((userId) => ({
+                groupId: row!.id,
+                userId,
+                directoryId,
+                tenantId,
+              })),
+            )
+          const entries = await outbox(tx, tenantId, directoryId, members, "group")
+          const skipped = input.members.length - members.length
+          await audit(tx, tenantId, {
+            ...event,
+            data: { ...event.data, groupId: row!.id, members: members.length, skipped },
+          })
+          return {
+            row: toGroup(row!),
+            outbox: entries,
+            skipped,
+            kind: "written" as const,
+          }
         })
-        return { row: toGroup(row!), outbox: entries, skipped }
-      })
+      } catch (error) {
+        if (uniqueViolation(error, "directory_groups_display_name_unique"))
+          return { kind: "duplicate" }
+        throw error
+      }
     },
 
     async editGroup(tenantId, directoryId, id, edit, event) {
       if (!UUID.test(id)) return null
-      return withTenant(db, tenantId, async (tx) => {
-        const [current] = await tx
-          .select()
-          .from(directoryGroups)
-          .where(
-            and(
-              eq(directoryGroups.tenantId, tenantId),
-              eq(directoryGroups.directoryId, directoryId),
-              eq(directoryGroups.id, id),
-            ),
-          )
-          .for("update")
-          .limit(1)
-        if (!current) return null
-        const had = (
-          await tx
-            .select({ userId: directoryMemberships.userId })
-            .from(directoryMemberships)
+      try {
+        return await withTenant(db, tenantId, async (tx) => {
+          const [current] = await tx
+            .select()
+            .from(directoryGroups)
             .where(
               and(
-                eq(directoryMemberships.tenantId, tenantId),
-                eq(directoryMemberships.groupId, id),
+                eq(directoryGroups.tenantId, tenantId),
+                eq(directoryGroups.directoryId, directoryId),
+                eq(directoryGroups.id, id),
               ),
             )
-        ).map((r) => r.userId)
-        const next = edit({ row: toGroup(current), members: had })
-        const wanted = await liveMembers(tx, tenantId, directoryId, next.members)
-        const before = new Set(had)
-        const after = new Set(wanted)
-        const added = wanted.filter((u) => !before.has(u))
-        const removed = had.filter((u) => !after.has(u))
-        const [row] = await tx
-          .update(directoryGroups)
-          .set({
-            displayName: next.displayName,
-            externalId: next.externalId,
-            resource: next.resource,
-            updatedAt: new Date(),
+            .for("update")
+            .limit(1)
+          if (!current) return null
+          const had = (
+            await tx
+              .select({ userId: directoryMemberships.userId })
+              .from(directoryMemberships)
+              .where(
+                and(
+                  eq(directoryMemberships.tenantId, tenantId),
+                  eq(directoryMemberships.groupId, id),
+                ),
+              )
+          ).map((r) => r.userId)
+          const next = edit({ row: toGroup(current), members: had })
+          const wanted = await liveMembers(tx, tenantId, directoryId, next.members)
+          const before = new Set(had)
+          const after = new Set(wanted)
+          const added = wanted.filter((u) => !before.has(u))
+          const removed = had.filter((u) => !after.has(u))
+          const [row] = await tx
+            .update(directoryGroups)
+            .set({
+              displayName: next.displayName,
+              externalId: next.externalId,
+              resource: next.resource,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(eq(directoryGroups.tenantId, tenantId), eq(directoryGroups.id, id)),
+            )
+            .returning()
+          if (added.length > 0)
+            await tx
+              .insert(directoryMemberships)
+              .values(
+                added.map((userId) => ({ groupId: id, userId, directoryId, tenantId })),
+              )
+          for (let i = 0; i < removed.length; i += 1000)
+            await tx
+              .delete(directoryMemberships)
+              .where(
+                and(
+                  eq(directoryMemberships.tenantId, tenantId),
+                  eq(directoryMemberships.groupId, id),
+                  inArray(directoryMemberships.userId, removed.slice(i, i + 1000)),
+                ),
+              )
+          // ⚠ A RENAME TOUCHES EVERY MEMBER: group-to-role rules (#341) read names.
+          const renamed =
+            current.displayName !== next.displayName ||
+            current.externalId !== next.externalId
+          const touched = renamed
+            ? [...new Set([...wanted, ...removed])]
+            : [...added, ...removed]
+          const entries = await outbox(tx, tenantId, directoryId, touched, "group")
+          const skipped = next.members.length - wanted.length
+          await audit(tx, tenantId, {
+            ...event,
+            data: {
+              ...event.data,
+              groupId: id,
+              added: added.length,
+              removed: removed.length,
+              skipped,
+            },
           })
-          .where(
-            and(eq(directoryGroups.tenantId, tenantId), eq(directoryGroups.id, id)),
-          )
-          .returning()
-        if (added.length > 0)
-          await tx
-            .insert(directoryMemberships)
-            .values(
-              added.map((userId) => ({ groupId: id, userId, directoryId, tenantId })),
-            )
-        for (let i = 0; i < removed.length; i += 1000)
-          await tx
-            .delete(directoryMemberships)
-            .where(
-              and(
-                eq(directoryMemberships.tenantId, tenantId),
-                eq(directoryMemberships.groupId, id),
-                inArray(directoryMemberships.userId, removed.slice(i, i + 1000)),
-              ),
-            )
-        // ⚠ A RENAME TOUCHES EVERY MEMBER: group-to-role rules (#341) read names.
-        const renamed =
-          current.displayName !== next.displayName ||
-          current.externalId !== next.externalId
-        const touched = renamed
-          ? [...new Set([...wanted, ...removed])]
-          : [...added, ...removed]
-        const entries = await outbox(tx, tenantId, directoryId, touched, "group")
-        const skipped = next.members.length - wanted.length
-        await audit(tx, tenantId, {
-          ...event,
-          data: {
-            ...event.data,
-            groupId: id,
-            added: added.length,
-            removed: removed.length,
+          return {
+            row: toGroup(row!),
+            outbox: entries,
             skipped,
-          },
+            kind: "written" as const,
+          }
         })
-        return { row: toGroup(row!), outbox: entries, skipped }
-      })
+      } catch (error) {
+        if (uniqueViolation(error, "directory_groups_display_name_unique"))
+          return { kind: "duplicate" }
+        throw error
+      }
     },
 
     async deleteGroup(tenantId, directoryId, id, event) {

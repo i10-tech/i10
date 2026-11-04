@@ -552,6 +552,12 @@ export function createScimRoutes(deps?: ScimRouteDeps) {
         stored,
         event(c, "scim.group.created"),
       )
+      if (made.kind === "duplicate")
+        throw new ScimError(
+          409,
+          "A group with that displayName already exists.",
+          "uniqueness",
+        )
       await d.schedule(s.tenantId, made.outbox)
       const [view] = await groupViews(c, d, [made.row])
       c.header("Location", `${s.base}/Groups/${made.row.id}`)
@@ -585,6 +591,12 @@ export function createScimRoutes(deps?: ScimRouteDeps) {
       event(c, "scim.group.updated"),
     )
     if (!done) throw notFound("The group")
+    if (done.kind === "duplicate")
+      throw new ScimError(
+        409,
+        "A group with that displayName already exists.",
+        "uniqueness",
+      )
     await d.schedule(s.tenantId, done.outbox)
     const [view] = await groupViews(c, d, [done.row])
     return respond(c, view, 200)

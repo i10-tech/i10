@@ -84,6 +84,19 @@ Step-up lasts ten minutes (`middleware/session.ts`), and every setup write asks 
 
 **Recommendation: A, with the activate dialog listing what goes live.** That gives one passkey prompt in a normal setup, at the moment that matters. C can follow in the UI pass if the dialog is not enough.
 
+## Status of P1 and P2 (2026-11-04)
+
+Built, with tests, none of it probed live yet. Decisions: `onmicrosoft.com` is guide only; no step-up on a draft or testing connection except activating or requiring SSO; new Entra and Okta connections default to a 7 day longest session (this replaces the 12 hours #10 first shipped), which an owner can change; a silent re-check is #348.
+
+| # | Result |
+|---|---|
+| 11, 12, 14 | Refused test runs are recorded with the cause and the fix. The IdP's code is kept and mapped (`identity/failure.ts`); its free text never is. |
+| 13, 19, 22 | Copy for every Google code, a sync failure alert at most daily, retries honouring `Retry-After`, six concurrent member fetches, a failed watch is audited and shown. |
+| 15, 21 | Duplicate group names are a 409, and Entra's `emails[type eq "work"].value` and `and` filters work. Token expiry already had separate audit reasons. A conflict still answers success by design (`sso.md` 2.17): the directory card shows the count. |
+| 16, 17, 18, 20 | The guides have the missing steps. Alerts for OIDC secret and SCIM token expiry, stale Google pulls, and a renamed login waiting for an owner. |
+| 23 | Okta Universal Logout at `POST /sso/universal-logout/<id>`, tested with locally signed tokens only. It needs Adaptive MFA or Identity Threat Protection. Entra and Google have no equivalent. |
+| 24 | `login_hint` on Entra SAML and the `xms_edov` values are done, Okta Basic-auth already was. The single-string Issuer match and SP key rotation were checked and left as they are; #24's report is the only evidence for those two. |
+
 ## What already holds
 
 - **SCIM for Okta:** path-less deactivation, group add/remove/replace, 409 on duplicate users, case-insensitive filters and stable pagination.

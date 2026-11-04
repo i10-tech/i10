@@ -1,3 +1,4 @@
+import { isMicrosoftOwnedDomain } from "./microsoft-domain.js"
 import { and, arrayContains, desc, eq, gt, isNull, lte, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { joinDomains, joinExclusions, tenants, workspaceRoles } from "../db/core.js"
@@ -318,7 +319,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     async addDomain(tenantId, connectionId, joinDomainId) {
       return withTenant(db, tenantId, async (tx) => {
         const [proof] = await tx
-          .select({ id: joinDomains.id })
+          .select({ id: joinDomains.id, name: joinDomains.name })
           .from(joinDomains)
           .where(
             and(
@@ -328,6 +329,8 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
             ),
           )
           .limit(1)
+        if (proof && isMicrosoftOwnedDomain(proof.name))
+          return "microsoft_owned" as const
         const [connection] = await tx
           .select({ id: connections.id })
           .from(connections)
@@ -830,6 +833,27 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
               eq(identities.tenantId, tenantId),
               eq(identities.connectionId, connectionId),
               eq(identities.clerkUserId, clerkUserId),
+            ),
+          )
+          .limit(1),
+      )
+      return row ?? null
+    },
+
+    async identityByEmail(tenantId, connectionId, email) {
+      const [row] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({
+            id: identities.id,
+            clerkUserId: identities.clerkUserId,
+            subject: identities.subject,
+          })
+          .from(identities)
+          .where(
+            and(
+              eq(identities.tenantId, tenantId),
+              eq(identities.connectionId, connectionId),
+              eq(identities.email, email.toLowerCase()),
             ),
           )
           .limit(1),

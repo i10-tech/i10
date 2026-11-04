@@ -707,8 +707,8 @@ describe("directories: what they do", () => {
     }
     const ada = await person("ada@acme.test")
     const bob = await person("bob@acme.test")
-    const group = (displayName: string, members: string[]) =>
-      w.dirs.store.createGroup(
+    const group = async (displayName: string, members: string[]) => {
+      const made = await w.dirs.store.createGroup(
         TENANT,
         DIRECTORY,
         {
@@ -719,6 +719,9 @@ describe("directories: what they do", () => {
         },
         { type: "scim.group.created" },
       )
+      if (made.kind !== "written") throw new Error("duplicate")
+      return made
+    }
     const zeta = await group("zeta", [ada, bob])
     const alpha = await group("Alpha", [ada])
     const mid = await group("beta", [])
@@ -908,9 +911,9 @@ describe("directories: confirming a refused Google removal", () => {
     for (const who of ["user_admin", "user_m"])
       expect((await w.call(who, "POST", PATH, { removedUsers: 7 })).status).toBe(403)
     w.setFresh(false)
-    expect((await w.call("user_owner", "POST", PATH, { removedUsers: 7 })).status).not.toBe(
-      200,
-    )
+    expect(
+      (await w.call("user_owner", "POST", PATH, { removedUsers: 7 })).status,
+    ).not.toBe(200)
     expect(w.dirs.directories.get(DIRECTORY)!.allowDropUpTo).toBeNull()
   })
 
@@ -926,9 +929,9 @@ describe("directories: confirming a refused Google removal", () => {
     ]) {
       const w = consoleApp({ google: true, directory: over })
       await shown(w)
-      expect((await w.call("user_owner", "POST", PATH, { removedUsers: 7 })).status).toBe(
-        409,
-      )
+      expect(
+        (await w.call("user_owner", "POST", PATH, { removedUsers: 7 })).status,
+      ).toBe(409)
       expect(w.dirs.directories.get(DIRECTORY)!.allowDropUpTo).toBeNull()
     }
   })

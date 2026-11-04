@@ -338,7 +338,7 @@ suite("SCIM directories", () => {
     // A rename onto another live person's name is refused, and changes nothing.
     const [ada] = (
       await store().listUsers(acme, dirA, {
-        filter: { attr: "userName", value: `ada@${live}` },
+        filter: { terms: [{ attr: "userName", value: `ada@${live}` }] },
         startIndex: 1,
         count: 1,
       })
@@ -354,10 +354,63 @@ suite("SCIM directories", () => {
     expect((await store().user(acme, dirA, ada!.id))?.userName).toBe(`ada@${live}`)
   })
 
+  it("keeps a group displayName unique per directory, case-insensitively", async () => {
+    const made = await store().createGroup(
+      acme,
+      dirA,
+      readGroup({ displayName: "uniq-a" }),
+      event,
+    )
+    if (made.kind !== "written") throw new Error("duplicate")
+    expect(
+      (
+        await store().createGroup(
+          acme,
+          dirA,
+          readGroup({ displayName: "UNIQ-A" }),
+          event,
+        )
+      ).kind,
+    ).toBe("duplicate")
+    // Another directory may hold the same name.
+    expect(
+      (
+        await store().createGroup(
+          acme,
+          dirB,
+          readGroup({ displayName: "uniq-a" }),
+          event,
+        )
+      ).kind,
+    ).toBe("written")
+    // A rename onto another group's name is refused, and changes nothing.
+    const second = await store().createGroup(
+      acme,
+      dirA,
+      readGroup({ displayName: "uniq-b" }),
+      event,
+    )
+    if (second.kind !== "written") throw new Error("duplicate")
+    const renamed = await store().editGroup(
+      acme,
+      dirA,
+      second.row.id,
+      (cur) => ({
+        displayName: "uniq-A",
+        externalId: null,
+        members: cur.members,
+        resource: cur.row.resource,
+      }),
+      { type: "scim.group.updated" },
+    )
+    expect(renamed?.kind).toBe("duplicate")
+    expect((await store().group(acme, dirA, second.row.id))?.displayName).toBe("uniq-b")
+  })
+
   it("links an account to one live person per directory", async () => {
     const [ada] = (
       await store().listUsers(acme, dirA, {
-        filter: { attr: "userName", value: `ada@${live}` },
+        filter: { terms: [{ attr: "userName", value: `ada@${live}` }] },
         startIndex: 1,
         count: 1,
       })
@@ -484,6 +537,8 @@ suite("SCIM directories", () => {
       }),
       { type: "scim.group.created" },
     )
+    expect(made.kind).toBe("written")
+    if (made.kind !== "written") throw new Error("duplicate")
     expect(made.skipped).toBe(3)
     expect(made.outbox.map((e) => e.directoryUserId)).toEqual([a.row.id])
     expect((await store().membersOf(acme, [made.row.id])).get(made.row.id)).toEqual([
@@ -505,7 +560,8 @@ suite("SCIM directories", () => {
       }),
       { type: "scim.group.updated" },
     )
-    expect(added!.outbox.map((e) => e.directoryUserId)).toEqual([b.row.id])
+    if (!added || added.kind !== "written") throw new Error("expected written")
+    expect(added.outbox.map((e) => e.directoryUserId)).toEqual([b.row.id])
     const renamed = await store().editGroup(
       acme,
       dirA,
@@ -518,7 +574,8 @@ suite("SCIM directories", () => {
       }),
       { type: "scim.group.updated" },
     )
-    expect(renamed!.outbox.map((e) => e.directoryUserId).sort()).toEqual(
+    if (!renamed || renamed.kind !== "written") throw new Error("expected written")
+    expect(renamed.outbox.map((e) => e.directoryUserId).sort()).toEqual(
       [a.row.id, b.row.id].sort(),
     )
 
@@ -540,31 +597,72 @@ suite("SCIM directories", () => {
 
   it("filters users by userName, externalId and emails.value, and pages them", async () => {
     await store().createUser(acme, dirB, person("p1", { externalId: "ext-p1" }), event)
-    await store().createUser(acme, dirB, person("p2", { externalId: "ext-p2" }), event)
+    await store().createUser(
+      acme,
+      dirB,
+      person("p2", {
+        externalId: "ext-p2",
+        emails: [{ value: `p2@${live}`, type: "work", primary: true }],
+      }),
+      event,
+    )
     const list = (
       filter: Parameters<ReturnType<typeof store>["listUsers"]>[2]["filter"],
       startIndex = 1,
       count = 100,
     ) => store().listUsers(acme, dirB, { filter, startIndex, count })
     expect(
-      (await list({ attr: "userName", value: `P1@${live.toUpperCase()}` })).total,
+      (await list({ terms: [{ attr: "userName", value: `P1@${live.toUpperCase()}` }] }))
+        .total,
     ).toBe(1)
     expect(
-      (await list({ attr: "externalId", value: "ext-p2" })).rows[0]!.userName,
+      (await list({ terms: [{ attr: "externalId", value: "ext-p2" }] })).rows[0]!
+        .userName,
     ).toBe(`p2@${live}`)
-    expect((await list({ attr: "emails.value", value: `P2@${live}` })).total).toBe(1)
-    expect((await list({ attr: "emails.value", value: "nobody@x.test" })).total).toBe(0)
+    expect(
+      (await list({ terms: [{ attr: "emails.value", value: `P2@${live}` }] })).total,
+    ).toBe(1)
+    expect(
+      (await list({ terms: [{ attr: "emails.value", value: "nobody@x.test" }] })).total,
+    ).toBe(0)
+    // The bracketed form is the same address with a work type on it.
+    expect(
+      (await list({ terms: [{ attr: "workEmail", value: `P2@${live}` }] })).total,
+    ).toBe(1)
+    // Both comparisons must hold.
+    expect(
+      (
+        await list({
+          terms: [
+            { attr: "userName", value: `P2@${live}` },
+            { attr: "externalId", value: "ext-p2" },
+          ],
+        })
+      ).total,
+    ).toBe(1)
+    expect(
+      (
+        await list({
+          terms: [
+            { attr: "userName", value: `P2@${live}` },
+            { attr: "externalId", value: "ext-p1" },
+          ],
+        })
+      ).total,
+    ).toBe(0)
     const all = await list(null)
     const second = await list(null, 2, 1)
     expect(second.total).toBe(all.total)
     expect(second.rows[0]!.id).toBe(all.rows[1]!.id)
     expect((await list(null, 1, 0)).rows).toEqual([])
     // A filter value is a value: SQL in it matches nothing and breaks nothing.
-    expect((await list({ attr: "userName", value: "x' or '1'='1" })).total).toBe(0)
+    expect(
+      (await list({ terms: [{ attr: "userName", value: "x' or '1'='1" }] })).total,
+    ).toBe(0)
     expect(
       (
         await store().listGroups(acme, dirB, {
-          filter: { attr: "displayName", value: "' or true --" },
+          filter: { terms: [{ attr: "displayName", value: "' or true --" }] },
           startIndex: 1,
           count: 10,
         })
