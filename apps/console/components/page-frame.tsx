@@ -73,7 +73,28 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
       ref={pane}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
     >
-      <PageTransition pathname={pathname}>{children}</PageTransition>
+      <PageTransition pathname={frameKey(pathname)}>{children}</PageTransition>
     </main>
   )
+}
+
+/**
+ * ⚠ SECTIONS WHOSE LAYOUT DRAWS THE HEADER, SO IT MUST NOT RE-ENTER INSIDE
+ * THEM. Keyed on the full pathname, `/settings/sso/connect` to `/settings/sso`
+ * remounted the whole layout: "Settings" rose and faded in again although it
+ * never changed, and the workspace picker beside it remounted and redrew. Inside
+ * these the frame holds still and `SectionContent` animates only the body.
+ */
+const SHARED_HEADER = ["/settings", "/account", "/reference"]
+
+function frameKey(pathname: string) {
+  return (
+    SHARED_HEADER.find((s) => pathname === s || pathname.startsWith(`${s}/`)) ??
+    pathname
+  )
+}
+
+/** The body of a section in `SHARED_HEADER`, arriving per page under its header. */
+export function SectionContent({ children }: { children: React.ReactNode }) {
+  return <PageTransition pathname={usePathname()}>{children}</PageTransition>
 }

@@ -70,7 +70,7 @@ export function WorkspaceBar({
      */
     <div className="relative flex h-9 items-center justify-between gap-2 rounded-md px-1">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <WorkspaceSwitcher />
+        <WorkspaceSwitcher initialWorkspace={tenant} />
       </div>
     </div>
   )

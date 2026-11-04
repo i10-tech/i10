@@ -6,7 +6,10 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/i10/page"
+import { SectionContent } from "@/components/page-frame"
 import { SettingsWorkspace } from "@/components/settings-workspace"
+import { tryApi } from "@/lib/api"
+import type { Me } from "@/lib/types"
 
 /**
  * The settings shell.
@@ -23,9 +26,13 @@ import { SettingsWorkspace } from "@/components/settings-workspace"
  * two pixels out - which nobody can name and everybody feels as they move
  * between tabs.
  */
-export default function SettingsLayout({
+export default async function SettingsLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const me = await tryApi<Me>("/console/me")
+  const tenant = me.ok ? me.data.tenant : null
+  const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
+
   return (
     <Page>
       <PageHeader>
@@ -33,14 +40,12 @@ export default function SettingsLayout({
           <PageTitle>Settings</PageTitle>
           {/*
            * Which workspace these are the settings of, for people in more than
-           * one. Clerk's hooks throw outside its provider, which is only
-           * mounted with a key - see WorkspaceBar.
+           * one. It fades in once Clerk has the list, into the 36px the row
+           * already reserves, so nothing beside it moves.
            */}
-          {process.env.CLERK_PUBLISHABLE_KEY && (
-            <PageActions>
-              <SettingsWorkspace />
-            </PageActions>
-          )}
+          <PageActions>
+            <SettingsWorkspace initialWorkspace={tenant} clerkEnabled={clerkEnabled} />
+          </PageActions>
         </PageHeaderRow>
       </PageHeader>
 
@@ -50,7 +55,9 @@ export default function SettingsLayout({
        * where a label and its field end up a hand's width apart.
        */}
       <PageBody>
-        <div className="min-w-0 max-w-3xl">{children}</div>
+        <div className="min-w-0 max-w-3xl">
+          <SectionContent>{children}</SectionContent>
+        </div>
       </PageBody>
     </Page>
   )

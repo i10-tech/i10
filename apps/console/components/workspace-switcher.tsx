@@ -23,7 +23,7 @@ import { useWorkspacesChanged } from "@/lib/workspace-name"
 import { useJoinSuggestions } from "@/lib/join-suggestions"
 import { teamRoles } from "@/lib/actions"
 import { roleLabel } from "@/lib/roles"
-import type { WorkspaceRole } from "@/lib/types"
+import type { TenantProfile, WorkspaceRole } from "@/lib/types"
 
 /**
  * The workspace switcher, ours (2026-10-12) - what Clerk's
@@ -45,7 +45,11 @@ import type { WorkspaceRole } from "@/lib/types"
  * `afterSwitch`. Creating one still goes to set-up, as Clerk's
  * `afterCreateOrganizationUrl="/onboarding"` did.
  */
-export function WorkspaceSwitcher() {
+export function WorkspaceSwitcher({
+  initialWorkspace,
+}: {
+  initialWorkspace?: Pick<TenantProfile, "id" | "name"> | null
+} = {}) {
   const router = useRouter()
   const { organization } = useOrganization()
   const { isLoaded, setActive, userMemberships, userInvitations } = useOrganizationList(
@@ -85,6 +89,21 @@ export function WorkspaceSwitcher() {
   })
 
   if (!isLoaded) {
+    if (initialWorkspace) {
+      return (
+        <button
+          type="button"
+          disabled
+          className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm outline-none"
+        >
+          <Avatar name={initialWorkspace.name} size="sm" className="rounded-md" />
+          <span className="min-w-0 flex-1 truncate text-start font-medium">
+            {initialWorkspace.name}
+          </span>
+          <ChevronsUpDown aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        </button>
+      )
+    }
     return <Skeleton className="h-7 w-full rounded-md" />
   }
 

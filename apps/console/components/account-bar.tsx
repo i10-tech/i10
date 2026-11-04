@@ -80,7 +80,11 @@ export function AccountBar({ clerkEnabled, ...props }: AccountBarProps) {
   return clerkEnabled ? <ClerkAccountBar {...props} /> : <StaticAccountBar {...props} />
 }
 
-function ClerkAccountBar({ plan, usage }: Omit<AccountBarProps, "clerkEnabled">) {
+function ClerkAccountBar({
+  plan,
+  usage,
+  fallbackEmail,
+}: Omit<AccountBarProps, "clerkEnabled">) {
   const { isLoaded, user } = useUser()
   const { signOut } = useClerk()
 
@@ -90,7 +94,20 @@ function ClerkAccountBar({ plan, usage }: Omit<AccountBarProps, "clerkEnabled">)
    * and jump back - movement that is only noticeable because it happens on
    * every navigation.
    */
-  if (!isLoaded) return <Skeleton className="h-8 w-full rounded-md" />
+  if (!isLoaded) {
+    if (fallbackEmail) {
+      return (
+        <AccountRow
+          name={firstName(null, null, fallbackEmail)}
+          email={fallbackEmail}
+          imageUrl={null}
+          plan={plan}
+          usage={usage}
+        />
+      )
+    }
+    return <Skeleton className="h-8 w-full rounded-md" />
+  }
   if (!user) return null
 
   const email = user.primaryEmailAddress?.emailAddress ?? null
