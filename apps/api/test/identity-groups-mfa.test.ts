@@ -196,9 +196,9 @@ describe("OIDC and SAML group state detection (P0 #3)", () => {
         "groups",
       ),
     ).toBe("overage")
-    expect(
-      groupsStateOf({ _claim_names: { team_ids: "src1" } }, "team_ids"),
-    ).toBe("overage")
+    expect(groupsStateOf({ _claim_names: { team_ids: "src1" } }, "team_ids")).toBe(
+      "overage",
+    )
 
     const mapped = toAssertion(
       {
@@ -259,16 +259,12 @@ describe("OIDC and SAML group state detection (P0 #3)", () => {
         defaults,
       ),
     ).toBe("overage")
-    expect(samlGroupsStateOf(nullProto({ email: ["ada@acme.test"] }), {}, defaults)).toBe(
-      "absent",
-    )
+    expect(
+      samlGroupsStateOf(nullProto({ email: ["ada@acme.test"] }), {}, defaults),
+    ).toBe("absent")
     expect(samlGroupsStateOf(nullProto({ groups: [] }), {}, defaults)).toBe("present")
     expect(
-      samlGroupsStateOf(
-        nullProto({ dept: ["eng"] }),
-        { dept: "groups" },
-        defaults,
-      ),
+      samlGroupsStateOf(nullProto({ dept: ["eng"] }), { dept: "groups" }, defaults),
     ).toBe("present")
 
     const baseVerified = (attributes: Record<string, string[]>): VerifiedAssertion => ({
@@ -334,12 +330,16 @@ describe("OIDC and SAML group state detection (P0 #3)", () => {
         { preset: SAML_PRESETS.okta, subjectAttribute: null, mfaContextClasses: [] },
       )!
 
-    expect(assertionProvesMfa(mk({ email: ["ada@acme.test"], amr: ["pwd"] }))).toBe(false)
+    expect(assertionProvesMfa(mk({ email: ["ada@acme.test"], amr: ["pwd"] }))).toBe(
+      false,
+    )
     expect(
       assertionProvesMfa(mk({ email: ["ada@acme.test"], amr: ["pwd", "mfa"] })),
     ).toBe(true)
     expect(
-      assertionProvesMfa(mk({ email: ["ada@acme.test"], "session.amr": ["[pwd, otp]"] })),
+      assertionProvesMfa(
+        mk({ email: ["ada@acme.test"], "session.amr": ["[pwd, otp]"] }),
+      ),
     ).toBe(true)
   })
 })
@@ -458,9 +458,9 @@ describe("bridge role preservation on missing groups and two-branch absent rule"
     })
     expect(demoted.outcome).toBe("signed_in")
     expect(await w.roleOf("user_ada")).toBe("member")
-    expect(
-      w.store.events.some((e) => e.type === "sign_in.groups_unavailable"),
-    ).toBe(false)
+    expect(w.store.events.some((e) => e.type === "sign_in.groups_unavailable")).toBe(
+      false,
+    )
     expect(w.store.events.at(-2)).toMatchObject({
       type: "role.synced",
       subjectUserId: "user_ada",
@@ -597,11 +597,16 @@ describe("console API refusal and with_setting guidance on mfaRequired", () => {
     const store = memoryStore({ connections, live })
     const app = new Hono()
     app.use("*", async (c, next) => {
-      c.set("auth", { apiKeyId: "", tenantId: TENANT, scopes: [], mode: "live" } as never)
-      c.set(
-        "user",
-        { userId: c.req.header("x-user") ?? "user_admin", orgId: ORG } as never,
-      )
+      c.set("auth", {
+        apiKeyId: "",
+        tenantId: TENANT,
+        scopes: [],
+        mode: "live",
+      } as never)
+      c.set("user", {
+        userId: c.req.header("x-user") ?? "user_admin",
+        orgId: ORG,
+      } as never)
       c.set("freshAuth", async () => ({ status: "fresh" }))
       await next()
     })
@@ -700,7 +705,9 @@ describe("console API refusal and with_setting guidance on mfaRequired", () => {
       mfaRequired: true,
       capabilities: { canProveMfa: "no" },
     })
-    expect(listed.data[0]!.capabilities.mfaUnprovableReason).toContain("Google Workspace")
+    expect(listed.data[0]!.capabilities.mfaUnprovableReason).toContain(
+      "Google Workspace",
+    )
 
     const renamed = await w.patch(legacyGoogleId, { name: "Google SSO" })
     expect(renamed.status).toBe(200)
@@ -710,7 +717,11 @@ describe("console API refusal and with_setting guidance on mfaRequired", () => {
     const resent = await w.patch(legacyGoogleId, { name: "Google", mfaRequired: true })
     expect(resent.status).toBe(200)
 
-    const turnedOff = await w.patch(legacyGoogleId, { mfaRequired: false }, "user_owner")
+    const turnedOff = await w.patch(
+      legacyGoogleId,
+      { mfaRequired: false },
+      "user_owner",
+    )
     expect(turnedOff.status).toBe(200)
     expect(w.store.connections.get(legacyGoogleId)?.mfaRequired).toBe(false)
   })

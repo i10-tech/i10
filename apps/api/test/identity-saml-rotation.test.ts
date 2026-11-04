@@ -102,7 +102,8 @@ async function world(
       ),
       inResponseTo: "_req1",
     })
-  const audited = () => store.events.filter((e) => e.type === "saml.certificate_refreshed")
+  const audited = () =>
+    store.events.filter((e) => e.type === "saml.certificate_refreshed")
   return { store, saml, replay, fetched, verify, audited }
 }
 
@@ -141,7 +142,10 @@ describe("a rotated IdP certificate", () => {
     const second = await w.verify(newKey)
     expect(second.ok).toBe(false)
     expect(w.fetched).toHaveLength(1)
-    expect(w.audited()[0]!.data).toMatchObject({ retried: false, retrySucceeded: false })
+    expect(w.audited()[0]!.data).toMatchObject({
+      retried: false,
+      retrySucceeded: false,
+    })
   })
 
   it("audits a retry that still fails, and the refusal stands", async () => {

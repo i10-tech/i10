@@ -175,7 +175,7 @@ connections on `sso-lab.i10.tech` are untouched. Driven from a script with its
 own cookie jar through the Frontend API, so no browser session was disturbed.
 
 - **Creation defaults** (Backend API): `active: false`, `authenticatable:
-  true`, JIT on, `sync_user_attributes: true`,
+true`, JIT on, `sync_user_attributes: true`,
   `disable_additional_identifications: true`,
   `allow_organization_account_linking: false`, `allow_idp_initiated: false`,
   `force_authn: false`, `login_hint: off`. Certificates come back as a list
@@ -204,8 +204,7 @@ own cookie jar through the Frontend API, so no browser session was disturbed.
   calls (`GET /v1/organizations/{id}/enterprise_connections`,
   `GET .../domains?enrollment_mode=enterprise_sso`) need
   `org:sys_entconns:manage`, and our roles webhook demotes the probe admin to
-  `org:member` within seconds (by design, `fixClerkRole`), so they answered
-  403. See section 4.
+  `org:member` within seconds (by design, `fixClerkRole`), so they answered 403. See section 4.
 
 ## 4. The probe page
 

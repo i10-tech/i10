@@ -28,7 +28,14 @@
         "backchannel.logout.revoke.offline.tokens": "false",
         "post.logout.redirect.uris": "+"
       },
-      "defaultClientScopes": ["web-origins", "acr", "basic", "profile", "roles", "email"],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "basic",
+        "profile",
+        "roles",
+        "email"
+      ],
       "protocolMappers": [
         {
           "name": "groups",

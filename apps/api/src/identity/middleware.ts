@@ -129,9 +129,7 @@ export function gateReader(
 }
 
 export type StepUpConnection =
-  | string
-  | { id: string; protocol: Protocol; provider: string }
-  | null
+  string | { id: string; protocol: Protocol; provider: string } | null
 
 /**
  * `requireFreshAuth` with SSO step-up (sso.md 2.4, 2.22).
@@ -176,11 +174,13 @@ export function withSsoFreshness(
     if (
       connection &&
       typeof connection === "object" &&
-      capabilitiesOf(connection.protocol, connection.provider).canProveFreshAuth === "no"
+      capabilitiesOf(connection.protocol, connection.provider).canProveFreshAuth ===
+        "no"
     )
       return inner(request)
     if (managed.fresh) return { status: "fresh" }
-    const connectionId = typeof connection === "string" ? connection : (connection?.id ?? null)
+    const connectionId =
+      typeof connection === "string" ? connection : (connection?.id ?? null)
     return { status: "sso_stale", startUrl: startUrl(connectionId) }
   }
 }

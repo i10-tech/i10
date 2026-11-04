@@ -26,6 +26,7 @@ Caveat up front: the client holds only the UI half. Home-realm matching, account
 **Several connections match.** `SignInFactorOne.tsx:185-187` renders `SignInFactorOneEnterpriseConnections` (`UI/SignIn/SignInFactorOneEnterpriseConnections.tsx`) when `hasMultipleEnterpriseConnections`. It is a picker (`@/ui/common/ChooseEnterpriseConnectionCard.tsx`): one button per connection with name, logo URL, provider icon. On click it calls `authenticateWithRedirect` with `enterpriseConnectionId` and `continueSignIn: true` (36-58). A route guard (72-91) redirects to the sign-in URL if there are not multiple connections. Copy: title "Choose an account", subtitle "Select an enterprise account to continue." (`packages/localizations/src/en-US.ts:1804-1807`).
 
 **Is a password or other factor still offered?**
+
 - If the server returns ANY non-`enterprise_sso` first factor alongside SSO, `shouldHandOffToEnterpriseConnection` is false and the user lands on factor-one with `determineStartingSignInFactor` choosing a factor. So password/OTP coexistence is a server decision (surfaced as extra entries in `supportedFirstFactors`).
 - `enterprise_sso` is NOT in `localStrategies` (`UI/SignIn/utils.ts:99`), so it is never listed as a button in the "alternative methods" list (`ui/src/hooks/useAlternativeStrategies.ts:24-30` filters to local strategies only). SSO can therefore only be reached by: auto hand-off, the connection picker, or the bypass screen.
 - Combined/sign-up-if-missing: unknown identifiers can fall into the sign-up path (`accountDoesNotExistError` handling, SignInStart ~500-530), unrelated to SSO.
@@ -43,6 +44,7 @@ Who gets it: decided entirely by the server. From the org-side API, it is an org
 Where it appears: `SignInFactorOne.tsx:122` freezes the bypass factor on mount (comment: client piggybacking could drop the field and unmount mid-flow), and `177-179` returns `<SignInFactorOneSSOBypass bypassFactor=.../>` BEFORE the multi-connection check or any factor card. Also `shouldHandOffToEnterpriseConnection` returns false when a bypass factor exists, so the start page sends these users to factor-one rather than auto-redirecting.
 
 What the UI does (`UI/SignIn/SignInFactorOneSSOBypass.tsx`):
+
 - Two steps, `'sso'` and `'code'` (17, 36).
 - SSO step, single connection (132-159): standard sign-in header, a primary "Continue with SSO" button (`signIn.enterpriseSSO.formButtonPrimary`) that calls `authenticateWithRedirect` (no connection id), plus a card action link "Can't use SSO?" (`signIn.ssoBypass.actionLink`) which switches to the code step.
 - SSO step, multiple connections (110-130): the same picker as section 1 with the "Can't use SSO?" link as a child.
@@ -54,6 +56,7 @@ What the UI does (`UI/SignIn/SignInFactorOneSSOBypass.tsx`):
 ## 3. Redirect round trip
 
 ### Outbound
+
 - `SignIn.authenticateWithRedirect` (`CJ/resources/SignIn.ts:511-525`, impl `authenticateWithRedirectOrPopup` 422-509):
   1. `redirectUrl = clerk.buildUrlWithAuth(params.redirectUrl)` (adds dev-browser/auth token); `actionCompleteRedirectUrl = params.redirectUrlComplete`.
   2. `shouldCreateSignIn = !this.id || !continueSignIn`. With `continueSignIn: true` and an existing sign-in, it reuses it (so the identified user/ticket survives) and only calls `prepare_first_factor`.
@@ -65,9 +68,11 @@ What the UI does (`UI/SignIn/SignInFactorOneSSOBypass.tsx`):
 - Sign-up missing field: if the sign-up requires SSO, `missing_fields` contains `'enterprise_sso'`. `completeSignUpFlow` (`SH/internal/clerk-js/completeSignUpFlow.ts:46-60`) then calls `signUp.authenticateWithRedirect({strategy:'enterprise_sso', continueSignUp:true, ...})` automatically. Protect-check is resolved BEFORE the hand-off (34-44). `SignUpStart.tsx:350-353` catches API error code `enterprise_connection_id_is_required_with_multiple_connections` and navigates to `./enterprise-connections`. That page (`UI/SignUp/SignUpEnterpriseConnections.tsx`) GETs `/client/sign_ups/{id}/enterprise_connections` (`SignUp.ts:670-679`, returns `{id,name,provider,logoPublicUrl}`) and shows the same picker with `continueSignUp:true`. `navigateToNextStepSignUp` (`SH/internal/clerk-js/navigateToNextStepSignUp.ts:31-62`) order: protect-check, then `enterprise_sso` missing -> enterprise-connections page, then missing fields -> continue, then verify email/phone.
 
 ### Callback (`Clerk.handleRedirectCallback`, `CJ/clerk.ts:2627-2964`; UI wrapper `ui/src/common/SSOCallback.tsx`)
+
 The UI mounts `/sso-callback` (`SignInSSOCallback` / `SignUpSSOCallback`). The component calls `handleRedirectCallback({...params, reloadResource}, navigate)`, where `reloadResource` comes from the `intent=signIn|signUp` query param. On throw: shows the error in the card and bounces to `../` after 4s (`SSOCallback.tsx:34-45`). Param sets: `UI/SignIn/buildOAuthCallbackParams.ts` (first factor `../factor-one`, `../factor-two`, `../reset-password`, `../protect-check`, sign-up step URLs including `enterprise-connections`, `transferable`, `unsafeMetadata`).
 
 Decision order inside `_handleRedirectCallback` (first match wins; line numbers in `clerk.ts`):
+
 1. 2762: `si.status === 'complete'` -> `setActive`, redirect to after-sign-in (or session task route if `session.currentTask`).
 2. 2785/2792: sign-in or sign-up protect_check -> protect-check route (scoped by intent so a stale gate from an abandoned attempt cannot hijack).
 3. 2796: external account `transferable` with error `external_account_exists` -> `signIn.create({transfer:true})`, then complete / factor-one / factor-two / reset-password.
@@ -85,7 +90,9 @@ Decision order inside `_handleRedirectCallback` (first match wins; line numbers 
 15. fallthrough -> sign-in page.
 
 ### Errors shown
+
 Errors persist on the resource (`signIn.firstFactorVerification.error`, `signUp.verifications.externalAccount.error`) and are rendered when the user lands back on the start page.
+
 - `SignInStart.tsx:288-329` (`handleOauthError`) and `SignUpStart.tsx:~195-225` show the server error object in the card for these codes (`SH/internal/clerk-js/constants.ts:24-60`): `not_allowed_to_sign_up`, `oauth_access_denied`, `not_allowed_access`, `saml_user_attribute_missing`, `oauth_email_domain_reserved_by_saml`, `user_locked`, `external_account_not_found`, `sign_up_mode_restricted`, `sign_up_restricted_waitlist`, `enterprise_sso_user_attribute_missing`, `enterprise_sso_email_address_domain_mismatch`, `enterprise_sso_hosted_domain_mismatch`, `saml_email_address_domain_mismatch`, `organization_membership_quota_exceeded_for_sso`, `captcha_invalid`, `device_blocked`, `action_blocked`, `signup_rate_limit_exceeded`, `user_banned`, `user_deactivated`.
 - Any other code is replaced by a generic string: unable to complete the action, contact support (SignInStart 321, SignUpStart ~222).
 - After showing, the start page calls `signIn.create({})` / `signUp.create({})` (SignInStart 325) to wipe the failed attempt so a refresh does not replay it.
@@ -93,6 +100,7 @@ Errors persist on the resource (`signIn.firstFactorVerification.error`, `signUp.
 - Client-thrown: `protect_check_required` ("This sign-in needs an extra verification step that can't be shown here..."), invalid FAPI response.
 
 ### Linking, JIT, account matching (what the client shows)
+
 - Sign-in callback `transferable` plus sign-up transfer is how an SSO login for an unknown user becomes a sign-up (that is JIT creation). If JIT is off the server cannot produce `transferable`; the user instead gets an error from the list above, most plausibly `not_allowed_to_sign_up` / `external_account_not_found` / `sign_up_mode_restricted`. The exact error for `disableJitProvisioning` is not named anywhere in the client. Treat as unverified.
 - Existing user + SSO email: `external_account_exists` + `transferable` -> `signIn.create({transfer:true})` (step 3 above). This is Clerk's "attach the enterprise identity to the existing user" path, and the server decides if it is allowed.
 - `allowOrganizationAccountLinking` (field on connection): per the backend doc, "Whether existing users who are members of the organization can link their account to their enterprise identity. If false, only sign-up flows apply" (`BE/api/endpoints/EnterpriseConnectionApi.ts:127,155`). So when false, an EXISTING user cannot be silently linked by sign-in via the org connection; only new sign-ups happen. Client use: UserProfile (section 5).
@@ -103,6 +111,7 @@ Errors persist on the resource (`signIn.firstFactorVerification.error`, `signUp.
 ## 4. Organization-scoped connections
 
 What is visible client-side (membership creation and activation are server work; I found no client code that creates a membership or activates an org after SSO):
+
 - A connection has `organizationId` (`CJ/resources/EnterpriseConnection.ts:109,135`; backend `organizationId`, "Organization ID if the connection is scoped to an organization", `BE/.../EnterpriseConnection.ts:238-241`). Created via `Organization.createEnterpriseConnection` -> `POST /organizations/{id}/enterprise_connections` (`CJ/resources/Organization.ts:207-218`), with test runs, directory sync (SCIM) and bypass allowlist beneath the org.
 - Domains: connection `domains` must be verified domains of the org (`CreateEnterpriseConnectionParams.domains`, "Verified Domains... at least one"). A localized error exists for adding a domain that already belongs to a connection (`organization_domain_exists_for_enterprise_connection`).
 - Membership quota: `organization_membership_quota_exceeded_for_sso` is a first-class SSO sign-in error (section 3). This proves that SSO sign-in creates an org membership server-side and fails when the org's limit is hit. The copy in the SSO card text says new members get a default role: "New members will be assigned to {{role}} in this organization" (`organizationProfile.securityPage.ssoSection.tooltip`, en-US ~1580), and "Members without a matching domain can still sign in using existing auth methods."
@@ -139,6 +148,7 @@ What is visible client-side (membership creation and activation are server work;
 REST: `POST/GET/PATCH/DELETE /enterprise_connections[/{id}]`. List filters: `organizationId`, `active`, pagination. Body keys are deep-snake-cased.
 
 **EnterpriseConnection (response)**
+
 - `id`, `name`: identity/label.
 - `domains[]`: email domains the connection serves (home-realm matching input). Must be at least one on create; "Verified Domains".
 - `organizationId | null`: scoped to an org, or instance-wide when null.
@@ -155,6 +165,7 @@ REST: `POST/GET/PATCH/DELETE /enterprise_connections[/{id}]`. List filters: `org
 - `samlConnection | null`, `oauthConfig | null`, `createdAt`, `updatedAt`.
 
 **samlConnection**: `id`, `name`, `active`; IdP side: `idpEntityId`, `idpSsoUrl`, `idpCertificate` (+ issued/expires; first of `idpCertificates`), `idpCertificates[{certificate (base64 DER), issuedAt, expiresAt}]` (supports rotation, replaces all on write), `idpMetadataUrl`, `idpMetadata` (XML, write-only, never returned); SP side (Clerk): `acsUrl`, `spEntityId`, `spMetadataUrl`; behaviour: `allowSubdomains`, `allowIdpInitiated` (IdP-initiated login), `forceAuthn` (IdP must re-authenticate every time, ignoring its session), `syncUserAttributes` (deprecated nested, undefined), `loginHint`, plus input-only `attributeMapping {userId, emailAddress, firstName, lastName}` that maps SAML attribute names.
+
 - `loginHint.mode`: `email_address` (send typed identifier as `login_hint` to the IdP), `custom_attribute` (send the value of the user `publicMetadata[source]`), `off` (omit). `source` only with `custom_attribute`.
 
 **oauthConfig (OIDC)**: `id`, `name`, `clientId`, `clientSecret` (write-only), `providerKey` (e.g. `custom_oidc`), `discoveryUrl`, `authUrl`, `tokenUrl`, `userInfoUrl`, `requiresPkce` (must be true for public clients), `logoPublicUrl`, timestamps.
@@ -168,6 +179,7 @@ Not on BAPI: org bypass allowlist, test runs, and directory sync are FAPI/organi
 ## 8. What a thorough own-built SSO layer should copy or deliberately differ on
 
 Copy:
+
 1. Server-side domain discovery with the client acting on a factors list. Never match the domain in the browser. Hand off only when SSO is the sole factor AND there is exactly one connection AND no bypass; any choice (multiple connections, bypass) must render a screen.
 2. Drop the typed password on the floor when SSO may apply; replay it only after the server confirms no SSO factor (Clerk's `safePassword...` pattern). An SSO domain must never accept a password on the start screen.
 3. Never list SSO as an "alternative method" button; only auto hand-off, picker, or bypass screen.
@@ -180,6 +192,7 @@ Copy:
 10. Connection fields worth mirroring in a schema: `domains`, `active`, `authenticatable`, `disableJitProvisioning`, `allowOrganizationAccountLinking`, `syncUserAttributes`, `disableAdditionalIdentifications`, `forceAuthn`, `allowIdpInitiated`, `allowSubdomains`, login-hint mode, multi-cert rotation, custom attribute `ssoPath`/`scimPath`, a `test run` gate before activation.
 
 Differ deliberately (gaps or choices in Clerk's design that your layer should decide on):
+
 1. **No per-workspace enforcement flag in the client.** Clerk enforces implicitly by domain match plus `enterprise_sso`-only factors. You need an explicit "enforce SSO for this workspace" bit, separate from "connection exists", and a defined behaviour for non-domain members (Clerk's copy lets them use existing auth methods).
 2. **Unlinking:** Clerk's prebuilt UI offers none, and the resource allows `destroy`. For managed accounts, decide who can unlink (probably nobody, admin only) and what happens to sign-in afterwards.
 3. **JIT-off error is unnamed on the client.** Define a dedicated code (for example `sso_jit_disabled`) and message rather than relying on `not_allowed_to_sign_up`.

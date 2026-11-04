@@ -298,7 +298,9 @@ describe("GET /console/me", () => {
   })
   it("sends only the owner through onboarding, not people who joined", async () => {
     const onboards = async (userId: string) => {
-      const res = await consoleApp(userId).app.request("/console/me", { headers: BEARER })
+      const res = await consoleApp(userId).app.request("/console/me", {
+        headers: BEARER,
+      })
       return ((await res.json()) as { onboarding: { should_onboard: boolean } })
         .onboarding.should_onboard
     }

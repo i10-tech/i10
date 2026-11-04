@@ -88,11 +88,16 @@ export function mountIdentityRelinks(app: Hono, d: ConsoleDeps): void {
       // it would sign two people in as one, so nothing moves.
       if (done.outcome === "conflict")
         return c.json(
-          conflict("That login is already linked to another person on this connection."),
+          conflict(
+            "That login is already linked to another person on this connection.",
+          ),
           409,
         )
       if (done.outcome === "gone")
-        return c.json(conflict("That person's link changed. Refresh and check again."), 409)
+        return c.json(
+          conflict("That person's link changed. Refresh and check again."),
+          409,
+        )
       await id.store.record(tenantId, {
         type: "identity.relinked",
         actorUserId: userId,

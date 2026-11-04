@@ -86,8 +86,7 @@ export const IDP_CAPABILITIES: Readonly<
       mfaSetting:
         "Send session.amr as an attribute named amr in your Okta SAML app so i10 can read it.",
       canProveFreshAuth: "with_setting",
-      freshAuthSetting:
-        "Set Honor Force Authentication to Yes in your Okta SAML app.",
+      freshAuthSetting: "Set Honor Force Authentication to Yes in your Okta SAML app.",
     },
     generic: DEFAULT_ENTRY,
   },
@@ -99,11 +98,9 @@ function providerLabel(protocol: Protocol, provider: string): string {
   return provider
 }
 
-export function capabilitiesOf(
-  protocol: Protocol,
-  provider: string,
-): IdpCapabilities {
-  const table = protocol === "oidc" || protocol === "saml" ? IDP_CAPABILITIES[protocol] : null
+export function capabilitiesOf(protocol: Protocol, provider: string): IdpCapabilities {
+  const table =
+    protocol === "oidc" || protocol === "saml" ? IDP_CAPABILITIES[protocol] : null
   const entry =
     table && Object.hasOwn(table, provider) ? table[provider]! : DEFAULT_ENTRY
   return {

@@ -50,7 +50,9 @@ function world(
     engines: new Map([["test", testEngine("https://auth.i10.localhost")]]),
     join: async () => "added",
     isExempt: async (_t, userId) => exempt.includes(userId),
-    ...(options.scim !== undefined ? { preProvisioned: async () => options.scim! } : {}),
+    ...(options.scim !== undefined
+      ? { preProvisioned: async () => options.scim! }
+      : {}),
     log,
     now: () => new Date(clock),
   }
@@ -284,14 +286,14 @@ describe("the Entra UPN as an email (opt-in)", () => {
   })
 
   it("never counts a guest's UPN", async () => {
-    const a = oidc(
-      { preferred_username: "ada_gmail.com#EXT#@acme.test" },
-      entra(),
-    )
+    const a = oidc({ preferred_username: "ada_gmail.com#EXT#@acme.test" }, entra())
     expect(a.email).toBeNull()
     expect(upnAsAddress("ada_gmail.com#ext#@acme.test")).toBeNull()
     const w = world({ connection: entra() })
-    expect(await w.complete(a)).toMatchObject({ outcome: "refused", reason: "no_email" })
+    expect(await w.complete(a)).toMatchObject({
+      outcome: "refused",
+      reason: "no_email",
+    })
   })
 
   it("ignores the UPN whenever a real email claim exists", () => {
@@ -304,10 +306,13 @@ describe("the Entra UPN as an email (opt-in)", () => {
   })
 
   it("is for Entra only: another provider's preferred_username is not an address", () => {
-    const a = oidc({ preferred_username: "ada@acme.test" }, {
-      provider: "okta",
-      upnAsEmail: true,
-    })
+    const a = oidc(
+      { preferred_username: "ada@acme.test" },
+      {
+        provider: "okta",
+        upnAsEmail: true,
+      },
+    )
     expect(a.email).toBeNull()
   })
 

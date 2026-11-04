@@ -86,7 +86,8 @@ export function mountAccount(app: Hono, d: ConsoleDeps): void {
       onboarding: {
         ...onboardingState,
         should_onboard:
-          onboardingState.should_onboard && (access === null || access.role === "owner"),
+          onboardingState.should_onboard &&
+          (access === null || access.role === "owner"),
       },
       access: access ? { role: access.role, permissions: access.permissions } : null,
     })

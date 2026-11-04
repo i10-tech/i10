@@ -100,7 +100,10 @@ describe("outside SSO starts and third-party initiated login", () => {
       ).toBe(true)
       expect(
         submittedFromHere(
-          req("/sso/start", { origin: "https://evil.example", host: new URL(BIND).host }),
+          req("/sso/start", {
+            origin: "https://evil.example",
+            host: new URL(BIND).host,
+          }),
         ),
       ).toBe(false)
       expect(submittedFromHere(req("/sso/start"))).toBe(false)
@@ -206,13 +209,15 @@ describe("outside SSO starts and third-party initiated login", () => {
         {},
       ] as Array<Record<string, string>>) {
         const request = req(tile, headers)
-        expect(decideSsoEntry(request, ID, request.nextUrl.searchParams)).toMatchObject({
-          action: "start",
-          connection: ID,
-          returnTo: `${CONSOLE}/projects`,
-          loginHint: "ada@acme.com",
-          iss: OKTA_ISSUER,
-        })
+        expect(decideSsoEntry(request, ID, request.nextUrl.searchParams)).toMatchObject(
+          {
+            action: "start",
+            connection: ID,
+            returnTo: `${CONSOLE}/projects`,
+            loginHint: "ada@acme.com",
+            iss: OKTA_ISSUER,
+          },
+        )
       }
     })
 
@@ -223,10 +228,12 @@ describe("outside SSO starts and third-party initiated login", () => {
         `iss=${"a".repeat(2049)}`,
       ]) {
         const request = req(`/sso/${ID}?${query}`, { "sec-fetch-site": "cross-site" })
-        expect(decideSsoEntry(request, ID, request.nextUrl.searchParams)).toMatchObject({
-          action: "interstitial",
-          iss: "",
-        })
+        expect(decideSsoEntry(request, ID, request.nextUrl.searchParams)).toMatchObject(
+          {
+            action: "interstitial",
+            iss: "",
+          },
+        )
       }
     })
 
@@ -249,9 +256,9 @@ describe("outside SSO starts and third-party initiated login", () => {
 
     it("marks a malformed connection id invalid", () => {
       const request = req("/sso/not-a-uuid", { "sec-fetch-site": "cross-site" })
-      expect(decideSsoEntry(request, "not-a-uuid", request.nextUrl.searchParams)).toEqual(
-        { action: "invalid" },
-      )
+      expect(
+        decideSsoEntry(request, "not-a-uuid", request.nextUrl.searchParams),
+      ).toEqual({ action: "invalid" })
     })
   })
 
