@@ -59,6 +59,14 @@ import { useMounted } from "@/lib/react"
  * here (settings, appearance, the set-up flow, the homepage). The identity is
  * still Clerk's (`useUser`) and so is signing out; what is ours is the list.
  */
+/** The signed-in person as the server read them from Clerk, for the first paint. */
+export interface InitialUser {
+  firstName: string | null
+  username: string | null
+  email: string | null
+  imageUrl: string
+}
+
 export interface AccountBarProps {
   plan: PlanSummary | null
   /**
@@ -73,6 +81,14 @@ export interface AccountBarProps {
    * menu has no "Log out", because there is no session to end.
    */
   clerkEnabled: boolean
+  /**
+   * ⚠ WHAT IS DRAWN UNTIL CLERK LOADS (2026-11-04), so a full load opens on the
+   * real name and picture. Without it the row opened on a name made from the
+   * email, with letters for a picture, and swapped a moment later: a fallback
+   * shown before anything had been tried, let alone had failed.
+   */
+  initialUser?: InitialUser | null
+  /** Only when the server could not read the person from Clerk. */
   fallbackEmail?: string | null
 }
 
@@ -83,6 +99,7 @@ export function AccountBar({ clerkEnabled, ...props }: AccountBarProps) {
 function ClerkAccountBar({
   plan,
   usage,
+  initialUser,
   fallbackEmail,
 }: Omit<AccountBarProps, "clerkEnabled">) {
   const { isLoaded, user } = useUser()
@@ -95,6 +112,21 @@ function ClerkAccountBar({
    * every navigation.
    */
   if (!isLoaded) {
+    if (initialUser) {
+      return (
+        <AccountRow
+          name={firstName(
+            initialUser.firstName,
+            initialUser.username,
+            initialUser.email,
+          )}
+          email={initialUser.email}
+          imageUrl={initialUser.imageUrl}
+          plan={plan}
+          usage={usage}
+        />
+      )
+    }
     if (fallbackEmail) {
       return (
         <AccountRow
@@ -212,8 +244,8 @@ function AccountRow({
           )}
           aria-label={`Account menu for ${name}`}
         >
-          {/* Initials when there is no photo: two people with no avatar are
-              two identical circles otherwise. */}
+          {/* Clerk's image, its default picture until a photo is set, as the
+              profile row shows it; initials only when it cannot load. */}
           <Avatar
             name={name}
             src={imageUrl || undefined}

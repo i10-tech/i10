@@ -31,9 +31,12 @@ import type { TenantProfile } from "@/lib/types"
  */
 export function WorkspaceBar({
   tenant,
+  image,
   clerkEnabled,
 }: {
   tenant: TenantProfile | null
+  /** The workspace's Clerk image, read by the server so the first paint has it. */
+  image?: string | null
   /**
    * ⚠ PASSED FROM THE SERVER RATHER THAN DETECTED HERE. Clerk's hooks throw
    * outside a `<ClerkProvider>`, and the provider is only mounted when a
@@ -70,7 +73,9 @@ export function WorkspaceBar({
      */
     <div className="relative flex h-9 items-center justify-between gap-2 rounded-md px-1">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <WorkspaceSwitcher initialWorkspace={tenant} />
+        <WorkspaceSwitcher
+          initialWorkspace={tenant ? { ...tenant, imageUrl: image ?? undefined } : null}
+        />
       </div>
     </div>
   )

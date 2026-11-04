@@ -25,6 +25,7 @@ import { tryApi } from "@/lib/api"
 import { gateRefusal } from "@/lib/identity-gate"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
 import { authOrigin } from "@/lib/sso-server"
+import { clerkIdentity } from "@/lib/clerk-identity"
 import type { Attention, Me } from "@/lib/types"
 
 /**
@@ -57,7 +58,9 @@ export const dynamic = "force-dynamic"
 export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const me = await tryApi<Me>("/console/me")
+  // Clerk's own copy of the person and the workspace picture, read alongside -
+  // for the rail's first paint only. See lib/clerk-identity.ts.
+  const [me, identity] = await Promise.all([tryApi<Me>("/console/me"), clerkIdentity()])
 
   /*
    * ⚠ `tenant_not_ready` IS NOT AN ERROR AND MUST NOT RENDER AS ONE. It means
@@ -230,7 +233,11 @@ export default async function AppLayout({
          */}
         <div className="flex items-center px-2 pt-2 pb-1">
           <div className="min-w-0 flex-1">
-            <WorkspaceBar tenant={me.data.tenant} clerkEnabled={clerkEnabled} />
+            <WorkspaceBar
+              tenant={me.data.tenant}
+              image={identity.workspaceImage}
+              clerkEnabled={clerkEnabled}
+            />
           </div>
         </div>
 
@@ -277,6 +284,7 @@ export default async function AppLayout({
           <AccountBar
             clerkEnabled={clerkEnabled}
             plan={me.data.billing.plan}
+            initialUser={identity.user}
             fallbackEmail={me.data.user.email}
             usage={
               <Suspense fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}>
@@ -304,6 +312,8 @@ export default async function AppLayout({
           <MobileNav
             tenant={me.data.tenant}
             plan={me.data.billing.plan}
+            workspaceImage={identity.workspaceImage}
+            initialUser={identity.user}
             fallbackEmail={me.data.user.email}
             clerkEnabled={clerkEnabled}
             attention={attention}

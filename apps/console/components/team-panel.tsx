@@ -405,11 +405,9 @@ function Members({
                 <span className="flex min-w-0 items-center gap-3">
                   <Avatar
                     name={name}
-                    src={
-                      member.publicUserData?.hasImage
-                        ? member.publicUserData.imageUrl
-                        : undefined
-                    }
+                    // Clerk's picture, its default without an upload; letters
+                    // only when it cannot load, as every avatar here.
+                    src={member.publicUserData?.imageUrl}
                   />
                   <span className="min-w-0">
                     <span className="flex items-center gap-2 text-sm">

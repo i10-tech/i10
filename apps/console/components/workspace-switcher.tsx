@@ -48,7 +48,8 @@ import type { TenantProfile, WorkspaceRole } from "@/lib/types"
 export function WorkspaceSwitcher({
   initialWorkspace,
 }: {
-  initialWorkspace?: Pick<TenantProfile, "id" | "name"> | null
+  /** The server's copy, drawn until Clerk loads; `imageUrl` is Clerk's, read there. */
+  initialWorkspace?: (Pick<TenantProfile, "id" | "name"> & { imageUrl?: string }) | null
 } = {}) {
   const router = useRouter()
   const { organization } = useOrganization()
@@ -96,11 +97,19 @@ export function WorkspaceSwitcher({
           disabled
           className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm outline-none"
         >
-          <Avatar name={initialWorkspace.name} size="sm" className="rounded-md" />
+          <Avatar
+            name={initialWorkspace.name}
+            src={initialWorkspace.imageUrl}
+            size="sm"
+            className="rounded-md"
+          />
           <span className="min-w-0 flex-1 truncate text-start font-medium">
             {initialWorkspace.name}
           </span>
-          <ChevronsUpDown aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          <ChevronsUpDown
+            aria-hidden
+            className="size-4 shrink-0 text-muted-foreground"
+          />
         </button>
       )
     }
@@ -138,7 +147,7 @@ export function WorkspaceSwitcher({
           >
             <Avatar
               name={name}
-              src={organization?.hasImage ? organization.imageUrl : undefined}
+              src={organization?.imageUrl}
               size="sm"
               className="rounded-md"
             />
@@ -166,7 +175,7 @@ export function WorkspaceSwitcher({
               <div className="flex items-center gap-3 px-2 py-2">
                 <Avatar
                   name={name}
-                  src={organization.hasImage ? organization.imageUrl : undefined}
+                  src={organization.imageUrl}
                   className="rounded-lg"
                 />
                 <span className="min-w-0 flex-1">
@@ -195,7 +204,7 @@ export function WorkspaceSwitcher({
                 >
                   <Avatar
                     name={m.organization.name}
-                    src={m.organization.hasImage ? m.organization.imageUrl : undefined}
+                    src={m.organization.imageUrl}
                     size="sm"
                     className="rounded-md"
                   />
@@ -227,11 +236,7 @@ export function WorkspaceSwitcher({
                 >
                   <Avatar
                     name={invitation.publicOrganizationData.name}
-                    src={
-                      invitation.publicOrganizationData.hasImage
-                        ? invitation.publicOrganizationData.imageUrl
-                        : undefined
-                    }
+                    src={invitation.publicOrganizationData.imageUrl}
                     size="sm"
                     className="rounded-md"
                   />

@@ -56,13 +56,9 @@ function ClerkSettingsWorkspace({
 
   const items = memberships.map((m) => {
     const org = m.organization.id === activeOrg.id ? activeOrg : m.organization
+    // Clerk's picture, its default without an upload, as the rail shows it.
     const imageUrl =
-      "hasImage" in org &&
-      org.hasImage &&
-      "imageUrl" in org &&
-      typeof org.imageUrl === "string"
-        ? org.imageUrl
-        : undefined
+      "imageUrl" in org && typeof org.imageUrl === "string" ? org.imageUrl : undefined
     return {
       value: org.id,
       label: org.name,
@@ -143,12 +139,26 @@ function ClerkSettingsWorkspace({
  * lost its tile and left two loose initials beside the name.
  */
 export function WorkspaceMark({ name, src }: { name: string; src?: string }) {
-  return src ? (
+  // The letters `Avatar` draws, so a mark that cannot load reads like the rail's.
+  const initials =
+    name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "?"
+  const [failed, setFailed] = React.useState<string | null>(null)
+  return src && failed !== src ? (
     // eslint-disable-next-line @next/next/no-img-element -- Clerk's image host, 20px
-    <img src={src} alt="" className="size-5 rounded-md object-cover" />
+    <img
+      src={src}
+      alt=""
+      className="size-5 rounded-md object-cover"
+      onError={() => setFailed(src)}
+    />
   ) : (
-    <span className="grid size-5 place-items-center rounded-md bg-muted text-[10px] font-medium text-muted-foreground uppercase">
-      {name.trim().charAt(0) || "?"}
+    <span className="grid size-5 place-items-center rounded-md bg-muted text-[9px] font-medium text-muted-foreground">
+      {initials}
     </span>
   )
 }
