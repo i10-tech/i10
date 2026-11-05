@@ -54,9 +54,13 @@ spec:
     # bytes sets the truncated bit and the resolver retries over TCP - so a
     # UDP-only rule yields a nameserver that works until a zone grows a DKIM key,
     # which is the hardest shape of DNS fault to see.
-    - from:
-        - ipBlock: { cidr: 0.0.0.0/0 }
-      ports:
+    #
+    # ⚠ NO `from` AT ALL, WHICH MEANS EVERY SOURCE ON BOTH FAMILIES. This rule
+    # was `ipBlock: 0.0.0.0/0`, which is IPv4 only, so every query arriving over
+    # IPv6 was dropped while `ns1`/`ns2` publish AAAA records. Found 2026-11-05
+    # when the tailnet's `fd7a:` path answered on :443 and timed out on :53.
+    # Stalwart's `allow-public-mail` documents the same trap.
+    - ports:
         - { port: 53, protocol: UDP }
         - { port: 53, protocol: TCP }
   egress:
