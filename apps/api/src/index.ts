@@ -147,9 +147,9 @@ try {
 }
 
 // ⚠ AFTER THE RLS ASSERTION, BEFORE ANYTHING SERVES. This publishes
-// `SES_ENABLED` and `METERING_FREE_PLAN_ID` into `core.routing_settings`, which
-// is the only way the mailbox lever - a function Stalwart calls inside Postgres
-// - can see them. See domains/routing-settings.ts.
+// `SES_ENABLED`, `SES_RELAY_ENABLED`, and `MAIL_DOMAINS` into
+// `core.routing_settings`, which is the only way the mailbox lever - a function
+// Stalwart calls inside Postgres - can see them. See domains/routing-settings.ts.
 //
 // ⚠ AND IT IS NOT FATAL. A failure leaves Stalwart reading the previous deploy's
 // values, which are stale rather than nonsense; refusing to boot over a routing
@@ -158,7 +158,7 @@ try {
   await publishRoutingSettings(db, {
     sesEnabled: env.SES_ENABLED,
     sesRelayEnabled: env.SES_RELAY_ENABLED,
-    freePlanId: env.METERING_FREE_PLAN_ID,
+    mailDomains: env.MAIL_DOMAINS,
   })
 } catch (error) {
   log.error(

@@ -467,7 +467,7 @@ requires it - and Amazon drops a DSN for mail it did not send. One return path
 for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
 return path".
 
-## The mailbox lever, and the one piece that is not here yet
+## The mailbox lever
 
 `MtaOutboundStrategy.route` is an expression evaluated **per recipient**, and it
 is awaited - so it can ask Postgres:
@@ -485,19 +485,21 @@ between two i10 mailboxes would have left through SES and come back over the
 internet. It is written in the STORED shape (`{"0": {...}}`, a list kept as a
 map) so the dry-run compares equal.
 
-`core.mailbox_route` (migration 0036) returns the **name of a route**:
+`core.mailbox_route` (migration 0036, replaced in 0132) returns the **name of a route**:
 `mx` to deliver ourselves, `ses-relay` to hand the message to SES's SMTP
 endpoint. It applies the same rule as `resolveRoute` in the API - kill switch,
-then the domain's override, then the plan - so a plan change takes effect on the
-next message rather than the next deploy.
+then the domain's override, otherwise SES. The plan is no longer an input.
+Our own mailbox domains come from `MAIL_DOMAINS`, because they are code-defined
+rather than rows in `core.domains`.
 
 ⚠ **`sender_domain` IS THE RETURN PATH, NOT THE `From:` HEADER.** For human mail
 that is the sender's own domain, which is what this wants. For our own
 transactional mail on the direct route it is the return path, `send.<domain>` -
-which matches no row, so it answers `mx` and the worker's decision stands. That
-is not incidental: this expression sees **every** message in the queue, and
-re-routing a transactional message onto SES here would silently move it off the
-route its plan chose. The `hosts_mailboxes` join is what prevents it.
+which matches no hosted mailbox row, so it answers `mx` and the worker's
+decision stands. That is not incidental: this expression sees **every** message
+in the queue, and re-routing a transactional message onto SES here would
+silently move it off the worker's chosen route. The `hosts_mailboxes` join is
+what prevents it.
 
 ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX, WHICH IS WHY THIS SHIPS SAFELY.**
 `get_route_or_default` answers `MX_GATEWAY` for a name it cannot resolve and logs
