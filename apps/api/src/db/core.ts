@@ -368,7 +368,7 @@ export const domains = core.table(
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
 
     /**
-     * Which MTA this domain's API mail leaves through. `auto` asks the plan.
+     * Which MTA this domain's API mail leaves through. `auto` uses SES.
      *
      * ⚠ ON THE DOMAIN, NOT THE TENANT, BECAUSE DELIVERABILITY IS PER DOMAIN. A
      * customer with a warmed sending domain and a brand-new one has different
@@ -398,15 +398,12 @@ export const domains = core.table(
     deliveryRoute: deliveryRoute("delivery_route").notNull().default("auto"),
 
     /**
-     * Which MTA this domain's MAILBOX mail leaves through. `auto` asks the plan.
+     * Which MTA this domain's MAILBOX mail leaves through. `auto` uses SES.
      *
-     * ⚠ STORED AND RENDERED, AND READ BY NOTHING YET. Stalwart chooses the
-     * mailbox route itself by evaluating an expression against its own queue,
-     * and that expression - plus the SES SMTP relay behind it - is not built.
-     * The column exists so the preference has somewhere to live and the API can
-     * answer with it; see docs/decisions/mail-routing.md. It is the same shape
-     * of promise `delivery_route` made before anything read that either, which
-     * is exactly why the note is here rather than implied.
+     * ⚠ STALWART ENFORCES THIS, NOT THE API. Mailbox mail enters Stalwart's
+     * queue straight from a person's mail client, so its outbound expression
+     * calls `core.mailbox_route` to apply this preference. The SQL function
+     * mirrors `resolveRoute`; see docs/decisions/mail-routing.md.
      */
     mailboxRoute: deliveryRoute("mailbox_route").notNull().default("auto"),
 
@@ -2951,11 +2948,11 @@ export const meterWindows = core.table(
 )
 
 /**
- * The two routing inputs that are configuration rather than rows.
+ * The routing inputs that are configuration rather than rows.
  *
- * ⚠ A PROJECTION OF THE ENVIRONMENT, NOT A SECOND SOURCE OF TRUTH. `SES_ENABLED`
- * and `METERING_FREE_PLAN_ID` are authored in Doppler and read from `env` by the
- * API and the worker; this row is a copy the API upserts at boot. It exists for
+ * ⚠ A PROJECTION OF THE ENVIRONMENT, NOT A SECOND SOURCE OF TRUTH. `SES_ENABLED`,
+ * `SES_RELAY_ENABLED`, and `MAIL_DOMAINS` are authored in Doppler and read from
+ * `env` by the API; this row is a copy the API upserts at boot. It exists for
  * one reader that cannot see our pods' environment: the `core.mailbox_route`
  * function Stalwart calls to decide where a mailbox domain's human mail goes.
  *
@@ -2989,8 +2986,11 @@ export const routingSettings = core.table("routing_settings", {
    */
   sesRelayEnabled: boolean("ses_relay_enabled").notNull().default(false),
 
-  /** Mirrors `METERING_FREE_PLAN_ID`. */
-  freePlanId: text("free_plan_id").notNull().default("free"),
+  /** Mirrors `MAIL_DOMAINS`: our own mailbox domains, which have no domain row. */
+  mailDomains: text("mail_domains")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
 
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })

@@ -1,17 +1,12 @@
 /**
- * Which MTA a domain's mail leaves through - one rule per class of mail.
+ * Which MTA a domain's mail leaves through - one shared rule for both classes
+ * of mail.
  *
- * ⚠ TWO CLASSES, TWO RULES, AND SINCE #155 THEY DELIBERATELY DIFFER.
- *
- * - **Transactional** (`resolveRoute`): mail our API accepted and our worker
- *   sends. Every plan goes through SES, free included - so a free sender is on
- *   the same path, the same reputation controls and the same event pipeline as
- *   a paying one, and never on the IP our human mailboxes share.
- * - **Mailbox** (`resolveMailboxRoute`): mail a person's client submitted into
- *   Stalwart's queue. Still decided by plan, because the only way to reach SES
- *   from Stalwart is the `ses-relay` route, which does not exist yet (#191).
- *   Stalwart evaluates this itself by calling `core.resolve_route`; the
- *   function here is the same rule where our own code can read it.
+ * ⚠ TWO READERS, ONE RULE. Transactional mail calls `resolveRoute` in the API
+ * and worker. Mailbox mail enters Stalwart's queue directly, so Stalwart
+ * evaluates the SQL mirror, `core.resolve_route`, through `core.mailbox_route`.
+ * Both classes use SES by default on every plan; only the kill switch and a
+ * per-domain override can choose direct delivery.
  *
  * ⚠ PURE, AND NOT WHERE THE MAILBOX DECISION IS ENFORCED. See
  * docs/decisions/mail-routing.md.
@@ -43,15 +38,8 @@ export interface RouteInput {
   sesEnabled: boolean
 }
 
-export interface MailboxRouteInput extends RouteInput {
-  /** The plan the tenant holds, or `null` if they hold none. */
-  planId: string | null
-  /** Which plan id counts as free. From `METERING_FREE_PLAN_ID`. */
-  freePlanId: string
-}
-
 /**
- * The transactional route.
+ * The shared route.
  *
  * ⚠ THE PLAN IS NOT AN INPUT, AND THAT IS THE CHANGE #155 MADE. It used to
  * send free tenants direct to save the SES per-message fee. That traded a
@@ -73,32 +61,4 @@ export function resolveRoute({ override, sesEnabled }: RouteInput): DeliveryRout
   if (!sesEnabled) return "direct"
   if (override !== "auto") return override
   return "ses"
-}
-
-/**
- * The mailbox route - the TypeScript mirror of `core.resolve_route`
- * (0036_mailbox_lever.sql), which is what Stalwart actually calls.
- *
- * ⚠ AN OVERRIDE BEATS THE PLAN, INCLUDING FOR A PAYING CUSTOMER. A customer
- * whose deliverability needs one specific path, or one being moved off a route
- * that is having a bad day, must not be silently moved back by their plan.
- *
- * ⚠ A TENANT WITH NO PLAN SENDS DIRECT: our misconfiguration rather than
- * theirs, and their mail still goes.
- *
- * ⚠ FREE IS RECOGNISED BY NAME AND EVERYTHING ELSE IS TREATED AS PAID. A plan
- * id renamed in the catalogue without moving `METERING_FREE_PLAN_ID` therefore
- * routes free mailboxes to SES. The SQL does the same, and must: the two are
- * asserted against one table. Whether free mailbox mail should use SES at all
- * is #191.
- */
-export function resolveMailboxRoute({
-  override,
-  planId,
-  freePlanId,
-  sesEnabled,
-}: MailboxRouteInput): DeliveryRoute {
-  if (!sesEnabled) return "direct"
-  if (override !== "auto") return override
-  return planId === null || planId === freePlanId ? "direct" : "ses"
 }
