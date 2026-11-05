@@ -2,14 +2,13 @@
 
 import * as React from "react"
 import { useOrganization, useOrganizationList } from "@clerk/nextjs"
-import { useRouter } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { clerkReason } from "@/components/account/shared"
-import { afterSwitch } from "@/lib/after-switch"
 import { toastError } from "@/lib/toast"
 import { useWorkspacesChanged } from "@/lib/workspace-name"
+import { useWorkspaceSwitch } from "@/lib/workspace-switch"
 import type { TenantProfile } from "@/lib/types"
 
 /**
@@ -38,11 +37,11 @@ function ClerkSettingsWorkspace({
 }: {
   initialWorkspace: Pick<TenantProfile, "id" | "name">
 }) {
-  const router = useRouter()
   const { organization } = useOrganization()
   const { isLoaded, setActive, userMemberships } = useOrganizationList({
     userMemberships: { pageSize: 50, keepPreviousData: true },
   })
+  const { pending, switchWorkspace } = useWorkspaceSwitch()
   const reduced = useReducedMotion()
   const [busy, setBusy] = React.useState(false)
   const wrap = React.useRef<HTMLDivElement>(null)
@@ -67,12 +66,24 @@ function ClerkSettingsWorkspace({
   })
 
   async function choose(id: string) {
-    if (id === activeOrg.id) return
+    if (id === (pending?.id ?? activeOrg.id)) return
+    const targetOrg = memberships.find((m) => m.organization.id === id)?.organization
+    const target = targetOrg
+      ? {
+          id: targetOrg.id,
+          name: targetOrg.name,
+          imageUrl:
+            "imageUrl" in targetOrg && typeof targetOrg.imageUrl === "string"
+              ? targetOrg.imageUrl
+              : undefined,
+        }
+      : { id, name: id }
+
     setBusy(true)
     try {
-      await setActive?.({ organization: id })
-      router.replace(afterSwitch(window.location.pathname, window.location.search))
-      router.refresh()
+      await switchWorkspace(target, async () => {
+        await setActive?.({ organization: id })
+      })
     } catch (error) {
       toastError("Could not switch workspace", clerkReason(error))
     } finally {
@@ -122,8 +133,8 @@ function ClerkSettingsWorkspace({
             hideLabel
             align="end"
             items={items}
-            value={activeOrg.id}
-            disabled={busy}
+            value={pending?.id ?? activeOrg.id}
+            disabled={busy || pending !== null}
             onValueChange={(id) => void choose(id)}
           />
         </motion.div>

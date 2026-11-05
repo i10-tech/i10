@@ -285,3 +285,24 @@ export function inSettings(pathname: string): boolean {
     (root) => pathname === root || pathname.startsWith(`${root}/`),
   )
 }
+
+/**
+ * Resolves which settings navigation item owns a given pathname.
+ *
+ * ⚠ LONGEST `href` WINS AMONG VISIBLE ITEMS, AND REUSES `isActive`.
+ * `/settings/security/audit` maps to Security and `/settings/sso/connect` to
+ * Single sign-on, because sub-flows and detail views inherit their parent tab's
+ * identity and page header. Hidden destinations in `SETTINGS_NAV` do not
+ * become tabs in the settings shell.
+ */
+export function findSettingsItem(
+  pathname: string,
+  groups: NavGroup[] = SETTINGS_NAV,
+): NavItem | undefined {
+  const matches = groups
+    .flatMap((group) => group.items)
+    .filter((item) => !item.hidden && isActive(pathname, item))
+    .sort((a, b) => b.href.length - a.href.length)
+
+  return matches[0]
+}

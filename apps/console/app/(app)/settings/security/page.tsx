@@ -38,7 +38,6 @@ export default async function SecuritySettingsPage() {
   if (!who.abilities.manage)
     return (
       <Section className="pt-0">
-        <SectionTitle>Security</SectionTitle>
         <SectionDescription>
           Only a workspace admin or owner can see and change security settings. Ask one
           of them to change session limits, second-factor rules, or allowlists.
@@ -56,7 +55,6 @@ export default async function SecuritySettingsPage() {
   if (!session.ok && session.error.statusCode === 501)
     return (
       <Section className="pt-0">
-        <SectionTitle>Security</SectionTitle>
         <SectionDescription>
           Security settings are not available on this deployment.
         </SectionDescription>

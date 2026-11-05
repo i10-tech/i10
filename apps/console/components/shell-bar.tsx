@@ -10,8 +10,9 @@ import { ThemeSwitch } from "@repo/ui/components/theme-switch/theme-switch"
 import { useTheme } from "next-themes"
 import { useMounted } from "@/lib/react"
 import { OPEN_COMMAND_MENU } from "@/components/command-menu"
-import { NAV, SETTINGS_NAV } from "@/lib/nav"
 import { useWorkspaceName } from "@/lib/workspace-name"
+import { useWorkspaceSwitch } from "@/lib/workspace-switch"
+import { buildBreadcrumbs } from "@/lib/breadcrumbs"
 
 /**
  * The bar across the top of the content surface, as in Arc's app shell:
@@ -22,14 +23,6 @@ import { useWorkspaceName } from "@/lib/workspace-name"
  * page's own title, read from `document.title` ("Your receipt · i10"), so a
  * detail page never has to pass it down.
  */
-const SUFFIX = " · i10"
-
-const SECTIONS = [...NAV, ...SETTINGS_NAV]
-  .flatMap((group) => group.items)
-  .filter((item) => item.href !== "/")
-  // Longest first, so /settings/billing wins over /settings.
-  .sort((a, b) => b.href.length - a.href.length)
-
 function useDocumentTitle(): string {
   const [title, setTitle] = React.useState("")
   React.useEffect(() => {
@@ -46,33 +39,18 @@ function useDocumentTitle(): string {
 
 export function ShellBar({ workspace: fromServer }: { workspace: string }) {
   const pathname = usePathname()
+  const { pending } = useWorkspaceSwitch()
   // Follows a rename at once. Arc's breadcrumb keys a crumb by its label, so
   // the new name runs its own crumb change: the old one leaves, the new one
   // arrives, and the crumbs after it glide to their new place.
-  const workspace = useWorkspaceName(fromServer)
+  const workspaceName = useWorkspaceName(fromServer)
+  const workspace = pending?.name ?? workspaceName
   const title = useDocumentTitle()
 
-  const items = React.useMemo(() => {
-    // ⚠ EVERY CRUMB HAS AN HREF, THE CURRENT ONE INCLUDED. A crumb that gains
-    // or loses its link becomes a different element, and its label can then
-    // only appear, not morph (see the note in breadcrumb.tsx).
-    const crumbs: { label: string; href: string }[] = [{ label: workspace, href: "/" }]
-    if (pathname === "/") {
-      crumbs.push({ label: "Overview", href: "/" })
-      return crumbs
-    }
-    const section = SECTIONS.find(
-      (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
-    )
-    if (!section) return crumbs
-    crumbs.push({ label: section.label, href: section.href })
-    if (pathname !== section.href) {
-      const record = title.endsWith(SUFFIX) ? title.slice(0, -SUFFIX.length) : ""
-      if (record && record !== section.label)
-        crumbs.push({ label: record, href: pathname })
-    }
-    return crumbs
-  }, [pathname, title, workspace])
+  const items = React.useMemo(
+    () => buildBreadcrumbs({ workspace, pathname, title }),
+    [pathname, title, workspace],
+  )
 
   return (
     <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] px-4 sm:px-6">

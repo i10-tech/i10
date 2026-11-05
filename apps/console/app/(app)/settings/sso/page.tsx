@@ -21,7 +21,6 @@ export default async function SingleSignOnPage() {
   if (!who.abilities.manage)
     return (
       <Section className="pt-0">
-        <SectionTitle>Single sign-on</SectionTitle>
         <SectionDescription>
           Only a workspace admin or owner can set this up. Ask one of them if your
           company wants to sign in through its identity provider.
@@ -36,7 +35,6 @@ export default async function SingleSignOnPage() {
   if (!catalog.ok && catalog.error.statusCode === 501)
     return (
       <Section className="pt-0">
-        <SectionTitle>Single sign-on</SectionTitle>
         <SectionDescription>
           Single sign-on is not available on this deployment.
         </SectionDescription>
@@ -53,10 +51,7 @@ export default async function SingleSignOnPage() {
   return (
     <div>
       <Section className="pt-0">
-        <SectionTitle>Single sign-on</SectionTitle>
-        <SectionDescription>
-          Your team signs in with the company account they already have.
-        </SectionDescription>
+        <SectionTitle>Connections</SectionTitle>
         <SectionContent>
           <SsoHome catalog={catalog.data} abilities={who.abilities} />
         </SectionContent>

@@ -1,12 +1,6 @@
-import {
-  Page,
-  PageBody,
-  PageHeader,
-  PageActions,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
+import { Page, PageBody } from "@repo/ui/components/i10/page"
 import { SectionContent } from "@/components/page-frame"
+import { SettingsHeader } from "@/components/settings-header"
 import { SettingsWorkspace } from "@/components/settings-workspace"
 import { tryApi } from "@/lib/api"
 import type { Me } from "@/lib/types"
@@ -22,9 +16,10 @@ import type { Me } from "@/lib/types"
  * carries a way back - one navigation, in the place navigation already lives.
  *
  * ⚠ AND THE HEADING STILL LIVES HERE, NOT IN EACH PAGE. Eight pages each
- * rendering their own "Settings" title is eight chances for one of them to be
+ * rendering their own title is eight chances for one of them to be
  * two pixels out - which nobody can name and everybody feels as they move
- * between tabs.
+ * between tabs. It now names the active tab, so the title morphs as you move
+ * between tabs while the layout persists and the actions hold still.
  */
 export default async function SettingsLayout({
   children,
@@ -35,19 +30,11 @@ export default async function SettingsLayout({
 
   return (
     <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>Settings</PageTitle>
-          {/*
-           * Which workspace these are the settings of, for people in more than
-           * one. It fades in once Clerk has the list, into the 36px the row
-           * already reserves, so nothing beside it moves.
-           */}
-          <PageActions>
-            <SettingsWorkspace initialWorkspace={tenant} clerkEnabled={clerkEnabled} />
-          </PageActions>
-        </PageHeaderRow>
-      </PageHeader>
+      <SettingsHeader
+        actions={
+          <SettingsWorkspace initialWorkspace={tenant} clerkEnabled={clerkEnabled} />
+        }
+      />
 
       {/*
        * ⚠ A MAX WIDTH, BECAUSE SETTINGS IS PROSE AND FORMS. Without the second

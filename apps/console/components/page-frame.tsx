@@ -2,8 +2,10 @@
 
 import { usePathname } from "next/navigation"
 import { useEffect, useRef } from "react"
+import { cn } from "cn"
 import { PageTransition } from "@repo/ui/components/i10/page-transition"
 import { forgetDraft } from "@/lib/add-domain-draft"
+import { useWorkspaceSwitch } from "@/lib/workspace-switch"
 
 /**
  * The console's pages, arriving rather than appearing - and the only thing on
@@ -28,6 +30,8 @@ import { forgetDraft } from "@/lib/add-domain-draft"
 export function PageFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const pane = useRef<HTMLElement>(null)
+  const { pending } = useWorkspaceSwitch()
+  const stale = pending !== null
 
   /*
    * ⚠ NAVIGATION HAS TO PUT US BACK AT THE TOP BY HAND NOW. Next resets
@@ -73,7 +77,21 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
       ref={pane}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
     >
-      <PageTransition pathname={frameKey(pathname)}>{children}</PageTransition>
+      {/*
+       * ⚠ VISIBLY STALE WHILE SWITCHING WORKSPACES.
+       * Dims to 0.5 opacity, marks inert so old rows cannot be clicked, and
+       * sets aria-busy. Returns to full opacity when the fresh tree commits.
+       */}
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col transition-opacity duration-(--duration-fast) ease-(--ease-standard) motion-reduce:transition-none",
+          stale && "opacity-50",
+        )}
+        aria-busy={stale ? true : undefined}
+        inert={stale ? true : undefined}
+      >
+        <PageTransition pathname={frameKey(pathname)}>{children}</PageTransition>
+      </div>
     </main>
   )
 }
