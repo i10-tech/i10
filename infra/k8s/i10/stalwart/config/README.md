@@ -570,6 +570,24 @@ handed. A customer mailbox domain must likewise be signed by Stalwart with ONE
 key. Drop the ed25519 `_domainkey` record from the dns stack once the key is
 retired.
 
+⚠ **STALWART DOES NOT SIGN MAIL THAT LEAVES THROUGH SES.** SES overwrites
+`Date` and `Message-ID` on every message, so any signature Stalwart adds fails
+at the receiver even though the body hash matches. On 2026-11-05 Gmail
+reported `dkim=fail header.s=v1-rsa-20260901` both with Message-ID signed and
+with only `To:Subject:From:Date` signed. SES's own i10.tech signature is the one
+DMARC needs, and every domain `mailbox_route` sends to `ses-relay` is an SES
+identity. So `SenderAuth.dkimSignDomain` in `plan.ndjson` asks the same
+function the route asks, and signs only when the answer is not `ses-relay`.
+Mail that goes out directly keeps Stalwart's signature.
+
+Signing is decided once, when the message is accepted, and the route at each
+delivery attempt. Two gaps follow, both narrow. A lookup that fails at
+acceptance (the pooler is down) leaves the message unsigned, and if the lookup
+fails again at delivery the route falls back to MX, so the message leaves
+directly with no DKIM. Turning the relay off sends already-queued mailbox mail
+directly, also unsigned. Both land in spam at worst while DMARC is `p=none`;
+neither loses mail.
+
 To throw the lever, in this order:
 
 1. `./bootstrap.sh --dry-run` on psl-vps. Every object should be unchanged,
