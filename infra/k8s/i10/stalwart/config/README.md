@@ -558,6 +558,18 @@ refused `host` in the dry-run. An earlier draft of this section also nested the
 rest under `tls` and `auth`. Port 587 with `implicitTls: false` is STARTTLS.
 Rename `address` to `host` when upgrading to v1.0.
 
+⚠ **SES REFUSES A MESSAGE THAT ARRIVES WITH TWO `DKIM-Signature` HEADERS.**
+The first relayed messages on 2026-11-05 bounced with `554 Transaction failed:
+Duplicate header 'DKIM-Signature'`, because i10.tech's `dkimManagement` signed
+with both ed25519 and RSA. The Domain in `plan.ndjson` now lists only
+`Dkim1RsaSha256` (RSA is what every receiver verifies; ed25519 support is
+patchy), and the old `v1-ed25519-20260901` key was moved to `retiring` by hand,
+which keeps it published but stops it signing. SES adds its own i10.tech
+signature on the way out, which is allowed: it only refuses duplicates it is
+handed. A customer mailbox domain must likewise be signed by Stalwart with ONE
+key. Drop the ed25519 `_domainkey` record from the dns stack once the key is
+retired.
+
 To throw the lever, in this order:
 
 1. `./bootstrap.sh --dry-run` on psl-vps. Every object should be unchanged,
