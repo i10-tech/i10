@@ -127,7 +127,7 @@ case "$raw" in
 esac
 
 api() {
-  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" python3 "$HELPER" "$@"
+  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" STALWART_NS="$NS" STALWART_SECRET="$SECRET" python3 "$HELPER" "$@"
 }
 
 # ⚠ A PORT-FORWARD IS BOUND TO ONE POD, NOT TO THE SERVICE. It dies with the pod
@@ -140,7 +140,7 @@ connect() {
 }
 
 cat >"$HELPER" <<'PY'
-import base64, gzip, json, os, sys, time, urllib.error, urllib.request
+import base64, gzip, json, os, subprocess, sys, time, urllib.error, urllib.request
 
 BASE = os.environ["STALWART_BASE"]
 AUTH = "Basic " + base64.b64encode(os.environ["STALWART_AUTH"].encode()).decode()
@@ -427,8 +427,41 @@ def update(c, op, dry=False):
     update_object(c, sid, op["value"])
 
 
+_secret = None
+
+
+def from_secret(value):
+    # ⚠ ONLY `SecretKey` FIELDS CAN NAME AN ENVIRONMENT VARIABLE. A plain string
+    # such as MtaRoute's `authUsername` cannot, and the SES SMTP username is an
+    # access key id that does not belong in git. `{"@fromSecret": "KEY"}` is
+    # replaced with that key of the Stalwart Secret - the one Doppler fills and
+    # the pod already reads - so Doppler stays the only place the value lives.
+    # It is read here, never from argv, and the dry-run prints property names
+    # only, so it is never shown.
+    global _secret
+    if isinstance(value, list):
+        return [from_secret(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    if set(value) != {"@fromSecret"}:
+        return {k: from_secret(v) for k, v in value.items()}
+    if _secret is None:
+        out = subprocess.run(
+            ["kubectl", "get", "secret", "-n", os.environ["STALWART_NS"],
+             os.environ["STALWART_SECRET"], "-o", "json"],
+            capture_output=True, check=False,
+        )
+        if out.returncode != 0:
+            fail(f"cannot read secret/{os.environ['STALWART_SECRET']}: {out.stderr.decode()[:200]}")
+        _secret = json.loads(out.stdout).get("data") or {}
+    key = value["@fromSecret"]
+    if not _secret.get(key):
+        fail(f"`{key}` is missing or empty in secret/{os.environ['STALWART_SECRET']}")
+    return base64.b64decode(_secret[key]).decode()
+
+
 def apply(text, dry=False):
-    ops = [json.loads(line) for line in text.splitlines() if line.strip()]
+    ops = [from_secret(json.loads(line)) for line in text.splitlines() if line.strip()]
     kinds = {}
     for op in ops:
         kinds[op.get("@type")] = kinds.get(op.get("@type"), 0) + 1

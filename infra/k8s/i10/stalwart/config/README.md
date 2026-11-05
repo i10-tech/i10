@@ -476,6 +476,15 @@ is awaited - so it can ask Postgres:
 sql_query('i10', 'SELECT core.mailbox_route($1)', [sender_domain])
 ```
 
+⚠ **LOCAL RECIPIENTS ARE MATCHED FIRST, OR THE LEVER SENDS INTERNAL MAIL OUT.**
+The route's `match` sends `is_local_domain(rcpt_domain)` to `'local'` before the
+lookup runs. It was added on the live server by hand and found missing from
+this plan on 2026-11-05, when a dry-run showed `would change route`; applying
+the plan as it stood would have deleted it, and with `ses-relay` on, mail
+between two i10 mailboxes would have left through SES and come back over the
+internet. It is written in the STORED shape (`{"0": {...}}`, a list kept as a
+map) so the dry-run compares equal.
+
 `core.mailbox_route` (migration 0036) returns the **name of a route**:
 `mx` to deliver ourselves, `ses-relay` to hand the message to SES's SMTP
 endpoint. It applies the same rule as `resolveRoute` in the API - kill switch,
@@ -520,58 +529,45 @@ so without 0056's `GRANT USAGE ON SCHEMA core` every lookup fails - silently,
 per the above. The password comes from CNPG's `i10-stalwart-db-role`, the same
 one Stalwart's own data store already uses, so there is nothing to add to Doppler.
 
-### What is missing: `ses-relay`
+### The `ses-relay` route
 
-The `MtaRoute` is deliberately **not** in `plan.ndjson`, because it needs SES SMTP
-credentials that do not exist yet - and a plan referencing a missing environment
-variable is a plan that may not apply. Until it exists,
-`core.routing_settings.ses_relay_enabled` stays `false` and `mailbox_route`
-returns `mx` for everybody, so nothing routes to a gateway that is not there.
+The `MtaRoute` is the last line of `plan.ndjson`. It authenticates to SES's SMTP
+endpoint in eu-central-1 as the IAM user `i10-stalwart-smtp`, which can only
+`ses:SendRawEmail`. Its credentials are `SES_SMTP_USER` and `SES_SMTP_PASSWORD`
+in Doppler's `prod_stalwart`, reaching the pod through `i10-stalwart`. Until the
+lever is thrown, `core.routing_settings.ses_relay_enabled` stays `false` and
+`mailbox_route` returns `mx` for everybody.
 
-To turn the lever on, in this order:
+⚠ **SES SMTP CREDENTIALS ARE NOT AN ACCESS KEY PAIR.** The console's "Create
+SMTP credentials" derives the password from a secret key, per region; a key made
+for another region is refused.
 
-1. **Create SES SMTP credentials** in the AWS console (IAM → SES → SMTP
-   settings). These are NOT an access key pair; SES derives an SMTP password from
-   a secret key and they are not interchangeable.
-2. Put them in Doppler's Stalwart config as `SES_SMTP_USER` and
-   `SES_SMTP_PASSWORD`, so they reach the pod through `i10-stalwart`.
-3. Add this line to `plan.ndjson` and run `./bootstrap.sh`:
+⚠ **THE USERNAME CANNOT BE AN `EnvironmentVariable`.** Only `SecretKey` fields
+(`authSecret`) can name one; `authUsername` is a plain string. The username is an
+access key id, which does not belong in git, so the plan writes
+`{"@fromSecret": "SES_SMTP_USER"}` and `bootstrap.sh` replaces it with that key
+of `i10-stalwart` at apply time. The dry-run prints property names, never values.
 
-   ```json
-   {
-     "@type": "upsert",
-     "object": "MtaRoute",
-     "matchOn": ["description"],
-     "value": {
-       "ses-relay": {
-         "@type": "Relay",
-         "description": "SES SMTP relay for mailbox mail",
-         "host": "email-smtp.eu-central-1.amazonaws.com",
-         "port": 587,
-         "tls": { "@type": "StartTls" },
-         "auth": {
-           "@type": "Basic",
-           "username": {
-             "@type": "EnvironmentVariable",
-             "variableName": "SES_SMTP_USER"
-           },
-           "secret": {
-             "@type": "EnvironmentVariable",
-             "variableName": "SES_SMTP_PASSWORD"
-           }
-         }
-       }
-     }
-   }
-   ```
+⚠ **THE FIELDS ARE FLAT, AND THE HOST IS `address` ON v0.16.** `address`, `port`,
+`protocol`, `implicitTls`, `authUsername`, `authSecret`. Stalwart's current
+MtaRoute reference documents v1.0, where the field is `host`; v0.16.19's own
+tests (`tests/src/smtp/outbound/lmtp.rs`) say `address`, and the live schema
+refused `host` in the dry-run. An earlier draft of this section also nested the
+rest under `tls` and `auth`. Port 587 with `implicitTls: false` is STARTTLS.
+Rename `address` to `host` when upgrading to v1.0.
 
-   ⚠ Check the object's field names with `stalwart-cli describe MtaRoute` before
-   pasting. This block is written from the schema's shape and has not been
-   applied against a running server.
+To throw the lever, in this order:
 
-4. Set `SES_RELAY_ENABLED=true` in Doppler's API config and roll the API. It
+1. `./bootstrap.sh --dry-run` on psl-vps. Every object should be unchanged,
+   plus one `+ would create MtaRoute ses-relay`.
+2. Restart Stalwart so the pod has `SES_SMTP_PASSWORD` - Doppler syncs the
+   Secret, but env vars never update in a running pod - then `./bootstrap.sh`.
+3. Set `SES_RELAY_ENABLED=true` in Doppler's API config and roll the API. It
    publishes the flag into `core.routing_settings` at boot; nothing reads the
    environment variable directly.
+4. Send a real message from a mailbox and read its headers: the hop after
+   `mail.i10.tech` must be `amazonses.com`. Then check Stalwart's log for
+   `Eval(Error)`, because a broken lookup falls back to MX silently.
 
 ⚠ **STEP 4 IS THE ONE THAT MOVES MAIL**, and today that means i10.tech's own
 human mail, because it is the only mailbox domain and it is on `pro`. Verify the
