@@ -30,7 +30,10 @@ metadata:
     app.kubernetes.io/name: i10-powerdns
 data:
   pdns.conf: |
-    launch=gpgsql
+    # ⚠ gpgsql FIRST. Customer zones are rows the API writes; `lmdb` carries
+    # only the tailnet view built at pod start (see `views.conf` below and
+    # infra/k8s/argo-ui.md). Order matters for writes, and nothing writes here.
+    launch=gpgsql,lmdb
 
     gpgsql-host=i10-platform-pooler
     gpgsql-port=5432
@@ -76,7 +79,11 @@ data:
     # to transfer to, and an open transfer hands anybody every customer domain.
     disable-axfr=yes
 
-    local-address=0.0.0.0
+    # ⚠ BOTH FAMILIES. This was `0.0.0.0` alone, so the server never listened
+    # on IPv6 at all while `ns1`/`ns2` publish AAAA records: every resolver that
+    # tried the AAAA timed out. Found 2026-11-05. `::` here is PowerDNS's own
+    # default, which the old line had narrowed.
+    local-address=0.0.0.0, ::
     local-port=53
 
     # ⚠ BOUND TO THE POD, NOT THE HOST. It is the readiness probe's target and
@@ -88,3 +95,38 @@ data:
 
     loglevel=4
     log-dns-queries=no
+
+    # ⚠ VIEWS: ONE ZONE ANSWERED ONLY TO THE TAILNET. Read infra/k8s/argo-ui.md
+    # before touching any of this. Queries from a network listed in the LMDB
+    # file get that view's zone variants; everyone else gets the server as it
+    # was, so a public query for `argo.i10.tech` is REFUSED exactly like any
+    # name we do not host. Views need the zone cache, which is on above.
+    #
+    # ⚠ THESE THREE LMDB SETTINGS MUST MATCH `views.conf`. The init container
+    # writes the file with those, this process opens it with these, and a
+    # different shard count reads as an empty database rather than an error.
+    views=yes
+    lmdb-filename=/var/lib/powerdns/views/pdns.lmdb
+    lmdb-shards=1
+    lmdb-map-size=64
+
+  # The init container's config: LMDB alone, so building the view needs no
+  # database and cannot touch a customer zone.
+  views.conf: |
+    launch=lmdb
+    views=yes
+    lmdb-filename=/var/lib/powerdns/views/pdns.lmdb
+    lmdb-shards=1
+    lmdb-map-size=64
+
+  # ⚠ THE BOX'S TAILNET ADDRESSES, NOT ITS PUBLIC ONES. Tailnet clients reach
+  # Traefik over WireGuard at these, so Traefik sees their 100.x / fd7a: source
+  # and the `ClientIP` rule in the argocd IngressRoute can match. They change
+  # only if psl-vps is removed from the tailnet and re-added; `tailscale ip` on
+  # the box prints the current pair.
+  argo.i10.tech.zone: |
+    $ORIGIN argo.i10.tech.
+    @ 60 IN SOA ns1.i10.tech. hostmaster.i10.tech. 1 3600 600 86400 60
+    @ 60 IN NS ns1.i10.tech.
+    @ 60 IN A 100.127.102.63
+    @ 60 IN AAAA fd7a:115c:a1e0::9932:663f

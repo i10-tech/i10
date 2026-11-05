@@ -146,3 +146,10 @@ deadlock on first sync. **Anything that provisions this host has to set it.**
 touches port 53, which is why `resolvectl query ghcr.io` succeeds on a node
 where `getent hosts ghcr.io` fails. That asymmetry is the fastest way to
 recognise this failure.
+
+## The tailnet view
+
+Besides customer zones, this server answers one name, `argo.i10.tech`, and only
+to tailnet sources, through a PowerDNS view built by the `views` init
+container. Everyone else gets `REFUSED` for it, as for any name we do not host.
+Why it is here and how to check it: [`infra/k8s/argo-ui.md`](../../argo-ui.md).
