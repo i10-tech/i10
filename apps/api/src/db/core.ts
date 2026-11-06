@@ -4220,6 +4220,51 @@ export const identityEvents = core.table(
 )
 
 /**
+ * Failed sign-ins to a hosted mailbox, as Stalwart reported them (#384).
+ *
+ * ⚠ NOT `identity_events`, AND KEEPING THEM APART IS THE WHOLE POINT. Every
+ * reader of that table treats each row as a sighting of the person themselves:
+ * their subnets are "familiar", the accounts behind a subnet are "peers". A
+ * failed login is somebody ELSE at an address the owner has never used, so
+ * filed there it would make an attacker's network look familiar to the victim
+ * and link every account one brute-forcing address touched. Here a row says
+ * only "someone failed to sign in to this mailbox from this address".
+ *
+ * ⚠ ONLY MAILBOXES WE HOST, AND ONLY ONES WITH A WORKSPACE. Scanners try
+ * random usernames all day; the ingest drops any account that is not in
+ * `authd.accounts`, so this table never grows with noise. Scoped per
+ * workspace like the rest of what the score reads, since the mailbox belongs
+ * to one.
+ *
+ * ⚠ THE RAW IP IS KEPT AS RECEIVED AND NOTHING NULLS IT YET. The hourly run
+ * that clears `identity_events.ip` after 90 days does not know this table.
+ */
+export const mailboxAuthFailures = core.table(
+  "mailbox_auth_failures",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The mailbox address, lowercased. */
+    account: text("account").notNull(),
+    ip: text("ip"),
+    /** `a.b.c` for IPv4, the /48 for IPv6, as `identity_events.subnet`. */
+    subnet: text("subnet"),
+    /** Stalwart's listener that took the attempt: `imap`, `submissions`... */
+    listener: text("listener"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("mailbox_auth_failures_account_idx").on(t.tenantId, t.account, t.occurredAt),
+    tenantPolicy("mailbox_auth_failures_tenant", t.tenantId),
+  ],
+)
+
+/**
  * What a workspace turned out to be, for training the model (#170).
  *
  * ⚠ THE FEATURES ARE STORED WITH THE LABEL, AS THEY WERE WHEN IT WAS GIVEN.
