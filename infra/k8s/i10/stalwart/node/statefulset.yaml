@@ -78,7 +78,7 @@ spec:
       # before, just not for the one-second race.
       initContainers:
         - name: wait-for-db
-          image: stalwartlabs/stalwart:v0.16.19-alpine
+          image: stalwartlabs/stalwart:v0.16.27-alpine
           command:
             - sh
             - -c
@@ -102,7 +102,7 @@ spec:
 
       containers:
         - name: stalwart
-          image: stalwartlabs/stalwart:v0.16.19-alpine
+          image: stalwartlabs/stalwart:v0.16.27-alpine
           # ⚠ THE FLAG IS NOT OPTIONAL. Without --config the server looks
           # elsewhere, finds nothing, and enters bootstrap mode - serving a setup
           # wizard instead of mail.

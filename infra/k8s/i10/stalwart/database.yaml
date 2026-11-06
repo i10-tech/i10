@@ -24,3 +24,23 @@ spec:
   # removed - every mailbox's metadata with it. Deleting mail must never be a
   # side effect of a manifest change; it should require someone to mean it.
   databaseReclaimPolicy: retain
+---
+# The 1.0 store (#365). Stalwart 1.0 cannot open a 0.16 store, so
+# `stalwart-migrate` copies `stalwart` into this one, which must be EMPTY when
+# the first run starts. The same `stalwart` role owns both, so config.json only
+# changes its `database` at the cutover.
+#
+# ⚠ `stalwart` STAYS UNTIL 1.0 HAS PROVED ITSELF. It is the rollback: before 1.0
+# serves, 0.16 restarts on it as it was; after, `stalwart-migrate rollback`
+# needs it alongside the migration state.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: i10-stalwart-v1-db
+  namespace: i10-prod
+spec:
+  cluster:
+    name: i10-platform
+  name: stalwart_v1
+  owner: stalwart
+  databaseReclaimPolicy: retain
