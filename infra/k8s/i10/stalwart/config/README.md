@@ -877,3 +877,117 @@ relay works before throwing it - `SES_RELAY_ENABLED=false` puts it straight back
 ⚠ **AND SES MUST BE ABLE TO SEND AS THOSE DOMAINS.** Relaying through SES means
 SES applies its own policy: the sending identity has to be verified there, or it
 refuses the message. A domain that only ever sent direct may not be.
+
+## The MTA hook: mailbox sends get the API's checks (B5, #380)
+
+Mail sent from a mailbox (submission on 465, through `ses-relay`) used to skip
+the checks an API send gets. `MtaHook mailboxgate` closes that: Stalwart POSTs
+each authenticated submission to `apps/api` (`/internal/mta-hook`), which answers
+with `admitSend` - **the function `acceptSend` calls for an API send**, so the
+two paths cannot drift. For a mailbox it decides the risk hold (#170) and
+nothing else: the API allowance never stops a mailbox (see below).
+
+| Answer                    | When                                             | SMTP reply  |
+| ------------------------- | ------------------------------------------------ | ----------- |
+| accept                    | allowed, or the sender has no tenant (see below) | -           |
+| reject                    | the workspace is held (`scope: all`)             | `550 5.7.1` |
+| tempfail (Stalwart's own) | the API is down, slow, or could not decide       | `451 4.3.5` |
+
+⚠ **AUTHENTICATED SUBMISSIONS ONLY, AND TWICE.** The plan's `enable` is
+`!is_empty(authenticated_as) && local_port != 25 && local_port != 2525`, so the
+hook is never consulted for inbound mail or for the send worker's relay (2525 has
+no AUTH, so `authenticated_as` is empty there anyway; the port tests are the
+second lock). The endpoint repeats it: a request with no `sasl.login` is
+accepted untouched.
+
+⚠ **A HOLD ONLY STOPS A MAILBOX WHEN ITS SCOPE IS `all`.** The score writes
+`scope: api`; only staff write `all` (risk.md, "Holds": mailboxes are not
+stopped by an automatic hold). An API send is stopped by either.
+
+⚠ **ONLY A LOGIN WE CAN PLACE IS LIMITED.** The tenant is the owner of the
+login's domain in `core.mailbox_domains()`, the key `core.mailbox_route` uses.
+Logins are mailbox addresses, so this holds even for `MAIL FROM:<>`, which an
+earlier draft waved through unchecked; the envelope sender is used only for a
+login that is not an address. i10's own addresses have no owner, so they are
+accepted untouched - staff mail never waits on a review.
+`MtaStageAuth.mustMatchSender` (default true, not set here) keeps the sender
+inside the login's own addresses as well.
+
+⚠ **THE API ALLOWANCE NEVER STOPS A MAILBOX, AND A MAILBOX NEVER SPENDS IT.**
+Mailbox mail is not a send for billing (mail-routing.md: "mailbox mail is
+billed by seats and storage and is not a send at all"), so `admitSend` skips the
+plan allowance and the free monthly line for it, and the hook records nothing:
+recording would put mailbox mail in `core.meter_events`, which `flushUsage`
+ships to Polar as `emails`. A workspace that has spent its API allowance still
+sends its people's own mail. The H1 throttles (200 an hour, 1000 a day per
+account) are the volume cap on 465. Decided by the user on 2026-11-06 (#380).
+
+**Stage and counting.** The hook is consulted at `rcpt` only. The decision needs
+the workspace and nothing else, so DATA would add nothing - and it would POST the
+whole message (up to 40 MB) as JSON into the API process for every mailbox
+send. RCPT also refuses before the client uploads a body. It is asked at **every**
+RCPT TO, not the first: the docs do not say whether a refused recipient stays in
+`envelope.to`, so skipping later ones on `to.length > 1` could wave one through
+after a refusal. It counts **one message however many recipients**, as
+`acceptSend` counts a payload and as the H1 throttles count; the answer does not
+depend on the recipient and nothing is recorded, so asking again is harmless
+(up to 50 asks a message, a few indexed reads each). The endpoint is
+stage-agnostic - it needs only the sender - so adding `data` to `stages` later
+cannot switch the check off.
+
+**Failure mode: tempfail, 3 s.** `tempFailOnError` is true and `timeout` is 3000
+ms. When the API is down, slow, mid-restart, or has the wrong secret, every
+mailbox send answers `451 4.3.5` and the client retries - nothing bounces and
+nothing is lost, but **nobody can send from a mailbox until the API is back**.
+The alternative, skipping the hook on error, would let a held
+workspace send freely for exactly as long as the API is down, which is also when
+nobody is watching. A decision is a few indexed reads, so 3 s is generous; a
+longer one only holds client connections open during an outage.
+
+⚠ **`tempFailOnError` MUST STAY TRUE.** The endpoint answers every error with a
+non-2xx status (503 unconfigured, 401 bad token, 400 unreadable body, 500
+decision threw), and it is Stalwart's `tempFailOnError` that turns those into
+a 451. Turn it off and every one of them becomes an accept. The protocol has no
+tempfail action, which is why the endpoint does not try to send one.
+
+⚠ **`STALWART_MTA_HOOK_SECRET` LIVES IN TWO PLACES, AND MUST MATCH.** Same
+shape as `STALWART_WEBHOOK_SECRET` above: the Stalwart pod reads it for
+`httpAuth` (`envFrom: secretRef i10-stalwart`) and the API pod compares it
+(`i10-api`), two Doppler configs. Stalwart sends it as `Authorization: Bearer`;
+the API compares it in constant time before reading the body. It is a plain
+token, not base64-decoded. **A mismatch reads as an outage**: every mailbox send
+tempfails. Look for `rejected an MTA hook call` in the API log and `mta-hook.error`
+in Stalwart's.
+
+To turn it on, in this order - the plan line is inert until `bootstrap.sh`
+applies it, and applied before the secret exists it tempfails all mailbox mail:
+
+1. Create `STALWART_MTA_HOOK_SECRET` (any long random string) in **both**
+   Doppler configs, the same value.
+2. Roll the API and restart Stalwart; env vars never update in a running pod.
+3. Port-forward the API and check it: `POST /internal/mta-hook` with the bearer
+   and `{"context":{"sasl":{"login":"a@b.c"}},"envelope":{"from":{"address":"a@b.c"}}}`
+   answers `{"action":"accept"}` (an address on no hosted domain), and without
+   the bearer answers 401.
+4. `./bootstrap.sh --dry-run`: the only change should be
+   `+ would create MtaHook mailboxgate`. Then `./bootstrap.sh`.
+5. Send from a mailbox and check the API log shows no `could not decide`, then
+   hold a test workspace with `scope: all` and check the send is refused `550`.
+
+To turn it off, change `enable` to `{"match": {}, "else": "false"}` and re-apply
+(the bootstrap cannot `destroy`).
+
+⚠ **THE WIRE SHAPE IS FROM THE DOCS AND HAS NOT BEEN PROBED ON OUR SERVER.**
+`apps/api/src/mail/mta-hook.ts` follows
+[the MTA hooks page](https://stalw.art/docs/mta/filter/mtahooks/) (read
+2026-11-06): the request is `{context, envelope, message}`, `context.sasl.login`
+is present only after AUTH, `envelope.from.address` from MAIL FROM on. Step 5
+above is the probe. If `sasl` is absent on an authenticated session, the hook
+accepts everything silently, so **check the first real send is actually
+decided** (a held workspace must be refused).
+
+⚠ **1.0's SSRF GUARD FOR INTERNAL ADDRESSES (U8) IS UNCHECKED FOR THIS URL.** The
+WebHook and the StoreLookup reach cluster addresses today; the hook goes to
+`i10-api.i10-prod.svc.cluster.local` the same way, but that is an inference.
+If it is blocked the symptom is `mta-hook.error` in Stalwart's log and `451` for
+every mailbox send.

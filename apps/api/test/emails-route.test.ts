@@ -349,7 +349,10 @@ describe("when the send path is not configured", () => {
 describe("a workspace held by the risk engine (#170)", () => {
   it("answers 403 sending_held, distinct from sending_paused, and writes nothing", async () => {
     const { app: a, sendPath } = app({
-      sendingHeld: async () => ({ why: "too many recent messages bounced" }),
+      sendingHeld: async () => ({
+        why: "too many recent messages bounced",
+        scope: "api" as const,
+      }),
     })
     const res = await post(a, "/emails", body)
     expect(res.status).toBe(403)
@@ -364,7 +367,10 @@ describe("a workspace held by the risk engine (#170)", () => {
 
   it("refuses a batch the same way", async () => {
     const { app: a } = app({
-      sendingHeld: async () => ({ why: "unusual sending activity" }),
+      sendingHeld: async () => ({
+        why: "unusual sending activity",
+        scope: "api" as const,
+      }),
     })
     const res = await post(a, "/emails/batch", [body, body])
     expect(res.status).toBe(403)

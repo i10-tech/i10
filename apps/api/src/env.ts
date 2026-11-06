@@ -525,6 +525,17 @@ const schema = z.object({
   STALWART_WEBHOOK_SECRET: z.string().min(1).optional(),
 
   /**
+   * The bearer token Stalwart's MTA hook presents (B5, #380). A different secret
+   * from the webhook's: that one signs what Stalwart tells us, this one
+   * authorises a call that decides whether a mailbox may send.
+   *
+   * ⚠ WITHOUT IT `/internal/mta-hook` ANSWERS 503, AND STALWART THEN TEMPFAILS
+   * EVERY MAILBOX SEND. Set it here and on Stalwart before applying the plan
+   * line that enables the hook; see the README, "The MTA hook".
+   */
+  STALWART_MTA_HOOK_SECRET: z.string().min(1).optional(),
+
+  /**
    * Stalwart's internal relay, for the direct route.
    *
    * ⚠ NOT THE SAME THING AS `STALWART_URL`. That one is the management API, used

@@ -1075,6 +1075,8 @@ const teamDomains: TeamDomainDeps | null = domains
     }
   : null
 
+const mailboxDir = mailboxDirectory(db)
+
 const app = createApp({
   suppressions,
   trustedTemplates: risk.trustedTemplates,
@@ -1632,7 +1634,7 @@ const app = createApp({
   },
   mailboxes: mailboxProvisioning({
     identity: clerkIdentity(clerk),
-    directory: mailboxDirectory(db),
+    directory: mailboxDir,
     capacity: postgresMeter(db),
     // ⚠ THE PROJECTION, NOT A SECOND WRITER. Provisioning changes Clerk and
     // then asks the projection to derive the row, exactly as the webhook does;
@@ -1672,6 +1674,23 @@ const app = createApp({
               },
             }
           : {}),
+      }
+    : {}),
+  /*
+   * ⚠ THE API SEND PATH'S OWN HOLD LOOKUP AND METERING, NOT COPIES. The hook asks
+   * `admitSend` with the same `sendingHeld` and the same `metering` that
+   * `acceptSend` gets through `sendPath`, so a mailbox send and an API send are
+   * judged by one object. Gated on its own secret: without it the route answers
+   * 503 and Stalwart tempfails, which is loud rather than a quiet gap.
+   */
+  ...(env.STALWART_MTA_HOOK_SECRET
+    ? {
+        mtaHook: {
+          secret: env.STALWART_MTA_HOOK_SECRET,
+          domainOwner: (domain: string) => mailboxDir.domainOwner(domain),
+          admit: { sendingHeld: sendPath.sendingHeld, metering: sendPath.metering },
+          log,
+        },
       }
     : {}),
   pingDb: async () => {
