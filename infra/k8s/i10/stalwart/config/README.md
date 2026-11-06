@@ -440,6 +440,11 @@ what follows are the ones whose reason is not obvious from the value.
   bootstrap.sh's own (stalwart-cli has no declarative delete). It destroys
   what matches and does nothing on later runs.
 
+- ⚠ **DNS GOES TO OUR OWN unbound, NOT THE CLUSTER'S.** `DnsResolver` is
+  `Custom` at 10.43.53.53 (`../resolver/`). Through CoreDNS and Tailscale,
+  Spamhaus and URIBL refused every query, so no message was ever scored on a
+  blocklist hit. It is one replica: while it is down, MX and SPF lookups fail
+  and mail waits in the queue rather than being misjudged.
 - **Search covers English, Arabic, French, German and Spanish.** Each message's
   language is detected when it is indexed, and a language not listed is
   processed as English. Adding one later means reindexing every message.

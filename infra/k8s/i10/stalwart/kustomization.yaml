@@ -9,6 +9,8 @@ resources:
   - node
   - internal
   - redis.yaml
+  # Stalwart's own recursive resolver, so blocklist queries are not refused (B2).
+  - resolver
   - service.yaml
   - networkpolicy.yaml
   - cert-reload.yaml
