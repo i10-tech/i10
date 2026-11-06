@@ -84,6 +84,16 @@ export class JmapAsError extends Error {
 /** The mailbox as apps/api knows it, once it has been authorised for a workspace. */
 export type AuthorisedMailbox = Pick<Mailbox, "address">
 
+/**
+ * A team inbox as apps/api knows it: its address, and the name it was given in
+ * the directory (`authd.groups.name`). Only the address reaches the registry
+ * lookup; the directory name is carried for the callers that need it.
+ */
+export interface AuthorisedGroup {
+  address: string
+  name: string
+}
+
 export type JmapMethod = readonly [
   name: string,
   args: Record<string, unknown>,
@@ -121,6 +131,26 @@ export interface JmapAsClient {
     methods: readonly JmapMethod[],
     using?: readonly string[],
   ): Promise<JmapResponse[]>
+
+  /**
+   * Runs the methods against a team inbox's Group account.
+   *
+   * `from` is the mailbox a cross-account method (`Email/copy`) reads from; its
+   * id is resolved and injected as `fromAccountId` exactly as the destination's
+   * is as `accountId`, and a caller supplying either is refused.
+   */
+  callAsGroup(
+    group: AuthorisedGroup,
+    methods: readonly JmapMethod[],
+    options?: { using?: readonly string[]; from?: AuthorisedMailbox },
+  ): Promise<JmapResponse[]>
+
+  /**
+   * Destroys the team inbox's Group account, mail and all. `false` when the
+   * registry has no such account, which for a group that nobody has signed in to
+   * yet is the ordinary case.
+   */
+  destroyGroup(group: AuthorisedGroup): Promise<boolean>
 }
 
 /** Long enough to spare the registry on a burst, short enough to bound a miss. */
@@ -152,8 +182,15 @@ export class MailboxIdCache {
     private readonly now: () => number = Date.now,
   ) {}
 
-  get(address: string): StalwartAccountId | null {
-    const key = address.toLowerCase()
+  // ⚠ THE KIND IS PART OF THE KEY. An address is one account, but a group's id
+  // must never answer for a user lookup or the reverse; the type check in
+  // `lookup` only runs on a miss.
+  private key(address: string, kind: AccountKind): string {
+    return `${kind}:${address.toLowerCase()}`
+  }
+
+  get(address: string, kind: AccountKind = "User"): StalwartAccountId | null {
+    const key = this.key(address, kind)
     const hit = this.entries.get(key)
     if (!hit) return null
     if (hit.expires <= this.now()) {
@@ -168,18 +205,30 @@ export class MailboxIdCache {
     return this.epoch
   }
 
-  set(address: string, id: StalwartAccountId, began: number): void {
+  set(
+    address: string,
+    id: StalwartAccountId,
+    began: number,
+    kind: AccountKind = "User",
+  ): void {
     // ⚠ A LOOKUP THAT STARTED BEFORE THE MAILBOX WAS FORGOTTEN MUST NOT WRITE
     // ITS ANSWER BACK, or the delete it raced with is undone.
     if (began !== this.epoch) return
-    this.entries.set(address.toLowerCase(), { id, expires: this.now() + this.ttlMs })
+    this.entries.set(this.key(address, kind), {
+      id,
+      expires: this.now() + this.ttlMs,
+    })
   }
 
+  /** Drops both kinds: whatever the address was, it no longer resolves. */
   forget(address: string): void {
     this.epoch += 1
-    this.entries.delete(address.toLowerCase())
+    this.entries.delete(this.key(address, "User"))
+    this.entries.delete(this.key(address, "Group"))
   }
 }
+
+type AccountKind = "User" | "Group"
 
 /** The cache the API process shares; the projection writer invalidates it. */
 export const mailboxIdCache = new MailboxIdCache()
@@ -254,11 +303,14 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
    * exact address check below picks the account. Two domains sharing a local
    * part both come back from the query; only one can carry the address.
    */
-  async function lookup(address: string): Promise<StalwartAccountId> {
-    const localPart = address.slice(0, address.lastIndexOf("@"))
+  async function lookup(
+    address: string,
+    kind: AccountKind,
+    registryName: string,
+  ): Promise<StalwartAccountId> {
     const [, queried] = (
       await post(opts.registryToken, REGISTRY_USING, [
-        ["x:Account/query", { filter: { name: localPart } }, "q"],
+        ["x:Account/query", { filter: { name: registryName } }, "q"],
       ])
     )[0]!
 
@@ -303,46 +355,65 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
     }
 
     const account = carrying[0]!
-    // A group is a delivery target with no store of its own; it has no mail to act on.
-    if (account["@type"] === "Group") {
-      throw new JmapAsError("ambiguous_account", `${address} is a group, not a mailbox`)
+    // ⚠ THE KIND MUST MATCH IN BOTH DIRECTIONS. A mailbox call must not land on a
+    // group's account, and a team inbox call must not land on somebody's own.
+    if ((account["@type"] === "Group") !== (kind === "Group")) {
+      throw new JmapAsError(
+        "ambiguous_account",
+        kind === "Group"
+          ? `${address} is not a group`
+          : `${address} is a group, not a mailbox`,
+      )
     }
 
     return mint(account.id as string)
   }
 
-  async function resolveAccount(
-    mailbox: AuthorisedMailbox,
+  async function resolve(
+    rawAddress: string,
+    kind: AccountKind,
+    registryName: (address: string) => string,
   ): Promise<StalwartAccountId> {
-    const address = mailbox.address.trim().toLowerCase()
+    const address = rawAddress.trim().toLowerCase()
     if (!ADDRESS.test(address)) {
-      throw new JmapAsError(
-        "invalid_address",
-        `not a mailbox address: ${mailbox.address}`,
-      )
+      throw new JmapAsError("invalid_address", `not a mailbox address: ${rawAddress}`)
     }
 
-    const cached = cache.get(address)
+    const cached = cache.get(address, kind)
     if (cached) return cached
 
     const began = cache.begin()
-    const id = await lookup(address)
-    cache.set(address, id, began)
+    const id = await lookup(address, kind, registryName(address))
+    cache.set(address, id, began, kind)
     return id
+  }
+
+  // ⚠ A REGISTRY NAME IS THE LOCAL PART OF THE ADDRESS, FOR USERS AND GROUPS
+  // ALIKE (probed on 1.0.3: the directory group `probe-team@i10.tech` became the
+  // Group account `probe-team`). Two workspaces' `support@` therefore share a
+  // name; the exact `emailAddress` match in `lookup` is what tells them apart.
+  const localPart = (a: string) => a.slice(0, a.lastIndexOf("@"))
+
+  const resolveAccount = (mailbox: AuthorisedMailbox) =>
+    resolve(mailbox.address, "User", localPart)
+
+  const resolveGroup = (group: AuthorisedGroup) =>
+    resolve(group.address, "Group", localPart)
+
+  // ⚠ REFUSED RATHER THAN OVERWRITTEN: an account id in the arguments means a
+  // caller is trying to name the account, and silently replacing it would hide
+  // the bug that put it there. Checked before the registry is asked.
+  const refuseNamedAccounts = (methods: readonly JmapMethod[]) => {
+    for (const [name, args] of methods) {
+      if ("accountId" in args || "fromAccountId" in args) {
+        throw new Error(`${name}: accountId is supplied by the client, not the caller`)
+      }
+    }
   }
 
   return {
     async call(mailbox, methods, using = MAIL_USING) {
-      // ⚠ REFUSED RATHER THAN OVERWRITTEN: an `accountId` in the arguments means
-      // a caller is trying to name the account, and silently replacing it would
-      // hide the bug that put it there. Checked before the registry is asked.
-      for (const [name, args] of methods) {
-        if ("accountId" in args) {
-          throw new Error(
-            `${name}: accountId is supplied by the client, not the caller`,
-          )
-        }
-      }
+      refuseNamedAccounts(methods)
 
       const accountId = await resolveAccount(mailbox)
 
@@ -355,6 +426,53 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
           callId,
         ]),
       )
+    },
+
+    async callAsGroup(group, methods, options = {}) {
+      refuseNamedAccounts(methods)
+
+      const accountId = await resolveGroup(group)
+      const fromAccountId = options.from ? await resolveAccount(options.from) : null
+
+      return post(
+        opts.impersonationToken,
+        options.using ?? MAIL_USING,
+        methods.map(([name, args, callId]): JmapMethod => [
+          name,
+          // ⚠ ONLY A COPY TAKES A SOURCE ACCOUNT. The other methods would
+          // answer `invalidArguments` to an argument they do not define.
+          fromAccountId && name.endsWith("/copy")
+            ? { ...args, accountId, fromAccountId }
+            : { ...args, accountId },
+          callId,
+        ]),
+      )
+    },
+
+    async destroyGroup(group) {
+      let id: StalwartAccountId
+      try {
+        id = await resolveGroup(group)
+      } catch (error) {
+        if (error instanceof JmapAsError && error.code === "no_account") return false
+        throw error
+      }
+
+      const [, result] = (
+        await post(opts.registryToken, REGISTRY_USING, [
+          ["x:Account/set", { destroy: [id] }, "d"],
+        ])
+      )[0]!
+      cache.forget(group.address)
+
+      const destroyed = Array.isArray(result.destroyed) ? result.destroyed : []
+      if (!destroyed.includes(id)) {
+        throw new JmapAsError(
+          "stalwart",
+          `stalwart did not destroy the account for ${group.address}`,
+        )
+      }
+      return true
     },
   }
 }

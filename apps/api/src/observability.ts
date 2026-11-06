@@ -48,6 +48,7 @@ export type Service =
   | "risk-score"
   | "content-store"
   | "retention"
+  | "team-sent"
 
 export interface ObservabilityOptions {
   /**

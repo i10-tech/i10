@@ -45,6 +45,8 @@ import { nameClaims } from "./domains/claims.js"
 import { domainStore } from "./domains/store.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
+import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
+import { onTeamInboxEvent } from "./team-inboxes/sync.js"
 import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
@@ -1078,6 +1080,13 @@ const teamDomains: TeamDomainDeps | null = domains
 
 const mailboxDir = mailboxDirectory(db)
 
+// Shared addresses (B8). The Sent copy runs in its own CronJob (team-sent.ts).
+const teamInboxService = teamInboxesFor({
+  db,
+  clerk,
+  mail: teamMailFor(env),
+})
+
 const app = createApp({
   suppressions,
   trustedTemplates: risk.trustedTemplates,
@@ -1122,6 +1131,17 @@ const app = createApp({
     lifecycle,
     // Member limits, late acceptances and capacity alerts (#327).
     members: (type: string, data: unknown) => onClerkEvent(members, type, data),
+    // Team inboxes follow the workspace (B8).
+    teamInboxes: (type: string, data: unknown) =>
+      onTeamInboxEvent(
+        {
+          inboxes: teamInboxService,
+          tenantOf: (orgId: string) => members.store.tenantOf(orgId),
+          log,
+        },
+        type,
+        data,
+      ),
     // Auto-join at sign-up (#326): verified addresses only, idempotent.
     ...(teamDomains
       ? {
@@ -1458,6 +1478,7 @@ const app = createApp({
     codeSends: codeCooldown(cache),
     ...(teamDomains ? { teamDomains } : {}),
     members,
+    teamInboxes: teamInboxService,
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
