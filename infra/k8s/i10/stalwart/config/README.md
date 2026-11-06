@@ -350,8 +350,13 @@ the account in the **internal** directory, and i10 runs an external LDAP
 directory, so there is nowhere for one to live. The product boundary is held by
 never surfacing the feature in i10's own UI rather than by a server setting.
 
-If that ever needs real enforcement, the mechanism is a permission denial on a
-Role, not a limit - see `/docs/auth/authorization/permissions`.
+⚠ **SO IT IS ENFORCED BY A ROLE NOW (#365).** The role `i10 User` inherits the
+built-in `b` (User) through `roleIds` and lists every `sysAppPassword*` and
+`sysApiKey*` permission in `disabledPermissions`; `Authentication` makes it the
+default user role. Inheriting instead of copying keeps every permission a later
+release adds to `b`. OAuth grants stay, because device sign-in needs them. Role
+has no name field, so the plan matches it on `description`: renaming it in the
+UI makes the next run create a second one.
 
 ## The database
 
@@ -388,6 +393,60 @@ the docs site:
 - A Certificate's `subjectAlternativeNames` is server-set from the PEM, and the
   CN counts. Ours names `i10.tech` and `*.i10.tech` only, so `matchOn` still
   matches; a certificate whose CN is not among its SANs would be created twice.
+
+## The tuning pass (#365)
+
+The second half of `plan.ndjson` (Email onward) is the tuning pass approved on
+#365. The proposal lists every setting with its current value and the reason;
+what follows are the ones whose reason is not obvious from the value.
+
+- ⚠ **40 MB ON 465, 50 MB ON 25, BECAUSE OF SES.** SES refuses a message over
+  40 MB (a fixed quota) and mailbox mail relays through SES, so submission
+  stops there instead of failing at delivery. Inbound is 50 MB to match
+  `Email.maxMessageSize`, so nothing is accepted that cannot be stored.
+  `MtaStageRcpt.maxRecipients` is 50 on 465 for the same reason.
+- ⚠ **THE `rcptrate` THROTTLE IS PORT 25 ONLY.** Matched on "not 2525" it also
+  capped our own customers on 465 at 25 messages an hour to one recipient.
+  Submission has its own per-account limits instead, keyed on
+  `authenticatedAs`: 200 an hour and 1000 a day.
+- ⚠ **THE OUTBOUND BACKSTOP IS PER SENDER DOMAIN, NOT PER SENDER.** The send
+  worker's relay mail carries a unique `bounce+` envelope sender per message,
+  so a per-sender limit on it would never trigger. 2525 skips every inbound
+  check by design; this is the one limit that catches a runaway worker.
+- ⚠ **PYZOR IS OFF ON PURPOSE, AND THE MIGRATION HAD TURNED IT BACK ON.** 1.0
+  ships it off, but `prepare`'s recommended policy pins 0.16's `true`. It sends
+  a fingerprint of every inbound message and our IP to a third party.
+- ⚠ **CACHE SIZES ARE READ AT STARTUP, AND 1.0'S DEFAULTS DO NOT FIT THE POD.**
+  `messages` and `messagesLarge` default to 320 MB and 512 MB against a 1 GiB
+  limit. The plan sets 128 MB and 64 MB; restart after applying.
+- ⚠ **THE CLIENT IP COMES FROM X-Forwarded-For, ONE HOP.** Behind Traefik every
+  client looked like Traefik for bans and rate limits. Anything that can reach
+  8080 directly can therefore claim any address. Today that is every pod in
+  i10-prod (`allow-same-namespace`, which a NetworkPolicy cannot narrow), plus
+  Traefik.
+- **The cluster and the tailnet are `AllowedIp`** (10.42.0.0/16, fd42::/48,
+  100.64.0.0/10, fd7a:115c:a1e0::/48), so a burst of failures from our own
+  components can never ban them. **Bans last 30 days** instead of forever.
+- **Failure reports are off** (DMARC `ruf`, DKIM and SPF). They send message
+  headers to whoever the sender's domain names, which for a mail host is
+  personal data leaving to third parties. Aggregate reports stay on, now from
+  `i10.tech` with `postmaster@i10.tech` as the contact.
+- **MTA-STS names `mail.i10.tech` but stays `testing`.** Enforce after four
+  weeks of clean TLS reports, and only with certificate-expiry alerting in
+  place: enforcing with a broken certificate stops inbound mail.
+- **pop3s, sieve and https are deleted** by an `absent` operation, which is
+  bootstrap.sh's own (stalwart-cli has no declarative delete). It destroys
+  what matches and does nothing on later runs.
+
+Approved but not in the plan, because each needs something first:
+
+- Blob encryption (`Email.blobEncryptionKey`): a key in Doppler with a copy
+  outside it and a rotation runbook. Losing the key loses every message.
+- The Prometheus exporter: a scraper and an auth secret.
+- `Search.supportedLanguages`: which languages customers write in. Changing it
+  later reindexes everything.
+- Per-account disk quotas and the API's JMAP rate limit: both need a probe on
+  one account first.
 
 ## Blobs live in R2 (#357)
 

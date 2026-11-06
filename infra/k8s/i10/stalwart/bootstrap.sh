@@ -94,8 +94,9 @@ kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
 # every field the schema marks `immutable` or `serverSet`; no match is created
 # minus `serverSet`; two matches is an error. `#name` references are never
 # rewritten client-side - every request carries a `createdIds` map (RFC 8620
-# §3.3) and the server resolves them, exactly as the CLI does. Only the three
-# operations plan.ndjson uses are supported; anything else fails loudly.
+# §3.3) and the server resolves them, exactly as the CLI does. Only the
+# operations plan.ndjson uses are supported (upsert, update, create, and our
+# own `absent`); anything else fails loudly.
 #
 # ⚠ THE CREDENTIAL NEVER REACHES argv OR A POD SPEC. It lives in a shell
 # variable and is handed to the helper through its environment for the length
@@ -498,6 +499,32 @@ def require_env(ops):
              + ", ".join(missing) + " - add them to Doppler, restart the pod, then re-run")
 
 
+def absent(c, op, cache, dry=False):
+    # ⚠ OURS, NOT THE CLI'S: stalwart-cli has no declarative delete. `absent`
+    # destroys every object whose `matchOn` properties equal one of the bodies
+    # in `value`, and does nothing when none does, so it converges like the
+    # other operations instead of failing on its second run.
+    label = c[2:]
+    match_on = op.get("matchOn") or fail(f"{label}: absent without `matchOn`")
+    if c not in cache:
+        cache[c] = fetch_all(c)
+    gone = [o for o in cache[c]
+            if any(all(same(o.get(p), b.get(p)) for p in match_on) for b in op["value"].values())]
+    for o in gone:
+        names = ", ".join(str(o.get(p)) for p in match_on)
+        if dry:
+            print(f"   - would destroy {label} {o['id']} ({names})")
+            continue
+        (res,) = jmap([[f"{c}/set", {"destroy": [o["id"]]}, "d"]])
+        if o["id"] not in (res.get("destroyed") or []):
+            fail(f"{label}: destroy failed for {o['id']}: {describe((res.get('notDestroyed') or {}).get(o['id'], {}))}")
+        cache[c].remove(o)
+        ok(f"destroyed {label} {o['id']} ({names})")
+    if dry and not gone:
+        print(f"   = {label}: nothing to destroy")
+    return 0 if dry else len(gone)
+
+
 def apply(text, dry=False):
     ops = [from_secret(json.loads(line)) for line in text.splitlines() if line.strip()]
     require_env(ops)
@@ -517,6 +544,8 @@ def apply(text, dry=False):
             created, updated = 0, 0 if dry else 1
             if not dry:
                 ok(f"updated {c[2:]}")
+        elif kind == "absent":
+            created, updated = 0, absent(c, op, cache, dry)
         elif dry:
             fail(f"operation #{i}: `{kind}` has no dry-run preview")
         elif kind == "create":
@@ -524,7 +553,7 @@ def apply(text, dry=False):
             ok(f"created {c[2:]} ({created})")
         else:
             fail(f"operation #{i}: `{kind}` is not supported by bootstrap.sh - "
-                 "only upsert, update and create; use stalwart-cli for the rest")
+                 "only upsert, update, create and absent; use stalwart-cli for the rest")
         total_created += created
         total_updated += updated
     if not dry:
