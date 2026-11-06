@@ -757,16 +757,29 @@ if [ "$RESTART" = true ]; then
   #   3. The per-account permission set, cached as `accessToken`. Assigning
   #      defaultUserRoleIds appeared to do nothing for twenty minutes because
   #      the running server kept serving the old, empty token.
+  #
+  # ⚠ EVERY NODE, NOT ONLY $POD (#358). Store and role settings are read at
+  # startup, and the coordinator does not carry them, so a node left running
+  # keeps the old in-memory store and the old role. One at a time, the edge
+  # node first: it holds the public listeners and is the one that must come
+  # back before the other goes down.
   disconnect
-  kubectl delete pod -n "$NS" "$POD" --wait=false >/dev/null
-  kubectl wait --for=delete "pod/$POD" -n "$NS" --timeout=90s >/dev/null 2>&1 || true
-  for _ in $(seq 1 60); do
-    ready=$(kubectl get pod -n "$NS" "$POD" -o jsonpath='{.status.containerStatuses[*].ready}' 2>/dev/null || true)
-    [ "$ready" = "true true" ] && break
-    sleep 3
+  restart_pod() {
+    local pod=$1 ready=""
+    kubectl delete pod -n "$NS" "$pod" --wait=false >/dev/null
+    kubectl wait --for=delete "pod/$pod" -n "$NS" --timeout=90s >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+      ready=$(kubectl get pod -n "$NS" "$pod" -o jsonpath='{.status.containerStatuses[*].ready}' 2>/dev/null || true)
+      [ "$ready" = "true true" ] && break
+      sleep 3
+    done
+    [ "$ready" = "true true" ] || die "$pod did not come back ready"
+    ok "$pod restarted and ready"
+  }
+  restart_pod "$POD"
+  for pod in $(kubectl get pod -n "$NS" -l app.kubernetes.io/part-of=i10-stalwart -o name | sed 's|^pod/||'); do
+    [ "$pod" = "$POD" ] || restart_pod "$pod"
   done
-  [ "${ready:-}" = "true true" ] || die "the pod did not come back ready"
-  ok "pod restarted and ready"
   sleep 3
   connect
 else

@@ -400,12 +400,59 @@ To switch, in this order:
 5. Deliver a message and check that a new object is in `i10-mail` and that the
    message reads back over JMAP.
 
+## Two nodes on one box (#358)
+
+Stalwart runs as a two-node cluster on psl-vps: `i10-stalwart-0` (edge) and
+`i10-stalwart-internal-0` (internal), both built from `node/statefulset.yaml`.
+They share Postgres (data, search), R2 (blobs) and `i10-stalwart-redis`
+(in-memory store and coordinator, `redis.yaml`). Neither holds data of its own,
+and the pod hostname is the node id, so each StatefulSet's `-0` keeps its id
+across restarts.
+
+| Node     | Listeners                    | Tasks                              | Reached through                                            |
+| -------- | ---------------------------- | ---------------------------------- | ---------------------------------------------------------- |
+| edge     | all, mail ports on hostPorts | all (no `STALWART_ROLE`)           | MX, IMAP/SMTP clients, `i10-stalwart-mail`, `i10-stalwart` |
+| internal | `http` (8080) only           | `outboundMta`, `pushNotifications` | `i10-stalwart` only                                        |
+
+⚠ **ONE NODE ON THE HOST'S MAIL PORTS, AND THAT IS NOT A CHOICE.** psl-vps is a
+single Kubernetes node and 25/465/993 are hostPorts, so a second pod claiming
+them would sit Pending. The internal node exists to take JMAP load (our API, the
+webmail) off the pod that handles mail, not to stand in for it.
+
+⚠ **THE `internal` ROLE NAMES A LISTENER BY ID** (`jcrkonsmahab`, the `http`
+listener this server created at first boot). A rebuilt server has different ids,
+and the role would then enable nothing: the internal node fails its probes and
+never becomes ready, which is loud. Read the new id from
+`x:NetworkListener/get` and update the plan.
+
+⚠ **THE SCHEDULER AND SPAM TRAINING STAY ON THE EDGE NODE.** Each node with
+`taskScheduler` queues its own copy of every periodic task, and two nodes
+training the classifier at once is unsupported. That is why the internal node
+has a role at all: without `STALWART_ROLE`, or with a role that does not exist
+yet, a node runs everything.
+
+⚠ **STORE AND ROLE CHANGES NEED EVERY NODE RESTARTED.** They are read at
+startup; the coordinator carries cache invalidations and setting reloads, not
+these. `bootstrap.sh` restarts every pod labelled
+`app.kubernetes.io/part-of=i10-stalwart`, edge first.
+
+To bring it up, in this order:
+
+1. Merge with the internal StatefulSet at `replicas: 0` (as shipped). Argo
+   starts `i10-stalwart-redis` and rolls the edge pod for its new label.
+2. `./bootstrap.sh` on psl-vps: it applies `InMemoryStore` (Redis), then
+   `Coordinator` (which Stalwart refuses while the in-memory store is local),
+   creates the `internal` role, and restarts.
+3. Raise `replicas` to 1 in `internal/kustomization.yaml` and merge.
+4. Check both nodes are `active` in `x:ClusterNode/get`, and that JMAP answers
+   with either pod deleted.
+
 ## The internal relay
 
 The send worker hands direct-route mail to the `relay` listener on **2525**, with
 **no account and no credential**. The trust is where the connection comes from:
 
-- **No hostPort** (statefulset.yaml) - nothing on the node's public addresses
+- **No hostPort** (node/statefulset.yaml) - nothing on the node's public addresses
   answers on 2525.
 - **Not in `allow-public-mail`** (networkpolicy.yaml) - traffic from outside the
   namespace cannot reach it. `allow-same-namespace` is what lets the worker in.

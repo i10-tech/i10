@@ -1,0 +1,49 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The second Stalwart node (#358): the same pod as ../node, serving JMAP and the
+# web endpoints on 8080 and nothing else.
+#
+# ⚠ NO hostPorts, BECAUSE psl-vps IS ONE NODE. 25, 465 and 993 are claimed on
+# the host by the edge pod, and a second claim on the same node leaves this pod
+# Pending forever. So this node takes the load that does not need a public port:
+# our API's and the webmail's JMAP, through the `i10-stalwart` Service.
+#
+# ⚠ AND THE ROLE IS WHAT KEEPS IT FROM DOING EVERYTHING. A node with no
+# STALWART_ROLE opens every listener and runs every task, including the
+# scheduler and spam training, which must run on one node only. The `internal`
+# ClusterRole (plan.ndjson) enables the http listener, outbound delivery and
+# push notifications. A role named here that does not exist yet makes the node
+# log `Cluster role "internal" not found` and run everything - hence replicas.
+resources:
+  - ../node
+
+nameSuffix: -internal
+
+patches:
+  - target:
+      kind: StatefulSet
+      name: i10-stalwart
+    patch: |-
+      # ⚠ ZERO UNTIL THE PLAN HAS RUN. Started before bootstrap.sh has applied
+      # the Redis in-memory store, the coordinator and the `internal` role, this
+      # node would share the data store with the edge node and no coordinator,
+      # and would run every task. Raised to 1 in a second change, after that.
+      - op: replace
+        path: /spec/replicas
+        value: 0
+      - op: replace
+        path: /spec/selector/matchLabels/app.kubernetes.io~1name
+        value: i10-stalwart-internal
+      - op: replace
+        path: /spec/template/metadata/labels/app.kubernetes.io~1name
+        value: i10-stalwart-internal
+      # The whole list, not the hostPorts alone: only `http` is served here, and
+      # the probes name it.
+      - op: replace
+        path: /spec/template/spec/containers/0/ports
+        value:
+          - { name: http, containerPort: 8080 }
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: STALWART_ROLE, value: internal }
