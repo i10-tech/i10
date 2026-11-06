@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { accounts, aliases, webhookEvents } from "../db/schema.js"
+import { mailboxIdCache } from "../mail/jmap-as.js"
 import { projectUser, type ClerkUser } from "./clerk-user.js"
 
 /**
@@ -79,7 +80,7 @@ export async function applyClerkEvent(
 
       case "user.deleted": {
         const { id } = (data ?? {}) as { id?: string }
-        if (id) await tx.delete(accounts).where(eq(accounts.clerkUserId, id))
+        if (id) await removeAccount(tx, id)
         return { outcome: "removed" }
       }
 
@@ -117,6 +118,23 @@ export async function projectClerkUser(
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 /**
+ * Deletes a user's mailbox row and forgets the Stalwart account id cached for it.
+ *
+ * ⚠ THE CACHE DROP IS WHAT STOPS A DELETED MAILBOX RESOLVING. Stalwart answers
+ * for the id of an account that no longer exists (see `mail/jmap-as.ts`), so a
+ * cached one would keep reading and writing a phantom. Forgetting before the
+ * transaction commits is deliberate: a rollback only costs one extra lookup.
+ */
+async function removeAccount(tx: Tx, clerkUserId: string): Promise<void> {
+  const gone = await tx
+    .delete(accounts)
+    .where(eq(accounts.clerkUserId, clerkUserId))
+    .returning({ email: accounts.email })
+
+  for (const { email } of gone) mailboxIdCache.forget(email)
+}
+
+/**
  * Brings one user's rows in line with Clerk.
  *
  * ⚠ `active` IS NEVER WRITTEN HERE. It is the subscription gate - whether the
@@ -149,9 +167,16 @@ async function applyUser(
     // No hosted address: either they never had one, or they gave it up. Either
     // way they must stop resolving as a recipient. Aliases and memberships
     // cascade.
-    await tx.delete(accounts).where(eq(accounts.clerkUserId, user.id))
+    await removeAccount(tx, user.id)
     return { outcome: "removed" }
   }
+
+  // The address this user held before, so a rename drops its cached account id.
+  const [previous] = await tx
+    .select({ email: accounts.email })
+    .from(accounts)
+    .where(eq(accounts.clerkUserId, user.id))
+    .limit(1)
 
   const updated = await tx
     .insert(accounts)
@@ -192,6 +217,10 @@ async function applyUser(
     .returning({ email: accounts.email })
 
   if (updated.length === 0) return { outcome: "stale" }
+
+  if (previous && previous.email !== updated[0]!.email) {
+    mailboxIdCache.forget(previous.email)
+  }
 
   // Aliases are replaced wholesale rather than diffed. The set is small, it is
   // two statements either way, and a diff still has to get removal right.
