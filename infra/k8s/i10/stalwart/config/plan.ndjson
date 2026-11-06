@@ -20,12 +20,13 @@
 {"@type": "upsert", "object": "MtaInboundThrottle", "matchOn": ["description"], "value": {"iprate": {"description": "Sender IP throttle", "enable": true, "key": {"remoteIp": true}, "match": {"match": {}, "else": "local_port != 2525"}, "rate": {"count": 5, "period": 1000}}}}
 {"@type": "upsert", "object": "MtaInboundThrottle", "matchOn": ["description"], "value": {"rcptrate": {"description": "Sender address to recipient throttle", "enable": true, "key": {"senderDomain": true, "rcpt": true}, "match": {"match": {}, "else": "local_port == 25"}, "rate": {"count": 25, "period": 3600000}}}}
 {"@type": "upsert", "object": "MtaRoute", "matchOn": ["name"], "value": {"ses-relay": {"@type": "Relay", "name": "ses-relay", "description": "SES SMTP relay for mailbox mail", "host": "email-smtp.eu-central-1.amazonaws.com", "port": 587, "protocol": "smtp", "implicitTls": false, "authUsername": {"@fromSecret": "SES_SMTP_USER"}, "authSecret": {"@type": "EnvironmentVariable", "variableName": "SES_SMTP_PASSWORD"}}}}
-{"@type": "update", "object": "Email", "value": {"compressionAlgorithm": "zstd", "maxMessageSize": 50000000, "maxAttachmentSize": 40000000, "maxSubmissions": 5000}}
+{"@type": "upsert", "object": "SymmetricKey", "matchOn": ["description"], "value": {"blobkey2026": {"description": "Blob key 2026-11", "cipher": "aes256Gcm", "key": {"@type": "EnvironmentVariable", "variableName": "STALWART_BLOB_KEY"}}}}
+{"@type": "update", "object": "Email", "value": {"compressionAlgorithm": "zstd", "maxMessageSize": 50000000, "maxAttachmentSize": 40000000, "maxSubmissions": 5000, "blobEncryptionKey": "#blobkey2026"}}
 {"@type": "update", "object": "Encryption", "value": {"atRestEnable": false}}
-{"@type": "update", "object": "FileStorage", "value": {"compressionAlgorithm": "zstd"}}
+{"@type": "update", "object": "FileStorage", "value": {"compressionAlgorithm": "zstd", "blobEncryptionKey": "#blobkey2026"}}
 {"@type": "update", "object": "Jmap", "value": {"maxUploadSize": 40000000, "uploadQuota": 200000000, "maxConcurrentRequests": 32, "maxMethodCalls": 32}}
 {"@type": "update", "object": "DataRetention", "value": {"maxChangesHistory": 50000}}
-{"@type": "update", "object": "Search", "value": {"indexTelemetry": false, "maxExtractDecompressedSize": 67108864, "maxConcurrentIndexTasks": 2}}
+{"@type": "update", "object": "Search", "value": {"indexTelemetry": false, "maxExtractDecompressedSize": 67108864, "maxConcurrentIndexTasks": 2, "supportedLanguages": {"en-US": true, "ar-001": true, "fr-FR": true, "de-DE": true, "es-ES": true}}}
 {"@type": "update", "object": "SpamClassifier", "value": {"holdSamplesFor": 5184000000}}
 {"@type": "update", "object": "SpamPyzor", "value": {"enable": false}}
 {"@type": "update", "object": "SpamSettings", "value": {"scoreReject": 15}}

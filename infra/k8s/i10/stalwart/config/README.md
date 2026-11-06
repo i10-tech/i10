@@ -440,15 +440,44 @@ what follows are the ones whose reason is not obvious from the value.
   bootstrap.sh's own (stalwart-cli has no declarative delete). It destroys
   what matches and does nothing on later runs.
 
-Approved but not in the plan, because each needs something first:
+- **Search covers English, Arabic, French, German and Spanish.** Each message's
+  language is detected when it is indexed, and a language not listed is
+  processed as English. Adding one later means reindexing every message.
 
-- Blob encryption (`Email.blobEncryptionKey`): a key in Doppler with a copy
-  outside it and a rotation runbook. Losing the key loses every message.
-- The Prometheus exporter: a scraper and an auth secret.
-- `Search.supportedLanguages`: which languages customers write in. Changing it
-  later reindexes everything.
+Approved but not in the plan yet:
+
+- The Prometheus exporter and alerts: deferred, because the cluster has no
+  collector to scrape it.
 - Per-account disk quotas and the API's JMAP rate limit: both need a probe on
   one account first.
+
+### ⚠ Blob encryption: the key must never change
+
+Message bodies, attachments, Sieve scripts and queued messages in R2 are
+encrypted with the `Blob key 2026-11` SymmetricKey (aes256Gcm), selected in
+both `Email` and `FileStorage`. The key material is `STALWART_BLOB_KEY` in
+Doppler `prod_stalwart`, read from the environment, so it is never in the
+database or a config export. Metadata, the search index and everything else in
+Postgres stay plaintext; encrypt those at the database level if needed.
+
+- ⚠ **CHANGING THE VALUE STOPS ALL MAIL.** Stalwart stores a fingerprint of the
+  key when it is created. A different value under the same name fails that
+  check, and the server then refuses to write any blob (no delivery, no
+  append) rather than write unencrypted. Never rotate it in Doppler.
+- ⚠ **LOSING THE VALUE LOSES EVERY MESSAGE.** The copy outside Doppler is the
+  only thing that survives a lost Doppler project. Restore the same value under
+  the same name and the server reads its blobs again.
+- **To rotate:** add a new variable and a new SymmetricKey, point `Email` and
+  `FileStorage` at it, reload, then run a `BlobRecode` task with
+  `encryption: {"@type": "Encrypt", "keyId": <new id>}`. Keep the old key and
+  variable until that task has finished on every shard (one
+  `store.blob-store-recoded` event per shard, 256 in all).
+- **Only the recovery admin can delete a key**, and the server cannot tell
+  whether blobs still need it. Never delete one unless a `BlobRecode` has moved
+  every blob off it.
+- New blobs are encrypted from the reload on. What was stored before was
+  converted once, with a `BlobRecode` task (#365); that is a one-off, so it is
+  not in this plan.
 
 ## Blobs live in R2 (#357)
 
