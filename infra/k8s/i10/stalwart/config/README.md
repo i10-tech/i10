@@ -519,6 +519,38 @@ proposal) and stays off.
 - **Turning it off** is `gatewayEnable: false`. Messages already in the queue
   keep the copies they were given at acceptance.
 
+### DKIM records publish themselves (B4)
+
+i10.tech's `dnsManagement` is `Automatic` through the `DnsServer` "Cloudflare
+i10.tech, DKIM records only". With DNS on `Manual`, 1.0 creates a key once and
+never rotates it; with it on `Automatic`, Stalwart publishes a new key's
+`_domainkey` record, waits for it to resolve, signs with it, and removes the
+old record after `retireAfter`. The defaults rotate every 90 days.
+
+- ⚠ **`publishRecords` IS `dkim` ONLY, AND MUST STAY SO.** Its default is every
+  record type Stalwart knows: MX, SPF, DMARC, MTA-STS, CAA, SRV and autoconfig.
+  `infra/tofu/stacks/dns` is the authority for those, and they deliberately
+  differ from what Stalwart would write (DMARC stays `p=none`, for one). With
+  the default, Stalwart and `tofu apply` would overwrite each other.
+- **The `_domainkey` records Stalwart writes are not in tofu**, and tofu leaves
+  records it does not declare alone. The SES selectors (`ses_byodkim`,
+  `domain_dkim`) stay in tofu: SES holds those keys, not Stalwart.
+- **The token is `STALWART_CLOUDFLARE_DNS_TOKEN`** in Doppler `prod_stalwart`:
+  Zone Read and DNS Edit on the i10.tech zone and nothing else. Do not reuse
+  `CLOUDFLARE_API_TOKEN` from `prod_tofu` or `prod_platform`, which reach R2
+  and every zone. Env vars only reach a running pod on restart, and
+  `bootstrap.sh --dry-run` refuses the plan until the pod has the variable.
+- **It only matters for mail that leaves directly.** Stalwart does not sign
+  `ses-relay` mail (see "The `ses-relay` route"), so today Stalwart's key signs
+  the worker's direct-route mail and mailbox mail while the relay is off.
+- **No PowerDNS server.** Customer domains are not Stalwart `Domain` objects,
+  their mailbox mail is signed by SES, and PowerDNS deliberately has no API
+  (`../../powerdns/README.md`): zones are rows `apps/api` writes. A Stalwart
+  write path into those zones would be a second source of truth.
+- **The ed25519 key `v1-ed25519-20260901` was moved to `retiring` by hand** and
+  has no `nextTransitionAt`, so Stalwart may never retire it. If it is still
+  `retiring` a week after this lands, delete its record and key by hand.
+
 ## Blobs live in R2 (#357)
 
 Message bodies, attachments and users' Sieve scripts go to the private R2 bucket
