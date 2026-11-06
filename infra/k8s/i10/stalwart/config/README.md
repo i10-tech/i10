@@ -409,10 +409,10 @@ They share Postgres (data, search), R2 (blobs) and `i10-stalwart-redis`
 and the pod hostname is the node id, so each StatefulSet's `-0` keeps its id
 across restarts.
 
-| Node | Listeners | Tasks | Reached through |
-| --- | --- | --- | --- |
-| edge | all, mail ports on hostPorts | all (no `STALWART_ROLE`) | MX, IMAP/SMTP clients, `i10-stalwart-mail`, `i10-stalwart` |
-| internal | `http` (8080) only | `outboundMta`, `pushNotifications` | `i10-stalwart` only |
+| Node     | Listeners                    | Tasks                              | Reached through                                            |
+| -------- | ---------------------------- | ---------------------------------- | ---------------------------------------------------------- |
+| edge     | all, mail ports on hostPorts | all (no `STALWART_ROLE`)           | MX, IMAP/SMTP clients, `i10-stalwart-mail`, `i10-stalwart` |
+| internal | `http` (8080) only           | `outboundMta`, `pushNotifications` | `i10-stalwart` only                                        |
 
 ⚠ **ONE NODE ON THE HOST'S MAIL PORTS, AND THAT IS NOT A CHOICE.** psl-vps is a
 single Kubernetes node and 25/465/993 are hostPorts, so a second pod claiming
