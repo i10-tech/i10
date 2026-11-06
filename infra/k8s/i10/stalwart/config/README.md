@@ -588,6 +588,28 @@ directly with no DKIM. Turning the relay off sends already-queued mailbox mail
 directly, also unsigned. Both land in spam at worst while DMARC is `p=none`;
 neither loses mail.
 
+⚠ **THE ORIGINAL MESSAGE-ID TRAVELS IN `References`, OR REPLIES DO NOT
+THREAD.** SES gives every message a new `Message-ID`
+(`<...-000000@eu-central-1.amazonses.com>`) and cannot be told to keep the
+original. The sender's Sent copy keeps the original, so a reply, whose
+`In-Reply-To` names SES's id, matched nothing in the sender's mailbox. SES
+leaves `References` alone, so the `ses-references` SieveSystemScript appends
+the message's own Message-ID to its `References` before it is queued, and the
+reply's `References` then names the Sent copy. `MtaStageData.script` runs it
+only for authenticated senders whose `mailbox_route` is `ses-relay`, the same
+rule as the route and the signing domain. This is the approach of
+[milter-autoref](https://github.com/jcsanyi/milter-autoref) for Postfix in front
+of SES (#354).
+
+⚠ **AN SES EMAIL-ADDRESS IDENTITY OVERRIDES ITS DOMAIN'S MAIL FROM.** SES
+applies the most specific identity it has. A hand-made `mohamed@i10.tech`
+identity with no custom MAIL FROM made SES use `amazonses.com` for that
+sender, so SPF passed unaligned while the i10.tech domain identity reported
+`send.mail.i10.tech` as `SUCCESS`. It was deleted on 2026-11-06: a verified
+domain also covers every address at it as a recipient, even in the sandbox.
+Look for address identities (`aws sesv2 list-email-identities`) before
+trusting a domain's MAIL FROM (#354).
+
 To throw the lever, in this order:
 
 1. `./bootstrap.sh --dry-run` on psl-vps. Every object should be unchanged,
