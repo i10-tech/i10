@@ -27,8 +27,9 @@ spec:
 ---
 # The 1.0 store (#365). Stalwart 1.0 cannot open a 0.16 store, so
 # `stalwart-migrate` copies `stalwart` into this one, which must be EMPTY when
-# the first run starts. The same `stalwart` role owns both, so config.json only
-# changes its `database` at the cutover.
+# the first run starts. The same `stalwart` role owns both, so the role and
+# its password carry over; config.json changes only its `database` (and 1.0's
+# `connectTimeout` name) at the cutover.
 #
 # ⚠ `stalwart` STAYS UNTIL 1.0 HAS PROVED ITSELF. It is the rollback: before 1.0
 # serves, 0.16 restarts on it as it was; after, `stalwart-migrate rollback`
