@@ -76,18 +76,14 @@ export interface HookDeps {
 const ACCEPT: HookResponse = { action: "accept" }
 
 /**
- * ⚠ 5xx, NOT 4xx, FOR BOTH REFUSALS, as the API's 403 and 429 are not retryable
- * either: a hold lifts with a person's review and an allowance with the period,
- * and a mail client retrying a 4xx would sit on the message for days instead of
- * telling the sender now. The text is the API's, single-line.
+ * ⚠ 5xx, NOT 4xx, as the API's 403 is not retryable either: a hold lifts with a
+ * person's review, and a mail client retrying a 4xx would sit on the message for
+ * days instead of telling the sender now. A hold is the only refusal a mailbox
+ * gets (`admitSend` skips the allowance for it). The text is the API's.
  */
 const rejection = (refusal: Refusal): HookResponse => ({
   action: "reject",
-  response: {
-    status: 550,
-    enhanced_status: refusal.status === "held" ? "5.7.1" : "5.4.5",
-    message: refusal.message,
-  },
+  response: { status: 550, enhanced_status: "5.7.1", message: refusal.message },
 })
 
 /**

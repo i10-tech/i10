@@ -884,14 +884,13 @@ Mail sent from a mailbox (submission on 465, through `ses-relay`) used to skip
 the checks an API send gets. `MtaHook mailboxgate` closes that: Stalwart POSTs
 each authenticated submission to `apps/api` (`/internal/mta-hook`), which answers
 with `admitSend` - **the function `acceptSend` calls for an API send**, so the
-two paths cannot drift. It decides the risk hold (#170), the plan's allowance
-and the free tier's monthly line (#165).
+two paths cannot drift. For a mailbox it decides the risk hold (#170) and
+nothing else: the API allowance never stops a mailbox (see below).
 
 | Answer                    | When                                             | SMTP reply  |
 | ------------------------- | ------------------------------------------------ | ----------- |
 | accept                    | allowed, or the sender has no tenant (see below) | -           |
 | reject                    | the workspace is held (`scope: all`)             | `550 5.7.1` |
-| reject                    | the plan or the monthly tier is spent            | `550 5.4.5` |
 | tempfail (Stalwart's own) | the API is down, slow, or could not decide       | `451 4.3.5` |
 
 ⚠ **AUTHENTICATED SUBMISSIONS ONLY, AND TWICE.** The plan's `enable` is
@@ -903,8 +902,7 @@ accepted untouched.
 
 ⚠ **A HOLD ONLY STOPS A MAILBOX WHEN ITS SCOPE IS `all`.** The score writes
 `scope: api`; only staff write `all` (risk.md, "Holds": mailboxes are not
-stopped by an automatic hold). An API send is stopped by either. The plan's
-allowance, by contrast, is the workspace's and applies to both.
+stopped by an automatic hold). An API send is stopped by either.
 
 ⚠ **ONLY A LOGIN WE CAN PLACE IS LIMITED.** The tenant is the owner of the
 login's domain in `core.mailbox_domains()`, the key `core.mailbox_route` uses.
@@ -915,15 +913,14 @@ accepted untouched - staff mail never waits on a review.
 `MtaStageAuth.mustMatchSender` (default true, not set here) keeps the sender
 inside the login's own addresses as well.
 
-⚠ **NOTHING RECORDS A MAILBOX SEND, SO THE ALLOWANCE IS ONLY EVER SPENT BY THE
-API.** The hook asks and never writes. Recording would put mailbox mail in
-`core.meter_events`, and `flushUsage` ships every row to Polar as an `emails`
-unit, which contradicts mail-routing.md ("mailbox mail is billed by seats and
-storage and is not a send at all"). So a mailbox send is refused when the
-workspace is already out of allowance or held, and never uses any itself. The
-H1 throttles (200 an hour, 1000 a day per account) are the real volume cap on
-465 and stay. Counting mailbox mail against the allowance needs a decision on
-billing first.
+⚠ **THE API ALLOWANCE NEVER STOPS A MAILBOX, AND A MAILBOX NEVER SPENDS IT.**
+Mailbox mail is not a send for billing (mail-routing.md: "mailbox mail is
+billed by seats and storage and is not a send at all"), so `admitSend` skips the
+plan allowance and the free monthly line for it, and the hook records nothing:
+recording would put mailbox mail in `core.meter_events`, which `flushUsage`
+ships to Polar as `emails`. A workspace that has spent its API allowance still
+sends its people's own mail. The H1 throttles (200 an hour, 1000 a day per
+account) are the volume cap on 465. Decided by the user on 2026-11-06 (#380).
 
 **Stage and counting.** The hook is consulted at `rcpt` only. The decision needs
 the workspace and nothing else, so DATA would add nothing - and it would POST the
@@ -942,7 +939,7 @@ cannot switch the check off.
 ms. When the API is down, slow, mid-restart, or has the wrong secret, every
 mailbox send answers `451 4.3.5` and the client retries - nothing bounces and
 nothing is lost, but **nobody can send from a mailbox until the API is back**.
-The alternative, skipping the hook on error, would let a held or over-allowance
+The alternative, skipping the hook on error, would let a held
 workspace send freely for exactly as long as the API is down, which is also when
 nobody is watching. A decision is a few indexed reads, so 3 s is generous; a
 longer one only holds client connections open during an outage.

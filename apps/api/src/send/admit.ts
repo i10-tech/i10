@@ -6,9 +6,9 @@ import { shouldSend, type Metering } from "./metering.js"
  *
  * ⚠ ONE DECISION FOR EVERY WAY OF SENDING. `acceptSend` asks it for an API send
  * and the Stalwart MTA hook (`mail/mta-hook.ts`) asks it for a mailbox send, so
- * a workspace that is held, or out of allowance, is refused by both for the same
- * reason in the same words. Two copies of these rules would be two places for a
- * new tier or a new hold category to be remembered.
+ * a held workspace is refused by both for the same reason in the same words. The
+ * allowance applies to API sends only. Two copies of these rules would be two
+ * places for a new tier or a new hold category to be remembered.
  *
  * ⚠ IT READS AND NEVER WRITES. Usage is recorded when the mail has gone, by the
  * worker, so asking twice about one message (the hook is consulted once per
@@ -74,6 +74,12 @@ export async function admitSend(
         "workspace owner, or contact support, to speed that up.",
     }
   }
+
+  // ⚠ THE ALLOWANCE IS THE API'S, AND IT NEVER STOPS A MAILBOX. Mailbox mail is
+  // not metered or billed (mail-routing.md), so a workspace that has spent its
+  // API allowance still sends its people's own mail; the H1 throttles on 465 cap
+  // mailbox volume instead. Decided by the user on 2026-11-06 (#380).
+  if (surface === "mailbox") return null
 
   // ⚠ FIRST, AND CHEAPLY. Rejecting an over-quota tenant before writing
   // anything is the difference between a 429 in milliseconds and a database

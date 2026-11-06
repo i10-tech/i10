@@ -108,41 +108,28 @@ describe("reading Stalwart's request", () => {
 })
 
 describe("deciding a mailbox send", () => {
-  it("accepts a workspace that is allowed to send, asking for one message", async () => {
+  it("accepts a workspace that is not held, without asking the meter", async () => {
     const { deps, checkQuota } = setup()
     expect(await decideHook(request(), deps)).toEqual({ action: "accept" })
-    expect(checkQuota).toHaveBeenCalledWith(TENANT, 1)
+    expect(checkQuota).not.toHaveBeenCalled()
   })
 
-  it("finds the tenant by the sender's domain", async () => {
+  it("finds the tenant by the login's domain, case-folded", async () => {
     const { deps, domainOwner } = setup()
-    await decideHook(request({ sender: "Anyone@ACME.test" }), deps)
+    await decideHook(request({ login: "Anyone@ACME.test" }), deps)
     expect(domainOwner).toHaveBeenCalledWith("acme.test")
   })
 
-  it("refuses a daily allowance that is spent, as a permanent 5.4.5", async () => {
-    const { deps } = setup({
-      quota: { status: "exceeded", message: "You have used your sending allowance." },
-    })
-    expect(await decideHook(request(), deps)).toEqual(rejected(550, "5.4.5"))
-  })
-
-  it("refuses a free workspace's spent monthly line the same way, in the API's words", async () => {
-    const { deps } = setup({
-      quota: {
-        status: "exceeded",
-        code: "monthly_quota_exceeded",
-        message: "This free workspace has used its monthly sending limit.",
-      },
-    })
-    expect(await decideHook(request(), deps)).toEqual({
-      action: "reject",
-      response: {
-        status: 550,
-        enhanced_status: "5.4.5",
-        message: "This free workspace has used its monthly sending limit.",
-      },
-    })
+  /**
+   * ⚠ THE API ALLOWANCE NEVER STOPS A MAILBOX. Mailbox mail is not metered or
+   * billed, so the user decided on 2026-11-06 (#380) that only a staff hold does.
+   */
+  it.each([
+    { name: "daily allowance", code: undefined },
+    { name: "free monthly line", code: "monthly_quota_exceeded" as const },
+  ])("accepts a workspace whose $name is spent", async ({ code }) => {
+    const { deps } = setup({ quota: { status: "exceeded", message: "m", code } })
+    expect(await decideHook(request(), deps)).toEqual({ action: "accept" })
   })
 
   it("refuses a workspace held for every kind of send, as a permanent 5.7.1", async () => {
@@ -227,7 +214,8 @@ describe("deciding a mailbox send", () => {
 /**
  * ⚠ THE POINT OF THE FEATURE: ONE DECISION. Each case goes through `acceptSend`
  * and through the hook with the same fakes, and the two must agree - except for
- * the one deliberate difference, a hold that covers only the API.
+ * the two deliberate differences: a hold that covers only the API, and the API
+ * allowance, which never stops a mailbox.
  */
 describe("the same decision as an API send", () => {
   const cases: {
@@ -241,7 +229,7 @@ describe("the same decision as an API send", () => {
       name: "daily allowance spent",
       over: { quota: { status: "exceeded", message: "m" } },
       api: "quota_exceeded",
-      hook: "reject",
+      hook: "accept",
     },
     {
       name: "monthly line spent",
@@ -249,7 +237,7 @@ describe("the same decision as an API send", () => {
         quota: { status: "exceeded", message: "m", code: "monthly_quota_exceeded" },
       },
       api: "quota_exceeded",
-      hook: "reject",
+      hook: "accept",
     },
     {
       name: "held for everything",
@@ -332,20 +320,14 @@ describe("POST /internal/mta-hook", () => {
     expect(await res.json()).toEqual({ action: "accept" })
   })
 
-  it("answers a reject Stalwart can relay, for a workspace out of allowance", async () => {
-    const { deps } = routeDeps({
-      quota: { status: "exceeded", message: "You have used your sending allowance." },
-    })
+  it("answers a reject Stalwart can relay, for a held workspace", async () => {
+    const { deps } = routeDeps({ held: { why: "unusual activity", scope: "all" } })
     const res = await call(createMtaHookRoutes(deps), rcpt("john@acme.test"))
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({
-      action: "reject",
-      response: {
-        status: 550,
-        enhanced_status: "5.4.5",
-        message: "You have used your sending allowance.",
-      },
-    })
+    const body = (await res.json()) as {
+      response: { status: number; enhanced_status: string }
+    }
+    expect(body.response).toMatchObject({ status: 550, enhanced_status: "5.7.1" })
   })
 
   it("answers a reject for a held workspace", async () => {
