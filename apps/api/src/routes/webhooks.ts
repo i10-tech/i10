@@ -64,6 +64,12 @@ export interface ClerkWebhookDeps {
    * `organizationMembership.created` and `organizationMembership.deleted`.
    */
   members?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * Team inboxes follow the workspace: a removed member leaves them, a deleted
+   * workspace loses them. Outside the dedupe and idempotent, like the others.
+   * See team-inboxes/sync.ts for the events it needs subscribed.
+   */
+  teamInboxes?: (type: string, data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -152,6 +158,10 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // Provisioning is the opposite: if it failed the first time, the retry is
       // the only chance to fix it, and swallowing that leaves somebody with an
       // account that can never send. Both halves are idempotent on their own.
+      // ⚠ BEFORE PROVISIONING, UNLIKE `members`. A deleted organization's tenant
+      // is what tells us whose inboxes to remove, and the lifecycle handler below
+      // is the thing that retires it.
+      const teamInboxes = (await deps.teamInboxes?.(event.type, event.data)) ?? null
       const provisioned = await provision(deps, event.type, event.data)
       // After provisioning, so a new organization's tenant exists to read.
       const members = (await deps.members?.(event.type, event.data)) ?? null
@@ -174,6 +184,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
           outcome: result.outcome,
           ...(provisioned ? { provisioned } : {}),
           ...(members ? { members } : {}),
+          ...(teamInboxes ? { teamInboxes } : {}),
           ...(emailed ? { emailed } : {}),
         },
         "clerk webhook applied",

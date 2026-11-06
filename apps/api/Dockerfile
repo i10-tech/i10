@@ -76,7 +76,7 @@ RUN bunx turbo run build --filter=@i10/api
 RUN set -eu; \
     for entry in index worker migrate sweep reconcile recheck \
                  domain-catchup domain-prove domain-orphans risk-score risk-admin \
-                 content-store retention; do \
+                 content-store retention team-sent; do \
       if [ ! -f "apps/api/dist/${entry}.js" ]; then \
         echo "dist/${entry}.js is missing - bun build moved the output layout."; \
         echo "Found instead:"; ls apps/api/dist; \

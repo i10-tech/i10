@@ -1,0 +1,72 @@
+# Copies what members sent as a team address into the team's own Sent, on a
+# schedule (B8, #382).
+#
+# ⚠ THE SAME IMAGE AND ANOTHER COMMAND. `bun dist/team-sent.js` runs one pass and
+# exits. The design, and why it is a pass over members' Sent folders rather than a
+# Sieve script or an MTA hook, is the header of
+# apps/api/src/team-inboxes/sent-copy.ts.
+#
+# ⚠ A CronJob RATHER THAN AN INTERVAL IN THE API, for the reason given in
+# message-sweep.yaml: the API has several replicas.
+#
+# ⚠ INERT UNTIL STALWART IS CONFIGURED. Without STALWART_URL, STALWART_API_TOKEN
+# and STALWART_IMPERSONATE_TOKEN in the i10-api Secret the pass logs that and
+# exits 0. It also has nothing to do until a team inbox exists.
+#
+# ⚠ THE FIRST RUN IS THE PROBE. apps/api/src/mail/team-mail.ts lists what no
+# probe has confirmed; a failure shows as `could not copy a team inbox's sent
+# mail` in this job's log and a failed check-in, and writes to no wrong account.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-team-sent
+  namespace: i10-prod
+spec:
+  # Every five minutes: a reply reaches the team's Sent within about that.
+  #
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/team-sent.ts, AND THEY MUST AGREE.
+  schedule: "*/5 * * * *"
+  # ⚠ NEVER TWO AT ONCE. The ledger is written after the copy, so two overlapping
+  # passes could copy one message twice.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Under the interval, so `Forbid` cannot turn one hung pod into a copy that
+      # never runs again.
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: team-sent
+              image: ghcr.io/i10-tech/i10-api:prod-a7f2607f026599026e06452f91a488ff27097ac9@sha256:85e6091cf6abdc9da0ff5eb52ed74b9d5ae89719e448451734c38601c2d90e5c
+              imagePullPolicy: Always
+              command: ["bun", "dist/team-sent.js"]
+              envFrom:
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER, like every other job. It reads and
+                # writes the `authd` tables (granted by 0003) and nothing else.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }

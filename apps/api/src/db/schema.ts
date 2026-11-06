@@ -111,11 +111,47 @@ export const aliases = authd.table(
   (t) => [index("aliases_account_idx").on(t.clerkUserId)],
 )
 
-export const groups = authd.table("groups", {
-  name: text("name").primaryKey(),
-  email: text("email").unique(),
-  description: text("description"),
-})
+export const groups = authd.table(
+  "groups",
+  {
+    name: text("name").primaryKey(),
+    email: text("email").unique(),
+    description: text("description"),
+
+    /**
+     * The workspace a team inbox belongs to.
+     *
+     * ⚠ NULLABLE, AND A NULL GROUP IS NOT A TEAM INBOX. Every group the API
+     * writes has an owner; the column is nullable for the same reason
+     * `accounts.tenant_id` is, and a team inbox is found by this column, never
+     * by the shape of the name. Not a foreign key, for the reason given there.
+     */
+    tenantId: uuid("tenant_id"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("groups_tenant_idx").on(t.tenantId)],
+)
+
+/**
+ * Which messages the server has already copied into a team inbox's Sent.
+ *
+ * ⚠ THE MESSAGE-ID IS THE KEY, AND THIS IS WHAT MAKES THE COPY SAFE TO REPEAT.
+ * The pass that fills a team inbox's Sent runs on a schedule and looks back over
+ * a window, so the same sent message is seen many times. See
+ * `team-inboxes/sent-copy.ts`.
+ */
+export const groupSentCopies = authd.table(
+  "group_sent_copies",
+  {
+    groupName: text("group_name")
+      .notNull()
+      .references(() => groups.name, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull(),
+    copiedAt: timestamp("copied_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.groupName, t.messageId] })],
+)
 
 export const groupMembers = authd.table(
   "group_members",

@@ -1021,3 +1021,40 @@ WebHook and the StoreLookup reach cluster addresses today; the hook goes to
 `i10-api.i10-prod.svc.cluster.local` the same way, but that is an inference.
 If it is blocked the symptom is `mta-hook.error` in Stalwart's log and `451` for
 every mailbox send.
+
+## Team inboxes: one role, and what is still to probe (B8, #382)
+
+A team inbox (`support@`) is a row in the directory. `apps/api` writes
+`authd.groups` and `authd.group_members`; authd already serves them as a
+`groupOfNames` (so `filterRecipient` accepts the address) and as `memberOf` on
+each member (`attrMemberOf`). Members reach it through their own sign-in:
+shared folders over IMAP, a second account over JMAP.
+
+The Sent copy is not Stalwart config: no setting copies a send-as-group message
+into the group's Sent, and Sieve cannot (the submission script has no account).
+`i10-team-sent` (a CronJob, `workloads/team-sent.yaml`) copies what members sent
+as the address, over JMAP, and is idempotent by Message-ID.
+
+⚠ **A GROUP CANNOT RECEIVE MAIL WITHOUT A ROLE, AND 1.0 GIVES IT NONE.**
+Probed on prod on 2026-11-06 with `probe-team@i10.tech`: Stalwart created the
+Group account on the first delivery, then refused that delivery with
+`security.unauthorized` (`emailReceive`) and a 550, because
+`Authentication.defaultGroupRoleIds` was empty. The plan adds the `i10 Group`
+role, which grants `emailReceive` and nothing else, and makes it the default
+group role. With that permission the message was stored in the group's mailbox.
+
+⚠ **THE GROUP'S REGISTRY NAME IS THE LOCAL PART** (`probe-team`), as a user's
+is, not the directory's full-address name. Two workspaces' `support@` share it;
+`jmap-as` tells them apart by the exact `emailAddress`.
+
+Also probed and fine: the impersonation key may `Email/copy` from a member into
+the group's `Sent Items`, and `Email/query` takes `from` and `after` with
+`inMailbox`. Still to probe (header of `apps/api/src/mail/team-mail.ts`):
+
+1. A member sees the group's mail with nothing but `memberOf`.
+2. Removing a member from the directory takes their access away. The server
+   caches an account's permission set (see above), so measure how long.
+3. A member can send `From:` the address (`mustMatchSender` is left at its
+   default).
+4. Destroying the Group account (`x:Account/set` destroy) removes its mail and
+   is not undone while a directory row still names it.
