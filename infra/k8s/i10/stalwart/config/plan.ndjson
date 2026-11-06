@@ -54,6 +54,6 @@
 {"@type": "upsert", "object": "AllowedIp", "matchOn": ["address"], "value": {"pods4": {"address": "10.42.0.0/16", "reason": "Cluster pods, Traefik among them"}, "pods6": {"address": "fd42::/48", "reason": "Cluster pods (IPv6)"}, "tailnet4": {"address": "100.64.0.0/10", "reason": "Tailscale"}, "tailnet6": {"address": "fd7a:115c:a1e0::/48", "reason": "Tailscale (IPv6)"}}}
 {"@type": "update", "object": "Imap", "value": {"maxConcurrentConnections": 32}}
 {"@type": "update", "object": "Cache", "value": {"messages": 134217728, "messagesLarge": 67108864}}
-{"@type": "upsert", "object": "Application", "matchOn": ["resourceUrl"], "value": {"webui": {"resourceUrl": "https://github.com/stalwartlabs/webui/releases/download/v2/webui.zip", "enable": false}}}
+{"@type": "upsert", "object": "Application", "matchOn": ["description"], "value": {"webui": {"description": "Stalwart Web Interface", "enable": false}}}
 {"@type": "update", "object": "Calendar", "value": {"defaultDisplayName": "Calendar"}}
 {"@type": "update", "object": "AddressBook", "value": {"defaultDisplayName": "Contacts"}}
