@@ -366,10 +366,12 @@ bootstraps only `i10`, so Stalwart's databases and their role are created by
 deliberately: it manages its own schema, migrates it on upgrade, and must never
 share a migration surface with the transactional product.
 
-⚠ **`stalwart` IS THE v0.16 STORE, KEPT AS THE ROLLBACK.** v1.0 cannot open a
-v0.16 store, so #365 copied `stalwart` into `stalwart_v1` with
-`stalwart-migrate` (`../migrate/README.md`). Drop `stalwart` only once v1.0 has
-proved itself and the migration state is no longer wanted.
+⚠ **THERE IS NO v0.16 STORE ANY MORE.** v1.0 cannot open a v0.16 store, so #365
+copied `stalwart` into `stalwart_v1` with `stalwart-migrate` (a hand-applied
+pod, in git until the cleanup PR), then dropped `stalwart` and the migration
+state. Going back to v0.16 is no longer possible. The next upgrade that needs a
+copy repeats the pattern: a new database beside this one, a migrate pod, and
+the old store kept until the new one has proved itself.
 
 ## Upgrading to v1.0 (#365)
 

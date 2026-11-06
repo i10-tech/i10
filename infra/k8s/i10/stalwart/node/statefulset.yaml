@@ -276,10 +276,10 @@ spec:
             - name: AUTHD_DB_PASSWORD
               valueFrom:
                 secretKeyRef: { name: i10-authd-db-role, key: password }
-            # ⚠ THE `i10` DATABASE, NOT `stalwart`. The projection is i10's
+            # ⚠ THE `i10` DATABASE, NOT STALWART'S. The projection is i10's
             # data - written by apps/api, read here - so it belongs with the
-            # product, not inside the mail server's database. Stalwart is
-            # pre-1.0 and migrates its own schema on upgrade; putting our tables
+            # product, not inside the mail server's database. Stalwart
+            # migrates its own schema on upgrade; putting our tables
             # in there is the same mistake as putting its tables in ours, just
             # pointed the other way.
             - name: AUTHD_DATABASE_URL
