@@ -4,7 +4,11 @@ namespace: i10-prod
 
 resources:
   - database.yaml
-  - statefulset.yaml
+  # The edge node (every listener, every task) and the internal node (JMAP
+  # only), both built from node/statefulset.yaml. See internal/kustomization.yaml.
+  - node
+  - internal
+  - redis.yaml
   - service.yaml
   - networkpolicy.yaml
   - cert-reload.yaml

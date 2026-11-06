@@ -22,8 +22,12 @@ metadata:
   name: i10-stalwart
   namespace: i10-prod
 spec:
+  # ⚠ part-of, NOT name: BOTH NODES (#358). JMAP and the web endpoints are
+  # served by the edge and the internal node alike, so this spreads them.
+  # i10-stalwart-mail below keeps `name` and reaches the edge node only, the one
+  # holding the mail listeners.
   selector:
-    app.kubernetes.io/name: i10-stalwart
+    app.kubernetes.io/part-of: i10-stalwart
   ports:
     - { name: http, port: 8080, targetPort: http }
 ---
@@ -41,7 +45,7 @@ spec:
   # whose path DNATs twice and re-enters the host on a NodePort - unreachable
   # behind a firewall that allows 993, and MASQUERADEd so Stalwart would see the
   # node as every client's address. The container claims the host ports directly
-  # instead; see the note on `ports:` in statefulset.yaml.
+  # instead; see the note on `ports:` in node/statefulset.yaml.
   #
   # The Service remains because in-cluster callers still need a stable name -
   # the send worker dials `relay` through it - and because the ports document
@@ -60,5 +64,5 @@ spec:
     - { name: submissions, port: 465, targetPort: submissions }
     - { name: submission, port: 587, targetPort: submission }
     - { name: imaps, port: 993, targetPort: imaps }
-    # In-cluster only, like everything on a ClusterIP. See statefulset.yaml.
+    # In-cluster only, like everything on a ClusterIP. See node/statefulset.yaml.
     - { name: relay, port: 2525, targetPort: relay }

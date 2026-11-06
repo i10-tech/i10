@@ -6,6 +6,12 @@
 # loopback only and the two containers share a network namespace precisely so
 # that connection never crosses a pod boundary. There is deliberately no Service
 # selecting it and no port published for it.
+#
+# ⚠ THIS IS THE BASE FOR BOTH NODES (#358). The `edge` node is this file as is:
+# every listener on its hostPorts, every task. `../internal` builds a second
+# StatefulSet from it with no hostPorts and STALWART_ROLE=internal. Anything
+# changed here changes both, which is the point - two hand-kept copies of this
+# pod would drift on the first edit.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -14,6 +20,10 @@ metadata:
 spec:
   serviceName: i10-stalwart
   replicas: 1
+  # ⚠ THE SELECTOR IS IMMUTABLE AND MUST NOT MATCH THE OTHER NODE. Two
+  # StatefulSets whose selectors overlap would each count the other's pod. The
+  # internal overlay replaces `name`; `part-of` is what the HTTP Service selects
+  # to reach both.
   selector:
     matchLabels:
       app.kubernetes.io/name: i10-stalwart
@@ -21,6 +31,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: i10-stalwart
+        app.kubernetes.io/part-of: i10-stalwart
     spec:
       # ⚠ UID 2000, NOT 65534. The Stalwart image creates a `stalwart` user at
       # UID 2000 and owns its directories to it. Running as nobody leaves the

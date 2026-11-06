@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The Stalwart pod, shared by the edge node (the parent kustomization, as is)
+# and the internal node (../internal, patched). See statefulset.yaml.
+resources:
+  - statefulset.yaml
