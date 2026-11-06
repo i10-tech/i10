@@ -204,7 +204,10 @@ describe("deciding a mailbox send", () => {
 
   it("places by the login's domain, not a different sender domain", async () => {
     const { deps, domainOwner } = setup()
-    await decideHook(request({ login: "a@login.example", sender: "b@other.example" }), deps)
+    await decideHook(
+      request({ login: "a@login.example", sender: "b@other.example" }),
+      deps,
+    )
     expect(domainOwner).toHaveBeenCalledWith("login.example")
   })
 

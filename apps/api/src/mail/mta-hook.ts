@@ -119,7 +119,8 @@ export async function decideHook(
   if (request.login === null) return ACCEPT
 
   const domain =
-    domainOf(request.login) ?? (request.sender === null ? null : domainOf(request.sender))
+    domainOf(request.login) ??
+    (request.sender === null ? null : domainOf(request.sender))
   const tenantId = domain === null ? null : await deps.domainOwner(domain)
   if (tenantId === null) return ACCEPT
 
