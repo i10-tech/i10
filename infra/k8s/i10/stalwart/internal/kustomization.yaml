@@ -25,13 +25,15 @@ patches:
       kind: StatefulSet
       name: i10-stalwart
     patch: |-
-      # ⚠ ZERO UNTIL THE PLAN HAS RUN. Started before bootstrap.sh has applied
-      # the Redis in-memory store, the coordinator and the `internal` role, this
-      # node would share the data store with the edge node and no coordinator,
-      # and would run every task. Raised to 1 in a second change, after that.
+      # ⚠ ONE, AND ONLY AFTER THE PLAN HAS RUN. Started before bootstrap.sh has
+      # applied the Redis in-memory store, the coordinator and the `internal`
+      # role, this node would share the data store with the edge node and no
+      # coordinator, and would run every task. It shipped at 0 (#363) and was
+      # raised once the plan was live (2026-11-06). On a rebuild, start at 0
+      # again.
       - op: replace
         path: /spec/replicas
-        value: 0
+        value: 1
       - op: replace
         path: /spec/selector/matchLabels/app.kubernetes.io~1name
         value: i10-stalwart-internal
