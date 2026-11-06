@@ -1047,14 +1047,17 @@ group role. With that permission the message was stored in the group's mailbox.
 is, not the directory's full-address name. Two workspaces' `support@` share it;
 `jmap-as` tells them apart by the exact `emailAddress`.
 
-Also probed and fine: the impersonation key may `Email/copy` from a member into
-the group's `Sent Items`, and `Email/query` takes `from` and `after` with
-`inMailbox`. Still to probe (header of `apps/api/src/mail/team-mail.ts`):
+Also probed on 2026-11-06 and fine: the impersonation key may `Email/copy` from
+a member into the group's `Sent Items`; `Email/query` takes `from` and `after`
+with `inMailbox`; a member sees the group as `Shared Folders/<address>/...`
+through `memberOf` alone (after #394, which made authd answer the read of a
+group's DN that Stalwart resolves `memberOf` with); a member may send `From:`
+the group address; destroying the Group account and then the directory row
+leaves the address refused with 550.
 
-1. A member sees the group's mail with nothing but `memberOf`.
-2. Removing a member from the directory takes their access away. The server
-   caches an account's permission set (see above), so measure how long.
-3. A member can send `From:` the address (`mustMatchSender` is left at its
-   default).
-4. Destroying the Group account (`x:Account/set` destroy) removes its mail and
-   is not undone while a directory row still names it.
+⚠ **REMOVING A MEMBER'S DIRECTORY ROW DOES NOT REVOKE THEIR ACCESS.** Stalwart
+refreshes memberships only when it looks the account up in the directory again,
+and an open mail client may not cause that for hours: access was still there 15
+minutes after the row was deleted. Clearing the group from the member's
+`memberGroupIds` in the registry revoked it at once, so the API does that first
+on every removal (`revokeGroup`) and changes the rows second.

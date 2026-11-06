@@ -55,6 +55,7 @@ function fakeMail(sent: Record<string, SentMessage[]>) {
       return messages.map((m) => m.messageId)
     },
     destroy: async () => true,
+    revoke: async () => {},
   }
   return { mail, copies, asked, failures }
 }

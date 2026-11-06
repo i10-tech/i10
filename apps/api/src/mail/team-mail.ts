@@ -13,10 +13,9 @@ import {
  * ⚠ THIS FILE IS THE ONE PLACE THE UNPROBED DETAILS LIVE. The JMAP methods are
  * RFC 8620 / 8621 and their shapes are standard; what was NOT known is how the
  * running 1.0.3 behaves when they are driven through the impersonation key
- * against a Group account that an LDAP directory created. Items 1, 2, 6 and 7
- * were probed on prod on 2026-11-06 with a throwaway group; the rest are still
- * questions for the first rollout, and a wrong answer changes this file and
- * `mail/jmap-as.ts` and nothing else:
+ * against a Group account that an LDAP directory created. Every item below was
+ * probed on prod on 2026-11-06 with a throwaway group (`probe-team@i10.tech`,
+ * since deleted):
  *
  *   1. PROBED: THE GROUP ACCOUNT IS CREATED ON FIRST DELIVERY, NAMED BY THE LOCAL
  *      PART. The directory group `probe-team@i10.tech` became the registry Group
@@ -30,29 +29,25 @@ import {
  *      `emailReceive`, then 550). The plan now gives every group the `i10 Group`
  *      role, which grants exactly that; with it, the message was stored in the
  *      group's own mailbox.
- *   3. THAT A MEMBER SEES THE GROUP'S MAIL WITH NOTHING BUT `memberOf`. The docs
- *      say members reach it "as shared folders in IMAP clients, and as a separate
- *      account in JMAP clients". Nothing else is configured here, on purpose:
- *      see `team-inboxes/service.ts` for why group membership and not per-mailbox
- *      ACLs.
- *   4. HOW LONG A REMOVED MEMBER KEEPS ACCESS. config/README.md records that the
- *      server caches an account's permission set (`accessToken`) and a reload
- *      did not clear it. Removal here is immediate in the directory; the
- *      server's cache decides when it takes effect. Measure it, and if it is
- *      minutes, say so wherever removal is promised.
- *   5. THAT A MEMBER MAY SEND AS THE GROUP. Stalwart issue #485 says members can
- *      submit `From: group@`; whether that needs an Identity, and whether
- *      `MtaStageAuth.mustMatchSender` (default true) allows `MAIL FROM:` the
- *      group address for an LDAP-sourced member, is untested.
+ *   3. PROBED: A MEMBER SEES THE GROUP'S MAIL WITH NOTHING BUT `memberOf`, once
+ *      authd answers a read of the group's DN (fixed in #394; before that
+ *      Stalwart dropped every membership). Outlook showed
+ *      `Shared Folders/<address>/...` without a new sign-in.
+ *   4. PROBED: REMOVING THE DIRECTORY ROW DOES NOT REVOKE. Access was still there
+ *      15 minutes later; clearing the group from the member's `memberGroupIds`
+ *      revoked it at once. So every removal calls `revoke` first (see
+ *      `revokeGroup` in jmap-as.ts and `revokeAccess` in team-inboxes/service.ts).
+ *   5. PROBED: A MEMBER MAY SEND AS THE GROUP. `MAIL FROM:<group@>` from a
+ *      member's session on 465 was accepted (the B5 hook said accept) and
+ *      delivered; `mustMatchSender` stays at its default.
  *   6. PROBED: THE IMPERSONATION KEY MAY `Email/copy` BETWEEN TWO ACCOUNTS. A copy
  *      from a member's Sent into the group's `Sent Items` (role `sent`) was
  *      created with the B6 key and the `Email*` grant alone.
  *   7. PROBED: `Email/query` ACCEPTS `inMailbox` WITH `from` AND `after`, and
  *      `Email/get` returns `messageId` (a list, per RFC 8621).
- *   8. THAT DESTROYING A GROUP ACCOUNT (`x:Account/set` destroy) DELETES ITS MAIL
- *      AND THAT IT IS NOT RE-CREATED while a member still lists it in
- *      `memberOf`. `deleteTeamInbox` destroys first and removes the directory
- *      rows second for that reason.
+ *   8. PROBED: DESTROYING THE GROUP ACCOUNT AND THEN THE DIRECTORY ROW LEAVES
+ *      NOTHING: mail to the address is then refused with 550. That is the order
+ *      `deleteTeamInbox` uses.
  *   9. SIEVE IS NOT AN OPTION FOR THE SENT COPY, AND THIS IS DESIGN, NOT A PROBE.
  *      The only script that runs on a submission is the system script at
  *      `MtaStageData`; it has no account to `fileinto`, and `redirect :copy` to
@@ -94,6 +89,8 @@ export interface TeamMail {
 
   /** Destroys the team's account. `false` when the server has none yet. */
   destroy(team: AuthorisedGroup): Promise<boolean>
+  /** Takes these members' access to the team away now (see `revokeGroup`). */
+  revoke(team: AuthorisedGroup, members: readonly AuthorisedMailbox[]): Promise<void>
 }
 
 const MAX_PER_PASS = 100
@@ -218,5 +215,6 @@ export function teamMail(client: JmapAsClient): TeamMail {
     },
 
     destroy: (team) => client.destroyGroup(team),
+    revoke: (team, members) => client.revokeGroup(team, members),
   }
 }

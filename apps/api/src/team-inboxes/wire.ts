@@ -72,5 +72,12 @@ export function teamInboxesFor(input: {
 
     // Without Stalwart configured there is no account to destroy (a dev setup).
     destroyAccount: async (team) => (mail ? mail.destroy(team) : false),
+    revokeAccess: async (team, addresses) => {
+      if (mail)
+        await mail.revoke(
+          team,
+          addresses.map((address) => ({ address })),
+        )
+    },
   })
 }

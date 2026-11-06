@@ -248,6 +248,77 @@ describe("membership follows the workspace", () => {
   })
 })
 
+/**
+ * ⚠ THE DIRECTORY ROW ALONE DOES NOT TAKE ACCESS AWAY (probed on prod: still
+ * there after 15 minutes), so every removal revokes in Stalwart first and only
+ * then changes the rows.
+ */
+describe("removing a member revokes their access in Stalwart", () => {
+  it("revokes exactly the people an admin dropped from the set", async () => {
+    const w = await withSupport()
+    await w.service.setMembers(as("alice"), "support@acme.test", [
+      "carol@acme.test",
+      "dave@acme.test",
+    ])
+    expect(w.revoked).toEqual([
+      { team: "support@acme.test", members: ["bob@acme.test"] },
+    ])
+  })
+
+  it("revokes nobody when the set only grows", async () => {
+    const w = await withSupport()
+    await w.service.setMembers(as("alice"), "support@acme.test", [
+      "bob@acme.test",
+      "carol@acme.test",
+      "dave@acme.test",
+    ])
+    expect(w.revoked).toEqual([])
+  })
+
+  it("keeps the old set when the revoke fails, so the change can be retried", async () => {
+    const w = await withSupport()
+    w.failRevoke.on = true
+    const outcome = await w.service
+      .setMembers(as("alice"), "support@acme.test", ["carol@acme.test"])
+      .then(
+        () => "ok",
+        () => "threw",
+      )
+    expect(outcome).toBe("threw")
+    expect(w.rows[0]!.members.map((m) => m.address)).toEqual([
+      "bob@acme.test",
+      "carol@acme.test",
+    ])
+  })
+
+  it("revokes a removed workspace member from every inbox they were in", async () => {
+    const w = await withSupport()
+    await w.service.create(as("alice"), {
+      address: "sales@acme.test",
+      members: ["bob@acme.test"],
+    })
+    await w.service.onMemberRemoved(ACME.tenantId, people.bob.userId)
+    expect(w.revoked.map((r) => r.team).sort()).toEqual([
+      "sales@acme.test",
+      "support@acme.test",
+    ])
+    expect(w.revoked.every((r) => r.members.join() === "bob@acme.test")).toBe(true)
+  })
+
+  it("keeps a removed workspace member's rows when the revoke fails", async () => {
+    const w = await withSupport()
+    w.failRevoke.on = true
+    const outcome = await w.service
+      .onMemberRemoved(ACME.tenantId, people.bob.userId)
+      .then(
+        () => "ok",
+        () => "threw",
+      )
+    expect(outcome).toBe("threw")
+    expect(w.rows[0]!.members.map((m) => m.address)).toContain("bob@acme.test")
+  })
+})
+
 describe("deleting one", () => {
   it("destroys the account before the rows, then nobody can reach it", async () => {
     const w = await withSupport()

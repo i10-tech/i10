@@ -17,6 +17,7 @@ interface Account {
   name: string
   email: string
   type: "User" | "Group"
+  memberGroupIds?: Record<string, boolean>
 }
 
 function server(accounts: Account[]) {
@@ -43,8 +44,25 @@ function server(accounts: Account[]) {
     } else if (name === "x:Account/get") {
       const list = accounts
         .filter((a) => (args.ids as string[]).includes(a.id))
-        .map((a) => ({ id: a.id, emailAddress: a.email, "@type": a.type }))
+        .map((a) => ({
+          id: a.id,
+          emailAddress: a.email,
+          "@type": a.type,
+          memberGroupIds: a.memberGroupIds ?? {},
+        }))
       reply = [[name, { list }, callId]]
+    } else if (name === "x:Account/set" && args.update) {
+      const updated: Record<string, null> = {}
+      for (const [id, patch] of Object.entries(
+        args.update as Record<string, { memberGroupIds: Record<string, boolean> }>,
+      )) {
+        const account = accounts.find((a) => a.id === id)
+        if (account) {
+          account.memberGroupIds = patch.memberGroupIds
+          updated[id] = null
+        }
+      }
+      reply = [[name, { updated }, callId]]
     } else if (name === "x:Account/set") {
       destroyed.push(...(args.destroy as string[]))
       reply = [[name, { destroyed: args.destroy }, callId]]
@@ -221,5 +239,45 @@ describe("destroying a team inbox's account", () => {
     expect(cache.get("support@acme.test", "Group")).not.toBeNull()
     await c.destroyGroup(SUPPORT)
     expect(cache.get("support@acme.test", "Group")).toBeNull()
+  })
+})
+
+describe("revoking a member's access to a team inbox", () => {
+  const members = (): Account[] => [
+    { id: "g1", name: "support", email: "support@acme.test", type: "Group" },
+    { id: "g9", name: "sales", email: "sales@acme.test", type: "Group" },
+    {
+      id: "u1",
+      name: "bob",
+      email: "bob@acme.test",
+      type: "User",
+      memberGroupIds: { g1: true, g9: true },
+    },
+  ]
+
+  it("drops only that group from the member, keeping their others", async () => {
+    const accounts = members()
+    const s = server(accounts)
+    await client(s.fetcher).revokeGroup(SUPPORT, [{ address: "bob@acme.test" }])
+    expect(accounts[2]!.memberGroupIds).toEqual({ g9: true })
+    // Registry work only, with the admin token.
+    expect(s.seen.every((r) => r.token === ADMIN)).toBe(true)
+  })
+
+  it("does nothing for a group the server has no account for yet", async () => {
+    const s = server(members().filter((a) => a.id !== "g1"))
+    await client(s.fetcher).revokeGroup(SUPPORT, [{ address: "bob@acme.test" }])
+    expect(s.seen.some((r) => r.methodCalls[0]![0] === "x:Account/set")).toBe(false)
+  })
+
+  it("skips a member who has no account yet or is not in the group", async () => {
+    const accounts = members()
+    accounts[2]!.memberGroupIds = { g9: true }
+    const s = server(accounts)
+    await client(s.fetcher).revokeGroup(SUPPORT, [
+      { address: "bob@acme.test" },
+      { address: "nobody@acme.test" },
+    ])
+    expect(s.seen.some((r) => r.methodCalls[0]![0] === "x:Account/set")).toBe(false)
   })
 })
