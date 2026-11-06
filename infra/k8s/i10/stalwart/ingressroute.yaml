@@ -33,6 +33,31 @@ spec:
   addPrefix:
     prefix: /autoconfig
 ---
+# Security headers on everything Traefik hands to Stalwart (#365, B12). These
+# routes serve XML, JSON and a policy file, never a page, so the headers cost
+# nothing; they matter the day JMAP or a web UI is routed here.
+#
+# ⚠ HSTS WITHOUT includeSubDomains. Several of these hosts sit on the apex
+# zone, and includeSubDomains there would commit every i10.tech name, including
+# ones a browser has never needed HTTPS for, for a year.
+#
+# ⚠ THE CLIENT IP NEEDS NOTHING HERE. Traefik runs on a hostPort, trusts no
+# incoming X-Forwarded-For (no forwardedHeaders.trustedIPs), and sets the
+# connecting address itself; Stalwart reads it with Http.clientIpSource
+# xForwardedFor and one hop. Trusting an upstream proxy later means adding it
+# to trustedIPs AND raising forwardedHops.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: i10-stalwart-headers
+  namespace: i10-prod
+spec:
+  headers:
+    stsSeconds: 31536000
+    contentTypeNosniff: true
+    frameDeny: true
+    referrerPolicy: no-referrer
+---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -69,6 +94,8 @@ spec:
         || PathRegexp(`^(?i)/autodiscover/`))
       kind: Rule
       priority: 90
+      middlewares:
+        - name: i10-stalwart-headers
       services:
         - name: i10-stalwart
           port: 8080
@@ -80,6 +107,8 @@ spec:
     - match: Host(`i10.tech`) && PathPrefix(`/.well-known/autoconfig`)
       kind: Rule
       priority: 100
+      middlewares:
+        - name: i10-stalwart-headers
       services:
         - name: i10-stalwart
           port: 8080
@@ -93,6 +122,8 @@ spec:
     # `_mta-sts` TXT record exists in DNS.
     - match: Host(`mta-sts.i10.tech`) && Path(`/.well-known/mta-sts.txt`)
       kind: Rule
+      middlewares:
+        - name: i10-stalwart-headers
       services:
         - name: i10-stalwart
           port: 8080
