@@ -101,6 +101,22 @@ func (f *fakeStore) GroupsByAddress(_ context.Context, addrs []string) ([]projec
 	return out, nil
 }
 
+func (f *fakeStore) GroupsByName(_ context.Context, names []string) ([]projection.Group, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []projection.Group
+	for _, g := range f.groups {
+		for _, want := range names {
+			if g.Name == want {
+				out = append(out, g)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) GroupsForMember(_ context.Context, uid string) ([]projection.Group, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -427,6 +443,52 @@ func TestFilterMemberOf(t *testing.T) {
 	}
 	if entries[0].DN != supportDN {
 		t.Errorf("DN = %q, want %q", entries[0].DN, supportDN)
+	}
+}
+
+// readDN is how Stalwart resolves each memberOf value: a base-scope read of
+// that one entry, asking for its address.
+func readDN(t *testing.T, addr, dn string) []*goldapclient.Entry {
+	t.Helper()
+	c := dial(t, addr)
+	if err := c.Bind(svcDN, svcSecret); err != nil {
+		t.Fatalf("service bind: %v", err)
+	}
+	res, err := c.Search(goldapclient.NewSearchRequest(
+		dn, goldapclient.ScopeBaseObject, goldapclient.NeverDerefAliases,
+		0, 0, false, "(objectClass=*)", []string{"mail", "objectClass"}, nil))
+	if err != nil {
+		t.Fatalf("read %q: %v", dn, err)
+	}
+	return res.Entries
+}
+
+func TestReadGroupByDN(t *testing.T) {
+	addr := newFixture(t, defaultStore(), &fakeVerifier{}, 60)
+
+	entries := readDN(t, addr, supportDN)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if got := entries[0].GetAttributeValue("mail"); got != "support@i10.tech" {
+		t.Errorf("mail = %q, want support@i10.tech", got)
+	}
+}
+
+func TestReadAccountByDN(t *testing.T) {
+	addr := newFixture(t, defaultStore(), &fakeVerifier{}, 60)
+
+	entries := readDN(t, addr, aliceDN)
+	if len(entries) != 1 || entries[0].GetAttributeValue("mail") != aliceEmail {
+		t.Fatalf("got %d entries, want alice", len(entries))
+	}
+}
+
+func TestReadUnknownDNFindsNothing(t *testing.T) {
+	addr := newFixture(t, defaultStore(), &fakeVerifier{}, 60)
+
+	if n := len(readDN(t, addr, "cn=nobody,ou=groups,dc=i10,dc=tech")); n != 0 {
+		t.Fatalf("got %d entries for an unknown group, want 0", n)
 	}
 }
 

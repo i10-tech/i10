@@ -120,6 +120,20 @@ func (p *Postgres) GroupsForMember(ctx context.Context, clerkUserID string) ([]G
 	return p.scanAndFillGroups(ctx, rows)
 }
 
+func (p *Postgres) GroupsByName(ctx context.Context, names []string) ([]Group, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT g.name, coalesce(g.email, ''), coalesce(g.description, '')
+		FROM authd.groups g
+		WHERE g.name = ANY($1)`, names)
+	if err != nil {
+		return nil, fmt.Errorf("projection: groups by name: %w", err)
+	}
+	return p.scanAndFillGroups(ctx, rows)
+}
+
 func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	defer rows.Close()
 	var out []Account

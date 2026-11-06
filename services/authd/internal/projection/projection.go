@@ -50,4 +50,7 @@ type Store interface {
 
 	// GroupsForMember lists the groups an account belongs to.
 	GroupsForMember(ctx context.Context, clerkUserID string) ([]Group, error)
+
+	// GroupsByName resolves groups by their directory name, the cn of their DN.
+	GroupsByName(ctx context.Context, names []string) ([]Group, error)
 }
