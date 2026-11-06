@@ -45,6 +45,16 @@ export const createMailboxSchema = z.object({
   address: mailboxAddressSchema,
   /** Shown in mail clients. Defaults to the Clerk profile name. */
   display_name: z.string().max(255).optional(),
+  /**
+   * Bytes of the workspace's storage to give this mailbox.
+   *
+   * ⚠ ONLY AN OWNER OR ADMIN OF THE WORKSPACE MAY SEND IT, AND A MEMBER WHO DOES
+   * IS REFUSED (403), NOT IGNORED. An allocation takes from a pool the workspace
+   * shares, so the person who will use the inbox must not be the one who sizes
+   * it. A prepaid plan REQUIRES it (422 without); pay as you go takes it as an
+   * optional cap. Zero is not a value: the mail server may read it as unlimited.
+   */
+  storage_allocation: z.number().int().positive().optional(),
 })
 
 export const mailboxSchema = z.object({
@@ -60,11 +70,79 @@ export const mailboxSchema = z.object({
    */
   active: z.boolean(),
   created_at: z.string(),
+  /**
+   * Storage an owner or admin allocated to this inbox, in bytes. Null when none
+   * is: uncapped on pay as you go, or not yet allocated on a plan.
+   */
+  storage_allocated: z.number().int().positive().nullable().optional(),
 })
 
 export const mailboxListSchema = z.object({
   data: z.array(mailboxSchema),
 })
 
+/**
+ * Splitting the workspace's storage across its inboxes - the console's, for an
+ * owner or admin.
+ *
+ * ⚠ NO ROUTE A MEMBER REACHES. An allocation takes from a shared pool, so
+ * letting the person who will use the inbox set it lets them take the pool. It
+ * is its own request, answered only for a workspace's owners and admins, and it
+ * names the mailbox in the path.
+ */
+export const setMailboxStorageSchema = z.object({
+  /**
+   * Bytes for this inbox. A positive whole number, or `null` to remove a cap.
+   *
+   * ⚠ `null` IS ONLY ACCEPTED ON PAY AS YOU GO. A prepaid plan needs a number
+   * for every inbox, so the pool is the sum of something. Zero is not a value:
+   * the mail server may read it as unlimited.
+   */
+  storage_allocation: z.number().int().positive().nullable(),
+})
+
+export const mailboxStorageSchema = z.object({
+  address: z.string(),
+  display_name: z.string().nullable(),
+  storage_allocated: z.number().int().positive().nullable(),
+})
+
+export const storagePoolSchema = z.object({
+  /** `pool`: a prepaid plan, split by the admin. `uncapped`: pay as you go. */
+  kind: z.enum(["pool", "uncapped"]),
+  /** The prepaid pool in bytes. Null when uncapped. */
+  total: z.number().int().nonnegative().nullable(),
+  allocated: z.number().int().nonnegative(),
+  /** What the workspace's mailboxes occupy, from the last storage sample. */
+  used: z.number().int().nonnegative(),
+  /** Pool minus allocated. Null when uncapped. */
+  remaining: z.number().int().nonnegative().nullable(),
+  /**
+   * Inboxes on a pool that have no allocation yet.
+   *
+   * ⚠ THEY HAVE A HIGH DEFAULT QUOTA, WHICH IS OUTSIDE THE POOL. They predate
+   * allocation; the console should prompt the admin to give each a number.
+   */
+  unallocated: z.number().int().nonnegative(),
+})
+
+export const mailboxStorageListSchema = z.object({
+  pool: storagePoolSchema,
+  data: z.array(mailboxStorageSchema),
+})
+
+export const mailboxStorageUpdatedSchema = z.object({
+  mailbox: mailboxStorageSchema,
+  /**
+   * `synced`: the mail server has the quota. `deferred`: the allocation is
+   * saved and the next reconcile applies it.
+   */
+  quota: z.enum(["synced", "deferred"]),
+})
+
 export type CreateMailbox = z.infer<typeof createMailboxSchema>
 export type Mailbox = z.infer<typeof mailboxSchema>
+export type SetMailboxStorage = z.infer<typeof setMailboxStorageSchema>
+export type MailboxStorage = z.infer<typeof mailboxStorageSchema>
+export type StoragePool = z.infer<typeof storagePoolSchema>
+export type MailboxStorageList = z.infer<typeof mailboxStorageListSchema>

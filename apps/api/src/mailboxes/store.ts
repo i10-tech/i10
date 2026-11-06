@@ -107,5 +107,6 @@ function toMailbox(row: AccountRow): Mailbox {
     display_name: row.displayName,
     active: row.active,
     created_at: row.createdAt.toISOString(),
+    storage_allocated: row.storageAllocation,
   }
 }

@@ -1,0 +1,2 @@
+ALTER TABLE "authd"."accounts" ADD COLUMN "storage_allocation" bigint;--> statement-breakpoint
+ALTER TABLE "authd"."accounts" ADD CONSTRAINT "accounts_storage_allocation_positive" CHECK ("authd"."accounts"."storage_allocation" is null or "authd"."accounts"."storage_allocation" > 0);
