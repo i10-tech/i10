@@ -159,6 +159,16 @@ export interface JmapAsClient {
   destroyGroup(group: AuthorisedGroup): Promise<boolean>
 
   /**
+   * Takes these mailboxes out of the team inbox's Group account in the registry,
+   * so they lose access now rather than at their next directory lookup.
+   * Nothing to do when either side has no account yet.
+   */
+  revokeGroup(
+    group: AuthorisedGroup,
+    members: readonly AuthorisedMailbox[],
+  ): Promise<void>
+
+  /**
    * Streams a blob out of the mailbox's account. The body is NOT read here:
    * the caller pulls it, so a 50 MB message is never held whole.
    *
@@ -553,6 +563,62 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
         )
       }
       return true
+    },
+
+    /**
+     * ⚠ REMOVING THE DIRECTORY ROW IS NOT ENOUGH. Probed on prod (1.0.3,
+     * 2026-11-06): with the member's `authd.group_members` row deleted, the
+     * account kept the group's folders for the full 15 minutes measured,
+     * because Stalwart refreshes memberships only when it looks the account up
+     * in the directory again (a new sign-in, or mail arriving for it). Clearing
+     * the group from the account's `memberGroupIds` took access away at once.
+     */
+    async revokeGroup(group, members) {
+      let groupId: StalwartAccountId
+      try {
+        groupId = await resolveGroup(group)
+      } catch (error) {
+        if (error instanceof JmapAsError && error.code === "no_account") return
+        throw error
+      }
+
+      for (const member of members) {
+        let memberId: StalwartAccountId
+        try {
+          memberId = await resolveAccount(member)
+        } catch (error) {
+          if (error instanceof JmapAsError && error.code === "no_account") continue
+          throw error
+        }
+
+        const [, got] = (
+          await post(opts.registryToken, REGISTRY_USING, [
+            ["x:Account/get", { ids: [memberId], properties: ["memberGroupIds"] }, "g"],
+          ])
+        )[0]!
+        const account = (Array.isArray(got.list) ? got.list[0] : undefined) as
+          { memberGroupIds?: Record<string, boolean> } | undefined
+        const groups = { ...(account?.memberGroupIds ?? {}) }
+        if (!(groupId in groups)) continue
+        delete groups[groupId]
+
+        const [, set] = (
+          await post(opts.registryToken, REGISTRY_USING, [
+            [
+              "x:Account/set",
+              { update: { [memberId]: { memberGroupIds: groups } } },
+              "s",
+            ],
+          ])
+        )[0]!
+        const updated = (set.updated ?? {}) as Record<string, unknown>
+        if (!(memberId in updated)) {
+          throw new JmapAsError(
+            "stalwart",
+            `stalwart did not remove ${member.address} from ${group.address}`,
+          )
+        }
+      }
     },
 
     async downloadBlob(mailbox, blobId) {

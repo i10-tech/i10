@@ -17,6 +17,7 @@ export function fakeJmapClient(methods: Partial<JmapAsClient>): JmapAsClient {
     call: unused("call"),
     callAsGroup: unused("callAsGroup"),
     destroyGroup: unused("destroyGroup"),
+    revokeGroup: unused("revokeGroup"),
     downloadBlob: unused("downloadBlob"),
     uploadBlob: unused("uploadBlob"),
     ...methods,

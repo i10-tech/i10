@@ -51,6 +51,8 @@ export function world() {
   ])
   const destroyed: string[] = []
   const failDestroy = { on: false }
+  const revoked: { team: string; members: string[] }[] = []
+  const failRevoke = { on: false }
 
   const mailboxList: MailboxAccount[] = Object.values(people)
 
@@ -145,7 +147,21 @@ export function world() {
       destroyed.push(address)
       return true
     },
+    async revokeAccess({ address }, members) {
+      if (failRevoke.on) throw new Error("stalwart is down")
+      revoked.push({ team: address, members: [...members] })
+    },
   })
 
-  return { service, store, rows, destroyed, failDestroy, rosters, admins }
+  return {
+    service,
+    store,
+    rows,
+    destroyed,
+    failDestroy,
+    revoked,
+    failRevoke,
+    rosters,
+    admins,
+  }
 }

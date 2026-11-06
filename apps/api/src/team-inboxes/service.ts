@@ -97,6 +97,19 @@ export interface TeamInboxDeps {
   roster(orgId: string): Promise<ReadonlySet<string>>
   /** Destroys the Stalwart account for a team inbox; `false` when there is none. */
   destroyAccount(input: { name: string; address: string }): Promise<boolean>
+  /**
+   * Takes these members out of the team inbox's Stalwart account now.
+   *
+   * ⚠ THE DIRECTORY ROW ALONE DOES NOT REVOKE. Stalwart keeps a membership until
+   * it next looks the account up in the directory, which an open mail client
+   * may not do for hours (measured: still there after 15 minutes). So every
+   * removal calls this FIRST and changes the rows second: if it fails, the
+   * directory still lists the member, the request fails, and a retry does both.
+   */
+  revokeAccess(
+    team: { name: string; address: string },
+    memberAddresses: string[],
+  ): Promise<void>
 }
 
 /** Who is asking: the verified session, and the workspace it is in. */
@@ -250,10 +263,20 @@ export function teamInboxes(deps: TeamInboxDeps): TeamInboxes {
 
       const wanted = address.toLowerCase()
       // Looked up first so a missing inbox is "missing" whatever the members were.
-      if (!(await store.find(viewer.tenantId, wanted))) return { status: "missing" }
+      const current = await store.find(viewer.tenantId, wanted)
+      if (!current) return { status: "missing" }
 
       const who = await people(viewer.orgId, members)
       if ("reason" in who) return { status: "rejected", reason: who.reason }
+
+      const keep = new Set(who.userIds)
+      const leaving = current.members.filter((m) => !keep.has(m.userId))
+      if (leaving.length > 0) {
+        await deps.revokeAccess(
+          current,
+          leaving.map((m) => m.address),
+        )
+      }
 
       const row = await store.setMembers(viewer.tenantId, wanted, who.userIds)
       return row ? { status: "ok", inbox: toTeamInbox(row) } : { status: "missing" }
@@ -276,7 +299,13 @@ export function teamInboxes(deps: TeamInboxDeps): TeamInboxes {
       return "ok"
     },
 
-    onMemberRemoved: (tenantId, userId) => store.dropMember(tenantId, userId),
+    async onMemberRemoved(tenantId, userId) {
+      for (const row of await store.forMember(tenantId, userId)) {
+        const member = row.members.find((m) => m.userId === userId)
+        if (member) await deps.revokeAccess(row, [member.address])
+      }
+      return store.dropMember(tenantId, userId)
+    },
 
     async onWorkspaceDeleted(tenantId) {
       const rows = await store.forTenant(tenantId)
