@@ -1,6 +1,8 @@
-import { relations } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 import {
+  bigint,
   boolean,
+  check,
   index,
   pgSchema,
   primaryKey,
@@ -36,69 +38,93 @@ export * from "./core.js"
  */
 export const authd = pgSchema("authd")
 
-export const accounts = authd.table("accounts", {
-  clerkUserId: text("clerk_user_id").primaryKey(),
+export const accounts = authd.table(
+  "accounts",
+  {
+    clerkUserId: text("clerk_user_id").primaryKey(),
 
-  /**
-   * The primary mailbox address, stored lowercased.
-   *
-   * ⚠ ONLY ADDRESSES IN DOMAINS i10 HOSTS. A row here makes Stalwart treat the
-   * address as a LOCAL RECIPIENT. Projecting a user's Gmail would have Stalwart
-   * accept and swallow mail addressed to gmail.com. See `projectUser`.
-   */
-  email: text("email").notNull().unique(),
+    /**
+     * The primary mailbox address, stored lowercased.
+     *
+     * ⚠ ONLY ADDRESSES IN DOMAINS i10 HOSTS. A row here makes Stalwart treat the
+     * address as a LOCAL RECIPIENT. Projecting a user's Gmail would have Stalwart
+     * accept and swallow mail addressed to gmail.com. See `projectUser`.
+     */
+    email: text("email").notNull().unique(),
 
-  displayName: text("display_name"),
-  description: text("description"),
+    displayName: text("display_name"),
+    description: text("description"),
 
-  /**
-   * The subscription gate, and the reason this is not derived from Clerk.
-   *
-   * Signing up is not the same as paying. An inactive account is INVISIBLE:
-   * filterMailbox stops returning it, Stalwart refuses mail for the address,
-   * and binds fail. That takes effect on the next query rather than on a
-   * reconciliation run, which is what SCIM deprovisioning would have bought us.
-   *
-   * Clerk webhooks must never set this - identity events say nothing about
-   * whether an invoice cleared.
-   */
-  active: boolean("active").notNull().default(false),
+    /**
+     * The subscription gate, and the reason this is not derived from Clerk.
+     *
+     * Signing up is not the same as paying. An inactive account is INVISIBLE:
+     * filterMailbox stops returning it, Stalwart refuses mail for the address,
+     * and binds fail. That takes effect on the next query rather than on a
+     * reconciliation run, which is what SCIM deprovisioning would have bought us.
+     *
+     * Clerk webhooks must never set this - identity events say nothing about
+     * whether an invoice cleared.
+     */
+    active: boolean("active").notNull().default(false),
 
-  /**
-   * The tenant whose domain this mailbox is on, once mailboxes are sold to
-   * anyone but us.
-   *
-   * ⚠ NULLABLE, AND NOT YET WRITTEN. i10's own mailboxes on i10.tech predate
-   * tenancy and have no owner row; a NOT NULL column would have to invent one.
-   * It is here now because the table is empty now - adding a column to a
-   * populated projection means a backfill against Clerk, and adding it later is
-   * the only version of this change that costs anything.
-   *
-   * Not a foreign key to `core.tenants`: authd holds SELECT on this schema and
-   * nothing else, and an FK would make its inserts depend on a table it cannot
-   * see. The reference is enforced by the API, which owns both sides.
-   */
-  tenantId: uuid("tenant_id"),
+    /**
+     * The tenant whose domain this mailbox is on, once mailboxes are sold to
+     * anyone but us.
+     *
+     * ⚠ NULLABLE, AND NOT YET WRITTEN. i10's own mailboxes on i10.tech predate
+     * tenancy and have no owner row; a NOT NULL column would have to invent one.
+     * It is here now because the table is empty now - adding a column to a
+     * populated projection means a backfill against Clerk, and adding it later is
+     * the only version of this change that costs anything.
+     *
+     * Not a foreign key to `core.tenants`: authd holds SELECT on this schema and
+     * nothing else, and an FK would make its inserts depend on a table it cannot
+     * see. The reference is enforced by the API, which owns both sides.
+     */
+    tenantId: uuid("tenant_id"),
 
-  /**
-   * Clerk's own `updated_at` for this user, and the column does two jobs.
-   *
-   * authd serves it to Stalwart as `pwdChangeTime` (attrSecretChanged), which
-   * Stalwart compares to decide when cached OAuth tokens are stale. Clerk
-   * publishes no password-specific timestamp, so this is the closest available
-   * signal - and it errs safely: it moves on any profile change, invalidating
-   * tokens MORE often than strictly needed, never less. A password change that
-   * failed to move it would leave tokens minted under the old password valid.
-   *
-   * It is also the ordering guard. Webhook delivery is unordered, so a write is
-   * applied only when the incoming value is at least the stored one; otherwise
-   * a delayed older event would overwrite a newer state.
-   */
-  clerkUpdatedAt: timestamp("clerk_updated_at", { withTimezone: true }),
+    /**
+     * The storage an owner or admin allocated to this mailbox, in bytes.
+     *
+     * ⚠ OUR DATABASE IS THE SOURCE OF TRUTH, and Stalwart's `maxDiskQuota` is a
+     * copy of it (mail/quota.ts). On a plan workspace the allocations of all its
+     * inboxes sum to at most the plan's prepaid storage; on PAYG one is an
+     * optional cap. Null means none: PAYG uncapped, or an inbox that predates
+     * allocation on a plan workspace (reported as `unallocated`, and given the
+     * high default quota so nothing live bounces).
+     *
+     * ⚠ POSITIVE, OR NULL, NEVER ZERO. Whether Stalwart reads a quota of 0 as
+     * "none" or as "unlimited" was not probed, so zero is not a value we send.
+     */
+    storageAllocation: bigint("storage_allocation", { mode: "number" }),
 
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-})
+    /**
+     * Clerk's own `updated_at` for this user, and the column does two jobs.
+     *
+     * authd serves it to Stalwart as `pwdChangeTime` (attrSecretChanged), which
+     * Stalwart compares to decide when cached OAuth tokens are stale. Clerk
+     * publishes no password-specific timestamp, so this is the closest available
+     * signal - and it errs safely: it moves on any profile change, invalidating
+     * tokens MORE often than strictly needed, never less. A password change that
+     * failed to move it would leave tokens minted under the old password valid.
+     *
+     * It is also the ordering guard. Webhook delivery is unordered, so a write is
+     * applied only when the incoming value is at least the stored one; otherwise
+     * a delayed older event would overwrite a newer state.
+     */
+    clerkUpdatedAt: timestamp("clerk_updated_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "accounts_storage_allocation_positive",
+      sql`${t.storageAllocation} is null or ${t.storageAllocation} > 0`,
+    ),
+  ],
+)
 
 export const aliases = authd.table(
   "aliases",

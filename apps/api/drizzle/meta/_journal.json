@@ -946,6 +946,13 @@
       "when": 1793995652037,
       "tag": "0134_team_inboxes",
       "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1793997686186,
+      "tag": "0135_mailbox_storage_allocation",
+      "breakpoints": true
     }
   ]
 }

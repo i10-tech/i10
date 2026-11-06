@@ -235,6 +235,81 @@ export const mailboxIdCache = new MailboxIdCache()
 
 const ADDRESS = /^[^\s@]+@[^\s@]+$/
 
+/**
+ * One registry round trip: the method calls in, the FIRST method's result out.
+ * The caller supplies the credential, so the lookup below serves both the
+ * impersonation client (which reads the registry with the admin token) and the
+ * quota sync.
+ */
+export type RegistryCall = (methodCalls: unknown[]) => Promise<Record<string, unknown>>
+
+/** The registry account found for an address; `id` is a bare string, not yet minted. */
+export interface RegistryMatch {
+  id: string
+  "@type"?: unknown
+}
+
+/**
+ * The registry account carrying exactly `address`.
+ *
+ * ⚠ THERE IS NO `emailAddress` FILTER. Probed on 1.0.3: it answers
+ * `unsupportedFilter`, and `text` matches neither a full address nor case
+ * variants. `name` is exact (`mohamed` does not match `mohamed-legacy`) and
+ * is the address's local part, so the query narrows by local part and the
+ * exact address check below picks the account. Two domains sharing a local
+ * part both come back from the query; only one can carry the address.
+ *
+ * Throws `JmapAsError` `no_account` / `address_mismatch` when nothing carries
+ * it and `ambiguous_account` when more than one does. It never creates anything.
+ */
+export async function findRegistryAccount(
+  registry: RegistryCall,
+  address: string,
+  registryName?: string,
+): Promise<RegistryMatch> {
+  const wanted = address.toLowerCase()
+  const name = registryName ?? wanted.slice(0, wanted.lastIndexOf("@"))
+  const queried = await registry([["x:Account/query", { filter: { name } }, "q"]])
+
+  const ids = (Array.isArray(queried.ids) ? queried.ids : []).filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  )
+  if (ids.length === 0) {
+    throw new JmapAsError("no_account", `no stalwart account for ${address}`)
+  }
+
+  const fetched = await registry([
+    ["x:Account/get", { ids, properties: ["@type", "emailAddress"] }, "g"],
+  ])
+
+  const list = Array.isArray(fetched.list)
+    ? (fetched.list as Record<string, unknown>[])
+    : []
+  const carrying = list.filter(
+    (account) =>
+      typeof account.emailAddress === "string" &&
+      account.emailAddress.toLowerCase() === wanted &&
+      typeof account.id === "string" &&
+      ids.includes(account.id),
+  )
+
+  if (carrying.length === 0) {
+    throw new JmapAsError("address_mismatch", `no stalwart account carries ${address}`)
+  }
+
+  // ⚠ MORE THAN ONE IS AN ERROR, NOT "TAKE THE FIRST": the first of a list is
+  // somebody else's account as often as not.
+  if (carrying.length !== 1) {
+    throw new JmapAsError(
+      "ambiguous_account",
+      `${carrying.length} stalwart accounts carry ${address}`,
+    )
+  }
+
+  const account = carrying[0]!
+  return { id: account.id as string, "@type": account["@type"] }
+}
+
 export function jmapAs(opts: JmapAsOptions): JmapAsClient {
   const doFetch = opts.fetch ?? fetch
   const timeoutMs = opts.timeoutMs ?? 10_000
@@ -295,66 +370,18 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
     }
   }
 
-  /**
-   * ⚠ THERE IS NO `emailAddress` FILTER. Probed on 1.0.3: it answers
-   * `unsupportedFilter`, and `text` matches neither a full address nor case
-   * variants. `name` is exact (`mohamed` does not match `mohamed-legacy`) and
-   * is the address's local part, so the query narrows by local part and the
-   * exact address check below picks the account. Two domains sharing a local
-   * part both come back from the query; only one can carry the address.
-   */
   async function lookup(
     address: string,
     kind: AccountKind,
     registryName: string,
   ): Promise<StalwartAccountId> {
-    const [, queried] = (
-      await post(opts.registryToken, REGISTRY_USING, [
-        ["x:Account/query", { filter: { name: registryName } }, "q"],
-      ])
-    )[0]!
-
-    const ids = (Array.isArray(queried.ids) ? queried.ids : []).filter(
-      (id): id is string => typeof id === "string" && id.length > 0,
-    )
-    if (ids.length === 0) {
-      throw new JmapAsError("no_account", `no stalwart account for ${address}`)
-    }
-
-    const [, fetched] = (
-      await post(opts.registryToken, REGISTRY_USING, [
-        ["x:Account/get", { ids, properties: ["@type", "emailAddress"] }, "g"],
-      ])
-    )[0]!
-
-    const list = Array.isArray(fetched.list)
-      ? (fetched.list as Record<string, unknown>[])
-      : []
-    const carrying = list.filter(
-      (account) =>
-        typeof account.emailAddress === "string" &&
-        account.emailAddress.toLowerCase() === address &&
-        typeof account.id === "string" &&
-        ids.includes(account.id),
+    const account = await findRegistryAccount(
+      async (methodCalls) =>
+        (await post(opts.registryToken, REGISTRY_USING, methodCalls))[0]![1],
+      address,
+      registryName,
     )
 
-    if (carrying.length === 0) {
-      throw new JmapAsError(
-        "address_mismatch",
-        `no stalwart account carries ${address}`,
-      )
-    }
-
-    // ⚠ MORE THAN ONE IS AN ERROR, NOT "TAKE THE FIRST": the first of a list is
-    // somebody else's account as often as not.
-    if (carrying.length !== 1) {
-      throw new JmapAsError(
-        "ambiguous_account",
-        `${carrying.length} stalwart accounts carry ${address}`,
-      )
-    }
-
-    const account = carrying[0]!
     // ⚠ THE KIND MUST MATCH IN BOTH DIRECTIONS. A mailbox call must not land on a
     // group's account, and a team inbox call must not land on somebody's own.
     if ((account["@type"] === "Group") !== (kind === "Group")) {
@@ -366,7 +393,7 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
       )
     }
 
-    return mint(account.id as string)
+    return mint(account.id)
   }
 
   async function resolve(

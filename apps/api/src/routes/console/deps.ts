@@ -37,6 +37,7 @@ import type { TeamDomainDeps } from "../../console/team-domains.js"
 import type { Reservation } from "../../console/code-cooldown.js"
 import type { MembersDeps } from "../../console/members.js"
 import type { TeamInboxes } from "../../team-inboxes/service.js"
+import type { StorageAllocations } from "../../mailboxes/allocation.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -209,6 +210,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * without it the routes answer 501.
    */
   teamInboxes?: TeamInboxes
+  /**
+   * Splitting the workspace's storage across its inboxes (B3), for owners and
+   * admins. Optional; without it the routes answer 501.
+   */
+  mailboxStorage?: StorageAllocations
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

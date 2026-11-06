@@ -43,7 +43,14 @@ import { acceptSend } from "./send/accept.js"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { nameClaims } from "./domains/claims.js"
 import { domainStore } from "./domains/store.js"
+import {
+  allocationStore,
+  storageAllocations,
+  workspaceOwnership,
+} from "./mailboxes/allocation.js"
 import { mailboxProvisioning } from "./mailboxes/provision.js"
+import { createStalwartCaller } from "./mail/stalwart.js"
+import { planAssignmentStore } from "./metering/postgres.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
 import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
 import { onTeamInboxEvent } from "./team-inboxes/sync.js"
@@ -89,7 +96,11 @@ import { riskSystem, systemTenantIds } from "./risk/wire.js"
 import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
 import { joinStore } from "./console/join.js"
-import { autoJoinFromWebhook, type TeamDomainDeps } from "./console/team-domains.js"
+import {
+  autoJoinFromWebhook,
+  MANAGE_MEMBERS,
+  type TeamDomainDeps,
+} from "./console/team-domains.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
 import { domainTransferStore } from "./domains/transfers.js"
 import { emailLookup } from "./send/lookup.js"
@@ -1080,6 +1091,33 @@ const teamDomains: TeamDomainDeps | null = domains
 
 const mailboxDir = mailboxDirectory(db)
 
+// Splitting a workspace's mailbox storage across its inboxes (B3). Without a
+// Stalwart URL and token nothing is pushed and the reconcile does it later.
+const mailboxStorage = storageAllocations({
+  store: allocationStore(db),
+  assignments: planAssignmentStore(db),
+  ...(env.STALWART_URL && env.STALWART_API_TOKEN
+    ? {
+        stalwart: createStalwartCaller({
+          baseUrl: env.STALWART_URL,
+          token: env.STALWART_API_TOKEN,
+        }),
+      }
+    : {}),
+  log,
+})
+
+// Whether a person may size an inbox: an owner or admin of the workspace that
+// owns the mailbox's domain. A tenant with no organization belongs to its owner.
+const canAllocateStorage = async (userId: string, tenantId: string) => {
+  const tenant = await workspaceOwnership(db, tenantId)
+  if (!tenant) return false
+  if (!tenant.clerkOrgId) return tenant.ownerClerkUserId === userId
+  return Boolean(
+    teamDomains && (await teamDomains.can(userId, tenant.clerkOrgId, MANAGE_MEMBERS)),
+  )
+}
+
 // Shared addresses (B8). The Sent copy runs in its own CronJob (team-sent.ts).
 const teamInboxService = teamInboxesFor({
   db,
@@ -1479,6 +1517,7 @@ const app = createApp({
     ...(teamDomains ? { teamDomains } : {}),
     members,
     teamInboxes: teamInboxService,
+    mailboxStorage,
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
@@ -1664,6 +1703,8 @@ const app = createApp({
     // domains are hosted regardless of who owns a `core.domains` row.
     project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
     featureId: MAILBOXES,
+    storage: mailboxStorage,
+    canAllocate: canAllocateStorage,
   }),
   ...(secrets && webhookQueue
     ? {

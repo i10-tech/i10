@@ -64,7 +64,8 @@ import { captureError, initObservability, withMonitor } from "./observability.js
 import { postgresEntitlements, postgresLedger } from "./metering/service.js"
 import { flushUsage } from "./metering/ingest.js"
 import { sampleStorage } from "./mail/storage.js"
-import { stalwartStorage } from "./mail/stalwart.js"
+import { createStalwartCaller, stalwartStorage } from "./mail/stalwart.js"
+import { reconcileQuotas } from "./mail/quota.js"
 import {
   needsAttention,
   reconcileSes,
@@ -251,8 +252,8 @@ await withMonitor(
     // ── storage sample ──────────────────────────────────────────────────────
     //
     // ⚠ IT RUNS HERE RATHER THAN ON ITS OWN SCHEDULE BECAUSE IT IS THE SAME KIND
-    // OF WORK: a number that lives somewhere else, pulled on a cadence, with
-    // nobody waiting on it. Thirty minutes is far finer than a storage limit
+    // OF WORK: numbers that live somewhere else, pulled on a cadence, with
+    // nobody waiting on them. Thirty minutes is far finer than a storage limit
     // needs - the figure moves in megabytes over hours.
     if (env.STALWART_URL && env.STALWART_API_TOKEN) {
       try {
@@ -274,10 +275,26 @@ await withMonitor(
         captureError(error)
         process.exitCode = 1
       }
+
+      try {
+        const quotaReport = await reconcileQuotas({
+          db,
+          call: createStalwartCaller({
+            baseUrl: env.STALWART_URL,
+            token: env.STALWART_API_TOKEN,
+          }),
+          log,
+        })
+        log.info(quotaReport, "mailbox quota reconcile complete")
+      } catch (error) {
+        log.error({ err: error }, "mailbox quota reconcile failed")
+        captureError(error)
+        process.exitCode = 1
+      }
     } else {
       log.warn(
         { stalwart: Boolean(env.STALWART_URL) },
-        "storage not sampled - STALWART_URL or STALWART_API_TOKEN is unset",
+        "storage and quotas not reconciled - STALWART_URL or STALWART_API_TOKEN is unset",
       )
     }
 

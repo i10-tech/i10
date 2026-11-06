@@ -4041,6 +4041,13 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "storage_allocated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "exclusiveMinimum": 0
           }
         },
         "required": [
@@ -4062,6 +4069,10 @@
           "display_name": {
             "type": "string",
             "maxLength": 255
+          },
+          "storage_allocation": {
+            "type": "integer",
+            "exclusiveMinimum": 0
           }
         },
         "required": [
@@ -4096,6 +4107,13 @@
                 },
                 "created_at": {
                   "type": "string"
+                },
+                "storage_allocated": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
                 }
               },
               "required": [
@@ -8900,7 +8918,7 @@
             }
           },
           "403": {
-            "description": "The plan does not include another mailbox.",
+            "description": "The plan does not include another mailbox, or a member asked to allocate storage.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8920,7 +8938,7 @@
             }
           },
           "422": {
-            "description": "The address is not one we can host.",
+            "description": "The address is not one we can host, or a prepaid plan needs a storage allocation.",
             "content": {
               "application/json": {
                 "schema": {
