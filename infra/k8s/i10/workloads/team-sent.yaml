@@ -44,7 +44,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: team-sent
-              image: ghcr.io/i10-tech/i10-api:prod-a7f2607f026599026e06452f91a488ff27097ac9@sha256:85e6091cf6abdc9da0ff5eb52ed74b9d5ae89719e448451734c38601c2d90e5c
+              image: ghcr.io/i10-tech/i10-api:prod-e5a0c75a37e0530c0507b2ae6485f8dc55c5185d@sha256:c0007005067b3c620fc24e5e485de8775e390c2c26f7f8b8abea1ecd9fc20b5a
               imagePullPolicy: Always
               command: ["bun", "dist/team-sent.js"]
               envFrom:
