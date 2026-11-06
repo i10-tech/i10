@@ -445,6 +445,10 @@ what follows are the ones whose reason is not obvious from the value.
   Spamhaus and URIBL refused every query, so no message was ever scored on a
   blocklist hit. It is one replica: while it is down, MX and SPF lookups fail
   and mail waits in the queue rather than being misjudged.
+  ⚠ **OVER TCP, OR DANE IS OFF.** With the server set to `udp`, Stalwart's
+  startup check reports "The configured DNS resolver cannot validate DNSSEC.
+  DANE has been disabled" even though unbound validates (it sets AD for
+  queries with DO). With `tcp` the warning is gone.
 - **Search covers English, Arabic, French, German and Spanish.** Each message's
   language is detected when it is indexed, and a language not listed is
   processed as English. Adding one later means reindexing every message.

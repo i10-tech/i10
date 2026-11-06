@@ -58,4 +58,4 @@
 {"@type": "upsert", "object": "Application", "matchOn": ["description"], "value": {"webui": {"description": "Stalwart Web Interface", "enable": false}}}
 {"@type": "update", "object": "Calendar", "value": {"defaultDisplayName": "Calendar"}}
 {"@type": "update", "object": "AddressBook", "value": {"defaultDisplayName": "Contacts"}}
-{"@type": "update", "object": "DnsResolver", "value": {"@type": "Custom", "servers": {"0": {"address": "10.43.53.53", "port": 53, "protocol": "udp"}}, "tcpOnError": true, "enableEdns": true}}
+{"@type": "update", "object": "DnsResolver", "value": {"@type": "Custom", "servers": {"0": {"address": "10.43.53.53", "port": 53, "protocol": "tcp"}}, "tcpOnError": true, "enableEdns": true}}

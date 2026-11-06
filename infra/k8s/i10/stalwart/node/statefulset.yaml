@@ -223,15 +223,30 @@ spec:
           # request - which is exactly what a Stalwart with an unreachable
           # DataStore looks like. These endpoints answer for the server's own
           # view of itself.
+          #
+          # ⚠ THE PROBES SEND X-Forwarded-For BECAUSE STALWART NOW EXPECTS IT.
+          # `Http.clientIpSource` is `xForwardedFor` (#365), so a request
+          # without the header logs `http.x-forwarded-missing` at WARN, and the
+          # kubelet probes from 10.42.0.1 every few seconds. The value is the
+          # kubelet's own address, which AllowedIp already covers.
           startupProbe:
-            httpGet: { path: /healthz/live, port: http }
+            httpGet:
+              path: /healthz/live
+              port: http
+              httpHeaders: [{ name: X-Forwarded-For, value: 10.42.0.1 }]
             periodSeconds: 5
             failureThreshold: 30
           readinessProbe:
-            httpGet: { path: /healthz/ready, port: http }
+            httpGet:
+              path: /healthz/ready
+              port: http
+              httpHeaders: [{ name: X-Forwarded-For, value: 10.42.0.1 }]
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /healthz/live, port: http }
+            httpGet:
+              path: /healthz/live
+              port: http
+              httpHeaders: [{ name: X-Forwarded-For, value: 10.42.0.1 }]
             periodSeconds: 30
 
         # ── the identity bridge ──────────────────────────────────────────────
