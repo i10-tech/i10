@@ -362,7 +362,7 @@ share a migration surface with the transactional product.
 
 ## Blobs live in R2 (#357)
 
-Message bodies, attachments and Sieve scripts go to the private R2 bucket
+Message bodies, attachments and users' Sieve scripts go to the private R2 bucket
 `i10-mail` (`BlobStore` in plan.ndjson), so the database holds metadata only and
 every Stalwart node reads the same blobs. The keys are `STALWART_S3_ACCESS_KEY`
 and `STALWART_S3_SECRET_KEY` in Doppler `prod_stalwart`, from a token scoped to
@@ -376,11 +376,12 @@ that existed then. Moving it again on a server with real mail is an
 `--export`/`--import` into fresh stores (`/docs/management/maintenance/migration`),
 not a plan edit.
 
-⚠ **AND SIEVE SCRIPTS ARE BLOBS.** After any blob store change the
-`ses-references` record survives in the database while its text does not, and
-relayed mail silently stops threading. Run `bootstrap.sh` a second time after
-the restart that activates the store: an upsert always rewrites `contents`, so
-the second run puts the text into the new store.
+**System Sieve scripts are not blobs.** `SieveSystemScript` (`ses-references`)
+is a settings object, and its `contents` live in the data store with the rest of
+the plan. Proven on the switch (2026-11-06): re-applying the plan rewrote the
+script and `i10-mail` stayed empty, and a relayed send afterwards still carried
+the original Message-ID in `References`. A user's own Sieve scripts (filters,
+vacation replies) are blobs, and would be lost like any message body.
 
 ⚠ **THE STORE CHANGE NEEDS A RESTART, AND THE KEYS NEED ONE BEFORE THAT.** A
 setting that names an unset variable is accepted and fails at first use, which
@@ -396,9 +397,8 @@ To switch, in this order:
 3. Restart the pod (`kubectl rollout restart sts/i10-stalwart -n i10-prod`) so
    it has the keys. Merging this plan rolls it too, through the ConfigMap hash.
 4. `./bootstrap.sh` on psl-vps: it applies `BlobStore`, reloads and restarts.
-5. `./bootstrap.sh` again, for the Sieve script.
-6. Send a relayed message and check its `References`, and that a new object is
-   in `i10-mail`.
+5. Deliver a message and check that a new object is in `i10-mail` and that the
+   message reads back over JMAP.
 
 ## The internal relay
 
