@@ -11,7 +11,7 @@
 # oven-sh/bun#25609, fixed in 1.3.14. `next dev` and `next start` were fine
 # throughout, and a --webpack build failed identically, so downgrading the
 # bundler is not a way out of it. Do not move this base image backwards.
-FROM oven/bun:1.4.2-alpine AS base
+FROM oven/bun:1.4.3-alpine AS base
 
 FROM base AS deps
 WORKDIR /repo
