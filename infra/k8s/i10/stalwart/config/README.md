@@ -716,6 +716,36 @@ requires it - and Amazon drops a DSN for mail it did not send. One return path
 for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
 return path".
 
+### Mailbox events: `auth.failed` and `limit.quota`
+
+Two more events in the include list are about a mailbox, not a message. They
+carry `accountName`, `remoteIp` and `listenerId` and no VERP sender, so
+`apps/api/src/webhooks/stalwart-account.ts` handles them apart from the
+delivery path; they never reach a customer's webhook endpoint.
+
+| Stalwart event | What the API does                                                                    |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `auth.failed`  | one row in `core.mailbox_auth_failures`: account, workspace, address, subnet         |
+| `limit.quota`  | tells the workspace once per mailbox per UTC day (logs only until a template exists) |
+
+⚠ **Failures for an account we do not host are dropped.** Scanners try random
+usernames all day and Stalwart reports each one. An address that is not in
+`authd.accounts`, or is hosted with no workspace (i10's own mailboxes), writes
+nothing and counts as `ignored`.
+
+⚠ **They are kept out of `core.identity_events` on purpose.** Every risk reader
+there treats a row as the person's own sighting, so a failure filed there would
+make an attacker's network look familiar to the owner and link unrelated
+accounts that one brute-forcing address touched. Nothing reads
+`mailbox_auth_failures` into the score yet; `mailboxAuthFailureSummary`
+(`apps/api/src/risk/mailbox-auth.ts`) is the read.
+
+`security.authentication-ban`, `security.too-many-attempts` and
+`limit.blob-quota` are not subscribed: the first two fire off the failures
+already seen, and the blob quota is a per-upload ceiling, not a full mailbox.
+Both events are deduplicated on `authd.webhook_events` like everything else,
+since each of the two nodes posts its own copy.
+
 ## The mailbox lever
 
 `MtaOutboundStrategy.route` is an expression evaluated **per recipient**, and it

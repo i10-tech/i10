@@ -94,6 +94,7 @@ import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
+import { accountEventOps } from "./webhooks/stalwart-account-db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
@@ -1669,6 +1670,7 @@ const app = createApp({
           ? {
               stalwartWebhooks: {
                 events: webhookEventOps({ db, queue: webhookQueue }),
+                accounts: accountEventOps(db),
                 log,
                 secret: env.STALWART_WEBHOOK_SECRET,
               },
