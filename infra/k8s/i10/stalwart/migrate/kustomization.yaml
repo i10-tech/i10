@@ -1,0 +1,21 @@
+# The v0.16 to v1.0 migration (#365). Applied BY HAND, never by Argo: the parent
+# kustomization does not list this directory, so i10-stalwart neither deploys
+# nor prunes it. See README.md for the order of operations.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: i10-prod
+
+resources:
+  - pod.yaml
+
+# ⚠ NO NAME HASH. stalwart-migrate fingerprints both files and refuses to go on
+# with a different source or target, so they never change mid-migration, and a
+# fixed name keeps the runbook's commands literal.
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: i10-stalwart-migrate
+    files:
+      - source.json
+      - target.json

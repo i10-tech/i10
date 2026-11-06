@@ -1,0 +1,13 @@
+{
+  "@type": "PostgreSql",
+  "host": "i10-platform-pooler.i10-prod.svc.cluster.local",
+  "port": 5432,
+  "database": "stalwart",
+  "authUsername": "stalwart",
+  "authSecret": {
+    "@type": "EnvironmentVariable",
+    "variableName": "STALWART_DB_PASSWORD"
+  },
+  "poolMaxConnections": 10,
+  "timeout": 15000
+}

@@ -1,0 +1,79 @@
+# ⚠ THE STATE OUTLIVES THE POD, SO IT IS A PVC. It holds the answers, the
+# position of every account and the original v0.16 settings, and `rollback`
+# needs it until v0.16 is retired. psl-zfs DELETES the volume with the claim,
+# so the claim stays until that day.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: i10-stalwart-migrate-state
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: psl-zfs
+  resources:
+    requests: { storage: 1Gi }
+---
+# A pod that idles, so every step is a `kubectl exec`: `prepare` needs a
+# terminal (`exec -it`), and `run --final` must be started by hand once both
+# v0.16 nodes are stopped.
+#
+# ⚠ NOT LABELLED part-of=i10-stalwart. bootstrap.sh restarts every pod with
+# that label, and the HTTP Service selects it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: i10-stalwart-migrate
+  labels:
+    app.kubernetes.io/name: i10-stalwart-migrate
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 2000
+    runAsGroup: 2000
+    fsGroup: 2000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: migrate
+      # Pin the exact release; 1.0.6 is the one rehearsed against v0.16.27 and
+      # v1.0.3 on scratch.
+      image: stalwartlabs/stalwart-migrate:1.0.6
+      command: ["sleep", "infinity"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      # The same environment as the server: both config files name
+      # STALWART_DB_PASSWORD, and the v0.16 settings inside the store name the
+      # R2 keys, which the final run uses to write Sieve scripts and the spam
+      # model into the shared bucket.
+      envFrom:
+        - secretRef: { name: i10-shared }
+        - secretRef: { name: i10-stalwart }
+      env:
+        - name: STALWART_DB_PASSWORD
+          valueFrom:
+            secretKeyRef: { name: i10-stalwart-db-role, key: password }
+        - { name: STALWART_MIGRATE_STATE, value: /var/lib/stalwart-migrate }
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits: { memory: 1Gi }
+      volumeMounts:
+        - name: config
+          mountPath: /etc/stalwart/config.json
+          subPath: source.json
+          readOnly: true
+        - name: config
+          mountPath: /etc/stalwart-v1/config.json
+          subPath: target.json
+          readOnly: true
+        - { name: state, mountPath: /var/lib/stalwart-migrate }
+        - { name: tmp, mountPath: /tmp }
+  volumes:
+    - name: config
+      configMap: { name: i10-stalwart-migrate }
+    - name: state
+      persistentVolumeClaim: { claimName: i10-stalwart-migrate-state }
+    - name: tmp
+      emptyDir: {}
