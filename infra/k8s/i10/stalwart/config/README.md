@@ -5,7 +5,8 @@ mail server boots into the wrong behaviour.**
 
 ## `config.json` - the startup file
 
-Stalwart v0.16 is not a daemon driven by a large configuration file.
+Stalwart (v1.0 since #365, v0.16 before it) is not a daemon driven by a large
+configuration file.
 `config.json` contains **one object**: the
 [DataStore](https://stalw.art/docs/ref/object/data-store) telling the server
 where its database lives. Everything else - listeners, domains, DKIM
@@ -354,11 +355,39 @@ Role, not a limit - see `/docs/auth/authorization/permissions`.
 
 ## The database
 
-`config.json` points at database `stalwart`, not `i10`. The CNPG cluster
-bootstraps only `i10`, so the `stalwart` database and its role are created by
+`config.json` points at database `stalwart_v1`, not `i10`. The CNPG cluster
+bootstraps only `i10`, so Stalwart's databases and their role are created by
 `database.yaml` in the parent directory. Stalwart owns its own database
 deliberately: it manages its own schema, migrates it on upgrade, and must never
 share a migration surface with the transactional product.
+
+⚠ **`stalwart` IS THE v0.16 STORE, KEPT AS THE ROLLBACK.** v1.0 cannot open a
+v0.16 store, so #365 copied `stalwart` into `stalwart_v1` with
+`stalwart-migrate` (`../migrate/README.md`). Drop `stalwart` only once v1.0 has
+proved itself and the migration state is no longer wanted.
+
+## Upgrading to v1.0 (#365)
+
+What changed for this directory, every item found by applying the v0.16 plan to
+a scratch v1.0.3 server and by a full `stalwart-migrate` rehearsal, not read off
+the docs site:
+
+- Renamed fields: Directory `filterMailbox` → `filterRecipient`; Domain
+  `isEnabled` → `enable`; BlobStore `accessKey` → `accessKeyId`, and its custom
+  region is `{url, region}` instead of `{customEndpoint, customRegion}`;
+  NetworkListener `tlsImplicit` → `implicitTls`; MtaRoute `address` → `host`; a
+  Postgres store's `timeout` → `connectTimeout` (in `config.json` too).
+- `SenderAuth.dkimSignDomain` moved to `MtaStageData.dkimSignDomain`.
+- A listener's `maxConnections` is now nullable and inherits from
+  SystemSettings. The migration clears every v0.16 default of 8192, so the relay
+  no longer pins it.
+- `stalwart-migrate prepare` converts all of this itself. Its report for our
+  settings: 0 dropped objects, and warnings only for permissions and OIDC
+  provider fields 1.0 no longer has. After the migration the converted
+  `plan.ndjson` dry-runs as unchanged, which is the check that the two agree.
+- A Certificate's `subjectAlternativeNames` is server-set from the PEM, and the
+  CN counts. Ours names `i10.tech` and `*.i10.tech` only, so `matchOn` still
+  matches; a certificate whose CN is not among its SANs would be created twice.
 
 ## Blobs live in R2 (#357)
 
@@ -419,11 +448,14 @@ single Kubernetes node and 25/465/993 are hostPorts, so a second pod claiming
 them would sit Pending. The internal node exists to take JMAP load (our API, the
 webmail) off the pod that handles mail, not to stand in for it.
 
-⚠ **THE `internal` ROLE NAMES A LISTENER BY ID** (`jcrkonsmahab`, the `http`
-listener this server created at first boot). A rebuilt server has different ids,
-and the role would then enable nothing: the internal node fails its probes and
-never becomes ready, which is loud. Read the new id from
-`x:NetworkListener/get` and update the plan.
+⚠ **THE `internal` ROLE NAMES ITS LISTENER BY REFERENCE, NOT BY ID.**
+`listenerIds` takes server ids, and a rebuilt or migrated store has new ones; a
+role naming a stale id is refused (`invalidForeignKey`), or, on a store where
+the id exists but is another listener, enables the wrong one. So the line before
+the role upserts the `http` listener by name with nothing to change, which binds
+`#http` to whatever id it has on this server, and the role writes
+`{"#http": true}`. Until #365 the plan pinned `jcrkonsmahab`, the id the 0.16
+server gave `http` at first boot.
 
 ⚠ **THE SCHEDULER AND SPAM TRAINING STAY ON THE EDGE NODE.** Each node with
 `taskScheduler` queues its own copy of every periodic task, and two nodes
@@ -637,13 +669,10 @@ access key id, which does not belong in git, so the plan writes
 `{"@fromSecret": "SES_SMTP_USER"}` and `bootstrap.sh` replaces it with that key
 of `i10-stalwart` at apply time. The dry-run prints property names, never values.
 
-⚠ **THE FIELDS ARE FLAT, AND THE HOST IS `address` ON v0.16.** `address`, `port`,
-`protocol`, `implicitTls`, `authUsername`, `authSecret`. Stalwart's current
-MtaRoute reference documents v1.0, where the field is `host`; v0.16.19's own
-tests (`tests/src/smtp/outbound/lmtp.rs`) say `address`, and the live schema
-refused `host` in the dry-run. An earlier draft of this section also nested the
+⚠ **THE FIELDS ARE FLAT.** `host`, `port`, `protocol`, `implicitTls`,
+`authUsername`, `authSecret`. On v0.16 the host was `address` and the 1.0 name
+was refused; #365 renamed it. An earlier draft of this section also nested the
 rest under `tls` and `auth`. Port 587 with `implicitTls: false` is STARTTLS.
-Rename `address` to `host` when upgrading to v1.0.
 
 ⚠ **SES REFUSES A MESSAGE THAT ARRIVES WITH TWO `DKIM-Signature` HEADERS.**
 The first relayed messages on 2026-11-05 bounced with `554 Transaction failed:
@@ -663,7 +692,8 @@ at the receiver even though the body hash matches. On 2026-11-05 Gmail
 reported `dkim=fail header.s=v1-rsa-20260901` both with Message-ID signed and
 with only `To:Subject:From:Date` signed. SES's own i10.tech signature is the one
 DMARC needs, and every domain `mailbox_route` sends to `ses-relay` is an SES
-identity. So `SenderAuth.dkimSignDomain` in `plan.ndjson` asks the same
+identity. So `MtaStageData.dkimSignDomain` in `plan.ndjson` (it was
+`SenderAuth.dkimSignDomain` on v0.16) asks the same
 function the route asks, and signs only when the answer is not `ses-relay`.
 Mail that goes out directly keeps Stalwart's signature.
 

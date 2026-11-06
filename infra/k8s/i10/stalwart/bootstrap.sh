@@ -327,6 +327,10 @@ def covers(current, wanted):
     # the plan sets. Plain maps (`bind`, `subjectAlternativeNames`) are sets and
     # are written whole, so they stay exact: a removed entry must show.
     wanted = resolve_ref(wanted)
+    # A reference can be a map KEY too (ClusterRole's `listenerIds: {"#http":
+    # true}`); the server stores the id, so resolve keys before comparing.
+    if isinstance(wanted, dict):
+        wanted = {resolve_ref(k): v for k, v in wanted.items()}
     if isinstance(wanted, dict) and "@type" in wanted and isinstance(current, dict):
         return current.get("@type") == wanted["@type"] and all(
             covers(current.get(k), v) for k, v in wanted.items() if k != "@type"
