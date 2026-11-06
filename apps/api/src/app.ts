@@ -52,6 +52,7 @@ import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
+import { createMtaHookRoutes, type MtaHookRouteDeps } from "./routes/mta-hook.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
@@ -162,6 +163,12 @@ export interface AppDeps {
    * never reports.
    */
   stalwartWebhooks?: StalwartWebhookDeps
+  /**
+   * Mailbox sends, checked as API sends are (B5). Bearer-authenticated. Absent:
+   * the route answers 503 and Stalwart tempfails every mailbox send, so it is
+   * set before the hook is enabled, not after.
+   */
+  mtaHook?: MtaHookRouteDeps
   /**
    * Polar subscription events. Unauthenticated; signature-verified.
    *
@@ -425,6 +432,10 @@ export function createApp(deps: AppDeps = {}) {
 
     return c.json(await metrics.queueDepth(), 200)
   })
+
+  // ⚠ MOUNTED UNCONDITIONALLY, LIKE THE WEBHOOKS: a missing secret is a 503 that
+  // says so, not a 404. Outside the OpenAPI document - Stalwart's contract.
+  app.route("/internal/mta-hook", createMtaHookRoutes(deps.mtaHook))
 
   app.get("/version", (c) =>
     c.json({

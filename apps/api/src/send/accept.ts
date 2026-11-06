@@ -2,7 +2,8 @@ import { createHash } from "node:crypto"
 import type { SendEmail } from "@repo/contracts"
 import { resolveTemplateSend, type TemplateLookup } from "@repo/templates"
 import type { SendClass, SendJob } from "../queue/send-queue.js"
-import { shouldSend, type Metering } from "./metering.js"
+import { admitSend, type AdmitDeps } from "./admit.js"
+import type { Metering } from "./metering.js"
 import { domainOf } from "./address.js"
 import { maySendFrom, scopedDomains } from "../auth/scope.js"
 
@@ -309,7 +310,7 @@ export interface AcceptOps {
    * ⚠ OPTIONAL AND ABSENT FOR OUR OWN MAIL, for the reason `sendingPaused` is:
    * sign-in codes must never wait on a review of some workspace.
    */
-  sendingHeld?: (tenantId: string) => Promise<{ why: string } | null>
+  sendingHeld?: AdmitDeps["sendingHeld"]
 
   /**
    * Where a send's `template` reference is looked up (#160).
@@ -463,28 +464,10 @@ export async function acceptSend(
     }
   }
 
-  const held = await deps.sendingHeld?.(input.tenantId)
-  if (held) {
-    return {
-      status: "held",
-      message:
-        `Sending is on hold for this workspace while we review it: ${held.why}. ` +
-        "A person will review it within a day. Reply to the email we sent the " +
-        "workspace owner, or contact support, to speed that up.",
-    }
-  }
-
-  // ⚠ FIRST, AND CHEAPLY. Rejecting an over-quota tenant before writing
-  // anything is the difference between a 429 in milliseconds and a database
-  // full of messages that will never be allowed to send.
-  const quota = await deps.metering.checkQuota(input.tenantId, input.payloads.length)
-  if (!shouldSend(quota)) {
-    return {
-      status: "quota_exceeded",
-      message: quota.status === "exceeded" ? quota.message : "Sending quota exceeded.",
-      code: (quota.status === "exceeded" && quota.code) || "daily_quota_exceeded",
-    }
-  }
+  // ⚠ THE HOLD AND THE QUOTA ARE `admitSend`, NOT CODE HERE: the Stalwart MTA hook
+  // asks the same question for a mailbox send, and the two must not drift.
+  const refusal = await admitSend(input.tenantId, input.payloads.length, deps)
+  if (refusal) return refusal
 
   const everyAddress = input.payloads.flatMap((p) => [
     ...asList(p.to),
