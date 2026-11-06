@@ -25,6 +25,8 @@ import {
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { createInvitationQueue, invitationScheduler } from "./queue/invitation-queue.js"
+import { createMailboxQueue, enqueueMailboxJob } from "./queue/mailbox-queue.js"
+import { canAccessMailbox, mailboxJobStore } from "./mailboxes/jobs.js"
 import { memberStore } from "./console/members-db.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { memberMail } from "./console/member-mail.js"
@@ -1090,6 +1092,15 @@ const teamDomains: TeamDomainDeps | null = domains
   : null
 
 const mailboxDir = mailboxDirectory(db)
+const mailboxMigrationQueue = contentStore
+  ? createMailboxQueue({ redis: queueRedis })
+  : null
+const mailboxDownloadSecret = createHmac(
+  "sha256",
+  env.WEBHOOK_SECRET_KEY ?? env.CLERK_WEBHOOK_SECRET,
+)
+  .update("mailbox-download-tokens")
+  .digest("hex")
 
 // Splitting a workspace's mailbox storage across its inboxes (B3). Without a
 // Stalwart URL and token nothing is pushed and the reconcile does it later.
@@ -1754,6 +1765,28 @@ const app = createApp({
           domainOwner: (domain: string) => mailboxDir.domainOwner(domain),
           admit: { sendingHeld: sendPath.sendingHeld, metering: sendPath.metering },
           log,
+        },
+      }
+    : {}),
+  ...(contentStore && mailboxMigrationQueue
+    ? {
+        mailboxMigration: {
+          jobs: mailboxJobStore(db),
+          store: contentStore,
+          enqueue: (data) => enqueueMailboxJob(mailboxMigrationQueue, data),
+          access: (userId, address) =>
+            canAccessMailbox(
+              db,
+              userId,
+              address,
+              teamDomains
+                ? {
+                    isAdmin: (user, orgId) =>
+                      teamDomains.can(user, orgId, MANAGE_MEMBERS),
+                  }
+                : undefined,
+            ),
+          tokenSecret: mailboxDownloadSecret,
         },
       }
     : {}),

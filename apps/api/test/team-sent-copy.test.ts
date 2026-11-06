@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { JmapAsError, type JmapAsClient, type JmapMethod } from "../src/mail/jmap-as.js"
+import { JmapAsError, type JmapMethod } from "../src/mail/jmap-as.js"
+import { fakeJmapClient } from "./support/jmap-client.js"
 import { teamMail, type SentMessage, type TeamMail } from "../src/mail/team-mail.js"
 import { copyTeamSent, type SentCopyStore } from "../src/team-inboxes/sent-copy.js"
 
@@ -207,7 +208,7 @@ describe("the JMAP the copy sends", () => {
     notCreated?: Record<string, { type: string }>
   }) {
     const calls: Call[] = []
-    const client: JmapAsClient = {
+    const client = fakeJmapClient({
       async call(mailbox, methods) {
         calls.push({ who: mailbox.address, methods: [...methods] })
         if (methods[0]![0] === "Mailbox/get") {
@@ -236,7 +237,7 @@ describe("the JMAP the copy sends", () => {
         return [["Email/copy", { created, notCreated: answers.notCreated ?? {} }, "c"]]
       },
       destroyGroup: async () => true,
-    }
+    })
     return { client, calls }
   }
 

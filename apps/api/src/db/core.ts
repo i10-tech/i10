@@ -4855,3 +4855,45 @@ export const deviceResumes = core.table(
     }),
   ],
 )
+
+/**
+ * Mailbox import and export background jobs (#385).
+ *
+ * Tracks the state, progress, and content-store references for mailbox migrations:
+ * exporting a mailbox to an archive (zip of EMLs) and importing an archive into a mailbox.
+ */
+export const mailboxJobs = core.table(
+  "mailbox_jobs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    mailboxAddress: text("mailbox_address").notNull(),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("pending"),
+    totalMessages: integer("total_messages").notNull().default(0),
+    processedMessages: integer("processed_messages").notNull().default(0),
+    totalFolders: integer("total_folders").notNull().default(0),
+    processedFolders: integer("processed_folders").notNull().default(0),
+    objectKey: text("object_key"),
+    error: text("error"),
+    errorCode: text("error_code"),
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("mailbox_jobs_tenant_idx").on(t.tenantId, t.status),
+    index("mailbox_jobs_address_idx").on(t.mailboxAddress),
+    pgPolicy("mailbox_jobs_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)

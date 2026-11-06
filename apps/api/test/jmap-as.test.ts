@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test"
-import { JmapAsError, MailboxIdCache, jmapAs } from "../src/mail/jmap-as.js"
+import {
+  JmapAsError,
+  MailboxIdCache,
+  blobDownloadUrl,
+  blobUploadUrl,
+  jmapAs,
+} from "../src/mail/jmap-as.js"
 
 const ADMIN = "admin-registry-token"
 const IMPERSONATE = "impersonate-key"
@@ -20,15 +26,30 @@ function server(
   accounts: Record<string, { id: string; email?: string; type?: string }>,
 ) {
   const seen: Seen[] = []
+  const blobs: { url: string; token: string; method?: string; body?: unknown }[] = []
 
-  const fetcher = (async (_url: string, init: RequestInit) => {
+  const fetcher = (async (url: string, init: RequestInit) => {
     const token = String(
       (init.headers as Record<string, string>).authorization,
     ).replace("Bearer ", "")
+
+    if (url.includes("/jmap/download/")) {
+      blobs.push({ url, token, method: "GET" })
+      return new Response(new Uint8Array([65, 66, 67]))
+    }
+
+    if (url.includes("/jmap/upload/")) {
+      blobs.push({ url, token, method: "POST", body: init.body })
+      return new Response(JSON.stringify({ blobId: "blob-123", size: 3 }), {
+        status: 201,
+      })
+    }
+
     const body = JSON.parse(String(init.body)) as Omit<Seen, "token">
     seen.push({ token, ...body })
 
     const [name, args, callId] = body.methodCalls[0]!
+
     let reply: unknown
 
     if (name === "x:Account/query") {
@@ -60,7 +81,7 @@ function server(
 
   const registry = () => seen.filter((s) => s.methodCalls[0]![0].startsWith("x:"))
   const mailbox = () => seen.filter((s) => !s.methodCalls[0]![0].startsWith("x:"))
-  return { fetcher, seen, registry, mailbox }
+  return { fetcher, seen, registry, mailbox, blobs }
 }
 
 function client(fetcher: typeof fetch, cache = new MailboxIdCache()) {
@@ -237,5 +258,73 @@ describe("the id cache", () => {
     cache.forget("a@acme.test")
     cache.set("a@acme.test", "idA" as never, began)
     expect(cache.get("a@acme.test")).toBeNull()
+  })
+})
+
+describe("blob download and upload", () => {
+  const mailbox = { address: "a@acme.test" }
+
+  it("builds both URLs from the session's templates, against the in-cluster base", () => {
+    // RFC 8620 6.2 and 6.1 as Stalwart advertises them; re-check on an upgrade.
+    expect(blobDownloadUrl("http://i10-stalwart:8080", "idA", "blob-xyz")).toBe(
+      "http://i10-stalwart:8080/jmap/download/idA/blob-xyz/message.eml",
+    )
+    expect(blobUploadUrl("http://i10-stalwart:8080", "idA")).toBe(
+      "http://i10-stalwart:8080/jmap/upload/idA/",
+    )
+    expect(blobDownloadUrl("http://x", "a/b", "c d")).toBe(
+      "http://x/jmap/download/a%2Fb/c%20d/message.eml",
+    )
+  })
+
+  it("downloads as the resolved account and hands back the body unread", async () => {
+    const s = server({ "a@acme.test": { id: "idA" } })
+    const c = client(s.fetcher)
+
+    const blob = await c.downloadBlob(mailbox, "blob-xyz")
+    // Not read yet: the caller pulls it, so a large message is never held whole.
+    expect(blob.body).toBeInstanceOf(ReadableStream)
+    expect(new Uint8Array(await new Response(blob.body).arrayBuffer())).toEqual(
+      new Uint8Array([65, 66, 67]),
+    )
+    expect(s.blobs).toHaveLength(1)
+    expect(s.blobs[0]!.url).toBe(
+      "http://i10-stalwart:8080/jmap/download/idA/blob-xyz/message.eml",
+    )
+    expect(s.blobs[0]!.token).toBe(IMPERSONATE)
+  })
+
+  it("uploads as the resolved account", async () => {
+    const s = server({ "a@acme.test": { id: "idA" } })
+    const c = client(s.fetcher)
+
+    const res = await c.uploadBlob(mailbox, new Uint8Array([1, 2, 3]))
+    expect(res).toEqual({ blobId: "blob-123", size: 3 })
+    expect(s.blobs[0]!.url).toBe("http://i10-stalwart:8080/jmap/upload/idA/")
+    expect(s.blobs[0]!.token).toBe(IMPERSONATE)
+  })
+
+  it("tells a missing blob, a full account and an oversize message apart", async () => {
+    const codeOf = async (status: number, body = "", upload = true) => {
+      const s = server({ "a@acme.test": { id: "idA" } })
+      const base = s.fetcher
+      const c = client((async (url: string, init: RequestInit) =>
+        String(url).includes("/jmap/download/") || String(url).includes("/jmap/upload/")
+          ? new Response(body, { status })
+          : base(url, init)) as unknown as typeof fetch)
+      return (
+        upload
+          ? c.uploadBlob(mailbox, new Uint8Array([1]))
+          : c.downloadBlob(mailbox, "b")
+      ).then(
+        () => "ok",
+        (error: JmapAsError) => error.code,
+      )
+    }
+    expect(await codeOf(404, "", false)).toBe("not_found")
+    expect(await codeOf(507)).toBe("over_quota")
+    expect(await codeOf(400, '{"type":"overQuota"}')).toBe("over_quota")
+    expect(await codeOf(413)).toBe("too_large")
+    expect(await codeOf(500)).toBe("stalwart")
   })
 })

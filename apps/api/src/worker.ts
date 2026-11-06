@@ -39,6 +39,14 @@ import {
 import { memberStore } from "./console/members-db.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { expireInvitation } from "./console/members.js"
+import { createMailboxQueue, startMailboxWorker } from "./queue/mailbox-queue.js"
+import {
+  runMailboxExport,
+  runMailboxImport,
+  type MigrationDeps,
+} from "./mailboxes/migration.js"
+import { mailboxJobStore } from "./mailboxes/jobs.js"
+import { jmapAs } from "./mail/jmap-as.js"
 
 /**
  * The send worker.
@@ -393,10 +401,55 @@ function startInvitationExpiry() {
   return worker
 }
 
+function startMailboxMigrationWorker() {
+  const store = objectStoreFrom(env)
+  if (
+    !store ||
+    !env.STALWART_URL ||
+    !env.STALWART_API_TOKEN ||
+    !env.STALWART_IMPERSONATE_TOKEN
+  ) {
+    log.warn(
+      {},
+      "mailbox migration worker disabled: content store or stalwart tokens not configured",
+    )
+    return null
+  }
+
+  const jmap = jmapAs({
+    baseUrl: env.STALWART_URL,
+    registryToken: env.STALWART_API_TOKEN,
+    impersonationToken: env.STALWART_IMPERSONATE_TOKEN,
+  })
+
+  const migrationDeps: MigrationDeps = {
+    jobs: mailboxJobStore(db),
+    store,
+    jmap,
+    log,
+  }
+
+  const worker = startMailboxWorker({
+    queue: createMailboxQueue({ redis: queueRedis }),
+    name: `${workerId}:mailbox-jobs`,
+    handler: async (jobData) => {
+      if (jobData.type === "export") {
+        await runMailboxExport(jobData, migrationDeps)
+      } else {
+        await runMailboxImport(jobData, migrationDeps)
+      }
+    },
+    log,
+  })
+  log.info({}, "mailbox migration worker started")
+  return worker
+}
+
 const workers = [
   ...(["transactional", "bulk"] as const).map(startWorker),
   startWebhookWorker(),
   startInvitationExpiry(),
+  startMailboxMigrationWorker(),
 ].filter((w) => w !== null)
 
 /**

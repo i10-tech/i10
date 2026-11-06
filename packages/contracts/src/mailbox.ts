@@ -140,9 +140,47 @@ export const mailboxStorageUpdatedSchema = z.object({
   quota: z.enum(["synced", "deferred"]),
 })
 
+export const mailboxJobProgressSchema = z.object({
+  total_messages: z.number().int().nonnegative(),
+  processed_messages: z.number().int().nonnegative(),
+  total_folders: z.number().int().nonnegative(),
+  processed_folders: z.number().int().nonnegative(),
+})
+
+/** Where an import's archive goes: straight to storage, not through the API. */
+export const mailboxJobUploadSchema = z.object({
+  url: z.string(),
+  method: z.literal("PUT"),
+  expires_at: z.string(),
+})
+
+export const createMailboxImportSchema = z.object({
+  /** The archive's size in bytes, so an oversize one is refused before it is sent. */
+  size: z.number().int().positive(),
+})
+
+export const mailboxJobSchema = z.object({
+  object: z.literal("mailbox_job"),
+  id: z.string(),
+  mailbox_address: z.string(),
+  type: z.enum(["export", "import"]),
+  status: z.enum(["awaiting_upload", "pending", "running", "completed", "failed"]),
+  progress: mailboxJobProgressSchema,
+  download_url: z.string().nullable().optional(),
+  upload: mailboxJobUploadSchema.nullable().optional(),
+  error: z.string().nullable().optional(),
+  error_code: z.string().nullable().optional(),
+  created_at: z.string(),
+  completed_at: z.string().nullable().optional(),
+})
+
 export type CreateMailbox = z.infer<typeof createMailboxSchema>
 export type Mailbox = z.infer<typeof mailboxSchema>
 export type SetMailboxStorage = z.infer<typeof setMailboxStorageSchema>
 export type MailboxStorage = z.infer<typeof mailboxStorageSchema>
 export type StoragePool = z.infer<typeof storagePoolSchema>
 export type MailboxStorageList = z.infer<typeof mailboxStorageListSchema>
+
+export type MailboxJobProgress = z.infer<typeof mailboxJobProgressSchema>
+export type MailboxJob = z.infer<typeof mailboxJobSchema>
+export type CreateMailboxImport = z.infer<typeof createMailboxImportSchema>

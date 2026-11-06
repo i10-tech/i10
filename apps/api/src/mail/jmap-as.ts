@@ -70,6 +70,12 @@ export type JmapAsFailure =
   | "address_mismatch"
   /** The server refused or could not be reached. */
   | "stalwart"
+  /** The blob is not there (a message deleted while it was being read). */
+  | "not_found"
+  /** The account has no room left. Retrying cannot help. */
+  | "over_quota"
+  /** The server's size limit for one message or upload. */
+  | "too_large"
 
 export class JmapAsError extends Error {
   constructor(
@@ -151,6 +157,28 @@ export interface JmapAsClient {
    * yet is the ordinary case.
    */
   destroyGroup(group: AuthorisedGroup): Promise<boolean>
+
+  /**
+   * Streams a blob out of the mailbox's account. The body is NOT read here:
+   * the caller pulls it, so a 50 MB message is never held whole.
+   *
+   * ⚠ THE TIMEOUT COVERS THE RESPONSE HEADERS ONLY. The body of a large blob
+   * legitimately takes longer than `timeoutMs`; a stalled body is the job
+   * timeout's business.
+   */
+  downloadBlob(mailbox: AuthorisedMailbox, blobId: string): Promise<BlobDownload>
+
+  /** Uploads one raw RFC 5322 message AS the mailbox's account. */
+  uploadBlob(
+    mailbox: AuthorisedMailbox,
+    bytes: Uint8Array,
+  ): Promise<{ blobId: string; size: number }>
+}
+
+export interface BlobDownload {
+  body: ReadableStream<Uint8Array>
+  /** `Content-Length`, when the server sent one. */
+  size: number | null
 }
 
 /** Long enough to spare the registry on a burst, short enough to bound a miss. */
@@ -309,6 +337,31 @@ export async function findRegistryAccount(
   const account = carrying[0]!
   return { id: account.id as string, "@type": account["@type"] }
 }
+
+/*
+ * ⚠ THE TWO BLOB URLS, BUILT HERE AND NOWHERE ELSE. They are RFC 8620's
+ * `downloadUrl` and `uploadUrl` templates (sections 6.2 and 6.1) as Stalwart
+ * documents them (`/jmap/download/<accountId>/<blobId>/<name>` and
+ * `/jmap/upload/<accountId>/`), with the in-cluster base put in front. A client
+ * is supposed to take the templates from `/jmap/session`, and this one does
+ * not: the session advertises the PUBLIC hostname, which does not route to the
+ * management pod (see the header). So the paths are copied, and the copy is the
+ * risk.
+ *
+ * ⚠ RE-CHECK BOTH AGAINST `GET /jmap/session` ON EVERY STALWART UPGRADE. A
+ * moved path answers 404 to every export and import, and the symptom is the
+ * job failing, not anything at startup.
+ */
+export const blobDownloadUrl = (
+  base: string,
+  accountId: string,
+  blobId: string,
+  name = "message.eml",
+) =>
+  `${base}/jmap/download/${encodeURIComponent(accountId)}/${encodeURIComponent(blobId)}/${encodeURIComponent(name)}`
+
+export const blobUploadUrl = (base: string, accountId: string) =>
+  `${base}/jmap/upload/${encodeURIComponent(accountId)}/`
 
 export function jmapAs(opts: JmapAsOptions): JmapAsClient {
   const doFetch = opts.fetch ?? fetch
@@ -500,6 +553,103 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
         )
       }
       return true
+    },
+
+    async downloadBlob(mailbox, blobId) {
+      const accountId = await resolveAccount(mailbox)
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+      try {
+        const response = await doFetch(blobDownloadUrl(base, accountId, blobId), {
+          method: "GET",
+          headers: { authorization: `Bearer ${opts.impersonationToken}` },
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          await response.body?.cancel()
+          throw new JmapAsError(
+            response.status === 404 ? "not_found" : "stalwart",
+            `stalwart blob download returned ${response.status}`,
+          )
+        }
+        if (!response.body) {
+          throw new JmapAsError("stalwart", "stalwart blob download had no body")
+        }
+
+        const length = Number(response.headers.get("content-length"))
+        return {
+          body: response.body,
+          size: Number.isSafeInteger(length) && length >= 0 ? length : null,
+        }
+      } catch (error) {
+        if (error instanceof JmapAsError) throw error
+        throw new JmapAsError(
+          "stalwart",
+          `stalwart unreachable: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      } finally {
+        // Headers are in; the body is the caller's to pull, and must not be
+        // cut off by a timer that was only ever for the headers.
+        clearTimeout(timer)
+      }
+    },
+
+    async uploadBlob(mailbox, bytes) {
+      const accountId = await resolveAccount(mailbox)
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+      try {
+        const response = await doFetch(blobUploadUrl(base, accountId), {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${opts.impersonationToken}`,
+            "content-type": "message/rfc822",
+          },
+          body: bytes,
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          // ⚠ QUOTA AND SIZE ARE TOLD APART, because only one of them is the
+          // customer's to fix by freeing space. Stalwart's wording for a full
+          // account is not pinned down, so the status or the body's word for it
+          // both count.
+          const detail = (await response.text().catch(() => "")).slice(0, 300)
+          if (response.status === 507 || /quota/i.test(detail)) {
+            throw new JmapAsError(
+              "over_quota",
+              `the mailbox is over its quota (stalwart returned ${response.status})`,
+            )
+          }
+          if (response.status === 413) {
+            throw new JmapAsError(
+              "too_large",
+              "stalwart refused the message as too large (413)",
+            )
+          }
+          throw new JmapAsError(
+            "stalwart",
+            `stalwart blob upload returned ${response.status}`,
+          )
+        }
+
+        const body = (await response.json()) as { blobId?: string; size?: number }
+        if (!body.blobId) {
+          throw new JmapAsError("stalwart", "stalwart returned no blobId")
+        }
+        return { blobId: body.blobId, size: body.size ?? bytes.byteLength }
+      } catch (error) {
+        if (error instanceof JmapAsError) throw error
+        throw new JmapAsError(
+          "stalwart",
+          `stalwart unreachable: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      } finally {
+        clearTimeout(timer)
+      }
     },
   }
 }
