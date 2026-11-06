@@ -488,6 +488,37 @@ Postgres stay plaintext; encrypt those at the database level if needed.
   converted once, with a `BlobRecode` task (#365); that is a one-off, so it is
   not in this plan.
 
+### The encryption gateway (B14)
+
+`Encryption.gatewayEnable` is on, and `gatewayOutbound` is opportunistic: a
+message to a remote recipient whose OpenPGP key or S/MIME certificate the server
+knows leaves encrypted with that key, and everyone else gets the original. The
+server only knows keys it has harvested from signed mail that recipient sent
+us, and harvesting needs a DMARC pass from the sender's domain, so a recipient
+who gets encrypted mail has already sent us mail from a client that holds the
+private key. `Encryption.atRestEnable` is a different feature (B3 in the
+proposal) and stays off.
+
+- ⚠ **THE GATEWAY ENCRYPTS EVERY QUEUED MESSAGE, NOT ONLY MAILBOX MAIL.** It
+  runs when a message enters the queue, so the send worker's mail on 2525 would
+  be encrypted too: a customer's receipts and sign-up codes would arrive as
+  PGP/MIME with the Subject replaced by `[...]`. The policy's second rule
+  disables it for `bounce+` envelope senders, which is every message the worker
+  relays (the same test as `MtaStageRcpt.allowRelaying`). The first rule is the
+  default one, which leaves local recipients alone.
+- **It works through `ses-relay`.** The gateway removes any DKIM signature from
+  each encrypted copy and signs it again with the keys the original would use,
+  which `MtaStageData.dkimSignDomain` makes none for mail that leaves through
+  SES. SES then signs the copy as it signs everything else. SES's new
+  `Message-ID` and `Date` stay outside the encrypted part; the protected copy
+  of the headers inside it keeps the originals, so a client with RFC 9788
+  support threads the reply against the sender's Sent copy.
+- **Each keyed recipient gets its own copy and its own SMTP transaction**, about
+  a third larger than the original. A message near the 40 MB SES limit can
+  therefore be refused for an encrypted recipient only.
+- **Turning it off** is `gatewayEnable: false`. Messages already in the queue
+  keep the copies they were given at acceptance.
+
 ## Blobs live in R2 (#357)
 
 Message bodies, attachments and users' Sieve scripts go to the private R2 bucket

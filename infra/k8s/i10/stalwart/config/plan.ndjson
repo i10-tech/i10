@@ -22,7 +22,7 @@
 {"@type": "upsert", "object": "MtaRoute", "matchOn": ["name"], "value": {"ses-relay": {"@type": "Relay", "name": "ses-relay", "description": "SES SMTP relay for mailbox mail", "host": "email-smtp.eu-central-1.amazonaws.com", "port": 587, "protocol": "smtp", "implicitTls": false, "authUsername": {"@fromSecret": "SES_SMTP_USER"}, "authSecret": {"@type": "EnvironmentVariable", "variableName": "SES_SMTP_PASSWORD"}}}}
 {"@type": "upsert", "object": "SymmetricKey", "matchOn": ["description"], "value": {"blobkey2026": {"description": "Blob key 2026-11", "cipher": "aes256Gcm", "key": {"@type": "EnvironmentVariable", "variableName": "STALWART_BLOB_KEY"}}}}
 {"@type": "update", "object": "Email", "value": {"compressionAlgorithm": "zstd", "maxMessageSize": 50000000, "maxAttachmentSize": 40000000, "maxSubmissions": 5000, "blobEncryptionKey": "#blobkey2026"}}
-{"@type": "update", "object": "Encryption", "value": {"atRestEnable": false}}
+{"@type": "update", "object": "Encryption", "value": {"atRestEnable": false, "gatewayEnable": true, "gatewayOutbound": {"match": {"0": {"if": "is_local_domain(rcpt_domain)", "then": "disable"}, "1": {"if": "starts_with(sender, 'bounce+')", "then": "disable"}}, "else": "opportunistic"}}}
 {"@type": "update", "object": "FileStorage", "value": {"compressionAlgorithm": "zstd", "blobEncryptionKey": "#blobkey2026"}}
 {"@type": "update", "object": "Jmap", "value": {"maxUploadSize": 40000000, "uploadQuota": 200000000, "maxConcurrentRequests": 32, "maxMethodCalls": 32}}
 {"@type": "update", "object": "DataRetention", "value": {"maxChangesHistory": 50000}}
