@@ -360,6 +360,46 @@ bootstraps only `i10`, so the `stalwart` database and its role are created by
 deliberately: it manages its own schema, migrates it on upgrade, and must never
 share a migration surface with the transactional product.
 
+## Blobs live in R2 (#357)
+
+Message bodies, attachments and Sieve scripts go to the private R2 bucket
+`i10-mail` (`BlobStore` in plan.ndjson), so the database holds metadata only and
+every Stalwart node reads the same blobs. The keys are `STALWART_S3_ACCESS_KEY`
+and `STALWART_S3_SECRET_KEY` in Doppler `prod_stalwart`, from a token scoped to
+`i10-mail` alone with Object Read and Write. The bucket is imported in
+`infra/tofu/stacks/data`.
+
+⚠ **CHANGING THE BLOB STORE DOES NOT MOVE A SINGLE BLOB.** Stalwart writes new
+blobs to the new store and looks old ones up there too, so everything written
+before the change stops being readable. The switch to R2 dropped the test mail
+that existed then. Moving it again on a server with real mail is an
+`--export`/`--import` into fresh stores (`/docs/management/maintenance/migration`),
+not a plan edit.
+
+⚠ **AND SIEVE SCRIPTS ARE BLOBS.** After any blob store change the
+`ses-references` record survives in the database while its text does not, and
+relayed mail silently stops threading. Run `bootstrap.sh` a second time after
+the restart that activates the store: an upsert always rewrites `contents`, so
+the second run puts the text into the new store.
+
+⚠ **THE STORE CHANGE NEEDS A RESTART, AND THE KEYS NEED ONE BEFORE THAT.** A
+setting that names an unset variable is accepted and fails at first use, which
+for the blob store is the first delivery. `bootstrap.sh` therefore refuses any
+plan that names a variable the running container lacks, and a key added to
+Doppler reaches the container only when the pod restarts.
+
+To switch, in this order:
+
+1. Create `i10-mail` by hand (location Eastern Europe, no public access, no
+   custom domain), then `tofu apply` in `stacks/data` to import it.
+2. Create the token and put both keys in Doppler `prod_stalwart`.
+3. Restart the pod (`kubectl rollout restart sts/i10-stalwart -n i10-prod`) so
+   it has the keys. Merging this plan rolls it too, through the ConfigMap hash.
+4. `./bootstrap.sh` on psl-vps: it applies `BlobStore`, reloads and restarts.
+5. `./bootstrap.sh` again, for the Sieve script.
+6. Send a relayed message and check its `References`, and that a new object is
+   in `i10-mail`.
+
 ## The internal relay
 
 The send worker hands direct-route mail to the `relay` listener on **2525**, with

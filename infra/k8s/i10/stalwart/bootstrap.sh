@@ -127,7 +127,7 @@ case "$raw" in
 esac
 
 api() {
-  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" STALWART_NS="$NS" STALWART_SECRET="$SECRET" python3 "$HELPER" "$@"
+  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" STALWART_NS="$NS" STALWART_SECRET="$SECRET" STALWART_POD="$POD" python3 "$HELPER" "$@"
 }
 
 # ⚠ A PORT-FORWARD IS BOUND TO ONE POD, NOT TO THE SERVICE. It dies with the pod
@@ -460,8 +460,43 @@ def from_secret(value):
     return base64.b64decode(_secret[key]).decode()
 
 
+def env_names(value):
+    if isinstance(value, list):
+        return {n for v in value for n in env_names(v)}
+    if not isinstance(value, dict):
+        return set()
+    names = {n for v in value.values() for n in env_names(v)}
+    if value.get("@type") == "EnvironmentVariable" and value.get("variableName"):
+        names.add(value["variableName"])
+    return names
+
+
+def require_env(ops):
+    # ⚠ A SETTING THAT NAMES AN UNSET VARIABLE IS ACCEPTED AND FAILS LATER. The
+    # server stores the name, not the value, so nothing complains until the
+    # first use - for the blob store, the first delivery after a restart, which
+    # then cannot write a single message. Refuse the plan while the RUNNING
+    # container lacks any variable it names: a key added to Doppler reaches the
+    # pod only on restart. Names only; the values never leave the pod.
+    wanted = set().union(*(env_names(op) for op in ops))
+    if not wanted:
+        return
+    out = subprocess.run(
+        ["kubectl", "exec", "-n", os.environ["STALWART_NS"], os.environ["STALWART_POD"],
+         "-c", "stalwart", "--", "sh", "-c", "env | cut -d= -f1"],
+        capture_output=True, check=False,
+    )
+    if out.returncode != 0:
+        fail(f"cannot list the container's environment: {out.stderr.decode()[:200]}")
+    missing = sorted(wanted - set(out.stdout.decode().split()))
+    if missing:
+        fail("the plan names variables the running container does not have: "
+             + ", ".join(missing) + " - add them to Doppler, restart the pod, then re-run")
+
+
 def apply(text, dry=False):
     ops = [from_secret(json.loads(line)) for line in text.splitlines() if line.strip()]
+    require_env(ops)
     kinds = {}
     for op in ops:
         kinds[op.get("@type")] = kinds.get(op.get("@type"), 0) + 1
