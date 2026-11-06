@@ -20,3 +20,8 @@ output "content_bucket" {
 output "content_dev_bucket" {
   value = cloudflare_r2_bucket.content_dev.name
 }
+
+output "mail_bucket" {
+  description = "Stalwart's blob store: mailbox bodies, attachments, Sieve scripts. Private; only Stalwart reads it."
+  value       = cloudflare_r2_bucket.mail.name
+}
