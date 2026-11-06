@@ -312,7 +312,23 @@ def create_objects(c, bodies, known):
     return len(created)
 
 
+def resolve_known(value):
+    if isinstance(value, list):
+        return [resolve_known(v) for v in value]
+    if isinstance(value, dict):
+        return {resolve_ref(k): resolve_known(v) for k, v in value.items()}
+    return resolve_ref(value)
+
+
 def update_object(c, sid, patch):
+    # ⚠ AN UPDATE SENDS SERVER IDS, NOT `#name`, BECAUSE v1.0.3 DOES NOT RESOLVE
+    # EVERY FIELD. `Email.blobEncryptionKey: "#blobkey2026"` is refused with
+    # "Failed to parse Id from string" even with the id in `createdIds`, while
+    # `SystemSettings.defaultCertificateId` resolves fine. Every reference an
+    # update can carry is to an object that already exists, whose id we hold,
+    # so swapping it here is exact. Creates still go through `createdIds`,
+    # because they may name an object made in the same request.
+    patch = resolve_known(patch)
     (res,) = jmap([[f"{c}/set", {"update": {sid: patch}}, "u"]])
     for bad, err in (res.get("notUpdated") or {}).items():
         fail(f"{c[2:]}: update failed for {bad}: {describe(err)}")
