@@ -34,14 +34,19 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       # The DNSSEC root anchor must be writable (RFC 5011 rollover), so it is
-      # copied out of the image into an emptyDir first.
+      # fetched into an emptyDir first.
+      #
+      # ⚠ THE IMAGE SHIPS NO root.key. Its own entrypoint creates one at start,
+      # and we bypass that entrypoint, so the anchor is fetched here with
+      # unbound-anchor. It exits 1 when it wrote a new file, which is the normal
+      # first-run case, so the check is that the file exists, not the exit code.
       initContainers:
         - name: anchor
           image: mvance/unbound:1.22.0
           command:
             - sh
             - -c
-            - cp /opt/unbound/etc/unbound/var/root.key /var/lib/unbound/root.key
+            - /opt/unbound/sbin/unbound-anchor -a /var/lib/unbound/root.key; test -s /var/lib/unbound/root.key
           volumeMounts:
             - { name: var, mountPath: /var/lib/unbound }
           resources:
