@@ -7,6 +7,7 @@ import {
   idempotencyKeys,
   messageBodies,
   messages,
+  sendingHolds,
   suppressions,
 } from "../src/db/core.js"
 import type { SendJob } from "../src/queue/send-queue.js"
@@ -37,6 +38,8 @@ interface Canned {
    * `sendableFrom`, and the id lookup `persist` makes (#205).
    */
   verified?: { name: string; id?: string }[]
+  /** The hold row `sendingHeld` reads, if the workspace has one. */
+  held?: { category: string; scope: "api" | "all" }[]
 }
 
 type Op = {
@@ -121,6 +124,7 @@ function fakeDb(canned: Canned = {}) {
         if (op.table === suppressions) return canned.suppressed ?? []
         if (op.table === apiKeys) return [{ id: "key-uuid" }]
         if (op.table === domainsTable) return canned.verified ?? []
+        if (op.table === sendingHolds) return canned.held ?? []
         return []
       }) as never
     },
@@ -459,5 +463,24 @@ describe("sendableFrom", () => {
     const o = ops()
     expect(await o.sendableFrom("ten-1", [])).toEqual(new Set())
     expect(o.recorded).toHaveLength(0)
+  })
+})
+
+describe("sendingHeld", () => {
+  it("answers null for a workspace that is not held", async () => {
+    expect(await ops().sendingHeld?.("ten-1")).toBeNull()
+  })
+
+  /**
+   * ⚠ THE SCOPE IS WHAT THE MTA HOOK DECIDES ON. An API send is stopped by any
+   * hold; a mailbox send only by `all`. An adapter that dropped the scope would
+   * make the hook accept every mailbox send of a workspace staff had silenced.
+   */
+  it.each(["api", "all"] as const)("carries a %s hold's scope", async (scope) => {
+    const o = ops({ held: [{ category: "bounces", scope }] })
+    expect(await o.sendingHeld?.("ten-1")).toEqual({
+      why: "too many recent messages bounced",
+      scope,
+    })
   })
 })

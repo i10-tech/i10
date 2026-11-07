@@ -1,8 +1,10 @@
 # Choosing the MTA, per message
 
 **Decided:** 2026-09-05. **Amended 2026-09-28 (#155):** transactional mail goes
-through SES on every plan, free included; the plan now decides only the
-**mailbox** route. See "Free transactional mail moved to SES" below.
+through SES on every plan, free included. **Amended 2026-11-05 (#191):** mailbox
+mail also goes through SES on every plan, free included. The plan is no longer
+an input to either route; own mailbox domains come from `MAIL_DOMAINS`. See
+"Free transactional mail moved to SES" below.
 
 i10 sends mail two ways and they are not the same product. Transactional mail
 goes out through the SES **API**, from `apps/api`. Human mail - the mailboxes
@@ -143,10 +145,10 @@ Verified against `stalwartlabs/stalwart` v0.16, 2026-09-05.
   (`crates/common/src/expr/functions/mod.rs`), and the route is awaited - so
   **async lookups work there**.
 
-⚠ **Which means the tier is a live lookup, not a config push.** The expression
-asks a `SECURITY DEFINER` function - the same pattern as every other
-cross-tenant question in this repo - and a plan change takes effect on the next
-message rather than on the next deploy.
+⚠ **Which means the domain override is a live lookup, not a config push.** The
+expression asks a `SECURITY DEFINER` function - the same pattern as every other
+cross-tenant question in this repo - and an override change takes effect on the
+next message rather than on the next deploy. The plan is not an input.
 
 ⚠ **Relay over SMTP for mailbox mail; the API stays for transactional.**
 Stalwart's outbound is SMTP only - there is no HTTP hook - so using the SES API
@@ -266,13 +268,14 @@ being a single point of failure - it has to increase on every write.
 
 ## Open
 
-- [x] **The mailbox lever. Built 2026-09-17.** `core.mailbox_route(sender_domain)`
-      (0036) returns the name of a Stalwart route - `mx` or `ses-relay` - and
+- [x] **The mailbox lever. Built 2026-09-17; updated 2026-11-05 (#191).**
+      `core.mailbox_route(sender_domain)` (0036, replaced in 0132) returns the
+      name of a Stalwart route - `mx` or `ses-relay` - and
       `MtaOutboundStrategy.route` calls it with
       `sql_query('i10', 'SELECT core.mailbox_route($1)', [sender_domain])`. The
-      expression is evaluated per recipient and awaited, so the tier is a live
-      lookup: a plan change takes effect on the next message, not the next
-      deploy.
+      expression is evaluated per recipient and awaited. The plan is no longer
+      an input: `SES_ENABLED` first, then a non-`auto` domain override, otherwise
+      SES. `SES_RELAY_ENABLED` gates mailbox relaying independently.
       ⚠ **THE RULE NOW EXISTS TWICE, AND THAT IS UNAVOIDABLE RATHER THAN
       SLOPPY.** Transactional mail is routed in TypeScript because our worker
       owns the message; mailbox mail is submitted straight into Stalwart's queue
@@ -284,37 +287,34 @@ being a single point of failure - it has to increase on every write.
       side by side in a diff.
       ⚠ **`sender_domain` IS THE RETURN PATH, NOT THE `From:` HEADER, AND THAT IS
       THE TRAP.** `QueueEnvelope::resolve_variable` maps it to
-      `return_path.domain_part()`. This expression sees EVERY message in the
-      queue including our own transactional sends, whose envelope is
-      `send.<domain>` - so without a guard it could re-route a direct-routed
-      message onto SES, silently moving it off the route its plan chose. The
-      `hosts_mailboxes` join is the guard: a return-path subdomain matches no
-      row, a send-only domain is not a mailbox domain, and both answer `mx`.
+      `return_path.domain_part()`. Our own mailbox domains are code-defined and
+      live in `MAIL_DOMAINS`, not `core.domains`, so that list reaches SES first.
+      This expression also sees EVERY transactional and forwarded message. The
+      `hosts_mailboxes` join is the guard for everything else: a return-path
+      subdomain matches no row, a send-only domain is not a mailbox domain, and
+      both answer `mx` because SES cannot send for an unverified identity.
       ⚠ **TWO SWITCHES, NOT ONE.** The transactional route uses the SES API;
       mailbox mail can only use SES SMTP, because Stalwart's outbound has no HTTP
       hook. Different credentials, independently available, so
       `SES_RELAY_ENABLED` is separate from `SES_ENABLED` - and it defaults OFF,
-      where `SES_ENABLED` defaults on. Shipping this migration moves no mail.
-      ⚠ **AND THE RULE'S OTHER TWO INPUTS ARE ENVIRONMENT VARIABLES A FUNCTION IN
-      POSTGRES CANNOT SEE.** `core.routing_settings` is a one-row projection the
-      API upserts at boot from `env`. Without it the kill switch would move
-      transactional mail and leave human mail pointed at the thing that is down.
-      The environment stays the authored source; nobody edits that row by hand.
-- [ ] **The `ses-relay` route itself.** Deliberately NOT in `plan.ndjson`: it
-      needs SES SMTP credentials that do not exist yet, and a plan referencing a
-      missing environment variable is a plan that may not apply. Paste-ready
-      block and the exact order of operations are in
+      where `SES_ENABLED` defaults on. Turning it off returns mailbox mail to
+      `mx` immediately.
+      ⚠ **THE ENVIRONMENT VALUES A FUNCTION IN POSTGRES CANNOT SEE ARE PROJECTED
+      INTO `core.routing_settings`.** The API upserts `SES_ENABLED`,
+      `SES_RELAY_ENABLED`, and `MAIL_DOMAINS` at boot. The environment stays the
+      authored source; nobody edits that row by hand.
+- [x] **The `ses-relay` route. Live in production 2026-11-05 (#350).** It is in
+      `plan.ndjson` with SES SMTP credentials. The mailbox route uses it for
+      every hosted mailbox domain, including free-plan domains, when both
+      operator switches permit it. Paste-ready operational detail remains in
       `infra/k8s/i10/stalwart/config/README.md`.
       ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX**, logging `Smtp(IdNotFound)` -
       `get_route_or_default` in crates/common/src/network/mta.rs. So the failure
       mode of shipping the lever early is mail leaving the way it does today.
 - [x] ~~**`resolveRoute`'s comment and its code disagree, and the code wins.**~~
-      **Resolved 2026-09-28 (#155).** `resolveRoute` no longer takes a plan, so
-      the transactional half of the question is gone. The plan rule survives
-      only for mailbox mail, as `resolveMailboxRoute` mirroring
-      `core.resolve_route`, and its comment now says what the code does: free
-      is recognised by name and everything else is treated as paid. Whether
-      free mailbox mail should use SES at all is #191.
+      **Resolved 2026-09-28 (#155), extended 2026-11-05 (#191).** `resolveRoute`
+      and the SQL mirror `core.resolve_route` take no plan. Both classes use
+      SES by default, free included; the kill switch and support override remain.
 - [x] ~~The transactional lever.~~ **Built 2026-09-16.** `stalwartTransport`
       beside `sesTransport`, selected per message from
       `core.domains.transactional_route`. The worker signs with the domain's own
@@ -565,16 +565,11 @@ being a single point of failure - it has to increase on every write.
       proxy and does not carry SMTP - every direct-route bounce would have been
       delivered nowhere. Now `mail.i10.tech`, which is unproxied precisely
       because `spf_include` names it with `a:`.
-- [x] ~~Which tier gets which route.~~ **Decided 2026-09-05: free sends direct,
-      paid sends through SES**, with a per-domain override for support.
-      `resolveRoute` in `src/domains/route.ts`.
-      ⚠ **`auto` is stored, not the resolved answer.** Freezing today's policy
-      into rows would make a pricing change a backfill.
-      ⚠ **Free is the default branch, not a special case** - anything not
-      recognised as a paid plan sends direct, so a plan id renamed in the
-      catalogue cannot start spending SES money on tenants who pay nothing.
-      ⚠ Free traffic on our own IP is still the abuse surface, on an address
-      shared with PSL. Revisit when there is volume.
+- [x] ~~Which tier gets which route.~~ **Superseded 2026-11-05 (#191): every
+      route uses SES by default, free included**, with a per-domain override for
+      support. `resolveRoute` in `src/domains/route.ts` and Stalwart's
+      `core.resolve_route` take no plan. `auto` is stored, not a third MTA: it
+      resolves to SES unless the kill switch is off.
 - [x] **A readout for `sent_route`. Added 2026-09-17.** The column had been
       written on every `sent` row since 0033 and read by NOTHING - the only way
       to ask "how much went direct" was to open psql and write the query by
@@ -617,9 +612,10 @@ leaves from, and outside every control abuse handling is built on: SES's
 per-tenant reputation, suppression and pause (#156, #157, #159, #170). A
 blocklisted mailbox IP costs every mailbox customer at once.
 
-⚠ **MAILBOX MAIL IS UNCHANGED.** The plan still decides it, through
-`core.resolve_route`, and nothing moves until the `ses-relay` route exists and
-`SES_RELAY_ENABLED` is on (#191).
+⚠ **MAILBOX MAIL NOW HAS THE SAME DEFAULT.** As of 2026-11-05 (#191),
+`core.resolve_route` sends `auto` mailbox mail through SES on every plan. The
+`ses-relay` route is live in production; `SES_RELAY_ENABLED` can still return
+all mailbox mail to `mx`, and `SES_ENABLED` remains the global kill switch.
 
 ⚠ **THE CLAIM NO LONGER READS THE PLAN.** `plan_id` rode along on every claimed
 row only to feed this rule, so it went with it - one correlated subquery fewer

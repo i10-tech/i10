@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "directory_groups_display_name_unique" ON "identity"."directory_groups" USING btree ("directory_id",lower("display_name"));

@@ -1,6 +1,6 @@
 {
-  "id": "4abb2936-1677-4ab3-945e-5786e3562705",
-  "prevId": "6d4bd4c4-943b-4ec3-bcd2-5ff1c8cd55e6",
+  "id": "45f7bcdf-b702-464c-9e3c-6906e4f47ffc",
+  "prevId": "561ef496-4441-4d17-8849-31bdd5796863",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -45,8 +45,27 @@
           "primaryKey": false,
           "notNull": false
         },
+        "storage_allocation": {
+          "name": "storage_allocation",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "clerk_updated_at": {
           "name": "clerk_updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credential_epoch": {
+          "name": "credential_epoch",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "suspended_at": {
+          "name": "suspended_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -79,7 +98,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "accounts_storage_allocation_positive": {
+          "name": "accounts_storage_allocation_positive",
+          "value": "\"authd\".\"accounts\".\"storage_allocation\" is null or \"authd\".\"accounts\".\"storage_allocation\" > 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "authd.aliases": {
@@ -97,6 +121,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'clerk'"
         }
       },
       "indexes": {
@@ -132,6 +163,103 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "aliases_source_check": {
+          "name": "aliases_source_check",
+          "value": "\"source\" in ('clerk', 'directory')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "authd.managed_accounts": {
+      "name": "managed_accounts",
+      "schema": "authd",
+      "columns": {
+        "clerk_user_id": {
+          "name": "clerk_user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "authd_managed_user_fk": {
+          "name": "authd_managed_user_fk",
+          "tableFrom": "managed_accounts",
+          "tableTo": "managed_accounts",
+          "schemaTo": "identity",
+          "columnsFrom": [
+            "clerk_user_id"
+          ],
+          "columnsTo": [
+            "clerk_user_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "authd_managed_connection_fk": {
+          "name": "authd_managed_connection_fk",
+          "tableFrom": "managed_accounts",
+          "tableTo": "connections",
+          "schemaTo": "identity",
+          "columnsFrom": [
+            "connection_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "authd.bind_failure_budget": {
+      "name": "bind_failure_budget",
+      "schema": "authd",
+      "columns": {
+        "clerk_user_id": {
+          "name": "clerk_user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "window_start": {
+          "name": "window_start",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -216,6 +344,61 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "authd.group_sent_copies": {
+      "name": "group_sent_copies",
+      "schema": "authd",
+      "columns": {
+        "group_name": {
+          "name": "group_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "copied_at": {
+          "name": "copied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "group_sent_copies_group_name_groups_name_fk": {
+          "name": "group_sent_copies_group_name_groups_name_fk",
+          "tableFrom": "group_sent_copies",
+          "tableTo": "groups",
+          "schemaTo": "authd",
+          "columnsFrom": [
+            "group_name"
+          ],
+          "columnsTo": [
+            "name"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "group_sent_copies_group_name_message_id_pk": {
+          "name": "group_sent_copies_group_name_message_id_pk",
+          "columns": [
+            "group_name",
+            "message_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "authd.groups": {
       "name": "groups",
       "schema": "authd",
@@ -237,10 +420,60 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "directory_group_id": {
+          "name": "directory_group_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "groups_tenant_idx": {
+          "name": "groups_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "authd_groups_directory_group_fk": {
+          "name": "authd_groups_directory_group_fk",
+          "tableFrom": "groups",
+          "tableTo": "directory_groups",
+          "schemaTo": "identity",
+          "columnsFrom": [
+            "directory_group_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "groups_email_unique": {
@@ -4027,6 +4260,308 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "core.mailbox_auth_failures": {
+      "name": "mailbox_auth_failures",
+      "schema": "core",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "clerk_user_id": {
+          "name": "clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account": {
+          "name": "account",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subnet": {
+          "name": "subnet",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "listener": {
+          "name": "listener",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "mailbox_auth_failures_account_idx": {
+          "name": "mailbox_auth_failures_account_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mailbox_auth_failures_tenant_id_tenants_id_fk": {
+          "name": "mailbox_auth_failures_tenant_id_tenants_id_fk",
+          "tableFrom": "mailbox_auth_failures",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "mailbox_auth_failures_tenant": {
+          "name": "mailbox_auth_failures_tenant",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"core\".\"mailbox_auth_failures\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"core\".\"mailbox_auth_failures\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "core.mailbox_jobs": {
+      "name": "mailbox_jobs",
+      "schema": "core",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mailbox_address": {
+          "name": "mailbox_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "total_messages": {
+          "name": "total_messages",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "processed_messages": {
+          "name": "processed_messages",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "total_folders": {
+          "name": "total_folders",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "processed_folders": {
+          "name": "processed_folders",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requested_by": {
+          "name": "requested_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "mailbox_jobs_tenant_idx": {
+          "name": "mailbox_jobs_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mailbox_jobs_address_idx": {
+          "name": "mailbox_jobs_address_idx",
+          "columns": [
+            {
+              "expression": "mailbox_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mailbox_jobs_tenant_id_tenants_id_fk": {
+          "name": "mailbox_jobs_tenant_id_tenants_id_fk",
+          "tableFrom": "mailbox_jobs",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "mailbox_jobs_workspace": {
+          "name": "mailbox_jobs_workspace",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"core\".\"mailbox_jobs\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"core\".\"mailbox_jobs\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "core.member_alerts": {
       "name": "member_alerts",
       "schema": "core",
@@ -6353,12 +6888,12 @@
           "notNull": true,
           "default": false
         },
-        "free_plan_id": {
-          "name": "free_plan_id",
-          "type": "text",
+        "mail_domains": {
+          "name": "mail_domains",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": true,
-          "default": "'free'"
+          "default": "'{}'::text[]"
         },
         "updated_at": {
           "name": "updated_at",
@@ -10247,6 +10782,100 @@
       },
       "isRLSEnabled": false
     },
+    "identity.bypass_sign_ins": {
+      "name": "bypass_sign_ins",
+      "schema": "identity",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "clerk_user_id": {
+          "name": "clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seen_at": {
+          "name": "seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "bypass_sign_ins_tenant_id_tenants_id_fk": {
+          "name": "bypass_sign_ins_tenant_id_tenants_id_fk",
+          "tableFrom": "bypass_sign_ins",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "bypass_sign_ins_connection_fk": {
+          "name": "bypass_sign_ins_connection_fk",
+          "tableFrom": "bypass_sign_ins",
+          "tableTo": "connections",
+          "schemaTo": "identity",
+          "columnsFrom": [
+            "connection_id",
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id",
+            "tenant_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "bypass_sign_ins_tenant_id_session_id_pk": {
+          "name": "bypass_sign_ins_tenant_id_session_id_pk",
+          "columns": [
+            "tenant_id",
+            "session_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "bypass_sign_ins_workspace": {
+          "name": "bypass_sign_ins_workspace",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"bypass_sign_ins\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"identity\".\"bypass_sign_ins\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "identity.bypass_users": {
       "name": "bypass_users",
       "schema": "identity",
@@ -10563,6 +11192,26 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "groups_last_seen_at": {
+          "name": "groups_last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "relink": {
+          "name": "relink",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ask'"
+        },
+        "upn_as_email": {
+          "name": "upn_as_email",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -10662,6 +11311,10 @@
           "name": "connections_enforcement_check",
           "value": "\"enforcement\" in ('off', 'optional', 'required_domain', 'required_all')"
         },
+        "connections_relink_check": {
+          "name": "connections_relink_check",
+          "value": "\"relink\" in ('ask', 'auto')"
+        },
         "connections_session_limits_check": {
           "name": "connections_session_limits_check",
           "value": "(\"max_session_seconds\" is null or \"max_session_seconds\" >= 300) and (\"idle_timeout_seconds\" is null or \"idle_timeout_seconds\" >= 300)"
@@ -10705,6 +11358,55 @@
           "primaryKey": false,
           "notNull": true,
           "default": true
+        },
+        "create_mailboxes": {
+          "name": "create_mailboxes",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "admin_email": {
+          "name": "admin_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_sync_at": {
+          "name": "last_sync_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_sync_status": {
+          "name": "last_sync_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_sync_error": {
+          "name": "last_sync_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allow_drop_up_to": {
+          "name": "allow_drop_up_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allow_drop_at": {
+          "name": "allow_drop_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -10787,6 +11489,14 @@
         "directories_provider_check": {
           "name": "directories_provider_check",
           "value": "\"provider\" in ('okta', 'entra', 'google', 'generic')"
+        },
+        "directories_last_sync_status_check": {
+          "name": "directories_last_sync_status_check",
+          "value": "\"last_sync_status\" is null or \"last_sync_status\" in ('ok', 'failed')"
+        },
+        "directories_allow_drop_check": {
+          "name": "directories_allow_drop_check",
+          "value": "(\"allow_drop_up_to\" is null and \"allow_drop_at\" is null) or (\"allow_drop_up_to\" >= 0 and \"allow_drop_at\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -10833,6 +11543,18 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "mail_address": {
+          "name": "mail_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mail_kind": {
+          "name": "mail_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10849,6 +11571,43 @@
         }
       },
       "indexes": {
+        "directory_groups_mail_address_unique": {
+          "name": "directory_groups_mail_address_unique",
+          "columns": [
+            {
+              "expression": "lower(\"mail_address\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"identity\".\"directory_groups\".\"mail_address\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "directory_groups_display_name_unique": {
+          "name": "directory_groups_display_name_unique",
+          "columns": [
+            {
+              "expression": "directory_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"display_name\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "directory_groups_directory_idx": {
           "name": "directory_groups_directory_idx",
           "columns": [
@@ -10935,7 +11694,173 @@
           "withCheck": "\"identity\".\"directory_groups\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
         }
       },
-      "checkConstraints": {},
+      "checkConstraints": {
+        "directory_groups_mail_check": {
+          "name": "directory_groups_mail_check",
+          "value": "(\"mail_address\" is null) = (\"mail_kind\" is null) and (\"mail_kind\" is null or \"mail_kind\" in ('list', 'shared'))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "identity.directory_mailboxes": {
+      "name": "directory_mailboxes",
+      "schema": "identity",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "clerk_user_id": {
+          "name": "clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "suspended_at": {
+          "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next": {
+          "name": "next",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'keep'"
+        },
+        "target_user_id": {
+          "name": "target_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_after_days": {
+          "name": "delete_after_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delete_at": {
+          "name": "delete_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "directory_mailboxes_due_idx": {
+          "name": "directory_mailboxes_due_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "delete_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"identity\".\"directory_mailboxes\".\"delete_at\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "directory_mailboxes_tenant_id_tenants_id_fk": {
+          "name": "directory_mailboxes_tenant_id_tenants_id_fk",
+          "tableFrom": "directory_mailboxes",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "directory_mailboxes_tenant_id_clerk_user_id_pk": {
+          "name": "directory_mailboxes_tenant_id_clerk_user_id_pk",
+          "columns": [
+            "tenant_id",
+            "clerk_user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "directory_mailboxes_workspace": {
+          "name": "directory_mailboxes_workspace",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"directory_mailboxes\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"identity\".\"directory_mailboxes\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        }
+      },
+      "checkConstraints": {
+        "directory_mailboxes_state_check": {
+          "name": "directory_mailboxes_state_check",
+          "value": "\"state\" in ('active', 'suspended')"
+        },
+        "directory_mailboxes_next_check": {
+          "name": "directory_mailboxes_next_check",
+          "value": "\"next\" in ('keep', 'forward_manager', 'delegate', 'delete')"
+        },
+        "directory_mailboxes_target_check": {
+          "name": "directory_mailboxes_target_check",
+          "value": "((\"next\" in ('forward_manager', 'delegate')) = (\"target_user_id\" is not null))"
+        },
+        "directory_mailboxes_delete_check": {
+          "name": "directory_mailboxes_delete_check",
+          "value": "((\"next\" = 'delete') = (\"delete_at\" is not null)) and ((\"next\" = 'delete') = (\"delete_after_days\" is not null)) and (\"delete_after_days\" is null or \"delete_after_days\" between 7 and 365)"
+        },
+        "directory_mailboxes_suspended_check": {
+          "name": "directory_mailboxes_suspended_check",
+          "value": "(\"state\" = 'suspended') = (\"suspended_at\" is not null) and (\"state\" = 'suspended' or \"next\" = 'keep')"
+        }
+      },
       "isRLSEnabled": false
     },
     "identity.directory_memberships": {
@@ -11492,6 +12417,19 @@
           "notNull": true,
           "default": false
         },
+        "aliases_ignored": {
+          "name": "aliases_ignored",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "mailbox_note": {
+          "name": "mailbox_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -11687,9 +12625,148 @@
         }
       },
       "checkConstraints": {
+        "directory_users_mailbox_note_check": {
+          "name": "directory_users_mailbox_note_check",
+          "value": "\"mailbox_note\" is null or \"mailbox_note\" in ('domain_not_hosted', 'limit', 'address_taken')"
+        },
         "directory_users_conflict_check": {
           "name": "directory_users_conflict_check",
           "value": "\"conflict\" is null or \"conflict\" in ('workspace_full', 'blocked', 'banned', 'domain_not_verified', 'address_taken', 'ambiguous_account', 'managed_elsewhere', 'role_exempt', 'already_linked', 'no_email', 'profile_incomplete', 'last_owner', 'account_deleted', 'no_sso_connection')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "identity.directory_watch_channels": {
+      "name": "directory_watch_channels",
+      "schema": "identity",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "directory_id": {
+          "name": "directory_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event": {
+          "name": "event",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resource_id": {
+          "name": "resource_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "directory_watch_channels_directory_idx": {
+          "name": "directory_watch_channels_directory_idx",
+          "columns": [
+            {
+              "expression": "directory_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "directory_watch_channels_tenant_id_tenants_id_fk": {
+          "name": "directory_watch_channels_tenant_id_tenants_id_fk",
+          "tableFrom": "directory_watch_channels",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "directory_watch_channels_directory_fk": {
+          "name": "directory_watch_channels_directory_fk",
+          "tableFrom": "directory_watch_channels",
+          "tableTo": "directories",
+          "schemaTo": "identity",
+          "columnsFrom": [
+            "directory_id",
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id",
+            "tenant_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "directory_watch_channels_workspace": {
+          "name": "directory_watch_channels_workspace",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"directory_watch_channels\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"identity\".\"directory_watch_channels\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        },
+        "directory_watch_channels_id_read": {
+          "name": "directory_watch_channels_id_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"directory_watch_channels\".\"id\"::text = nullif(current_setting('app.google_channel', true), '')"
+        }
+      },
+      "checkConstraints": {
+        "directory_watch_channels_event_check": {
+          "name": "directory_watch_channels_event_check",
+          "value": "\"event\" in ('add', 'update', 'delete', 'undelete')"
         }
       },
       "isRLSEnabled": false
@@ -11795,6 +12872,60 @@
             },
             {
               "expression": "subject_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "events_connection_type_idx": {
+          "name": "events_connection_type_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "connection_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "events_tenant_id_idx": {
+          "name": "events_tenant_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -12245,6 +13376,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "login_hint": {
+          "name": "login_hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",
@@ -12656,6 +13793,162 @@
       },
       "isRLSEnabled": false
     },
+    "identity.relink_requests": {
+      "name": "relink_requests",
+      "schema": "identity",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "identity_id": {
+          "name": "identity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "new_subject": {
+          "name": "new_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_hash": {
+          "name": "email_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "relink_requests_identity_unique": {
+          "name": "relink_requests_identity_unique",
+          "columns": [
+            {
+              "expression": "identity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "relink_requests_connection_idx": {
+          "name": "relink_requests_connection_idx",
+          "columns": [
+            {
+              "expression": "connection_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "relink_requests_tenant_id_tenants_id_fk": {
+          "name": "relink_requests_tenant_id_tenants_id_fk",
+          "tableFrom": "relink_requests",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "relink_requests_identity_id_identities_id_fk": {
+          "name": "relink_requests_identity_id_identities_id_fk",
+          "tableFrom": "relink_requests",
+          "tableTo": "identities",
+          "schemaTo": "identity",
+          "columnsFrom": [
+            "identity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "relink_requests_connection_fk": {
+          "name": "relink_requests_connection_fk",
+          "tableFrom": "relink_requests",
+          "tableTo": "connections",
+          "schemaTo": "identity",
+          "columnsFrom": [
+            "connection_id",
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id",
+            "tenant_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "relink_requests_workspace": {
+          "name": "relink_requests_workspace",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"relink_requests\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"identity\".\"relink_requests\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "identity.saml_certificates": {
       "name": "saml_certificates",
       "schema": "identity",
@@ -12827,6 +14120,117 @@
       },
       "isRLSEnabled": false
     },
+    "identity.session_activity": {
+      "name": "session_activity",
+      "schema": "identity",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "clerk_user_id": {
+          "name": "clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_reason": {
+          "name": "revoked_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "session_activity_seen_idx": {
+          "name": "session_activity_seen_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "last_seen_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "session_activity_tenant_id_tenants_id_fk": {
+          "name": "session_activity_tenant_id_tenants_id_fk",
+          "tableFrom": "session_activity",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "session_activity_tenant_id_session_id_pk": {
+          "name": "session_activity_tenant_id_session_id_pk",
+          "columns": [
+            "tenant_id",
+            "session_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "session_activity_workspace": {
+          "name": "session_activity_workspace",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"session_activity\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"identity\".\"session_activity\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "identity.setup_links": {
       "name": "setup_links",
       "schema": "identity",
@@ -12848,7 +14252,7 @@
           "name": "connection_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "token_hash": {
           "name": "token_hash",
@@ -12983,6 +14387,161 @@
           ],
           "using": "\"identity\".\"setup_links\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
           "withCheck": "\"identity\".\"setup_links\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        },
+        "setup_links_hash_read": {
+          "name": "setup_links_hash_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"setup_links\".\"token_hash\" = nullif(current_setting('app.setup_token', true), '')"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "identity.siem_exports": {
+      "name": "siem_exports",
+      "schema": "identity",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "endpoint": {
+          "name": "endpoint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bucket": {
+          "name": "bucket",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "region": {
+          "name": "region",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prefix": {
+          "name": "prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "access_key_id": {
+          "name": "access_key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "secret_ciphertext": {
+          "name": "secret_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "secret_hint": {
+          "name": "secret_hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "last_event_id": {
+          "name": "last_event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_export_at": {
+          "name": "last_export_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_at": {
+          "name": "last_error_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_run_at": {
+          "name": "next_run_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "siem_exports_tenant_id_tenants_id_fk": {
+          "name": "siem_exports_tenant_id_tenants_id_fk",
+          "tableFrom": "siem_exports",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "siem_exports_workspace": {
+          "name": "siem_exports_workspace",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"identity\".\"siem_exports\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"identity\".\"siem_exports\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
         }
       },
       "checkConstraints": {},
@@ -13337,6 +14896,96 @@
           "notNull": true,
           "default": "'membership'"
         },
+        "owner_exemption": {
+          "name": "owner_exemption",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "leaver_action": {
+          "name": "leaver_action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'keep'"
+        },
+        "leaver_days": {
+          "name": "leaver_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "exemption_off_requested_by": {
+          "name": "exemption_off_requested_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "exemption_off_requested_at": {
+          "name": "exemption_off_requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "max_session_seconds": {
+          "name": "max_session_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idle_timeout_seconds": {
+          "name": "idle_timeout_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "require_second_factor": {
+          "name": "require_second_factor",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "ip_allowlist_console": {
+          "name": "ip_allowlist_console",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "ip_allowlist_api_keys": {
+          "name": "ip_allowlist_api_keys",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "ip_ranges": {
+          "name": "ip_ranges",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "ip_grace_user_id": {
+          "name": "ip_grace_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip_grace_address": {
+          "name": "ip_grace_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip_grace_until": {
+          "name": "ip_grace_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "updated_by": {
           "name": "updated_by",
           "type": "text",
@@ -13386,6 +15035,26 @@
         "workspace_settings_deprovision_check": {
           "name": "workspace_settings_deprovision_check",
           "value": "\"deprovision\" in ('membership', 'account')"
+        },
+        "workspace_settings_leaver_check": {
+          "name": "workspace_settings_leaver_check",
+          "value": "\"leaver_action\" in ('keep', 'forward_manager', 'delete_after') and ((\"leaver_action\" = 'delete_after') = (\"leaver_days\" is not null)) and (\"leaver_days\" is null or \"leaver_days\" between 7 and 365)"
+        },
+        "workspace_settings_exemption_request_check": {
+          "name": "workspace_settings_exemption_request_check",
+          "value": "(\"exemption_off_requested_by\" is null) = (\"exemption_off_requested_at\" is null)"
+        },
+        "workspace_settings_session_bounds_check": {
+          "name": "workspace_settings_session_bounds_check",
+          "value": "(\"max_session_seconds\" is null or \"max_session_seconds\" between 900 and 7776000)\n        and (\"idle_timeout_seconds\" is null or \"idle_timeout_seconds\" between 300 and 2592000)"
+        },
+        "workspace_settings_ip_ranges_check": {
+          "name": "workspace_settings_ip_ranges_check",
+          "value": "cardinality(\"ip_ranges\") <= 100"
+        },
+        "workspace_settings_ip_grace_check": {
+          "name": "workspace_settings_ip_grace_check",
+          "value": "(\"ip_grace_user_id\" is null) = (\"ip_grace_address\" is null)\n        and (\"ip_grace_user_id\" is null) = (\"ip_grace_until\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -13664,7 +15333,11 @@
         "email.unsubscribed",
         "webhook_endpoint.failing",
         "webhook_endpoint.disabled",
-        "webhook_endpoint.recovered"
+        "webhook_endpoint.recovered",
+        "member.provisioned",
+        "member.deprovisioned",
+        "sso.connection.failed",
+        "sso.certificate.expiring"
       ]
     },
     "core.webhook_health_change": {

@@ -34,6 +34,7 @@
         "@upyo/smtp": "^0.6.0",
         "@xmldom/xmldom": "0.8.15",
         "drizzle-orm": "^0.45.2",
+        "fflate": "^0.8.2",
         "groupmq": "^1.1.0",
         "hono": "^4.13.5",
         "ioredis": "^6.0.0",

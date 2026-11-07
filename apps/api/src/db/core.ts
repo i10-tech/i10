@@ -377,7 +377,7 @@ export const domains = core.table(
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
 
     /**
-     * Which MTA this domain's API mail leaves through. `auto` asks the plan.
+     * Which MTA this domain's API mail leaves through. `auto` uses SES.
      *
      * ⚠ ON THE DOMAIN, NOT THE TENANT, BECAUSE DELIVERABILITY IS PER DOMAIN. A
      * customer with a warmed sending domain and a brand-new one has different
@@ -407,15 +407,12 @@ export const domains = core.table(
     deliveryRoute: deliveryRoute("delivery_route").notNull().default("auto"),
 
     /**
-     * Which MTA this domain's MAILBOX mail leaves through. `auto` asks the plan.
+     * Which MTA this domain's MAILBOX mail leaves through. `auto` uses SES.
      *
-     * ⚠ STORED AND RENDERED, AND READ BY NOTHING YET. Stalwart chooses the
-     * mailbox route itself by evaluating an expression against its own queue,
-     * and that expression - plus the SES SMTP relay behind it - is not built.
-     * The column exists so the preference has somewhere to live and the API can
-     * answer with it; see docs/decisions/mail-routing.md. It is the same shape
-     * of promise `delivery_route` made before anything read that either, which
-     * is exactly why the note is here rather than implied.
+     * ⚠ STALWART ENFORCES THIS, NOT THE API. Mailbox mail enters Stalwart's
+     * queue straight from a person's mail client, so its outbound expression
+     * calls `core.mailbox_route` to apply this preference. The SQL function
+     * mirrors `resolveRoute`; see docs/decisions/mail-routing.md.
      */
     mailboxRoute: deliveryRoute("mailbox_route").notNull().default("auto"),
 
@@ -3035,11 +3032,11 @@ export const meterWindows = core.table(
 )
 
 /**
- * The two routing inputs that are configuration rather than rows.
+ * The routing inputs that are configuration rather than rows.
  *
- * ⚠ A PROJECTION OF THE ENVIRONMENT, NOT A SECOND SOURCE OF TRUTH. `SES_ENABLED`
- * and `METERING_FREE_PLAN_ID` are authored in Doppler and read from `env` by the
- * API and the worker; this row is a copy the API upserts at boot. It exists for
+ * ⚠ A PROJECTION OF THE ENVIRONMENT, NOT A SECOND SOURCE OF TRUTH. `SES_ENABLED`,
+ * `SES_RELAY_ENABLED`, and `MAIL_DOMAINS` are authored in Doppler and read from
+ * `env` by the API; this row is a copy the API upserts at boot. It exists for
  * one reader that cannot see our pods' environment: the `core.mailbox_route`
  * function Stalwart calls to decide where a mailbox domain's human mail goes.
  *
@@ -3073,8 +3070,11 @@ export const routingSettings = core.table("routing_settings", {
    */
   sesRelayEnabled: boolean("ses_relay_enabled").notNull().default(false),
 
-  /** Mirrors `METERING_FREE_PLAN_ID`. */
-  freePlanId: text("free_plan_id").notNull().default("free"),
+  /** Mirrors `MAIL_DOMAINS`: our own mailbox domains, which have no domain row. */
+  mailDomains: text("mail_domains")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
 
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
@@ -4304,6 +4304,51 @@ export const identityEvents = core.table(
 )
 
 /**
+ * Failed sign-ins to a hosted mailbox, as Stalwart reported them (#384).
+ *
+ * ⚠ NOT `identity_events`, AND KEEPING THEM APART IS THE WHOLE POINT. Every
+ * reader of that table treats each row as a sighting of the person themselves:
+ * their subnets are "familiar", the accounts behind a subnet are "peers". A
+ * failed login is somebody ELSE at an address the owner has never used, so
+ * filed there it would make an attacker's network look familiar to the victim
+ * and link every account one brute-forcing address touched. Here a row says
+ * only "someone failed to sign in to this mailbox from this address".
+ *
+ * ⚠ ONLY MAILBOXES WE HOST, AND ONLY ONES WITH A WORKSPACE. Scanners try
+ * random usernames all day; the ingest drops any account that is not in
+ * `authd.accounts`, so this table never grows with noise. Scoped per
+ * workspace like the rest of what the score reads, since the mailbox belongs
+ * to one.
+ *
+ * ⚠ THE RAW IP IS KEPT AS RECEIVED AND NOTHING NULLS IT YET. The hourly run
+ * that clears `identity_events.ip` after 90 days does not know this table.
+ */
+export const mailboxAuthFailures = core.table(
+  "mailbox_auth_failures",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The mailbox address, lowercased. */
+    account: text("account").notNull(),
+    ip: text("ip"),
+    /** `a.b.c` for IPv4, the /48 for IPv6, as `identity_events.subnet`. */
+    subnet: text("subnet"),
+    /** Stalwart's listener that took the attempt: `imap`, `submissions`... */
+    listener: text("listener"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("mailbox_auth_failures_account_idx").on(t.tenantId, t.account, t.occurredAt),
+    tenantPolicy("mailbox_auth_failures_tenant", t.tenantId),
+  ],
+)
+
+/**
  * What a workspace turned out to be, for training the model (#170).
  *
  * ⚠ THE FEATURES ARE STORED WITH THE LABEL, AS THEY WERE WHEN IT WAS GIVEN.
@@ -4891,6 +4936,48 @@ export const deviceResumes = core.table(
       for: "all",
       using: sql`${t.userId} = current_setting('app.user_id', true)`,
       withCheck: sql`${t.userId} = current_setting('app.user_id', true)`,
+    }),
+  ],
+)
+
+/**
+ * Mailbox import and export background jobs (#385).
+ *
+ * Tracks the state, progress, and content-store references for mailbox migrations:
+ * exporting a mailbox to an archive (zip of EMLs) and importing an archive into a mailbox.
+ */
+export const mailboxJobs = core.table(
+  "mailbox_jobs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    mailboxAddress: text("mailbox_address").notNull(),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("pending"),
+    totalMessages: integer("total_messages").notNull().default(0),
+    processedMessages: integer("processed_messages").notNull().default(0),
+    totalFolders: integer("total_folders").notNull().default(0),
+    processedFolders: integer("processed_folders").notNull().default(0),
+    objectKey: text("object_key"),
+    error: text("error"),
+    errorCode: text("error_code"),
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("mailbox_jobs_tenant_idx").on(t.tenantId, t.status),
+    index("mailbox_jobs_address_idx").on(t.mailboxAddress),
+    pgPolicy("mailbox_jobs_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
     }),
   ],
 )

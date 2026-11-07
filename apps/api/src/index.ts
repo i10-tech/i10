@@ -25,6 +25,8 @@ import {
 import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { createInvitationQueue, invitationScheduler } from "./queue/invitation-queue.js"
+import { createMailboxQueue, enqueueMailboxJob } from "./queue/mailbox-queue.js"
+import { canAccessMailbox, mailboxJobStore } from "./mailboxes/jobs.js"
 import { memberStore } from "./console/members-db.js"
 import { roleStore } from "./console/roles-db.js"
 import {
@@ -150,11 +152,20 @@ import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { nameClaims } from "./domains/claims.js"
 import { domainStore } from "./domains/store.js"
 import {
+  allocationStore,
+  storageAllocations,
+  workspaceOwnership,
+} from "./mailboxes/allocation.js"
+import {
   mailboxProvisioning,
   provisionForDirectory,
   type ProvisionDeps,
 } from "./mailboxes/provision.js"
+import { createStalwartCaller } from "./mail/stalwart.js"
+import { planAssignmentStore } from "./metering/postgres.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
+import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
+import { onTeamInboxEvent } from "./team-inboxes/sync.js"
 import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
 import { clerkActiveOrg, clerkFreshAuth, clerkSessions } from "./middleware/session.js"
 import { consoleQueries } from "./console/queries.js"
@@ -204,6 +215,7 @@ import { emailLookup } from "./send/lookup.js"
 import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
+import { accountEventOps } from "./webhooks/stalwart-account-db.js"
 import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
@@ -257,9 +269,9 @@ try {
 }
 
 // ⚠ AFTER THE RLS ASSERTION, BEFORE ANYTHING SERVES. This publishes
-// `SES_ENABLED` and `METERING_FREE_PLAN_ID` into `core.routing_settings`, which
-// is the only way the mailbox lever - a function Stalwart calls inside Postgres
-// - can see them. See domains/routing-settings.ts.
+// `SES_ENABLED`, `SES_RELAY_ENABLED`, and `MAIL_DOMAINS` into
+// `core.routing_settings`, which is the only way the mailbox lever - a function
+// Stalwart calls inside Postgres - can see them. See domains/routing-settings.ts.
 //
 // ⚠ AND IT IS NOT FATAL. A failure leaves Stalwart reading the previous deploy's
 // values, which are stale rather than nonsense; refusing to boot over a routing
@@ -268,7 +280,7 @@ try {
   await publishRoutingSettings(db, {
     sesEnabled: env.SES_ENABLED,
     sesRelayEnabled: env.SES_RELAY_ENABLED,
-    freePlanId: env.METERING_FREE_PLAN_ID,
+    mailDomains: env.MAIL_DOMAINS,
   })
 } catch (error) {
   log.error(
@@ -1265,6 +1277,52 @@ const teamDomains: TeamDomainDeps | null = domains
     }
   : null
 
+const mailboxDir = mailboxDirectory(db)
+const mailboxMigrationQueue = contentStore
+  ? createMailboxQueue({ redis: queueRedis })
+  : null
+const mailboxDownloadSecret = createHmac(
+  "sha256",
+  env.WEBHOOK_SECRET_KEY ?? env.CLERK_WEBHOOK_SECRET,
+)
+  .update("mailbox-download-tokens")
+  .digest("hex")
+
+// Splitting a workspace's mailbox storage across its inboxes (B3). Without a
+// Stalwart URL and token nothing is pushed and the reconcile does it later.
+const mailboxStorage = storageAllocations({
+  store: allocationStore(db),
+  assignments: planAssignmentStore(db),
+  ...(env.STALWART_URL && env.STALWART_API_TOKEN
+    ? {
+        stalwart: createStalwartCaller({
+          baseUrl: env.STALWART_URL,
+          token: env.STALWART_API_TOKEN,
+        }),
+      }
+    : {}),
+  log,
+})
+
+// Whether a person may size an inbox: an owner or admin of the workspace that
+// owns the mailbox's domain. A tenant with no organization belongs to its owner.
+const canAllocateStorage = async (userId: string, tenantId: string) => {
+  const tenant = await workspaceOwnership(db, tenantId)
+  if (!tenant) return false
+  if (!tenant.clerkOrgId) return tenant.ownerClerkUserId === userId
+  return Boolean(
+    teamDomains && (await teamDomains.can(tenantId, userId, "members:manage")),
+  )
+}
+
+// Shared addresses (B8). The Sent copy runs in its own CronJob (team-sent.ts).
+const teamInboxService = teamInboxesFor({
+  db,
+  clerk,
+  mail: teamMailFor(env),
+  isAdmin: (tenantId, userId) => can(roleRows, tenantId, userId, "members:manage"),
+})
+
 /**
  * The identity core (#337): SSO connections, the sign-in bridge, the gate,
  * the sweeper's scheduling and the managed-account watchdog. See
@@ -1498,13 +1556,18 @@ const kickDirectory = directoryKicker({
  * projection, not a second writer; `MAIL_DOMAINS` is passed for the reason it
  * is there - i10's own domains are hosted regardless of who owns a
  * `core.domains` row.
+ *
+ * `storage` and `canAllocate` (B3) only matter to a person sizing their own
+ * inbox; a directory's mailbox is created without an allocation.
  */
 const mailboxProvisionDeps: ProvisionDeps = {
   identity: clerkIdentity(clerk),
-  directory: mailboxDirectory(db),
+  directory: mailboxDir,
   capacity: postgresMeter(db),
   project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
   featureId: MAILBOXES,
+  storage: mailboxStorage,
+  canAllocate: canAllocateStorage,
 }
 /*
  * Mail from the directory (#344): mailboxes, aliases and lists for the people
@@ -1879,6 +1942,17 @@ const app = createApp({
       ),
     // Member limits, late acceptances and capacity alerts (#327).
     members: (type: string, data: unknown) => onClerkEvent(members, type, data),
+    // Team inboxes follow the workspace (B8).
+    teamInboxes: (type: string, data: unknown) =>
+      onTeamInboxEvent(
+        {
+          inboxes: teamInboxService,
+          tenantOf: (orgId: string) => members.store.tenantOf(orgId),
+          log,
+        },
+        type,
+        data,
+      ),
     // Auto-join at sign-up (#326): verified addresses only, idempotent.
     ...(teamDomains
       ? {
@@ -2397,6 +2471,8 @@ const app = createApp({
     ...(teamDomains ? { teamDomains } : {}),
     roles,
     members,
+    teamInboxes: teamInboxService,
+    mailboxStorage,
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
@@ -2639,11 +2715,51 @@ const app = createApp({
           ? {
               stalwartWebhooks: {
                 events: webhookEventOps({ db, queue: webhookQueue }),
+                accounts: accountEventOps(db),
                 log,
                 secret: env.STALWART_WEBHOOK_SECRET,
               },
             }
           : {}),
+      }
+    : {}),
+  /*
+   * ⚠ THE API SEND PATH'S OWN HOLD LOOKUP AND METERING, NOT COPIES. The hook asks
+   * `admitSend` with the same `sendingHeld` and the same `metering` that
+   * `acceptSend` gets through `sendPath`, so a mailbox send and an API send are
+   * judged by one object. Gated on its own secret: without it the route answers
+   * 503 and Stalwart tempfails, which is loud rather than a quiet gap.
+   */
+  ...(env.STALWART_MTA_HOOK_SECRET
+    ? {
+        mtaHook: {
+          secret: env.STALWART_MTA_HOOK_SECRET,
+          domainOwner: (domain: string) => mailboxDir.domainOwner(domain),
+          admit: { sendingHeld: sendPath.sendingHeld, metering: sendPath.metering },
+          log,
+        },
+      }
+    : {}),
+  ...(contentStore && mailboxMigrationQueue
+    ? {
+        mailboxMigration: {
+          jobs: mailboxJobStore(db),
+          store: contentStore,
+          enqueue: (data) => enqueueMailboxJob(mailboxMigrationQueue, data),
+          access: (userId, address) =>
+            canAccessMailbox(
+              db,
+              userId,
+              address,
+              teamDomains
+                ? {
+                    isAdmin: (user, tenantId) =>
+                      teamDomains.can(tenantId, user, "members:manage"),
+                  }
+                : undefined,
+            ),
+          tokenSecret: mailboxDownloadSecret,
+        },
       }
     : {}),
   pingDb: async () => {

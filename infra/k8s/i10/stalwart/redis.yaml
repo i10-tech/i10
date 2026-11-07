@@ -1,0 +1,102 @@
+# Stalwart's Redis (#358): its in-memory store and its cluster coordinator.
+#
+# ⚠ NOT i10-redis WITH ANOTHER DATABASE NUMBER. i10-redis holds the send and
+# webhook queues with `noeviction` and a 384mb cap, so a Stalwart cache that
+# filled it would start failing sends. The two want opposite policies, and the
+# repo rule is a separate instance (see ../redis/redis.yaml).
+#
+# ⚠ NO PERSISTENCE, ON PURPOSE. What Stalwart keeps here is rate-limit counters,
+# short-lived lookups and the coordinator's pub/sub, all rebuilt or expired on
+# their own. Nothing durable lives here; mail and accounts are in Postgres and
+# R2. A restart costs some rate-limit history and nothing else.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: i10-stalwart-redis-config
+  namespace: i10-prod
+data:
+  redis.conf: |
+    save ""
+    appendonly no
+    # Evict only keys that carry an expiry, which is what Stalwart's caches and
+    # counters set. A key without one is never chosen, so a full instance
+    # refuses writes rather than silently dropping something it had no expiry
+    # for.
+    maxmemory-policy volatile-lru
+    maxmemory 192mb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-stalwart-redis
+  namespace: i10-prod
+spec:
+  selector:
+    app.kubernetes.io/name: i10-stalwart-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-stalwart-redis
+  namespace: i10-prod
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: two instances side by side would split the
+  # nodes' coordinator traffic between them for the length of the rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-stalwart-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-stalwart-redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:8.10-alpine
+          args: ["/etc/redis/redis.conf"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis
+            # The image's working directory. Nothing is written with
+            # persistence off, but redis wants it writable at startup.
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: i10-stalwart-redis-config
+        - name: data
+          emptyDir: {}

@@ -72,6 +72,47 @@ spec:
         fsGroup: 953
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # Builds the tailnet view into a fresh LMDB file from the ConfigMap, so
+        # the view is whatever the commit says and nothing else. See
+        # infra/k8s/argo-ui.md for what it is for and why it is shaped this way.
+        #
+        # ⚠ IT STARTS FROM AN EMPTY DIRECTORY EVERY TIME. `zone load` into a
+        # file that already holds the zone would merge rather than replace, and
+        # an emptyDir survives a container restart within the pod.
+        - name: views
+          image: powerdns/pdns-auth-51:5.1.5@sha256:77ff4efdbb9ec30e9309c8a1cbed6121a67fa3be25c848bbbfa756fc75bf9a27
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          command: ["sh", "-euc"]
+          args:
+            - |
+              rm -rf /var/lib/powerdns/views/*
+              u() { pdnsutil --config-dir=/etc/pdns-views "$@"; }
+              u zone load argo.i10.tech..tailnet /etc/pdns-views/argo.i10.tech.zone
+              u network set 100.64.0.0/10 tailnet
+              u network set fd7a:115c:a1e0::/48 tailnet
+              u view add-zone tailnet argo.i10.tech..tailnet
+              u network list
+              u view list tailnet
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/pdns-views/pdns.conf
+              subPath: views.conf
+              readOnly: true
+            - name: config
+              mountPath: /etc/pdns-views/argo.i10.tech.zone
+              subPath: argo.i10.tech.zone
+              readOnly: true
+            - { name: views, mountPath: /var/lib/powerdns/views }
+            - { name: run, mountPath: /var/run/pdns }
       containers:
         - name: pdns
           # ⚠ PINNED BY DIGEST, LIKE EVERY OTHER IMAGE HERE. A floating tag on
@@ -88,12 +129,19 @@ spec:
           # verified against our 4.x gpgsql schema locally - it serves the zones
           # `powerdns.ts` writes without a schema change.
           #
+          # ⚠ NOW 5.1.5, FOR THE NEXT ADVISORY. 5.1.4 started printing
+          # "Security Update Mandatory" once advisory 2026-13 landed (High, a
+          # crafted packet's compression pointers drive CPU; CVE-2026-73206).
+          # 5.1.5 is the first fixed 5.1 release and the newest stable branch;
+          # 5.2 is alpha only. KEEP THE INIT CONTAINER BELOW ON THE SAME DIGEST:
+          # it writes the LMDB file this process reads.
+          #
           # ⚠ AND `runAsUser: 953` BELOW MATCHES THIS IMAGE'S `pdns` ACCOUNT.
           # The image declares `User: pdns` by NAME, and `runAsNonRoot` cannot
           # verify a name - the kubelet refuses the pod with "has non-numeric
           # user (pdns), cannot verify user is non-root". 953 is that account's
           # uid, read out of the image's own /etc/passwd.
-          image: powerdns/pdns-auth-51:5.1.4@sha256:bb5b1c133bcca1dd455075321de7d55db4945a8d7f2ba23339e3c7bbe416b205
+          image: powerdns/pdns-auth-51:5.1.5@sha256:77ff4efdbb9ec30e9309c8a1cbed6121a67fa3be25c848bbbfa756fc75bf9a27
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -182,9 +230,12 @@ spec:
             # wants a control socket and a pid file, and neither needs to
             # survive a restart.
             - { name: run, mountPath: /var/run/pdns }
+            - { name: views, mountPath: /var/lib/powerdns/views }
       volumes:
         - name: config
           configMap:
             name: i10-powerdns
         - name: run
+          emptyDir: {}
+        - name: views
           emptyDir: {}

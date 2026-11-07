@@ -36,6 +36,11 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 
 func (p *Postgres) Close() { p.pool.Close() }
 
+// Pool is the connection pool, for the one other thing authd writes: the shared
+// failure budget (internal/budgetstore). It is shared rather than duplicated so
+// that the PgBouncer settings above apply to it too.
+func (p *Postgres) Pool() *pgxpool.Pool { return p.pool }
+
 // Ping is used by the readiness probe. authd with an unreachable projection can
 // answer nothing, and should not be routed to.
 func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
@@ -46,7 +51,7 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 // before it has a mailbox row, and a missing row must read as "managed" only
 // when authd.managed_accounts says so.
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
-	coalesce(a.description, ''), a.active, a.clerk_updated_at,
+	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
 	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
 	(a.suspended_at IS NOT NULL)`
 
@@ -130,13 +135,27 @@ func (p *Postgres) GroupsForMember(ctx context.Context, clerkUserID string) ([]G
 	return p.scanAndFillGroups(ctx, rows)
 }
 
+func (p *Postgres) GroupsByName(ctx context.Context, names []string) ([]Group, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT g.name, coalesce(g.email, ''), coalesce(g.description, '')
+		FROM authd.groups g
+		WHERE g.name = ANY($1)`, names)
+	if err != nil {
+		return nil, fmt.Errorf("projection: groups by name: %w", err)
+	}
+	return p.scanAndFillGroups(ctx, rows)
+}
+
 func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	defer rows.Close()
 	var out []Account
 	for rows.Next() {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
-			&a.Description, &a.Active, &a.ClerkUpdatedAt,
+			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
 			&a.Managed, &a.ManagedConnection, &a.Suspended); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}

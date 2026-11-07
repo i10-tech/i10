@@ -5,35 +5,43 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
 	goldapclient "github.com/go-ldap/ldap/v3"
 
-	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/passthrough"
 	"github.com/i10-tech/i10/services/authd/internal/passthrough/ldaptest"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
+	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
 
 // A managed account's password belongs to its company (#344). These pin the
-// property that matters: such an account is never sent to Clerk, never served
-// from the credential cache, and an outage on the way to the company's
-// directory is "unavailable" - not "wrong password", and not a question for
-// Clerk.
+// property that matters: such an account is never sent to Clerk, and an outage
+// on the way to the company's directory is "unavailable" - not "wrong
+// password", not a question for Clerk, and not a failure the directory counts.
+//
+// The directory is a verify.Verifier behind the same bind path as Clerk, so the
+// failure budget and the identical-retry memory apply to it; the tests below
+// that count slots and directory calls are about that. The credential cache
+// does not: a directory never reports a password change, so its answers are
+// never cached (passthrough.Verifier.MaxCacheTTL).
 
 const (
+	carolUID  = "user_carol"
 	carolDN   = "uid=user_carol,ou=people,dc=i10,dc=tech"
 	carolMail = "carol@acme.test"
 	carolPass = "carol-company-password"
 	connAcme  = "33333333-3333-4333-8333-333333333333"
+	connOther = "44444444-4444-4444-8444-444444444444"
 )
 
 func managedStore() *fakeStore {
 	store := defaultStore()
 	store.accounts = append(store.accounts, projection.Account{
-		ClerkUserID:       "user_carol",
+		ClerkUserID:       carolUID,
 		Email:             carolMail,
 		Active:            true,
 		Managed:           true,
@@ -42,18 +50,48 @@ func managedStore() *fakeStore {
 	return store
 }
 
-type fakePassThrough struct {
+// fakeDirectory is a passthrough.Directory that answers from a script and
+// records what it was asked. Binds run on a goroutine of the bind path's own.
+type fakeDirectory struct {
 	result passthrough.Result
-	calls  int
-	conn   string
-	email  string
+
+	mu    sync.Mutex
+	calls int
+	conn  string
+	email string
 }
 
-func (f *fakePassThrough) Bind(_ context.Context, conn, email, _ string) passthrough.Result {
+func (f *fakeDirectory) Bind(_ context.Context, conn, email, _ string) passthrough.Result {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	f.conn, f.email = conn, email
 	return f.result
 }
+
+func (f *fakeDirectory) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakeDirectory) setResult(r passthrough.Result) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.result = r
+}
+
+func (f *fakeDirectory) asked() (conn, email string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.conn, f.email
+}
+
+var (
+	resultVerified    = passthrough.Result{Outcome: passthrough.Verified, Reason: passthrough.ReasonVerified}
+	resultRejected    = passthrough.Result{Outcome: passthrough.Rejected, Reason: passthrough.ReasonUserBindRejected}
+	resultUnavailable = passthrough.Result{Outcome: passthrough.Unavailable, Reason: passthrough.ReasonDialFailed}
+)
 
 // failing is an API that cannot be reached.
 type failing struct{ err error }
@@ -66,77 +104,119 @@ func (f fixedSource) Fetch(context.Context, string) (*passthrough.Settings, erro
 
 func code(err error) uint16 { return resultCode(err) }
 
+// managedFixture serves store with Clerk as the verifier for everyone no
+// connection manages, dir for the rest, and a shared budget store (the
+// pass-through verifier has a failure budget, so one is required).
+func managedFixture(
+	t *testing.T,
+	store projection.Store,
+	clerk verify.Verifier,
+	dir passthrough.Directory,
+	cache *credcache.Cache,
+) (string, *fakeBudgetStore) {
+	t.Helper()
+	budget := newFakeBudgetStore()
+	return newFixtureOpts(t, fixtureOptions{
+		store: store,
+		resolver: &passthrough.ManagedResolver{
+			Unmanaged: clerk,
+			Directory: dir,
+		},
+		perMinute: 600,
+		cache:     cache,
+		budget:    budget,
+	}), budget
+}
+
+func bindCarol(t *testing.T, addr, password string) uint16 {
+	t.Helper()
+	err := dial(t, addr).Bind(carolDN, password)
+	if err == nil {
+		return goldapclient.LDAPResultSuccess
+	}
+	return resultCode(err)
+}
+
 // ── Refusals first ───────────────────────────────────────────────────────
 
 func TestAManagedAccountNeverReachesClerk(t *testing.T) {
-	for name, pt := range map[string]*fakePassThrough{
-		"rejected":    {result: passthrough.Result{Outcome: passthrough.Rejected, Reason: "user_bind_rejected"}},
-		"unavailable": {result: passthrough.Result{Outcome: passthrough.Unavailable, Reason: "dial_failed"}},
-		"verified":    {result: passthrough.Result{Outcome: passthrough.Verified, Reason: "verified"}},
+	for name, tc := range map[string]struct {
+		result passthrough.Result
+		want   uint16
+	}{
+		"rejected":    {resultRejected, goldapclient.LDAPResultInvalidCredentials},
+		"unavailable": {resultUnavailable, goldapclient.LDAPResultUnavailable},
+		"verified":    {resultVerified, goldapclient.LDAPResultSuccess},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Clerk would say yes to anything. If it is ever asked, this fails.
-			v := &fakeVerifier{outcome: clerkauth.Verified}
-			addr := newFixtureFull(t, managedStore(), v, 60, credcache.New(time.Minute), pt)
-			_ = dial(t, addr).Bind(carolDN, carolPass)
-			if v.calls != 0 {
-				t.Fatalf("Clerk was asked %d times about a managed account", v.calls)
+			clerk := &fakeVerifier{outcome: verify.Verified}
+			dir := &fakeDirectory{result: tc.result}
+			addr, _ := managedFixture(t, managedStore(), clerk, dir, credcache.New(time.Minute))
+
+			if got := bindCarol(t, addr, carolPass); got != tc.want {
+				t.Fatalf("result = %d, want %d", got, tc.want)
 			}
-			if pt.calls != 1 || pt.conn != connAcme || pt.email != carolMail {
-				t.Fatalf("pass-through saw %d calls, connection %q, address %q", pt.calls, pt.conn, pt.email)
+			if clerk.callCount() != 0 {
+				t.Fatalf("Clerk was asked %d times about a managed account", clerk.callCount())
+			}
+			if conn, email := dir.asked(); dir.callCount() != 1 || conn != connAcme || email != carolMail {
+				t.Fatalf("pass-through saw %d calls, connection %q, address %q", dir.callCount(), conn, email)
 			}
 		})
 	}
 }
 
-func TestAManagedAccountIsNeverServedFromTheCredentialCache(t *testing.T) {
+// A warm entry that Clerk minted must not answer for the company's directory.
+// The verifier's name is in the entry, and it carries the connection.
+func TestAClerkCacheEntryDoesNotAnswerForAManagedAccount(t *testing.T) {
 	store := managedStore()
-	v := &fakeVerifier{outcome: clerkauth.Verified}
-	cache := credcache.New(time.Minute)
-	pt := &fakePassThrough{result: passthrough.Result{Outcome: passthrough.Rejected, Reason: "user_bind_rejected"}}
-	addr := newFixtureFull(t, store, v, 60, cache, pt)
+	clerk := &fakeVerifier{outcome: verify.Verified}
+	dir := &fakeDirectory{result: resultRejected}
+	addr, _ := managedFixture(t, store, clerk, dir, credcache.New(time.Minute))
 
 	// The same Clerk user verified (and cached) while it was not managed...
 	store.accounts[2].Managed = false
-	if err := dial(t, addr).Bind(carolDN, carolPass); err != nil {
-		t.Fatalf("unmanaged bind: %v", err)
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultSuccess {
+		t.Fatalf("unmanaged bind = %d", got)
 	}
-	if v.calls != 1 {
-		t.Fatalf("verifier called %d times, want 1", v.calls)
+	if clerk.callCount() != 1 {
+		t.Fatalf("verifier called %d times, want 1", clerk.callCount())
 	}
 	// ...and then the company takes the account over. The warm entry must not
 	// answer for it.
 	store.accounts[2].Managed = true
-	if got := code(dial(t, addr).Bind(carolDN, carolPass)); got != goldapclient.LDAPResultInvalidCredentials {
-		t.Fatalf("result = %d, want invalidCredentials: a managed account was served from the cache", got)
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultInvalidCredentials {
+		t.Fatalf("result = %d, want invalidCredentials: a managed account was served from Clerk's cache", got)
 	}
-	if pt.calls != 1 || v.calls != 1 {
-		t.Fatalf("pass-through %d calls, Clerk %d calls; want 1 and 1", pt.calls, v.calls)
+	if dir.callCount() != 1 || clerk.callCount() != 1 {
+		t.Fatalf("pass-through %d calls, Clerk %d calls; want 1 and 1", dir.callCount(), clerk.callCount())
 	}
 }
 
 func TestAManagedAccountWithoutPassThroughIsRefused(t *testing.T) {
 	cases := map[string]struct {
-		pt   ldapsrvPassThrough
+		dir  passthrough.Directory
 		conn string
 	}{
-		"the connection has it off": {pt: passthrough.NewService(fixedSource{nil}, &passthrough.Binder{}), conn: connAcme},
-		"no pass-through at all":    {pt: nil, conn: connAcme},
-		"the connection is gone":    {pt: &fakePassThrough{result: passthrough.Result{Outcome: passthrough.Verified}}, conn: ""},
+		"the connection has it off": {dir: passthrough.NewService(fixedSource{nil}, &passthrough.Binder{}), conn: connAcme},
+		"no pass-through at all":    {dir: nil, conn: connAcme},
+		"the connection is gone":    {dir: &fakeDirectory{result: resultVerified}, conn: ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			store := managedStore()
 			store.accounts[2].ManagedConnection = tc.conn
-			v := &fakeVerifier{outcome: clerkauth.Verified}
-			addr := newFixtureFull(t, store, v, 60, credcache.New(time.Minute), tc.pt)
-			if got := code(dial(t, addr).Bind(carolDN, carolPass)); got != goldapclient.LDAPResultInvalidCredentials {
+			clerk := &fakeVerifier{outcome: verify.Verified}
+			addr, _ := managedFixture(t, store, clerk, tc.dir, credcache.New(time.Minute))
+
+			if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultInvalidCredentials {
 				t.Fatalf("result = %d, want invalidCredentials", got)
 			}
-			if v.calls != 0 {
-				t.Fatalf("Clerk was asked %d times", v.calls)
+			if clerk.callCount() != 0 {
+				t.Fatalf("Clerk was asked %d times", clerk.callCount())
 			}
-			if f, ok := tc.pt.(*fakePassThrough); ok && f.calls != 0 {
+			if f, ok := tc.dir.(*fakeDirectory); ok && f.callCount() != 0 {
 				t.Fatalf("pass-through was called for an account with no connection")
 			}
 		})
@@ -145,85 +225,199 @@ func TestAManagedAccountWithoutPassThroughIsRefused(t *testing.T) {
 
 func TestAnUnreachableAPIIsUnavailableNeverAFallbackToClerk(t *testing.T) {
 	store := managedStore()
-	v := &fakeVerifier{outcome: clerkauth.Verified}
+	clerk := &fakeVerifier{outcome: verify.Verified}
 	svc := passthrough.NewService(failing{errors.New("api down")}, &passthrough.Binder{})
-	addr := newFixtureFull(t, store, v, 60, nil, svc)
+	addr, budget := managedFixture(t, store, clerk, svc, nil)
 
-	if got := code(dial(t, addr).Bind(carolDN, carolPass)); got != goldapclient.LDAPResultUnavailable {
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultUnavailable {
 		t.Fatalf("result = %d, want unavailable (52)", got)
 	}
-	if v.calls != 0 {
-		t.Fatalf("Clerk was asked %d times while the API was down", v.calls)
+	if clerk.callCount() != 0 {
+		t.Fatalf("Clerk was asked %d times while the API was down", clerk.callCount())
+	}
+	// Nothing was forwarded to the directory, so nothing is counted against it.
+	if n := budget.count(carolUID); n != 0 {
+		t.Fatalf("an outage left %d slots spent", n)
 	}
 
 	// Unmanaged accounts keep working exactly as before, API down or not.
 	if err := dial(t, addr).Bind(aliceDN, alicePass); err != nil {
 		t.Fatalf("an unmanaged account could not bind while the API was down: %v", err)
 	}
-	if v.calls != 1 {
-		t.Fatalf("Clerk called %d times for the unmanaged bind, want 1", v.calls)
+	if clerk.callCount() != 1 {
+		t.Fatalf("Clerk called %d times for the unmanaged bind, want 1", clerk.callCount())
 	}
 }
 
 func TestADeactivatedManagedAccountIsRefusedWithoutAskingAnyone(t *testing.T) {
 	store := managedStore()
 	store.accounts[2].Active = false
-	v := &fakeVerifier{outcome: clerkauth.Verified}
-	pt := &fakePassThrough{result: passthrough.Result{Outcome: passthrough.Verified}}
-	addr := newFixtureFull(t, store, v, 60, nil, pt)
-	if got := code(dial(t, addr).Bind(carolDN, carolPass)); got != goldapclient.LDAPResultInvalidCredentials {
+	clerk := &fakeVerifier{outcome: verify.Verified}
+	dir := &fakeDirectory{result: resultVerified}
+	addr, _ := managedFixture(t, store, clerk, dir, nil)
+
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultInvalidCredentials {
 		t.Fatalf("result = %d, want invalidCredentials", got)
 	}
-	if pt.calls != 0 || v.calls != 0 {
-		t.Fatalf("pass-through %d calls, Clerk %d calls; want none", pt.calls, v.calls)
+	if dir.callCount() != 0 || clerk.callCount() != 0 {
+		t.Fatalf("pass-through %d calls, Clerk %d calls; want none", dir.callCount(), clerk.callCount())
+	}
+}
+
+// Suspension is checked before the verifier is chosen, so a warm entry for a
+// managed account cannot open a mailbox the directory switched off.
+func TestASuspendedManagedMailboxIsRefusedEvenWithAWarmCache(t *testing.T) {
+	store := managedStore()
+	clerk := &fakeVerifier{outcome: verify.Verified}
+	dir := &fakeDirectory{result: resultVerified}
+	addr, _ := managedFixture(t, store, clerk, dir, credcache.New(time.Hour))
+
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultSuccess {
+		t.Fatalf("bind before the suspension = %d", got)
+	}
+	store.accounts[2].Suspended = true
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultInvalidCredentials {
+		t.Fatalf("a suspended managed mailbox bound from the cache: result = %d", got)
+	}
+	if dir.callCount() != 1 {
+		t.Fatalf("the directory was asked %d times, want only the first bind", dir.callCount())
 	}
 }
 
 func TestAnEmptyPasswordForAManagedAccountReachesNothing(t *testing.T) {
-	v := &fakeVerifier{outcome: clerkauth.Verified}
-	pt := &fakePassThrough{result: passthrough.Result{Outcome: passthrough.Verified}}
-	addr := newFixtureFull(t, managedStore(), v, 60, nil, pt)
+	clerk := &fakeVerifier{outcome: verify.Verified}
+	dir := &fakeDirectory{result: resultVerified}
+	addr, budget := managedFixture(t, managedStore(), clerk, dir, nil)
 	// The client library refuses to send an empty password; this sends one.
 	if got := code(dial(t, addr).UnauthenticatedBind(carolDN)); got != goldapclient.LDAPResultInvalidCredentials {
 		t.Fatalf("result = %d, want invalidCredentials", got)
 	}
-	if pt.calls != 0 || v.calls != 0 {
-		t.Fatalf("pass-through %d calls, Clerk %d calls; want none", pt.calls, v.calls)
+	if reserves, _ := budget.counts(); dir.callCount() != 0 || clerk.callCount() != 0 || reserves != 0 {
+		t.Fatalf("pass-through %d calls, Clerk %d calls, %d slots reserved; want none",
+			dir.callCount(), clerk.callCount(), reserves)
 	}
 }
 
 func TestTheThrottleStillGuardsManagedBinds(t *testing.T) {
-	pt := &fakePassThrough{result: passthrough.Result{Outcome: passthrough.Rejected, Reason: "user_bind_rejected"}}
-	addr := newFixtureFull(t, managedStore(), &fakeVerifier{}, 1, nil, pt) // burst of 1
-	_ = dial(t, addr).Bind(carolDN, "wrong")
-	if got := code(dial(t, addr).Bind(carolDN, "wrong")); got != goldapclient.LDAPResultBusy {
+	dir := &fakeDirectory{result: resultRejected}
+	budget := newFakeBudgetStore()
+	addr := newFixtureOpts(t, fixtureOptions{
+		store:     managedStore(),
+		resolver:  &passthrough.ManagedResolver{Unmanaged: &fakeVerifier{}, Directory: dir},
+		perMinute: 1, // a burst of 1
+		budget:    budget,
+	})
+	// Two different wrong passwords: an identical one is answered from memory
+	// before the throttle, which is the other test's business.
+	_ = bindCarol(t, addr, "wrong-1")
+	if got := bindCarol(t, addr, "wrong-2"); got != goldapclient.LDAPResultBusy {
 		t.Fatalf("second bind = %d, want busy (51)", got)
 	}
-	if pt.calls != 1 {
-		t.Fatalf("the company's directory was asked %d times, want 1", pt.calls)
+	if dir.callCount() != 1 {
+		t.Fatalf("the company's directory was asked %d times, want 1", dir.callCount())
 	}
 }
 
-func TestAPassThroughSuccessIsNotCached(t *testing.T) {
-	pt := &fakePassThrough{result: passthrough.Result{Outcome: passthrough.Verified, Reason: "verified"}}
-	addr := newFixtureFull(t, managedStore(), &fakeVerifier{}, 60, credcache.New(time.Minute), pt)
-	for i := 0; i < 3; i++ {
-		if err := dial(t, addr).Bind(carolDN, carolPass); err != nil {
-			t.Fatalf("bind %d: %v", i, err)
+// ── The failure budget, the cache and the outage rules ───────────────────
+
+// ⚠ A COMPANY'S DIRECTORY LOCKS THE REAL ACCOUNT. A wrong password is the one
+// answer that is a failure the directory counted, so it keeps its slot.
+func TestAWrongManagedPasswordIs49AndSpendsASlot(t *testing.T) {
+	dir := &fakeDirectory{result: resultRejected}
+	addr, budget := managedFixture(t, managedStore(), &fakeVerifier{}, dir, nil)
+
+	if got := bindCarol(t, addr, "wrong-1"); got != goldapclient.LDAPResultInvalidCredentials {
+		t.Fatalf("result = %d, want invalidCredentials (49)", got)
+	}
+	reserves, releases := budget.counts()
+	if reserves != 1 || releases != 0 || budget.count(carolUID) != 1 {
+		t.Fatalf("reserves=%d releases=%d spent=%d; a wrong password must keep exactly one slot",
+			reserves, releases, budget.count(carolUID))
+	}
+	if dir.callCount() != 1 {
+		t.Fatalf("the directory was asked %d times, want 1", dir.callCount())
+	}
+}
+
+// Three forwarded failures in fifteen minutes, then the directory is left alone.
+func TestAManagedAccountGetsThreeForwardedFailuresPerWindow(t *testing.T) {
+	dir := &fakeDirectory{result: resultRejected}
+	addr, budget := managedFixture(t, managedStore(), &fakeVerifier{}, dir, nil)
+
+	for i := 1; i <= 3; i++ {
+		if got := bindCarol(t, addr, wrong(i)); got != goldapclient.LDAPResultInvalidCredentials {
+			t.Fatalf("failure %d: result = %d, want 49", i, got)
 		}
 	}
-	if pt.calls != 3 {
-		t.Fatalf("the directory was asked %d times for 3 binds: a success was cached", pt.calls)
+	if got := bindCarol(t, addr, wrong(4)); got != goldapclient.LDAPResultBusy {
+		t.Fatalf("the failure past the budget gave %d, want busy (51)", got)
+	}
+	if dir.callCount() != 3 {
+		t.Fatalf("the directory was asked %d times, want it to stay at 3", dir.callCount())
+	}
+
+	// A new window gives the person their attempts back.
+	budget.advance(passthrough.FailureBudget.Window)
+	if got := bindCarol(t, addr, wrong(5)); got != goldapclient.LDAPResultInvalidCredentials {
+		t.Fatalf("after the window: result = %d, want 49", got)
+	}
+	if dir.callCount() != 4 {
+		t.Fatalf("the directory was asked %d times, want 4", dir.callCount())
+	}
+}
+
+// ⚠ AN OUTAGE IS NOT A FAILURE. The directory not answering must not read as a
+// wrong password, and must not use up the slots that protect the real account.
+func TestAnUnreachableDirectoryIsUnavailableNotInvalidAndGivesTheSlotBack(t *testing.T) {
+	dir := &fakeDirectory{result: resultUnavailable}
+	addr, budget := managedFixture(t, managedStore(), &fakeVerifier{}, dir, nil)
+
+	for i := 1; i <= 5; i++ { // more than the budget: none of them is a failure
+		if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultUnavailable {
+			t.Fatalf("bind %d: result = %d, want unavailable (52), never 49", i, got)
+		}
+	}
+	reserves, releases := budget.counts()
+	if reserves != 5 || releases != 5 || budget.count(carolUID) != 0 {
+		t.Fatalf("reserves=%d releases=%d spent=%d; every outage must give its slot back",
+			reserves, releases, budget.count(carolUID))
+	}
+
+	// The directory comes back, and the person's real password works at once.
+	dir.setResult(resultVerified)
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultSuccess {
+		t.Fatalf("after the outage: result = %d, want success", got)
+	}
+}
+
+// A directory never reports a password change, so its yes is never remembered:
+// every bind asks it again, even with a long credential cache configured.
+func TestAManagedPasswordIsAskedOfTheDirectoryEveryTime(t *testing.T) {
+	dir := &fakeDirectory{result: resultVerified}
+	addr, budget := managedFixture(t, managedStore(), &fakeVerifier{}, dir, credcache.New(2*time.Hour))
+
+	for i := 0; i < 3; i++ {
+		if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultSuccess {
+			t.Fatalf("bind %d: result = %d", i, got)
+		}
+	}
+	if dir.callCount() != 3 {
+		t.Fatalf("the directory was asked %d times for 3 binds, want 3: a directory answer was cached", dir.callCount())
+	}
+	if reserves, releases := budget.counts(); reserves != releases {
+		t.Fatalf("%d slots reserved and %d released for 3 successes: a success kept a slot", reserves, releases)
+	}
+
+	// The password the directory stopped accepting is refused at once.
+	dir.setResult(resultRejected)
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultInvalidCredentials {
+		t.Fatalf("a password the directory now refuses gave %d, want invalidCredentials", got)
 	}
 }
 
 // ── Against a real directory, end to end ─────────────────────────────────
 
-type ldapsrvPassThrough = interface {
-	Bind(ctx context.Context, connectionID, email, password string) passthrough.Result
-}
-
-func directoryService(t *testing.T, dir *ldaptest.Server, mutate func(*passthrough.Settings)) ldapsrvPassThrough {
+func directoryService(t *testing.T, dir *ldaptest.Server, mutate func(*passthrough.Settings)) *passthrough.Service {
 	t.Helper()
 	s := passthrough.Settings{
 		Host: ldaptest.Host, Port: 636, TLSMode: passthrough.TLSModeLDAPS, CAPem: dir.CAPem,
@@ -251,25 +445,31 @@ func (l lookup) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, er
 func TestAManagedAccountBindsThroughTheCompanysDirectory(t *testing.T) {
 	dir := ldaptest.Start(t, ldaptest.LDAPS,
 		ldaptest.Person{DN: "uid=carol,ou=people,dc=acme,dc=test", Mail: carolMail, Password: carolPass})
-	v := &fakeVerifier{outcome: clerkauth.Verified}
-	addr := newFixtureFull(t, managedStore(), v, 60, credcache.New(time.Minute), directoryService(t, dir, nil))
+	clerk := &fakeVerifier{outcome: verify.Verified}
+	addr, budget := managedFixture(t, managedStore(), clerk, directoryService(t, dir, nil), credcache.New(time.Minute))
 
-	if got := code(dial(t, addr).Bind(carolDN, "not-her-password")); got != goldapclient.LDAPResultInvalidCredentials {
+	if got := bindCarol(t, addr, "not-her-password"); got != goldapclient.LDAPResultInvalidCredentials {
 		t.Fatalf("wrong password = %d, want invalidCredentials", got)
 	}
-	if err := dial(t, addr).Bind(carolDN, carolPass); err != nil {
-		t.Fatalf("correct password: %v", err)
+	if n := budget.count(carolUID); n != 1 {
+		t.Fatalf("a wrong password left %d slots spent, want 1", n)
 	}
-	if v.calls != 0 {
-		t.Fatalf("Clerk was asked %d times", v.calls)
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultSuccess {
+		t.Fatalf("correct password = %d", got)
+	}
+	if n := budget.count(carolUID); n != 1 {
+		t.Fatalf("a success changed the slots spent to %d, want it to stay 1", n)
+	}
+	if clerk.callCount() != 0 {
+		t.Fatalf("Clerk was asked %d times", clerk.callCount())
 	}
 }
 
 func TestAPersonTheDirectoryDoesNotHaveIsRefusedNotUnavailable(t *testing.T) {
 	dir := ldaptest.Start(t, ldaptest.LDAPS,
 		ldaptest.Person{DN: "uid=dave,ou=people,dc=acme,dc=test", Mail: "dave@acme.test", Password: "dave"})
-	addr := newFixtureFull(t, managedStore(), &fakeVerifier{}, 60, nil, directoryService(t, dir, nil))
-	if got := code(dial(t, addr).Bind(carolDN, carolPass)); got != goldapclient.LDAPResultInvalidCredentials {
+	addr, _ := managedFixture(t, managedStore(), &fakeVerifier{}, directoryService(t, dir, nil), nil)
+	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultInvalidCredentials {
 		t.Fatalf("result = %d, want invalidCredentials", got)
 	}
 }
@@ -283,13 +483,16 @@ func TestADirectoryThatCannotBeTrustedIsUnavailableAndGetsNothing(t *testing.T) 
 		"the host is private":            func(s *passthrough.Settings) { s.Host = "127.0.0.1" },
 	} {
 		t.Run(name, func(t *testing.T) {
-			v := &fakeVerifier{outcome: clerkauth.Verified}
-			addr := newFixtureFull(t, managedStore(), v, 60, nil, directoryService(t, dir, mutate))
-			if got := code(dial(t, addr).Bind(carolDN, carolPass)); got != goldapclient.LDAPResultUnavailable {
+			clerk := &fakeVerifier{outcome: verify.Verified}
+			addr, budget := managedFixture(t, managedStore(), clerk, directoryService(t, dir, mutate), nil)
+			if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultUnavailable {
 				t.Fatalf("result = %d, want unavailable (52)", got)
 			}
-			if v.calls != 0 {
-				t.Fatalf("Clerk was asked %d times", v.calls)
+			if clerk.callCount() != 0 {
+				t.Fatalf("Clerk was asked %d times", clerk.callCount())
+			}
+			if n := budget.count(carolUID); n != 0 {
+				t.Fatalf("a connection we refused to use left %d slots spent, want 0", n)
 			}
 		})
 	}

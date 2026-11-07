@@ -104,7 +104,7 @@ services:
   #
   #   dig @127.0.0.1 -p 5354 SOA mail.example.com
   powerdns:
-    image: powerdns/pdns-auth-51:5.1.4
+    image: powerdns/pdns-auth-51:5.1.5
     depends_on:
       postgres:
         condition: service_healthy

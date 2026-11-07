@@ -1,9 +1,11 @@
 import { relations, sql } from "drizzle-orm"
 import {
+  bigint,
   boolean,
   check,
   foreignKey,
   index,
+  integer,
   pgSchema,
   primaryKey,
   text,
@@ -41,82 +43,127 @@ export * from "./identity.js"
  */
 export const authd = pgSchema("authd")
 
-export const accounts = authd.table("accounts", {
-  clerkUserId: text("clerk_user_id").primaryKey(),
+export const accounts = authd.table(
+  "accounts",
+  {
+    clerkUserId: text("clerk_user_id").primaryKey(),
 
-  /**
-   * The primary mailbox address, stored lowercased.
-   *
-   * ⚠ ONLY ADDRESSES IN DOMAINS i10 HOSTS. A row here makes Stalwart treat the
-   * address as a LOCAL RECIPIENT. Projecting a user's Gmail would have Stalwart
-   * accept and swallow mail addressed to gmail.com. See `projectUser`.
-   */
-  email: text("email").notNull().unique(),
+    /**
+     * The primary mailbox address, stored lowercased.
+     *
+     * ⚠ ONLY ADDRESSES IN DOMAINS i10 HOSTS. A row here makes Stalwart treat the
+     * address as a LOCAL RECIPIENT. Projecting a user's Gmail would have Stalwart
+     * accept and swallow mail addressed to gmail.com. See `projectUser`.
+     */
+    email: text("email").notNull().unique(),
 
-  displayName: text("display_name"),
-  description: text("description"),
+    displayName: text("display_name"),
+    description: text("description"),
 
-  /**
-   * The subscription gate, and the reason this is not derived from Clerk.
-   *
-   * Signing up is not the same as paying. An inactive account is INVISIBLE:
-   * filterMailbox stops returning it, Stalwart refuses mail for the address,
-   * and binds fail. That takes effect on the next query rather than on a
-   * reconciliation run, which is what SCIM deprovisioning would have bought us.
-   *
-   * Clerk webhooks must never set this - identity events say nothing about
-   * whether an invoice cleared.
-   */
-  active: boolean("active").notNull().default(false),
+    /**
+     * The subscription gate, and the reason this is not derived from Clerk.
+     *
+     * Signing up is not the same as paying. An inactive account is INVISIBLE:
+     * filterMailbox stops returning it, Stalwart refuses mail for the address,
+     * and binds fail. That takes effect on the next query rather than on a
+     * reconciliation run, which is what SCIM deprovisioning would have bought us.
+     *
+     * Clerk webhooks must never set this - identity events say nothing about
+     * whether an invoice cleared.
+     */
+    active: boolean("active").notNull().default(false),
 
-  /**
-   * The tenant whose domain this mailbox is on, once mailboxes are sold to
-   * anyone but us.
-   *
-   * ⚠ NULLABLE, AND NOT YET WRITTEN. i10's own mailboxes on i10.tech predate
-   * tenancy and have no owner row; a NOT NULL column would have to invent one.
-   * It is here now because the table is empty now - adding a column to a
-   * populated projection means a backfill against Clerk, and adding it later is
-   * the only version of this change that costs anything.
-   *
-   * Not a foreign key to `core.tenants`: authd holds SELECT on this schema and
-   * nothing else, and an FK would make its inserts depend on a table it cannot
-   * see. The reference is enforced by the API, which owns both sides.
-   */
-  tenantId: uuid("tenant_id"),
+    /**
+     * The tenant whose domain this mailbox is on, once mailboxes are sold to
+     * anyone but us.
+     *
+     * ⚠ NULLABLE, AND NOT YET WRITTEN. i10's own mailboxes on i10.tech predate
+     * tenancy and have no owner row; a NOT NULL column would have to invent one.
+     * It is here now because the table is empty now - adding a column to a
+     * populated projection means a backfill against Clerk, and adding it later is
+     * the only version of this change that costs anything.
+     *
+     * Not a foreign key to `core.tenants`: authd holds SELECT on this schema and
+     * nothing else, and an FK would make its inserts depend on a table it cannot
+     * see. The reference is enforced by the API, which owns both sides.
+     */
+    tenantId: uuid("tenant_id"),
 
-  /**
-   * Clerk's own `updated_at` for this user, and the column does two jobs.
-   *
-   * authd serves it to Stalwart as `pwdChangeTime` (attrSecretChanged), which
-   * Stalwart compares to decide when cached OAuth tokens are stale. Clerk
-   * publishes no password-specific timestamp, so this is the closest available
-   * signal - and it errs safely: it moves on any profile change, invalidating
-   * tokens MORE often than strictly needed, never less. A password change that
-   * failed to move it would leave tokens minted under the old password valid.
-   *
-   * It is also the ordering guard. Webhook delivery is unordered, so a write is
-   * applied only when the incoming value is at least the stored one; otherwise
-   * a delayed older event would overwrite a newer state.
-   */
-  clerkUpdatedAt: timestamp("clerk_updated_at", { withTimezone: true }),
+    /**
+     * The storage an owner or admin allocated to this mailbox, in bytes.
+     *
+     * ⚠ OUR DATABASE IS THE SOURCE OF TRUTH, and Stalwart's `maxDiskQuota` is a
+     * copy of it (mail/quota.ts). On a plan workspace the allocations of all its
+     * inboxes sum to at most the plan's prepaid storage; on PAYG one is an
+     * optional cap. Null means none: PAYG uncapped, or an inbox that predates
+     * allocation on a plan workspace (reported as `unallocated`, and given the
+     * high default quota so nothing live bounces).
+     *
+     * ⚠ POSITIVE, OR NULL, NEVER ZERO. Whether Stalwart reads a quota of 0 as
+     * "none" or as "unlimited" was not probed, so zero is not a value we send.
+     */
+    storageAllocation: bigint("storage_allocation", { mode: "number" }),
 
-  /**
-   * Set when a company's directory switched the person off (#344): the mailbox
-   * still EXISTS and still receives mail, but nobody can log in to it.
-   *
-   * ⚠ NOT `active`, AND THAT IS THE POINT. `active` makes an account invisible
-   * (no delivery, no bind); suspension must keep delivering. authd refuses the
-   * bind for a row with this set and answers every search as before.
-   *
-   * ⚠ ONE WRITER: mailboxes/store.ts. The projection's upsert must never name
-   * this column, or a profile edit would lift a suspension.
-   */
-  suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    /**
+     * Clerk's own `updated_at` for this user, and the column does two jobs.
+     *
+     * authd serves it to Stalwart as `pwdChangeTime` (attrSecretChanged), which
+     * Stalwart compares to decide when cached OAuth tokens are stale. Clerk
+     * publishes no password-specific timestamp, so this is the closest available
+     * signal - and it errs safely: it moves on any profile change, invalidating
+     * tokens MORE often than strictly needed, never less. A password change that
+     * failed to move it would leave tokens minted under the old password valid.
+     *
+     * It is also the ordering guard. Webhook delivery is unordered, so a write is
+     * applied only when the incoming value is at least the stored one; otherwise
+     * a delayed older event would overwrite a newer state.
+     */
+    clerkUpdatedAt: timestamp("clerk_updated_at", { withTimezone: true }),
 
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-})
+    /**
+     * Raised to kill every cached password verification for this person, on every
+     * Stalwart pod at once.
+     *
+     * authd remembers a verified password for hours (`AUTHD_CRED_CACHE_TTL`) and
+     * compares this column on every hit, so bumping it is the instant way to make
+     * the next bind ask the identity provider again. That is the only reason the
+     * cache can be that long.
+     *
+     * ⚠ FOR REVOCATIONS THAT LEAVE THE ROW ACTIVE AND DO NOT MOVE
+     * `clerk_updated_at`. A password change in Clerk already moves that, and a
+     * deleted or deactivated row is turned away before the cache is consulted, so
+     * neither needs this. Raise it with `raiseCredentialEpoch`, never with a bare
+     * UPDATE: the increment has to be one statement or two writers can lose one.
+     *
+     * Only ever compared for equality, so it can be bumped by any amount.
+     */
+    credentialEpoch: bigint("credential_epoch", { mode: "number" })
+      .notNull()
+      .default(0),
+
+    /**
+     * Set when a company's directory switched the person off (#344): the mailbox
+     * still EXISTS and still receives mail, but nobody can log in to it.
+     *
+     * ⚠ NOT `active`, AND THAT IS THE POINT. `active` makes an account invisible
+     * (no delivery, no bind); suspension must keep delivering. authd refuses the
+     * bind for a row with this set and answers every search as before.
+     *
+     * ⚠ ONE WRITER: mailboxes/store.ts. The projection's upsert must never name
+     * this column, or a profile edit would lift a suspension.
+     */
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "accounts_storage_allocation_positive",
+      sql`${t.storageAllocation} is null or ${t.storageAllocation} > 0`,
+    ),
+  ],
+)
 
 export const aliases = authd.table(
   "aliases",
@@ -147,20 +194,54 @@ export const groups = authd.table(
     name: text("name").primaryKey(),
     email: text("email").unique(),
     description: text("description"),
+
+    /**
+     * The workspace a team inbox belongs to.
+     *
+     * ⚠ NULLABLE, AND A NULL GROUP IS NOT A TEAM INBOX. Every group the API
+     * writes has an owner; the column is nullable for the same reason
+     * `accounts.tenant_id` is, and a team inbox is found by this column, never
+     * by the shape of the name. Not a foreign key, for the reason given there.
+     */
+    tenantId: uuid("tenant_id"),
+
     /**
      * The directory group this list was made from (#344), or null for any other
      * group. The foreign key is the backstop: a group deleted by its directory,
      * or a workspace deleted, takes its list (and the list's members) with it.
      */
     directoryGroupId: uuid("directory_group_id"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("groups_tenant_idx").on(t.tenantId),
     foreignKey({
       name: "authd_groups_directory_group_fk",
       columns: [t.directoryGroupId],
       foreignColumns: [directoryGroups.id],
     }).onDelete("cascade"),
   ],
+)
+
+/**
+ * Which messages the server has already copied into a team inbox's Sent.
+ *
+ * ⚠ THE MESSAGE-ID IS THE KEY, AND THIS IS WHAT MAKES THE COPY SAFE TO REPEAT.
+ * The pass that fills a team inbox's Sent runs on a schedule and looks back over
+ * a window, so the same sent message is seen many times. See
+ * `team-inboxes/sent-copy.ts`.
+ */
+export const groupSentCopies = authd.table(
+  "group_sent_copies",
+  {
+    groupName: text("group_name")
+      .notNull()
+      .references(() => groups.name, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull(),
+    copiedAt: timestamp("copied_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.groupName, t.messageId] })],
 )
 
 export const groupMembers = authd.table(
@@ -233,6 +314,34 @@ export const webhookEvents = authd.table("webhook_events", {
   eventId: text("event_id").primaryKey(),
   eventType: text("event_type").notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * How many failed passwords authd has forwarded to an identity provider for one
+ * person in the current window.
+ *
+ * An IdP such as Okta locks the REAL company account after about ten failures,
+ * and i10 must never be what spends them. authd counts the failures it forwards
+ * here and stops forwarding while the budget is spent. It is a table rather than
+ * memory because both Stalwart pods run an authd, and a count kept per pod would
+ * let each forward its own share.
+ *
+ * ⚠ NO PASSWORD MATERIAL, NOT EVEN A HASH. A counter and the instant its window
+ * opened, keyed by Clerk user id. Anything derived from the password stays in
+ * authd's memory (`internal/credcache`).
+ *
+ * ⚠ THE ONLY TABLE IN `authd` THAT THE `authd` ROLE WRITES. Everything else is
+ * the API's; 0138 grants authd INSERT and UPDATE on this one table and nothing
+ * more. Not a foreign key to `accounts`: a budget outliving a re-created account
+ * is harmless, and the role has no business depending on that table's rows.
+ *
+ * Inert for Clerk, whose verify_password was measured not to feed lockout. It is
+ * here ahead of the first provider that needs it.
+ */
+export const bindFailureBudget = authd.table("bind_failure_budget", {
+  clerkUserId: text("clerk_user_id").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull(),
 })
 
 export const accountsRelations = relations(accounts, ({ many }) => ({

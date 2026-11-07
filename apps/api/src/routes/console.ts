@@ -8,6 +8,8 @@ import type { ConsoleDeps } from "./console/deps.js"
 import { notWired } from "./console/http.js"
 import { mountAccount } from "./console/account.js"
 import { mountTeam } from "./console/team.js"
+import { mountTeamInboxes } from "./console/team-inboxes.js"
+import { mountMailboxStorage } from "./console/mailbox-storage.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountTemplates } from "./console/templates.js"
@@ -248,6 +250,8 @@ export function createConsole(deps?: ConsoleDeps) {
    */
   mountAccount(app, d)
   mountTeam(app, d)
+  mountTeamInboxes(app, d)
+  mountMailboxStorage(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)

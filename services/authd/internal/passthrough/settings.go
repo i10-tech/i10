@@ -8,10 +8,17 @@
 // find the one entry for the address, bind as that entry with the password
 // given. Success is that last bind and nothing else.
 //
-// There is no mailbox password, no cache of a success and no fallback. A
-// connection without pass-through has no IMAP, and an outage anywhere on this
-// path is "unavailable" to the mail client - never "wrong password", and never
-// a question for Clerk.
+// There is no mailbox password stored here and no fallback. A connection
+// without pass-through has no IMAP, and an outage anywhere on this path is
+// "unavailable" to the mail client - never "wrong password", and never a
+// question for Clerk.
+//
+// The walk is a verify.Verifier (verifier.go), so everything the bind path does
+// for a provider applies to it: the credential cache, the shared failure budget
+// and the identical-retry memory. A success is remembered by internal/credcache
+// under this verifier's name, which carries the connection id, and not by
+// anything in this package; the settings Cache below holds the company's
+// settings, never a password or a bind result.
 package passthrough
 
 import (

@@ -18,12 +18,17 @@ type Account struct {
 	Active         bool
 	ClerkUpdatedAt *time.Time
 
+	// CredentialEpoch is `authd.accounts.credential_epoch`, raised by the API to
+	// invalidate every cached verification for this person on every pod. Only
+	// ever compared for equality; see credcache.
+	CredentialEpoch int64
+
 	// Managed is true when an SSO connection controls this account (#344).
-	// ⚠ A MANAGED ACCOUNT IS NEVER SENT TO CLERK'S verify_password, and never
-	// served from the credential cache: its password belongs to the company's
-	// directory. ManagedConnection names the connection whose pass-through
-	// answers its binds; it is empty when the connection is gone, which authd
-	// refuses rather than falling back to Clerk.
+	// ⚠ A MANAGED ACCOUNT IS NEVER SENT TO CLERK'S verify_password: its password
+	// belongs to the company's directory, and the resolver answers it with the
+	// pass-through verifier or a refusal, never Clerk. ManagedConnection names
+	// the connection whose pass-through answers its binds; it is empty when the
+	// connection is gone, which authd refuses rather than falling back to Clerk.
 	Managed           bool
 	ManagedConnection string
 
@@ -66,4 +71,7 @@ type Store interface {
 
 	// GroupsForMember lists the groups an account belongs to.
 	GroupsForMember(ctx context.Context, clerkUserID string) ([]Group, error)
+
+	// GroupsByName resolves groups by their directory name, the cn of their DN.
+	GroupsByName(ctx context.Context, names []string) ([]Group, error)
 }

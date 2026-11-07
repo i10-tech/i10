@@ -391,7 +391,10 @@ describe("the risk engine at accept (#170)", () => {
   it("refuses a held workspace before the quota, the suppression list or a write", async () => {
     const checkQuota = mock(async () => ({ status: "ok" as const }))
     const { deps, persist, suppressedFor } = ops({
-      sendingHeld: async () => ({ why: "unusual sending activity" }),
+      sendingHeld: async () => ({
+        why: "unusual sending activity",
+        scope: "api" as const,
+      }),
     })
     const outcome = await accept({
       ...deps,
@@ -406,7 +409,7 @@ describe("the risk engine at accept (#170)", () => {
   it("checks the SES pause first: the provider's reason is the one to fix first", async () => {
     const { deps } = ops({
       sendingPaused: async () => ({ cause: "bounces" }),
-      sendingHeld: async () => ({ why: "x" }),
+      sendingHeld: async () => ({ why: "x", scope: "api" as const }),
     })
     expect((await accept(deps)).status).toBe("paused")
   })

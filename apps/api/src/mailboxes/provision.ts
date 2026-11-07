@@ -1,5 +1,6 @@
 import type { CreateMailbox, Mailbox } from "@repo/contracts"
 import type { ClerkUser } from "../projection/clerk-user.js"
+import type { StorageAllocations } from "./allocation.js"
 
 /**
  * Giving a person a mailbox.
@@ -103,6 +104,21 @@ export interface ProvisionDeps {
   /** `mailboxes`. Passed in so the core owes nothing to the metering package. */
   featureId: string
   now?: () => Date
+  /**
+   * Allocation and the pool (B3). Without it a mailbox is created as before and
+   * a request for storage is refused, since saving one with nothing to check it
+   * against is how a pool is overfilled.
+   */
+  storage?: StorageAllocations
+  /**
+   * Whether this person is an owner or admin of the workspace that owns the
+   * mailbox's domain - the only people who may size an inbox.
+   *
+   * ⚠ ASKED ABOUT THE TENANT, NOT TAKEN FROM THE REQUEST. This route has no
+   * organization in its session, so the answer comes from the workspace the
+   * DOMAIN belongs to, which is the one whose pool the mailbox would draw on.
+   */
+  canAllocate?: (userId: string, tenantId: string) => Promise<boolean>
 }
 
 export type ProvisionOutcome =
@@ -114,6 +130,8 @@ export type ProvisionOutcome =
   /** Taken, or they already have one. */
   | { status: "conflict"; reason: string }
   | { status: "limit"; reason: string }
+  /** They asked to size the inbox and are not an owner or admin of the workspace. */
+  | { status: "forbidden"; reason: string }
 
 /** The domain half of an address, lowercased. */
 const domainOf = (address: string) =>
@@ -215,6 +233,49 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
         }
       }
 
+      // ⚠ STORAGE IS CHECKED BEFORE ANYTHING REACHES CLERK, because an address
+      // added there cannot be taken back by refusing here. Sizing an inbox is an
+      // owner or admin's act, so a member who sends `storage_allocation` is
+      // refused rather than ignored. On a prepaid plan the allocation is
+      // required: the pool is the sum of every inbox's share, so an inbox with
+      // none would sit outside it. This read is the fast refusal; the write
+      // below re-checks under a lock, which is the real one.
+      const requested = input.storage_allocation
+      if (!deps.storage) {
+        if (requested !== undefined) {
+          return {
+            status: "rejected",
+            reason: "Storage allocation is not configured on this deployment.",
+          }
+        }
+      } else {
+        if (requested !== undefined && !(await deps.canAllocate?.(userId, tenantId))) {
+          return {
+            status: "forbidden",
+            reason: "Only an owner or admin of the workspace can allocate storage.",
+          }
+        }
+
+        const model = await deps.storage.model(tenantId)
+        if (model.kind === "pool") {
+          if (requested === undefined) {
+            return {
+              status: "rejected",
+              reason:
+                "Your plan's storage is a pool an owner or admin splits across " +
+                "inboxes. Ask one to set up this mailbox with a storage allocation.",
+            }
+          }
+          const { pool } = await deps.storage.overview(tenantId)
+          if (requested > (pool.remaining ?? 0)) {
+            return {
+              status: "limit",
+              reason: "That is more storage than is left in your pool.",
+            }
+          }
+        }
+      }
+
       await deps.identity.addVerifiedAddress({ userId, address })
 
       // ⚠ RE-READ RATHER THAN PATCHED LOCALLY. The projection derives the
@@ -238,7 +299,36 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
         }
       }
 
-      const mailbox = await deps.directory.activate(userId)
+      // ⚠ WITH AN ALLOCATION, ACTIVATING AND ALLOCATING ARE ONE WRITE under the
+      // pool lock, so the inbox is never live outside the pool and two creations
+      // cannot both take the last of it. Without one there is nothing to
+      // allocate: on pay as you go the inbox carries the default quota, and the
+      // reconcile gives it that.
+      if (requested !== undefined) {
+        const saved = await deps.storage!.allocate({
+          tenantId,
+          address,
+          bytes: requested,
+          activate: true,
+        })
+        if (saved.status === "over_pool") {
+          return {
+            status: "limit",
+            reason: "That is more storage than is left in your pool.",
+          }
+        }
+        if (saved.status !== "ok") {
+          return {
+            status: "rejected",
+            reason: "The mailbox could not be created. Try again.",
+          }
+        }
+      }
+
+      const mailbox =
+        requested !== undefined
+          ? await deps.directory.current(userId)
+          : await deps.directory.activate(userId)
       if (!mailbox) {
         return {
           status: "rejected",

@@ -47,6 +47,46 @@ tofu plan -out=tfplan
 `stacks/bootstrap` has no backend - it runs on local state and skips the
 `init -backend-config` line.
 
+Everything a stack needs at run time is in Doppler `prod_tofu`:
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (the `i10-tofu-state-rw` token),
+`CLOUDFLARE_API_TOKEN`, and `TF_ENCRYPTION`. Export those four on psl-vps (see
+below for why there) and nothing else is required. Doppler is not installed on
+the box, so from a workstation pipe them over ssh's stdin, which keeps them out
+of argv and off the box's disk:
+
+```bash
+{ doppler secrets download --project i10 --config prod_tofu --no-file --format json \
+    | python3 -c 'import json, shlex, sys; d = json.load(sys.stdin)
+for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "CLOUDFLARE_API_TOKEN", "TF_ENCRYPTION"):
+    print(f"export {k}={shlex.quote(d[k])}")'
+  echo 'cd <checkout>/infra/tofu/stacks/<stratum> && tofu plan -out=tfplan'
+} | ssh psl-vps bash -s
+```
+
+⚠ **NOT `--format env` AND A LINE FILTER.** `TF_ENCRYPTION` is multi-line HCL,
+so grepping the env output keeps its first line and the shell dies on an
+unterminated quote. JSON plus `shlex.quote` carries it whole.
+
+### State is encrypted (#360)
+
+Both state objects in `i10-tofu-state` (`data/global.tfstate`,
+`dns/global.tfstate`) are AES-GCM ciphertext, keyed by a PBKDF2 passphrase that
+lives only in `TF_ENCRYPTION`. `enforced = true` for state and plan, so a run
+without it fails instead of writing plaintext. Turned on 2026-11-06; until then
+the state was plain JSON while this file described encryption.
+
+⚠ **LOSE THE PASSPHRASE AND THE STATE IS GONE.** There is no recovery. `data`
+comes back from its import blocks; `dns` would have to be re-imported record by
+record from `record_ids`. Doppler is the only copy, so a rotation is: add a new
+`key_provider` beside the old one as a `fallback`, run `tofu apply
+-refresh-only` per stack, then drop the old key.
+
+A new stack that starts with existing plaintext state migrates the same way:
+add `method "unencrypted" "migrate" {}` as the state `fallback`, without
+`enforced`, run `tofu apply -refresh-only` (it changes no infrastructure and
+rewrites the state), check the object now has `encrypted_data`, then remove the
+fallback.
+
 **Apply is a human action**, deliberately. `tofu.yml` formats, validates and
 plans; it never applies. A DNS mistake on a mail domain is a deliverability
 incident, not a rollback.

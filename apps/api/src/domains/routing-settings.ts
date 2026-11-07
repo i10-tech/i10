@@ -2,15 +2,14 @@ import { sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 
 /**
- * Publishing the two environment-held routing inputs where Stalwart can read
- * them.
+ * Publishing the environment-held mailbox routing inputs where Stalwart can
+ * read them.
  *
  * ⚠ THE MAILBOX LEVER RUNS INSIDE POSTGRES AND CANNOT SEE OUR PODS' ENVIRONMENT.
  * `core.mailbox_route` is called by Stalwart's `MtaOutboundStrategy` expression
- * to decide where a domain's human mail goes, and the rule needs four inputs:
- * the domain's override and the tenant's plan, which are rows, and `SES_ENABLED`
- * and `METERING_FREE_PLAN_ID`, which are not. This copies the second pair into
- * `core.routing_settings` so one rule has one answer.
+ * to decide where a domain's human mail goes. The domain's override is a row;
+ * `SES_ENABLED`, `SES_RELAY_ENABLED`, and `MAIL_DOMAINS` are environment values
+ * this copies into `core.routing_settings` so one rule has one answer.
  *
  * ⚠ THE ENVIRONMENT STAYS THE AUTHORED SOURCE. Nobody edits that row by hand;
  * it is overwritten on every boot from `env`. Editing it directly works until
@@ -35,7 +34,8 @@ export interface RoutingSettings {
    * domain must keep leaving by our own MTA.
    */
   sesRelayEnabled: boolean
-  freePlanId: string
+  /** Our code-defined mailbox domains. Mirrors the lowercased `MAIL_DOMAINS`. */
+  mailDomains: string[]
 }
 
 /**
@@ -53,15 +53,27 @@ export async function publishRoutingSettings(
   db: Database,
   settings: RoutingSettings,
 ): Promise<void> {
+  // A JS array interpolation expands into a PostgreSQL ROW, not a text array.
+  // JSON keeps it one parameter, then Postgres reconstructs a proven `text[]`.
+  const mailDomains = JSON.stringify(settings.mailDomains)
   await db.execute(sql`
     insert into core.routing_settings
-      (id, ses_enabled, ses_relay_enabled, free_plan_id, updated_at)
+      (id, ses_enabled, ses_relay_enabled, mail_domains, updated_at)
     values
-      (true, ${settings.sesEnabled}, ${settings.sesRelayEnabled}, ${settings.freePlanId}, now())
+      (
+        true,
+        ${settings.sesEnabled},
+        ${settings.sesRelayEnabled},
+        (
+          select coalesce(array_agg(domain), '{}'::text[])
+            from jsonb_array_elements_text(${mailDomains}::jsonb) as domains(domain)
+        ),
+        now()
+      )
     on conflict (id) do update
       set ses_enabled       = excluded.ses_enabled,
           ses_relay_enabled = excluded.ses_relay_enabled,
-          free_plan_id      = excluded.free_plan_id,
+          mail_domains      = excluded.mail_domains,
           updated_at        = now()
   `)
 }

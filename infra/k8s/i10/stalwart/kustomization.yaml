@@ -4,7 +4,13 @@ namespace: i10-prod
 
 resources:
   - database.yaml
-  - statefulset.yaml
+  # The edge node (every listener, every task) and the internal node (JMAP
+  # only), both built from node/statefulset.yaml. See internal/kustomization.yaml.
+  - node
+  - internal
+  - redis.yaml
+  # Stalwart's own recursive resolver, so blocklist queries are not refused (B2).
+  - resolver
   - service.yaml
   - networkpolicy.yaml
   - cert-reload.yaml

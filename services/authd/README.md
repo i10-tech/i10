@@ -24,13 +24,14 @@ check at request time:
 ```
 Apple Mail ──IMAP──▶ Stalwart ──LDAP search──▶ authd ──▶ Postgres projection
                           │                                (0 Clerk calls)
-                          └────LDAP bind─────▶ authd ──▶ credential cache (60s)
-                                                          └▶ Clerk verify_password
+                          └────LDAP bind─────▶ authd ──▶ credential cache (2h)
+                                                          └▶ verifier (Clerk verify_password)
                                                              (only on a miss)
 ```
 
 That is the path for an ordinary account. An account an SSO connection manages
-takes a different one, below.
+takes the same path with a different verifier: its company's directory instead
+of Clerk (see "Managed accounts" below).
 
 Searches are answered entirely from a local projection of Clerk, maintained by
 webhook. Only the bind reaches Clerk. That split is load-bearing: Clerk allows
@@ -40,14 +41,42 @@ It also buys the thing the OIDC directory could not do - `filterMailbox`
 resolves a recipient **on demand**, so an account that has never signed in still
 accepts mail. That limitation was what forced pre-creating every mailbox.
 
+## Verifiers
+
+A bind never talks to Clerk directly. `internal/verify` defines the seam: a
+`Verifier` checks one password against one identity provider, and a `Resolver`
+picks the verifier for an account. Today there are two: Clerk, for every account
+no SSO connection manages, and the company's own LDAP directory (`passthrough`),
+for the ones one does. The resolver is `passthrough.ManagedResolver`; choosing a
+provider is its job and not `handleBind`'s.
+
+Every verifier answers with the same tri-state outcome, and the third state is
+the one that matters:
+
+| Outcome       | Meaning                     | LDAP                      |
+| ------------- | --------------------------- | ------------------------- |
+| `Verified`    | the provider said yes       | `success` (0)             |
+| `Rejected`    | the provider said no        | `invalidCredentials` (49) |
+| `Unavailable` | the provider did not answer | **`unavailable` (52)**    |
+
+A verifier also has a stable `Name()` (`clerk`, or `passthrough:<connection id>`),
+its own `Timeout()` and an
+optional failure `Budget()`. The name is mixed into every cached credential, so a
+workspace that later switches provider can never be answered from an entry the
+old provider minted. A resolver that cannot decide is `unavailable`, never
+`invalidCredentials`.
+
+Clerk has no budget: its `verify_password` was measured not to feed lockout. A
+company's directory has one, below.
+
 ## The credential cache
 
-A bind is one HTTPS round trip to Clerk, measured at roughly a second against
-production. Mail clients do not bind once: Apple Mail opens several connections
-to set up an account and reconnects constantly after that, so reading your own
-mail meant paying that second over and over. `internal/credcache` remembers a
-**verified** password for 60 seconds, which collapses a client's connection
-burst to a single Clerk call.
+A bind is one HTTPS round trip to the provider, measured at roughly a second for
+Clerk. Mail clients do not bind once: Apple Mail opens several connections to set
+up an account and reconnects constantly after that, so reading your own mail
+meant paying that second over and over. `internal/credcache` remembers a
+**verified** password for **two hours** (`AUTHD_CRED_CACHE_TTL`), which collapses
+a client's connection burst, and its all-day reconnects, to a handful of calls.
 
 ⚠ **It costs a property this service used to have.** `clerkauth` says authd holds
 no password material of any kind. It now holds one HMAC per recently
@@ -55,33 +84,120 @@ authenticated user, under a key generated at startup, in memory, never
 persisted, and dead the moment the process restarts. That is weak material, but
 it is material, and it is stated here rather than left to be discovered.
 
-What makes 60 seconds defensible is that two other things are unaffected:
+⚠ **Two hours is defensible only because revocation does not wait for it.** The
+timer is the backstop for a revocation nobody signalled. Everything below cuts a
+cached password off at the very next bind:
 
 - **Deactivation is not cached.** The projection lookup runs BEFORE the cache,
   so a suspended, unpaid or deprovisioned account is refused on the very next
   bind. The cache only ever short-circuits the password check.
-- **A password change invalidates it.** Each entry records the account's
+- **A change in Clerk invalidates it.** Each entry records the account's
   `clerk_updated_at` and stops matching when it moves. Clerk publishes no
   password-specific timestamp, so this fires on any profile change - more often
   than strictly needed, never less, which is the only direction an
   authentication cache may err in. The same reasoning already governs what authd
   serves Stalwart as `pwdChangeTime`.
+- **The credential epoch invalidates it for everything else.**
+  `authd.accounts.credential_epoch` is a counter in Postgres, so both Stalwart
+  pods see it. Each entry records the epoch it was minted under and a mismatch
+  deletes it. The API raises it (`raiseCredentialEpoch` in
+  `apps/api/src/projection/credential-epoch.ts`) for a revocation that leaves the
+  row active and does not move `clerk_updated_at`. authd reads the column in the
+  same query that already loads the account, so checking it costs nothing.
+- **The provider is part of the entry.** The verifier name is in the MAC.
 
 Only `Verified` is ever stored. Caching a rejection would leave a corrected
 password broken for the rest of the TTL and would let one failed attempt
 suppress a real one; caching `unavailable` would be caching the absence of an
-answer.
+answer. (The one remembered refusal is the failure budget's, below, and it lives
+minutes, not hours.)
 
-The cache is consulted **after** the projection lookup and **before** the
-throttle. Both halves are asserted by tests. Before, because the limiter exists
-to protect the Clerk request budget and a hit spends none of it - otherwise a
-client opening six connections at once would be throttled for calls it never
-made.
+The bind order is a security property, and tests assert it:
 
-`AUTHD_CRED_CACHE_TTL=0` disables it. The config refuses anything above five
-minutes: past that this stops being a latency optimisation and becomes a policy
-statement about how long a revoked credential stays live, which does not belong
-in an environment variable nobody reviews.
+```
+projection lookup (suspension included) -> resolve verifier -> cache -> flight ->
+identical-failure memory -> per-DN throttle -> budget reserve -> verify ->
+release or keep -> cache store
+```
+
+The cache is consulted **after** the projection lookup and **before** everything
+else. Before, because a hit spends no provider call, no throttle token and no
+budget slot - a client opening six connections at once is not throttled for calls
+it never made, and a person whose budget is spent can still read mail with the
+password that already works.
+
+`AUTHD_CRED_CACHE_TTL=0` disables it. The config refuses anything above three
+hours: past that the timer is doing real security work again, which does not
+belong in an environment variable nobody reviews.
+
+## One verification per burst
+
+Concurrent binds with the same (account, verifier, password) share a single
+verification (`internal/inflight`). It applies to every verifier, Clerk included,
+because it changes no outcome - it only stops N connections spending N throttle
+tokens and N provider calls for one answer.
+
+The key is an HMAC under a per-process key, never the raw password. The work runs
+on its own goroutine under its own timeout, so a bind whose deadline passes
+returns `unavailable` for itself and changes nothing for the others - and the
+verification, and the budget release it owes, still finish. This is why it is not
+`x/sync/singleflight`, which would hand the first caller's cancellation to every
+follower.
+
+## The failure budget
+
+Some providers lock the REAL account after a few failures (Okta: about ten, and a
+locked account answers exactly like a wrong password). i10 must never be what
+spends them. A verifier with a `Budget{Max, Window}` gets this protection; Clerk
+has none, so none of it runs for Clerk. The company directory verifier has one,
+**3 per 15 minutes** (`passthrough.FailureBudget`), because Active Directory and
+its kin lock the real account too.
+
+- **Shared.** Both Stalwart pods run an authd, so the count is the table
+  `authd.bind_failure_budget` (`clerk_user_id`, `window_start`, `count`). It holds
+  no password material of any kind. It is the one table the `authd` role may
+  write, through `INSERT, UPDATE` granted in migration 0138.
+- **Reserve, then forward.** Before a password is forwarded, one upsert takes a
+  slot: it restarts an expired window, otherwise raises the count only while it is
+  below `Max`. Concurrent binds on any number of pods cannot forward more than
+  `Max`; see the comment on the statement in `internal/budgetstore` for why.
+- **Release or keep.** A `Verified` or `Unavailable` outcome gives its slot back,
+  because neither is a failure the provider counted. `Rejected` keeps it. A
+  success does not reset the window: whether Okta resets its own counter on
+  success is unprobed, so we stay conservative.
+- **Spent.** The bind is answered locally with LDAP `busy` (51) and the logged
+  reason `failure_budget_spent`, without calling the provider, until the window
+  passes. A cache hit still succeeds.
+- **Fail closed.** If the budget store cannot be reached, the answer is
+  `unavailable` and the password is NOT forwarded.
+- **Identical retries.** A phone retries its stale saved password every few
+  seconds. authd remembers, in memory, a keyed hash of the last few refused
+  passwords per account for the length of the window, and answers an identical
+  retry `invalidCredentials` locally with no provider call and no slot. Each
+  record is bound to the account's `credential_epoch` and `clerk_updated_at`, so
+  a password reset clears it.
+
+## Timeouts
+
+Stalwart's LDAP Directory gives up on authd after **15 s** (`timeout` in
+`infra/k8s/i10/stalwart/config/plan.ndjson`; it was 5 s, which an Okta password
+grant measured at one to seven seconds could not meet). authd must answer before
+that, so:
+
+| What                       | Value | Where                                              |
+| -------------------------- | ----- | -------------------------------------------------- |
+| Stalwart directory         | 15 s  | `plan.ndjson`                                      |
+| authd operation            | 14 s  | `ldapsrv.DefaultOpTimeout` (`MaxTimeout + 2s`)     |
+| Longest verifier           | 12 s  | `verify.MaxTimeout`, clamped per bind              |
+| One budget reserve/release | 1 s   | `budgetOpTimeout`                                  |
+| Clerk                      | 5 s   | `AUTHD_CLERK_TIMEOUT`, refused above 12 s          |
+| Company directory          | 10 s  | `passthrough.VerifyTimeout`: settings fetch + walk |
+| Pass-through settings call | 5 s   | `AUTHD_API_TIMEOUT`, refused above 12 s            |
+| LDAP read/write deadline   | 30 s  | `main.go`; above both, so an answer can be written |
+
+The two seconds above the verifier cover the projection lookup and the budget
+reserve and release. If a verification is slower than that, the bind is answered
+`unavailable` at 14 s and the work finishes in the background.
 
 ### Not built: stale-while-unavailable
 
@@ -92,7 +208,7 @@ on a third party for access to your own inbox.
 The shape: a second, longer window (perhaps 15 minutes) whose entries are served
 **only** when Clerk answers `Unavailable`, never when Clerk is reachable and
 says no. That turns an outage into degraded-but-working for recently active
-users while leaving the normal-operation revocation window at 60 seconds.
+users while leaving the normal-operation revocation window short.
 
 It is a different feature answering a different question, and it wants evidence
 about how often Clerk is actually unavailable before the risk is worth taking.
@@ -101,9 +217,8 @@ about how often Clerk is actually unavailable before the risk is worth taking.
 
 An account a company's SSO connection manages (sso.md 2.3) has no Clerk
 password: its company took it away, and its password belongs to the company's
-directory. So authd **never** sends such an account to Clerk's `verify_password`
-and **never** answers it from the credential cache. Per connection it does one
-of two things:
+directory. So authd **never** sends such an account to Clerk's `verify_password`.
+Per connection it does one of two things:
 
 - **LDAP pass-through** to the company's own LDAP server (Okta LDAP Interface,
   Google Secure LDAP, Entra Domain Services, AD, JumpCloud). One password, theirs.
@@ -113,23 +228,38 @@ of two things:
 
 There is no mailbox password and no ROPC.
 
+The directory is a `verify.Verifier` (`passthrough.Verifier`, named
+`passthrough:<connection id>`), behind the same bind path as Clerk:
+
 ```
-Stalwart ──LDAP bind──▶ authd ──▶ projection lookup  (active? managed? by which connection?)
+Stalwart ──LDAP bind──▶ authd ──▶ projection lookup  (active? suspended? managed? by which connection?)
                                     │
                     not managed ────┴──── managed
                          │                   │
-                  cache / Clerk        throttle ─▶ settings (API, cached ≤60s)
-                  (as above)                         │
-                                           resolve + vet host ─▶ dial the vetted IP
-                                           TLS (ldaps | StartTLS, verified) ─▶ service bind
-                                           search: exactly one entry ─▶ bind as that entry
+                    verifier: clerk     verifier: passthrough:<connection>
+                         │                   │
+                         └──── credential cache ─▶ flight ─▶ identical-failure memory
+                               ─▶ throttle ─▶ failure budget (3 / 15 min, managed only)
+                               ─▶ verify:
+                                    settings (API, cached ≤60s)
+                                    resolve + vet host ─▶ dial the vetted IP
+                                    TLS (ldaps | StartTLS, verified) ─▶ service bind
+                                    search: exactly one entry ─▶ bind as that entry
 ```
+
+**Choosing the verifier does no I/O.** `ManagedResolver` reads the projection row
+only: not managed is Clerk; managed by a connection is the directory verifier for
+that connection; managed by a connection that is gone, or on an authd with no
+`AUTHD_API_URL`, is a refusal (`managed_no_connection`,
+`passthrough_not_configured`). Whether the connection has pass-through switched
+on is learned from the settings API inside `Verify`, where the verifier's own
+timeout bounds it.
 
 **How authd knows.** The API mirrors `identity.managed_accounts` into
 `authd.managed_accounts` in the same transaction as every claim, move, release
-and forget, and `AccountByUID` reads it in the same query as the account. It is
-a separate table rather than a column on `accounts` because an account is
-managed before it has a mailbox row.
+and forget, and `AccountByUID` reads it in the same query as the account and its
+`credential_epoch`. It is a separate table rather than a column on `accounts`
+because an account is managed before it has a mailbox row.
 
 **Where the settings come from.** `POST /internal/authd/passthrough` on the API,
 authenticated by `AUTHD_API_SECRET` (constant-time compare, 401 otherwise),
@@ -140,7 +270,7 @@ escaped) and the service account. The API holds them sealed with the
 connection's other secrets and lets an admin enable them only after a setup test
 passed in the last 24 hours.
 
-**The bind**, in this order and no other:
+**The walk**, in this order and no other:
 
 1. An empty password is refused before any network call.
 2. The host is resolved and **every** address must be public: loopback,
@@ -157,21 +287,28 @@ passed in the last 24 hours.
 5. Bind as that entry with the password given. Success is that bind and nothing
    else.
 
-Every timeout is bounded: dial 5s, each operation 5s, the whole walk 15s.
+Every step is bounded: dial 5s, each operation 5s, and the whole of it, settings
+fetch included, by `passthrough.VerifyTimeout` (10s, under `verify.MaxTimeout`).
 
-| Directory / path                                                                                               | LDAP answer            |
-| -------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| the person's own bind succeeds                                                                                 | `success`              |
-| their bind returns 49, no entry for the address, or several                                                    | `invalidCredentials`   |
-| connection has no pass-through, or it is disabled                                                              | `invalidCredentials`   |
-| API unreachable, host blocked or unresolvable, dial or TLS failure, service bind or search fails, bad settings | **`unavailable` (52)** |
-| local throttle exceeded                                                                                        | `busy` (51)            |
+| Directory / path                                                                                               | Outcome       | LDAP answer            | Budget slot |
+| -------------------------------------------------------------------------------------------------------------- | ------------- | ---------------------- | ----------- |
+| the person's own bind succeeds                                                                                 | `Verified`    | `success`              | given back  |
+| their bind returns 49, no entry for the address, or several                                                    | `Rejected`    | `invalidCredentials`   | **kept**    |
+| connection has no pass-through, or it is disabled                                                              | `Rejected`    | `invalidCredentials`   | kept        |
+| API unreachable, host blocked or unresolvable, dial or TLS failure, service bind or search fails, bad settings | `Unavailable` | **`unavailable` (52)** | given back  |
+| budget spent                                                                                                   | -             | `busy` (51)            | -           |
+| local throttle exceeded                                                                                        | -             | `busy` (51)            | -           |
 
 The service bind failing is `unavailable`, not `invalidCredentials`: it says
 something about our settings, not about the person, and a mail client told
 otherwise prompts for a password that is fine. The unmanaged path is untouched:
 it keeps working while the API is down, and a managed account is never answered
 by Clerk, outage or not.
+
+A connection with pass-through switched off still spends a slot per refused
+attempt, because the verifier only learns it is off after the slot is taken. The
+answer is no either way; after three attempts it reads `busy` instead of
+`invalidCredentials` until the window passes.
 
 **What is cached, for how long, and why.**
 
@@ -181,14 +318,18 @@ by Clerk, outage or not.
   pass-through or rotating the service secret takes up to a minute to reach
   authd. It holds a service secret in the clear in this process for that long,
   and nowhere else.
-- **A pass-through success: nothing.** The credential cache is for Clerk
-  verifications, keyed by the account's `clerk_updated_at`, which moves when
-  _Clerk_ changes the user. It cannot see the company's directory change a
-  password or switch a person off, so a cached success would outlive both. The
-  directory is asked at every bind; the cost is one round trip per IMAP
-  connection, bounded by the throttle (which stays, because a mail client
-  retrying a stale password counts against the company's own lockout).
-- **A rejection or an outage:** never.
+- **A pass-through success:** never cached. The verifier caps the credential
+  cache at zero (`verify.CacheLimit`), so every bind asks the directory.
+
+  ⚠ **Nothing tells authd that a company's directory changed a password.** There
+  is no event hook into Active Directory, so a cached success would keep the old
+  password opening IMAP for the whole `AUTHD_CRED_CACHE_TTL`. The long cache is
+  for providers whose password changes reach authd (Clerk's `clerk_updated_at`,
+  an IdP's event hooks raising `credential_epoch`). The flight still collapses a
+  client's simultaneous connections into one directory bind.
+
+- **A rejection or an outage:** never cached. A rejection is remembered only as
+  the failure budget's identical-retry memory (minutes, in memory).
 
 The log carries reason codes (`user_not_found`, `ambiguous_entry`,
 `user_bind_rejected`, `host_blocked`, `tls_failed`, ...), never the password,
@@ -198,8 +339,8 @@ the service secret, a filter or a DN the directory returned.
 
 A mailbox a company's directory switched off has `authd.accounts.suspended_at`
 set and stays `active`. Searches return it, so mail keeps arriving; every bind is
-refused with `invalidCredentials` (`mailbox_suspended`) BEFORE the credential
-cache, Clerk or the pass-through is consulted.
+refused with `invalidCredentials` (`mailbox_suspended`) BEFORE the verifier is
+chosen, so before the credential cache, Clerk or the pass-through is consulted.
 
 ## The one rule you must not break
 
@@ -278,12 +419,12 @@ Worth reporting upstream.
 | `AUTHD_DATABASE_URL`        | -                          | The projection. Goes through PgBouncer.              |
 | `AUTHD_CLERK_SECRET_KEY`    | -                          |                                                      |
 | `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                      |
-| `AUTHD_CLERK_TIMEOUT`       | `5s`                       |                                                      |
+| `AUTHD_CLERK_TIMEOUT`       | `5s`                       | Must be positive and at most `12s`.                  |
 | `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                   |
-| `AUTHD_CRED_CACHE_TTL`      | `60s`                      | Verified passwords only. `0` disables; max `5m`.     |
+| `AUTHD_CRED_CACHE_TTL`      | `2h`                       | Verified passwords only. `0` disables; max `3h`.     |
 | `AUTHD_API_URL`             | -                          | The API, for pass-through settings. Both or neither. |
 | `AUTHD_API_SECRET`          | -                          | Same value as the API's. 32+ characters.             |
-| `AUTHD_API_TIMEOUT`         | `5s`                       |                                                      |
+| `AUTHD_API_TIMEOUT`         | `5s`                       | Must be positive and at most `12s`.                  |
 | `AUTHD_LOG_LEVEL`           | `info`                     |                                                      |
 
 ## Layout
@@ -292,8 +433,13 @@ Worth reporting upstream.
 cmd/authd            entrypoint, signal handling, readiness
 internal/config      env loading, the loopback guard
 internal/directory   the LDAP view: entries, DNs, filter evaluation
-internal/clerkauth   verify_password and the status mapping
-internal/passthrough managed accounts: settings client, host guard, the LDAP walk
+internal/verify      the Verifier / Resolver / BudgetStore seam, Outcome
+internal/clerkauth   the Clerk verifier: verify_password and its status mapping
+internal/passthrough the company-directory verifier and ManagedResolver: settings
+                     client, host guard, the LDAP walk
+internal/credcache   verified-password cache and the remembered refusals
+internal/inflight    one verification for concurrent identical binds
+internal/budgetstore the shared failure budget in Postgres
 internal/projection  the Clerk read model (Store interface + Postgres)
 internal/ldapsrv     Bind and Search handlers
 internal/throttle    per-DN token bucket
