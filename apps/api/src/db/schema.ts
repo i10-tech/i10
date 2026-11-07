@@ -4,6 +4,7 @@ import {
   boolean,
   check,
   index,
+  integer,
   pgSchema,
   primaryKey,
   text,
@@ -115,6 +116,27 @@ export const accounts = authd.table(
      */
     clerkUpdatedAt: timestamp("clerk_updated_at", { withTimezone: true }),
 
+    /**
+     * Raised to kill every cached password verification for this person, on every
+     * Stalwart pod at once.
+     *
+     * authd remembers a verified password for hours (`AUTHD_CRED_CACHE_TTL`) and
+     * compares this column on every hit, so bumping it is the instant way to make
+     * the next bind ask the identity provider again. That is the only reason the
+     * cache can be that long.
+     *
+     * ⚠ FOR REVOCATIONS THAT LEAVE THE ROW ACTIVE AND DO NOT MOVE
+     * `clerk_updated_at`. A password change in Clerk already moves that, and a
+     * deleted or deactivated row is turned away before the cache is consulted, so
+     * neither needs this. Raise it with `raiseCredentialEpoch`, never with a bare
+     * UPDATE: the increment has to be one statement or two writers can lose one.
+     *
+     * Only ever compared for equality, so it can be bumped by any amount.
+     */
+    credentialEpoch: bigint("credential_epoch", { mode: "number" })
+      .notNull()
+      .default(0),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -206,6 +228,34 @@ export const webhookEvents = authd.table("webhook_events", {
   eventId: text("event_id").primaryKey(),
   eventType: text("event_type").notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * How many failed passwords authd has forwarded to an identity provider for one
+ * person in the current window.
+ *
+ * An IdP such as Okta locks the REAL company account after about ten failures,
+ * and i10 must never be what spends them. authd counts the failures it forwards
+ * here and stops forwarding while the budget is spent. It is a table rather than
+ * memory because both Stalwart pods run an authd, and a count kept per pod would
+ * let each forward its own share.
+ *
+ * ⚠ NO PASSWORD MATERIAL, NOT EVEN A HASH. A counter and the instant its window
+ * opened, keyed by Clerk user id. Anything derived from the password stays in
+ * authd's memory (`internal/credcache`).
+ *
+ * ⚠ THE ONLY TABLE IN `authd` THAT THE `authd` ROLE WRITES. Everything else is
+ * the API's; 0138 grants authd INSERT and UPDATE on this one table and nothing
+ * more. Not a foreign key to `accounts`: a budget outliving a re-created account
+ * is harmless, and the role has no business depending on that table's rows.
+ *
+ * Inert for Clerk, whose verify_password was measured not to feed lockout. It is
+ * here ahead of the first provider that needs it.
+ */
+export const bindFailureBudget = authd.table("bind_failure_budget", {
+  clerkUserId: text("clerk_user_id").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull(),
 })
 
 export const accountsRelations = relations(accounts, ({ many }) => ({
