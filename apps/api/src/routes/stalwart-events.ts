@@ -1,6 +1,13 @@
 import { Hono } from "hono"
 import { ingestEvent, type EventOps, type Logger } from "../webhooks/events.js"
 import {
+  ingestAccountEvent,
+  notifyQuotaReached,
+  type AccountEventOps,
+  type QuotaReached,
+} from "../webhooks/stalwart-account.js"
+import {
+  interpretStalwartAccountEvent,
   interpretStalwartEvent,
   verifyStalwartSignature,
   type StalwartEventBatch,
@@ -39,6 +46,10 @@ import {
 
 export interface StalwartWebhookDeps {
   events: EventOps
+  /** Failed sign-ins and full mailboxes, which are not about any message. */
+  accounts: AccountEventOps
+  /** Defaults to logging; the place to send the workspace its notice. */
+  notifyQuotaReached?: (n: QuotaReached) => Promise<void>
   log: Logger
   /** The `signatureKey` configured on Stalwart's WebHook object. */
   secret: string
@@ -90,12 +101,46 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
       return c.json({ ok: true }, 200)
     }
 
+    const couldNotRecord = () =>
+      c.json(
+        {
+          statusCode: 500,
+          name: "internal_server_error",
+          message: "Could not record the event.",
+        },
+        500,
+      )
+
     const events = batch.events ?? []
     let recorded = 0
     let queued = 0
     let ignored = 0
 
     for (const event of events) {
+      // ⚠ A MAILBOX'S EVENTS ARE NOT A MESSAGE'S, AND ARE HANDLED APART. They
+      // write no `message_events` row and fan out to no customer endpoint, so
+      // they take their own path rather than a branch inside `ingestEvent`.
+      // The same rule applies to them: a failure is a 500 and a replay.
+      const account = interpretStalwartAccountEvent(event)
+      if (account) {
+        try {
+          const outcome = await ingestAccountEvent(account, {
+            ...deps.accounts,
+            log: deps.log,
+            notifyQuotaReached: deps.notifyQuotaReached ?? notifyQuotaReached(deps.log),
+          })
+          if (outcome === "recorded") recorded++
+          if (outcome === "ignored") ignored++
+        } catch (err) {
+          deps.log.error(
+            { err, type: account.type },
+            "failed to ingest a Stalwart event",
+          )
+          return couldNotRecord()
+        }
+        continue
+      }
+
       const normalised = interpretStalwartEvent(event)
       // Not an event we act on, or not one of our messages - Stalwart's queue
       // carries mailbox mail and its own reports through the same path.
@@ -127,21 +172,14 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
           { err, messageId: normalised.messageId, type: normalised.type },
           "failed to ingest a Stalwart event",
         )
-        return c.json(
-          {
-            statusCode: 500,
-            name: "internal_server_error",
-            message: "Could not record the event.",
-          },
-          500,
-        )
+        return couldNotRecord()
       }
     }
 
     if (recorded > 0 || ignored > 0) {
       deps.log.info(
         { received: events.length, recorded, ignored, queued },
-        "ingested Stalwart delivery events",
+        "ingested Stalwart events",
       )
     }
 

@@ -64,3 +64,19 @@ export const PAGE_COPY = {
       "Write emails in the editor or upload React Email files, then send them by id or alias. Nothing changes what is going out until it is published, and any earlier version can be made live again.",
   },
 } as const
+
+/**
+ * Descriptions for each settings page, keyed by href.
+ */
+export const SETTINGS_COPY: Record<string, string> = {
+  "/settings": "Your workspace's name, logo and identifiers.",
+  "/settings/team": "Who can use this workspace, and what each of them can do.",
+  "/settings/sso": "Your team signs in with the company account they already have.",
+  "/settings/security":
+    "Session limits, second factor, allowed networks and security logging.",
+  "/settings/billing": "Your plan, payment method and invoices.",
+  "/settings/usage":
+    "What this workspace has sent and holds, against its plan's limits.",
+  "/settings/unsubscribe-page":
+    "What your recipients see when they follow an unsubscribe link.",
+}

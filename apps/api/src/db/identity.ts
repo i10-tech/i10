@@ -25,7 +25,7 @@ import { joinDomains, tenants } from "./core.js"
  * ⚠ ITS OWN SCHEMA, AND THE SAME TENANT BOUNDARY AS `core`. Every table carries
  * `tenant_id` and a workspace policy on `app.tenant_id`, and `assertRlsSubject`
  * checks this schema as it checks `core`. The grants for `i10_api` are the one
- * hand-made part (migration 0134, `drizzle-kit generate --custom`): Drizzle
+ * hand-made part (migration 0140, `drizzle-kit generate --custom`): Drizzle
  * does not model GRANT, and 0002's default privileges only cover `core`.
  *
  * ⚠ EVERY REFERENCE TO A CONNECTION OR A PROOF CARRIES THE TENANT TOO, as a

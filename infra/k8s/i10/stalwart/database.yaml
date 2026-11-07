@@ -1,23 +1,29 @@
 # Stalwart's own database, inside the shared CNPG cluster.
 #
 # ⚠ ITS OWN DATABASE, NOT ITS OWN SCHEMA IN `i10`. Stalwart creates and migrates
-# its own tables on upgrade, and it is pre-1.0 - its schema moves. Sharing a
-# database with the transactional product would mean one server's migration can
-# take a lock, or fail, against tables the other owns. Separating them now also
-# keeps the door open to moving Stalwart to its own Cluster later without a data
-# migration, which was the stated design intent.
+# its own tables on upgrade, and its schema moves. Sharing a database with the
+# transactional product would mean one server's migration can take a lock, or
+# fail, against tables the other owns. Separating them also keeps the door open
+# to moving Stalwart to its own Cluster later without a data migration, which
+# was the stated design intent.
 #
 # The cluster bootstraps only the `i10` database; this adds the second one
 # declaratively (CNPG 1.30, databases.postgresql.cnpg.io/v1).
+#
+# ⚠ `stalwart_v1`, BECAUSE A MAJOR UPGRADE CAN NEED A NEW STORE. Stalwart 1.0
+# could not open the 0.16 store `stalwart`, so #365 copied it here with
+# `stalwart-migrate` and then dropped the old one. The next upgrade that needs a
+# copy goes into a third database the same way: add it beside this one, migrate,
+# and only then remove this.
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
-  name: i10-stalwart-db
+  name: i10-stalwart-v1-db
   namespace: i10-prod
 spec:
   cluster:
     name: i10-platform
-  name: stalwart
+  name: stalwart_v1
   owner: stalwart
 
   # ⚠ RETAIN, NOT DELETE. `delete` would drop the database when this object is

@@ -326,7 +326,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
           async sendingHeld(tenantId: string) {
             const [row] = await withTenant(opts.db, tenantId, (tx) =>
               tx
-                .select({ category: sendingHolds.category })
+                .select({ category: sendingHolds.category, scope: sendingHolds.scope })
                 .from(sendingHolds)
                 .where(eq(sendingHolds.tenantId, tenantId))
                 .limit(1),
@@ -336,6 +336,7 @@ export function acceptDatabaseOps(opts: SendPathOptions): AcceptOps {
                   why:
                     CATEGORY_TEXT[row.category as Category] ??
                     "unusual sending activity",
+                  scope: row.scope,
                 }
               : null
           },

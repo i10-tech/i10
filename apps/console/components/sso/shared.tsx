@@ -107,8 +107,8 @@ export function useSsoAttempt() {
 }
 
 /** A value read once on mount through an action, with a way to set it from a write's answer. */
-export function useRemote<T>(load: () => Promise<ActionResult<T>>) {
-  const [data, setData] = React.useState<T | null>(null)
+export function useRemote<T>(load: () => Promise<ActionResult<T>>, initial?: T | null) {
+  const [data, setData] = React.useState<T | null>(initial ?? null)
   const [failed, setFailed] = React.useState<RemoteFailure | null>(null)
   const loader = React.useRef(load)
   React.useEffect(() => {
@@ -124,8 +124,10 @@ export function useRemote<T>(load: () => Promise<ActionResult<T>>) {
   }, [])
 
   React.useEffect(() => {
-    void reload()
-  }, [reload])
+    if (initial === undefined) {
+      void reload()
+    }
+  }, [reload, initial])
 
   return { data, setData, failed, reload }
 }

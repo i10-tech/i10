@@ -19,44 +19,46 @@ import (
 
 	ldap "github.com/vjeantet/ldapserver"
 
-	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
-	"github.com/i10-tech/i10/services/authd/internal/passthrough"
+	"github.com/i10-tech/i10/services/authd/internal/inflight"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
+	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
 
-// Verifier is the password oracle. In production it is *clerkauth.Client.
-type Verifier interface {
-	Verify(ctx context.Context, userID, password string) (clerkauth.Outcome, error)
-}
-
-// PassThrough answers a managed account's bind from its company's directory
-// (#344). In production it is *passthrough.Service.
-type PassThrough interface {
-	Bind(ctx context.Context, connectionID, email, password string) passthrough.Result
-}
+// DefaultOpTimeout bounds one LDAP operation, and it is sized against the two
+// timeouts on either side of it. See verify.MaxTimeout for the arithmetic:
+// Stalwart gives up at 15s, a verifier gets at most 12s, and this is 14s, so the
+// bind always answers - `unavailable`, never silence - before Stalwart stops
+// listening.
+const DefaultOpTimeout = verify.MaxTimeout + 2*time.Second
 
 type Options struct {
 	BaseDN            string
 	ServiceBindDN     string
 	ServiceBindSecret string
 	Store             projection.Store
-	Verifier          Verifier
-	Limiter           *throttle.Limiter
-	Logger            *slog.Logger
 
-	// CredCache short-circuits the Clerk call for a password verified in the
+	// Resolver picks the verifier for an account. Required for user binds.
+	Resolver verify.Resolver
+
+	// Budget counts failures forwarded to providers that have a failure budget.
+	// It may be nil while every verifier's Budget() is nil, as it is for Clerk;
+	// a budgeted verifier with no store is refused rather than forwarded
+	// unprotected.
+	Budget verify.BudgetStore
+
+	Limiter *throttle.Limiter
+	Logger  *slog.Logger
+
+	// CredCache short-circuits the provider call for a password verified in the
 	// last TTL. Nil disables it, and a nil *credcache.Cache is safe to call, so
 	// the bind path needs no branch of its own.
 	CredCache *credcache.Cache
 
-	// PassThrough serves managed accounts. Nil means none is configured, and a
-	// managed account's bind is then refused - never sent to Verifier.
-	PassThrough PassThrough
-
 	// OpTimeout bounds the work behind a single LDAP operation - the projection
-	// query, and for a bind the Clerk call as well.
+	// query, and for a bind the verifier call as well. Defaults to
+	// DefaultOpTimeout.
 	OpTimeout time.Duration
 }
 
@@ -65,10 +67,12 @@ type Server struct {
 	serviceBindDN     string
 	serviceBindSecret []byte
 	store             projection.Store
-	verifier          Verifier
+	resolver          verify.Resolver
+	budget            verify.BudgetStore
 	limiter           *throttle.Limiter
 	credCache         *credcache.Cache
-	passthrough       PassThrough
+	rejections        *credcache.Rejections
+	flights           *inflight.Group[bindAnswer]
 	log               *slog.Logger
 	opTimeout         time.Duration
 }
@@ -80,17 +84,19 @@ func New(opts Options) *Server {
 	}
 	timeout := opts.OpTimeout
 	if timeout <= 0 {
-		timeout = 10 * time.Second
+		timeout = DefaultOpTimeout
 	}
 	return &Server{
 		baseDN:            opts.BaseDN,
 		serviceBindDN:     opts.ServiceBindDN,
 		serviceBindSecret: []byte(opts.ServiceBindSecret),
 		store:             opts.Store,
-		verifier:          opts.Verifier,
+		resolver:          opts.Resolver,
+		budget:            opts.Budget,
 		limiter:           opts.Limiter,
 		credCache:         opts.CredCache,
-		passthrough:       opts.PassThrough,
+		rejections:        credcache.NewRejections(),
+		flights:           inflight.New[bindAnswer](),
 		log:               log,
 		opTimeout:         timeout,
 	}

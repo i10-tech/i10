@@ -6,6 +6,7 @@ import { Button } from "@repo/ui/components/button/button"
 import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { Time } from "@/components/time"
 import {
   deprovisionedPeople,
@@ -111,14 +112,14 @@ export function DeprovisionedKeysPanel({
                   {open === person.user_id ? "Hide keys" : "Show keys"}
                 </Button>
               </div>
-              {open === person.user_id && (
+              <Reveal show={open === person.user_id} spacing="pt-3">
                 <PersonKeys
                   keys={person.keys}
                   abilities={abilities}
                   onRotate={(key) => setRotating({ userId: person.user_id, key })}
                   onRevoke={(key) => setRevoking({ userId: person.user_id, key })}
                 />
-              )}
+              </Reveal>
             </li>
           ))}
         </ul>

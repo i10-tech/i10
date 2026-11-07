@@ -150,7 +150,12 @@ function WorkspaceProfile({
     }
   }
 
-  const logo = org.hasImage ? org.imageUrl : undefined
+  /*
+   * ⚠ CLERK'S IMAGE EVEN WITHOUT AN UPLOAD (2026-11-04), as the switcher and
+   * the settings picker show it, so one workspace has one picture everywhere.
+   * The letters are `Avatar`'s fallback when it cannot load.
+   */
+  const logo = org.imageUrl
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
@@ -189,15 +194,22 @@ function WorkspaceProfile({
               // Finished, as a saved name is: the card closes.
               setOpen(false)
             }}
-            onRemove={async () => {
-              const result = await removeWorkspaceLogo()
-              if (!result.ok) {
-                toastError("Could not remove the logo", { description: result.error })
-                return
-              }
-              await org.reload().catch(() => {})
-              announceWorkspacesChanged()
-            }}
+            // Only an uploaded logo can be removed; Clerk's default cannot.
+            onRemove={
+              org.hasImage
+                ? async () => {
+                    const result = await removeWorkspaceLogo()
+                    if (!result.ok) {
+                      toastError("Could not remove the logo", {
+                        description: result.error,
+                      })
+                      return
+                    }
+                    await org.reload().catch(() => {})
+                    announceWorkspacesChanged()
+                  }
+                : undefined
+            }
           >
             <FloatingInput
               id="workspace-name"

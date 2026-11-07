@@ -39,6 +39,8 @@ import type { MembersDeps } from "../../console/members.js"
 import type { RolesDeps } from "../../console/roles.js"
 import type { AccountDeps } from "../../console/account-deletion.js"
 import type { IdentityConsoleDeps } from "./identity.js"
+import type { TeamInboxes } from "../../team-inboxes/service.js"
+import type { StorageAllocations } from "../../mailboxes/allocation.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -237,6 +239,16 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * page and /usage show no member counts.
    */
   members?: MembersDeps
+  /**
+   * Shared addresses the workspace's people read and send from (B8). Optional;
+   * without it the routes answer 501.
+   */
+  teamInboxes?: TeamInboxes
+  /**
+   * Splitting the workspace's storage across its inboxes (B3), for owners and
+   * admins. Optional; without it the routes answer 501.
+   */
+  mailboxStorage?: StorageAllocations
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

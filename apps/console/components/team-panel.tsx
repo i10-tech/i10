@@ -405,11 +405,9 @@ function Members({
                 <span className="flex min-w-0 items-center gap-3">
                   <Avatar
                     name={name}
-                    src={
-                      member.publicUserData?.hasImage
-                        ? member.publicUserData.imageUrl
-                        : undefined
-                    }
+                    // Clerk's picture, its default without an upload; letters
+                    // only when it cannot load, as every avatar here.
+                    src={member.publicUserData?.imageUrl}
                   />
                   <span className="min-w-0">
                     <span className="flex items-center gap-2 text-sm">
@@ -652,31 +650,36 @@ function Invitations({
         </p>
       )}
       <MotionList>
-        {(pending ?? []).map((invitation) => (
-          <MotionItem key={invitation.id}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0">
-                <span className="block truncate text-sm">{invitation.email}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {expiresLine(new Date(invitation.expires_at), now)} ·{" "}
-                  {roleLabel(invitation.role)}
-                </span>
-              </span>
-              <RowMenu visible label={invitation.email}>
-                <DropdownMenuItem
-                  className="text-danger"
-                  onSelect={() => setWithdrawing(invitation)}
-                >
-                  Withdraw invitation
-                </DropdownMenuItem>
-              </RowMenu>
-            </div>
+        {pending && pending.length === 0 && !open ? (
+          <MotionItem key="empty">
+            <p className="pt-1.5 text-sm text-muted-foreground">
+              No pending invitations.
+            </p>
           </MotionItem>
-        ))}
+        ) : (
+          (pending ?? []).map((invitation) => (
+            <MotionItem key={invitation.id}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm">{invitation.email}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {expiresLine(new Date(invitation.expires_at), now)} ·{" "}
+                    {roleLabel(invitation.role)}
+                  </span>
+                </span>
+                <RowMenu visible label={invitation.email}>
+                  <DropdownMenuItem
+                    className="text-danger"
+                    onSelect={() => setWithdrawing(invitation)}
+                  >
+                    Withdraw invitation
+                  </DropdownMenuItem>
+                </RowMenu>
+              </div>
+            </MotionItem>
+          ))
+        )}
       </MotionList>
-      {pending && pending.length === 0 && !open && (
-        <p className="pt-1.5 text-sm text-muted-foreground">No pending invitations.</p>
-      )}
 
       <Reveal show={open} spacing="pt-3">
         <form
@@ -717,16 +720,20 @@ function Invitations({
               setExpiry(next)
             }}
           />
-          {tooMany && capacity && (
-            <p className="-mt-3 text-xs text-danger">
-              {capacity.free === 0
+          <Reveal show={Boolean(tooMany && capacity)} spacing="pt-0">
+            <p className="text-xs text-danger">
+              {capacity?.free === 0
                 ? "This workspace is full."
-                : `Only ${capacity.free} ${capacity.free === 1 ? "spot is" : "spots are"} free.`}{" "}
-              To make room, {roomText(capacity.reasons)}.
+                : `Only ${capacity?.free} ${capacity?.free === 1 ? "spot is" : "spots are"} free.`}{" "}
+              To make room, {roomText(capacity?.reasons ?? [])}.
             </p>
-          )}
-          {warning && <p className="-mt-3 text-xs text-warning">{warning}</p>}
-          {error && <p className="-mt-3 text-xs text-danger">{error}</p>}
+          </Reveal>
+          <Reveal show={Boolean(warning)} spacing="pt-0">
+            <p className="text-xs text-warning">{warning}</p>
+          </Reveal>
+          <Reveal show={Boolean(error)} spacing="pt-0">
+            <p className="text-xs text-danger">{error}</p>
+          </Reveal>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
@@ -847,8 +854,6 @@ function Requests({
 
   if (!requests)
     return <p className="pt-1.5 text-sm text-muted-foreground">Loading requests…</p>
-  if (requests.length === 0)
-    return <p className="pt-1.5 text-sm text-muted-foreground">No requests to join.</p>
 
   return (
     <div className="flex flex-col gap-2">
@@ -858,54 +863,60 @@ function Requests({
         </p>
       )}
       <MotionList>
-        {requests.map((request) => (
-          <MotionItem key={request.id}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0">
-                <span className="flex items-center gap-2 text-sm">
-                  <span className="truncate">{request.email}</span>
-                  {request.full && (
-                    <Badge size="sm" tone="warning">
-                      Waiting for room
-                    </Badge>
-                  )}
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  {request.full
-                    ? `Tried to join automatically ${shortDate(new Date(request.created_at))} while the workspace was full`
-                    : `Asked ${shortDate(new Date(request.created_at))} · via ${request.via ? `@${request.via}` : atDomain(request.email)}`}
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy !== null}
-                  onClick={() => void answer(request, false)}
-                >
-                  Decline
-                </Button>
-                <Button
-                  size="sm"
-                  loading={busy === request.id}
-                  disabled={busy !== null || full}
-                  onClick={() => void answer(request, true)}
-                >
-                  Accept and notify
-                </Button>
-                <RowMenu visible label={request.email}>
-                  <DropdownMenuItem
-                    className="text-danger"
-                    disabled={busy !== null}
-                    onSelect={() => void answer(request, false, true)}
-                  >
-                    Decline and block
-                  </DropdownMenuItem>
-                </RowMenu>
-              </span>
-            </div>
+        {requests.length === 0 ? (
+          <MotionItem key="empty">
+            <p className="pt-1.5 text-sm text-muted-foreground">No requests to join.</p>
           </MotionItem>
-        ))}
+        ) : (
+          requests.map((request) => (
+            <MotionItem key={request.id}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2 text-sm">
+                    <span className="truncate">{request.email}</span>
+                    {request.full && (
+                      <Badge size="sm" tone="warning">
+                        Waiting for room
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {request.full
+                      ? `Tried to join automatically ${shortDate(new Date(request.created_at))} while the workspace was full`
+                      : `Asked ${shortDate(new Date(request.created_at))} · via ${request.via ? `@${request.via}` : atDomain(request.email)}`}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void answer(request, false)}
+                  >
+                    Decline
+                  </Button>
+                  <Button
+                    size="sm"
+                    loading={busy === request.id}
+                    disabled={busy !== null || full}
+                    onClick={() => void answer(request, true)}
+                  >
+                    Accept and notify
+                  </Button>
+                  <RowMenu visible label={request.email}>
+                    <DropdownMenuItem
+                      className="text-danger"
+                      disabled={busy !== null}
+                      onSelect={() => void answer(request, false, true)}
+                    >
+                      Decline and block
+                    </DropdownMenuItem>
+                  </RowMenu>
+                </span>
+              </div>
+            </MotionItem>
+          ))
+        )}
       </MotionList>
     </div>
   )

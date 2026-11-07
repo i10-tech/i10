@@ -5,7 +5,8 @@ mail server boots into the wrong behaviour.**
 
 ## `config.json` - the startup file
 
-Stalwart v0.16 is not a daemon driven by a large configuration file.
+Stalwart (v1.0 since #365, v0.16 before it) is not a daemon driven by a large
+configuration file.
 `config.json` contains **one object**: the
 [DataStore](https://stalw.art/docs/ref/object/data-store) telling the server
 where its database lives. Everything else - listeners, domains, DKIM
@@ -349,23 +350,271 @@ the account in the **internal** directory, and i10 runs an external LDAP
 directory, so there is nowhere for one to live. The product boundary is held by
 never surfacing the feature in i10's own UI rather than by a server setting.
 
-If that ever needs real enforcement, the mechanism is a permission denial on a
-Role, not a limit - see `/docs/auth/authorization/permissions`.
+⚠ **SO IT IS ENFORCED BY A ROLE NOW (#365).** The role `i10 User` inherits the
+built-in `b` (User) through `roleIds` and lists every `sysAppPassword*` and
+`sysApiKey*` permission in `disabledPermissions`; `Authentication` makes it the
+default user role. Inheriting instead of copying keeps every permission a later
+release adds to `b`. OAuth grants stay, because device sign-in needs them. Role
+has no name field, so the plan matches it on `description`: renaming it in the
+UI makes the next run create a second one.
 
 ## The database
 
-`config.json` points at database `stalwart`, not `i10`. The CNPG cluster
-bootstraps only `i10`, so the `stalwart` database and its role are created by
+`config.json` points at database `stalwart_v1`, not `i10`. The CNPG cluster
+bootstraps only `i10`, so Stalwart's databases and their role are created by
 `database.yaml` in the parent directory. Stalwart owns its own database
 deliberately: it manages its own schema, migrates it on upgrade, and must never
 share a migration surface with the transactional product.
+
+⚠ **THERE IS NO v0.16 STORE ANY MORE.** v1.0 cannot open a v0.16 store, so #365
+copied `stalwart` into `stalwart_v1` with `stalwart-migrate` (a hand-applied
+pod, in git until the cleanup PR), then dropped `stalwart` and the migration
+state. Going back to v0.16 is no longer possible. The next upgrade that needs a
+copy repeats the pattern: a new database beside this one, a migrate pod, and
+the old store kept until the new one has proved itself.
+
+## Upgrading to v1.0 (#365)
+
+What changed for this directory, every item found by applying the v0.16 plan to
+a scratch v1.0.3 server and by a full `stalwart-migrate` rehearsal, not read off
+the docs site:
+
+- Renamed fields: Directory `filterMailbox` → `filterRecipient`; Domain
+  `isEnabled` → `enable`; BlobStore `accessKey` → `accessKeyId`, and its custom
+  region is `{url, region}` instead of `{customEndpoint, customRegion}`;
+  NetworkListener `tlsImplicit` → `implicitTls`; MtaRoute `address` → `host`; a
+  Postgres store's `timeout` → `connectTimeout` (in `config.json` too).
+- `SenderAuth.dkimSignDomain` moved to `MtaStageData.dkimSignDomain`.
+- A listener's `maxConnections` is now nullable and inherits from
+  SystemSettings. The migration clears every v0.16 default of 8192, so the relay
+  no longer pins it.
+- `stalwart-migrate prepare` converts all of this itself. Its report for our
+  settings: 0 dropped objects, and warnings only for permissions and OIDC
+  provider fields 1.0 no longer has. After the migration the converted
+  `plan.ndjson` dry-runs as unchanged, which is the check that the two agree.
+- A Certificate's `subjectAlternativeNames` is server-set from the PEM, and the
+  CN counts. Ours names `i10.tech` and `*.i10.tech` only, so `matchOn` still
+  matches; a certificate whose CN is not among its SANs would be created twice.
+
+## The tuning pass (#365)
+
+The second half of `plan.ndjson` (Email onward) is the tuning pass approved on
+#365. The proposal lists every setting with its current value and the reason;
+what follows are the ones whose reason is not obvious from the value.
+
+- ⚠ **40 MB ON 465, 50 MB ON 25, BECAUSE OF SES.** SES refuses a message over
+  40 MB (a fixed quota) and mailbox mail relays through SES, so submission
+  stops there instead of failing at delivery. Inbound is 50 MB to match
+  `Email.maxMessageSize`, so nothing is accepted that cannot be stored.
+  `MtaStageRcpt.maxRecipients` is 50 on 465 for the same reason.
+- ⚠ **THE `rcptrate` THROTTLE IS PORT 25 ONLY.** Matched on "not 2525" it also
+  capped our own customers on 465 at 25 messages an hour to one recipient.
+  Submission has its own per-account limits instead, keyed on
+  `authenticatedAs`: 200 an hour and 1000 a day.
+- ⚠ **THE OUTBOUND BACKSTOP IS PER SENDER DOMAIN, NOT PER SENDER.** The send
+  worker's relay mail carries a unique `bounce+` envelope sender per message,
+  so a per-sender limit on it would never trigger. 2525 skips every inbound
+  check by design; this is the one limit that catches a runaway worker.
+- ⚠ **PYZOR IS OFF ON PURPOSE, AND THE MIGRATION HAD TURNED IT BACK ON.** 1.0
+  ships it off, but `prepare`'s recommended policy pins 0.16's `true`. It sends
+  a fingerprint of every inbound message and our IP to a third party.
+- ⚠ **CACHE SIZES ARE READ AT STARTUP, AND 1.0'S DEFAULTS DO NOT FIT THE POD.**
+  `messages` and `messagesLarge` default to 320 MB and 512 MB against a 1 GiB
+  limit. The plan sets 128 MB and 64 MB; restart after applying.
+- ⚠ **THE CLIENT IP COMES FROM X-Forwarded-For, ONE HOP.** Behind Traefik every
+  client looked like Traefik for bans and rate limits. Anything that can reach
+  8080 directly can therefore claim any address. Today that is every pod in
+  i10-prod (`allow-same-namespace`, which a NetworkPolicy cannot narrow), plus
+  Traefik.
+- **The cluster and the tailnet are `AllowedIp`** (10.42.0.0/16, fd42::/48,
+  100.64.0.0/10, fd7a:115c:a1e0::/48), so a burst of failures from our own
+  components can never ban them. **Bans last 30 days** instead of forever.
+- **Failure reports are off** (DMARC `ruf`, DKIM and SPF). They send message
+  headers to whoever the sender's domain names, which for a mail host is
+  personal data leaving to third parties. Aggregate reports stay on, now from
+  `i10.tech` with `postmaster@i10.tech` as the contact.
+- **MTA-STS names `mail.i10.tech` but stays `testing`.** Enforce after four
+  weeks of clean TLS reports, and only with certificate-expiry alerting in
+  place: enforcing with a broken certificate stops inbound mail.
+- **pop3s, sieve and https are deleted** by an `absent` operation, which is
+  bootstrap.sh's own (stalwart-cli has no declarative delete). It destroys
+  what matches and does nothing on later runs.
+
+- ⚠ **DNS GOES TO OUR OWN unbound, NOT THE CLUSTER'S.** `DnsResolver` is
+  `Custom` at 10.43.53.53 (`../resolver/`). Through CoreDNS and Tailscale,
+  Spamhaus and URIBL refused every query, so no message was ever scored on a
+  blocklist hit. It is one replica: while it is down, MX and SPF lookups fail
+  and mail waits in the queue rather than being misjudged.
+  ⚠ **OVER TCP, OR DANE IS OFF.** With the server set to `udp`, Stalwart's
+  startup check reports "The configured DNS resolver cannot validate DNSSEC.
+  DANE has been disabled" even though unbound validates (it sets AD for
+  queries with DO). With `tcp` the warning is gone.
+- **Search covers English, Arabic, French, German and Spanish.** Each message's
+  language is detected when it is indexed, and a language not listed is
+  processed as English. Adding one later means reindexing every message.
+
+Approved but not in the plan yet:
+
+- The Prometheus exporter and alerts: deferred, because the cluster has no
+  collector to scrape it.
+- Per-account disk quotas and the API's JMAP rate limit: both need a probe on
+  one account first.
+
+### ⚠ Blob encryption: the key must never change
+
+Message bodies, attachments, Sieve scripts and queued messages in R2 are
+encrypted with the `Blob key 2026-11` SymmetricKey (aes256Gcm), selected in
+both `Email` and `FileStorage`. The key material is `STALWART_BLOB_KEY` in
+Doppler `prod_stalwart`, read from the environment, so it is never in the
+database or a config export. Metadata, the search index and everything else in
+Postgres stay plaintext; encrypt those at the database level if needed.
+
+- ⚠ **CHANGING THE VALUE STOPS ALL MAIL.** Stalwart stores a fingerprint of the
+  key when it is created. A different value under the same name fails that
+  check, and the server then refuses to write any blob (no delivery, no
+  append) rather than write unencrypted. Never rotate it in Doppler.
+- ⚠ **LOSING THE VALUE LOSES EVERY MESSAGE.** The copy outside Doppler is the
+  only thing that survives a lost Doppler project. Restore the same value under
+  the same name and the server reads its blobs again.
+- **To rotate:** add a new variable and a new SymmetricKey, point `Email` and
+  `FileStorage` at it, reload, then run a `BlobRecode` task with
+  `encryption: {"@type": "Encrypt", "keyId": <new id>}`. Keep the old key and
+  variable until that task has finished on every shard (one
+  `store.blob-store-recoded` event per shard, 256 in all).
+- **Only the recovery admin can delete a key**, and the server cannot tell
+  whether blobs still need it. Never delete one unless a `BlobRecode` has moved
+  every blob off it.
+- New blobs are encrypted from the reload on. What was stored before was
+  converted once, with a `BlobRecode` task (#365); that is a one-off, so it is
+  not in this plan.
+
+### The encryption gateway (B14)
+
+`Encryption.gatewayEnable` is on, and `gatewayOutbound` is opportunistic: a
+message to a remote recipient whose OpenPGP key or S/MIME certificate the server
+knows leaves encrypted with that key, and everyone else gets the original. The
+server only knows keys it has harvested from signed mail that recipient sent
+us, and harvesting needs a DMARC pass from the sender's domain, so a recipient
+who gets encrypted mail has already sent us mail from a client that holds the
+private key. `Encryption.atRestEnable` is a different feature (B3 in the
+proposal) and stays off.
+
+- ⚠ **THE GATEWAY ENCRYPTS EVERY QUEUED MESSAGE, NOT ONLY MAILBOX MAIL.** It
+  runs when a message enters the queue, so the send worker's mail on 2525 would
+  be encrypted too: a customer's receipts and sign-up codes would arrive as
+  PGP/MIME with the Subject replaced by `[...]`. The policy's second rule
+  disables it for `bounce+` envelope senders, which is every message the worker
+  relays (the same test as `MtaStageRcpt.allowRelaying`). The first rule is the
+  default one, which leaves local recipients alone.
+- **It works through `ses-relay`.** The gateway removes any DKIM signature from
+  each encrypted copy and signs it again with the keys the original would use,
+  which `MtaStageData.dkimSignDomain` makes none for mail that leaves through
+  SES. SES then signs the copy as it signs everything else. SES's new
+  `Message-ID` and `Date` stay outside the encrypted part; the protected copy
+  of the headers inside it keeps the originals, so a client with RFC 9788
+  support threads the reply against the sender's Sent copy.
+- **Each keyed recipient gets its own copy and its own SMTP transaction**, about
+  a third larger than the original. A message near the 40 MB SES limit can
+  therefore be refused for an encrypted recipient only.
+- **Turning it off** is `gatewayEnable: false`. Messages already in the queue
+  keep the copies they were given at acceptance.
+
+## Blobs live in R2 (#357)
+
+Message bodies, attachments and users' Sieve scripts go to the private R2 bucket
+`i10-mail` (`BlobStore` in plan.ndjson), so the database holds metadata only and
+every Stalwart node reads the same blobs. The keys are `STALWART_S3_ACCESS_KEY`
+and `STALWART_S3_SECRET_KEY` in Doppler `prod_stalwart`, from a token scoped to
+`i10-mail` alone with Object Read and Write. The bucket is imported in
+`infra/tofu/stacks/data`.
+
+⚠ **CHANGING THE BLOB STORE DOES NOT MOVE A SINGLE BLOB.** Stalwart writes new
+blobs to the new store and looks old ones up there too, so everything written
+before the change stops being readable. The switch to R2 dropped the test mail
+that existed then. Moving it again on a server with real mail is an
+`--export`/`--import` into fresh stores (`/docs/management/maintenance/migration`),
+not a plan edit.
+
+**System Sieve scripts are not blobs.** `SieveSystemScript` (`ses-references`)
+is a settings object, and its `contents` live in the data store with the rest of
+the plan. Proven on the switch (2026-11-06): re-applying the plan rewrote the
+script and `i10-mail` stayed empty, and a relayed send afterwards still carried
+the original Message-ID in `References`. A user's own Sieve scripts (filters,
+vacation replies) are blobs, and would be lost like any message body.
+
+⚠ **THE STORE CHANGE NEEDS A RESTART, AND THE KEYS NEED ONE BEFORE THAT.** A
+setting that names an unset variable is accepted and fails at first use, which
+for the blob store is the first delivery. `bootstrap.sh` therefore refuses any
+plan that names a variable the running container lacks, and a key added to
+Doppler reaches the container only when the pod restarts.
+
+To switch, in this order:
+
+1. Create `i10-mail` by hand (location Eastern Europe, no public access, no
+   custom domain), then `tofu apply` in `stacks/data` to import it.
+2. Create the token and put both keys in Doppler `prod_stalwart`.
+3. Restart the pod (`kubectl rollout restart sts/i10-stalwart -n i10-prod`) so
+   it has the keys. Merging this plan rolls it too, through the ConfigMap hash.
+4. `./bootstrap.sh` on psl-vps: it applies `BlobStore`, reloads and restarts.
+5. Deliver a message and check that a new object is in `i10-mail` and that the
+   message reads back over JMAP.
+
+## Two nodes on one box (#358)
+
+Stalwart runs as a two-node cluster on psl-vps: `i10-stalwart-0` (edge) and
+`i10-stalwart-internal-0` (internal), both built from `node/statefulset.yaml`.
+They share Postgres (data, search), R2 (blobs) and `i10-stalwart-redis`
+(in-memory store and coordinator, `redis.yaml`). Neither holds data of its own,
+and the pod hostname is the node id, so each StatefulSet's `-0` keeps its id
+across restarts.
+
+| Node     | Listeners                    | Tasks                              | Reached through                                            |
+| -------- | ---------------------------- | ---------------------------------- | ---------------------------------------------------------- |
+| edge     | all, mail ports on hostPorts | all (no `STALWART_ROLE`)           | MX, IMAP/SMTP clients, `i10-stalwart-mail`, `i10-stalwart` |
+| internal | `http` (8080) only           | `outboundMta`, `pushNotifications` | `i10-stalwart` only                                        |
+
+⚠ **ONE NODE ON THE HOST'S MAIL PORTS, AND THAT IS NOT A CHOICE.** psl-vps is a
+single Kubernetes node and 25/465/993 are hostPorts, so a second pod claiming
+them would sit Pending. The internal node exists to take JMAP load (our API, the
+webmail) off the pod that handles mail, not to stand in for it.
+
+⚠ **THE `internal` ROLE NAMES ITS LISTENER BY REFERENCE, NOT BY ID.**
+`listenerIds` takes server ids, and a rebuilt or migrated store has new ones; a
+role naming a stale id is refused (`invalidForeignKey`), or, on a store where
+the id exists but is another listener, enables the wrong one. So the line before
+the role upserts the `http` listener by name with nothing to change, which binds
+`#http` to whatever id it has on this server, and the role writes
+`{"#http": true}`. Until #365 the plan pinned `jcrkonsmahab`, the id the 0.16
+server gave `http` at first boot.
+
+⚠ **THE SCHEDULER AND SPAM TRAINING STAY ON THE EDGE NODE.** Each node with
+`taskScheduler` queues its own copy of every periodic task, and two nodes
+training the classifier at once is unsupported. That is why the internal node
+has a role at all: without `STALWART_ROLE`, or with a role that does not exist
+yet, a node runs everything.
+
+⚠ **STORE AND ROLE CHANGES NEED EVERY NODE RESTARTED.** They are read at
+startup; the coordinator carries cache invalidations and setting reloads, not
+these. `bootstrap.sh` restarts every pod labelled
+`app.kubernetes.io/part-of=i10-stalwart`, edge first.
+
+To bring it up, in this order:
+
+1. Merge with the internal StatefulSet at `replicas: 0` (as shipped). Argo
+   starts `i10-stalwart-redis` and rolls the edge pod for its new label.
+2. `./bootstrap.sh` on psl-vps: it applies `InMemoryStore` (Redis), then
+   `Coordinator` (which Stalwart refuses while the in-memory store is local),
+   creates the `internal` role, and restarts.
+3. Raise `replicas` to 1 in `internal/kustomization.yaml` and merge.
+4. Check both nodes are `active` in `x:ClusterNode/get`, and that JMAP answers
+   with either pod deleted.
 
 ## The internal relay
 
 The send worker hands direct-route mail to the `relay` listener on **2525**, with
 **no account and no credential**. The trust is where the connection comes from:
 
-- **No hostPort** (statefulset.yaml) - nothing on the node's public addresses
+- **No hostPort** (node/statefulset.yaml) - nothing on the node's public addresses
   answers on 2525.
 - **Not in `allow-public-mail`** (networkpolicy.yaml) - traffic from outside the
   namespace cannot reach it. `allow-same-namespace` is what lets the worker in.
@@ -467,7 +716,37 @@ requires it - and Amazon drops a DSN for mail it did not send. One return path
 for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
 return path".
 
-## The mailbox lever, and the one piece that is not here yet
+### Mailbox events: `auth.failed` and `limit.quota`
+
+Two more events in the include list are about a mailbox, not a message. They
+carry `accountName`, `remoteIp` and `listenerId` and no VERP sender, so
+`apps/api/src/webhooks/stalwart-account.ts` handles them apart from the
+delivery path; they never reach a customer's webhook endpoint.
+
+| Stalwart event | What the API does                                                                    |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `auth.failed`  | one row in `core.mailbox_auth_failures`: account, workspace, address, subnet         |
+| `limit.quota`  | tells the workspace once per mailbox per UTC day (logs only until a template exists) |
+
+⚠ **Failures for an account we do not host are dropped.** Scanners try random
+usernames all day and Stalwart reports each one. An address that is not in
+`authd.accounts`, or is hosted with no workspace (i10's own mailboxes), writes
+nothing and counts as `ignored`.
+
+⚠ **They are kept out of `core.identity_events` on purpose.** Every risk reader
+there treats a row as the person's own sighting, so a failure filed there would
+make an attacker's network look familiar to the owner and link unrelated
+accounts that one brute-forcing address touched. Nothing reads
+`mailbox_auth_failures` into the score yet; `mailboxAuthFailureSummary`
+(`apps/api/src/risk/mailbox-auth.ts`) is the read.
+
+`security.authentication-ban`, `security.too-many-attempts` and
+`limit.blob-quota` are not subscribed: the first two fire off the failures
+already seen, and the blob quota is a per-upload ceiling, not a full mailbox.
+Both events are deduplicated on `authd.webhook_events` like everything else,
+since each of the two nodes posts its own copy.
+
+## The mailbox lever
 
 `MtaOutboundStrategy.route` is an expression evaluated **per recipient**, and it
 is awaited - so it can ask Postgres:
@@ -476,19 +755,30 @@ is awaited - so it can ask Postgres:
 sql_query('i10', 'SELECT core.mailbox_route($1)', [sender_domain])
 ```
 
-`core.mailbox_route` (migration 0036) returns the **name of a route**:
+⚠ **LOCAL RECIPIENTS ARE MATCHED FIRST, OR THE LEVER SENDS INTERNAL MAIL OUT.**
+The route's `match` sends `is_local_domain(rcpt_domain)` to `'local'` before the
+lookup runs. It was added on the live server by hand and found missing from
+this plan on 2026-11-05, when a dry-run showed `would change route`; applying
+the plan as it stood would have deleted it, and with `ses-relay` on, mail
+between two i10 mailboxes would have left through SES and come back over the
+internet. It is written in the STORED shape (`{"0": {...}}`, a list kept as a
+map) so the dry-run compares equal.
+
+`core.mailbox_route` (migration 0036, replaced in 0132) returns the **name of a route**:
 `mx` to deliver ourselves, `ses-relay` to hand the message to SES's SMTP
 endpoint. It applies the same rule as `resolveRoute` in the API - kill switch,
-then the domain's override, then the plan - so a plan change takes effect on the
-next message rather than the next deploy.
+then the domain's override, otherwise SES. The plan is no longer an input.
+Our own mailbox domains come from `MAIL_DOMAINS`, because they are code-defined
+rather than rows in `core.domains`.
 
 ⚠ **`sender_domain` IS THE RETURN PATH, NOT THE `From:` HEADER.** For human mail
 that is the sender's own domain, which is what this wants. For our own
 transactional mail on the direct route it is the return path, `send.<domain>` -
-which matches no row, so it answers `mx` and the worker's decision stands. That
-is not incidental: this expression sees **every** message in the queue, and
-re-routing a transactional message onto SES here would silently move it off the
-route its plan chose. The `hosts_mailboxes` join is what prevents it.
+which matches no hosted mailbox row, so it answers `mx` and the worker's
+decision stands. That is not incidental: this expression sees **every** message
+in the queue, and re-routing a transactional message onto SES here would
+silently move it off the worker's chosen route. The `hosts_mailboxes` join is
+what prevents it.
 
 ⚠ **AN UNKNOWN ROUTE NAME FALLS BACK TO MX, WHICH IS WHY THIS SHIPS SAFELY.**
 `get_route_or_default` answers `MX_GATEWAY` for a name it cannot resolve and logs
@@ -520,58 +810,95 @@ so without 0056's `GRANT USAGE ON SCHEMA core` every lookup fails - silently,
 per the above. The password comes from CNPG's `i10-stalwart-db-role`, the same
 one Stalwart's own data store already uses, so there is nothing to add to Doppler.
 
-### What is missing: `ses-relay`
+### The `ses-relay` route
 
-The `MtaRoute` is deliberately **not** in `plan.ndjson`, because it needs SES SMTP
-credentials that do not exist yet - and a plan referencing a missing environment
-variable is a plan that may not apply. Until it exists,
-`core.routing_settings.ses_relay_enabled` stays `false` and `mailbox_route`
-returns `mx` for everybody, so nothing routes to a gateway that is not there.
+The `MtaRoute` is the last line of `plan.ndjson`. It authenticates to SES's SMTP
+endpoint in eu-central-1 as the IAM user `i10-stalwart-smtp`, which can only
+`ses:SendRawEmail`. Its credentials are `SES_SMTP_USER` and `SES_SMTP_PASSWORD`
+in Doppler's `prod_stalwart`, reaching the pod through `i10-stalwart`. Until the
+lever is thrown, `core.routing_settings.ses_relay_enabled` stays `false` and
+`mailbox_route` returns `mx` for everybody.
 
-To turn the lever on, in this order:
+⚠ **SES SMTP CREDENTIALS ARE NOT AN ACCESS KEY PAIR.** The console's "Create
+SMTP credentials" derives the password from a secret key, per region; a key made
+for another region is refused.
 
-1. **Create SES SMTP credentials** in the AWS console (IAM → SES → SMTP
-   settings). These are NOT an access key pair; SES derives an SMTP password from
-   a secret key and they are not interchangeable.
-2. Put them in Doppler's Stalwart config as `SES_SMTP_USER` and
-   `SES_SMTP_PASSWORD`, so they reach the pod through `i10-stalwart`.
-3. Add this line to `plan.ndjson` and run `./bootstrap.sh`:
+⚠ **THE USERNAME CANNOT BE AN `EnvironmentVariable`.** Only `SecretKey` fields
+(`authSecret`) can name one; `authUsername` is a plain string. The username is an
+access key id, which does not belong in git, so the plan writes
+`{"@fromSecret": "SES_SMTP_USER"}` and `bootstrap.sh` replaces it with that key
+of `i10-stalwart` at apply time. The dry-run prints property names, never values.
 
-   ```json
-   {
-     "@type": "upsert",
-     "object": "MtaRoute",
-     "matchOn": ["description"],
-     "value": {
-       "ses-relay": {
-         "@type": "Relay",
-         "description": "SES SMTP relay for mailbox mail",
-         "host": "email-smtp.eu-central-1.amazonaws.com",
-         "port": 587,
-         "tls": { "@type": "StartTls" },
-         "auth": {
-           "@type": "Basic",
-           "username": {
-             "@type": "EnvironmentVariable",
-             "variableName": "SES_SMTP_USER"
-           },
-           "secret": {
-             "@type": "EnvironmentVariable",
-             "variableName": "SES_SMTP_PASSWORD"
-           }
-         }
-       }
-     }
-   }
-   ```
+⚠ **THE FIELDS ARE FLAT.** `host`, `port`, `protocol`, `implicitTls`,
+`authUsername`, `authSecret`. On v0.16 the host was `address` and the 1.0 name
+was refused; #365 renamed it. An earlier draft of this section also nested the
+rest under `tls` and `auth`. Port 587 with `implicitTls: false` is STARTTLS.
 
-   ⚠ Check the object's field names with `stalwart-cli describe MtaRoute` before
-   pasting. This block is written from the schema's shape and has not been
-   applied against a running server.
+⚠ **SES REFUSES A MESSAGE THAT ARRIVES WITH TWO `DKIM-Signature` HEADERS.**
+The first relayed messages on 2026-11-05 bounced with `554 Transaction failed:
+Duplicate header 'DKIM-Signature'`, because i10.tech's `dkimManagement` signed
+with both ed25519 and RSA. The Domain in `plan.ndjson` now lists only
+`Dkim1RsaSha256` (RSA is what every receiver verifies; ed25519 support is
+patchy), and the old `v1-ed25519-20260901` key was moved to `retiring` by hand,
+which keeps it published but stops it signing. SES adds its own i10.tech
+signature on the way out, which is allowed: it only refuses duplicates it is
+handed. A customer mailbox domain must likewise be signed by Stalwart with ONE
+key. Drop the ed25519 `_domainkey` record from the dns stack once the key is
+retired.
 
-4. Set `SES_RELAY_ENABLED=true` in Doppler's API config and roll the API. It
+⚠ **STALWART DOES NOT SIGN MAIL THAT LEAVES THROUGH SES.** SES overwrites
+`Date` and `Message-ID` on every message, so any signature Stalwart adds fails
+at the receiver even though the body hash matches. On 2026-11-05 Gmail
+reported `dkim=fail header.s=v1-rsa-20260901` both with Message-ID signed and
+with only `To:Subject:From:Date` signed. SES's own i10.tech signature is the one
+DMARC needs, and every domain `mailbox_route` sends to `ses-relay` is an SES
+identity. So `MtaStageData.dkimSignDomain` in `plan.ndjson` (it was
+`SenderAuth.dkimSignDomain` on v0.16) asks the same
+function the route asks, and signs only when the answer is not `ses-relay`.
+Mail that goes out directly keeps Stalwart's signature.
+
+Signing is decided once, when the message is accepted, and the route at each
+delivery attempt. Two gaps follow, both narrow. A lookup that fails at
+acceptance (the pooler is down) leaves the message unsigned, and if the lookup
+fails again at delivery the route falls back to MX, so the message leaves
+directly with no DKIM. Turning the relay off sends already-queued mailbox mail
+directly, also unsigned. Both land in spam at worst while DMARC is `p=none`;
+neither loses mail.
+
+⚠ **THE ORIGINAL MESSAGE-ID TRAVELS IN `References`, OR REPLIES DO NOT
+THREAD.** SES gives every message a new `Message-ID`
+(`<...-000000@eu-central-1.amazonses.com>`) and cannot be told to keep the
+original. The sender's Sent copy keeps the original, so a reply, whose
+`In-Reply-To` names SES's id, matched nothing in the sender's mailbox. SES
+leaves `References` alone, so the `ses-references` SieveSystemScript appends
+the message's own Message-ID to its `References` before it is queued, and the
+reply's `References` then names the Sent copy. `MtaStageData.script` runs it
+only for authenticated senders whose `mailbox_route` is `ses-relay`, the same
+rule as the route and the signing domain. This is the approach of
+[milter-autoref](https://github.com/jcsanyi/milter-autoref) for Postfix in front
+of SES (#354).
+
+⚠ **AN SES EMAIL-ADDRESS IDENTITY OVERRIDES ITS DOMAIN'S MAIL FROM.** SES
+applies the most specific identity it has. A hand-made `mohamed@i10.tech`
+identity with no custom MAIL FROM made SES use `amazonses.com` for that
+sender, so SPF passed unaligned while the i10.tech domain identity reported
+`send.mail.i10.tech` as `SUCCESS`. It was deleted on 2026-11-06: a verified
+domain also covers every address at it as a recipient, even in the sandbox.
+Look for address identities (`aws sesv2 list-email-identities`) before
+trusting a domain's MAIL FROM (#354).
+
+To throw the lever, in this order:
+
+1. `./bootstrap.sh --dry-run` on psl-vps. Every object should be unchanged,
+   plus one `+ would create MtaRoute ses-relay`.
+2. Restart Stalwart so the pod has `SES_SMTP_PASSWORD` - Doppler syncs the
+   Secret, but env vars never update in a running pod - then `./bootstrap.sh`.
+3. Set `SES_RELAY_ENABLED=true` in Doppler's API config and roll the API. It
    publishes the flag into `core.routing_settings` at boot; nothing reads the
    environment variable directly.
+4. Send a real message from a mailbox and read its headers: the hop after
+   `mail.i10.tech` must be `amazonses.com`. Then check Stalwart's log for
+   `Eval(Error)`, because a broken lookup falls back to MX silently.
 
 ⚠ **STEP 4 IS THE ONE THAT MOVES MAIL**, and today that means i10.tech's own
 human mail, because it is the only mailbox domain and it is on `pro`. Verify the
@@ -580,3 +907,157 @@ relay works before throwing it - `SES_RELAY_ENABLED=false` puts it straight back
 ⚠ **AND SES MUST BE ABLE TO SEND AS THOSE DOMAINS.** Relaying through SES means
 SES applies its own policy: the sending identity has to be verified there, or it
 refuses the message. A domain that only ever sent direct may not be.
+
+## The MTA hook: mailbox sends get the API's checks (B5, #380)
+
+Mail sent from a mailbox (submission on 465, through `ses-relay`) used to skip
+the checks an API send gets. `MtaHook mailboxgate` closes that: Stalwart POSTs
+each authenticated submission to `apps/api` (`/internal/mta-hook`), which answers
+with `admitSend` - **the function `acceptSend` calls for an API send**, so the
+two paths cannot drift. For a mailbox it decides the risk hold (#170) and
+nothing else: the API allowance never stops a mailbox (see below).
+
+| Answer                    | When                                             | SMTP reply  |
+| ------------------------- | ------------------------------------------------ | ----------- |
+| accept                    | allowed, or the sender has no tenant (see below) | -           |
+| reject                    | the workspace is held (`scope: all`)             | `550 5.7.1` |
+| tempfail (Stalwart's own) | the API is down, slow, or could not decide       | `451 4.3.5` |
+
+⚠ **AUTHENTICATED SUBMISSIONS ONLY, AND TWICE.** The plan's `enable` is
+`!is_empty(authenticated_as) && local_port != 25 && local_port != 2525`, so the
+hook is never consulted for inbound mail or for the send worker's relay (2525 has
+no AUTH, so `authenticated_as` is empty there anyway; the port tests are the
+second lock). The endpoint repeats it: a request with no `sasl.login` is
+accepted untouched.
+
+⚠ **A HOLD ONLY STOPS A MAILBOX WHEN ITS SCOPE IS `all`.** The score writes
+`scope: api`; only staff write `all` (risk.md, "Holds": mailboxes are not
+stopped by an automatic hold). An API send is stopped by either.
+
+⚠ **ONLY A LOGIN WE CAN PLACE IS LIMITED.** The tenant is the owner of the
+login's domain in `core.mailbox_domains()`, the key `core.mailbox_route` uses.
+Logins are mailbox addresses, so this holds even for `MAIL FROM:<>`, which an
+earlier draft waved through unchecked; the envelope sender is used only for a
+login that is not an address. i10's own addresses have no owner, so they are
+accepted untouched - staff mail never waits on a review.
+`MtaStageAuth.mustMatchSender` (default true, not set here) keeps the sender
+inside the login's own addresses as well.
+
+⚠ **THE API ALLOWANCE NEVER STOPS A MAILBOX, AND A MAILBOX NEVER SPENDS IT.**
+Mailbox mail is not a send for billing (mail-routing.md: "mailbox mail is
+billed by seats and storage and is not a send at all"), so `admitSend` skips the
+plan allowance and the free monthly line for it, and the hook records nothing:
+recording would put mailbox mail in `core.meter_events`, which `flushUsage`
+ships to Polar as `emails`. A workspace that has spent its API allowance still
+sends its people's own mail. The H1 throttles (200 an hour, 1000 a day per
+account) are the volume cap on 465. Decided by the user on 2026-11-06 (#380).
+
+**Stage and counting.** The hook is consulted at `rcpt` only. The decision needs
+the workspace and nothing else, so DATA would add nothing - and it would POST the
+whole message (up to 40 MB) as JSON into the API process for every mailbox
+send. RCPT also refuses before the client uploads a body. It is asked at **every**
+RCPT TO, not the first: the docs do not say whether a refused recipient stays in
+`envelope.to`, so skipping later ones on `to.length > 1` could wave one through
+after a refusal. It counts **one message however many recipients**, as
+`acceptSend` counts a payload and as the H1 throttles count; the answer does not
+depend on the recipient and nothing is recorded, so asking again is harmless
+(up to 50 asks a message, a few indexed reads each). The endpoint is
+stage-agnostic - it needs only the sender - so adding `data` to `stages` later
+cannot switch the check off.
+
+**Failure mode: tempfail, 3 s.** `tempFailOnError` is true and `timeout` is 3000
+ms. When the API is down, slow, mid-restart, or has the wrong secret, every
+mailbox send answers `451 4.3.5` and the client retries - nothing bounces and
+nothing is lost, but **nobody can send from a mailbox until the API is back**.
+The alternative, skipping the hook on error, would let a held
+workspace send freely for exactly as long as the API is down, which is also when
+nobody is watching. A decision is a few indexed reads, so 3 s is generous; a
+longer one only holds client connections open during an outage.
+
+⚠ **`tempFailOnError` MUST STAY TRUE.** The endpoint answers every error with a
+non-2xx status (503 unconfigured, 401 bad token, 400 unreadable body, 500
+decision threw), and it is Stalwart's `tempFailOnError` that turns those into
+a 451. Turn it off and every one of them becomes an accept. The protocol has no
+tempfail action, which is why the endpoint does not try to send one.
+
+⚠ **`STALWART_MTA_HOOK_SECRET` LIVES IN TWO PLACES, AND MUST MATCH.** Same
+shape as `STALWART_WEBHOOK_SECRET` above: the Stalwart pod reads it for
+`httpAuth` (`envFrom: secretRef i10-stalwart`) and the API pod compares it
+(`i10-api`), two Doppler configs. Stalwart sends it as `Authorization: Bearer`;
+the API compares it in constant time before reading the body. It is a plain
+token, not base64-decoded. **A mismatch reads as an outage**: every mailbox send
+tempfails. Look for `rejected an MTA hook call` in the API log and `mta-hook.error`
+in Stalwart's.
+
+To turn it on, in this order - the plan line is inert until `bootstrap.sh`
+applies it, and applied before the secret exists it tempfails all mailbox mail:
+
+1. Create `STALWART_MTA_HOOK_SECRET` (any long random string) in **both**
+   Doppler configs, the same value.
+2. Roll the API and restart Stalwart; env vars never update in a running pod.
+3. Port-forward the API and check it: `POST /internal/mta-hook` with the bearer
+   and `{"context":{"sasl":{"login":"a@b.c"}},"envelope":{"from":{"address":"a@b.c"}}}`
+   answers `{"action":"accept"}` (an address on no hosted domain), and without
+   the bearer answers 401.
+4. `./bootstrap.sh --dry-run`: the only change should be
+   `+ would create MtaHook mailboxgate`. Then `./bootstrap.sh`.
+5. Send from a mailbox and check the API log shows no `could not decide`, then
+   hold a test workspace with `scope: all` and check the send is refused `550`.
+
+To turn it off, change `enable` to `{"match": {}, "else": "false"}` and re-apply
+(the bootstrap cannot `destroy`).
+
+⚠ **THE WIRE SHAPE IS FROM THE DOCS AND HAS NOT BEEN PROBED ON OUR SERVER.**
+`apps/api/src/mail/mta-hook.ts` follows
+[the MTA hooks page](https://stalw.art/docs/mta/filter/mtahooks/) (read
+2026-11-06): the request is `{context, envelope, message}`, `context.sasl.login`
+is present only after AUTH, `envelope.from.address` from MAIL FROM on. Step 5
+above is the probe. If `sasl` is absent on an authenticated session, the hook
+accepts everything silently, so **check the first real send is actually
+decided** (a held workspace must be refused).
+
+⚠ **1.0's SSRF GUARD FOR INTERNAL ADDRESSES (U8) IS UNCHECKED FOR THIS URL.** The
+WebHook and the StoreLookup reach cluster addresses today; the hook goes to
+`i10-api.i10-prod.svc.cluster.local` the same way, but that is an inference.
+If it is blocked the symptom is `mta-hook.error` in Stalwart's log and `451` for
+every mailbox send.
+
+## Team inboxes: one role, and what is still to probe (B8, #382)
+
+A team inbox (`support@`) is a row in the directory. `apps/api` writes
+`authd.groups` and `authd.group_members`; authd already serves them as a
+`groupOfNames` (so `filterRecipient` accepts the address) and as `memberOf` on
+each member (`attrMemberOf`). Members reach it through their own sign-in:
+shared folders over IMAP, a second account over JMAP.
+
+The Sent copy is not Stalwart config: no setting copies a send-as-group message
+into the group's Sent, and Sieve cannot (the submission script has no account).
+`i10-team-sent` (a CronJob, `workloads/team-sent.yaml`) copies what members sent
+as the address, over JMAP, and is idempotent by Message-ID.
+
+⚠ **A GROUP CANNOT RECEIVE MAIL WITHOUT A ROLE, AND 1.0 GIVES IT NONE.**
+Probed on prod on 2026-11-06 with `probe-team@i10.tech`: Stalwart created the
+Group account on the first delivery, then refused that delivery with
+`security.unauthorized` (`emailReceive`) and a 550, because
+`Authentication.defaultGroupRoleIds` was empty. The plan adds the `i10 Group`
+role, which grants `emailReceive` and nothing else, and makes it the default
+group role. With that permission the message was stored in the group's mailbox.
+
+⚠ **THE GROUP'S REGISTRY NAME IS THE LOCAL PART** (`probe-team`), as a user's
+is, not the directory's full-address name. Two workspaces' `support@` share it;
+`jmap-as` tells them apart by the exact `emailAddress`.
+
+Also probed on 2026-11-06 and fine: the impersonation key may `Email/copy` from
+a member into the group's `Sent Items`; `Email/query` takes `from` and `after`
+with `inMailbox`; a member sees the group as `Shared Folders/<address>/...`
+through `memberOf` alone (after #394, which made authd answer the read of a
+group's DN that Stalwart resolves `memberOf` with); a member may send `From:`
+the group address; destroying the Group account and then the directory row
+leaves the address refused with 550.
+
+⚠ **REMOVING A MEMBER'S DIRECTORY ROW DOES NOT REVOKE THEIR ACCESS.** Stalwart
+refreshes memberships only when it looks the account up in the directory again,
+and an open mail client may not cause that for hours: access was still there 15
+minutes after the row was deleted. Clearing the group from the member's
+`memberGroupIds` in the registry revoked it at once, so the API does that first
+on every removal (`revokeGroup`) and changes the rows second.

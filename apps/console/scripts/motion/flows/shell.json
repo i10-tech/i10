@@ -1,0 +1,53 @@
+[
+  {
+    "name": "shell-settings-load",
+    "steps": [{ "do": "goto", "url": "/settings", "window": 2000 }]
+  },
+  {
+    "name": "shell-rail-switch",
+    "steps": [
+      { "do": "goto", "url": "/domains", "window": false },
+      { "do": "wait", "ms": 1000 },
+      { "do": "click", "role": "link", "name": "Emails", "window": 1500 },
+      { "do": "wait", "ms": 1000 },
+      { "do": "click", "role": "link", "name": "Contacts", "window": 1500 }
+    ]
+  },
+  {
+    "name": "shell-settings-rail",
+    "steps": [
+      { "do": "goto", "url": "/settings", "window": false },
+      { "do": "wait", "ms": 1000 },
+      { "do": "click", "role": "link", "name": "Team", "window": 1500 },
+      { "do": "wait", "ms": 1000 },
+      { "do": "click", "role": "link", "name": "Billing", "window": 1500 }
+    ]
+  },
+  {
+    "name": "shell-command-menu",
+    "steps": [
+      { "do": "goto", "url": "/settings", "window": false },
+      { "do": "wait", "ms": 1000 },
+      { "do": "click", "name": "Search and commands", "window": 1500 },
+      { "do": "press", "value": "Escape", "window": 1500 }
+    ]
+  },
+  {
+    "name": "shell-account-menu",
+    "steps": [
+      { "do": "goto", "url": "/settings", "window": false },
+      { "do": "wait", "ms": 1000 },
+      { "do": "click", "label": "Account menu for you", "window": 1500 },
+      { "do": "press", "value": "Escape", "window": 1500 }
+    ]
+  },
+  {
+    "name": "shell-theme-switch",
+    "steps": [
+      { "do": "goto", "url": "/settings", "window": false },
+      { "do": "wait", "ms": 1000 },
+      { "do": "click", "label": "Switch to light mode", "window": 1500 },
+      { "do": "click", "label": "Switch to dark mode", "window": 1500 }
+    ]
+  }
+]

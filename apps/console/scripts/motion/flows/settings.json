@@ -1,0 +1,18 @@
+[
+  {
+    "name": "general-settings-load",
+    "steps": [{ "do": "goto", "url": "/settings", "window": 2500 }]
+  },
+  {
+    "name": "billing-settings-load",
+    "steps": [{ "do": "goto", "url": "/settings/billing", "window": 2500 }]
+  },
+  {
+    "name": "usage-settings-load",
+    "steps": [{ "do": "goto", "url": "/settings/usage", "window": 2500 }]
+  },
+  {
+    "name": "unsubscribe-page-load",
+    "steps": [{ "do": "goto", "url": "/settings/unsubscribe-page", "window": 2500 }]
+  }
+]

@@ -22,6 +22,7 @@ import (
 
 	ldap "github.com/vjeantet/ldapserver"
 
+	"github.com/i10-tech/i10/services/authd/internal/budgetstore"
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/config"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
@@ -70,10 +71,10 @@ func run() error {
 	limiter := throttle.New(cfg.BindsPerMinute)
 	go sweepLoop(ctx, limiter, log)
 
-	// ⚠ A TYPED NIL IS NOT A NIL INTERFACE: Options.PassThrough must stay a
-	// true nil when pass-through is not configured, so that managed accounts
-	// are refused rather than panicking the bind.
-	var managed ldapsrv.PassThrough
+	// ⚠ A TYPED NIL IS NOT A NIL INTERFACE: ManagedResolver.Directory must stay a
+	// true nil when pass-through is not configured, so that a managed account is
+	// refused rather than panicking the bind.
+	var managed passthrough.Directory
 	if cfg.PassthroughConfigured() {
 		src, err := passthrough.NewHTTPSource(cfg.APIURL, cfg.APISecret, cfg.APITimeout)
 		if err != nil {
@@ -81,7 +82,7 @@ func run() error {
 		}
 		managed = passthrough.NewService(
 			passthrough.NewCache(src, passthrough.MaxCacheTTL),
-			&passthrough.Binder{},
+			&passthrough.Binder{TotalTimeout: passthrough.VerifyTimeout},
 		)
 		log.Info("ldap pass-through enabled for managed accounts")
 	} else {
@@ -89,6 +90,10 @@ func run() error {
 	}
 
 	srv := ldap.NewServer()
+	// Both are connection-level deadlines, reset each time a request is read, and
+	// both are deliberately well above ldapsrv.DefaultOpTimeout (14s) and
+	// Stalwart's own 15s directory timeout: a bind that takes the whole of its
+	// operation deadline must still be able to write its answer.
 	srv.ReadTimeout = 30 * time.Second
 	srv.WriteTimeout = 30 * time.Second
 	srv.Handle(ldapsrv.New(ldapsrv.Options{
@@ -96,11 +101,19 @@ func run() error {
 		ServiceBindDN:     cfg.ServiceBindDN,
 		ServiceBindSecret: cfg.ServiceBindSecret,
 		Store:             store,
-		Verifier:          clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout),
-		Limiter:           limiter,
-		CredCache:         credcache.New(cfg.CredCacheTTL),
-		PassThrough:       managed,
-		Logger:            log,
+		// An account an SSO connection manages is verified by its company's
+		// directory (#344); every other account is verified by Clerk. The choice is
+		// the Resolver's, not the bind path's, and a managed account is never
+		// asked of Clerk.
+		Resolver: &passthrough.ManagedResolver{
+			Unmanaged: clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout),
+			Directory: managed,
+			Log:       log,
+		},
+		Budget:    budgetstore.NewPostgres(store.Pool()),
+		Limiter:   limiter,
+		CredCache: credcache.New(cfg.CredCacheTTL),
+		Logger:    log,
 	}).Routes())
 
 	// The listener is created here, on this goroutine, rather than inside

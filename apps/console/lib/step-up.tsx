@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useSession } from "@clerk/nextjs"
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors"
 import { isReverificationHint } from "@clerk/shared/authorization-errors"
 import type { SessionVerificationLevel } from "@clerk/shared/types"
@@ -54,6 +55,9 @@ const StepUpContext = React.createContext<StepUp | null>(null)
 type Ask = (level: SessionVerificationLevel) => Promise<boolean>
 const AskContext = React.createContext<Ask | null>(null)
 
+/** Whether Clerk will run a sensitive account action without asking first. */
+const FreshContext = React.createContext<() => boolean>(() => true)
+
 /**
  * ⚠ WITH NO CLERK THERE IS NO WAY TO ASK, SO THIS ASKS THE API AND BELIEVES IT.
  * It cannot open a prompt, so a stale session simply fails the action with the
@@ -75,6 +79,14 @@ export function StepUpProvider({
   const [passkey, setPasskey] = React.useState(false)
   const pending = React.useRef<((proved: boolean) => void) | null>(null)
   const asked = React.useRef(0)
+  const { session } = useSession()
+  // `strict` is Clerk's window for its own account actions: 10 minutes, a
+  // second factor where the account has one (measured 2026-11-04: a 20-minute
+  // session reads moderate but not strict, and adding a passkey was refused).
+  const fresh = React.useCallback(
+    () => session?.checkAuthorization({ reverification: "strict" }) ?? true,
+    [session],
+  )
 
   const ask = React.useCallback<Ask>(
     (level) =>
@@ -141,20 +153,22 @@ export function StepUpProvider({
   return (
     <CodeReservationContext.Provider value={reserveCodeSend}>
       <AskContext.Provider value={ask}>
-        <StepUpContext.Provider value={value}>
-          {children}
-          <StepUpDialog
-            request={request}
-            onDone={(proved) => {
-              pending.current?.(proved)
-              pending.current = null
-              setRequest(null)
-            }}
-            onPasskey={setPasskey}
-          />
-          {/* The sign-in page's passkey screen, over everything - see the dialog. */}
-          <PasskeyCue open={passkey} mode="verify" />
-        </StepUpContext.Provider>
+        <FreshContext.Provider value={fresh}>
+          <StepUpContext.Provider value={value}>
+            {children}
+            <StepUpDialog
+              request={request}
+              onDone={(proved) => {
+                pending.current?.(proved)
+                pending.current = null
+                setRequest(null)
+              }}
+              onPasskey={setPasskey}
+            />
+            {/* The sign-in page's passkey screen, over everything - see the dialog. */}
+            <PasskeyCue open={passkey} mode="verify" />
+          </StepUpContext.Provider>
+        </FreshContext.Provider>
       </AskContext.Provider>
     </CodeReservationContext.Provider>
   )
@@ -178,11 +192,19 @@ function needsReverification(error: unknown): boolean {
  * `session_reverification_required`; this opens the dialog, and on success
  * runs the action again once. Closing the dialog is an answer, not a fault:
  * it resolves `null` and the caller leaves things as they were.
+ *
+ * ⚠ A SESSION ALREADY TOO OLD IS ASKED FIRST, BEFORE THE ACTION STARTS. Adding
+ * a passkey raises the passkey screen over everything as it begins; started on
+ * a stale session, Clerk refused it and our dialog opened UNDER that screen,
+ * where the only sign of it was the browser offering to fill a password
+ * (2026-11-04). The refusal path stays for when Clerk's window and ours differ.
  */
 export function useReverify() {
   const ask = React.useContext(AskContext)
+  const fresh = React.useContext(FreshContext)
   return React.useCallback(
     async <T,>(action: () => Promise<T>): Promise<T | null> => {
+      if (ask && !fresh() && !(await ask("second_factor"))) return null
       try {
         return await action()
       } catch (error) {
@@ -191,7 +213,7 @@ export function useReverify() {
         return await action()
       }
     },
-    [ask],
+    [ask, fresh],
   )
 }
 
@@ -223,6 +245,15 @@ function levelOf(hint: unknown): SessionVerificationLevel {
  */
 export function useStepUp(): StepUp {
   return React.useContext(StepUpContext) ?? withoutClerk
+}
+
+/**
+ * Whether Clerk would run one of its sensitive account actions right now
+ * without asking first - for work that can start ahead of the press, like
+ * minting the authenticator secret, and must not raise a dialog unasked.
+ */
+export function useSessionFresh() {
+  return React.useContext(FreshContext)
 }
 
 /**

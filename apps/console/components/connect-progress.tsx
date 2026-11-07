@@ -4,8 +4,10 @@ import * as React from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Check, TriangleAlert } from "lucide-react"
 import { Spinner } from "@repo/ui/components/i10/spinner"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
+import { useRetained } from "@/lib/react"
 import type { ConnectPhase } from "@/lib/dns-connect"
 
 /** Where set-up is with a connection that came back from the provider. */
@@ -48,6 +50,8 @@ export function ConnectProgress({
   const reached =
     view.phase === "failed" ? -1 : view.phase === "done" ? 3 : order.indexOf(view.phase)
   const shown = view.phase === "failed" ? rows.slice(0, 1) : rows.slice(0, reached + 1)
+  const shownError = useRetained(view.error ?? null)
+  const shownBlocked = useRetained(view.blocked.length > 0 ? view.blocked : null) ?? []
 
   return (
     <div className="mt-3 rounded-2xl border px-4 py-3.5 sm:px-5" role="status">
@@ -116,28 +120,34 @@ export function ConnectProgress({
           })}
         </AnimatePresence>
       </ul>
-      {view.phase === "failed" && view.error && (
-        <p className="mt-2 pl-7 text-sm text-muted-foreground">{view.error}</p>
-      )}
-      {view.phase === "done" && view.blocked.length > 0 && (
-        <p className="mt-2 pl-7 text-sm text-muted-foreground">
-          {view.blocked.join(", ")} already {view.blocked.length === 1 ? "has" : "have"}{" "}
+      <Reveal show={view.phase === "failed" && Boolean(view.error)} spacing="mt-2 pl-7">
+        <p className="text-sm text-muted-foreground">{shownError}</p>
+      </Reveal>
+      <Reveal
+        show={view.phase === "done" && view.blocked.length > 0}
+        spacing="mt-2 pl-7"
+      >
+        <p className="text-sm text-muted-foreground">
+          {shownBlocked.join(", ")} already {shownBlocked.length === 1 ? "has" : "have"}{" "}
           records at the names we need. Open the domain to choose whether to replace
           them.
         </p>
-      )}
-      {view.phase === "done" && view.unchecked.length > 0 && (
-        <p className="mt-2 pl-7 text-sm text-muted-foreground">
+      </Reveal>
+      <Reveal
+        show={view.phase === "done" && view.unchecked.length > 0}
+        spacing="mt-2 pl-7"
+      >
+        <p className="text-sm text-muted-foreground">
           The records are in place, but the first check did not answer. We keep checking
           on our own.
         </p>
-      )}
-      {view.phase === "done" && !verified && (
-        <p className="mt-2 pl-7 text-xs text-muted-foreground">
+      </Reveal>
+      <Reveal show={view.phase === "done" && !verified} spacing="mt-2 pl-7">
+        <p className="text-xs text-muted-foreground">
           Propagation is usually minutes and can take up to 72 hours - nothing is wrong
           yet. This updates by itself.
         </p>
-      )}
+      </Reveal>
     </div>
   )
 }

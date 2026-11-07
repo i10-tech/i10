@@ -51,6 +51,24 @@ func UIDFromDN(dn, baseDN string) string {
 	return unescapeRDNValue(strings.TrimSpace(value))
 }
 
+// GroupNameFromDN pulls the cn value out of a DN of the form
+// "cn=<value>,ou=groups,<base>", returning "" if the DN is not that shape. It
+// is the inverse of GroupDN.
+func GroupNameFromDN(dn, baseDN string) string {
+	if !UnderDN(dn, "ou=groups,"+baseDN) {
+		return ""
+	}
+	first, _, found := strings.Cut(canonDN(dn), ",")
+	if !found {
+		return ""
+	}
+	attr, value, ok := strings.Cut(first, "=")
+	if !ok || !strings.EqualFold(strings.TrimSpace(attr), "cn") {
+		return ""
+	}
+	return unescapeRDNValue(strings.TrimSpace(value))
+}
+
 // canonDN trims whitespace around each RDN separator so that
 // "uid=a, ou=people, dc=i10" and "uid=a,ou=people,dc=i10" compare equal.
 func canonDN(dn string) string {

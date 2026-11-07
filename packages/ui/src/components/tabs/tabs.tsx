@@ -122,8 +122,13 @@ export function TabsContent({ className, value, forceMount, children, ...props }
     let controls: AnimationPlaybackControls | undefined;
     const release = () => { node.style.height = ""; node.style.overflow = ""; };
     if (from !== null && Math.abs(from - to) > 1 && !reduced) {
-      if (to > from) node.style.overflow = "clip";
-      controls = animate(node, { height: [from, to] }, { ...motionTokens.spring.smooth, onComplete: release });
+      // Pinned here, before paint: the animation's first frame is a frame later, and the panel was measured once at full height in between.
+      node.style.height = `${from}px`;
+      node.style.overflow = "clip";
+      // ⚠ RETARGETED WHEN THE CONTENT CHANGES MID-FLIGHT (2026-11-04): a panel that filled in after mounting (the device list) was clipped at the height it had when measured, then snapped 234px when the animation let go. `scrollHeight` is the content's own height only while it overflows the clip, so only an overflow is followed; a shorter content reads as the box's height and would hold a shrinking panel open.
+      let target = to;
+      const follow = () => { if (node.scrollHeight <= node.clientHeight + 1) return; const natural = node.scrollHeight; if (natural <= target + 1) return; target = natural; controls = animate(node, { height: target }, { ...motionTokens.spring.smooth, onUpdate: follow, onComplete: release }); };
+      controls = animate(node, { height: [from, to] }, { ...motionTokens.spring.smooth, onUpdate: follow, onComplete: release });
     }
     panelHeightRef.current = controls && from !== null ? from : to;
     const observer = new ResizeObserver(() => { panelHeightRef.current = node.offsetHeight; });

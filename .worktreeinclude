@@ -1,0 +1,12 @@
+# What a new worktree copies from the primary checkout (gitignore patterns;
+# a file must be both gitignored and listed here). Read by `wt step
+# copy-ignored` and by Claude Code desktop's worktrees.
+#
+# ⚠ ONLY WHAT bun install CANNOT MAKE, NEVER SECRETS. Dependencies are not
+# here: bun clones them from its own cache in about 7 seconds, while copying
+# 2 GB of node_modules file by file took 31 (measured 2026-11-01). What is
+# here is a network download (the embedding model, pinned and hash-checked)
+# and build output the API tests import. Env files, the SSO lab's .env and CA
+# key, .dev.vars and Terraform state stay in the checkout that owns them.
+packages/*/dist/
+apps/api/models/

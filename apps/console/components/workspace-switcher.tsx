@@ -16,14 +16,14 @@ import {
 import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-block"
 import { TextMorph } from "@repo/ui/components/text-morph/text-morph"
 import { clerkReason } from "@/components/account/shared"
-import { afterSwitch } from "@/lib/after-switch"
 import { useCreateWorkspace } from "@/lib/create-workspace"
 import { toastDone, toastError } from "@/lib/toast"
 import { useWorkspacesChanged } from "@/lib/workspace-name"
+import { useWorkspaceSwitch } from "@/lib/workspace-switch"
 import { useJoinSuggestions } from "@/lib/join-suggestions"
 import { teamRoles } from "@/lib/actions"
 import { roleLabel } from "@/lib/roles"
-import type { WorkspaceRole } from "@/lib/types"
+import type { TenantProfile, WorkspaceRole } from "@/lib/types"
 
 /**
  * The workspace switcher, ours (2026-10-12) - what Clerk's
@@ -45,7 +45,12 @@ import type { WorkspaceRole } from "@/lib/types"
  * `afterSwitch`. Creating one still goes to set-up, as Clerk's
  * `afterCreateOrganizationUrl="/onboarding"` did.
  */
-export function WorkspaceSwitcher() {
+export function WorkspaceSwitcher({
+  initialWorkspace,
+}: {
+  /** The server's copy, drawn until Clerk loads; `imageUrl` is Clerk's, read there. */
+  initialWorkspace?: (Pick<TenantProfile, "id" | "name"> & { imageUrl?: string }) | null
+} = {}) {
   const router = useRouter()
   const { organization } = useOrganization()
   const { isLoaded, setActive, userMemberships, userInvitations } = useOrganizationList(
@@ -54,6 +59,7 @@ export function WorkspaceSwitcher() {
       userInvitations: { status: "pending" },
     },
   )
+  const { pending, switchWorkspace } = useWorkspaceSwitch()
   // Ours, not Clerk's `userSuggestions` - see lib/join-suggestions.
   const joinable = useJoinSuggestions()
   const { creating, create } = useCreateWorkspace()
@@ -85,16 +91,49 @@ export function WorkspaceSwitcher() {
   })
 
   if (!isLoaded) {
+    if (initialWorkspace) {
+      return (
+        <button
+          type="button"
+          disabled
+          className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm outline-none"
+        >
+          <Avatar
+            name={initialWorkspace.name}
+            src={initialWorkspace.imageUrl}
+            size="sm"
+            className="rounded-md"
+          />
+          <span className="min-w-0 flex-1 truncate text-start font-medium">
+            {initialWorkspace.name}
+          </span>
+          <ChevronsUpDown
+            aria-hidden
+            className="size-4 shrink-0 text-muted-foreground"
+          />
+        </button>
+      )
+    }
     return <Skeleton className="h-7 w-full rounded-md" />
   }
 
   async function switchTo(id: string) {
     switched.current = true
     setBusy(id)
+    const targetOrg = (userMemberships.data ?? []).find(
+      (m) => m.organization.id === id,
+    )?.organization
+    const target = targetOrg
+      ? {
+          id: targetOrg.id,
+          name: targetOrg.name,
+          imageUrl: targetOrg.imageUrl,
+        }
+      : { id, name: id }
     try {
-      await setActive?.({ organization: id })
-      router.replace(afterSwitch(window.location.pathname, window.location.search))
-      router.refresh()
+      await switchWorkspace(target, async () => {
+        await setActive?.({ organization: id })
+      })
     } catch (error) {
       toastError("Could not switch workspace", clerkReason(error))
     } finally {
@@ -107,7 +146,8 @@ export function WorkspaceSwitcher() {
   )
   const invitations = userInvitations.data ?? []
   const suggestions = (joinable.list ?? []).filter((s) => !s.requested)
-  const name = organization?.name ?? "Workspace"
+  const name = pending?.name ?? organization?.name ?? "Workspace"
+  const imageUrl = pending ? pending.imageUrl : organization?.imageUrl
 
   return (
     <>
@@ -117,12 +157,7 @@ export function WorkspaceSwitcher() {
             type="button"
             className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-sidebar-accent"
           >
-            <Avatar
-              name={name}
-              src={organization?.hasImage ? organization.imageUrl : undefined}
-              size="sm"
-              className="rounded-md"
-            />
+            <Avatar name={name} src={imageUrl} size="sm" className="rounded-md" />
             {/* A switch glides to the new name rather than cutting to it. */}
             <span className="min-w-0 flex-1 truncate text-start font-medium">
               <TextMorph>{name}</TextMorph>
@@ -147,7 +182,7 @@ export function WorkspaceSwitcher() {
               <div className="flex items-center gap-3 px-2 py-2">
                 <Avatar
                   name={name}
-                  src={organization.hasImage ? organization.imageUrl : undefined}
+                  src={organization.imageUrl}
                   className="rounded-lg"
                 />
                 <span className="min-w-0 flex-1">
@@ -171,12 +206,12 @@ export function WorkspaceSwitcher() {
               {others.map((m) => (
                 <DropdownMenuItem
                   key={m.organization.id}
-                  disabled={busy !== null}
+                  disabled={busy !== null || pending !== null}
                   onSelect={() => void switchTo(m.organization.id)}
                 >
                   <Avatar
                     name={m.organization.name}
-                    src={m.organization.hasImage ? m.organization.imageUrl : undefined}
+                    src={m.organization.imageUrl}
                     size="sm"
                     className="rounded-md"
                   />
@@ -208,11 +243,7 @@ export function WorkspaceSwitcher() {
                 >
                   <Avatar
                     name={invitation.publicOrganizationData.name}
-                    src={
-                      invitation.publicOrganizationData.hasImage
-                        ? invitation.publicOrganizationData.imageUrl
-                        : undefined
-                    }
+                    src={invitation.publicOrganizationData.imageUrl}
                     size="sm"
                     className="rounded-md"
                   />

@@ -13,7 +13,7 @@ export default function Loading() {
         <PageHeaderRow>
           <SkeletonBlock className="h-8 w-48 rounded-lg" />
         </PageHeaderRow>
-        <SkeletonBlock className="mt-2 h-4 w-full max-w-md rounded-full opacity-70" />
+        <SkeletonBlock className="h-4 w-full max-w-md rounded-full opacity-70" />
       </PageHeader>
       <PageBody>
         <SkeletonBlock className="h-80 w-full rounded-[var(--radius-panel)] opacity-60" />

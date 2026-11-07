@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { Button } from "@repo/ui/components/button/button"
 import { FloatingTextarea } from "@repo/ui/components/i10/floating-field"
 import { ConfirmDialog } from "@/components/confirm-dialog"
@@ -10,6 +11,7 @@ import { ipAllowlist, saveIpAllowlist } from "@/lib/sso-policy-actions"
 import { toastDone, toastFailure } from "@/lib/toast"
 import type { IpAllowlist, SsoAbilities } from "@/lib/sso-types"
 import { Loading, ToggleRow, useRemote, useSsoAttempt } from "./shared"
+import { SettingsRow } from "./settings-card"
 
 /**
  * The workspace's IP allowlist (#345): two switches (the console, API keys)
@@ -21,16 +23,64 @@ import { Loading, ToggleRow, useRemote, useSsoAttempt } from "./shared"
  * yes resends with `confirmLockout`. Even then the address keeps access for
  * ten minutes, so the same person can undo it.
  */
-export function IpAllowlistPanel({ abilities }: { abilities: SsoAbilities }) {
-  const { data, reload, failed } = useRemote(ipAllowlist)
+export function IpAllowlistPanel({
+  abilities,
+  initial,
+}: {
+  abilities: SsoAbilities
+  initial?: IpAllowlist | null
+}) {
+  const { data, reload, failed } = useRemote(ipAllowlist, initial)
   if (!data) return <Loading failed={failed} />
+  return <AllowlistRow list={data} abilities={abilities} reload={reload} />
+}
+
+function AllowlistRow({
+  list,
+  abilities,
+  reload,
+}: {
+  list: IpAllowlist
+  abilities: SsoAbilities
+  reload: () => Promise<void>
+}) {
+  const on = list.console || list.apiKeys
+  // An address about to lose access is the one thing here that should not wait for a click.
+  const [open, setOpen] = React.useState(
+    Boolean(list.console && !list.yourAddressListed),
+  )
+  const scope =
+    list.console && list.apiKeys
+      ? "Console and API keys"
+      : list.console
+        ? "Console"
+        : "API keys"
   return (
-    <Form
-      key={`${data.console}:${data.apiKeys}:${data.ranges.join(",")}`}
-      list={data}
-      abilities={abilities}
-      reload={reload}
-    />
+    <SettingsRow
+      title="IP allowlist"
+      description="Limit the console and API keys to the networks you list."
+      action={
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            {on
+              ? `${scope}, ${list.ranges.length} ${list.ranges.length === 1 ? "range" : "ranges"}`
+              : "Off"}
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
+            {open ? "Close" : on ? "Edit" : "Set up"}
+          </Button>
+        </div>
+      }
+    >
+      <Reveal show={open} spacing="" keepMounted>
+        <Form
+          key={`${list.console}:${list.apiKeys}:${list.ranges.join(",")}`}
+          list={list}
+          abilities={abilities}
+          reload={reload}
+        />
+      </Reveal>
+    </SettingsRow>
   )
 }
 

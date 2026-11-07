@@ -94,8 +94,9 @@ kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
 # every field the schema marks `immutable` or `serverSet`; no match is created
 # minus `serverSet`; two matches is an error. `#name` references are never
 # rewritten client-side - every request carries a `createdIds` map (RFC 8620
-# §3.3) and the server resolves them, exactly as the CLI does. Only the three
-# operations plan.ndjson uses are supported; anything else fails loudly.
+# §3.3) and the server resolves them, exactly as the CLI does. Only the
+# operations plan.ndjson uses are supported (upsert, update, create, and our
+# own `absent`); anything else fails loudly.
 #
 # ⚠ THE CREDENTIAL NEVER REACHES argv OR A POD SPEC. It lives in a shell
 # variable and is handed to the helper through its environment for the length
@@ -127,7 +128,7 @@ case "$raw" in
 esac
 
 api() {
-  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" python3 "$HELPER" "$@"
+  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" STALWART_NS="$NS" STALWART_SECRET="$SECRET" STALWART_POD="$POD" python3 "$HELPER" "$@"
 }
 
 # ⚠ A PORT-FORWARD IS BOUND TO ONE POD, NOT TO THE SERVICE. It dies with the pod
@@ -140,7 +141,7 @@ connect() {
 }
 
 cat >"$HELPER" <<'PY'
-import base64, gzip, json, os, sys, time, urllib.error, urllib.request
+import base64, gzip, json, os, subprocess, sys, time, urllib.error, urllib.request
 
 BASE = os.environ["STALWART_BASE"]
 AUTH = "Basic " + base64.b64encode(os.environ["STALWART_AUTH"].encode()).decode()
@@ -311,7 +312,23 @@ def create_objects(c, bodies, known):
     return len(created)
 
 
+def resolve_known(value):
+    if isinstance(value, list):
+        return [resolve_known(v) for v in value]
+    if isinstance(value, dict):
+        return {resolve_ref(k): resolve_known(v) for k, v in value.items()}
+    return resolve_ref(value)
+
+
 def update_object(c, sid, patch):
+    # ⚠ AN UPDATE SENDS SERVER IDS, NOT `#name`, BECAUSE v1.0.3 DOES NOT RESOLVE
+    # EVERY FIELD. `Email.blobEncryptionKey: "#blobkey2026"` is refused with
+    # "Failed to parse Id from string" even with the id in `createdIds`, while
+    # `SystemSettings.defaultCertificateId` resolves fine. Every reference an
+    # update can carry is to an object that already exists, whose id we hold,
+    # so swapping it here is exact. Creates still go through `createdIds`,
+    # because they may name an object made in the same request.
+    patch = resolve_known(patch)
     (res,) = jmap([[f"{c}/set", {"update": {sid: patch}}, "u"]])
     for bad, err in (res.get("notUpdated") or {}).items():
         fail(f"{c[2:]}: update failed for {bad}: {describe(err)}")
@@ -327,6 +344,10 @@ def covers(current, wanted):
     # the plan sets. Plain maps (`bind`, `subjectAlternativeNames`) are sets and
     # are written whole, so they stay exact: a removed entry must show.
     wanted = resolve_ref(wanted)
+    # A reference can be a map KEY too (ClusterRole's `listenerIds: {"#http":
+    # true}`); the server stores the id, so resolve keys before comparing.
+    if isinstance(wanted, dict):
+        wanted = {resolve_ref(k): v for k, v in wanted.items()}
     if isinstance(wanted, dict) and "@type" in wanted and isinstance(current, dict):
         return current.get("@type") == wanted["@type"] and all(
             covers(current.get(k), v) for k, v in wanted.items() if k != "@type"
@@ -427,8 +448,102 @@ def update(c, op, dry=False):
     update_object(c, sid, op["value"])
 
 
+_secret = None
+
+
+def from_secret(value):
+    # ⚠ ONLY `SecretKey` FIELDS CAN NAME AN ENVIRONMENT VARIABLE. A plain string
+    # such as MtaRoute's `authUsername` cannot, and the SES SMTP username is an
+    # access key id that does not belong in git. `{"@fromSecret": "KEY"}` is
+    # replaced with that key of the Stalwart Secret - the one Doppler fills and
+    # the pod already reads - so Doppler stays the only place the value lives.
+    # It is read here, never from argv, and the dry-run prints property names
+    # only, so it is never shown.
+    global _secret
+    if isinstance(value, list):
+        return [from_secret(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    if set(value) != {"@fromSecret"}:
+        return {k: from_secret(v) for k, v in value.items()}
+    if _secret is None:
+        out = subprocess.run(
+            ["kubectl", "get", "secret", "-n", os.environ["STALWART_NS"],
+             os.environ["STALWART_SECRET"], "-o", "json"],
+            capture_output=True, check=False,
+        )
+        if out.returncode != 0:
+            fail(f"cannot read secret/{os.environ['STALWART_SECRET']}: {out.stderr.decode()[:200]}")
+        _secret = json.loads(out.stdout).get("data") or {}
+    key = value["@fromSecret"]
+    if not _secret.get(key):
+        fail(f"`{key}` is missing or empty in secret/{os.environ['STALWART_SECRET']}")
+    return base64.b64decode(_secret[key]).decode()
+
+
+def env_names(value):
+    if isinstance(value, list):
+        return {n for v in value for n in env_names(v)}
+    if not isinstance(value, dict):
+        return set()
+    names = {n for v in value.values() for n in env_names(v)}
+    if value.get("@type") == "EnvironmentVariable" and value.get("variableName"):
+        names.add(value["variableName"])
+    return names
+
+
+def require_env(ops):
+    # ⚠ A SETTING THAT NAMES AN UNSET VARIABLE IS ACCEPTED AND FAILS LATER. The
+    # server stores the name, not the value, so nothing complains until the
+    # first use - for the blob store, the first delivery after a restart, which
+    # then cannot write a single message. Refuse the plan while the RUNNING
+    # container lacks any variable it names: a key added to Doppler reaches the
+    # pod only on restart. Names only; the values never leave the pod.
+    wanted = set().union(*(env_names(op) for op in ops))
+    if not wanted:
+        return
+    out = subprocess.run(
+        ["kubectl", "exec", "-n", os.environ["STALWART_NS"], os.environ["STALWART_POD"],
+         "-c", "stalwart", "--", "sh", "-c", "env | cut -d= -f1"],
+        capture_output=True, check=False,
+    )
+    if out.returncode != 0:
+        fail(f"cannot list the container's environment: {out.stderr.decode()[:200]}")
+    missing = sorted(wanted - set(out.stdout.decode().split()))
+    if missing:
+        fail("the plan names variables the running container does not have: "
+             + ", ".join(missing) + " - add them to Doppler, restart the pod, then re-run")
+
+
+def absent(c, op, cache, dry=False):
+    # ⚠ OURS, NOT THE CLI'S: stalwart-cli has no declarative delete. `absent`
+    # destroys every object whose `matchOn` properties equal one of the bodies
+    # in `value`, and does nothing when none does, so it converges like the
+    # other operations instead of failing on its second run.
+    label = c[2:]
+    match_on = op.get("matchOn") or fail(f"{label}: absent without `matchOn`")
+    if c not in cache:
+        cache[c] = fetch_all(c)
+    gone = [o for o in cache[c]
+            if any(all(same(o.get(p), b.get(p)) for p in match_on) for b in op["value"].values())]
+    for o in gone:
+        names = ", ".join(str(o.get(p)) for p in match_on)
+        if dry:
+            print(f"   - would destroy {label} {o['id']} ({names})")
+            continue
+        (res,) = jmap([[f"{c}/set", {"destroy": [o["id"]]}, "d"]])
+        if o["id"] not in (res.get("destroyed") or []):
+            fail(f"{label}: destroy failed for {o['id']}: {describe((res.get('notDestroyed') or {}).get(o['id'], {}))}")
+        cache[c].remove(o)
+        ok(f"destroyed {label} {o['id']} ({names})")
+    if dry and not gone:
+        print(f"   = {label}: nothing to destroy")
+    return 0 if dry else len(gone)
+
+
 def apply(text, dry=False):
-    ops = [json.loads(line) for line in text.splitlines() if line.strip()]
+    ops = [from_secret(json.loads(line)) for line in text.splitlines() if line.strip()]
+    require_env(ops)
     kinds = {}
     for op in ops:
         kinds[op.get("@type")] = kinds.get(op.get("@type"), 0) + 1
@@ -445,6 +560,8 @@ def apply(text, dry=False):
             created, updated = 0, 0 if dry else 1
             if not dry:
                 ok(f"updated {c[2:]}")
+        elif kind == "absent":
+            created, updated = 0, absent(c, op, cache, dry)
         elif dry:
             fail(f"operation #{i}: `{kind}` has no dry-run preview")
         elif kind == "create":
@@ -452,7 +569,7 @@ def apply(text, dry=False):
             ok(f"created {c[2:]} ({created})")
         else:
             fail(f"operation #{i}: `{kind}` is not supported by bootstrap.sh - "
-                 "only upsert, update and create; use stalwart-cli for the rest")
+                 "only upsert, update, create and absent; use stalwart-cli for the rest")
         total_created += created
         total_updated += updated
     if not dry:
@@ -689,16 +806,29 @@ if [ "$RESTART" = true ]; then
   #   3. The per-account permission set, cached as `accessToken`. Assigning
   #      defaultUserRoleIds appeared to do nothing for twenty minutes because
   #      the running server kept serving the old, empty token.
+  #
+  # ⚠ EVERY NODE, NOT ONLY $POD (#358). Store and role settings are read at
+  # startup, and the coordinator does not carry them, so a node left running
+  # keeps the old in-memory store and the old role. One at a time, the edge
+  # node first: it holds the public listeners and is the one that must come
+  # back before the other goes down.
   disconnect
-  kubectl delete pod -n "$NS" "$POD" --wait=false >/dev/null
-  kubectl wait --for=delete "pod/$POD" -n "$NS" --timeout=90s >/dev/null 2>&1 || true
-  for _ in $(seq 1 60); do
-    ready=$(kubectl get pod -n "$NS" "$POD" -o jsonpath='{.status.containerStatuses[*].ready}' 2>/dev/null || true)
-    [ "$ready" = "true true" ] && break
-    sleep 3
+  restart_pod() {
+    local pod=$1 ready=""
+    kubectl delete pod -n "$NS" "$pod" --wait=false >/dev/null
+    kubectl wait --for=delete "pod/$pod" -n "$NS" --timeout=90s >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+      ready=$(kubectl get pod -n "$NS" "$pod" -o jsonpath='{.status.containerStatuses[*].ready}' 2>/dev/null || true)
+      [ "$ready" = "true true" ] && break
+      sleep 3
+    done
+    [ "$ready" = "true true" ] || die "$pod did not come back ready"
+    ok "$pod restarted and ready"
+  }
+  restart_pod "$POD"
+  for pod in $(kubectl get pod -n "$NS" -l app.kubernetes.io/part-of=i10-stalwart -o name | sed 's|^pod/||'); do
+    [ "$pod" = "$POD" ] || restart_pod "$pod"
   done
-  [ "${ready:-}" = "true true" ] || die "the pod did not come back ready"
-  ok "pod restarted and ready"
   sleep 3
   connect
 else

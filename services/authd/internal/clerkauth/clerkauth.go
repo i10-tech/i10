@@ -3,6 +3,8 @@
 // Clerk is the source of truth for i10 users. authd holds no password material
 // of any kind - not a hash, not a verifier. Every bind becomes one call to
 // Clerk's Backend API and the answer is passed straight through to Stalwart.
+//
+// *Client is the "clerk" verify.Verifier.
 package clerkauth
 
 import (
@@ -16,38 +18,19 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/i10-tech/i10/services/authd/internal/projection"
+	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
 
-// Outcome is the tri-state answer a bind needs. The third state is the one that
-// matters: "we could not find out" is not the same as "wrong password", and
-// collapsing them is the most damaging bug this package could ship.
-type Outcome int
-
-const (
-	// Rejected means Clerk answered, and the answer was no.
-	Rejected Outcome = iota
-	// Verified means Clerk answered yes.
-	Verified
-	// Unavailable means Clerk did not answer. The caller must NOT report this
-	// to the client as invalid credentials.
-	Unavailable
-)
-
-func (o Outcome) String() string {
-	switch o {
-	case Verified:
-		return "verified"
-	case Rejected:
-		return "rejected"
-	default:
-		return "unavailable"
-	}
-}
+// Name is the verifier's identity in logs and in cached credentials.
+const Name = "clerk"
 
 type Client struct {
 	http    *http.Client
 	baseURL string
 	secret  string
+	timeout time.Duration
 }
 
 func New(baseURL, secretKey string, timeout time.Duration) *Client {
@@ -55,8 +38,17 @@ func New(baseURL, secretKey string, timeout time.Duration) *Client {
 		http:    &http.Client{Timeout: timeout},
 		baseURL: strings.TrimRight(baseURL, "/"),
 		secret:  secretKey,
+		timeout: timeout,
 	}
 }
+
+func (c *Client) Name() string { return Name }
+
+func (c *Client) Timeout() time.Duration { return c.timeout }
+
+// Budget is nil: Clerk's verify_password does not feed lockout (measured, see
+// Verify), so there is no failure count for i10 to protect.
+func (c *Client) Budget() *verify.Budget { return nil }
 
 // Verify checks a password for one Clerk user.
 //
@@ -76,22 +68,23 @@ func New(baseURL, secretKey string, timeout time.Duration) *Client {
 //
 // The password is never logged, never wrapped into an error, and never
 // returned. Errors from this function are safe to log verbatim.
-func (c *Client) Verify(ctx context.Context, userID, password string) (Outcome, error) {
-	if userID == "" {
-		return Rejected, errors.New("clerkauth: empty user id")
+func (c *Client) Verify(ctx context.Context, account *projection.Account, password string) (verify.Outcome, error) {
+	if account == nil || account.ClerkUserID == "" {
+		return verify.Rejected, errors.New("clerkauth: empty user id")
 	}
+	userID := account.ClerkUserID
 
 	body, err := json.Marshal(struct {
 		Password string `json:"password"`
 	}{password})
 	if err != nil {
-		return Unavailable, fmt.Errorf("clerkauth: encode request: %w", err)
+		return verify.Unavailable, fmt.Errorf("clerkauth: encode request: %w", err)
 	}
 
 	endpoint := fmt.Sprintf("%s/users/%s/verify_password", c.baseURL, url.PathEscape(userID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return Unavailable, fmt.Errorf("clerkauth: build request: %w", err)
+		return verify.Unavailable, fmt.Errorf("clerkauth: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.secret)
 	req.Header.Set("Content-Type", "application/json")
@@ -100,7 +93,7 @@ func (c *Client) Verify(ctx context.Context, userID, password string) (Outcome, 
 	if err != nil {
 		// Transport failure, DNS, TLS, or the client timeout firing. Never a
 		// statement about the password.
-		return Unavailable, fmt.Errorf("clerkauth: request failed: %w", err)
+		return verify.Unavailable, fmt.Errorf("clerkauth: request failed: %w", err)
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
@@ -109,38 +102,38 @@ func (c *Client) Verify(ctx context.Context, userID, password string) (Outcome, 
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
-		return Verified, nil
+		return verify.Verified, nil
 
 	case resp.StatusCode == http.StatusUnprocessableEntity:
-		return Rejected, nil
+		return verify.Rejected, nil
 
 	case resp.StatusCode == http.StatusBadRequest:
 		// 400 is only a rejection when Clerk names the reason. An unrecognised
 		// 400 is our bug or a contract change, and guessing "wrong password"
 		// would hide it - so it degrades to Unavailable and gets logged.
 		if code := firstErrorCode(resp.Body); code == "no_password_set" {
-			return Rejected, nil
+			return verify.Rejected, nil
 		} else if code != "" {
-			return Unavailable, fmt.Errorf("clerkauth: unexpected 400 (%s)", code)
+			return verify.Unavailable, fmt.Errorf("clerkauth: unexpected 400 (%s)", code)
 		}
-		return Unavailable, errors.New("clerkauth: unexpected 400")
+		return verify.Unavailable, errors.New("clerkauth: unexpected 400")
 
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return Unavailable, fmt.Errorf("clerkauth: rate limited (retry-after %q)",
+		return verify.Unavailable, fmt.Errorf("clerkauth: rate limited (retry-after %q)",
 			resp.Header.Get("Retry-After"))
 
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		// Our own credential is bad, or the user is locked. Either way this is
 		// not evidence about the password the client supplied.
-		return Unavailable, fmt.Errorf("clerkauth: not authorised (%d)", resp.StatusCode)
+		return verify.Unavailable, fmt.Errorf("clerkauth: not authorised (%d)", resp.StatusCode)
 
 	case resp.StatusCode == http.StatusNotFound:
 		// The projection knows a user Clerk does not. Stale projection, not a
 		// password answer - surface it so the drift gets noticed.
-		return Unavailable, errors.New("clerkauth: user not found in Clerk")
+		return verify.Unavailable, errors.New("clerkauth: user not found in Clerk")
 
 	default:
-		return Unavailable, fmt.Errorf("clerkauth: unexpected status %d", resp.StatusCode)
+		return verify.Unavailable, fmt.Errorf("clerkauth: unexpected status %d", resp.StatusCode)
 	}
 }
 
@@ -160,3 +153,5 @@ func firstErrorCode(r io.Reader) string {
 	}
 	return payload.Errors[0].Code
 }
+
+var _ verify.Verifier = (*Client)(nil)

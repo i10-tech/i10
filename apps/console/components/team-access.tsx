@@ -7,10 +7,12 @@ import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
+import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { VerifiedSeal } from "@repo/ui/components/i10/verified-seal"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
+import { domainProblem } from "@/lib/domain-check"
 import {
   AddAction,
   MotionItem,
@@ -99,25 +101,28 @@ export function AccessDomains({
   return (
     <div className="flex flex-col gap-3">
       <Suggestions names={state.suggested} onChange={onChange} />
-      {state.domains.length === 0 && !adding && (
-        <p className="pt-1.5 text-sm text-muted-foreground">
-          Choose who can find and join this workspace by their email address. Add a
-          domain you verified on{" "}
-          <Link
-            href="/domains"
-            className="text-foreground underline underline-offset-4"
-          >
-            Domains
-          </Link>
-          , or prove one with a TXT record.
-        </p>
-      )}
       <MotionList>
-        {state.domains.map((domain) => (
-          <MotionItem key={domain.id}>
-            <DomainRow domain={domain} roles={roles} onChange={onChange} />
+        {state.domains.length === 0 && !adding ? (
+          <MotionItem key="empty">
+            <p className="pt-1.5 text-sm text-muted-foreground">
+              Choose who can find and join this workspace by their email address. Add a
+              domain you verified on{" "}
+              <Link
+                href="/domains"
+                className="text-foreground underline underline-offset-4"
+              >
+                Domains
+              </Link>
+              , or prove one with a TXT record.
+            </p>
           </MotionItem>
-        ))}
+        ) : (
+          state.domains.map((domain) => (
+            <MotionItem key={domain.id}>
+              <DomainRow domain={domain} roles={roles} onChange={onChange} />
+            </MotionItem>
+          ))
+        )}
       </MotionList>
       <AddDomain
         open={adding}
@@ -214,7 +219,7 @@ function AddDomain({
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const follow = useFollowOpen<HTMLFormElement>(open)
-  const picked = choice ?? verified[0] ?? OTHER
+  const picked = choice ?? (verified.length === 0 ? OTHER : "")
   const items = [
     ...verified.map((n) => ({ value: n, label: n })),
     { value: OTHER, label: "Another domain, proved with a TXT record" },
@@ -225,6 +230,13 @@ function AddDomain({
     const txt = picked === OTHER
     const target = txt ? name.trim() : picked
     if (!target) return
+    if (txt) {
+      const prob = domainProblem(name.trim())
+      if (prob) {
+        setError(typeof prob === "string" ? prob : prob.message)
+        return
+      }
+    }
     setSaving(true)
     setError(null)
     const result = await addAccessDomain(target, txt ? "txt" : "domains")
@@ -251,15 +263,16 @@ function AddDomain({
         >
           <MorphSelect
             label="Domain"
+            placeholder="Choose a domain"
             items={items}
-            value={picked}
+            value={picked || null}
             onValueChange={(value) => {
               setError(null)
               setChoice(value)
             }}
           />
-          {picked === OTHER && (
-            <FloatingInput
+          <Reveal show={picked === OTHER} spacing="pt-0">
+            <ValidatedInput
               label="Domain name"
               id="access-domain-name"
               value={name}
@@ -267,12 +280,25 @@ function AddDomain({
                 setError(null)
                 setName(event.target.value)
               }}
+              check={domainProblem}
+              required="Enter a domain name."
+              refused={picked === OTHER ? (error ?? undefined) : undefined}
               hint="It covers this name and its subdomains, never its parent."
+              reserveHint={true}
               maxLength={253}
               disabled={saving}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              inputMode="url"
+              className="font-mono"
             />
+          </Reveal>
+          {picked !== OTHER && (
+            <Reveal show={Boolean(error)} spacing="pt-0">
+              <p className="text-xs text-danger">{error}</p>
+            </Reveal>
           )}
-          {error && <p className="-mt-2 text-xs text-danger">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
@@ -280,7 +306,7 @@ function AddDomain({
             <Button
               type="submit"
               loading={saving}
-              disabled={picked === OTHER && !name.trim()}
+              disabled={!picked || (picked === OTHER && !name.trim())}
             >
               Add domain
             </Button>
@@ -399,7 +425,7 @@ function DomainRow({
         </span>
       </div>
 
-      {needsTxt && (
+      <Reveal show={needsTxt} spacing="pt-0">
         <div className="flex flex-col gap-2 rounded-2xl border p-4">
           <p className="text-xs text-muted-foreground">
             Add this TXT record at your DNS provider, then verify. It proves{" "}
@@ -414,7 +440,7 @@ function DomainRow({
             </Button>
           </div>
         </div>
-      )}
+      </Reveal>
 
       <Reveal show={editing && domain.status === "verified"} spacing="pt-0">
         <RulesEditor
@@ -466,10 +492,23 @@ function RulesEditor({
   onSaved: () => void
 }) {
   const fallbackRole: JoinRole = "member"
-  const [rules, setRules] = React.useState<AccessRule[]>(() =>
-    domain.rules.length > 0
-      ? domain.rules
-      : [{ pattern: domain.name, mode: "suggest", role: fallbackRole }],
+  const [rules, setRules] = React.useState<(AccessRule & { clientKey: string })[]>(
+    () => {
+      const initial =
+        domain.rules.length > 0
+          ? domain.rules
+          : [
+              {
+                pattern: domain.name,
+                mode: "suggest" as AccessMode,
+                role: fallbackRole,
+              },
+            ]
+      return initial.map((r, i) => ({
+        ...r,
+        clientKey: `rule-${domain.id}-${i}`,
+      }))
+    },
   )
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -527,7 +566,7 @@ function RulesEditor({
       </p>
       <MotionList>
         {rules.map((rule, index) => (
-          <MotionItem key={index}>
+          <MotionItem key={rule.clientKey}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
               <FloatingInput
                 label="Addresses at"
@@ -535,7 +574,7 @@ function RulesEditor({
                 value={rule.pattern}
                 onChange={(event) => update(index, { pattern: event.target.value })}
                 maxLength={253}
-                reserveHint={false}
+                reserveHint={true}
                 className="font-mono"
                 containerClassName="min-w-0 flex-1"
               />
@@ -571,14 +610,21 @@ function RulesEditor({
           onClick={() =>
             setRules((list) => [
               ...list,
-              { pattern: `*.${domain.name}`, mode: "suggest", role: fallbackRole },
+              {
+                pattern: `*.${domain.name}`,
+                mode: "suggest",
+                role: fallbackRole,
+                clientKey: `rule-${domain.id}-${Date.now()}-${Math.random()}`,
+              },
             ])
           }
         >
           Add rule
         </AddAction>
       </div>
-      {error && <p className="text-xs text-danger">{error}</p>}
+      <Reveal show={Boolean(error)} spacing="pt-0">
+        <p className="text-xs text-danger">{error}</p>
+      </Reveal>
       <div className="flex justify-end">
         <Button
           size="sm"
@@ -641,48 +687,53 @@ export function Exclusions({ version }: { version: number }) {
   }
 
   if (!list) return <p className="pt-1.5 text-sm text-muted-foreground">Loading…</p>
-  if (list.length === 0)
-    return (
-      <p className="pt-1.5 text-sm text-muted-foreground">
-        Nobody is removed or blocked.
-      </p>
-    )
 
   return (
     <MotionList>
-      {list.map((entry) => (
-        <MotionItem key={entry.email}>
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-0">
-              <span className="flex items-center gap-2 text-sm">
-                <span className="truncate">{entry.email}</span>
-                <Badge size="sm" tone={entry.kind === "blocked" ? "danger" : "neutral"}>
-                  {entry.kind === "blocked" ? "Blocked" : "Removed"}
-                </Badge>
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                {entry.kind === "blocked"
-                  ? `Blocked ${shortDate(new Date(entry.created_at))} · no suggestion, request or auto-join`
-                  : `Removed ${shortDate(new Date(entry.created_at))} · can only ask to join again`}
-              </span>
-            </span>
-            <RowMenu visible label={entry.email}>
-              <DropdownMenuItem
-                disabled={busy !== null}
-                onSelect={() => void allow(entry, false)}
-              >
-                Allow
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={busy !== null}
-                onSelect={() => void allow(entry, true)}
-              >
-                Allow and invite
-              </DropdownMenuItem>
-            </RowMenu>
-          </div>
+      {list.length === 0 ? (
+        <MotionItem key="empty">
+          <p className="pt-1.5 text-sm text-muted-foreground">
+            Nobody is removed or blocked.
+          </p>
         </MotionItem>
-      ))}
+      ) : (
+        list.map((entry) => (
+          <MotionItem key={entry.email}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0">
+                <span className="flex items-center gap-2 text-sm">
+                  <span className="truncate">{entry.email}</span>
+                  <Badge
+                    size="sm"
+                    tone={entry.kind === "blocked" ? "danger" : "neutral"}
+                  >
+                    {entry.kind === "blocked" ? "Blocked" : "Removed"}
+                  </Badge>
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {entry.kind === "blocked"
+                    ? `Blocked ${shortDate(new Date(entry.created_at))} · no suggestion, request or auto-join`
+                    : `Removed ${shortDate(new Date(entry.created_at))} · can only ask to join again`}
+                </span>
+              </span>
+              <RowMenu visible label={entry.email}>
+                <DropdownMenuItem
+                  disabled={busy !== null}
+                  onSelect={() => void allow(entry, false)}
+                >
+                  Allow
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={busy !== null}
+                  onSelect={() => void allow(entry, true)}
+                >
+                  Allow and invite
+                </DropdownMenuItem>
+              </RowMenu>
+            </div>
+          </MotionItem>
+        ))
+      )}
     </MotionList>
   )
 }

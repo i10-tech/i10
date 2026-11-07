@@ -20,14 +20,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CERT="$ROOT/dev/.caddy-root.crt"
 
 compose() {
-  # ⚠ `docker compose`, NOT `docker-compose`. The hyphenated v1 is gone from
-  # current Docker Desktop and the error it leaves is "command not found",
-  # which reads as Docker not being installed at all.
+  # ⚠ `docker compose`, NOT `docker-compose`. OrbStack ships Compose as a CLI
+  # plugin, and a missing hyphenated binary leaves "command not found", which
+  # reads as the container runtime not being installed at all.
   docker compose -f "$ROOT/compose.dev.yaml" "$@"
 }
 
 if ! docker info >/dev/null 2>&1; then
-  echo "dev:trust: Docker is not running. Start Docker Desktop and try again." >&2
+  echo "dev:trust: OrbStack is not running. Start OrbStack and try again." >&2
   exit 1
 fi
 

@@ -694,7 +694,7 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
   URL is read through the egress guard when set and daily by the nightly
   re-check job (src/recheck.ts; one daily cross-workspace job already
   existed), through `identity.saml_connections_due`, a SECURITY DEFINER that
-  answers ids only (migration 0137, hand-written like 0130). The refresh
+  answers ids only (migration 0141, hand-written like 0130). The refresh
   rotates certificates and follows endpoint moves; a changed entity id is
   refused and audited. Expiry alerts at 30, 7, 1 and 0 days, once per
   threshold, are an audit event (`sso.certificate.expiring`) and a log line;
@@ -805,7 +805,7 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
   at a time, plus `users.watch` notifications verified by channel id and a
   hashed per-channel token; a notification only schedules a pull. Directories
   due for a pull are found through a SECURITY DEFINER function returning ids
-  only (as 0130 and 0138), never a setting-gated cross-workspace policy.
+  only (as 0130 and 0141), never a setting-gated cross-workspace policy.
 - **Open:** whether these two readonly scopes put our Google OAuth app through
   verification is not settled by Google's pages (no end-user consent screen
   under delegation, but our account reads customer data); check the scope list

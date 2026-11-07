@@ -56,10 +56,14 @@ import {
   id = "${var.cloudflare_account_id}/i10-backups/default"
 }
 
+# ⚠ WEUR, NOT var.r2_location. The dashboard shows i10-backups in Western
+# Europe (checked 2026-11-06) while every other i10 bucket is in Eastern Europe.
+# A location is fixed at creation, so declaring the hint here would plan a
+# replace that prevent_destroy refuses, failing every apply of this stack.
 resource "cloudflare_r2_bucket" "backups" {
   account_id    = var.cloudflare_account_id
   name          = "i10-backups"
-  location      = var.r2_location
+  location      = "weur"
   storage_class = "Standard"
 
   lifecycle { prevent_destroy = true }
@@ -99,6 +103,32 @@ import {
 resource "cloudflare_r2_bucket" "content_dev" {
   account_id    = var.cloudflare_account_id
   name          = "i10-content-dev"
+  location      = var.r2_location
+  storage_class = "Standard"
+
+  lifecycle { prevent_destroy = true }
+}
+
+# Stalwart's blob store (#357): mailbox message bodies, attachments and Sieve
+# scripts. Its keys are `<base32 hash>`, written and read only by Stalwart.
+#
+# ⚠ NOT i10-content. That bucket is the API's, and a token can read every
+# object in a bucket it is scoped to, so sharing one would hand Stalwart the
+# API's content and the API every mailbox. Private, created by hand on the same
+# terms as i10-content, then imported.
+#
+# ⚠ NO LIFECYCLE RULE, EVER, for the same reason as i10-content: a blob is
+# shared by every message with the same bytes, and Stalwart's blob purge
+# deletes it once nothing references it.
+
+import {
+  to = cloudflare_r2_bucket.mail
+  id = "${var.cloudflare_account_id}/i10-mail/default"
+}
+
+resource "cloudflare_r2_bucket" "mail" {
+  account_id    = var.cloudflare_account_id
+  name          = "i10-mail"
   location      = var.r2_location
   storage_class = "Standard"
 

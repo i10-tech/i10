@@ -1,1 +1,0 @@
-ALTER TABLE "core"."join_domains" ADD CONSTRAINT "join_domains_id_tenant_unique" UNIQUE("id","tenant_id");

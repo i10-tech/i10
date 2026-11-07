@@ -49,6 +49,10 @@ import { trustedTemplateRoutes } from "./routes/trusted-templates.js"
 import type { TrustedTemplateStore } from "./risk/trusted.js"
 import { domains } from "./routes/domains.js"
 import { mailboxes } from "./routes/mailboxes.js"
+import {
+  mailboxMigration,
+  type MailboxMigrationDeps,
+} from "./routes/mailbox-migration.js"
 import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
 import {
@@ -65,6 +69,7 @@ import {
 } from "./routes/google-directory.js"
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
+import { createMtaHookRoutes, type MtaHookRouteDeps } from "./routes/mta-hook.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
@@ -181,6 +186,8 @@ export interface AppDeps {
    * Omitted in tests and in the OpenAPI generator, where the routes answer 501.
    */
   mailboxes?: MailboxProvisioning
+  /** Mailbox export and import jobs (#385). */
+  mailboxMigration?: MailboxMigrationDeps
   /** SES delivery events over SNS. Unauthenticated; signature-verified. */
   sesWebhooks?: SesWebhookDeps
   /**
@@ -194,6 +201,12 @@ export interface AppDeps {
    * never reports.
    */
   stalwartWebhooks?: StalwartWebhookDeps
+  /**
+   * Mailbox sends, checked as API sends are (B5). Bearer-authenticated. Absent:
+   * the route answers 503 and Stalwart tempfails every mailbox send, so it is
+   * set before the hook is enabled, not after.
+   */
+  mtaHook?: MtaHookRouteDeps
   /**
    * Polar subscription events. Unauthenticated; signature-verified.
    *
@@ -335,6 +348,7 @@ export function createApp(deps: AppDeps = {}) {
     const mailboxStore = deps.mailboxes
     const gate = deps.ssoGate
     const network = deps.apiKeyNetwork
+    const migrationDeps = deps.mailboxMigration
     app.use("*", async (c, next) => {
       if (auth) c.set("apiKeyAuth", auth)
       if (sendPath) c.set("sendPath", sendPath)
@@ -350,6 +364,7 @@ export function createApp(deps: AppDeps = {}) {
       if (mailboxStore) c.set("mailboxes", mailboxStore)
       if (gate) c.set("ssoGate", gate)
       if (network) c.set("apiKeyNetwork", network)
+      if (migrationDeps) c.set("mailboxMigration", migrationDeps)
       await next()
     })
   }
@@ -470,6 +485,10 @@ export function createApp(deps: AppDeps = {}) {
     return c.json(await metrics.queueDepth(), 200)
   })
 
+  // ⚠ MOUNTED UNCONDITIONALLY, LIKE THE WEBHOOKS: a missing secret is a 503 that
+  // says so, not a 404. Outside the OpenAPI document - Stalwart's contract.
+  app.route("/internal/mta-hook", createMtaHookRoutes(deps.mtaHook))
+
   app.get("/version", (c) =>
     c.json({
       sha: process.env.GIT_SHA ?? "dev",
@@ -519,6 +538,7 @@ export function createApp(deps: AppDeps = {}) {
   // human half of i10; an API key must not be able to create one. See
   // middleware/session.ts.
   app.route("/mailboxes", mailboxes)
+  app.route("/mailboxes", mailboxMigration)
 
   // ⚠ API-key authenticated, like everything above it - which is exactly why it
   // cannot issue a tenant's first key. See routes/api-keys.ts.

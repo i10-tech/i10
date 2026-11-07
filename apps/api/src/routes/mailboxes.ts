@@ -54,12 +54,16 @@ const create = createRoute({
       content: { "application/json": { schema: Mailbox } },
     },
     401: errorResponse("Not signed in."),
-    403: errorResponse("The plan does not include another mailbox."),
+    403: errorResponse(
+      "The plan does not include another mailbox, or a member asked to allocate storage.",
+    ),
     409: errorResponse(
       "The account has no password, the address is taken, or the user " +
         "already has a mailbox.",
     ),
-    422: errorResponse("The address is not one we can host."),
+    422: errorResponse(
+      "The address is not one we can host, or a prepaid plan needs a storage allocation.",
+    ),
     501: errorResponse("Mailboxes are not configured."),
     503: errorResponse("The session could not be verified."),
   },
@@ -111,6 +115,18 @@ mailboxes.openapi(
           {
             statusCode: 403,
             name: "plan_limit_exceeded" as const,
+            message: outcome.reason,
+          },
+          403,
+        )
+
+      // ⚠ NAMED `invalid_access`, NOT `plan_limit_exceeded`: nothing about the plan
+      // is wrong, the caller is not allowed to size an inbox.
+      case "forbidden":
+        return c.json(
+          {
+            statusCode: 403,
+            name: "invalid_access" as const,
             message: outcome.reason,
           },
           403,

@@ -10,7 +10,7 @@ import {
 /**
  * The database half of SAML (#339). Every read and write is under the row's
  * own tenant (`withTenant`); the one cross-workspace read is the definer in
- * migration 0137, which answers ids only.
+ * migration 0141, which answers ids only.
  */
 
 const toRow = (r: typeof samlCertificates.$inferSelect): SamlCertificateRow => ({

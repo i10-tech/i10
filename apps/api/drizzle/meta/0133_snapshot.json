@@ -1,6 +1,6 @@
 {
-  "id": "caa6c762-78e2-4070-b142-b0afd411dc6b",
-  "prevId": "3ef218f1-bf79-40f2-8a66-848e8e77de1d",
+  "id": "d83382cb-e900-4312-9899-bb853a1efad5",
+  "prevId": "f3823eb1-575e-49b1-a381-1686754af62b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3497,16 +3497,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "join_domains_id_tenant_unique": {
-          "name": "join_domains_id_tenant_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "tenant_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {
         "join_domains_workspace": {
           "name": "join_domains_workspace",
@@ -4027,6 +4018,122 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "core.mailbox_auth_failures": {
+      "name": "mailbox_auth_failures",
+      "schema": "core",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "clerk_user_id": {
+          "name": "clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account": {
+          "name": "account",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subnet": {
+          "name": "subnet",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "listener": {
+          "name": "listener",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "mailbox_auth_failures_account_idx": {
+          "name": "mailbox_auth_failures_account_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mailbox_auth_failures_tenant_id_tenants_id_fk": {
+          "name": "mailbox_auth_failures_tenant_id_tenants_id_fk",
+          "tableFrom": "mailbox_auth_failures",
+          "tableTo": "tenants",
+          "schemaTo": "core",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "mailbox_auth_failures_tenant": {
+          "name": "mailbox_auth_failures_tenant",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": [
+            "public"
+          ],
+          "using": "\"core\".\"mailbox_auth_failures\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+          "withCheck": "\"core\".\"mailbox_auth_failures\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "core.member_alerts": {
       "name": "member_alerts",
       "schema": "core",
@@ -4169,18 +4276,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'pending'"
-        },
-        "applied_membership_id": {
-          "name": "applied_membership_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "applied_at": {
-          "name": "applied_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -6353,12 +6448,12 @@
           "notNull": true,
           "default": false
         },
-        "free_plan_id": {
-          "name": "free_plan_id",
-          "type": "text",
+        "mail_domains": {
+          "name": "mail_domains",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": true,
-          "default": "'free'"
+          "default": "'{}'::text[]"
         },
         "updated_at": {
           "name": "updated_at",
@@ -10121,130 +10216,6 @@
         }
       },
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "core.workspace_roles": {
-      "name": "workspace_roles",
-      "schema": "core",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "clerk_user_id": {
-          "name": "clerk_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "clerk_membership_id": {
-          "name": "clerk_membership_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "workspace_roles_tenant_role_idx": {
-          "name": "workspace_roles_tenant_role_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "role",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "workspace_roles_tenant_id_tenants_id_fk": {
-          "name": "workspace_roles_tenant_id_tenants_id_fk",
-          "tableFrom": "workspace_roles",
-          "tableTo": "tenants",
-          "schemaTo": "core",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "workspace_roles_tenant_id_clerk_user_id_pk": {
-          "name": "workspace_roles_tenant_id_clerk_user_id_pk",
-          "columns": [
-            "tenant_id",
-            "clerk_user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {
-        "workspace_roles_workspace": {
-          "name": "workspace_roles_workspace",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "\"core\".\"workspace_roles\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
-          "withCheck": "\"core\".\"workspace_roles\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
-        }
-      },
-      "checkConstraints": {
-        "workspace_roles_role_check": {
-          "name": "workspace_roles_role_check",
-          "value": "\"role\" in ('owner', 'admin', 'member')"
-        }
-      },
       "isRLSEnabled": false
     }
   },

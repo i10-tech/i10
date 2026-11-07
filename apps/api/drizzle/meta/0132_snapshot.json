@@ -1,6 +1,6 @@
 {
-  "id": "3ef218f1-bf79-40f2-8a66-848e8e77de1d",
-  "prevId": "3db4b8ed-eb7a-4051-8c09-ea5c537cfbea",
+  "id": "f3823eb1-575e-49b1-a381-1686754af62b",
+  "prevId": "d1e005e1-8d29-4fad-9d94-26e73b2b24f7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -72,10 +72,10 @@
       "uniqueConstraints": {
         "accounts_email_unique": {
           "name": "accounts_email_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -111,25 +111,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "aliases_clerk_user_id_accounts_clerk_user_id_fk": {
           "name": "aliases_clerk_user_id_accounts_clerk_user_id_fk",
           "tableFrom": "aliases",
-          "tableTo": "accounts",
-          "schemaTo": "authd",
           "columnsFrom": [
             "clerk_user_id"
           ],
+          "tableTo": "accounts",
+          "schemaTo": "authd",
           "columnsTo": [
             "clerk_user_id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -167,39 +167,39 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "group_members_group_name_groups_name_fk": {
           "name": "group_members_group_name_groups_name_fk",
           "tableFrom": "group_members",
-          "tableTo": "groups",
-          "schemaTo": "authd",
           "columnsFrom": [
             "group_name"
           ],
+          "tableTo": "groups",
+          "schemaTo": "authd",
           "columnsTo": [
             "name"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "group_members_clerk_user_id_accounts_clerk_user_id_fk": {
           "name": "group_members_clerk_user_id_accounts_clerk_user_id_fk",
           "tableFrom": "group_members",
-          "tableTo": "accounts",
-          "schemaTo": "authd",
           "columnsFrom": [
             "clerk_user_id"
           ],
+          "tableTo": "accounts",
+          "schemaTo": "authd",
           "columnsTo": [
             "clerk_user_id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -245,10 +245,10 @@
       "uniqueConstraints": {
         "groups_email_unique": {
           "name": "groups_email_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -379,35 +379,35 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "api_keys_tenant_id_tenants_id_fk": {
           "name": "api_keys_tenant_id_tenants_id_fk",
           "tableFrom": "api_keys",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "api_keys_secret_hash_unique": {
           "name": "api_keys_secret_hash_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "secret_hash"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -511,25 +511,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "api_requests_tenant_id_tenants_id_fk": {
           "name": "api_requests_tenant_id_tenants_id_fk",
           "tableFrom": "api_requests",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -575,25 +575,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "hnsw",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "behaviour_vectors_tenant_id_tenants_id_fk": {
           "name": "behaviour_vectors_tenant_id_tenants_id_fk",
           "tableFrom": "behaviour_vectors",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -744,53 +744,53 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "broadcasts_tenant_id_tenants_id_fk": {
           "name": "broadcasts_tenant_id_tenants_id_fk",
           "tableFrom": "broadcasts",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "broadcasts_segment_id_segments_id_fk": {
           "name": "broadcasts_segment_id_segments_id_fk",
           "tableFrom": "broadcasts",
-          "tableTo": "segments",
-          "schemaTo": "core",
           "columnsFrom": [
             "segment_id"
           ],
+          "tableTo": "segments",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "broadcasts_topic_id_topics_id_fk": {
           "name": "broadcasts_topic_id_topics_id_fk",
           "tableFrom": "broadcasts",
-          "tableTo": "topics",
-          "schemaTo": "core",
           "columnsFrom": [
             "topic_id"
           ],
+          "tableTo": "topics",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -862,25 +862,25 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "contact_properties_tenant_id_tenants_id_fk": {
           "name": "contact_properties_tenant_id_tenants_id_fk",
           "tableFrom": "contact_properties",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -937,9 +937,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "contact_topics_tenant_idx": {
           "name": "contact_topics_tenant_idx",
@@ -952,53 +952,53 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "contact_topics_contact_id_contacts_id_fk": {
           "name": "contact_topics_contact_id_contacts_id_fk",
           "tableFrom": "contact_topics",
-          "tableTo": "contacts",
-          "schemaTo": "core",
           "columnsFrom": [
             "contact_id"
           ],
+          "tableTo": "contacts",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "contact_topics_topic_id_topics_id_fk": {
           "name": "contact_topics_topic_id_topics_id_fk",
           "tableFrom": "contact_topics",
-          "tableTo": "topics",
-          "schemaTo": "core",
           "columnsFrom": [
             "topic_id"
           ],
+          "tableTo": "topics",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "contact_topics_tenant_id_tenants_id_fk": {
           "name": "contact_topics_tenant_id_tenants_id_fk",
           "tableFrom": "contact_topics",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -1102,9 +1102,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "contacts_tenant_idx": {
           "name": "contacts_tenant_idx",
@@ -1123,25 +1123,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "contacts_tenant_id_tenants_id_fk": {
           "name": "contacts_tenant_id_tenants_id_fk",
           "tableFrom": "contacts",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1224,9 +1224,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "content_fingerprints_bands_idx": {
           "name": "content_fingerprints_bands_idx",
@@ -1239,9 +1239,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "gin",
-          "with": {}
+          "concurrently": false
         },
         "content_fingerprints_day_idx": {
           "name": "content_fingerprints_day_idx",
@@ -1254,25 +1254,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "content_fingerprints_tenant_id_tenants_id_fk": {
           "name": "content_fingerprints_tenant_id_tenants_id_fk",
           "tableFrom": "content_fingerprints",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -1350,9 +1350,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -1442,9 +1442,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -1552,9 +1552,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "content_templates_bands_idx": {
           "name": "content_templates_bands_idx",
@@ -1567,25 +1567,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "gin",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "content_templates_tenant_id_tenants_id_fk": {
           "name": "content_templates_tenant_id_tenants_id_fk",
           "tableFrom": "content_templates",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1666,9 +1666,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "hnsw",
-          "with": {}
+          "concurrently": false
         },
         "content_vectors_day_idx": {
           "name": "content_vectors_day_idx",
@@ -1681,25 +1681,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "content_vectors_tenant_id_tenants_id_fk": {
           "name": "content_vectors_tenant_id_tenants_id_fk",
           "tableFrom": "content_vectors",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -1771,39 +1771,39 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "delegations_domain_fk": {
           "name": "delegations_domain_fk",
           "tableFrom": "delegations",
-          "tableTo": "domains",
-          "schemaTo": "core",
           "columnsFrom": [
             "domain_id"
           ],
+          "tableTo": "domains",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "delegations_tenant_fk": {
           "name": "delegations_tenant_fk",
           "tableFrom": "delegations",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -1817,10 +1817,10 @@
       "uniqueConstraints": {
         "delegations_domain_unique": {
           "name": "delegations_domain_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "domain_id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -1876,25 +1876,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "device_resumes_device_id_remembered_devices_id_fk": {
           "name": "device_resumes_device_id_remembered_devices_id_fk",
           "tableFrom": "device_resumes",
-          "tableTo": "remembered_devices",
-          "schemaTo": "core",
           "columnsFrom": [
             "device_id"
           ],
+          "tableTo": "remembered_devices",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2001,25 +2001,25 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "dns_connections_tenant_id_tenants_id_fk": {
           "name": "dns_connections_tenant_id_tenants_id_fk",
           "tableFrom": "dns_connections",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2125,9 +2125,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "domain_transfers_recipient_idx": {
           "name": "domain_transfers_recipient_idx",
@@ -2140,9 +2140,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "domain_transfers_open_unique": {
           "name": "domain_transfers_open_unique",
@@ -2155,26 +2155,26 @@
             }
           ],
           "isUnique": true,
-          "where": "\"core\".\"domain_transfers\".\"accepted_at\" is null and \"core\".\"domain_transfers\".\"declined_at\" is null and \"core\".\"domain_transfers\".\"canceled_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"domain_transfers\".\"accepted_at\" is null and \"core\".\"domain_transfers\".\"declined_at\" is null and \"core\".\"domain_transfers\".\"canceled_at\" is null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "domain_transfers_tenant_id_tenants_id_fk": {
           "name": "domain_transfers_tenant_id_tenants_id_fk",
           "tableFrom": "domain_transfers",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2434,9 +2434,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "domains_verified_name_unique": {
           "name": "domains_verified_name_unique",
@@ -2449,37 +2449,37 @@
             }
           ],
           "isUnique": true,
-          "where": "\"core\".\"domains\".\"status\" = 'verified'",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"domains\".\"status\" = 'verified'",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "domains_tenant_id_tenants_id_fk": {
           "name": "domains_tenant_id_tenants_id_fk",
           "tableFrom": "domains",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "domains_tenant_name_unique": {
           "name": "domains_tenant_name_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "tenant_id",
             "name"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -2522,9 +2522,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -2599,26 +2599,26 @@
         "github_installations_tenant_id_tenants_id_fk": {
           "name": "github_installations_tenant_id_tenants_id_fk",
           "tableFrom": "github_installations",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "github_installations_installation_uq": {
           "name": "github_installations_installation_uq",
-          "nullsNotDistinct": false,
           "columns": [
             "installation_id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {
@@ -2729,9 +2729,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "github_repositories_repo_idx": {
           "name": "github_repositories_repo_idx",
@@ -2744,39 +2744,39 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "github_repositories_tenant_id_tenants_id_fk": {
           "name": "github_repositories_tenant_id_tenants_id_fk",
           "tableFrom": "github_repositories",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "github_repositories_installation_id_github_installations_installation_id_fk": {
           "name": "github_repositories_installation_id_github_installations_installation_id_fk",
           "tableFrom": "github_repositories",
-          "tableTo": "github_installations",
-          "schemaTo": "core",
           "columnsFrom": [
             "installation_id"
           ],
+          "tableTo": "github_installations",
+          "schemaTo": "core",
           "columnsTo": [
             "installation_id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2883,9 +2883,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "github_syncs_pending_idx": {
           "name": "github_syncs_pending_idx",
@@ -2898,40 +2898,40 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"github_syncs\".\"status\" in ('pending', 'running')",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"github_syncs\".\"status\" in ('pending', 'running')",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "github_syncs_tenant_id_tenants_id_fk": {
           "name": "github_syncs_tenant_id_tenants_id_fk",
           "tableFrom": "github_syncs",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "github_syncs_repository_id_github_repositories_id_fk": {
           "name": "github_syncs_repository_id_github_repositories_id_fk",
           "tableFrom": "github_syncs",
-          "tableTo": "github_repositories",
-          "schemaTo": "core",
           "columnsFrom": [
             "repository_id"
           ],
+          "tableTo": "github_repositories",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2999,25 +2999,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "idempotency_keys_tenant_id_tenants_id_fk": {
           "name": "idempotency_keys_tenant_id_tenants_id_fk",
           "tableFrom": "idempotency_keys",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -3167,9 +3167,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "identity_events_device_idx": {
           "name": "identity_events_device_idx",
@@ -3188,9 +3188,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "identity_events_subnet_idx": {
           "name": "identity_events_subnet_idx",
@@ -3209,9 +3209,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "identity_events_unenriched_idx": {
           "name": "identity_events_unenriched_idx",
@@ -3230,9 +3230,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -3302,25 +3302,25 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "join_dismissals_tenant_id_tenants_id_fk": {
           "name": "join_dismissals_tenant_id_tenants_id_fk",
           "tableFrom": "join_dismissals",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -3446,9 +3446,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "join_domains_name_idx": {
           "name": "join_domains_name_idx",
@@ -3461,39 +3461,39 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "join_domains_tenant_id_tenants_id_fk": {
           "name": "join_domains_tenant_id_tenants_id_fk",
           "tableFrom": "join_domains",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "join_domains_domain_id_domains_id_fk": {
           "name": "join_domains_domain_id_domains_id_fk",
           "tableFrom": "join_domains",
-          "tableTo": "domains",
-          "schemaTo": "core",
           "columnsFrom": [
             "domain_id"
           ],
+          "tableTo": "domains",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -3577,25 +3577,25 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "join_exclusions_tenant_id_tenants_id_fk": {
           "name": "join_exclusions_tenant_id_tenants_id_fk",
           "tableFrom": "join_exclusions",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -3682,9 +3682,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "join_memberships_user_idx": {
           "name": "join_memberships_user_idx",
@@ -3697,25 +3697,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "join_memberships_tenant_id_tenants_id_fk": {
           "name": "join_memberships_tenant_id_tenants_id_fk",
           "tableFrom": "join_memberships",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -3818,9 +3818,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "join_requests_user_idx": {
           "name": "join_requests_user_idx",
@@ -3833,9 +3833,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "join_requests_open_unique": {
           "name": "join_requests_open_unique",
@@ -3854,26 +3854,26 @@
             }
           ],
           "isUnique": true,
-          "where": "\"core\".\"join_requests\".\"answered_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"join_requests\".\"answered_at\" is null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "join_requests_tenant_id_tenants_id_fk": {
           "name": "join_requests_tenant_id_tenants_id_fk",
           "tableFrom": "join_requests",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -3971,25 +3971,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "link_hosts_tenant_id_tenants_id_fk": {
           "name": "link_hosts_tenant_id_tenants_id_fk",
           "tableFrom": "link_hosts",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -4054,16 +4054,16 @@
         "member_alerts_tenant_id_tenants_id_fk": {
           "name": "member_alerts_tenant_id_tenants_id_fk",
           "tableFrom": "member_alerts",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -4161,18 +4161,6 @@
           "notNull": true,
           "default": "'pending'"
         },
-        "applied_membership_id": {
-          "name": "applied_membership_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "applied_at": {
-          "name": "applied_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4205,9 +4193,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "member_invitations_email_idx": {
           "name": "member_invitations_email_idx",
@@ -4220,9 +4208,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "member_invitations_clerk_unique": {
           "name": "member_invitations_clerk_unique",
@@ -4235,25 +4223,25 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "member_invitations_tenant_id_tenants_id_fk": {
           "name": "member_invitations_tenant_id_tenants_id_fk",
           "tableFrom": "member_invitations",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -4469,10 +4457,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"examined_at\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"examined_at\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null",
+          "concurrently": false
         },
         "message_bodies_candidates_idx": {
           "name": "message_bodies_candidates_idx",
@@ -4485,10 +4473,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"template_id\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "gin",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"template_id\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null",
+          "concurrently": false
         },
         "message_bodies_linked_idx": {
           "name": "message_bodies_linked_idx",
@@ -4501,10 +4489,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"template_id\" is not null and \"core\".\"message_bodies\".\"compacted_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"template_id\" is not null and \"core\".\"message_bodies\".\"compacted_at\" is null",
+          "concurrently": false
         },
         "message_bodies_unanalysed_idx": {
           "name": "message_bodies_unanalysed_idx",
@@ -4523,10 +4511,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"analysed_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"analysed_at\" is null",
+          "concurrently": false
         },
         "message_bodies_unfingerprinted_idx": {
           "name": "message_bodies_unfingerprinted_idx",
@@ -4545,10 +4533,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"fingerprinted_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"fingerprinted_at\" is null",
+          "concurrently": false
         },
         "message_bodies_tenant_created_idx": {
           "name": "message_bodies_tenant_created_idx",
@@ -4567,9 +4555,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "message_bodies_attachments_pending_idx": {
           "name": "message_bodies_attachments_pending_idx",
@@ -4582,10 +4570,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"attachments\" is not null and \"core\".\"message_bodies\".\"attachments_stored_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"attachments\" is not null and \"core\".\"message_bodies\".\"attachments_stored_at\" is null",
+          "concurrently": false
         },
         "message_bodies_attachments_gin_idx": {
           "name": "message_bodies_attachments_gin_idx",
@@ -4599,9 +4587,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "gin",
-          "with": {}
+          "concurrently": false
         },
         "message_bodies_inline_objects_gin_idx": {
           "name": "message_bodies_inline_objects_gin_idx",
@@ -4614,9 +4602,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "gin",
-          "with": {}
+          "concurrently": false
         },
         "message_bodies_template_idx": {
           "name": "message_bodies_template_idx",
@@ -4629,10 +4617,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"template_id\" is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"template_id\" is not null",
+          "concurrently": false
         },
         "message_bodies_pack_idx": {
           "name": "message_bodies_pack_idx",
@@ -4645,10 +4633,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"pack_id\" is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"pack_id\" is not null",
+          "concurrently": false
         },
         "message_bodies_unpacked_idx": {
           "name": "message_bodies_unpacked_idx",
@@ -4667,10 +4655,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"message_bodies\".\"pack_id\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null and (\"core\".\"message_bodies\".\"html\" is not null or \"core\".\"message_bodies\".\"text\" is not null)",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"message_bodies\".\"pack_id\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null and (\"core\".\"message_bodies\".\"html\" is not null or \"core\".\"message_bodies\".\"text\" is not null)",
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -4756,9 +4744,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "message_events_tenant_idx": {
           "name": "message_events_tenant_idx",
@@ -4777,9 +4765,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "message_events_source_idx": {
           "name": "message_events_source_idx",
@@ -4798,9 +4786,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -4996,9 +4984,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "messages_tenant_recent_idx": {
           "name": "messages_tenant_recent_idx",
@@ -5017,9 +5005,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "messages_ses_id_idx": {
           "name": "messages_ses_id_idx",
@@ -5032,9 +5020,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "messages_provider_id_idx": {
           "name": "messages_provider_id_idx",
@@ -5047,9 +5035,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -5153,25 +5141,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "meter_events_tenant_id_tenants_id_fk": {
           "name": "meter_events_tenant_id_tenants_id_fk",
           "tableFrom": "meter_events",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -5230,16 +5218,16 @@
         "meter_windows_tenant_id_tenants_id_fk": {
           "name": "meter_windows_tenant_id_tenants_id_fk",
           "tableFrom": "meter_windows",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -5324,16 +5312,16 @@
         "onboarding_tenant_id_tenants_id_fk": {
           "name": "onboarding_tenant_id_tenants_id_fk",
           "tableFrom": "onboarding",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5398,30 +5386,30 @@
         "plan_assignments_tenant_id_tenants_id_fk": {
           "name": "plan_assignments_tenant_id_tenants_id_fk",
           "tableFrom": "plan_assignments",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "plan_assignments_plan_id_plans_id_fk": {
           "name": "plan_assignments_plan_id_plans_id_fk",
           "tableFrom": "plan_assignments",
-          "tableTo": "plans",
-          "schemaTo": "core",
           "columnsFrom": [
             "plan_id"
           ],
+          "tableTo": "plans",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5513,25 +5501,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "plans_tenant_id_tenants_id_fk": {
           "name": "plans_tenant_id_tenants_id_fk",
           "tableFrom": "plans",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5620,9 +5608,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -5630,10 +5618,10 @@
       "uniqueConstraints": {
         "remembered_devices_secret_hash_unique": {
           "name": "remembered_devices_secret_hash_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "secret_hash"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {
@@ -5739,25 +5727,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "risk_assessment_events_tenant_id_tenants_id_fk": {
           "name": "risk_assessment_events_tenant_id_tenants_id_fk",
           "tableFrom": "risk_assessment_events",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5868,16 +5856,16 @@
         "risk_assessments_tenant_id_tenants_id_fk": {
           "name": "risk_assessments_tenant_id_tenants_id_fk",
           "tableFrom": "risk_assessments",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -5994,9 +5982,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "risk_boilerplate_skeleton_unique": {
           "name": "risk_boilerplate_skeleton_unique",
@@ -6009,9 +5997,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -6099,9 +6087,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -6202,25 +6190,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "risk_labels_tenant_id_tenants_id_fk": {
           "name": "risk_labels_tenant_id_tenants_id_fk",
           "tableFrom": "risk_labels",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -6296,9 +6284,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -6344,12 +6332,12 @@
           "notNull": true,
           "default": false
         },
-        "free_plan_id": {
-          "name": "free_plan_id",
-          "type": "text",
+        "mail_domains": {
+          "name": "mail_domains",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": true,
-          "default": "'free'"
+          "default": "'{}'::text[]"
         },
         "updated_at": {
           "name": "updated_at",
@@ -6409,9 +6397,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "segment_contacts_tenant_idx": {
           "name": "segment_contacts_tenant_idx",
@@ -6424,53 +6412,53 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "segment_contacts_segment_id_segments_id_fk": {
           "name": "segment_contacts_segment_id_segments_id_fk",
           "tableFrom": "segment_contacts",
-          "tableTo": "segments",
-          "schemaTo": "core",
           "columnsFrom": [
             "segment_id"
           ],
+          "tableTo": "segments",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "segment_contacts_contact_id_contacts_id_fk": {
           "name": "segment_contacts_contact_id_contacts_id_fk",
           "tableFrom": "segment_contacts",
-          "tableTo": "contacts",
-          "schemaTo": "core",
           "columnsFrom": [
             "contact_id"
           ],
+          "tableTo": "contacts",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "segment_contacts_tenant_id_tenants_id_fk": {
           "name": "segment_contacts_tenant_id_tenants_id_fk",
           "tableFrom": "segment_contacts",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -6549,25 +6537,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "segments_tenant_id_tenants_id_fk": {
           "name": "segments_tenant_id_tenants_id_fk",
           "tableFrom": "segments",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -6662,25 +6650,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "sending_hold_events_tenant_id_tenants_id_fk": {
           "name": "sending_hold_events_tenant_id_tenants_id_fk",
           "tableFrom": "sending_hold_events",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -6780,16 +6768,16 @@
         "sending_holds_tenant_id_tenants_id_fk": {
           "name": "sending_holds_tenant_id_tenants_id_fk",
           "tableFrom": "sending_holds",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -6884,25 +6872,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "sending_tier_events_tenant_id_tenants_id_fk": {
           "name": "sending_tier_events_tenant_id_tenants_id_fk",
           "tableFrom": "sending_tier_events",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -6970,16 +6958,16 @@
         "sending_tiers_tenant_id_tenants_id_fk": {
           "name": "sending_tiers_tenant_id_tenants_id_fk",
           "tableFrom": "sending_tiers",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -7097,10 +7085,10 @@
             }
           ],
           "isUnique": true,
-          "where": "\"core\".\"ses_reputation_findings\".\"resolved_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"ses_reputation_findings\".\"resolved_at\" is null",
+          "concurrently": false
         },
         "ses_reputation_findings_tenant_idx": {
           "name": "ses_reputation_findings_tenant_idx",
@@ -7119,25 +7107,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "ses_reputation_findings_tenant_id_tenants_id_fk": {
           "name": "ses_reputation_findings_tenant_id_tenants_id_fk",
           "tableFrom": "ses_reputation_findings",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -7254,16 +7242,16 @@
         "ses_reputation_snapshots_tenant_id_tenants_id_fk": {
           "name": "ses_reputation_snapshots_tenant_id_tenants_id_fk",
           "tableFrom": "ses_reputation_snapshots",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -7345,16 +7333,16 @@
         "ses_tenant_status_tenant_id_tenants_id_fk": {
           "name": "ses_tenant_status_tenant_id_tenants_id_fk",
           "tableFrom": "ses_tenant_status",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -7454,9 +7442,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "ses_tenant_status_events_tenant_idx": {
           "name": "ses_tenant_status_events_tenant_idx",
@@ -7475,25 +7463,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "ses_tenant_status_events_tenant_id_tenants_id_fk": {
           "name": "ses_tenant_status_events_tenant_id_tenants_id_fk",
           "tableFrom": "ses_tenant_status_events",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -7542,16 +7530,16 @@
         "shared_template_dismissals_tenant_id_tenants_id_fk": {
           "name": "shared_template_dismissals_tenant_id_tenants_id_fk",
           "tableFrom": "shared_template_dismissals",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -7702,42 +7690,42 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "subscriptions_tenant_id_tenants_id_fk": {
           "name": "subscriptions_tenant_id_tenants_id_fk",
           "tableFrom": "subscriptions",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "subscriptions_tenant_id_unique": {
           "name": "subscriptions_tenant_id_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "tenant_id"
-          ]
+          ],
+          "nullsNotDistinct": false
         },
         "subscriptions_polar_subscription_id_unique": {
           "name": "subscriptions_polar_subscription_id_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "polar_subscription_id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -7799,25 +7787,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "suppressions_tenant_id_tenants_id_fk": {
           "name": "suppressions_tenant_id_tenants_id_fk",
           "tableFrom": "suppressions",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -7959,25 +7947,25 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "template_folders_tenant_id_tenants_id_fk": {
           "name": "template_folders_tenant_id_tenants_id_fk",
           "tableFrom": "template_folders",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -8149,9 +8137,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "template_versions_tenant_idx": {
           "name": "template_versions_tenant_idx",
@@ -8170,39 +8158,39 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "template_versions_tenant_id_tenants_id_fk": {
           "name": "template_versions_tenant_id_tenants_id_fk",
           "tableFrom": "template_versions",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "template_versions_template_id_templates_id_fk": {
           "name": "template_versions_template_id_templates_id_fk",
           "tableFrom": "template_versions",
-          "tableTo": "templates",
-          "schemaTo": "core",
           "columnsFrom": [
             "template_id"
           ],
+          "tableTo": "templates",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -8378,9 +8366,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "templates_tenant_name_uq": {
           "name": "templates_tenant_name_uq",
@@ -8399,9 +8387,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "templates_github_path_uq": {
           "name": "templates_github_path_uq",
@@ -8420,68 +8408,68 @@
             }
           ],
           "isUnique": true,
-          "where": "\"core\".\"templates\".\"github_repository_id\" is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"templates\".\"github_repository_id\" is not null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "templates_tenant_id_tenants_id_fk": {
           "name": "templates_tenant_id_tenants_id_fk",
           "tableFrom": "templates",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "templates_folder_id_template_folders_id_fk": {
           "name": "templates_folder_id_template_folders_id_fk",
           "tableFrom": "templates",
-          "tableTo": "template_folders",
-          "schemaTo": "core",
           "columnsFrom": [
             "folder_id"
           ],
+          "tableTo": "template_folders",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "templates_github_repository_id_github_repositories_id_fk": {
           "name": "templates_github_repository_id_github_repositories_id_fk",
           "tableFrom": "templates",
-          "tableTo": "github_repositories",
-          "schemaTo": "core",
           "columnsFrom": [
             "github_repository_id"
           ],
+          "tableTo": "github_repositories",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "templates_live_version_id_template_versions_id_fk": {
           "name": "templates_live_version_id_template_versions_id_fk",
           "tableFrom": "templates",
-          "tableTo": "template_versions",
-          "schemaTo": "core",
           "columnsFrom": [
             "live_version_id"
           ],
+          "tableTo": "template_versions",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -8519,16 +8507,16 @@
         "tenant_storage_tenant_id_tenants_id_fk": {
           "name": "tenant_storage_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_storage",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -8607,9 +8595,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -8617,17 +8605,17 @@
       "uniqueConstraints": {
         "tenants_slug_unique": {
           "name": "tenants_slug_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ]
+          ],
+          "nullsNotDistinct": false
         },
         "tenants_clerk_org_id_unique": {
           "name": "tenants_clerk_org_id_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "clerk_org_id"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -8712,25 +8700,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "topics_tenant_id_tenants_id_fk": {
           "name": "topics_tenant_id_tenants_id_fk",
           "tableFrom": "topics",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -8812,25 +8800,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "trusted_template_events_tenant_id_tenants_id_fk": {
           "name": "trusted_template_events_tenant_id_tenants_id_fk",
           "tableFrom": "trusted_template_events",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -8987,9 +8975,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "trusted_templates_live_unique": {
           "name": "trusted_templates_live_unique",
@@ -9008,26 +8996,26 @@
             }
           ],
           "isUnique": true,
-          "where": "status in ('pending', 'approved')",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "status in ('pending', 'approved')",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "trusted_templates_tenant_id_tenants_id_fk": {
           "name": "trusted_templates_tenant_id_tenants_id_fk",
           "tableFrom": "trusted_templates",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -9172,9 +9160,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_attempts_endpoint_idx": {
           "name": "webhook_attempts_endpoint_idx",
@@ -9193,9 +9181,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_attempts_tenant_idx": {
           "name": "webhook_attempts_tenant_idx",
@@ -9214,25 +9202,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "webhook_attempts_delivery_id_webhook_deliveries_id_fk": {
           "name": "webhook_attempts_delivery_id_webhook_deliveries_id_fk",
           "tableFrom": "webhook_attempts",
-          "tableTo": "webhook_deliveries",
-          "schemaTo": "core",
           "columnsFrom": [
             "delivery_id"
           ],
+          "tableTo": "webhook_deliveries",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -9412,9 +9400,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_deliveries_sequence_idx": {
           "name": "webhook_deliveries_sequence_idx",
@@ -9433,9 +9421,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_deliveries_due_idx": {
           "name": "webhook_deliveries_due_idx",
@@ -9448,10 +9436,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"webhook_deliveries\".\"status\" = 'pending'",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"webhook_deliveries\".\"status\" = 'pending'",
+          "concurrently": false
         },
         "webhook_deliveries_tenant_idx": {
           "name": "webhook_deliveries_tenant_idx",
@@ -9470,9 +9458,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_deliveries_message_idx": {
           "name": "webhook_deliveries_message_idx",
@@ -9485,9 +9473,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_deliveries_pending_idx": {
           "name": "webhook_deliveries_pending_idx",
@@ -9506,25 +9494,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "webhook_deliveries_endpoint_id_webhook_endpoints_id_fk": {
           "name": "webhook_deliveries_endpoint_id_webhook_endpoints_id_fk",
           "tableFrom": "webhook_deliveries",
-          "tableTo": "webhook_endpoints",
-          "schemaTo": "core",
           "columnsFrom": [
             "endpoint_id"
           ],
+          "tableTo": "webhook_endpoints",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -9739,25 +9727,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "webhook_endpoints_tenant_id_tenants_id_fk": {
           "name": "webhook_endpoints_tenant_id_tenants_id_fk",
           "tableFrom": "webhook_endpoints",
-          "tableTo": "tenants",
-          "schemaTo": "core",
           "columnsFrom": [
             "tenant_id"
           ],
+          "tableTo": "tenants",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -9870,9 +9858,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_health_events_endpoint_idx": {
           "name": "webhook_health_events_endpoint_idx",
@@ -9891,9 +9879,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_health_events_unfanned_idx": {
           "name": "webhook_health_events_unfanned_idx",
@@ -9906,10 +9894,10 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"webhook_health_events\".\"fanned_out_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"webhook_health_events\".\"fanned_out_at\" is null",
+          "concurrently": false
         },
         "webhook_health_events_unemailed_idx": {
           "name": "webhook_health_events_unemailed_idx",
@@ -9922,26 +9910,26 @@
             }
           ],
           "isUnique": false,
-          "where": "\"core\".\"webhook_health_events\".\"emailed_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"core\".\"webhook_health_events\".\"emailed_at\" is null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "webhook_health_events_endpoint_id_webhook_endpoints_id_fk": {
           "name": "webhook_health_events_endpoint_id_webhook_endpoints_id_fk",
           "tableFrom": "webhook_health_events",
-          "tableTo": "webhook_endpoints",
-          "schemaTo": "core",
           "columnsFrom": [
             "endpoint_id"
           ],
+          "tableTo": "webhook_endpoints",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -10076,25 +10064,25 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "webhook_replays_endpoint_id_webhook_endpoints_id_fk": {
           "name": "webhook_replays_endpoint_id_webhook_endpoints_id_fk",
           "tableFrom": "webhook_replays",
-          "tableTo": "webhook_endpoints",
-          "schemaTo": "core",
           "columnsFrom": [
             "endpoint_id"
           ],
+          "tableTo": "webhook_endpoints",
+          "schemaTo": "core",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -10112,130 +10100,6 @@
         }
       },
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "core.workspace_roles": {
-      "name": "workspace_roles",
-      "schema": "core",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "clerk_user_id": {
-          "name": "clerk_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "clerk_membership_id": {
-          "name": "clerk_membership_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "workspace_roles_tenant_role_idx": {
-          "name": "workspace_roles_tenant_role_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "role",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "workspace_roles_tenant_id_tenants_id_fk": {
-          "name": "workspace_roles_tenant_id_tenants_id_fk",
-          "tableFrom": "workspace_roles",
-          "tableTo": "tenants",
-          "schemaTo": "core",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "workspace_roles_tenant_id_clerk_user_id_pk": {
-          "name": "workspace_roles_tenant_id_clerk_user_id_pk",
-          "columns": [
-            "tenant_id",
-            "clerk_user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {
-        "workspace_roles_workspace": {
-          "name": "workspace_roles_workspace",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": [
-            "public"
-          ],
-          "using": "\"core\".\"workspace_roles\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
-          "withCheck": "\"core\".\"workspace_roles\".\"tenant_id\" = current_setting('app.tenant_id')::uuid"
-        }
-      },
-      "checkConstraints": {
-        "workspace_roles_role_check": {
-          "name": "workspace_roles_role_check",
-          "value": "\"role\" in ('owner', 'admin', 'member')"
-        }
-      },
       "isRLSEnabled": false
     }
   },
@@ -10565,10 +10429,10 @@
     "authd": "authd",
     "core": "core"
   },
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

@@ -33,6 +33,7 @@
  * protection is that turning it on is deliberate.
  */
 
+import { ssoRoutes } from "@/lib/preview-sso"
 import { webhookRoutes } from "@/lib/preview-webhooks"
 
 export const PREVIEW =
@@ -180,6 +181,21 @@ const DOMAINS = [
     click_tracking: false,
   },
 ]
+
+const NEW_DOMAIN_PREVIEW = {
+  ...DOMAINS[0]!,
+  id: "prv_new",
+  name: "mytest.com",
+  status: "not_started" as const,
+  delegated: false,
+}
+
+function findDomain(id: string | undefined) {
+  if (!id) return null
+  return (
+    DOMAINS.find((d) => d.id === id) ?? (id === "prv_new" ? NEW_DOMAIN_PREVIEW : null)
+  )
+}
 
 const DKIM_KEY =
   "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv7hK2qQ8nJ3mF1xZ" +
@@ -962,6 +978,7 @@ const ROUTES: [
           "owners:manage",
           "workspace:manage",
           "workspace:delete",
+          "sso:manage",
         ],
       },
     }),
@@ -1109,7 +1126,7 @@ const ROUTES: [
   [
     /^\/console\/domains\/([^/]+)$/,
     (m, _q, method) => {
-      const domain = DOMAINS.find((d) => d.id === m[1])
+      const domain = findDomain(m[1])
       // ⚠ NOT A FALLBACK TO THE FIRST ROW - see `PREVIEW_NOT_FOUND`.
       if (!domain) return PREVIEW_NOT_FOUND
       // A tracking PATCH answers with the domain as it was: the switch keeps its
@@ -1150,7 +1167,7 @@ const ROUTES: [
   [
     /^\/console\/domains\/([^/]+)\/verify$/,
     (m) => {
-      const domain = DOMAINS.find((d) => d.id === m[1])
+      const domain = findDomain(m[1])
       if (!domain) return PREVIEW_NOT_FOUND
       return {
         ...domain,
@@ -1172,7 +1189,7 @@ const ROUTES: [
   [
     /^\/console\/domains\/([^/]+)\/refresh$/,
     (m) => {
-      const domain = DOMAINS.find((d) => d.id === m[1])
+      const domain = findDomain(m[1])
       if (!domain) return PREVIEW_NOT_FOUND
       if (domain.status === "verified" || domain.status === "failed") {
         return { ...domain, records: recordsFor(domain) }
@@ -1269,6 +1286,9 @@ const ROUTES: [
           last_used_at: ago(0, 1),
           expires_at: null,
           revoked_at: null,
+          can_rotate: true,
+          can_revoke: true,
+          can_edit: true,
         },
         {
           id: "4f7a1c00-0000-4000-8000-000000000002",
@@ -1281,6 +1301,9 @@ const ROUTES: [
           last_used_at: ago(46),
           expires_at: null,
           revoked_at: null,
+          can_rotate: true,
+          can_revoke: true,
+          can_edit: true,
         },
         {
           id: "4f7a1c00-0000-4000-8000-000000000003",
@@ -1293,6 +1316,9 @@ const ROUTES: [
           last_used_at: ago(250),
           expires_at: null,
           revoked_at: ago(120),
+          can_rotate: false,
+          can_revoke: false,
+          can_edit: false,
         },
       ],
     }),
@@ -1300,6 +1326,7 @@ const ROUTES: [
 
   // ⚠ THE WEBHOOK SCREENS' FIXTURES LIVE IN THEIR OWN MODULE (#286).
   ...webhookRoutes(PREVIEW_NOT_FOUND),
+  ...ssoRoutes(PREVIEW_NOT_FOUND),
 
   [
     // ⚠ AT RISK IN PREVIEW, so the amber banner, the rail pill and the

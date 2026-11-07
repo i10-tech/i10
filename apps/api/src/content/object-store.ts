@@ -10,9 +10,11 @@ import { parseKeyring, type Body, type Keyring } from "./seal.js"
  * on Bun, and its client is built in - one dependency fewer in an image that
  * already bundles the SES SDK, and nothing for `bun build` to drop.
  *
- * ⚠ NEVER A PUBLIC URL, NEVER A PRESIGNED ONE HANDED OUT. Customers reach
+ * ⚠ NEVER A PUBLIC URL, AND NEVER A PRESIGNED ONE FOR READING. Customers reach
  * content only through our API, behind the tenant check; the bucket has no
- * custom domain and no r2.dev URL.
+ * custom domain and no r2.dev URL. The one presigned URL there is
+ * (`presignPut`) is write-only, for one key we chose, and lives for minutes: it
+ * lets a mailbox archive reach R2 without passing through the API (#385).
  */
 export interface ObjectStore {
   put(key: string, bytes: Uint8Array, contentType?: string): Promise<void>
@@ -25,11 +27,32 @@ export interface ObjectStore {
   delete(key: string): Promise<void>
 }
 
+/** A multipart upload in progress: parts leave as the writer fills them. */
+export interface ObjectWriter {
+  /** Resolves once the chunk is accepted, so awaiting it is the backpressure. */
+  write(chunk: Uint8Array): Promise<void>
+  /** Completes the object. Nothing is readable under the key before this. */
+  end(): Promise<void>
+}
+
+/**
+ * The same store, for objects too big to hold (#385): a mailbox archive is
+ * gigabytes, and every method here keeps memory at one chunk or one part.
+ */
+export interface StreamingObjectStore extends ObjectStore {
+  open(key: string, contentType?: string): ObjectWriter
+  read(key: string): ReadableStream<Uint8Array>
+  /** The object's length, or `null` when there is no such object. */
+  size(key: string): Promise<number | null>
+  /** A URL a client can `PUT` the object to, once, until it expires. */
+  presignPut(key: string, expiresInSeconds: number): string
+}
+
 /**
  * An object store that can also open sealed message bodies (#188), and may
  * cache what it opened.
  */
-export type ContentStore = ObjectStore & {
+export type ContentStore = StreamingObjectStore & {
   /** Master keys (CONTENT_KEYS). Absent: bodies stay in Postgres. */
   keys?: Keyring | null
   cache?: { get(key: string): Body | null; set(key: string, body: Body): void } | null
@@ -121,7 +144,15 @@ export function templateAssetsBucketFrom(
   }
 }
 
-export function r2Store(client: S3Client): ObjectStore {
+/**
+ * ⚠ THE PART SIZE IS THE MEMORY BOUND OF AN UPLOAD: `queueSize` parts in flight
+ * plus the one being filled. R2 wants equal parts but the last, which Bun's
+ * writer does.
+ */
+const PART_BYTES = 8 * 1024 * 1024
+const PARTS_IN_FLIGHT = 2
+
+export function r2Store(client: S3Client): StreamingObjectStore {
   return {
     async put(key, bytes, contentType) {
       await client.write(key, bytes, {
@@ -150,11 +181,46 @@ export function r2Store(client: S3Client): ObjectStore {
     async delete(key) {
       await client.delete(key)
     },
+    open(key, contentType) {
+      const sink = client.file(key).writer({
+        type: contentType ?? "application/octet-stream",
+        partSize: PART_BYTES,
+        queueSize: PARTS_IN_FLIGHT,
+        retry: 3,
+      })
+      let unflushed = 0
+      return {
+        async write(chunk) {
+          await sink.write(chunk)
+          // ⚠ A WRITE MAY RETURN BEFORE THE BYTES LEAVE, so flush once a part's
+          // worth has built up: that is what makes awaiting this a bound.
+          unflushed += chunk.byteLength
+          if (unflushed >= PART_BYTES) {
+            unflushed = 0
+            await sink.flush()
+          }
+        },
+        async end() {
+          await sink.end()
+        },
+      }
+    },
+    read(key) {
+      return client.file(key).stream()
+    },
+    async size(key) {
+      const file = client.file(key)
+      if (!(await file.exists())) return null
+      return (await file.stat()).size
+    },
+    presignPut(key, expiresInSeconds) {
+      return client.file(key).presign({ method: "PUT", expiresIn: expiresInSeconds })
+    },
   }
 }
 
 /** For tests: the same contract, in memory. */
-export function memoryStore(): ObjectStore & {
+export function memoryStore(): StreamingObjectStore & {
   objects: Map<string, Uint8Array>
   puts: number
   ranges: number
@@ -167,6 +233,37 @@ export function memoryStore(): ObjectStore & {
     async put(key: string, bytes: Uint8Array) {
       store.puts++
       objects.set(key, bytes)
+    },
+    open(key: string) {
+      const parts: Uint8Array[] = []
+      return {
+        async write(chunk: Uint8Array) {
+          parts.push(chunk.slice())
+        },
+        async end() {
+          store.puts++
+          objects.set(key, concat(parts))
+        },
+      }
+    },
+    read(key: string) {
+      const found = objects.get(key)
+      if (!found) throw new Error(`no such object: ${key}`)
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          // Small pieces, so a reader's chunk handling is exercised.
+          for (let at = 0; at < found.byteLength; at += 16 * 1024) {
+            controller.enqueue(found.slice(at, at + 16 * 1024))
+          }
+          controller.close()
+        },
+      })
+    },
+    async size(key: string) {
+      return objects.get(key)?.byteLength ?? null
+    },
+    presignPut(key: string, expiresInSeconds: number) {
+      return `memory://${key}?expires=${expiresInSeconds}`
     },
     async get(key: string) {
       const found = objects.get(key)
@@ -185,4 +282,14 @@ export function memoryStore(): ObjectStore & {
     },
   }
   return store
+}
+
+function concat(parts: readonly Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0))
+  let at = 0
+  for (const p of parts) {
+    out.set(p, at)
+    at += p.byteLength
+  }
+  return out
 }

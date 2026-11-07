@@ -1,0 +1,24 @@
+# Stalwart's own recursive resolver (#365, build B2).
+#
+# ⚠ WHY STALWART CANNOT USE THE CLUSTER'S DNS. CoreDNS forwards to the node's
+# resolver, which is Tailscale's 100.100.100.100, so every blocklist query
+# arrives at Spamhaus and URIBL from a shared public resolver. They refuse
+# those: ZEN and DBL answer 127.255.255.254 and URIBL 127.0.0.1, which the spam
+# filter reads as "not listed". Cloudflare, Quad9 and Google, the resolvers
+# Stalwart offers built in, are refused the same way. unbound resolves from the
+# root itself, so the queries come from our own address.
+#
+# ⚠ SPAMHAUS'S FREE ACCESS IS FOR NON-COMMERCIAL USE. This makes the queries
+# work; commercial use at our volume needs a Data Query Service key, which is a
+# Spamhaus account decision, not a config change.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - unbound.yaml
+
+configMapGenerator:
+  - name: i10-stalwart-unbound
+    namespace: i10-prod
+    files:
+      - unbound.conf

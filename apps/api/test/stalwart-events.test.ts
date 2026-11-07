@@ -3,7 +3,13 @@ import { describe, expect, it, mock } from "bun:test"
 import { createStalwartWebhooks } from "../src/routes/stalwart-events.js"
 import type { EventOps } from "../src/webhooks/events.js"
 import { decodeSecret } from "../src/webhooks/signing.js"
+import type {
+  AccountEventOps,
+  MailboxOwner,
+  QuotaReached,
+} from "../src/webhooks/stalwart-account.js"
 import {
+  interpretStalwartAccountEvent,
   interpretStalwartEvent,
   messageIdFrom,
   sourceEventIdFor,
@@ -356,6 +362,93 @@ describe("what the customer receives", () => {
   })
 })
 
+/**
+ * A mailbox event as Stalwart serialises one. The field names are the ones its
+ * own log lines carry: `accountName`, `remoteIp`, `listenerId`, `localPort`.
+ * No VERP sender - these are not about a message.
+ */
+const mailboxEvent = (
+  type: string,
+  data: Record<string, unknown> = {},
+  over: Partial<StalwartEvent> = {},
+): StalwartEvent => ({
+  id: "17579800000005678",
+  createdAt: "2026-09-17T10:00:00Z",
+  type,
+  data: { listenerId: "imap", localPort: 993, ...data },
+  ...over,
+})
+
+describe("interpreting a mailbox event", () => {
+  it("reads the account, address and listener off a failed sign-in", () => {
+    expect(
+      interpretStalwartAccountEvent(
+        mailboxEvent("auth.failed", {
+          accountName: "Alice@Example.com",
+          remoteIp: "192.0.2.1",
+        }),
+      ),
+    ).toMatchObject({
+      type: "auth.failed",
+      account: "alice@example.com",
+      ip: "192.0.2.1",
+      listener: "imap",
+      occurredAt: new Date("2026-09-17T10:00:00Z"),
+    })
+  })
+
+  it("reads the account off a quota event", () => {
+    expect(
+      interpretStalwartAccountEvent(
+        mailboxEvent("limit.quota", { accountName: "bob@example.com" }),
+      ),
+    ).toMatchObject({ type: "limit.quota", account: "bob@example.com" })
+  })
+
+  it("ignores an event with no account, and types it does not handle", () => {
+    expect(interpretStalwartAccountEvent(mailboxEvent("auth.failed"))).toBeNull()
+    expect(interpretStalwartAccountEvent(mailboxEvent("limit.quota"))).toBeNull()
+    expect(
+      interpretStalwartAccountEvent(
+        mailboxEvent("security.authentication-ban", { accountName: "a@example.com" }),
+      ),
+    ).toBeNull()
+  })
+
+  // Delivery outcomes stay on their own path: a mailbox event is never a message.
+  it("is not mistaken for a delivery event, nor the reverse", () => {
+    const failed = mailboxEvent("auth.failed", { accountName: "a@example.com" })
+    expect(interpretStalwartEvent(failed)).toBeNull()
+    expect(interpretStalwartAccountEvent(event("delivery.delivered"))).toBeNull()
+  })
+
+  // Stalwart's own id changes on every resend, and each node posts a copy.
+  it("derives the same key for two nodes' copies of a failed sign-in", () => {
+    const data = { accountName: "alice@example.com", remoteIp: "192.0.2.1" }
+    const a = interpretStalwartAccountEvent(
+      mailboxEvent("auth.failed", data, { id: "n1-1" }),
+    )
+    const b = interpretStalwartAccountEvent(
+      mailboxEvent("auth.failed", data, { id: "n2-9" }),
+    )
+    expect(a?.sourceEventId).toBe(b?.sourceEventId)
+    expect(a?.sourceEventId).toStartWith("stalwart_")
+  })
+
+  it("keeps failures from different addresses or times apart", () => {
+    const at = (ip: string, createdAt = "2026-09-17T10:00:00Z") =>
+      interpretStalwartAccountEvent(
+        mailboxEvent(
+          "auth.failed",
+          { accountName: "a@example.com", remoteIp: ip },
+          { createdAt },
+        ),
+      )?.sourceEventId
+    expect(at("192.0.2.1")).not.toBe(at("192.0.2.2"))
+    expect(at("192.0.2.1")).not.toBe(at("192.0.2.1", "2026-09-17T10:00:01Z"))
+  })
+})
+
 /** A minimal EventOps that records what it was asked to write. */
 function ops() {
   const recorded: { messageId: string; type: string }[] = []
@@ -370,6 +463,40 @@ function ops() {
     ),
     enqueue: mock(async () => {}),
   } as unknown as EventOps & { recorded: { messageId: string; type: string }[] }
+}
+
+/**
+ * The mailbox side, with the hosted mailboxes it is told about.
+ *
+ * ⚠ THIS DOUBLE HAS NO IDENTITY PATH, DELIBERATELY. `AccountEventOps` offers no
+ * way to write a person's sighting, so a handler that tried to file a failed
+ * login as one would not compile against it. The real ops are held to the same
+ * rule against a database in `test/mailbox-auth-db.test.ts`.
+ */
+function accountsFake(hosted: Record<string, MailboxOwner> = {}) {
+  const claimed = new Set<string>()
+  const failures: { account: string; ip: string | null; tenantId: string }[] = []
+  const quotaClaims: string[] = []
+  const claim = (id: string) => {
+    if (claimed.has(id)) return false
+    claimed.add(id)
+    return true
+  }
+  return {
+    failures,
+    quotaClaims,
+    mailboxOwnerOf: async (address) => hosted[address] ?? null,
+    recordAuthFailure: async ({ owner, event }) => {
+      if (!claim(event.sourceEventId)) return "duplicate"
+      failures.push({ account: event.account, ip: event.ip, tenantId: owner.tenantId })
+      return "recorded"
+    },
+    claimQuota: async (event) => {
+      if (!claim(event.sourceEventId)) return "duplicate"
+      quotaClaims.push(event.account)
+      return "recorded"
+    },
+  } satisfies AccountEventOps & { failures: unknown[]; quotaClaims: string[] }
 }
 
 const log = { info: () => {}, warn: () => {}, error: () => {} }
@@ -396,7 +523,12 @@ describe("the ingest endpoint", () => {
    */
   it("answers 403 and writes nothing when the signature is wrong", async () => {
     const events = ops()
-    const app = createStalwartWebhooks({ events, log, secret: SECRET })
+    const app = createStalwartWebhooks({
+      events,
+      accounts: accountsFake(),
+      log,
+      secret: SECRET,
+    })
     const body = JSON.stringify({
       events: [event("delivery.rcpt-to-rejected", { to: "v@x.test", code: 550 })],
     })
@@ -409,7 +541,12 @@ describe("the ingest endpoint", () => {
 
   it("answers 403 when the signature header is absent entirely", async () => {
     const events = ops()
-    const app = createStalwartWebhooks({ events, log, secret: SECRET })
+    const app = createStalwartWebhooks({
+      events,
+      accounts: accountsFake(),
+      log,
+      secret: SECRET,
+    })
     const res = await post(app, JSON.stringify({ events: [] }))
     expect(res.status).toBe(403)
     expect(events.recorded).toEqual([])
@@ -417,7 +554,12 @@ describe("the ingest endpoint", () => {
 
   it("records a signed batch", async () => {
     const events = ops()
-    const app = createStalwartWebhooks({ events, log, secret: SECRET })
+    const app = createStalwartWebhooks({
+      events,
+      accounts: accountsFake(),
+      log,
+      secret: SECRET,
+    })
     const body = JSON.stringify({
       events: [
         event("delivery.delivered", { to: "a@x.test" }),
@@ -442,7 +584,12 @@ describe("the ingest endpoint", () => {
    */
   it("skips events for mail that is not ours without failing the batch", async () => {
     const events = ops()
-    const app = createStalwartWebhooks({ events, log, secret: SECRET })
+    const app = createStalwartWebhooks({
+      events,
+      accounts: accountsFake(),
+      log,
+      secret: SECRET,
+    })
     const body = JSON.stringify({
       events: [
         event("delivery.delivered", { from: "mohamed@i10.tech", to: "a@x.test" }),
@@ -473,7 +620,12 @@ describe("the ingest endpoint", () => {
       },
       enqueue: async () => {},
     } as unknown as EventOps
-    const app = createStalwartWebhooks({ events, log, secret: SECRET })
+    const app = createStalwartWebhooks({
+      events,
+      accounts: accountsFake(),
+      log,
+      secret: SECRET,
+    })
     const body = JSON.stringify({ events: [event("delivery.delivered")] })
 
     expect((await post(app, body, sign(body))).status).toBe(500)
@@ -483,7 +635,12 @@ describe("the ingest endpoint", () => {
   // Retrying cannot fix it, so take it off the queue.
   it("answers 200 to a signed body that is not an object", async () => {
     const events = ops()
-    const app = createStalwartWebhooks({ events, log, secret: SECRET })
+    const app = createStalwartWebhooks({
+      events,
+      accounts: accountsFake(),
+      log,
+      secret: SECRET,
+    })
     for (const body of ["null", "[]", "not json"]) {
       expect((await post(app, body, sign(body))).status).toBe(200)
     }
@@ -499,5 +656,199 @@ describe("the ingest endpoint", () => {
     const app = createStalwartWebhooks()
     const res = await app.request("/stalwart", { method: "POST", body: "{}" })
     expect(res.status).toBe(503)
+  })
+
+  describe("events about a mailbox", () => {
+    const OWNER: MailboxOwner = { clerkUserId: "user_1", tenantId: "ten-1" }
+    const HOSTED = { "alice@example.com": OWNER, "bob@example.com": OWNER }
+
+    const send = async (
+      accounts: ReturnType<typeof accountsFake>,
+      events: StalwartEvent[],
+      notifyQuotaReached: (n: QuotaReached) => Promise<void> = async () => {},
+    ) => {
+      const app = createStalwartWebhooks({
+        events: ops(),
+        accounts,
+        notifyQuotaReached,
+        log,
+        secret: SECRET,
+      })
+      const body = JSON.stringify({ events })
+      const res = await post(app, body, sign(body))
+      return { status: res.status, json: await res.json() }
+    }
+
+    it("records a failed sign-in to a hosted mailbox", async () => {
+      const accounts = accountsFake(HOSTED)
+
+      const { status, json } = await send(accounts, [
+        mailboxEvent("auth.failed", {
+          accountName: "alice@example.com",
+          remoteIp: "192.0.2.1",
+        }),
+      ])
+
+      expect(status).toBe(200)
+      expect(json).toMatchObject({ recorded: 1, ignored: 0 })
+      expect(accounts.failures).toEqual([
+        { account: "alice@example.com", ip: "192.0.2.1", tenantId: "ten-1" },
+      ])
+    })
+
+    // Internet scanners try random usernames; those are noise, not signal.
+    it("drops a failed sign-in to an account we do not host", async () => {
+      const accounts = accountsFake(HOSTED)
+
+      const { json } = await send(accounts, [
+        mailboxEvent("auth.failed", {
+          accountName: "admin@example.com",
+          remoteIp: "192.0.2.9",
+        }),
+      ])
+
+      expect(json).toMatchObject({ recorded: 0, ignored: 1 })
+      expect(accounts.failures).toEqual([])
+    })
+
+    it("drops a hosted mailbox that has no workspace", async () => {
+      const accounts = accountsFake({
+        "staff@i10.tech": { clerkUserId: "user_2", tenantId: null },
+      })
+
+      const { json } = await send(accounts, [
+        mailboxEvent("auth.failed", {
+          accountName: "staff@i10.tech",
+          remoteIp: "192.0.2.1",
+        }),
+      ])
+
+      expect(json).toMatchObject({ recorded: 0, ignored: 1 })
+      expect(accounts.failures).toEqual([])
+    })
+
+    it("ignores the second node's copy of a failed sign-in", async () => {
+      const accounts = accountsFake(HOSTED)
+      const data = { accountName: "alice@example.com", remoteIp: "192.0.2.1" }
+
+      await send(accounts, [mailboxEvent("auth.failed", data, { id: "node1-111" })])
+      const second = await send(accounts, [
+        mailboxEvent("auth.failed", data, { id: "node2-999" }),
+      ])
+
+      expect(second.json).toMatchObject({ recorded: 0, ignored: 0 })
+      expect(accounts.failures).toHaveLength(1)
+    })
+
+    it("records a full mailbox and tells the hook which workspace", async () => {
+      const accounts = accountsFake(HOSTED)
+      const notified: QuotaReached[] = []
+
+      const { json } = await send(
+        accounts,
+        [mailboxEvent("limit.quota", { accountName: "bob@example.com" })],
+        async (n) => void notified.push(n),
+      )
+
+      expect(json).toMatchObject({ recorded: 1, ignored: 0 })
+      expect(accounts.quotaClaims).toEqual(["bob@example.com"])
+      expect(notified).toEqual([
+        {
+          tenantId: "ten-1",
+          account: "bob@example.com",
+          occurredAt: new Date("2026-09-17T10:00:00Z"),
+        },
+      ])
+    })
+
+    it("notifies once for the second node's copy and for repeats the same day", async () => {
+      const accounts = accountsFake(HOSTED)
+      const notified: QuotaReached[] = []
+      const notify = async (n: QuotaReached) => void notified.push(n)
+      const data = { accountName: "bob@example.com" }
+
+      await send(
+        accounts,
+        [mailboxEvent("limit.quota", data, { id: "node1-111" })],
+        notify,
+      )
+      await send(
+        accounts,
+        [mailboxEvent("limit.quota", data, { id: "node2-999" })],
+        notify,
+      )
+      await send(
+        accounts,
+        [mailboxEvent("limit.quota", data, { createdAt: "2026-09-17T18:30:00Z" })],
+        notify,
+      )
+      expect(notified).toHaveLength(1)
+
+      await send(
+        accounts,
+        [mailboxEvent("limit.quota", data, { createdAt: "2026-09-18T00:00:01Z" })],
+        notify,
+      )
+      expect(notified).toHaveLength(2)
+    })
+
+    it("drops a full mailbox we do not host without notifying", async () => {
+      const accounts = accountsFake(HOSTED)
+      const notify = mock(async () => {})
+
+      const { json } = await send(
+        accounts,
+        [mailboxEvent("limit.quota", { accountName: "stranger@example.com" })],
+        notify,
+      )
+
+      expect(json).toMatchObject({ recorded: 0, ignored: 1 })
+      expect(notify).not.toHaveBeenCalled()
+    })
+
+    // The claim is already taken by then, so a 500 would replay it into a
+    // duplicate and lose the notice anyway.
+    it("still answers 200 when the quota hook throws", async () => {
+      const accounts = accountsFake(HOSTED)
+
+      const { status } = await send(
+        accounts,
+        [mailboxEvent("limit.quota", { accountName: "bob@example.com" })],
+        async () => {
+          throw new Error("mail down")
+        },
+      )
+
+      expect(status).toBe(200)
+    })
+
+    it("answers 500 when the write fails, so Stalwart redelivers", async () => {
+      const accounts = {
+        ...accountsFake(HOSTED),
+        recordAuthFailure: async () => {
+          throw new Error("db down")
+        },
+      }
+
+      const { status } = await send(accounts, [
+        mailboxEvent("auth.failed", { accountName: "alice@example.com" }),
+      ])
+
+      expect(status).toBe(500)
+    })
+
+    it("ignores an event type it does not handle", async () => {
+      const accounts = accountsFake(HOSTED)
+
+      const { json } = await send(accounts, [
+        mailboxEvent("security.authentication-ban", {
+          accountName: "alice@example.com",
+          remoteIp: "192.0.2.1",
+        }),
+      ])
+
+      expect(json).toMatchObject({ recorded: 0, ignored: 1 })
+      expect(accounts.failures).toEqual([])
+    })
   })
 })

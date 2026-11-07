@@ -9,6 +9,7 @@
     "./foundation.css": "./src/components/foundation.css",
     "./hooks/*": "./src/hooks/*.ts",
     "./components/motion-tokens": "./src/components/motion-tokens.ts",
+    "./components/lib/glide-scroll": "./src/components/lib/glide-scroll.ts",
     "./components/lib/motion-tokens": "./src/components/lib/motion-tokens.ts",
     "./components/lib/use-copy-feedback": "./src/components/lib/use-copy-feedback.ts",
     "./components/lib/use-today": "./src/components/lib/use-today.ts",

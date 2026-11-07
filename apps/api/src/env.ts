@@ -605,6 +605,16 @@ const schema = z.object({
   STALWART_API_TOKEN: z.string().min(1).optional(),
 
   /**
+   * An `x:ApiKey` holding the `impersonate` permission, for acting as a
+   * mailbox over JMAP. See `mail/jmap-as.ts` for the setup.
+   *
+   * ⚠ NOT `STALWART_API_TOKEN`, AND NEVER SUBSTITUTED FOR IT. That one reads the
+   * registry; this one reads and writes a person's mail. Optional so a
+   * deployment without it answers 503 for mailbox-data routes and nothing else.
+   */
+  STALWART_IMPERSONATE_TOKEN: z.string().min(1).optional(),
+
+  /**
    * The HMAC key on Stalwart's `WebHook` object, and the only thing standing
    * between a public endpoint and a stranger's suppression list.
    *
@@ -620,6 +630,17 @@ const schema = z.object({
    * genuine notification.
    */
   STALWART_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  /**
+   * The bearer token Stalwart's MTA hook presents (B5, #380). A different secret
+   * from the webhook's: that one signs what Stalwart tells us, this one
+   * authorises a call that decides whether a mailbox may send.
+   *
+   * ⚠ WITHOUT IT `/internal/mta-hook` ANSWERS 503, AND STALWART THEN TEMPFAILS
+   * EVERY MAILBOX SEND. Set it here and on Stalwart before applying the plan
+   * line that enables the hook; see the README, "The MTA hook".
+   */
+  STALWART_MTA_HOOK_SECRET: z.string().min(1).optional(),
 
   /**
    * Stalwart's internal relay, for the direct route.
