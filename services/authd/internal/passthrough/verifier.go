@@ -141,6 +141,11 @@ var _ verify.Verifier = (*Verifier)(nil)
 const (
 	ReasonManagedNoConnection = "managed_no_connection"
 	ReasonNotConfigured       = "passthrough_not_configured"
+	// ReasonSSORequired is an account that is NOT managed but whose address is on a
+	// domain an active connection requires SSO for: its Clerk password is not
+	// accepted any more, and it becomes managed (and gets its company's password)
+	// by signing in through SSO.
+	ReasonSSORequired = "sso_required"
 )
 
 // refusal is the verifier of a managed account that has no directory to ask. It
@@ -167,6 +172,13 @@ var _ verify.Verifier = refusal{}
 // pass-through switched off is (that is learned from the settings API, in
 // Verify). None of it falls back.
 //
+// ⚠ NOR IS AN ACCOUNT THAT SSO IS REQUIRED FOR, WHILE IT IS NOT MANAGED YET. The
+// owner turned "required" on for its domain, so a Clerk password may no longer
+// open its mail. It is refused here, ahead of the credential cache: the refusal's
+// name is mixed into the cache key, so a password cached under Unmanaged's name
+// can never match it. That is what makes the switch take effect on the next bind
+// on every pod, not after the cache's two hours.
+//
 // The resolver does no I/O. Whether the connection has pass-through settings,
 // and what they are, is fetched inside Verify, where the verifier's own timeout
 // bounds it.
@@ -184,6 +196,8 @@ type ManagedResolver struct {
 // Resolve implements verify.Resolver.
 func (r *ManagedResolver) Resolve(_ context.Context, account *projection.Account) (verify.Verifier, error) {
 	switch {
+	case !account.Managed && account.SSORequired:
+		return refusal{ReasonSSORequired}, nil
 	case !account.Managed:
 		return r.Unmanaged, nil
 	case account.ManagedConnection == "":

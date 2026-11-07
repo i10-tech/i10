@@ -55,9 +55,26 @@ export interface Logger {
   error: (o: object, m: string) => void
 }
 
+/**
+ * What a lapsed or restored subscription does to the workspace's mail logins.
+ *
+ * ⚠ BOTH ARE IDEMPOTENT AND NEITHER TOUCHES DELIVERY: a held mailbox keeps
+ * receiving, and paying again lifts the hold and nothing else (a person who was
+ * removed or suspended stays so). See `mailAccess` in mailboxes/store.ts.
+ */
+export interface MailPaymentHold {
+  hold(tenantId: string): Promise<void>
+  release(tenantId: string): Promise<void>
+}
+
 export interface GrantsDeps {
   subscriptions: SubscriptionOps
   entitlements: Entitlements
+  /**
+   * Optional so a test without mailboxes needs none; index.ts always passes it.
+   * ⚠ ITS ABSENCE LEAVES AN UNPAID WORKSPACE'S LOGINS OPEN.
+   */
+  mail?: MailPaymentHold
   log: Logger
 }
 
@@ -166,6 +183,30 @@ export function subscriptionGrants(deps: GrantsDeps): SubscriptionGrants {
           ? { subscriptionId: state.polarSubscriptionId }
           : {}),
       })
+
+      /*
+       * ⚠ THE MAIL LOGINS FOLLOW THE ENTITLEMENT, AND THEY MOVE BEFORE
+       * `markGranted`. `entitledPlanId` is the plan only while the subscription
+       * entitles anything - `past_due` still does, so a failed card is not a lockout
+       * (billing/events.ts) - and once Polar has revoked it, or a cancellation has
+       * run out, it is the free plan and the logins are held; a subscription that
+       * entitles again lifts them. A hold that failed must leave the grant looking
+       * undone, because the retry and the reconciler find it by `granted_plan_id`:
+       * marking it first would leave the logins open with nothing to repair them.
+       */
+      if (deps.mail) {
+        if (state.entitledPlanId === state.planId)
+          await deps.mail.release(state.tenantId)
+        else await deps.mail.hold(state.tenantId)
+      } else if (state.entitledPlanId !== state.planId) {
+        // ⚠ `error`, NOT `warn`, ON THE SAME RULE AS A MISSING POLAR CLIENT: this is
+        // not an absent feature, it is an unpaid workspace whose people still sign in.
+        deps.log.error(
+          { tenantId: state.tenantId, subscriptionId: state.polarSubscriptionId },
+          "a subscription lapsed but mailbox sign-in cannot be held - the " +
+            "workspace's people can STILL SIGN IN to their mailboxes",
+        )
+      }
 
       await deps.subscriptions.markGranted(
         state.tenantId,

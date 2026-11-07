@@ -27,6 +27,9 @@ const deps = (over: Record<string, unknown> = {}) => ({
   },
   polar: { revokeSubscription: mock(async () => "revoked" as const) },
   domains: { releaseDomains: mock(async () => ({ released: 2, failed: 0 })) },
+  // ⚠ WIRED BY DEFAULT, like Polar and the domains: an absent port logs at error,
+  // and the tests below that count what was logged are about something else.
+  mail: { suspendWorkspace: mock(async () => 0) },
   organizations: {
     hasMembers: mock(async () => false),
     remove: mock(async () => "deleted" as const),
@@ -559,5 +562,100 @@ describe("a Clerk organization that has been renamed", () => {
     const d = named()
     expect(await tenantLifecycle(d).onOrganizationUpdated(payload)).toBe("ignored")
     expect(d.tenants.renameByOrg).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * ⚠ A DELETED WORKSPACE'S PEOPLE KEEP THEIR MAIL LOGINS UNLESS SOMETHING TAKES
+ * THEM. Termination marks the tenant dead and leaves every `authd.accounts` row
+ * active, so a password authd had cached for hours went on opening the mailbox.
+ */
+describe("the mailboxes of a terminated workspace", () => {
+  it("are suspended, whether or not there was a subscription", async () => {
+    for (const polarSubscriptionId of ["sub_1", null]) {
+      const mail = { suspendWorkspace: mock(async () => 3) }
+      const d = deps({
+        mail,
+        tenants: {
+          isLive: mock(async () => true),
+          terminate: mock(async () => ({
+            tenantId: "ten-1",
+            polarSubscriptionId,
+            alreadyDead: false,
+          })),
+          ownedBy: mock(async () => []),
+          renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
+        },
+      })
+      await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })
+      expect(mail.suspendWorkspace).toHaveBeenCalledWith("ten-1")
+    }
+  })
+
+  it("are suspended again on a redelivery, which is how a failed first pass repairs itself", async () => {
+    const mail = { suspendWorkspace: mock(async () => 0) }
+    const d = deps({
+      mail,
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => ({
+          tenantId: "ten-1",
+          polarSubscriptionId: null,
+          alreadyDead: true,
+        })),
+        ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => ({ tenantId: "ten-1", renamed: true })),
+      },
+    })
+    expect(await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })).toBe(
+      "already_terminated",
+    )
+    expect(mail.suspendWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  // ⚠ THE BILLING STOP IS NOT HELD UP BY IT, AND IT IS NOT SWALLOWED EITHER: a
+  // failure still answers 500 so Svix retries, after the money has stopped and
+  // the domains are given back.
+  it("a failure is retried by Svix, after billing and the domains have gone", async () => {
+    const mail = {
+      suspendWorkspace: mock(async () => {
+        throw new Error("database down")
+      }),
+    }
+    const d = deps({ mail })
+    await expect(
+      tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" }),
+    ).rejects.toThrow("database down")
+    expect(d.polar.revokeSubscription).toHaveBeenCalledTimes(1)
+    expect(d.domains.releaseDomains).toHaveBeenCalledTimes(1)
+  })
+
+  it("says so, at error, when nothing can close them", async () => {
+    const error = mock(() => {})
+    const d = deps({ mail: undefined, log: { info: () => {}, warn: () => {}, error } })
+    expect(await tenantLifecycle(d).onOrganizationDeleted({ id: "org_1" })).toBe(
+      "terminated",
+    )
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "ten-1" }),
+      expect.stringContaining("STILL SIGN IN"),
+    )
+  })
+
+  it("an organization we never provisioned suspends nothing", async () => {
+    const mail = { suspendWorkspace: mock(async () => 0) }
+    const d = deps({
+      mail,
+      tenants: {
+        isLive: mock(async () => true),
+        terminate: mock(async () => null),
+        ownedBy: mock(async () => []),
+        renameByOrg: mock(async () => null),
+      },
+    })
+    expect(await tenantLifecycle(d).onOrganizationDeleted({ id: "org_x" })).toBe(
+      "no_tenant",
+    )
+    expect(mail.suspendWorkspace).not.toHaveBeenCalled()
   })
 })

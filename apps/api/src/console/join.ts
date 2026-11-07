@@ -11,6 +11,7 @@ import {
   type StoredJoinRule,
 } from "../db/core.js"
 import { NO_TENANT } from "../middleware/tenant.js"
+import { mirrorRequiredDomains } from "../identity/authd-mirror.js"
 import type { TxtLookup } from "../domains/ownership.js"
 import { coveringNames, normalizeName, type AccessDomain } from "./access-rules.js"
 import { DEFAULT_ROLE, readJoinRole } from "./roles.js"
@@ -238,14 +239,17 @@ async function displaceOthers(db: Database, name: string, tenantId: string) {
   })
   for (const other of others) {
     if (other.tenantId === tenantId) continue
-    await withTenant(db, other.tenantId, (tx) =>
-      tx
+    await withTenant(db, other.tenantId, async (tx) => {
+      await tx
         .update(joinDomains)
         .set({ displacedAt: new Date() })
         .where(
           and(eq(joinDomains.id, other.id), eq(joinDomains.tenantId, other.tenantId)),
-        ),
-    )
+        )
+      // ⚠ A PROOF THAT MOVES TO ANOTHER WORKSPACE TAKES ITS SSO REQUIREMENT FOR
+      // THAT NAME WITH IT: authd must stop applying it to the name's new owner.
+      await mirrorRequiredDomains(tx, other.tenantId)
+    })
   }
 }
 
@@ -274,6 +278,7 @@ async function syncFromDomains(tx: Tx, tenantId: string, now: Date) {
     .from(joinDomains)
     .leftJoin(domains, eq(domains.id, joinDomains.domainId))
     .where(and(eq(joinDomains.tenantId, tenantId), eq(joinDomains.source, "domains")))
+  let moved = false
   for (const r of rows) {
     if (!r.domainId) continue
     const proven = r.status === "verified" && !r.displaced
@@ -292,6 +297,7 @@ async function syncFromDomains(tx: Tx, tenantId: string, now: Date) {
           rules: [{ pattern: r.name, mode: "suggest", role: DEFAULT_ROLE }],
         })
         .where(eq(joinDomains.id, r.id))
+      moved = true
       continue
     }
     if (proven === (r.lapsedAt === null)) continue
@@ -299,7 +305,10 @@ async function syncFromDomains(tx: Tx, tenantId: string, now: Date) {
       .update(joinDomains)
       .set({ lapsedAt: proven ? null : now, checkedAt: now })
       .where(eq(joinDomains.id, r.id))
+    moved = true
   }
+  // ⚠ A PROOF LAPSING OR RETURNING CHANGES WHERE SSO IS REQUIRED (authd's mirror).
+  if (moved) await mirrorRequiredDomains(tx, tenantId)
 }
 
 export function joinStore(db: Database): JoinStore {
@@ -396,8 +405,8 @@ export function joinStore(db: Database): JoinStore {
       const wanted = accessTxtValue(row.token)
       const proven = published.some((v) => v.replace(/["\s]/g, "") === wanted)
       const now = new Date()
-      await withTenant(db, tenantId, (tx) =>
-        tx
+      await withTenant(db, tenantId, async (tx) => {
+        await tx
           .update(joinDomains)
           .set(
             proven
@@ -410,20 +419,26 @@ export function joinStore(db: Database): JoinStore {
                 }
               : { checkedAt: now },
           )
-          .where(and(eq(joinDomains.tenantId, tenantId), eq(joinDomains.id, id))),
-      )
+          .where(and(eq(joinDomains.tenantId, tenantId), eq(joinDomains.id, id)))
+        // ⚠ A PROOF COMING BACK BRINGS ITS SSO REQUIREMENT BACK (authd's mirror).
+        if (proven) await mirrorRequiredDomains(tx, tenantId)
+      })
       if (!proven) return "absent"
       await displaceOthers(db, row.name, tenantId)
       return "proven"
     },
 
     async removeAccessDomain(tenantId, id) {
-      const gone = await withTenant(db, tenantId, (tx) =>
-        tx
+      const gone = await withTenant(db, tenantId, async (tx) => {
+        const removed = await tx
           .delete(joinDomains)
           .where(and(eq(joinDomains.tenantId, tenantId), eq(joinDomains.id, id)))
-          .returning({ id: joinDomains.id }),
-      )
+          .returning({ id: joinDomains.id })
+        // ⚠ THE PROOF'S DELETE CASCADES AWAY ITS LINK TO A CONNECTION, so the name
+        // stops being one SSO is required for.
+        if (removed.length > 0) await mirrorRequiredDomains(tx, tenantId)
+        return removed
+      })
       return gone.length > 0
     },
 
@@ -744,15 +759,17 @@ export async function recheckAccessDomains({
     )
     if (proven && row.lapsedAt) summary.restored += 1
     if (!proven && !row.lapsedAt) summary.lapsed += 1
-    await withTenant(db, row.tenantId, (tx) =>
-      tx
+    await withTenant(db, row.tenantId, async (tx) => {
+      await tx
         .update(joinDomains)
         .set({
           checkedAt: now(),
           lapsedAt: proven ? null : (row.lapsedAt ?? now()),
         })
-        .where(and(eq(joinDomains.id, row.id), eq(joinDomains.tenantId, row.tenantId))),
-    )
+        .where(and(eq(joinDomains.id, row.id), eq(joinDomains.tenantId, row.tenantId)))
+      if (proven === (row.lapsedAt !== null))
+        await mirrorRequiredDomains(tx, row.tenantId)
+    })
   }
   // /domains-sourced entries follow their sending domain, which has its own re-check.
   for (const tenantId of tenants) {

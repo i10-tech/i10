@@ -270,6 +270,117 @@ const row = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+/**
+ * ⚠ THE MAIL LOGINS FOLLOW THE ENTITLEMENT, AND `past_due` IS NOT A LAPSE. Polar
+ * retries a failed card for days and revokes when it gives up, so only the state
+ * `entitledPlanId` calls free - revoked, unpaid, a cancellation that has run out -
+ * holds the workspace's logins; paying again lifts them.
+ */
+describe("a lapsed plan and the mail logins", () => {
+  const harness = (over: Partial<SubscriptionOps> = {}) => {
+    const calls: string[] = []
+    const grants = subscriptionGrants({
+      subscriptions: ops({
+        markGranted: async () => {
+          calls.push("mark")
+        },
+        ...over,
+      }),
+      entitlements: {
+        ensureCustomer: async () => {},
+        grantPlan: async () => {
+          calls.push("grant")
+        },
+      },
+      mail: {
+        hold: async (t) => {
+          calls.push(`hold:${t}`)
+        },
+        release: async (t) => {
+          calls.push(`release:${t}`)
+        },
+      },
+      log,
+    })
+    return { grants, calls }
+  }
+
+  it("holds the logins when the subscription stops entitling anything", async () => {
+    const h = harness()
+    await h.grants.apply(state({ status: "revoked", entitledPlanId: "free" }))
+    expect(h.calls).toEqual(["grant", "hold:ten-1", "mark"])
+  })
+
+  it("holds them when a cancellation has run its course", async () => {
+    const h = harness()
+    await h.grants.apply(
+      state({ cancelAtPeriodEnd: true, status: "active", entitledPlanId: "free" }),
+    )
+    expect(h.calls).toContain("hold:ten-1")
+  })
+
+  it("lifts them when the subscription entitles again", async () => {
+    const h = harness()
+    await h.grants.apply(state())
+    expect(h.calls).toEqual(["grant", "release:ten-1", "mark"])
+  })
+
+  it("past_due is still entitled, so it never holds anything", async () => {
+    const h = harness()
+    await h.grants.apply(state({ status: "past_due" }))
+    expect(h.calls.some((c) => c.startsWith("hold"))).toBe(false)
+  })
+
+  // ⚠ A HOLD THAT FAILED MUST LEAVE THE GRANT LOOKING UNDONE: the retry and the
+  // reconciler find a half-applied grant by `granted_plan_id`, so marking it
+  // first would leave the logins open with nothing left to repair them.
+  it("does not mark the grant done when the hold failed, so the retry repairs it", async () => {
+    const calls: string[] = []
+    const grants = subscriptionGrants({
+      subscriptions: ops({
+        markGranted: async () => {
+          calls.push("mark")
+        },
+      }),
+      entitlements: { ensureCustomer: async () => {}, grantPlan: async () => {} },
+      mail: {
+        hold: async () => {
+          throw new Error("database down")
+        },
+        release: async () => {},
+      },
+      log,
+    })
+    await expect(
+      grants.apply(state({ status: "revoked", entitledPlanId: "free" })),
+    ).rejects.toThrow("database down")
+    expect(calls).toEqual([])
+  })
+
+  it("says so, at error, when a lapse cannot hold anything", async () => {
+    const error = mock(() => {})
+    const grants = subscriptionGrants({
+      subscriptions: ops(),
+      entitlements: { ensureCustomer: async () => {}, grantPlan: async () => {} },
+      log: { info: () => {}, warn: () => {}, error },
+    })
+    await grants.apply(state({ status: "revoked", entitledPlanId: "free" }))
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "ten-1" }),
+      expect.stringContaining("STILL SIGN IN"),
+    )
+    error.mockClear()
+    await grants.apply(state())
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it("holds nothing for an out-of-order event", async () => {
+    const h = harness({ record: async () => "stale" })
+    await h.grants.apply(state({ status: "revoked", entitledPlanId: "free" }))
+    expect(h.calls).toEqual([])
+  })
+})
+
 describe("reconciling against Polar", () => {
   /*
    * ⚠ THE ONE THING THE BACKSTOP CANNOT BACK UP, AND IT USED TO SKIP IT

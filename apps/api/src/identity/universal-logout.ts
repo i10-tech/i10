@@ -121,6 +121,16 @@ export interface UniversalLogoutDeps {
   clerk: Pick<ClerkIdentity, "revokeSession" | "usersByEmail">
   replay: ReplayCache
   forget(input: { userId?: string; sessionId?: string }): void
+  /**
+   * Makes authd ask the identity provider again for this person's mail password
+   * (`raiseCredentialEpoch`, projection/credential-epoch.ts).
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE LEAVES A LOGGED-OUT PERSON'S CACHED MAIL PASSWORD
+   * GOOD FOR HOURS. A universal logout ends sessions; authd's cache of a verified
+   * mail password is none of those, so nothing else reaches it. index.ts always
+   * passes it.
+   */
+  raiseCredentialEpoch?: (clerkUserId: string) => Promise<unknown>
   fetch?: OidcFetch
   log: Logger
   endpointUrl?: (connectionId: string) => string
@@ -348,6 +358,8 @@ export function universalLogout(
     // 8. Resolve subject
     const subId = parsedBody.data.sub_id
     let resolvedSubject: string | null = null
+    // The i10 account behind it, for the mail password cache (step 9).
+    let resolvedUserId: string | null = null
 
     if (subId.format === "iss_sub") {
       const normSubIss = subId.iss.replace(/\/+$/, "")
@@ -361,6 +373,7 @@ export function universalLogout(
       )
       if (!linked) return { outcome: "not_found" }
       resolvedSubject = subId.sub
+      resolvedUserId = linked.clerkUserId
     } else if (subId.format === "email") {
       const email = normaliseEmail(subId.email)
       if (!email) return { outcome: "malformed" }
@@ -380,6 +393,7 @@ export function universalLogout(
           )
           if (idn) {
             resolvedSubject = idn.subject
+            resolvedUserId = user.id
             break
           }
         }
@@ -393,6 +407,7 @@ export function universalLogout(
         )
         if (idn) {
           resolvedSubject = idn.subject
+          resolvedUserId = idn.clerkUserId
         }
       }
 
@@ -410,6 +425,22 @@ export function universalLogout(
         at,
         by: "universal_logout",
       })
+      /*
+       * ⚠ AFTER THE SESSIONS, NEVER BEFORE. The epoch makes authd ask the provider
+       * again for this person's mail password; raised first, a bind landing before
+       * the revocation finished would be answered by a provider that has not yet
+       * heard and cached again for the rest of the TTL. External change first, then
+       * the signal that makes it count.
+       *
+       * ⚠ AND IT RUNS WHETHER OR NOT ANY SESSION WAS BOUND. A person with no
+       * console session open still has a mail client holding a password authd has
+       * cached; `revoked` being zero says nothing about that.
+       *
+       * ⚠ A FAILURE HERE IS A FAILED LOGOUT, like a failed revoke: the token is
+       * released and the IdP's retry does both again.
+       */
+      if (resolvedUserId && d.raiseCredentialEpoch)
+        await d.raiseCredentialEpoch(resolvedUserId)
       return { outcome: "logged_out", revoked }
     } catch (error) {
       await d.replay

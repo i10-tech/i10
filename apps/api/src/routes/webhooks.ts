@@ -90,6 +90,14 @@ export interface ClerkWebhookDeps {
    * See team-inboxes/sync.ts for the events it needs subscribed.
    */
   teamInboxes?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * A member who leaves a workspace loses the login of their mailbox in it
+   * (mailboxes/revoke.ts). Outside the dedupe and idempotent, like the others.
+   *
+   * ⚠ ABSENT MEANS A REMOVED MEMBER KEEPS THEIR MAIL LOGIN, which is why it is wired
+   * wherever `roles` is. Needs `organizationMembership.deleted` subscribed.
+   */
+  mailAccess?: (type: string, data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -186,6 +194,9 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // After provisioning, so a new organization's tenant exists to read -
       // and before members, whose capacity alerts go to the owners and admins.
       const roles = (await deps.roles?.(event.type, event.data)) ?? null
+      // ⚠ AFTER ROLES, which has already taken the row of a person who left: the
+      // mailbox is suspended only for somebody who is no longer a member.
+      const mailAccess = (await deps.mailAccess?.(event.type, event.data)) ?? null
       const members = (await deps.members?.(event.type, event.data)) ?? null
       const identity = (await deps.identity?.(event.type, event.data)) ?? null
 
@@ -207,6 +218,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
           outcome: result.outcome,
           ...(provisioned ? { provisioned } : {}),
           ...(roles ? { roles } : {}),
+          ...(mailAccess ? { mailAccess } : {}),
           ...(members ? { members } : {}),
           ...(identity ? { identity } : {}),
           ...(teamInboxes ? { teamInboxes } : {}),

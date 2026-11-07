@@ -431,6 +431,70 @@ describe("role events arriving from Clerk", () => {
   })
 })
 
+/**
+ * A member who leaves a workspace loses the login of their mailbox in it
+ * (mailboxes/revoke.ts). The hook runs after the roles hook has taken the row,
+ * so "not a member" is already true when it asks, and a failure is a 500: a
+ * missed suspension is a login that stays open.
+ */
+describe("a member leaving, arriving from Clerk", () => {
+  const order: string[] = []
+  const roles = mock(async (type: string) => {
+    order.push(`roles:${type}`)
+    return null
+  })
+  const mailAccess = mock(async (type: string) => {
+    order.push(`mailAccess:${type}`)
+    return "mailbox:suspended"
+  })
+  const members = mock(async (type: string) => {
+    order.push(`members:${type}`)
+    return null
+  })
+  const left = JSON.stringify({
+    type: "organizationMembership.deleted",
+    data: {
+      id: "orgmem_1",
+      organization: { id: "org_acme" },
+      public_user_data: { user_id: "user_ada" },
+    },
+  })
+  const send = (id: string) =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        roles,
+        mailAccess,
+        members,
+      },
+    }).request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(left, id),
+      body: left,
+    })
+
+  beforeEach(() => {
+    order.length = 0
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+  })
+
+  it("runs after roles and before members, even as a duplicate", async () => {
+    expect((await send("msg_left")).status).toBe(200)
+    expect(order).toEqual([
+      "roles:organizationMembership.deleted",
+      "mailAccess:organizationMembership.deleted",
+      "members:organizationMembership.deleted",
+    ])
+  })
+
+  it("answers 500 when the suspension fails, so Svix retries", async () => {
+    mailAccess.mockRejectedValueOnce(new Error("database down"))
+    expect((await send("msg_left")).status).toBe(500)
+  })
+})
+
 describe("GET /readyz", () => {
   it("reports ok when the database answers", async () => {
     const res = await createApp({ pingDb: async () => {} }).request("/readyz")

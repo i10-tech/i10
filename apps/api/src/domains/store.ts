@@ -357,6 +357,18 @@ export interface DomainStoreDeps {
    * is the half of this that would be worse.
    */
   log?: Logger
+  /**
+   * Told BEFORE a domain row is deleted, so the mailboxes on it lose their login
+   * (mailboxes/revoke.ts `domainGone`).
+   *
+   * ⚠ A THROW STOPS THE DELETE, ON PURPOSE. The row going first and the
+   * revocation failing after would leave a domain the workspace no longer holds
+   * with people still signing in to mailboxes on it, and nothing left to retry
+   * from. Failing here leaves the domain standing and the delete repeatable.
+   * Optional so tests without mail need none; a deployment that omits it leaves
+   * those logins open, which is why index.ts always passes it.
+   */
+  onRemoving?: (tenantId: string, name: string) => Promise<unknown>
   now?: () => Date
 }
 
@@ -505,6 +517,7 @@ export function domainStore({
   txt = nodeTxtLookup(),
   delegation = readDelegation,
   log,
+  onRemoving,
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
   const probes: DnsProbes = { txt, delegation }
@@ -1326,6 +1339,10 @@ export function domainStore({
           const holder = rows[0]
           return holder === undefined || holder.domain_id === id
         })())
+
+      // ⚠ BEFORE THE ROW, AND A FAILURE STOPS THE DELETE (see `onRemoving`): the
+      // people on this name stop signing in to their mailboxes first.
+      await onRemoving?.(tenantId, existing.name)
 
       // ⚠ THE ROW GOES FIRST, AND THE ORDER IS THE OPPOSITE OF `create`'s ON
       // PURPOSE. Both orders leak something if the second step fails; this one

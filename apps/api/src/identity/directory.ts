@@ -515,6 +515,10 @@ async function deactivate(
 
   const before = await d.clerk.user(userId)
   if (!before) {
+    // ⚠ A USER CLERK NO LONGER KNOWS STILL HAS A ROW THE `user.deleted` WEBHOOK HAS
+    // NOT REMOVED YET, and a password authd cached for it opens that mailbox until
+    // it does. Closed here, as for anybody the directory switches off.
+    await closeMailbox(d, row, userId)
     await d.identity.forgetUser(t, userId)
     d.forget({ userId })
     await d.store.closeWaitlist(t, userId, false)
@@ -544,6 +548,12 @@ async function deactivate(
       break
     case "not_managed":
     case "workspace_gone":
+      // ⚠ NOT OURS TO RELEASE OR BAN, BUT THE MAILBOX IS. `deprovision` returns
+      // before it suspends for somebody this workspace does not manage - one who
+      // was never claimed, was released earlier, or is managed by another
+      // workspace - and the directory has said the person is off. Without this
+      // their mailbox in THIS workspace kept its login.
+      await closeMailbox(d, row, userId)
       break
     case "last_owner":
       await settleConflict(d, row, "last_owner")
@@ -558,6 +568,32 @@ async function deactivate(
   await d.store.closeWaitlist(t, userId, false)
   d.forget({ userId })
   return done("deprovisioned")
+}
+
+/**
+ * Suspends the person's mailbox in this workspace and takes them off its lists,
+ * for a deactivation that `deprovision` did not carry out (it does both itself
+ * when it does). Idempotent: a mailbox already suspended is left as it is.
+ */
+async function closeMailbox(
+  d: DirectoryDeps,
+  row: DirectoryUserRow,
+  userId: string,
+): Promise<void> {
+  const mailbox = await d.deprovision.mail.suspend({
+    tenantId: row.tenantId,
+    clerkUserId: userId,
+    actorUserId: null,
+    cause: "scim",
+  })
+  await d.deprovision.mail.leaveLists(row.tenantId, userId)
+  if (mailbox === "suspended")
+    await d.identity.record(row.tenantId, {
+      type: "mailbox.suspended_unmanaged",
+      subjectUserId: userId,
+      reason: "directory_inactive",
+      data: { directoryId: row.directoryId, directoryUserId: row.id },
+    })
 }
 
 // ── The bridge ──────────────────────────────────────────────────────────────

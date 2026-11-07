@@ -161,3 +161,122 @@ func TestAccountByUIDReadsManagedAndSuspendedWithTheEpoch(t *testing.T) {
 		t.Fatalf("an account whose connection is gone read as %+v, want managed with no connection", byAddr[0])
 	}
 }
+
+// The rest of what turns a login off, in the same query (apps/api/src/mailboxes/
+// revoke.ts writes these). All four are read from the row the bind holds, as the
+// `authd` role: the required-domains table is new, and the role has to be able to
+// read it through the schema's default privileges, which only a real database
+// shows.
+func TestAccountByUIDReadsTheRowGates(t *testing.T) {
+	dsn, admin := os.Getenv("AUTHD_TEST_DATABASE_URL"), os.Getenv("AUTHD_TEST_ADMIN_DATABASE_URL")
+	if dsn == "" || admin == "" {
+		t.Skip("AUTHD_TEST_DATABASE_URL and AUTHD_TEST_ADMIN_DATABASE_URL are not both set")
+	}
+	ctx := context.Background()
+
+	w, err := pgxpool.New(ctx, admin)
+	if err != nil {
+		t.Fatalf("connect as admin: %v", err)
+	}
+	t.Cleanup(w.Close)
+
+	const id, email, slug, conn = "user_gates_test", "gates-test@required.test", "gates-test", "66666666-6666-4666-8666-666666666666"
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := w.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed %q: %v", sql, err)
+		}
+	}
+	purge := func() {
+		if _, err := w.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id = $1`, id); err != nil {
+			t.Logf("purge account: %v", err)
+		}
+		// Takes the connection and the required-domains row with it.
+		if _, err := w.Exec(ctx, `DELETE FROM core.tenants WHERE slug = $1`, slug); err != nil {
+			t.Logf("purge tenant: %v", err)
+		}
+	}
+	purge()
+	t.Cleanup(purge)
+
+	exec(`INSERT INTO core.tenants (slug, name, owner_clerk_user_id) VALUES ($1, 'Gates test', 'user_owner')`, slug)
+	exec(`INSERT INTO identity.connections (id, tenant_id, name, protocol)
+		SELECT $1::uuid, id, 'Test connection', 'saml' FROM core.tenants WHERE slug = $2`, conn, slug)
+	exec(`INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id)
+		SELECT $1, $2, true, id FROM core.tenants WHERE slug = $3`, id, email, slug)
+
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatalf("NewPostgres: %v", err)
+	}
+	defer store.Close()
+
+	read := func() Account {
+		t.Helper()
+		got, err := store.AccountByUID(ctx, id)
+		if err != nil || got == nil {
+			t.Fatalf("AccountByUID = (%v, %v)", got, err)
+		}
+		byAddr, err := store.AccountsByAddress(ctx, []string{email})
+		if err != nil || len(byAddr) != 1 {
+			t.Fatalf("AccountsByAddress = (%+v, %v)", byAddr, err)
+		}
+		// The search path and the bind path share the column list.
+		if byAddr[0].PaymentHold != got.PaymentHold || byAddr[0].Banned != got.Banned ||
+			byAddr[0].Locked != got.Locked || byAddr[0].SSORequired != got.SSORequired {
+			t.Fatalf("search read %+v, bind read %+v", byAddr[0], got)
+		}
+		return *got
+	}
+
+	if a := read(); a.PaymentHold || a.Banned || a.Locked || a.SSORequired {
+		t.Fatalf("a clean account read as %+v", a)
+	}
+
+	exec(`UPDATE authd.accounts SET payment_hold_at = now() WHERE clerk_user_id = $1`, id)
+	if a := read(); !a.PaymentHold || a.Banned || a.Locked || a.SSORequired {
+		t.Fatalf("a payment hold read as %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET payment_hold_at = NULL, banned = true WHERE clerk_user_id = $1`, id)
+	if a := read(); a.PaymentHold || !a.Banned || a.Locked {
+		t.Fatalf("a ban read as %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET banned = false, locked = true WHERE clerk_user_id = $1`, id)
+	if a := read(); a.Banned || !a.Locked {
+		t.Fatalf("an indefinite lock read as %+v", a)
+	}
+	// A lockout ends by itself and Clerk says nothing when it does, so the row's
+	// own end time is what lifts it.
+	exec(`UPDATE authd.accounts SET locked_until = now() + interval '1 hour' WHERE clerk_user_id = $1`, id)
+	if a := read(); !a.Locked {
+		t.Fatalf("a lockout that has not run out read as %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET locked_until = now() - interval '1 second' WHERE clerk_user_id = $1`, id)
+	if a := read(); a.Locked {
+		t.Fatalf("a lockout that has run out still read as locked: %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET locked = false, locked_until = NULL WHERE clerk_user_id = $1`, id)
+
+	// SSO is required for the DOMAIN, and a row for another domain says nothing
+	// about this account.
+	exec(`INSERT INTO authd.required_domains (domain, tenant_id, connection_id)
+		SELECT 'other.test', id, $1::uuid FROM core.tenants WHERE slug = $2`, conn, slug)
+	if a := read(); a.SSORequired {
+		t.Fatalf("a required domain that is not the account's marked it: %+v", a)
+	}
+	exec(`INSERT INTO authd.required_domains (domain, tenant_id, connection_id)
+		SELECT 'required.test', id, $1::uuid FROM core.tenants WHERE slug = $2`, conn, slug)
+	if a := read(); !a.SSORequired {
+		t.Fatalf("an account on a required domain read as %+v", a)
+	}
+	// A row left behind for another workspace's name binds nobody of this one's.
+	exec(`UPDATE authd.accounts SET tenant_id = NULL WHERE clerk_user_id = $1`, id)
+	if a := read(); a.SSORequired {
+		t.Fatalf("a required domain of another workspace marked this account: %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET tenant_id = (SELECT id FROM core.tenants WHERE slug = $2) WHERE clerk_user_id = $1`, id, slug)
+	exec(`DELETE FROM authd.required_domains WHERE domain = 'required.test'`)
+	if a := read(); a.SSORequired {
+		t.Fatalf("turning the requirement off did not restore the account: %+v", a)
+	}
+}

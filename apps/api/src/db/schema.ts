@@ -12,6 +12,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core"
+import { tenants } from "./core.js"
 import { connections, directoryGroups, managedAccounts } from "./identity.js"
 
 // The transactional product. Re-exported so drizzle-kit and `import * as
@@ -136,10 +137,19 @@ export const accounts = authd.table(
      * UPDATE: the increment has to be one statement or two writers can lose one.
      *
      * Only ever compared for equality, so it can be bumped by any amount.
+     *
+     * ⚠ A NEW ROW STARTS FROM THE CLOCK, NEVER FROM ZERO. The row is deleted when
+     * a person gives up their hosted address or their mailbox is deleted, and
+     * made again if they come back; a counter that restarts at 0 can land on a
+     * number authd cached a password under BEFORE the revocation that raised it,
+     * and the revoked password would match again. Microseconds since 1970 only
+     * ever grow, so a recreated row's seed is above anything the old one reached
+     * (raising adds 1; it would take one raise per microsecond to catch up). It
+     * stays below 2^53 until the year 2255, so a JS number holds it exactly.
      */
     credentialEpoch: bigint("credential_epoch", { mode: "number" })
       .notNull()
-      .default(0),
+      .default(sql`(extract(epoch from clock_timestamp()) * 1000000)::bigint`),
 
     /**
      * Set when a company's directory switched the person off (#344): the mailbox
@@ -153,6 +163,43 @@ export const accounts = authd.table(
      * this column, or a profile edit would lift a suspension.
      */
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+
+    /**
+     * Set while the workspace's paid plan has lapsed (billing/grants.ts): the
+     * mailbox still EXISTS and still receives mail, but nobody can log in to it,
+     * and paying again clears it.
+     *
+     * ⚠ NOT `suspended_at`, BECAUSE THE TWO ARE LIFTED BY DIFFERENT PEOPLE.
+     * Payment lifts this one on its own; `suspended_at` is a person's leaving, a
+     * company's directory or an owner, and a paying workspace must never get back
+     * the login of somebody it removed. authd refuses a bind for either, ahead of
+     * the credential cache.
+     *
+     * ⚠ ONE WRITER: `mailAccess` in mailboxes/store.ts. The projection's upsert
+     * must never name this column.
+     */
+    paymentHoldAt: timestamp("payment_hold_at", { withTimezone: true }),
+
+    /**
+     * Clerk's `banned`, `locked` and the end of a lockout for this user, projected
+     * by the webhook (projection/clerk-user.ts).
+     *
+     * ⚠ PROBED AGAINST CLERK'S DEV INSTANCE 2026-11-07: verify_password ANSWERS
+     * 200 `verified: true` FOR A BANNED USER AND FOR A LOCKED ONE. Clerk refuses
+     * them at its own sign-in, not at that endpoint, so without these columns
+     * authd would go on letting them in - and a password verified before the ban
+     * sits in its cache besides. The bind refuses them itself, ahead of the cache.
+     *
+     * ⚠ A LOCKOUT ENDS BY ITSELF (`lockout_expires_in_seconds`, an hour for the
+     * lock endpoint) AND CLERK SAYS NOTHING WHEN IT DOES; unlocking by hand does
+     * not even move `updated_at`. So a lock is `locked` AND not yet past
+     * `locked_until`: it lifts on its own clock, and a webhook that never comes
+     * can keep somebody out for at most that long. A null `locked_until` on a
+     * locked row is indefinite.
+     */
+    banned: boolean("banned").notNull().default(false),
+    locked: boolean("locked").notNull().default(false),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -300,6 +347,47 @@ export const authdManagedAccounts = authd.table(
       columns: [t.connectionId],
       foreignColumns: [connections.id],
     }).onDelete("set null"),
+  ],
+)
+
+/**
+ * The domains whose people must sign in through SSO, as authd needs it.
+ *
+ * A mirror of what `identity.connections` and `identity.connection_domains`
+ * say, which authd cannot read: a domain is here while an ACTIVE connection with
+ * enforcement "required_domain" or "required_all" covers it with a live proof.
+ * authd refuses the Clerk password of an account that is on one of these and is
+ * not managed (internal/passthrough ManagedResolver), so the person has to go
+ * through SSO, which makes them managed and moves their mail password to the
+ * company's directory.
+ *
+ * ⚠ A DOMAIN, NOT A FLAG ON EACH ACCOUNT, SO A MAILBOX MADE LATER IS COVERED THE
+ * MOMENT IT EXISTS and nothing has to remember to flag it. Turning enforcement
+ * off, deactivating the connection or losing the proof removes the row, which
+ * is what restores the Clerk password.
+ *
+ * ⚠ ONE WRITER: identity/authd-mirror.ts (`mirrorRequiredDomains`), called from
+ * the same transaction as every change that can move the answer. The foreign
+ * keys are the backstop: a connection or a workspace deleted takes its rows
+ * with it.
+ */
+export const authdRequiredDomains = authd.table(
+  "required_domains",
+  {
+    domain: text("domain").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("required_domains_tenant_idx").on(t.tenantId),
+    foreignKey({
+      name: "authd_required_connection_fk",
+      columns: [t.connectionId],
+      foreignColumns: [connections.id],
+    }).onDelete("cascade"),
   ],
 )
 

@@ -98,6 +98,17 @@ cached password off at the very next bind:
 - **Deactivation is not cached.** The projection lookup runs BEFORE the cache,
   so a suspended, unpaid or deprovisioned account is refused on the very next
   bind. The cache only ever short-circuits the password check.
+- **So is every other reason the account row gives for turning a login off.**
+  All are columns of `authd.accounts`, read in the same query as the account, and
+  refused before the cache (in `handleBind`, `ldapsrv/bind.go`):
+
+  | column                                | set by                                                                                                                 | why the login is off                                                                                                                                               |
+  | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | `suspended_at`                        | a company's directory, an owner, a member leaving or being removed, a workspace deleted, a domain removed              | the person's access to this mailbox ended; mail keeps arriving                                                                                                     |
+  | `payment_hold_at`                     | billing, when the subscription stops entitling anything (`past_due` is still entitled); cleared when it entitles again | the workspace has no paid plan; mail keeps arriving                                                                                                                |
+  | `banned`, `locked` (+ `locked_until`) | the Clerk webhook                                                                                                      | Clerk's `verify_password` answers yes for both (probed 2026-11-07), so authd refuses them itself; a lockout lifts at `locked_until`                                |
+  | `authd.required_domains`              | an active connection that requires SSO                                                                                 | an account that is not managed, on one of those domains, has no Clerk password to use: `ManagedResolver` refuses it (`sso_required`) until it signs in through SSO |
+
 - **A change in Clerk invalidates it.** Each entry records the account's
   `clerk_updated_at` and stops matching when it moves. Clerk publishes no
   password-specific timestamp, so this fires on any profile change - more often
@@ -109,8 +120,12 @@ cached password off at the very next bind:
   pods see it. Each entry records the epoch it was minted under and a mismatch
   deletes it. The API raises it (`raiseCredentialEpoch` in
   `apps/api/src/projection/credential-epoch.ts`) for a revocation that leaves the
-  row active and does not move `clerk_updated_at`. authd reads the column in the
-  same query that already loads the account, so checking it costs nothing.
+  row active and does not move `clerk_updated_at`: today an Okta Universal Logout
+  (`identity/universal-logout.ts`, after the sessions are revoked). authd reads the
+  column in the same query that already loads the account, so checking it costs
+  nothing. A new row's epoch starts from the clock in microseconds, never from
+  zero, so a mailbox deleted and made again can not land on a number a password was
+  cached under before the revocation that raised it.
 - **The provider is part of the entry.** The verifier name is in the MAC.
 
 Only `Verified` is ever stored. Caching a rejection would leave a corrected

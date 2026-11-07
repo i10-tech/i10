@@ -347,6 +347,62 @@ describe("deleting a domain whose cleanup fails", () => {
     expect(warn).toHaveBeenCalledTimes(1)
   })
 
+  /*
+   * ⚠ THE PEOPLE ON A NAME STOP SIGNING IN BEFORE THE NAME IS DELETED, AND A
+   * FAILURE STOPS THE DELETE. Deleted first, a revocation that then failed would
+   * leave a domain nobody holds with mailboxes still open on it and no row left to
+   * retry from. Left standing, the customer's delete simply fails and is repeated.
+   */
+  it("suspends the mailboxes on the name before it deletes the row", async () => {
+    const order: string[] = []
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row({ name: "acme.example" })],
+        del: () => {
+          order.push("delete")
+        },
+      }),
+      identity: identity(),
+      onRemoving: async (tenantId, name) => {
+        order.push(`revoke:${tenantId}:${name}`)
+      },
+    })
+    expect(await store.remove(TENANT, ID)).toBe(true)
+    expect(order).toEqual([`revoke:${TENANT}:acme.example`, "delete"])
+  })
+
+  it("keeps the domain, and says so, when the mailboxes on it could not be suspended", async () => {
+    let deleted = false
+    const store = domainStore({
+      ...base,
+      db: fakeDb({
+        select: () => [row()],
+        del: () => {
+          deleted = true
+        },
+      }),
+      identity: identity(),
+      onRemoving: async () => {
+        throw new Error("database down")
+      },
+    })
+    await expect(store.remove(TENANT, ID)).rejects.toThrow("database down")
+    expect(deleted).toBe(false)
+  })
+
+  it("does nothing for a domain that is not there", async () => {
+    const onRemoving = mock(async () => {})
+    const store = domainStore({
+      ...base,
+      db: fakeDb({ select: () => [] }),
+      identity: identity(),
+      onRemoving,
+    })
+    expect(await store.remove(TENANT, ID)).toBe(false)
+    expect(onRemoving).not.toHaveBeenCalled()
+  })
+
   it("reports success when the zone delete fails", async () => {
     const warn = mock(() => {})
     const store = domainStore({

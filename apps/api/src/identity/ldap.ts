@@ -348,11 +348,25 @@ export type PassthroughAnswer =
  * NOT an answer: it throws, and the route says 503.
  */
 export async function passthroughFor(
-  store: Pick<IdentityStore, "connectionForStart" | "connectionSecrets">,
+  store: Pick<
+    IdentityStore,
+    "connectionForStart" | "connectionSecrets" | "liveDomains"
+  >,
   connectionId: string,
 ): Promise<PassthroughAnswer> {
   const connection = await store.connectionForStart(connectionId)
   if (!connection) return { enabled: false }
+  // ⚠ A CONNECTION THAT IS NOT LIVE ANSWERS "OFF". `status` is `active` only while an owner has it on; a draft, a
+  // test run or a disabled connection (an owner's off switch) must stop asking its
+  // company's directory for passwords, and `enabled` in the settings is a
+  // different thing (the pass-through switch), left on when a connection is
+  // disabled. And a live proof of at least one domain must still back it: when the
+  // proof lapses or another workspace takes the name, nobody at that name is
+  // signed in through this connection either (the bridge reads the same columns),
+  // so its people's mail passwords stop going to a directory nothing vouches for.
+  if (connection.status !== "active") return { enabled: false }
+  if ((await store.liveDomains(connection.tenantId, connection.id)).length === 0)
+    return { enabled: false }
   const stored = storedLdap(connection)
   if (stored.enabled === true) {
     const secrets = await store.connectionSecrets(connection.tenantId, connection.id)
