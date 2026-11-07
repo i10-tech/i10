@@ -8,8 +8,13 @@ import { beforeEach, describe, expect, it, mock } from "bun:test"
 // `import { createApp } from "../src/app.js"` would then be evaluated before
 // this line ran, and the route would hold the real writer. The `await import`
 // is load-bearing, not a leftover.
+//
+// ⚠ THE REST OF THE MODULE STAYS REAL. bun keeps a module mock for the whole run,
+// so a file that loads after this one and imports anything else from the writer
+// would fail with "Export named ... not found".
 const applyClerkEvent = mock()
-mock.module("../src/projection/writer.js", () => ({ applyClerkEvent }))
+const writer = { ...(await import("../src/projection/writer.js")) }
+mock.module("../src/projection/writer.js", () => ({ ...writer, applyClerkEvent }))
 
 const { createApp } = await import("../src/app.js")
 
