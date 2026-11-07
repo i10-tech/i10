@@ -9,17 +9,18 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	goldapclient "github.com/go-ldap/ldap/v3"
 	ldap "github.com/vjeantet/ldapserver"
 
-	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
+	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
 
 const (
@@ -142,38 +143,118 @@ func containsFold(hay []string, needle string) bool {
 	return false
 }
 
+// fakeVerifier is a verify.Verifier that answers from a script and counts how
+// many times it was asked. It is safe for concurrent use, because the bind path
+// runs verification on a goroutine of its own.
 type fakeVerifier struct {
-	outcome clerkauth.Outcome
+	// name defaults to "clerk".
+	name    string
+	outcome verify.Outcome
 	err     error
-	calls   int
+
+	// answer, when set, decides per password and overrides outcome and err.
+	answer func(password string) (verify.Outcome, error)
+
+	// budget is the failure budget; nil, as for Clerk, means none.
+	budget *verify.Budget
+
+	// timeout is the verifier's own timeout; defaults to 5s.
+	timeout time.Duration
+
+	// delay makes Verify slow, to hold a flight open.
+	delay time.Duration
+
+	mu    sync.Mutex
+	calls int
 }
 
-func (f *fakeVerifier) Verify(context.Context, string, string) (clerkauth.Outcome, error) {
+func (f *fakeVerifier) Name() string {
+	if f.name == "" {
+		return "clerk"
+	}
+	return f.name
+}
+
+func (f *fakeVerifier) Timeout() time.Duration {
+	if f.timeout == 0 {
+		return 5 * time.Second
+	}
+	return f.timeout
+}
+
+func (f *fakeVerifier) Budget() *verify.Budget { return f.budget }
+
+func (f *fakeVerifier) Verify(_ context.Context, _ *projection.Account, password string) (verify.Outcome, error) {
+	f.mu.Lock()
 	f.calls++
-	return f.outcome, f.err
+	outcome, err, answer, delay := f.outcome, f.err, f.answer, f.delay
+	f.mu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	if answer != nil {
+		return answer(password)
+	}
+	return outcome, err
 }
 
-func newFixture(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMinute int) string {
+func (f *fakeVerifier) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakeVerifier) setOutcome(o verify.Outcome) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.outcome = o
+}
+
+// fixtureOptions is everything a test can vary about the server under test.
+type fixtureOptions struct {
+	store     projection.Store
+	resolver  verify.Resolver
+	perMinute int
+	cache     *credcache.Cache
+	budget    verify.BudgetStore
+	opTimeout time.Duration
+}
+
+func newFixture(t *testing.T, store projection.Store, v verify.Verifier, perMinute int) string {
 	t.Helper()
 	// No credential cache: every existing test asserts on how many times the
 	// verifier was called, and a cache would silently change those counts.
 	return newFixtureWith(t, store, v, perMinute, nil)
 }
 
-func newFixtureWith(t *testing.T, store projection.Store, v ldapsrv.Verifier, perMinute int, cache *credcache.Cache) string {
+func newFixtureWith(t *testing.T, store projection.Store, v verify.Verifier, perMinute int, cache *credcache.Cache) string {
 	t.Helper()
+	return newFixtureOpts(t, fixtureOptions{
+		store: store, resolver: verify.Fixed(v), perMinute: perMinute, cache: cache,
+	})
+}
+
+func newFixtureOpts(t *testing.T, o fixtureOptions) string {
+	t.Helper()
+
+	opTimeout := o.opTimeout
+	if opTimeout == 0 {
+		opTimeout = 2 * time.Second
+	}
 
 	srv := ldap.NewServer()
 	srv.Handle(ldapsrv.New(ldapsrv.Options{
 		BaseDN:            baseDN,
 		ServiceBindDN:     svcDN,
 		ServiceBindSecret: svcSecret,
-		Store:             store,
-		Verifier:          v,
-		Limiter:           throttle.New(perMinute),
-		CredCache:         cache,
+		Store:             o.store,
+		Resolver:          o.resolver,
+		Budget:            o.budget,
+		Limiter:           throttle.New(o.perMinute),
+		CredCache:         o.cache,
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
-		OpTimeout:         2 * time.Second,
+		OpTimeout:         opTimeout,
 	}).Routes())
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -256,16 +337,16 @@ func TestServiceBind(t *testing.T) {
 func TestUserBindOutcomes(t *testing.T) {
 	tests := []struct {
 		name     string
-		outcome  clerkauth.Outcome
+		outcome  verify.Outcome
 		verErr   error
 		wantCode uint16
 	}{
-		{"verified", clerkauth.Verified, nil, goldapclient.LDAPResultSuccess},
-		{"rejected", clerkauth.Rejected, nil, goldapclient.LDAPResultInvalidCredentials},
+		{"verified", verify.Verified, nil, goldapclient.LDAPResultSuccess},
+		{"rejected", verify.Rejected, nil, goldapclient.LDAPResultInvalidCredentials},
 		// ⚠ The load-bearing case. A Clerk outage must NOT look like a wrong
 		// password, or every mail client prompts its user and people start
 		// changing passwords to fix an outage that was never theirs.
-		{"clerk down", clerkauth.Unavailable, errors.New("boom"), goldapclient.LDAPResultUnavailable},
+		{"clerk down", verify.Unavailable, errors.New("boom"), goldapclient.LDAPResultUnavailable},
 	}
 
 	for _, tc := range tests {
@@ -281,15 +362,15 @@ func TestUserBindOutcomes(t *testing.T) {
 			if got != tc.wantCode {
 				t.Fatalf("result = %d, want %d (err %v)", got, tc.wantCode, err)
 			}
-			if v.calls != 1 {
-				t.Errorf("verifier called %d times, want 1", v.calls)
+			if v.callCount() != 1 {
+				t.Errorf("verifier called %d times, want 1", v.callCount())
 			}
 		})
 	}
 }
 
 func TestSuspendedAccountCannotBind(t *testing.T) {
-	v := &fakeVerifier{outcome: clerkauth.Verified}
+	v := &fakeVerifier{outcome: verify.Verified}
 	addr := newFixture(t, defaultStore(), v, 60)
 
 	err := dial(t, addr).Bind("uid=user_suspended,ou=people,"+baseDN, "any-password")
@@ -298,28 +379,28 @@ func TestSuspendedAccountCannotBind(t *testing.T) {
 	}
 	// The gate must close before Clerk is consulted: a suspended account should
 	// not be able to spend our Clerk budget at all.
-	if v.calls != 0 {
-		t.Errorf("verifier called %d times for a suspended account, want 0", v.calls)
+	if v.callCount() != 0 {
+		t.Errorf("verifier called %d times for a suspended account, want 0", v.callCount())
 	}
 }
 
 func TestUnknownDNDoesNotReachClerk(t *testing.T) {
-	v := &fakeVerifier{outcome: clerkauth.Verified}
+	v := &fakeVerifier{outcome: verify.Verified}
 	addr := newFixture(t, defaultStore(), v, 60)
 
 	err := dial(t, addr).Bind("uid=nobody,ou=people,"+baseDN, "pw")
 	if got := resultCode(err); got != goldapclient.LDAPResultInvalidCredentials {
 		t.Fatalf("result = %d, want invalidCredentials", got)
 	}
-	if v.calls != 0 {
-		t.Errorf("verifier called %d times, want 0", v.calls)
+	if v.callCount() != 0 {
+		t.Errorf("verifier called %d times, want 0", v.callCount())
 	}
 }
 
 func TestProjectionDownIsUnavailableNotInvalidCredentials(t *testing.T) {
 	store := defaultStore()
 	store.err = errors.New("connection refused")
-	v := &fakeVerifier{outcome: clerkauth.Verified}
+	v := &fakeVerifier{outcome: verify.Verified}
 	addr := newFixture(t, store, v, 60)
 
 	err := dial(t, addr).Bind(aliceDN, alicePass)
@@ -329,7 +410,7 @@ func TestProjectionDownIsUnavailableNotInvalidCredentials(t *testing.T) {
 }
 
 func TestThrottleReturnsBusyNotInvalidCredentials(t *testing.T) {
-	v := &fakeVerifier{outcome: clerkauth.Verified}
+	v := &fakeVerifier{outcome: verify.Verified}
 	addr := newFixture(t, defaultStore(), v, 1) // burst of 1
 
 	if err := dial(t, addr).Bind(aliceDN, alicePass); err != nil {
@@ -339,13 +420,13 @@ func TestThrottleReturnsBusyNotInvalidCredentials(t *testing.T) {
 	if got := resultCode(err); got != goldapclient.LDAPResultBusy {
 		t.Fatalf("throttled bind gave %d, want busy (51)", got)
 	}
-	if v.calls != 1 {
-		t.Errorf("verifier called %d times; the throttle must sit in front of Clerk", v.calls)
+	if v.callCount() != 1 {
+		t.Errorf("verifier called %d times; the throttle must sit in front of Clerk", v.callCount())
 	}
 }
 
 func TestEmptyPasswordNeverReachesClerk(t *testing.T) {
-	v := &fakeVerifier{outcome: clerkauth.Verified}
+	v := &fakeVerifier{outcome: verify.Verified}
 	addr := newFixture(t, defaultStore(), v, 60)
 
 	// RFC 4513 §5.1.2: this is an unauthenticated bind, not a verification.
@@ -353,8 +434,8 @@ func TestEmptyPasswordNeverReachesClerk(t *testing.T) {
 	if err == nil {
 		t.Fatal("empty password bind succeeded")
 	}
-	if v.calls != 0 {
-		t.Errorf("verifier called %d times for an empty password, want 0", v.calls)
+	if v.callCount() != 0 {
+		t.Errorf("verifier called %d times for an empty password, want 0", v.callCount())
 	}
 }
 

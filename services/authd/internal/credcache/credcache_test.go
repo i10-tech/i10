@@ -20,24 +20,32 @@ func newAt(ttl time.Duration, clock *time.Time) *Cache {
 	return c
 }
 
+// sub is the subject most tests use: user_1, verified by Clerk, at one instant
+// and epoch.
+func sub(ts *time.Time) Subject {
+	return Subject{UserID: "user_1", Verifier: "clerk", ChangedAt: ts}
+}
+
 func TestStoreThenLookup(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	c := newAt(time.Minute, &now)
 	ts := at("2026-09-02T10:00:00Z")
 
-	if c.Lookup("user_1", "hunter2", ts) {
+	if c.Lookup(sub(ts), "hunter2") {
 		t.Fatal("empty cache reported a hit")
 	}
 
-	c.Store("user_1", "hunter2", ts)
+	c.Store(sub(ts), "hunter2")
 
-	if !c.Lookup("user_1", "hunter2", ts) {
+	if !c.Lookup(sub(ts), "hunter2") {
 		t.Fatal("stored credential did not hit")
 	}
-	if c.Lookup("user_1", "hunter3", ts) {
+	if c.Lookup(sub(ts), "hunter3") {
 		t.Fatal("a different password hit")
 	}
-	if c.Lookup("user_2", "hunter2", ts) {
+	other := sub(ts)
+	other.UserID = "user_2"
+	if c.Lookup(other, "hunter2") {
 		t.Fatal("a different user hit")
 	}
 }
@@ -46,19 +54,38 @@ func TestExpiry(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	c := newAt(60*time.Second, &now)
 	ts := at("2026-09-02T10:00:00Z")
-	c.Store("user_1", "hunter2", ts)
+	c.Store(sub(ts), "hunter2")
 
 	now = now.Add(59 * time.Second)
-	if !c.Lookup("user_1", "hunter2", ts) {
+	if !c.Lookup(sub(ts), "hunter2") {
 		t.Fatal("expired one second early")
 	}
 
 	now = now.Add(2 * time.Second)
-	if c.Lookup("user_1", "hunter2", ts) {
+	if c.Lookup(sub(ts), "hunter2") {
 		t.Fatal("served an entry past its TTL")
 	}
 	if c.Len() != 0 {
 		t.Fatalf("expired entry was not dropped on read, len=%d", c.Len())
+	}
+}
+
+// The production default. Nothing about the cache is special at this length, and
+// that is the point: the clock arithmetic must hold across hours, not minutes.
+func TestTwoHourTTLExpiresOnTheDot(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	c := newAt(2*time.Hour, &now)
+	ts := at("2026-09-02T10:00:00Z")
+	c.Store(sub(ts), "hunter2")
+
+	now = now.Add(2*time.Hour - time.Second)
+	if !c.Lookup(sub(ts), "hunter2") {
+		t.Fatal("a two hour entry expired a second early")
+	}
+
+	now = now.Add(2 * time.Second)
+	if c.Lookup(sub(ts), "hunter2") {
+		t.Fatal("a two hour entry outlived its TTL")
 	}
 }
 
@@ -70,15 +97,62 @@ func TestClerkUpdatedAtInvalidates(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	c := newAt(time.Minute, &now)
 
-	c.Store("user_1", "hunter2", at("2026-09-02T10:00:00Z"))
+	c.Store(sub(at("2026-09-02T10:00:00Z")), "hunter2")
 
-	if c.Lookup("user_1", "hunter2", at("2026-09-02T10:05:00Z")) {
+	if c.Lookup(sub(at("2026-09-02T10:05:00Z")), "hunter2") {
 		t.Fatal("a changed account still served the cached password")
 	}
 	// And the stale entry is gone, so it cannot come back if the timestamp
 	// somehow reverts.
-	if c.Lookup("user_1", "hunter2", at("2026-09-02T10:00:00Z")) {
+	if c.Lookup(sub(at("2026-09-02T10:00:00Z")), "hunter2") {
 		t.Fatal("invalidated entry was still present")
+	}
+}
+
+// ⚠ THE SHARED SWITCH. The API raises credential_epoch for a revocation that
+// does not touch Clerk's record, and the entry must die at once.
+func TestEpochInvalidates(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	c := newAt(2*time.Hour, &now)
+	ts := at("2026-09-02T10:00:00Z")
+
+	s := sub(ts)
+	c.Store(s, "hunter2")
+	if !c.Lookup(s, "hunter2") {
+		t.Fatal("stored credential did not hit")
+	}
+
+	s.Epoch = 1
+	if c.Lookup(s, "hunter2") {
+		t.Fatal("a raised epoch still served the cached password")
+	}
+	// Gone, not merely skipped: an epoch that somehow went back must not
+	// resurrect it.
+	s.Epoch = 0
+	if c.Lookup(s, "hunter2") {
+		t.Fatal("an epoch-invalidated entry came back")
+	}
+	if c.Len() != 0 {
+		t.Fatalf("invalidated entry was not dropped, len=%d", c.Len())
+	}
+}
+
+// A workspace that switches identity provider must never be answered from an
+// entry the previous provider minted: the new one has not agreed to the password.
+func TestVerifierNameIsPartOfTheEntry(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	c := newAt(time.Minute, &now)
+	ts := at("2026-09-02T10:00:00Z")
+
+	c.Store(sub(ts), "hunter2")
+
+	okta := sub(ts)
+	okta.Verifier = "okta"
+	if c.Lookup(okta, "hunter2") {
+		t.Fatal("an entry minted by clerk answered for okta")
+	}
+	if !c.Lookup(sub(ts), "hunter2") {
+		t.Fatal("the original verifier no longer hits")
 	}
 }
 
@@ -86,16 +160,19 @@ func TestNullTimestampsAreDistinctFromValues(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	c := newAt(time.Minute, &now)
 
-	c.Store("user_1", "hunter2", nil)
-	if !c.Lookup("user_1", "hunter2", nil) {
+	c.Store(sub(nil), "hunter2")
+	if !c.Lookup(sub(nil), "hunter2") {
 		t.Fatal("null-to-null did not match")
 	}
-	if c.Lookup("user_1", "hunter2", at("2026-09-02T10:00:00Z")) {
+	if c.Lookup(sub(at("2026-09-02T10:00:00Z")), "hunter2") {
 		t.Fatal("null stored matched a real timestamp")
 	}
 
-	c.Store("user_2", "hunter2", at("2026-09-02T10:00:00Z"))
-	if c.Lookup("user_2", "hunter2", nil) {
+	two := sub(at("2026-09-02T10:00:00Z"))
+	two.UserID = "user_2"
+	c.Store(two, "hunter2")
+	two.ChangedAt = nil
+	if c.Lookup(two, "hunter2") {
 		t.Fatal("a real timestamp matched null")
 	}
 }
@@ -107,13 +184,13 @@ func TestNewVerificationReplacesTheOldPassword(t *testing.T) {
 	c := newAt(time.Minute, &now)
 	ts := at("2026-09-02T10:00:00Z")
 
-	c.Store("user_1", "old", ts)
-	c.Store("user_1", "new", ts)
+	c.Store(sub(ts), "old")
+	c.Store(sub(ts), "new")
 
-	if c.Lookup("user_1", "old", ts) {
+	if c.Lookup(sub(ts), "old") {
 		t.Fatal("the previous password survived a newer verification")
 	}
-	if !c.Lookup("user_1", "new", ts) {
+	if !c.Lookup(sub(ts), "new") {
 		t.Fatal("the newest password did not hit")
 	}
 	if c.Len() != 1 {
@@ -125,9 +202,9 @@ func TestForget(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	c := newAt(time.Minute, &now)
 	ts := at("2026-09-02T10:00:00Z")
-	c.Store("user_1", "hunter2", ts)
+	c.Store(sub(ts), "hunter2")
 	c.Forget("user_1")
-	if c.Lookup("user_1", "hunter2", ts) {
+	if c.Lookup(sub(ts), "hunter2") {
 		t.Fatal("Forget did not drop the entry")
 	}
 }
@@ -142,9 +219,9 @@ func TestDisabledCacheIsSafe(t *testing.T) {
 	if New(-time.Second) != nil {
 		t.Fatal("a negative TTL should disable the cache")
 	}
-	c.Store("user_1", "hunter2", nil)
+	c.Store(sub(nil), "hunter2")
 	c.Forget("user_1")
-	if c.Lookup("user_1", "hunter2", nil) {
+	if c.Lookup(sub(nil), "hunter2") {
 		t.Fatal("a nil cache reported a hit")
 	}
 	if c.Len() != 0 {
@@ -159,12 +236,12 @@ func TestEmptyInputsNeverCache(t *testing.T) {
 	// RFC 4513 §5.1.2 makes an empty password an unauthenticated bind, and
 	// handleBind rejects it before reaching here - but a cache that could be
 	// primed with one would be a bypass, so it refuses independently.
-	c.Store("user_1", "", nil)
-	c.Store("", "hunter2", nil)
+	c.Store(sub(nil), "")
+	c.Store(Subject{Verifier: "clerk"}, "hunter2")
 	if c.Len() != 0 {
 		t.Fatalf("cached an empty credential, len=%d", c.Len())
 	}
-	if c.Lookup("user_1", "", nil) || c.Lookup("", "hunter2", nil) {
+	if c.Lookup(sub(nil), "") || c.Lookup(Subject{Verifier: "clerk"}, "hunter2") {
 		t.Fatal("an empty credential hit")
 	}
 }
@@ -176,17 +253,22 @@ func TestKeysAreNotShared(t *testing.T) {
 	if string(a.key) == string(b.key) {
 		t.Fatal("two caches were built with the same hmac key")
 	}
-	if string(a.mac("user_1", "hunter2")) == string(b.mac("user_1", "hunter2")) {
+	if string(mac(a.key, sub(nil), "hunter2")) == string(mac(b.key, sub(nil), "hunter2")) {
 		t.Fatal("two caches produced the same mac")
 	}
 }
 
 // The separator stops ("ab","c") and ("a","bc") colliding, which would let one
-// account's cached entry answer for another.
-func TestUserAndPasswordCannotCollide(t *testing.T) {
+// account's cached entry answer for another - or one provider's for another's.
+func TestFieldsCannotCollide(t *testing.T) {
 	c := New(time.Minute)
-	if string(c.mac("ab", "c")) == string(c.mac("a", "bc")) {
+	if string(mac(c.key, Subject{UserID: "ab", Verifier: "x"}, "c")) ==
+		string(mac(c.key, Subject{UserID: "a", Verifier: "x"}, "bc")) {
 		t.Fatal("user id and password are concatenated without a separator")
+	}
+	if string(mac(c.key, Subject{UserID: "u", Verifier: "ab"}, "c")) ==
+		string(mac(c.key, Subject{UserID: "u", Verifier: "a"}, "bc")) {
+		t.Fatal("verifier name and password are concatenated without a separator")
 	}
 }
 
@@ -195,7 +277,7 @@ func TestSweepBoundsMemory(t *testing.T) {
 	c := newAt(time.Minute, &now)
 
 	for i := 0; i < maxEntries; i++ {
-		c.Store(string(rune(i))+"-user", "hunter2", nil)
+		c.Store(Subject{UserID: string(rune(i)) + "-user", Verifier: "clerk"}, "hunter2")
 	}
 	if c.Len() != maxEntries {
 		t.Fatalf("expected %d entries, got %d", maxEntries, c.Len())
@@ -203,11 +285,12 @@ func TestSweepBoundsMemory(t *testing.T) {
 
 	// Everything ages out; the next write sweeps rather than refusing.
 	now = now.Add(2 * time.Minute)
-	c.Store("fresh", "hunter2", nil)
+	fresh := Subject{UserID: "fresh", Verifier: "clerk"}
+	c.Store(fresh, "hunter2")
 	if c.Len() != 1 {
 		t.Fatalf("sweep left %d entries, expected 1", c.Len())
 	}
-	if !c.Lookup("fresh", "hunter2", nil) {
+	if !c.Lookup(fresh, "hunter2") {
 		t.Fatal("the write that triggered the sweep was lost")
 	}
 }

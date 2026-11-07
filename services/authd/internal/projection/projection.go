@@ -17,8 +17,12 @@ type Account struct {
 	Description    string
 	Active         bool
 	ClerkUpdatedAt *time.Time
-	Aliases        []string
-	MemberOf       []string // group names, not DNs; the caller renders DNs
+	// CredentialEpoch is `authd.accounts.credential_epoch`, raised by the API to
+	// invalidate every cached verification for this person on every pod. Only
+	// ever compared for equality; see credcache.
+	CredentialEpoch int64
+	Aliases         []string
+	MemberOf        []string // group names, not DNs; the caller renders DNs
 }
 
 // Group is a mail-enabled group.
