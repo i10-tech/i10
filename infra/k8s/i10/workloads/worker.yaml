@@ -58,7 +58,7 @@ spec:
       terminationGracePeriodSeconds: 90
       containers:
         - name: worker
-          image: ghcr.io/i10-tech/i10-api:prod-dfcc74a6bece4458425b9590317ccdb57ab0162a@sha256:3397cc020f72b194dde95937564f63d84de89cd98112a8c776d87db93922382c
+          image: ghcr.io/i10-tech/i10-api:prod-3e0c92a17bf456e7e027370f2763d479d7091a27@sha256:dc02cfa0d18455c801ea1b8be020c06d6730d1c1977b38996e425828e47ea462
           imagePullPolicy: Always
           command: ["bun", "dist/worker.js"]
           envFrom:
