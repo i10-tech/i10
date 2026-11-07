@@ -167,12 +167,16 @@ describe("/webhook-event-types (#283)", () => {
         example: object
       }[]
     }
-    expect(body.data).toHaveLength(12)
+    expect(body.data).toHaveLength(16)
     for (const e of body.data) {
       expect(e.version).toBe(1)
       expect(e.schema.type).toBe("object")
       expect(e.example).toHaveProperty(
-        e.type.startsWith("email.") ? "email_id" : "endpoint_id",
+        e.type.startsWith("email.")
+          ? "email_id"
+          : e.type.startsWith("webhook_endpoint.")
+            ? "endpoint_id"
+            : "created_at",
       )
     }
   })

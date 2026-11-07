@@ -55,7 +55,12 @@ const TIMED_OUT = new Set(["expired", "abandoned", "active"])
 
 export async function resume(
   presented: PresentedDevice,
-  deps: { store: DeviceStore; clerk: ResumeClerk },
+  deps: {
+    store: DeviceStore
+    clerk: ResumeClerk
+    /** Whether the account is SSO-managed (#337). Absent: nobody is. */
+    managed?: (userId: string) => Promise<boolean>
+  },
 ): Promise<ResumeOutcome> {
   const { store, clerk } = deps
   const found = await store.find(presented)
@@ -81,6 +86,13 @@ export async function resume(
   }
   // Locked out by too many wrong attempts: the ordinary flow says so.
   if (user.locked) return { outcome: "signin" }
+  /*
+   * ⚠ A MANAGED ACCOUNT IS NEVER RESUMED BY TICKET (#337). Its company signs
+   * it in; a saved-account ticket would be a Clerk session that skipped the
+   * IdP, which the gate refuses and the sweeper revokes. The ordinary flow
+   * sends it to its SSO instead.
+   */
+  if (deps.managed && (await deps.managed(row.userId))) return { outcome: "signin" }
 
   // ⚠ NO SESSION ON RECORD COUNTS AS SIGNED OUT. Fail towards asking.
   const status = row.sessionId ? await clerk.sessionStatus(row.sessionId) : null

@@ -96,6 +96,18 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 
+	// ⚠ A SUSPENDED MAILBOX CANNOT LOG IN, AND IT STILL RECEIVES (#344). The
+	// directory switched the person off; the account is kept active so mail
+	// keeps arriving, and this is where the login is refused. It comes before the
+	// verifier is chosen and before the credential cache: a password that was
+	// right yesterday, cached or asked of the company's directory, must not open
+	// a suspended mailbox. Same answer as a wrong password, by design.
+	if account.Suspended {
+		s.log.Info("bind rejected", "reason", "mailbox_suspended", "uid", uid)
+		w.Write(res)
+		return
+	}
+
 	// Which provider holds this person's password. A resolver that cannot say is
 	// not evidence about the password either.
 	v, err := s.resolver.Resolve(ctx, account)
@@ -288,7 +300,13 @@ func (s *Server) verifyOnce(
 		// corrected password broken for the rest of the TTL, and would let one
 		// failed attempt suppress a real one. Remembering an unavailable answer
 		// would be caching the absence of an answer.
-		s.credCache.Store(sub, password)
+		// A provider that never reports a password change caps how long its
+		// answer may stand in for asking again (verify.CacheLimit).
+		if limit, ok := v.(verify.CacheLimit); ok {
+			s.credCache.StoreFor(sub, password, limit.MaxCacheTTL())
+		} else {
+			s.credCache.Store(sub, password)
+		}
 		s.log.Info("bind succeeded", "uid", uid, "mail", account.Email, "source", v.Name())
 		return answerSuccess
 

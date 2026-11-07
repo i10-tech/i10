@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import {
   memberAlerts,
@@ -9,6 +9,7 @@ import {
 } from "../db/core.js"
 import { NO_TENANT } from "../middleware/tenant.js"
 import type { AlertLevel } from "./capacity.js"
+import { readJoinRole, type JoinRole } from "./roles.js"
 
 /**
  * The database half of member limits, invitations and capacity alerts (#327).
@@ -23,7 +24,8 @@ export interface InvitationRow {
   clerkOrgId: string
   clerkInvitationId: string | null
   email: string
-  role: string
+  /** Ours (#335); a row from before reads its Clerk key as ours. */
+  role: JoinRole
   inviterUserId: string
   expiresAt: Date
   zone: string
@@ -47,7 +49,7 @@ export interface MemberStore {
     input: {
       clerkOrgId: string
       email: string
-      role: string
+      role: JoinRole
       inviterUserId: string
       expiresAt: Date
       zone: string
@@ -75,6 +77,18 @@ export interface MemberStore {
   keepLink(email: string, id: string, actionUrl: string): Promise<void>
   /** The one row an invitation link names. */
   byLink(id: string): Promise<InvitationRow | null>
+  /**
+   * Pending or accepted invitations sent since `since` that no OTHER
+   * membership has used, newest first: what a new membership's role is
+   * matched against (#335).
+   */
+  recentInvitations(
+    tenantId: string,
+    since: Date,
+    membershipId: string,
+  ): Promise<{ id: string; email: string; role: JoinRole }[]>
+  /** Marks it used by this membership; false when another one used it first. */
+  applyInvitation(tenantId: string, id: string, membershipId: string): Promise<boolean>
 
   planLimit(tenantId: string): Promise<PlanLimit>
   workspace(
@@ -95,7 +109,7 @@ const toRow = (r: typeof memberInvitations.$inferSelect): InvitationRow => ({
   clerkOrgId: r.clerkOrgId,
   clerkInvitationId: r.clerkInvitationId,
   email: r.email,
-  role: r.role,
+  role: readJoinRole(r.role),
   inviterUserId: r.inviterUserId,
   expiresAt: r.expiresAt,
   zone: r.zone,
@@ -271,6 +285,55 @@ export function memberStore(db: Database): MemberStore {
           .limit(1),
       )
       return row ? toRow(row) : null
+    },
+
+    async recentInvitations(tenantId, since, membershipId) {
+      const rows = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({
+            id: memberInvitations.id,
+            email: memberInvitations.email,
+            role: memberInvitations.role,
+          })
+          .from(memberInvitations)
+          .where(
+            and(
+              eq(memberInvitations.tenantId, tenantId),
+              inArray(memberInvitations.status, ["pending", "accepted"]),
+              gt(memberInvitations.createdAt, since),
+              or(
+                isNull(memberInvitations.appliedMembershipId),
+                eq(memberInvitations.appliedMembershipId, membershipId),
+              ),
+            ),
+          )
+          .orderBy(desc(memberInvitations.createdAt)),
+      )
+      return rows.map((r) => ({ id: r.id, email: r.email, role: readJoinRole(r.role) }))
+    },
+
+    async applyInvitation(tenantId, id, membershipId) {
+      // ⚠ CONDITIONAL, so two memberships racing for one invitation get one winner.
+      const used = await withTenant(db, tenantId, (tx) =>
+        tx
+          .update(memberInvitations)
+          .set({
+            appliedMembershipId: membershipId,
+            appliedAt: sql`coalesce(${memberInvitations.appliedAt}, now())`,
+          })
+          .where(
+            and(
+              eq(memberInvitations.tenantId, tenantId),
+              eq(memberInvitations.id, id),
+              or(
+                isNull(memberInvitations.appliedMembershipId),
+                eq(memberInvitations.appliedMembershipId, membershipId),
+              ),
+            ),
+          )
+          .returning({ id: memberInvitations.id }),
+      )
+      return used.length > 0
     },
 
     async planLimit(tenantId) {

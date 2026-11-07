@@ -1,4 +1,4 @@
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-block"
@@ -9,6 +9,7 @@ import { parseCounts } from "@/lib/list-counts"
 import { Rail } from "@/components/rail"
 import { SendingStatusNotice } from "@/components/sending-status-banner"
 import { ClientContext } from "@/components/client-context"
+import { OnboardingGate } from "@/components/onboarding-gate"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { ShellBar } from "@/components/shell-bar"
 import { CommandMenu } from "@/components/command-menu"
@@ -16,10 +17,16 @@ import { MobileNav } from "@/components/mobile-nav"
 import { UsageRail } from "@/components/usage-rail"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { AccountBar } from "@/components/account-bar"
+import { AccessGate } from "@/components/access-gate"
+import { MfaRequired, NetworkBlocked, SessionEnded } from "@/components/gate-refusals"
 import { NoWorkspace } from "@/components/no-workspace"
 import { TenantNotReady } from "@/components/tenant-not-ready"
 import { tryApi } from "@/lib/api"
+import { gateRefusal } from "@/lib/identity-gate"
 import { hasSkippedOnboarding } from "@/lib/onboarding-skip"
+import { authOrigin } from "@/lib/sso-server"
+import { clerkIdentity } from "@/lib/clerk-identity"
+import { WorkspaceSwitchProvider } from "@/lib/workspace-switch"
 import type { Attention, Me } from "@/lib/types"
 
 /**
@@ -52,7 +59,9 @@ export const dynamic = "force-dynamic"
 export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const me = await tryApi<Me>("/console/me")
+  // Clerk's own copy of the person and the workspace picture, read alongside -
+  // for the rail's first paint only. See lib/clerk-identity.ts.
+  const [me, identity] = await Promise.all([tryApi<Me>("/console/me"), clerkIdentity()])
 
   /*
    * ⚠ `tenant_not_ready` IS NOT AN ERROR AND MUST NOT RENDER AS ONE. It means
@@ -68,6 +77,62 @@ export default async function AppLayout({
   // Signed in with no workspace active - see components/no-workspace.tsx.
   if (!me.ok && me.error.name === "no_workspace") {
     return <NoWorkspace />
+  }
+
+  /*
+   * ⚠ A SESSION THE WORKSPACE'S SSO REFUSES SEES ONE SCREEN AND NOTHING ELSE
+   * (#340). `passkey_required`: an owner or admin exempt from "required" SSO
+   * who holds no passkey. `sso_required`: a session that skipped the company's
+   * provider. Rendered instead of the shell, so no link inside it is reachable.
+   */
+  if (!me.ok && me.error.name === "passkey_required") {
+    return (
+      <AccessGate
+        kind="passkey"
+        authOrigin={authOrigin()}
+        startUrl={null}
+        clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+      />
+    )
+  }
+  if (!me.ok && me.error.name === "sso_required") {
+    const start = (me.error as { startUrl?: unknown }).startUrl
+    return (
+      <AccessGate
+        kind="sso"
+        authOrigin={authOrigin()}
+        startUrl={typeof start === "string" ? start : null}
+        clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
+      />
+    )
+  }
+
+  /*
+   * ⚠ THE WORKSPACE'S SESSION AND NETWORK POLICIES REFUSE THE SAME WAY (#345):
+   * a session past its limits is sent to sign in again with the reason, an
+   * address off the allowlist sees one page, and a member with no second
+   * factor is pointed at their account (kept reachable inside the gate). Each
+   * replaces the shell, as the SSO gates above do.
+   */
+  if (!me.ok) {
+    const refusal = gateRefusal(me.error)
+    const clerkOn = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
+    if (refusal?.kind === "session_expired")
+      return (
+        <SessionEnded
+          reason={refusal.reason}
+          authOrigin={authOrigin()}
+          clerkEnabled={clerkOn}
+        />
+      )
+    if (refusal?.kind === "ip_not_allowed")
+      return <NetworkBlocked authOrigin={authOrigin()} clerkEnabled={clerkOn} />
+    if (refusal?.kind === "mfa_required")
+      return (
+        <MfaRequired authOrigin={authOrigin()} clerkEnabled={clerkOn}>
+          {children}
+        </MfaRequired>
+      )
   }
 
   if (!me.ok) {
@@ -88,10 +153,18 @@ export default async function AppLayout({
   // Without it "Skip to the console" was a link to a page that immediately sent
   // people back, which is indistinguishable from a broken button. See
   // lib/onboarding-skip.ts for why this is a cookie and not a stored fact.
-  if (
+  //
+  // ⚠ SETTINGS PAGES STAY REACHABLE: switching workspace from the settings
+  // picker keeps you on settings rather than bouncing to onboarding. The
+  // `x-pathname` header populated by middleware identifies whether this request
+  // is for settings; leaving settings on the client triggers `OnboardingGate`.
+  const reqHeaders = await headers()
+  const pathname = reqHeaders.get("x-pathname") ?? ""
+  const isSettings = pathname.startsWith("/settings")
+  const needsOnboarding =
     me.data.onboarding.should_onboard &&
     !(await hasSkippedOnboarding(me.data.tenant?.id ?? ""))
-  ) {
+  if (!isSettings && needsOnboarding) {
     redirect("/onboarding")
   }
 
@@ -141,145 +214,159 @@ export default async function AppLayout({
      * the rail lifts off the top edge and drops back - which is precisely the
      * movement this layout is meant to remove.
      */
-    <div className="flex h-dvh overflow-hidden bg-background">
-      {/*
-       * ⚠ NO HEIGHT OF ITS OWN: `h-full` DEFERS TO THE SHELL. A rail that
-       * declared `h-dvh` a second time would be two numbers that have to agree
-       * - and they stop agreeing the first time the shell grows a header.
-       */}
-      <Rail className="hidden h-full w-60 shrink-0 flex-col lg:flex">
+    <WorkspaceSwitchProvider>
+      <div className="flex h-dvh overflow-hidden bg-background">
         {/*
-         * ⚠ THE RAIL STARTS WITH THE WORKSPACE, NOT A LOGO (decided
-         * 2026-10-01). Which workspace you are in is the first thing worth
-         * knowing in here; the mark said only which product, which nobody in
-         * the dashboard needs told.
-         *
-         * ⚠ NO RULE UNDER IT (2026-10-03). It used to line up with a bordered
-         * page header and the two drew one bar across the whole screen; the
-         * page header is part of the content now, so the rule would be a line
-         * to nowhere.
+         * ⚠ NO HEIGHT OF ITS OWN: `h-full` DEFERS TO THE SHELL. A rail that
+         * declared `h-dvh` a second time would be two numbers that have to agree
+         * - and they stop agreeing the first time the shell grows a header.
          */}
-        <div className="flex items-center px-2 pt-2 pb-1">
-          <div className="min-w-0 flex-1">
-            <WorkspaceBar tenant={me.data.tenant} clerkEnabled={clerkEnabled} />
-          </div>
-        </div>
-
-        {/*
-         * ⚠ THE RAIL FITS; IT DOES NOT SCROLL. With Settings moved into the
-         * account menu and 28px rows, the navigation fits a 700px-tall window,
-         * and a rail that scrolls hides its own last items behind a gesture
-         * nobody expects to need there (decided 2026-09-29).
-         *
-         * ⚠ `overflow-y-auto` STAYS, AS THE LAST RESORT, AND ONLY ENGAGES WHEN
-         * THE NAV TRULY CANNOT FIT. A fixed height breakpoint was tried and
-         * clipped Mailboxes out of reach between the breakpoint and the height
-         * the rail actually needs; "scroll only when it overflows" cannot clip.
-         * The account row stays pinned either way.
-         */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
-          <SidebarNav attention={attention} />
-        </div>
-
-        {/*
-         * ⚠ ONE ROW AT THE FOOT OF THE RAIL: WHO YOU ARE, THE PLAN, AND THE
-         * USAGE RING. The ring is visible on every screen, and that is a
-         * product decision rather than a layout one: metering that only
-         * appears on a billing page is metering nobody looks at until they are
-         * refused a send. See components/account-bar.tsx.
-         *
-         * ⚠ THE RING IN ITS OWN SUSPENSE BOUNDARY, so a slow meter read cannot
-         * hold up the rail. The row renders; the ring arrives.
-         *
-         * ⚠ NO SENDING-HEALTH PILL HERE (#153). Trouble reaches every page
-         * through the banner above the content.
-         */}
-        {/*
-         * ⚠ THE SENDING NOTICE LIVES HERE, NOT AS A BAND ACROSS THE PAGE
-         * (2026-10-03). It still shows on every screen while sending is in
-         * trouble - that rule from #157 stands - but as one line in the rail
-         * that leads to the overview, where the full explanation is.
-         */}
-        <Suspense fallback={null}>
-          <SendingStatusNotice className="mx-2 mb-2" />
-        </Suspense>
-
-        <div className="mt-auto p-2">
-          <AccountBar
-            clerkEnabled={clerkEnabled}
-            plan={me.data.billing.plan}
-            fallbackEmail={me.data.user.email}
-            usage={
-              <Suspense fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}>
-                <UsageRail />
-              </Suspense>
-            }
-          />
-        </div>
-      </Rail>
-
-      {/*
-       * ⚠ `overflow-hidden` ON THE COLUMN, `overflow-y-auto` ON THE PANE
-       * INSIDE IT. The column has to refuse to grow before the pane can be
-       * asked to scroll: a flex child's default `min-height: auto` lets it
-       * stretch to its content instead, and then the shell overflows and
-       * nothing scrolls anywhere.
-       */}
-      {/*
-       * Arc's app shell: the page is one raised, rounded surface inset from
-       * the window, beside a quiet rail on the background. On phones the
-       * surface fills the screen.
-       */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden lg:py-2 lg:pr-2">
-        <div className="i10-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface)] lg:rounded-[var(--radius-surface)] lg:border lg:border-[var(--border)]">
-          <MobileNav
-            tenant={me.data.tenant}
-            plan={me.data.billing.plan}
-            fallbackEmail={me.data.user.email}
-            clerkEnabled={clerkEnabled}
-            attention={attention}
-            usage={
-              <Suspense fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}>
-                <UsageRail side="top" />
-              </Suspense>
-            }
-          />
+        <Rail className="hidden h-full w-60 shrink-0 flex-col lg:flex">
           {/*
-           * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,
-           * the workspace bar and the mobile header stay perfectly still while the
-           * content changes. A transition that moved the chrome as well would be a
-           * page load with extra steps - the whole value of an app shell is that
-           * most of the screen does not go anywhere.
+           * ⚠ THE RAIL STARTS WITH THE WORKSPACE, NOT A LOGO (decided
+           * 2026-10-01). Which workspace you are in is the first thing worth
+           * knowing in here; the mark said only which product, which nobody in
+           * the dashboard needs told.
+           *
+           * ⚠ NO RULE UNDER IT (2026-10-03). It used to line up with a bordered
+           * page header and the two drew one bar across the whole screen; the
+           * page header is part of the content now, so the rule would be a line
+           * to nowhere.
+           */}
+          <div className="flex items-center px-2 pt-2 pb-1">
+            <div className="min-w-0 flex-1">
+              <WorkspaceBar
+                tenant={me.data.tenant}
+                image={identity.workspaceImage}
+                clerkEnabled={clerkEnabled}
+              />
+            </div>
+          </div>
+
+          {/*
+           * ⚠ THE RAIL FITS; IT DOES NOT SCROLL. With Settings moved into the
+           * account menu and 28px rows, the navigation fits a 700px-tall window,
+           * and a rail that scrolls hides its own last items behind a gesture
+           * nobody expects to need there (decided 2026-09-29).
+           *
+           * ⚠ `overflow-y-auto` STAYS, AS THE LAST RESORT, AND ONLY ENGAGES WHEN
+           * THE NAV TRULY CANNOT FIT. A fixed height breakpoint was tried and
+           * clipped Mailboxes out of reach between the breakpoint and the height
+           * the rail actually needs; "scroll only when it overflows" cannot clip.
+           * The account row stays pinned either way.
+           */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
+            <SidebarNav attention={attention} />
+          </div>
+
+          {/*
+           * ⚠ ONE ROW AT THE FOOT OF THE RAIL: WHO YOU ARE, THE PLAN, AND THE
+           * USAGE RING. The ring is visible on every screen, and that is a
+           * product decision rather than a layout one: metering that only
+           * appears on a billing page is metering nobody looks at until they are
+           * refused a send. See components/account-bar.tsx.
+           *
+           * ⚠ THE RING IN ITS OWN SUSPENSE BOUNDARY, so a slow meter read cannot
+           * hold up the rail. The row renders; the ring arrives.
+           *
+           * ⚠ NO SENDING-HEALTH PILL HERE (#153). Trouble reaches every page
+           * through the banner above the content.
            */}
           {/*
-           * ⚠ BELOW THE LARGE BREAKPOINT THERE IS NO RAIL, so the same one-line
-           * notice sits under the mobile header instead. Its own boundary with
-           * no fallback: it is absent for almost everybody.
+           * ⚠ THE SENDING NOTICE LIVES HERE, NOT AS A BAND ACROSS THE PAGE
+           * (2026-10-03). It still shows on every screen while sending is in
+           * trouble - that rule from #157 stands - but as one line in the rail
+           * that leads to the overview, where the full explanation is.
            */}
           <Suspense fallback={null}>
-            <SendingStatusNotice className="mx-4 mt-3 lg:hidden" />
+            <SendingStatusNotice className="mx-2 mb-2" />
           </Suspense>
-          <ClientContext />
-          <div className="hidden lg:block">
-            <ShellBar workspace={me.data.tenant?.name ?? "Workspace"} />
-          </div>
-          <PageFrame>
-            <RememberedViewsProvider views={views}>
-              <RememberedCountsProvider tenantId={tenantId} counts={counts}>
-                {children}
-              </RememberedCountsProvider>
-            </RememberedViewsProvider>
-          </PageFrame>
-        </div>
-      </div>
 
-      {/*
-       * ⚠ RENDERED ONCE, AT THE SHELL, NOT PER PAGE. The command menu binds a
-       * global ⌘K listener; one per page would stack listeners on every
-       * navigation in a client-side transition and open several dialogs at
-       * once.
-       */}
-      <CommandMenu />
-    </div>
+          <div className="mt-auto p-2">
+            <AccountBar
+              clerkEnabled={clerkEnabled}
+              plan={me.data.billing.plan}
+              initialUser={identity.user}
+              fallbackEmail={me.data.user.email}
+              usage={
+                <Suspense
+                  fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}
+                >
+                  <UsageRail />
+                </Suspense>
+              }
+            />
+          </div>
+        </Rail>
+
+        {/*
+         * ⚠ `overflow-hidden` ON THE COLUMN, `overflow-y-auto` ON THE PANE
+         * INSIDE IT. The column has to refuse to grow before the pane can be
+         * asked to scroll: a flex child's default `min-height: auto` lets it
+         * stretch to its content instead, and then the shell overflows and
+         * nothing scrolls anywhere.
+         */}
+        {/*
+         * Arc's app shell: the page is one raised, rounded surface inset from
+         * the window, beside a quiet rail on the background. On phones the
+         * surface fills the screen.
+         */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden lg:py-2 lg:pr-2">
+          <div className="i10-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface)] lg:rounded-[var(--radius-surface)] lg:border lg:border-[var(--border)]">
+            <MobileNav
+              tenant={me.data.tenant}
+              plan={me.data.billing.plan}
+              workspaceImage={identity.workspaceImage}
+              initialUser={identity.user}
+              fallbackEmail={me.data.user.email}
+              clerkEnabled={clerkEnabled}
+              attention={attention}
+              usage={
+                <Suspense
+                  fallback={<Skeleton className="size-8 shrink-0 rounded-md" />}
+                >
+                  <UsageRail side="top" />
+                </Suspense>
+              }
+            />
+            {/*
+             * ⚠ THE FRAME IS INSIDE THE COLUMN AND OUTSIDE THE PAGE, so the rail,
+             * the workspace bar and the mobile header stay perfectly still while the
+             * content changes. A transition that moved the chrome as well would be a
+             * page load with extra steps - the whole value of an app shell is that
+             * most of the screen does not go anywhere.
+             */}
+            {/*
+             * ⚠ BELOW THE LARGE BREAKPOINT THERE IS NO RAIL, so the same one-line
+             * notice sits under the mobile header instead. Its own boundary with
+             * no fallback: it is absent for almost everybody.
+             */}
+            <Suspense fallback={null}>
+              <SendingStatusNotice className="mx-4 mt-3 lg:hidden" />
+            </Suspense>
+            <ClientContext />
+            <OnboardingGate enabled={needsOnboarding} />
+            <div className="hidden lg:block">
+              <ShellBar workspace={me.data.tenant?.name ?? "Workspace"} />
+            </div>
+            <PageFrame>
+              <RememberedViewsProvider views={views}>
+                <RememberedCountsProvider tenantId={tenantId} counts={counts}>
+                  {children}
+                </RememberedCountsProvider>
+              </RememberedViewsProvider>
+            </PageFrame>
+          </div>
+        </div>
+
+        {/*
+         * ⚠ RENDERED ONCE, AT THE SHELL, NOT PER PAGE. The command menu binds a
+         * global ⌘K listener; one per page would stack listeners on every
+         * navigation in a client-side transition and open several dialogs at
+         * once.
+         */}
+        <CommandMenu />
+      </div>
+    </WorkspaceSwitchProvider>
   )
 }

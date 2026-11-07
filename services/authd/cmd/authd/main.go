@@ -27,9 +27,9 @@ import (
 	"github.com/i10-tech/i10/services/authd/internal/config"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
+	"github.com/i10-tech/i10/services/authd/internal/passthrough"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
-	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
 
 // version is stamped at build time with -ldflags "-X main.version=<sha>".
@@ -71,6 +71,24 @@ func run() error {
 	limiter := throttle.New(cfg.BindsPerMinute)
 	go sweepLoop(ctx, limiter, log)
 
+	// ⚠ A TYPED NIL IS NOT A NIL INTERFACE: ManagedResolver.Directory must stay a
+	// true nil when pass-through is not configured, so that a managed account is
+	// refused rather than panicking the bind.
+	var managed passthrough.Directory
+	if cfg.PassthroughConfigured() {
+		src, err := passthrough.NewHTTPSource(cfg.APIURL, cfg.APISecret, cfg.APITimeout)
+		if err != nil {
+			return err
+		}
+		managed = passthrough.NewService(
+			passthrough.NewCache(src, passthrough.MaxCacheTTL),
+			&passthrough.Binder{TotalTimeout: passthrough.VerifyTimeout},
+		)
+		log.Info("ldap pass-through enabled for managed accounts")
+	} else {
+		log.Warn("ldap pass-through is not configured: managed accounts cannot bind")
+	}
+
 	srv := ldap.NewServer()
 	// Both are connection-level deadlines, reset each time a request is read, and
 	// both are deliberately well above ldapsrv.DefaultOpTimeout (14s) and
@@ -83,9 +101,15 @@ func run() error {
 		ServiceBindDN:     cfg.ServiceBindDN,
 		ServiceBindSecret: cfg.ServiceBindSecret,
 		Store:             store,
-		// Every account is verified by Clerk today. Choosing a provider per
-		// workspace is a different Resolver, not a change to the bind path.
-		Resolver:  verify.Fixed(clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout)),
+		// An account an SSO connection manages is verified by its company's
+		// directory (#344); every other account is verified by Clerk. The choice is
+		// the Resolver's, not the bind path's, and a managed account is never
+		// asked of Clerk.
+		Resolver: &passthrough.ManagedResolver{
+			Unmanaged: clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout),
+			Directory: managed,
+			Log:       log,
+		},
 		Budget:    budgetstore.NewPostgres(store.Pool()),
 		Limiter:   limiter,
 		CredCache: credcache.New(cfg.CredCacheTTL),

@@ -1,6 +1,5 @@
 import type { ClerkClient } from "@clerk/backend"
 import type { Database } from "../db/client.js"
-import { MANAGE_MEMBERS } from "../console/team-domains.js"
 import { jmapAs } from "../mail/jmap-as.js"
 import { teamMail, type TeamMail } from "../mail/team-mail.js"
 import { teamInboxes, type TeamInboxes } from "./service.js"
@@ -8,7 +7,8 @@ import { teamInboxStore } from "./store.js"
 
 /**
  * Team inboxes, assembled from the environment: Clerk for who is in the
- * workspace, Postgres for the directory rows, Stalwart for the account.
+ * workspace, our roles table for who may manage it, Postgres for the directory
+ * rows, Stalwart for the account.
  */
 
 interface StalwartEnv {
@@ -42,20 +42,19 @@ export function teamInboxesFor(input: {
   db: Database
   clerk: ClerkClient
   mail: TeamMail | null
+  /**
+   * Whether this person holds `members:manage` in the workspace. Our roles table
+   * (#335), not Clerk's permissions: Clerk's roles are powerless, so asking
+   * Clerk would call every admin a member.
+   */
+  isAdmin: (tenantId: string, userId: string) => Promise<boolean>
 }): TeamInboxes {
   const { clerk, mail } = input
 
   return teamInboxes({
     store: teamInboxStore(input.db),
 
-    async isAdmin(userId, orgId) {
-      const { data } = await clerk.users.getOrganizationMembershipList({
-        userId,
-        limit: 100,
-      })
-      const membership = data.find((m) => m.organization.id === orgId)
-      return membership?.permissions.includes(MANAGE_MEMBERS) ?? false
-    },
+    isAdmin: input.isAdmin,
 
     // ⚠ A HUNDRED IS THE CEILING, NOT A PAGE, as in console/clerk-members.ts.
     async roster(orgId) {

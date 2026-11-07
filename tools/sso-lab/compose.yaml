@@ -1,0 +1,197 @@
+# The i10 SSO lab: Keycloak, authentik and OpenLDAP seeded with the same six
+# people, behind a TLS front that i10's egress guard will accept.
+# Throwaway credentials only; see .env.example and README.md.
+#   cp .env.example .env && ./lab.sh up
+name: i10-sso-lab
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    ports:
+      - "${KEYCLOAK_HTTPS_PORT:-8443}:8443"
+      - "${AUTHENTIK_HTTPS_PORT:-9443}:9443"
+      - "${MINIO_HTTPS_PORT:-9012}:9012"
+      - "${CATCHER_HTTPS_PORT:-8090}:8090"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+
+  openldap:
+    image: osixia/openldap:1.5.0
+    hostname: openldap
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      LAB_DOMAIN: ${LAB_DOMAIN:-sso-lab.i10.tech}
+      LAB_USER_PASSWORD: ${LAB_USER_PASSWORD}
+      LDAP_SERVICE_PASSWORD: ${LDAP_SERVICE_PASSWORD}
+      LDAP_ORGANISATION: i10 SSO lab
+      LDAP_DOMAIN: ${LAB_DOMAIN:-sso-lab.i10.tech}
+      LDAP_ADMIN_PASSWORD: ${OPENLDAP_ADMIN_PASSWORD}
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: lab.crt
+      LDAP_TLS_KEY_FILENAME: lab.key
+      LDAP_TLS_CA_CRT_FILENAME: lab-ca.crt
+      LDAP_TLS_VERIFY_CLIENT: never
+      LDAP_TLS_ENFORCE: "false"
+    ports:
+      # i10 accepts LDAP on 389 and 636 only (identity/ldap.ts LDAP_PORTS).
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./ldap/entrypoint.sh:/entrypoint.sh:ro
+      - ./ldap/seed.ldif.tpl:/seed/seed.ldif.tpl:ro
+      - ./ldap/acl.sh:/acl.sh:ro
+      - ./certs:/container/service/slapd/assets/certs:ro
+      - openldap-data:/var/lib/ldap
+      - openldap-config:/etc/ldap/slapd.d
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ldapsearch -x -H ldap://localhost -D cn=admin,dc=$$(echo $$LAB_DOMAIN | sed 's/\\./,dc=/g') -w $$LDAP_ADMIN_PASSWORD -b ou=people,dc=$$(echo $$LAB_DOMAIN | sed 's/\\./,dc=/g') uid=alice dn | grep -q '^dn:'",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      openldap:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: https://kc.lab.localhost:${KEYCLOAK_HTTPS_PORT:-8443}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      # Substituted into the realm import (${...} placeholders).
+      LAB_DOMAIN: ${LAB_DOMAIN:-sso-lab.i10.tech}
+      LDAP_BASE_DN: ${LDAP_BASE_DN:?run through ./lab.sh, which derives it from LAB_DOMAIN}
+      OPENLDAP_ADMIN_PASSWORD: ${OPENLDAP_ADMIN_PASSWORD}
+      KEYCLOAK_OIDC_CLIENT_ID: ${KEYCLOAK_OIDC_CLIENT_ID}
+      KEYCLOAK_OIDC_CLIENT_SECRET: ${KEYCLOAK_OIDC_CLIENT_SECRET}
+      AUTH_ORIGIN: ${AUTH_ORIGIN}
+    ports:
+      - "${KEYCLOAK_HTTP_PORT:-8180}:8080"
+    volumes:
+      - ./keycloak/realm-i10-lab.json:/opt/keycloak/data/import/realm-i10-lab.json:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '\"status\": \"UP\"' <&3",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+
+  authentik-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: lab-authentik-db
+    volumes:
+      - authentik-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d authentik -U authentik"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:2026.8.5
+    command: server
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+    environment: &authentik-env
+      AUTHENTIK_POSTGRESQL__HOST: authentik-db
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: lab-authentik-db
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_ADMIN_EMAIL}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_ADMIN_PASSWORD}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
+      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      # Read by the blueprints with !Env.
+      LAB_DOMAIN: ${LAB_DOMAIN:-sso-lab.i10.tech}
+      LAB_USER_PASSWORD: ${LAB_USER_PASSWORD}
+      AUTH_ORIGIN: ${AUTH_ORIGIN}
+      CONNECTION_ID_AUTHENTIK_OIDC: ${CONNECTION_ID_AUTHENTIK_OIDC:-unset}
+      CONNECTION_ID_AUTHENTIK_SAML: ${CONNECTION_ID_AUTHENTIK_SAML:-unset}
+      AUTHENTIK_OIDC_CLIENT_ID: ${AUTHENTIK_OIDC_CLIENT_ID}
+      AUTHENTIK_OIDC_CLIENT_SECRET: ${AUTHENTIK_OIDC_CLIENT_SECRET}
+      API_ORIGIN_FROM_CONTAINERS: ${API_ORIGIN_FROM_CONTAINERS}
+      DIRECTORY_ID: ${DIRECTORY_ID:-unset}
+      SCIM_TOKEN: ${SCIM_TOKEN:-unset}
+    ports:
+      - "${AUTHENTIK_HTTP_PORT:-9100}:9000"
+    volumes:
+      - ./authentik/blueprints:/blueprints/custom:ro
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2026.8.5
+    command: worker
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+    environment: *authentik-env
+    volumes:
+      - ./authentik/blueprints:/blueprints/custom:ro
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+
+  # MinIO's own images left Docker Hub and Quay; bitnamilegacy is the last pinned copy.
+  # --- profile "extras": SIEM export target and identity-webhook receiver ----
+  minio:
+    profiles: ["extras"]
+    image: docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r5
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_CONSOLE_PORT:-9011}:9001"
+    volumes:
+      - minio-data:/bitnami/minio/data
+
+  minio-bucket:
+    profiles: ["extras"]
+    image: docker.io/bitnamilegacy/minio-client:2025.7.21-debian-12-r3
+    depends_on: [minio]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - until mc alias set lab http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 1; done; mc mb --ignore-existing lab/i10-siem
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    restart: "no"
+
+  webhook-catcher:
+    profiles: ["extras"]
+    image: mendhak/http-https-echo:43
+    environment:
+      HTTP_PORT: "8080"
+      HTTPS_PORT: "8444"
+
+volumes:
+  openldap-data:
+  openldap-config:
+  authentik-db:
+  minio-data:

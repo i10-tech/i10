@@ -1,7 +1,7 @@
 import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
 import { asId, notFound, notWired, readJson, validation } from "./http.js"
-import { MANAGE_MEMBERS } from "../../console/team-domains.js"
+import { can } from "../../console/roles.js"
 import {
   revokeExpired,
   sendInvitations,
@@ -13,8 +13,8 @@ import { zoneCatalog } from "../../console/zones.js"
 /**
  * Member limits, invitations with a chosen expiry, and capacity (#327).
  *
- * ⚠ EVERY WRITE ASKS CLERK FOR THE MEMBERS-MANAGE PERMISSION, like the team
- * routes beside it; the console hiding a button is not the check.
+ * ⚠ EVERY WRITE CHECKS `members:manage` IN OUR ROLES TABLE (#335), like the
+ * team routes beside it; the console hiding a button is not the check.
  */
 
 const forbidden = (message: string) =>
@@ -23,11 +23,11 @@ const forbidden = (message: string) =>
 const noTeam = validation("Invitations need a team workspace.")
 
 export function mountMembers(app: Hono, d: ConsoleDeps): void {
-  const isAdmin = async (userId: string, orgId: string | undefined) =>
+  const isAdmin = async (tenantId: string, userId: string, orgId: string | undefined) =>
     Boolean(
       orgId &&
-      d.teamDomains &&
-      (await d.teamDomains.can(userId, orgId, MANAGE_MEMBERS)),
+      d.roles &&
+      (await can(d.roles.store, tenantId, userId, "members:manage")),
     )
 
   /**
@@ -42,7 +42,7 @@ export function mountMembers(app: Hono, d: ConsoleDeps): void {
     await revokeExpired(d.members, tenantId)
     const [room, admin, access] = await Promise.all([
       seats(d.members, tenantId, orgId),
-      isAdmin(userId, orgId),
+      isAdmin(tenantId, userId, orgId),
       d.teamDomains ? d.teamDomains.store.accessDomains(tenantId) : Promise.resolve([]),
     ])
     const alert = admin ? await d.members.store.alert(tenantId) : null
@@ -95,7 +95,7 @@ export function mountMembers(app: Hono, d: ConsoleDeps): void {
     const { tenantId } = c.get("auth")
     const { userId, orgId } = c.get("user")
     if (!orgId) return c.json(noTeam, 422)
-    if (!(await isAdmin(userId, orgId)))
+    if (!(await isAdmin(tenantId, userId, orgId)))
       return c.json(forbidden("Only an admin can invite people."), 403)
     const body = await readJson(c)
     const sent = await sendInvitations(d.members, {
@@ -143,7 +143,7 @@ export function mountMembers(app: Hono, d: ConsoleDeps): void {
     if (!id) return c.json(notFound("No such invitation."), 404)
     const { tenantId } = c.get("auth")
     const { userId, orgId } = c.get("user")
-    if (!(await isAdmin(userId, orgId)))
+    if (!(await isAdmin(tenantId, userId, orgId)))
       return c.json(forbidden("Only an admin can withdraw invitations."), 403)
     const outcome = await withdrawInvitation(d.members, { tenantId, id })
     if (outcome === "ok") return c.body(null, 204)

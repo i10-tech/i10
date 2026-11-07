@@ -1,0 +1,21 @@
+{
+  "name": "@i10/clerk-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check-types": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "local": "wrangler dev --env local",
+    "lint": "eslint . --max-warnings 0",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260928.1",
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "^1.4.2",
+    "eslint": "^9.39.5",
+    "typescript": "6.0.3",
+    "wrangler": "^4.143.0"
+  }
+}

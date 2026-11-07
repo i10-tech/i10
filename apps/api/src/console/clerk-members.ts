@@ -1,7 +1,7 @@
 import type { ClerkClient } from "@clerk/backend"
 import { notFound } from "../mailboxes/clerk.js"
 import type { ClerkMembers } from "./members.js"
-import { MANAGE_MEMBERS } from "./team-domains.js"
+import { CLERK_ROLE } from "./roles.js"
 
 /**
  * `ClerkMembers` over Clerk's backend API (#327), shared by the API and the
@@ -48,7 +48,8 @@ export function clerkMembers(clerk: ClerkClient): ClerkMembers {
         organizationId: input.orgId,
         inviterUserId: input.inviterUserId,
         emailAddress: input.email,
-        role: input.role,
+        // ⚠ ALWAYS THE POWERLESS ROLE (#335); the real one is our row's.
+        role: CLERK_ROLE,
         expiresInDays: input.expiresInDays,
       })
       return { id: made.id }
@@ -86,13 +87,14 @@ export function clerkMembers(clerk: ClerkClient): ClerkMembers {
       }
     },
 
-    async admins(orgId) {
+    async addresses(orgId, userIds) {
+      const wanted = new Set(userIds)
       const { data } = await clerk.organizations.getOrganizationMembershipList({
         organizationId: orgId,
         limit: 100,
       })
       return data
-        .filter((m) => m.permissions.includes(MANAGE_MEMBERS))
+        .filter((m) => m.publicUserData?.userId && wanted.has(m.publicUserData.userId))
         .flatMap((m) =>
           m.publicUserData?.identifier ? [m.publicUserData.identifier] : [],
         )

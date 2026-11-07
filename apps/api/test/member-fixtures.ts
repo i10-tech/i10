@@ -1,6 +1,7 @@
 import type { AlertLevel } from "../src/console/capacity.js"
 import type { InvitationRow, MemberStore } from "../src/console/members-db.js"
 import type { ClerkMembers, MemberMail, MembersDeps } from "../src/console/members.js"
+import { memoryRoles, row } from "./role-fixtures.js"
 
 /**
  * An in-memory member store, Clerk organization, scheduler and mail (#327).
@@ -38,6 +39,15 @@ export function world(
   const cancelled: string[] = []
   const mailed: { kind: "capacity" | "accepted"; input: unknown }[] = []
   const invited: { email: string; expiresInDays: number }[] = []
+  /** Whose addresses the capacity alert asked Clerk for. */
+  const addressed: string[][] = []
+  const roles = memoryRoles({
+    [ACME.tenantId]: [
+      row("user_owner", "owner"),
+      row("user_ops", "admin"),
+      row("user_m", "member"),
+    ],
+  })
   let failNext: unknown = null
   let n = 0
 
@@ -96,6 +106,17 @@ export function world(
       rows.find((r) => r.id === id)!.actionUrl = url
     },
     byLink: async (id) => rows.find((r) => r.id === id) ?? null,
+    recentInvitations: async (t, since) =>
+      [...rows]
+        .reverse()
+        .filter(
+          (r) =>
+            r.tenantId === t &&
+            (r.status === "pending" || r.status === "accepted") &&
+            r.createdAt > since,
+        )
+        .map((r) => ({ id: r.id, email: r.email, role: r.role })),
+    applyInvitation: async () => true,
     planLimit: async () => ({
       planId: "plan",
       limit: state.limit,
@@ -141,7 +162,10 @@ export function world(
     async removeMember(orgId, userId) {
       removed.push({ orgId, userId })
     },
-    admins: async () => ["owner@acme.test", "ops@acme.test"],
+    addresses: async (_o, userIds) => {
+      addressed.push(userIds)
+      return ["owner@acme.test", "ops@acme.test"]
+    },
   }
 
   const mail: MemberMail = {
@@ -156,6 +180,7 @@ export function world(
   const d: MembersDeps = {
     store,
     clerk,
+    roles: roles.store,
     expiry: {
       async schedule(job, at) {
         scheduled.push({ id: job.id, at })
@@ -182,6 +207,7 @@ export function world(
     cancelled,
     mailed,
     invited,
+    addressed,
     failNextInvite: (error: unknown) => {
       failNext = error
     },

@@ -23,6 +23,7 @@ NAMES=(
   dash.i10.localhost
   auth.i10.localhost
   api.i10.localhost
+  clerk.i10.localhost
   docs.i10.localhost
   i10.localhost
   www.i10.localhost

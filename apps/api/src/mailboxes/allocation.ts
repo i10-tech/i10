@@ -12,9 +12,10 @@ import { STORAGE, storageStatement } from "../metering/levels.js"
  *
  * ⚠ ONLY AN OWNER OR ADMIN OF THE WORKSPACE SETS AN ALLOCATION, AND THIS FILE
  * KNOWS NOTHING ABOUT WHO THAT IS. The caller proves it (the console route asks
- * Clerk for the members-manage permission) and passes a tenant id that came from
- * the verified session. What this file guarantees is the other half: the mailbox
- * it writes belongs to THAT tenant, and the writes cannot overfill the pool.
+ * our roles table for `members:manage`, #335) and passes a tenant id that came
+ * from the verified session. What this file guarantees is the other half: the
+ * mailbox it writes belongs to THAT tenant, and the writes cannot overfill the
+ * pool.
  */
 
 /**

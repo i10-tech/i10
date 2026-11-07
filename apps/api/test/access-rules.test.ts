@@ -20,7 +20,7 @@ import type { JoinRule } from "../src/db/core.js"
 const rule = (
   pattern: string,
   mode: JoinRule["mode"],
-  role = "org:member",
+  role: JoinRule["role"] = "member",
 ): JoinRule => ({
   pattern,
   mode,
@@ -55,14 +55,14 @@ describe("ruleFor", () => {
     rule("pslhq.app", "suggest"),
     rule("*.pslhq.app", "auto"),
     rule("dev.pslhq.app", "off"),
-    rule("*.dev.pslhq.app", "auto", "org:admin"),
+    rule("*.dev.pslhq.app", "auto", "admin"),
   ]
   test("the most specific rule wins", () => {
     expect(ruleFor(rules, "pslhq.app")?.mode).toBe("suggest")
     expect(ruleFor(rules, "eu.pslhq.app")?.mode).toBe("auto")
     // `off` on dev beats `auto` on *.pslhq.app.
     expect(ruleFor(rules, "dev.pslhq.app")?.mode).toBe("off")
-    expect(ruleFor(rules, "x.dev.pslhq.app")?.role).toBe("org:admin")
+    expect(ruleFor(rules, "x.dev.pslhq.app")?.role).toBe("admin")
   })
   test("nothing for a name no rule covers", () => {
     expect(ruleFor(rules, "other.app")).toBeNull()
@@ -90,24 +90,53 @@ describe("cleanRules", () => {
   test("normalizes and keeps valid rules", () => {
     expect(
       cleanRules(
-        [{ pattern: " DEV.pslhq.app ", mode: "auto", role: "org:admin" }],
+        [{ pattern: " DEV.pslhq.app ", mode: "auto", role: "admin" }],
         "pslhq.app",
       ),
-    ).toEqual({ ok: true, rules: [rule("dev.pslhq.app", "auto", "org:admin")] })
+    ).toEqual({ ok: true, rules: [rule("dev.pslhq.app", "auto", "admin")] })
   })
   test("refuses a duplicate pattern, a bad mode, a missing role", () => {
     expect(
       cleanRules([rule("pslhq.app", "auto"), rule("PSLHQ.app", "off")], "pslhq.app").ok,
     ).toBe(false)
     expect(
-      cleanRules(
-        [{ pattern: "pslhq.app", mode: "on", role: "org:member" }],
-        "pslhq.app",
-      ).ok,
+      cleanRules([{ pattern: "pslhq.app", mode: "on", role: "member" }], "pslhq.app")
+        .ok,
     ).toBe(false)
     expect(cleanRules([{ pattern: "pslhq.app", mode: "auto" }], "pslhq.app").ok).toBe(
       false,
     )
+  })
+
+  // #335: our keys, written as ours; Clerk's two old keys read as ours.
+  test("a role is member or admin, and is written as our key", () => {
+    expect(
+      cleanRules(
+        [
+          { pattern: "pslhq.app", mode: "suggest", role: "org:member" },
+          { pattern: "*.pslhq.app", mode: "auto", role: "org:admin" },
+        ],
+        "pslhq.app",
+      ),
+    ).toEqual({
+      ok: true,
+      rules: [
+        rule("pslhq.app", "suggest", "member"),
+        rule("*.pslhq.app", "auto", "admin"),
+      ],
+    })
+  })
+  test("never owner, and never a role we do not have", () => {
+    expect(
+      cleanRules([{ pattern: "pslhq.app", mode: "auto", role: "owner" }], "pslhq.app"),
+    ).toEqual({ ok: false, error: "A rule can't make anyone an owner." })
+    for (const role of ["org:billing", "superadmin", "org:sys_memberships:manage"])
+      expect(
+        cleanRules([{ pattern: "pslhq.app", mode: "auto", role }], "pslhq.app"),
+      ).toEqual({ ok: false, error: "A rule's role is member or admin." })
+    expect(
+      cleanRules([{ pattern: "pslhq.app", mode: "auto", role: " " }], "pslhq.app"),
+    ).toEqual({ ok: false, error: "A rule needs a role." })
   })
 })
 
@@ -149,7 +178,7 @@ describe("matchAccess", () => {
     tenantId: "t_acme",
     clerkOrgId: "org_acme",
     name: "pslhq.app",
-    rules: [rule("pslhq.app", "suggest"), rule("*.pslhq.app", "auto", "org:admin")],
+    rules: [rule("pslhq.app", "suggest"), rule("*.pslhq.app", "auto", "admin")],
   }
 
   test("each address takes its most specific rule", () => {
@@ -160,12 +189,12 @@ describe("matchAccess", () => {
         email: "a@pslhq.app",
         pattern: "pslhq.app",
         mode: "suggest",
-        role: "org:member",
+        role: "member",
       },
     ])
     expect(matchAccess([acme], ["a@x.y.pslhq.app"])[0]).toMatchObject({
       mode: "auto",
-      role: "org:admin",
+      role: "admin",
       pattern: "*.pslhq.app",
     })
   })

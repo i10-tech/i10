@@ -1,4 +1,5 @@
 import type { Context } from "hono"
+import { edgeHeader } from "./identity/edge.js"
 import { bodyLimit } from "hono/body-limit"
 import pkg from "../package.json" with { type: "json" }
 import { OpenAPIHono } from "@hono/zod-openapi"
@@ -54,13 +55,26 @@ import {
 } from "./routes/mailbox-migration.js"
 import { createApiKeyRoutes, type ApiKeyRouteDeps } from "./routes/api-keys.js"
 import { createClerkWebhooks, type ClerkWebhookDeps } from "./routes/webhooks.js"
+import {
+  createInternalIdentityRoutes,
+  createSsoRoutes,
+  type InternalIdentityDeps,
+  type SsoRouteDeps,
+} from "./routes/sso.js"
+import { createScimRoutes, type ScimRouteDeps } from "./routes/scim.js"
+import { createInternalAuthdRoutes, type InternalAuthdDeps } from "./routes/authd.js"
+import {
+  createGoogleDirectoryRoutes,
+  type GoogleDirectoryRouteDeps,
+} from "./routes/google-directory.js"
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { createMtaHookRoutes, type MtaHookRouteDeps } from "./routes/mta-hook.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
-import type { SessionVerifier } from "./middleware/session.js"
+import type { SessionVerifier, SsoGateReader } from "./middleware/session.js"
+import type { NetworkOutcome } from "./identity/workspace-policy.js"
 import type { MailboxProvisioning } from "./mailboxes/provision.js"
 
 /**
@@ -147,11 +161,29 @@ export interface AppDeps {
    */
   sessionAuth?: SessionVerifier
   /**
+   * The SSO gate (#337), read by `requireUser` and `requireTenant`. Absent
+   * means no identity core in this process, so no managed accounts to gate.
+   */
+  ssoGate?: SsoGateReader
+  /** The workspace's API-key IP allowlist (#345), read by `requireApiKey`. */
+  apiKeyNetwork?: (tenantId: string, headers: Headers) => Promise<NetworkOutcome>
+  /** The SSO bridge's routes (#337), at `/sso`. */
+  sso?: SsoRouteDeps
+  /** The SCIM server (#342), at `/scim/v2/<directory id>`. */
+  scim?: ScimRouteDeps
+  /** Google Workspace directory watch notifications (#343), at `/google/directory/notify`. */
+  googleDirectory?: GoogleDirectoryRouteDeps
+  /** The Clerk gateway's managed-account lookup (#337), at `/internal/identity`. */
+  internalIdentity?: InternalIdentityDeps
+  /** authd's pass-through lookup (#344), at `/internal/authd`. */
+  internalAuthd?: InternalAuthdDeps
+  /**
    * Creating a human mailbox, for `/mailboxes`.
    *
    * ⚠ THE ONLY PLACE `authd.accounts.active` IS EVER SET TRUE, which is what
-   * makes a mailbox visible to authd at all. Omitted in tests and in the
-   * OpenAPI generator, where the routes answer 501.
+   * makes a mailbox visible to authd at all. A company's directory (#344)
+   * gives mailboxes through the same `activate`, via `provisionForDirectory`.
+   * Omitted in tests and in the OpenAPI generator, where the routes answer 501.
    */
   mailboxes?: MailboxProvisioning
   /** Mailbox export and import jobs (#385). */
@@ -211,6 +243,12 @@ export interface AppDeps {
    * connecting a customer's DNS provider is emphatically not that.
    */
   console?: ConsoleDeps
+
+  /**
+   * `EDGE_SECRET`: what makes Cloudflare's `cf-*` headers believable (the
+   * request log's address and country). Unset, they are recorded as unknown.
+   */
+  edgeSecret?: string | undefined
 
   /**
    * Queue depth, for the autoscaler and for whoever is asking why mail is slow.
@@ -292,7 +330,9 @@ export function createApp(deps: AppDeps = {}) {
     deps.trustedTemplates ||
     deps.domains ||
     deps.sessionAuth ||
-    deps.mailboxes
+    deps.mailboxes ||
+    deps.ssoGate ||
+    deps.apiKeyNetwork
   ) {
     const auth = deps.apiKeyAuth
     const sendPath = deps.sendPath
@@ -306,6 +346,8 @@ export function createApp(deps: AppDeps = {}) {
     const domainStore = deps.domains
     const sessions = deps.sessionAuth
     const mailboxStore = deps.mailboxes
+    const gate = deps.ssoGate
+    const network = deps.apiKeyNetwork
     const migrationDeps = deps.mailboxMigration
     app.use("*", async (c, next) => {
       if (auth) c.set("apiKeyAuth", auth)
@@ -320,6 +362,8 @@ export function createApp(deps: AppDeps = {}) {
       if (domainStore) c.set("domains", domainStore)
       if (sessions) c.set("sessionAuth", sessions)
       if (mailboxStore) c.set("mailboxes", mailboxStore)
+      if (gate) c.set("ssoGate", gate)
+      if (network) c.set("apiKeyNetwork", network)
       if (migrationDeps) c.set("mailboxMigration", migrationDeps)
       await next()
     })
@@ -374,11 +418,11 @@ export function createApp(deps: AppDeps = {}) {
           errorName: status >= 400 ? await errorNameOf(c.res) : null,
           userAgent: c.req.header("user-agent") ?? null,
           // ⚠ CLOUDFLARE'S, BECAUSE api.i10.tech IS PROXIED AND THE SOCKET IS
-          // CLOUDFLARE'S EDGE. A caller reaching the origin directly could forge
-          // these; the worst it buys them is hiding where a key is used from,
-          // which a proxy buys them anyway (#170).
-          clientIp: c.req.header("cf-connecting-ip") ?? null,
-          country: c.req.header("cf-ipcountry") ?? null,
+          // CLOUDFLARE'S EDGE - BELIEVED ONLY WITH THE `x-i10-edge` PROOF. A
+          // caller reaching the origin directly could forge these, so without
+          // the proof they are recorded as unknown.
+          clientIp: edgeHeader(c.req.raw.headers, "cf-connecting-ip", deps.edgeSecret),
+          country: edgeHeader(c.req.raw.headers, "cf-ipcountry", deps.edgeSecret),
         })
       })().catch((error: unknown) => {
         requestLogger?.warn(
@@ -538,6 +582,18 @@ export function createApp(deps: AppDeps = {}) {
   // answers 501 with a reason rather than 404 - which would read as the console
   // being pointed at the wrong origin.
   app.route("/console", createConsole(deps.console))
+
+  // ⚠ OUTSIDE THE OPENAPI DOCUMENT, like `/console`: the sign-in bridge and
+  // the gateway's lookup are ours, not the product's API.
+  app.route("/sso", createSsoRoutes(deps.sso))
+  // ⚠ SCIM's OWN ERROR SHAPE AND ITS OWN AUTHENTICATION: a directory's bearer
+  // token, not a session or an API key. See routes/scim.ts.
+  app.route("/scim/v2", createScimRoutes(deps.scim))
+  // Google Admin SDK `users.watch` push notifications (#343): channel id +
+  // constant-time secret hash, outside the OpenAPI document.
+  app.route("/google/directory", createGoogleDirectoryRoutes(deps.googleDirectory))
+  app.route("/internal/identity", createInternalIdentityRoutes(deps.internalIdentity))
+  app.route("/internal/authd", createInternalAuthdRoutes(deps.internalAuthd))
 
   // ⚠ ALSO OUTSIDE THE OPENAPI DOCUMENT, AND NOT FOR THE SAME REASON. The two
   // routers above implement somebody else's contract; this one is ours, but it

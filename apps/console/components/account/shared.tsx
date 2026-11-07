@@ -5,6 +5,7 @@ import { isClerkAPIResponseError } from "@clerk/nextjs/errors"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Plus } from "lucide-react"
 import { Button } from "@repo/ui/components/button/button"
+import { glideIntoView, holdScrollFloor } from "@repo/ui/components/lib/glide-scroll"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { cn } from "cn"
 
@@ -92,9 +93,18 @@ export function AddAction({
  * a passkey removed, a device signed out - as Clerk's lists did, so the rows
  * below glide rather than jump.
  */
-export function MotionList({ children }: { children: React.ReactNode }) {
+export function MotionList({
+  children,
+  busy,
+  label,
+}: {
+  children: React.ReactNode
+  /** Still loading: announced as busy, with `label` saying what. */
+  busy?: boolean
+  label?: string
+}) {
   return (
-    <ul className="flex flex-col">
+    <ul className="flex flex-col" aria-busy={busy || undefined} aria-label={label}>
       <AnimatePresence initial={false}>{children}</AnimatePresence>
     </ul>
   )
@@ -160,6 +170,39 @@ export function MotionItem({
   )
 }
 
+/**
+ * A row's action or badge, fading in and out rather than popping, and leaving
+ * no box behind while it is away. `swap` names what is shown, so one action
+ * replacing another (Set up, then the menu) fades across instead of cutting.
+ */
+export function RowAction({
+  show,
+  swap = "action",
+  children,
+}: {
+  show: boolean
+  swap?: string
+  children: React.ReactNode
+}) {
+  const reduced = useReducedMotion()
+  return (
+    <AnimatePresence initial={false} mode="popLayout">
+      {show && (
+        <motion.span
+          key={swap}
+          className="flex shrink-0 items-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: reduced ? 0 : motionTokens.duration.fast }}
+        >
+          {children}
+        </motion.span>
+      )}
+    </AnimatePresence>
+  )
+}
+
 /** Clerk's own sentence for a refusal, or ours when it gives none. */
 export function clerkReason(
   error: unknown,
@@ -184,20 +227,49 @@ export function shortDate(date: Date | null | undefined): string {
 
 /**
  * Bring an editor that just opened fully into view - the way set-up's rail
- * follows the step in progress. Waits for the panel to finish opening, or it
- * would aim at where the bottom was a moment ago; `nearest`, so an editor
- * already on screen does not move at all.
+ * follows the step in progress. `nearest`, so an editor already on screen does
+ * not move at all.
+ *
+ * ⚠ IT GLIDES FROM THE PRESS, RIDING THE PANEL AS IT OPENS (2026-11-04). It
+ * used to wait 420ms for the panel to settle and then ask for a native smooth
+ * scroll: the panel opened, everything stopped, then the page moved. See
+ * `glideIntoView`. Reduced motion keeps the old wait and jumps.
  */
 export function useFollowOpen<T extends HTMLElement>(open: boolean) {
   const ref = React.useRef<T>(null)
+  const reduced = useReducedMotion()
+  const wasOpen = React.useRef(open)
+  /*
+   * ⚠ AND CLOSING HOLDS THE VIEW STILL (2026-11-04). The glide left the page
+   * scrolled down; without a floor the fold shortened the page under that
+   * position and the browser dragged everything above the panel down the
+   * screen. A layout effect, so the floor is down before the first folded frame
+   * is painted. See `holdScrollFloor`; it outlives this effect on purpose.
+   */
+  React.useLayoutEffect(() => {
+    const closing = wasOpen.current && !open
+    wasOpen.current = open
+    if (closing && ref.current) holdScrollFloor(ref.current)
+  }, [open])
   React.useEffect(() => {
     if (!open) return
-    const timer = window.setTimeout(
-      () => ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
-      // Arc's panel spring settles in about this long.
-      420,
-    )
-    return () => window.clearTimeout(timer)
-  }, [open])
+    if (reduced) {
+      const timer = window.setTimeout(
+        () => ref.current?.scrollIntoView({ block: "nearest" }),
+        // Arc's panel spring settles in about this long.
+        420,
+      )
+      return () => window.clearTimeout(timer)
+    }
+    let stop: (() => void) | undefined
+    // The frame after the panel's content has mounted.
+    const frame = requestAnimationFrame(() => {
+      if (ref.current) stop = glideIntoView(ref.current, "nearest")
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      stop?.()
+    }
+  }, [open, reduced])
   return ref
 }

@@ -83,9 +83,7 @@ export function JoinSuggestions({ className }: { className?: string }) {
     ...(userInvitations.data ?? []).map((invitation) => ({
       id: invitation.id,
       name: invitation.publicOrganizationData.name,
-      image: invitation.publicOrganizationData.hasImage
-        ? invitation.publicOrganizationData.imageUrl
-        : undefined,
+      image: invitation.publicOrganizationData.imageUrl,
       kind: "invitation" as const,
       requested: false,
       act: async () => {

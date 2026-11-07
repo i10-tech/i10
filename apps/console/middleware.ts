@@ -1,3 +1,4 @@
+import { NextResponse, type NextRequest } from "next/server"
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
 
 /*
@@ -71,17 +72,30 @@ const PREVIEW =
  * branch it takes, so with no Clerk instance the factory is never called at
  * all.
  *
- * ⚠ AND THE FALLBACK RETURNS `undefined`, WHICH MEANS "CONTINUE". It is not a
+ * ⚠ AND THE FALLBACK ATTACHES `x-pathname` AND CONTINUES. It is not a
  * permissive auth decision - there is no auth to decide. In a production build
  * `PREVIEW` folds to `false` and this whole branch is removed by the bundler.
  */
 export default PREVIEW
-  ? function previewMiddleware() {
-      return undefined
+  ? function previewMiddleware(request: NextRequest) {
+      const requestHeaders = new Headers(request.headers)
+      requestHeaders.set("x-pathname", request.nextUrl.pathname)
+      return NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+      })
     }
   : clerkMiddleware(
       async (auth, request) => {
-        if (isPublic(request)) return
+        const requestHeaders = new Headers(request.headers)
+        requestHeaders.set("x-pathname", request.nextUrl.pathname)
+
+        if (isPublic(request)) {
+          return NextResponse.next({
+            request: { headers: requestHeaders },
+          })
+        }
 
         /*
          * ⚠ A TRANSFER EMAIL SENT TO SOMEBODY WITHOUT AN ACCOUNT CARRIES
@@ -106,6 +120,10 @@ export default PREVIEW
         // to the console tomorrow is protected because nobody remembered to protect
         // it, which is the only version of this that stays correct.
         await auth.protect()
+
+        return NextResponse.next({
+          request: { headers: requestHeaders },
+        })
       },
       {
         /**
@@ -135,6 +153,16 @@ export default PREVIEW
          */
         signInUrl: process.env.CLERK_SIGN_IN_URL,
         signUpUrl: process.env.CLERK_SIGN_UP_URL,
+        /**
+         * ⚠ ONLY WHEN SET, SO PRODUCTION IS EXACTLY AS BEFORE THE GATEWAY.
+         * `CLERK_PROXY_URL` points the handshake at the Clerk gateway
+         * (services/clerk-gateway); locally that is https://clerk.i10.localhost in
+         * front of the dev instance. Production needs no value at all: the gateway
+         * answers clerk.i10.tech, the very host the publishable key already names.
+         */
+        ...(process.env.CLERK_PROXY_URL
+          ? { proxyUrl: process.env.CLERK_PROXY_URL }
+          : {}),
       },
     )
 

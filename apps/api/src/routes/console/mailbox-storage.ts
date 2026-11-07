@@ -2,7 +2,6 @@ import type { Hono } from "hono"
 import { mailboxAddressSchema, setMailboxStorageSchema } from "@repo/contracts"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
-import { MANAGE_MEMBERS } from "../../console/team-domains.js"
 import type { MailboxStorageRow } from "../../mailboxes/allocation.js"
 
 /**
@@ -11,9 +10,9 @@ import type { MailboxStorageRow } from "../../mailboxes/allocation.js"
  * ⚠ OWNERS AND ADMINS ONLY, AND THE CHECK IS HERE RATHER THAN IN THE CONSOLE.
  * An allocation takes from a pool the whole workspace shares, so the person who
  * will use an inbox must not be the one who sizes it: that is a member taking
- * the pool. It asks Clerk for the members-manage permission - the one the team
- * and invitation routes ask, which owners and admins hold and members do not -
- * and `/mailboxes`, the route a member reaches, has no storage field at all.
+ * the pool. It asks our roles table for `members:manage` - the one the team and
+ * invitation routes ask, which owners and admins hold and members do not - and
+ * `/mailboxes`, the route a member reaches, has no storage field at all.
  *
  * ⚠ AND IT TARGETS A MAILBOX OF THE CALLER'S WORKSPACE, never one named by a
  * body. The tenant is the verified session's; the address in the path is looked
@@ -32,12 +31,12 @@ const asMailbox = (row: MailboxStorageRow) => ({
 
 export function mountMailboxStorage(app: Hono, d: ConsoleDeps): void {
   // ⚠ NO ORGANIZATION IS "NOT AN ADMIN", as in the members routes: without one
-  // there is no role to ask Clerk about, and a guess is not a check.
-  const isAdmin = async (userId: string, orgId: string | undefined) =>
+  // there is no role to ask about, and a guess is not a check.
+  const isAdmin = async (tenantId: string, userId: string, orgId: string | undefined) =>
     Boolean(
       orgId &&
       d.teamDomains &&
-      (await d.teamDomains.can(userId, orgId, MANAGE_MEMBERS)),
+      (await d.teamDomains.can(tenantId, userId, "members:manage")),
     )
 
   /** The pool and every inbox in it, with what each has and uses. */
@@ -45,7 +44,7 @@ export function mountMailboxStorage(app: Hono, d: ConsoleDeps): void {
     if (!d.mailboxStorage) return c.json(notWired("Mailbox storage"), 501)
     const { tenantId } = c.get("auth")
     const { userId, orgId } = c.get("user")
-    if (!(await isAdmin(userId, orgId)))
+    if (!(await isAdmin(tenantId, userId, orgId)))
       return c.json(forbidden("Only an admin can see the storage pool."), 403)
 
     const { pool, mailboxes } = await d.mailboxStorage.overview(tenantId)
@@ -60,7 +59,7 @@ export function mountMailboxStorage(app: Hono, d: ConsoleDeps): void {
     if (!d.mailboxStorage) return c.json(notWired("Mailbox storage"), 501)
     const { tenantId } = c.get("auth")
     const { userId, orgId } = c.get("user")
-    if (!(await isAdmin(userId, orgId)))
+    if (!(await isAdmin(tenantId, userId, orgId)))
       return c.json(forbidden("Only an admin can allocate storage."), 403)
 
     const parsed = setMailboxStorageSchema.safeParse(await readJson(c))

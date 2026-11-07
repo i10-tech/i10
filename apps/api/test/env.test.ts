@@ -90,6 +90,7 @@ describe("production must name its environment", () => {
       const env = loadEnv({
         ...base,
         NODE_ENV: "production",
+        EDGE_SECRET: "e".repeat(32),
         SENTRY_ENVIRONMENT: environment,
       })
       expect(env.SENTRY_ENVIRONMENT).toBe(environment)
@@ -103,6 +104,23 @@ describe("production must name its environment", () => {
     expect(loadEnv({ ...base, NODE_ENV: "test" }).SENTRY_ENVIRONMENT).toBe(
       "development",
     )
+  })
+})
+
+describe("production must hold the edge secret", () => {
+  const prod = { ...base, NODE_ENV: "production", SENTRY_ENVIRONMENT: "production" }
+
+  it("refuses to boot without EDGE_SECRET, or with one under 32 characters", () => {
+    expect(() => loadEnv(prod)).toThrow(/EDGE_SECRET/)
+    expect(() => loadEnv({ ...prod, EDGE_SECRET: "short" })).toThrow(/EDGE_SECRET/)
+  })
+
+  it("accepts it, and leaves development and test without it alone", () => {
+    expect(loadEnv({ ...prod, EDGE_SECRET: "e".repeat(32) }).EDGE_SECRET).toBe(
+      "e".repeat(32),
+    )
+    expect(loadEnv(base).EDGE_SECRET).toBeUndefined()
+    expect(loadEnv({ ...base, NODE_ENV: "test" }).EDGE_SECRET).toBeUndefined()
   })
 })
 

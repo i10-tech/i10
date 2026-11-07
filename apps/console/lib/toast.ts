@@ -1,5 +1,6 @@
 "use client"
 
+import { planRequiredOf, upgradeSentence } from "@/lib/plan-required"
 import {
   toast,
   type ToastDetail as ExternalToast,
@@ -26,6 +27,8 @@ export interface Failure {
   error: string
   name: string
   status: number
+  /** The API's whole error body, when the caller has it (an ActionResult does). */
+  body?: Record<string, unknown>
 }
 
 /**
@@ -37,6 +40,7 @@ export interface Failure {
 const TITLES: Record<string, string> = {
   domain_already_exists: "That domain is already here",
   domain_already_claimed: "Verified elsewhere at the same moment",
+  plan_required: "Upgrade to use this",
   plan_limit_exceeded: "Your plan does not cover that",
   tenant_not_ready: "Your workspace is still being set up",
   no_workspace: "Choose a workspace first",
@@ -70,6 +74,24 @@ export function toastFailure(
   failure: Failure,
   options: { title?: string; action?: { label: string; onClick: () => void } } = {},
 ): void {
+  /*
+   * ⚠ THE PLAN REFUSAL IS ONE STATE EVERYWHERE (#345): the same title, the
+   * feature named, and a way to the billing page - whatever the caller's own
+   * title was, since "Could not save the allowlist" is the wrong answer to "not
+   * on your plan".
+   */
+  const plan = planRequiredOf(failure)
+  if (plan) {
+    toast.error(titleFor(failure), {
+      description: upgradeSentence(plan.feature),
+      duration: ERROR_MS,
+      action: {
+        label: "See plans",
+        onClick: () => window.location.assign("/settings/billing"),
+      },
+    })
+    return
+  }
   toast.error(options.title ?? titleFor(failure), {
     description: failure.error,
     duration: ERROR_MS,

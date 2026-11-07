@@ -1,0 +1,126 @@
+[
+  {
+    "name": "overview-interactions",
+    "steps": [
+      { "do": "goto", "url": "/", "window": 2000 },
+      { "do": "click", "name": "7 days", "window": 1500 },
+      { "do": "click", "name": "30 days", "window": 1500 },
+      { "do": "click", "name": "Send from code", "window": 1500 },
+      { "do": "press", "value": "Escape", "window": 1500 }
+    ]
+  },
+  {
+    "name": "emails-interactions",
+    "steps": [
+      { "do": "goto", "url": "/emails", "window": 2000 },
+      { "do": "fill", "label": "Search emails", "value": "welcome", "window": 1500 },
+      { "do": "click", "name": "Clear search", "window": 1500 },
+      { "do": "click", "label": "Date range", "window": 1500 },
+      { "do": "click", "text": "Last 7 days", "window": 1500 },
+      { "do": "click", "name": "Clear", "window": 1500 }
+    ]
+  },
+  {
+    "name": "email-detail-tabs",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/emails/0199c010-0000-7000-8000-000000000010",
+        "window": 2000
+      },
+      { "do": "click", "name": "HTML", "role": "tab", "window": 1500 },
+      { "do": "click", "name": "Plain text", "role": "tab", "window": 1500 },
+      { "do": "click", "name": "Headers", "role": "tab", "window": 1500 },
+      { "do": "click", "name": "Preview", "role": "tab", "window": 1500 }
+    ]
+  },
+  {
+    "name": "logs-interactions",
+    "steps": [
+      { "do": "goto", "url": "/logs", "window": 2000 },
+      { "do": "click", "text": "/emails", "exact": true, "window": 1500 },
+      { "do": "click", "text": "/emails", "exact": true, "window": 1500 }
+    ]
+  },
+  {
+    "name": "broadcasts-interactions",
+    "steps": [
+      { "do": "goto", "url": "/broadcasts", "window": 2000 },
+      { "do": "click", "name": "Grid", "window": 1500 },
+      { "do": "click", "name": "Table", "window": 1500 },
+      { "do": "click", "name": "New broadcast", "window": 1500 },
+      { "do": "click", "name": "Cancel", "window": 1500 }
+    ]
+  },
+  {
+    "name": "contacts-interactions",
+    "steps": [
+      { "do": "goto", "url": "/contacts", "window": 2000 },
+      { "do": "click", "text": "bob+0@example.com", "exact": true, "window": 1500 },
+      { "do": "click", "name": "Clear selection", "window": 1500 },
+      { "do": "click", "name": "Add contact", "window": 1500 },
+      { "do": "click", "name": "Cancel", "window": 1500 }
+    ]
+  },
+  {
+    "name": "segments-interactions",
+    "steps": [
+      { "do": "goto", "url": "/segments", "window": 2000 },
+      { "do": "click", "name": "Grid", "window": 1500 },
+      { "do": "click", "name": "Table", "window": 1500 },
+      { "do": "click", "name": "New segment", "window": 1500 },
+      { "do": "click", "name": "Cancel", "window": 1500 }
+    ]
+  },
+  {
+    "name": "topics-interactions",
+    "steps": [
+      { "do": "goto", "url": "/topics", "window": 2000 },
+      { "do": "click", "name": "Grid", "window": 1500 },
+      { "do": "click", "name": "Table", "window": 1500 },
+      { "do": "click", "name": "New topic", "window": 1500 },
+      { "do": "click", "name": "Cancel", "window": 1500 }
+    ]
+  },
+  {
+    "name": "suppressions-interactions",
+    "steps": [
+      { "do": "goto", "url": "/suppressions", "window": 2000 },
+      { "do": "click", "name": "Suppress an address", "window": 1500 },
+      { "do": "click", "name": "Cancel", "window": 1500 },
+      {
+        "do": "click",
+        "name": "Remove bounced+0@example.com from the suppression list",
+        "window": 1500
+      },
+      { "do": "press", "value": "Escape", "window": 1500 }
+    ]
+  },
+  {
+    "name": "mailboxes-page",
+    "steps": [{ "do": "goto", "url": "/mailboxes", "window": 2000 }]
+  },
+  {
+    "name": "templates-interactions",
+    "steps": [
+      { "do": "goto", "url": "/templates", "window": 2000 },
+      { "do": "click", "name": "Table", "window": 1500 },
+      { "do": "click", "name": "Grid", "window": 1500 },
+      { "do": "click", "name": "New", "window": 1500 },
+      { "do": "press", "value": "Escape", "window": 1500 }
+    ]
+  },
+  {
+    "name": "template-editor-panels",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/templates/bf7a1c00-0000-4000-8000-000000000001/editor",
+        "window": 2500
+      },
+      { "do": "click", "name": "More actions", "window": 1500 },
+      { "do": "click", "name": "Variables", "role": "menuitem", "window": 1500 },
+      { "do": "click", "label": "Close variables", "window": 1500 }
+    ]
+  }
+]

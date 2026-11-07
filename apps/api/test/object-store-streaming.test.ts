@@ -74,7 +74,7 @@ beforeAll(() => {
       }
       const headers = { "content-length": String(found.byteLength), etag: '"x"' }
       if (request.method === "HEAD") return new Response(null, { headers })
-      return new Response(found, { headers })
+      return new Response(found as Uint8Array<ArrayBuffer>, { headers })
     },
   })
 })

@@ -12,7 +12,7 @@ import type { ObjectStore } from "../content/object-store.js"
  * Who can request an export or an import:
  *   - the mailbox's owner (`accounts.clerk_user_id` is the session's user)
  *   - the workspace's owner (`tenants.owner_clerk_user_id`)
- *   - a workspace admin (MANAGE_MEMBERS in the Clerk organization)
+ *   - a workspace admin (`members:manage` in our roles table, #335)
  * Any other member of the workspace is refused: a mailbox is its owner's mail,
  * and a colleague's seat on the workspace is not a right to read it.
  */
@@ -24,7 +24,8 @@ export interface MailboxAccessResult {
 }
 
 export interface AdminChecker {
-  isAdmin(userId: string, orgId: string): Promise<boolean>
+  /** Whether this person holds `members:manage` in the workspace: our roles table. */
+  isAdmin(userId: string, tenantId: string): Promise<boolean>
 }
 
 export interface MailboxAccessFacts {
@@ -73,7 +74,7 @@ export async function decideAccess(
   if (
     facts.clerkOrgId &&
     adminChecker &&
-    (await adminChecker.isAdmin(userId, facts.clerkOrgId))
+    (await adminChecker.isAdmin(userId, tenantId))
   ) {
     return { allowed: true, tenantId }
   }

@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono"
 import { verifyApiKey, type Mode, type VerifyDeps } from "../auth/api-key.js"
+import { gateUnavailable, ipNotAllowed } from "./session.js"
 
 export interface AuthContext {
   apiKeyId: string
@@ -72,6 +73,19 @@ declare module "hono" {
     freshAuth?: import("./session.js").FreshAuthReader
     /** Human mailboxes, and the rules for who may have one. */
     mailboxes?: import("../mailboxes/provision.js").MailboxProvisioning
+    /**
+     * The SSO gate (#337): a managed account passes only on a bound session.
+     * Read by `requireUser` and `requireTenant`. See middleware/session.ts.
+     */
+    ssoGate?: import("./session.js").SsoGateReader
+    /**
+     * The workspace's API-key IP allowlist (#345), asked once a key has
+     * verified. Absent only in a process without the identity core.
+     */
+    apiKeyNetwork?: (
+      tenantId: string,
+      headers: Headers,
+    ) => Promise<import("../identity/workspace-policy.js").NetworkOutcome>
   }
 }
 
@@ -132,10 +146,23 @@ export const requireApiKey: MiddlewareHandler = async (c, next) => {
   const outcome = await verifyApiKey(header.slice("Bearer ".length).trim(), deps)
 
   switch (outcome.status) {
-    case "verified":
+    case "verified": {
+      /*
+       * ⚠ AFTER THE KEY IS KNOWN AND BEFORE IT IS USED (#345): the workspace
+       * may allow its keys from listed networks only. Every request, cached
+       * key or not - the list is the workspace's, not the key's. Unknown is a
+       * 503 like the key lookup's own, never a pass.
+       */
+      const network = c.get("apiKeyNetwork")
+      if (network) {
+        const allowed = await network(outcome.key.tenantId, c.req.raw.headers)
+        if (allowed.status === "ip_not_allowed") return ipNotAllowed(c)
+        if (allowed.status === "unknown") return gateUnavailable(c)
+      }
       c.set("auth", outcome.key)
       await next()
       return
+    }
 
     case "rejected":
       return c.json(

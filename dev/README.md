@@ -157,6 +157,24 @@ and copy the **signing secret** (`whsec_…`) into `CLERK_WEBHOOK_SECRET`.
 > until there is a tenant to send as, which is why the API logs "no tenant for
 > auth email - clerk keeps delivering its own" at boot.
 
+### Through the Clerk gateway (optional)
+
+To run the apps through `services/clerk-gateway` - the Worker that will answer
+`clerk.i10.tech` - instead of talking to the dev Frontend API directly:
+
+```bash
+bun run dev:up    # Caddy serves https://clerk.i10.localhost -> wrangler on 3006
+(cd services/clerk-gateway && doppler run --project i10 --config dev -- bun run local)
+CLERK_PROXY_URL=https://clerk.i10.localhost doppler run -- bun run dev
+```
+
+`CLERK_PROXY_URL` is the only switch, and it is not in Doppler on purpose: unset,
+the apps talk to Clerk exactly as before. If Caddy was already running, restart
+it (`docker compose -f compose.dev.yaml restart caddy`) so it reads the new
+block. `bun run dev:hosts` skips when its block exists, so run `dev:unhosts`
+first if you want `clerk.i10.localhost` in `/etc/hosts` for curl. The gateway's
+README has the rest.
+
 ## The nameserver
 
 PowerDNS runs against the same `pdns` schema the API writes, which is the whole

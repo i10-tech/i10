@@ -146,7 +146,10 @@ export function fakeMailbox(
       const email = emails.find((e) => `blob-${e.id}` === blobId)!
       const { bytes } = email
       if (bytes instanceof Uint8Array) {
-        return { body: new Response(bytes).body!, size: bytes.byteLength }
+        return {
+          body: new Response(bytes as Uint8Array<ArrayBuffer>).body!,
+          size: bytes.byteLength,
+        }
       }
       let i = 0
       return {

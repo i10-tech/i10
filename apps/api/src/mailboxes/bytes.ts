@@ -39,15 +39,23 @@ export const concat = (parts: readonly Uint8Array[]): Uint8Array => {
   return out
 }
 
-/** A stream over what a reader has not consumed yet, for piping onwards. */
+/**
+ * A stream over what a reader has not consumed yet, for piping onwards.
+ *
+ * ⚠ TYPED AS ARRAYBUFFER-BACKED, WHICH IS WHAT EVERY CHUNK HERE IS. The DOM
+ * typings (@xmldom/xmldom brings them in for the SAML parser) let a
+ * `CompressionStream` or `DecompressionStream` read only such chunks, and a
+ * plain `Uint8Array` is `Uint8Array<ArrayBufferLike>`, which could be shared
+ * memory. Nothing in this pipeline allocates any.
+ */
 export function streamOf(
   chunks: AsyncIterator<Uint8Array>,
-): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
+): ReadableStream<Uint8Array<ArrayBuffer>> {
+  return new ReadableStream<Uint8Array<ArrayBuffer>>({
     async pull(controller) {
       const next = await chunks.next()
       if (next.done) controller.close()
-      else controller.enqueue(next.value)
+      else controller.enqueue(next.value as Uint8Array<ArrayBuffer>)
     },
     async cancel() {
       await chunks.return?.(undefined)

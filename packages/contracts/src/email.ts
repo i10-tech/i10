@@ -374,6 +374,16 @@ export const webhookEventName = z.enum([
   "webhook_endpoint.failing",
   "webhook_endpoint.disabled",
   "webhook_endpoint.recovered",
+  /**
+   * About your workspace's single sign-on (#345): somebody became a managed
+   * member or stopped being one, a connection's sign-ins are failing, a SAML
+   * certificate is about to expire. Ids and reasons only, never a token or an
+   * assertion.
+   */
+  "member.provisioned",
+  "member.deprovisioned",
+  "sso.connection.failed",
+  "sso.certificate.expiring",
 ])
 
 /** Where an endpoint stands: `failing` and `disabled` are what you are told about. */

@@ -1,4 +1,6 @@
 bun.lock
+# Worktrees made inside the repo: each one checks its own files.
+.claude/worktrees/
 .next/
 dist/
 .astro/

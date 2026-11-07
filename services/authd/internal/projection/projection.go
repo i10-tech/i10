@@ -17,12 +17,29 @@ type Account struct {
 	Description    string
 	Active         bool
 	ClerkUpdatedAt *time.Time
+
 	// CredentialEpoch is `authd.accounts.credential_epoch`, raised by the API to
 	// invalidate every cached verification for this person on every pod. Only
 	// ever compared for equality; see credcache.
 	CredentialEpoch int64
-	Aliases         []string
-	MemberOf        []string // group names, not DNs; the caller renders DNs
+
+	// Managed is true when an SSO connection controls this account (#344).
+	// ⚠ A MANAGED ACCOUNT IS NEVER SENT TO CLERK'S verify_password: its password
+	// belongs to the company's directory, and the resolver answers it with the
+	// pass-through verifier or a refusal, never Clerk. ManagedConnection names
+	// the connection whose pass-through answers its binds; it is empty when the
+	// connection is gone, which authd refuses rather than falling back to Clerk.
+	Managed           bool
+	ManagedConnection string
+
+	// Suspended is true when a company's directory switched the person off
+	// (#344): the mailbox still exists and still receives mail, so searches
+	// return it, but NO BIND succeeds. It is not Active=false, which would make
+	// the account invisible and stop delivery.
+	Suspended bool
+
+	Aliases  []string
+	MemberOf []string // group names, not DNs; the caller renders DNs
 }
 
 // Group is a mail-enabled group.

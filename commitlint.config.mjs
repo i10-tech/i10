@@ -88,6 +88,18 @@ export default {
         // confused precisely because both are "DNS", and a reader looking for
         // why their delegation broke needs to be able to tell them apart.
         "dns",
+        // Single sign-on and the directory: SAML and OIDC connections, JIT and
+        // group roles, SCIM and Google directory sync, enforcement, session
+        // policy, the identity audit log and its exports, and tools/sso-lab.
+        // Spread over apps/api/src/identity, the auth app's /sso routes and the
+        // console's sso screens, so listed for the same reason `billing` and
+        // `send` are: "SAML sign-in now works with Entra" belongs under one
+        // heading, not split three ways by which app the change landed in.
+        //
+        // ⚠ NOT `auth` (the sign-in pages people type a password into) AND NOT
+        // `authd` (the LDAP bridge). A change to how a password sign-in looks
+        // is `auth`; a change to how a company's IdP signs people in is `sso`.
+        "sso",
         "stalwart",
         "bulwark",
         "infra",

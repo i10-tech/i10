@@ -88,9 +88,9 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     extra_hosts:
-      # ⚠ HOW THE PROXY REACHES APPS RUNNING ON THE HOST. Docker Desktop
-      # provides `host.docker.internal`; this line makes it work on the Linux
-      # daemons that do not.
+      # ⚠ HOW THE PROXY REACHES APPS RUNNING ON THE HOST. OrbStack provides
+      # `host.docker.internal`; this line makes it work on the Linux daemons
+      # that do not.
       - "host.docker.internal:host-gateway"
 
   # ⚠ THE AUTHORITATIVE NAMESERVER, SO DELEGATION CAN BE EXERCISED LOCALLY. It

@@ -94,6 +94,10 @@ export default function RootLayout({
     <ClerkProvider
       {...NO_AUTH_STATE_REFRESH}
       publishableKey={process.env.CLERK_PUBLISHABLE_KEY}
+      // Only when set: see middleware.ts, which carries the same option.
+      {...(process.env.CLERK_PROXY_URL
+        ? { proxyUrl: process.env.CLERK_PROXY_URL }
+        : {})}
       /*
        * ⚠ THE SAME APPEARANCE THE CONSOLE USES, AND THIS APP HAD NONE AT ALL.
        * Most of the auth flow is our own markup - see the forms under `app/` -

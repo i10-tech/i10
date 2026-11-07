@@ -32,7 +32,7 @@ const facts: MailboxAccessFacts = {
   clerkOrgId: "org_1",
 }
 const adminChecker: AdminChecker = {
-  isAdmin: async (userId, orgId) => userId === ADMIN && orgId === "org_1",
+  isAdmin: async (userId, tenantId) => userId === ADMIN && tenantId === TENANT,
 }
 
 function build(over: Partial<MailboxMigrationDeps> = {}) {

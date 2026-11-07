@@ -974,6 +974,41 @@
       "when": 1794014373914,
       "tag": "0138_authd_budget_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1794050538197,
+      "tag": "0139_sso_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794050550225,
+      "tag": "0140_identity_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794050551028,
+      "tag": "0141_saml_connections_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1794050551830,
+      "tag": "0142_google_directories_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1794050552643,
+      "tag": "0143_siem_exports_due",
+      "breakpoints": true
     }
   ]
 }

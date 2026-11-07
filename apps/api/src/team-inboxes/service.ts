@@ -91,8 +91,8 @@ export interface TeamInboxStore {
 
 export interface TeamInboxDeps {
   store: TeamInboxStore
-  /** Whether this person holds the members-manage permission in the organization. */
-  isAdmin(userId: string, orgId: string): Promise<boolean>
+  /** Whether this person holds `members:manage` in the workspace: our roles table, #335. */
+  isAdmin(tenantId: string, userId: string): Promise<boolean>
   /** The user ids of the organization's members, from Clerk. */
   roster(orgId: string): Promise<ReadonlySet<string>>
   /** Destroys the Stalwart account for a team inbox; `false` when there is none. */
@@ -165,7 +165,7 @@ export function teamInboxes(deps: TeamInboxDeps): TeamInboxes {
   const { store } = deps
 
   const admin = async (viewer: Viewer): Promise<boolean> =>
-    Boolean(viewer.orgId && (await deps.isAdmin(viewer.userId, viewer.orgId)))
+    Boolean(viewer.orgId && (await deps.isAdmin(viewer.tenantId, viewer.userId)))
 
   /**
    * Mailbox addresses to the people who hold them, or the reason one cannot be.

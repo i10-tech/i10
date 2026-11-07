@@ -113,7 +113,7 @@ async function* tarBytes(entries: AsyncIterable<TarEntry>): AsyncGenerator<Uint8
 /** The archive as a stream that produces the next entry only when it is read. */
 export function tarStream(
   entries: AsyncIterable<TarEntry>,
-): ReadableStream<Uint8Array> {
+): ReadableStream<Uint8Array<ArrayBuffer>> {
   return streamOf(tarBytes(entries))
 }
 

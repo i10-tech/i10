@@ -25,6 +25,7 @@ COPY packages/next/package.json packages/next/
 COPY packages/node/package.json packages/node/
 COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
+COPY services/clerk-gateway/package.json services/clerk-gateway/
 COPY services/template-renderer/package.json services/template-renderer/
 ENV BUN_INSTALL_CACHE_DIR=/bun-cache
 RUN --mount=type=cache,id=bun,target=/bun-cache \

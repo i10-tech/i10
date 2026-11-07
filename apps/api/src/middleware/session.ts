@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from "hono"
+import type { Context, MiddlewareHandler } from "hono"
 import type { ClerkClient } from "@clerk/backend"
 import { reverificationError } from "@clerk/backend/internal"
 
@@ -108,6 +108,157 @@ export function clerkSessions(
 }
 
 /**
+ * The SSO gate's answer for one verified request (#337, sso.md 2.2).
+ *
+ * ⚠ A SEPARATE READER AGAIN, NOT A FIELD ON `SessionOutcome`, for the reason
+ * `clerkActiveOrg` gives: it needs the session id, and no caller of `verify`
+ * should be able to authorise against one.
+ */
+export type SsoGateOutcome =
+  | { status: "pass" }
+  | {
+      status: "sso_required"
+      startUrl: string | null
+      /** `enforced`: a workspace's "required" enforcement covers them (#340). */
+      reason:
+        "unbound" | "connection_inactive" | "max_age" | "idle" | "revoked" | "enforced"
+    }
+  /** An owner or admin exempt from "required" SSO who holds no passkey (#340). */
+  | { status: "passkey_required" }
+  /** The workspace's IP allowlist does not list the caller's address (#345). */
+  | { status: "ip_not_allowed" }
+  /** The session is past the workspace's (or its connection's) session policy (#345). */
+  | { status: "session_expired"; reason: "max_age" | "idle" | "revoked" }
+  /** The workspace requires a second factor of members outside SSO (#345). */
+  | { status: "mfa_required" }
+  | { status: "unknown" }
+
+/**
+ * Without `tenantId`: the managed-account gate, which holds everywhere. With
+ * it: the workspace's own enforcement (#340), once `requireTenant` knows it.
+ */
+export type SsoGateReader = (
+  request: Request,
+  userId: string,
+  tenantId?: string,
+) => Promise<SsoGateOutcome>
+
+/**
+ * The refusal a managed account gets on a session that did not come through
+ * its company's SSO. The console sends the person to `startUrl`.
+ */
+export function ssoRequired(
+  c: Context,
+  outcome: Extract<SsoGateOutcome, { status: "sso_required" }>,
+) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "sso_required",
+      message: "Your company signs you in. Continue with your company's SSO.",
+      startUrl: outcome.startUrl,
+    },
+    403,
+  )
+}
+
+/**
+ * The refusal an owner or admin exempt from "required" SSO gets without a
+ * passkey (decision 7). The console sends them to add one; adding it is
+ * Clerk's frontend API, which this API never stands in front of.
+ */
+export function passkeyRequired(c: Context) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "passkey_required",
+      message:
+        "Your workspace requires SSO, and owners and admins who skip it must sign in with a passkey. Add a passkey to your account to continue.",
+    },
+    403,
+  )
+}
+
+/** 403 for an address outside the workspace's allowlist, console or API key. */
+export function ipNotAllowed(c: Context) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "ip_not_allowed",
+      message: "This workspace only allows access from its approved networks.",
+    },
+    403,
+  )
+}
+
+/**
+ * 401 for a session past the workspace's session policy. The console reads
+ * `reason` to say why the person was signed out and sends them to sign in.
+ */
+export function sessionExpired(c: Context, reason: "max_age" | "idle" | "revoked") {
+  return c.json(
+    {
+      statusCode: 401,
+      name: "session_expired",
+      reason,
+      message:
+        reason === "idle"
+          ? "You were signed out after being inactive. Sign in again."
+          : reason === "max_age"
+            ? "Your session reached the longest this workspace allows. Sign in again."
+            : "This session was ended. Sign in again.",
+    },
+    401,
+  )
+}
+
+/** 403 for a member outside SSO with no second factor, in a workspace that requires one. */
+export function mfaRequired(c: Context) {
+  return c.json(
+    {
+      statusCode: 403,
+      name: "mfa_required",
+      message:
+        "This workspace requires a second factor. Add one to your account to continue.",
+    },
+    403,
+  )
+}
+
+/**
+ * Runs the SSO gate for a verified person, if this process has one: a refusal
+ * to return, or null to carry on. Shared by `requireUser` and `requireTenant`;
+ * `tenantId` asks for that workspace's enforcement (#340) as well.
+ * Unwired (tests, and processes with no identity core) means no managed
+ * accounts can exist to gate.
+ */
+export async function ssoGateRefusal(c: Context, userId: string, tenantId?: string) {
+  const gate = c.get("ssoGate")
+  if (!gate) return null
+  const verdict = await gate(c.req.raw, userId, tenantId)
+  if (verdict.status === "sso_required") return ssoRequired(c, verdict)
+  if (verdict.status === "passkey_required") return passkeyRequired(c)
+  if (verdict.status === "ip_not_allowed") return ipNotAllowed(c)
+  if (verdict.status === "session_expired") return sessionExpired(c, verdict.reason)
+  if (verdict.status === "mfa_required") return mfaRequired(c)
+  if (verdict.status === "unknown") return gateUnavailable(c)
+  return null
+}
+
+/** 503 for a gate that could not tell: never a pass, never a sign-out. */
+export function gateUnavailable(c: Context) {
+  c.header("Retry-After", "5")
+  return c.json(
+    {
+      statusCode: 503,
+      name: "service_unavailable",
+      message: "Could not verify your session right now. Retry shortly.",
+    },
+    503,
+  )
+}
+
+/**
  * ⚠ THE 503 BRANCH IS THE SAME RULE `requireApiKey` FOLLOWS, and it matters
  * more here. A 401 tells someone their sign-in is bad; during a Clerk outage
  * they respond by signing out and finding they cannot sign back in. authd
@@ -130,10 +281,18 @@ export const requireUser: MiddlewareHandler = async (c, next) => {
   const outcome = await verifier.verify(c.req.raw)
 
   switch (outcome.status) {
-    case "signed-in":
+    case "signed-in": {
+      /*
+       * ⚠ THE GATE RUNS HERE AS WELL AS IN `requireTenant`: `/mailboxes` is a
+       * person's route, and a managed account's email-code session must not
+       * reach it either.
+       */
+      const refused = await ssoGateRefusal(c, outcome.userId)
+      if (refused) return refused
       c.set("user", { userId: outcome.userId })
       await next()
       return
+    }
 
     case "signed-out":
       return c.json(
@@ -274,6 +433,11 @@ export type FreshAuthOutcome =
   | { status: "stale" }
   /** Clerk did not answer. Do NOT guess - see the 503 below. */
   | { status: "unknown" }
+  /**
+   * A managed account (#337) that has not been back to its IdP recently.
+   * Clerk's own reverification does not count for them (sso.md 2.4).
+   */
+  | { status: "sso_stale"; startUrl: string | null }
 
 export type FreshAuthReader = (request: Request) => Promise<FreshAuthOutcome>
 
@@ -383,7 +547,7 @@ export function clerkFreshAuth(
  * `clerk_error` would surface as an empty toast anywhere the hint was not
  * handled - which is every call site that has not been converted yet.
  */
-export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
+export async function freshAuthRefusal(c: Context): Promise<Response | null> {
   const reader = c.get("freshAuth")
   /*
    * ⚠ NOT WIRED MEANS REFUSE, NOT ALLOW. Every other optional dependency in
@@ -406,8 +570,7 @@ export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
   const outcome = await reader(c.req.raw)
 
   if (outcome.status === "fresh") {
-    await next()
-    return
+    return null
   }
 
   if (outcome.status === "unknown") {
@@ -424,6 +587,23 @@ export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
     )
   }
 
+  /*
+   * ⚠ NOT CLERK'S HINT FOR A MANAGED ACCOUNT. Clerk's dialog would offer the
+   * account's first factor - an email code - which proves nothing their
+   * company asked for. The console sends them to their IdP instead (#340).
+   */
+  if (outcome.status === "sso_stale") {
+    return c.json(
+      {
+        statusCode: 403,
+        name: "sso_step_up_required",
+        message: "Sign in with your company's SSO again before doing this.",
+        startUrl: outcome.startUrl,
+      },
+      403,
+    )
+  }
+
   return c.json(
     {
       ...reverificationError(FRESHNESS),
@@ -433,4 +613,10 @@ export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
     },
     403,
   )
+}
+
+export const requireFreshAuth: MiddlewareHandler = async (c, next) => {
+  const refusal = await freshAuthRefusal(c)
+  if (refusal) return refusal
+  await next()
 }

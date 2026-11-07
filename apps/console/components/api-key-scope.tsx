@@ -9,6 +9,7 @@ import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
 import { GrowHeight } from "@repo/ui/components/i10/grow-height"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { updateApiKeyScope } from "@/lib/actions"
+import { useStepUp } from "@/lib/step-up"
 import { useResetOnOpen } from "@/lib/react"
 import { toastDone, toastError } from "@/lib/toast"
 
@@ -164,6 +165,7 @@ export function ApiKeyScopeDialog({
 }) {
   const [scope, setScope] = React.useState<string[] | null>(null)
   const [pending, setPending] = React.useState(false)
+  const stepUp = useStepUp()
 
   /*
    * ⚠ SEEDED FROM THE KEY EACH TIME THE DIALOG OPENS, NOT ONCE. The same
@@ -182,6 +184,8 @@ export function ApiKeyScopeDialog({
 
   async function save() {
     if (!apiKey || pending || !scopeComplete(scope)) return
+    // The API asks for a recent sign-in before it changes a key's scope.
+    if (!(await stepUp())) return
     setPending(true)
     const result = await updateApiKeyScope(apiKey.id, scope ?? [])
     setPending(false)

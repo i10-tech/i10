@@ -100,6 +100,18 @@ type Resolver interface {
 	Resolve(ctx context.Context, account *projection.Account) (Verifier, error)
 }
 
+// CacheLimit is implemented by a verifier whose verified passwords may be
+// cached for less than the configured TTL, or not at all (zero).
+//
+// ⚠ THE LONG CACHE IS ONLY SAFE WHERE A PASSWORD CHANGE REACHES authd. Clerk's
+// does, through `clerk_updated_at`; an IdP with event hooks does, through
+// `credential_epoch`. A provider that never tells authd its passwords changed
+// must cap the cache here, or an old password keeps opening mail for the whole
+// TTL. A verifier that does not implement it gets the configured TTL.
+type CacheLimit interface {
+	MaxCacheTTL() time.Duration
+}
+
 // Fixed resolves every account to the same verifier.
 func Fixed(v Verifier) Resolver { return fixed{v} }
 

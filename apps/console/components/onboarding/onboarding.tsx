@@ -39,6 +39,7 @@ import { EASE, StepItem, StepRail } from "@/components/steps"
 import {
   acceptTransfer,
   createPersonalWorkspace,
+  createTeamWorkspace,
   renameWorkspace,
   updateOnboarding,
   workspaceReady,
@@ -105,6 +106,7 @@ export function Onboarding({
   resumeStep,
   justPublished,
   domainDraft = null,
+  joined = false,
 }: {
   /**
    * Set-up for a workspace that does not exist yet (`/onboarding?new=1`): the
@@ -145,6 +147,11 @@ export function Onboarding({
   justPublished: number
   /** The domain steps as a reload left them, from set-up's own draft cookie. */
   domainDraft?: RestoredDraft | null
+  /**
+   * The reader joined this workspace rather than made it: its name is the
+   * owner's, so they start past the workspace step, which shows as done.
+   */
+  joined?: boolean
 }) {
   const router = useRouter()
   const reduce = useReducedMotion() ?? false
@@ -181,7 +188,7 @@ export function Onboarding({
     const stored = STEPS.some((s) => s.id === state.step)
       ? (state.step as StepId)
       : "workspace"
-    return stored === "workspace" ? "workspace" : "domain"
+    return stored === "workspace" && !joined ? "workspace" : "domain"
   })
   const index = STEPS.findIndex((s) => s.id === step)
 
@@ -632,8 +639,18 @@ function CreateWorkspaceForm({
     if (!next || creating) return
     setCreating("named")
     try {
-      const made = await clerk.createOrganization({ name: next })
-      await enter(made.id, next)
+      /*
+       * ⚠ THROUGH OUR API, NOT `clerk.createOrganization()` (#335): Clerk
+       * makes every creator an admin, and only the backend can demote them
+       * in the same request. Activating and waiting are as before.
+       */
+      const made = await createTeamWorkspace(next)
+      if (!made.ok) {
+        toastError("Could not create the workspace", made.error)
+        setCreating(null)
+        return
+      }
+      await enter(made.data.organization_id, next)
     } catch (error) {
       toastError("Could not create the workspace", clerkReason(error))
       setCreating(null)

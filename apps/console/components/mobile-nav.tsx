@@ -8,7 +8,7 @@ import { Button } from "@repo/ui/components/button/button"
 import { MenuIcon } from "@repo/ui/components/icon-morph/icon-morph"
 import { Drawer, DrawerContent, DrawerTrigger } from "@repo/ui/components/drawer/drawer"
 import { SidebarNav } from "@/components/sidebar-nav"
-import { AccountBar } from "@/components/account-bar"
+import { AccountBar, type InitialUser } from "@/components/account-bar"
 import { WorkspaceBar } from "@/components/workspace-bar"
 import { Wordmark } from "@/components/wordmark"
 import type { Attention, PlanSummary, TenantProfile } from "@/lib/types"
@@ -31,14 +31,18 @@ import { useResetWhen } from "@/lib/react"
  */
 export function MobileNav({
   tenant,
+  workspaceImage,
   plan,
+  initialUser,
   fallbackEmail,
   clerkEnabled,
   attention,
   usage,
 }: {
   tenant: TenantProfile | null
+  workspaceImage?: string | null
   plan: PlanSummary | null
+  initialUser?: InitialUser | null
   fallbackEmail?: string | null
   clerkEnabled: boolean
   attention?: Promise<Attention["domains"] | null>
@@ -70,7 +74,11 @@ export function MobileNav({
           description="Move around the i10 dashboard."
         >
           <div className="flex min-h-full flex-col gap-2">
-            <WorkspaceBar tenant={tenant} clerkEnabled={clerkEnabled} />
+            <WorkspaceBar
+              tenant={tenant}
+              image={workspaceImage}
+              clerkEnabled={clerkEnabled}
+            />
             {/*
              * ⚠ ITS OWN `scope`, SO THE DRAWER'S ACTIVE HIGHLIGHT AND THE
              * DESKTOP RAIL'S ARE DIFFERENT OBJECTS. Both are mounted while the
@@ -84,6 +92,7 @@ export function MobileNav({
               <AccountBar
                 clerkEnabled={clerkEnabled}
                 plan={plan}
+                initialUser={initialUser}
                 fallbackEmail={fallbackEmail ?? null}
                 usage={usage}
               />

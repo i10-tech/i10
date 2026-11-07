@@ -30,6 +30,8 @@ const tenants: TenantResolver = { resolve: async () => TENANT }
 
 const store = {
   list: async () => [],
+  // The caller's own key: a member may revoke what they created.
+  get: async () => ({ id: KEY_ID, createdBy: "user_1" }),
   revoke: async () => ({ secretHash: "HASH" }),
 } as unknown as KeyStore
 
@@ -100,6 +102,8 @@ describe("the routes that cannot be undone", () => {
   it.each([
     ["/console/api-keys/" + KEY_ID, "DELETE"],
     ["/console/domains/" + KEY_ID, "DELETE"],
+    // Deleting the workspace, through us since #335.
+    ["/console/workspace", "DELETE"],
   ])("refuses %s on a stale session", async (path, method) => {
     const res = await appWith(stale).request(path, { method, headers: BEARER })
 

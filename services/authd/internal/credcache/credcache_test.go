@@ -93,6 +93,31 @@ func TestTwoHourTTLExpiresOnTheDot(t *testing.T) {
 // Clerk's updated_at, the webhook writes it to the projection, and handleBind
 // hands the new value here. Without this the old password would keep working
 // for the rest of the TTL.
+// A verifier can shorten its entries (verify.CacheLimit) or refuse them, but
+// never outlive the cache's own TTL.
+func TestStoreForShortensButNeverLengthens(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	c := newAt(time.Hour, &now)
+	ts := at("2026-09-02T10:00:00Z")
+
+	c.StoreFor(sub(ts), "hunter2", 0)
+	if c.Lookup(sub(ts), "hunter2") {
+		t.Fatal("a zero lifetime was cached")
+	}
+
+	c.StoreFor(sub(ts), "hunter2", 30*time.Minute)
+	now = now.Add(31 * time.Minute)
+	if c.Lookup(sub(ts), "hunter2") {
+		t.Fatal("a 30 minute entry answered after 31 minutes")
+	}
+
+	c.StoreFor(sub(ts), "hunter2", 5*time.Hour)
+	now = now.Add(61 * time.Minute)
+	if c.Lookup(sub(ts), "hunter2") {
+		t.Fatal("an entry outlived the cache's own one hour TTL")
+	}
+}
+
 func TestClerkUpdatedAtInvalidates(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	c := newAt(time.Minute, &now)

@@ -8,10 +8,12 @@ import {
   joinMemberships,
   joinRequests,
   type JoinRule,
+  type StoredJoinRule,
 } from "../db/core.js"
 import { NO_TENANT } from "../middleware/tenant.js"
 import type { TxtLookup } from "../domains/ownership.js"
 import { coveringNames, normalizeName, type AccessDomain } from "./access-rules.js"
+import { DEFAULT_ROLE, readJoinRole } from "./roles.js"
 
 /**
  * Team access domains, join requests, and the removed and block lists - ours
@@ -31,6 +33,13 @@ import { coveringNames, normalizeName, type AccessDomain } from "./access-rules.
  */
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
+
+/**
+ * Rules as the column holds them, with Clerk's old role keys read as ours
+ * (#335). Every read of `join_domains.rules` goes through this.
+ */
+const readRules = (rules: StoredJoinRule[]): JoinRule[] =>
+  rules.map((r) => ({ ...r, role: readJoinRole(r.role) }))
 
 export interface JoinRequestRow {
   id: string
@@ -280,7 +289,7 @@ async function syncFromDomains(tx: Tx, tenantId: string, now: Date) {
           verifiedAt: now,
           checkedAt: now,
           lapsedAt: null,
-          rules: [{ pattern: r.name, mode: "suggest", role: "org:member" }],
+          rules: [{ pattern: r.name, mode: "suggest", role: DEFAULT_ROLE }],
         })
         .where(eq(joinDomains.id, r.id))
       continue
@@ -310,7 +319,7 @@ export function joinStore(db: Database): JoinStore {
         source: r.source === "txt" ? "txt" : "domains",
         status: statusOf(r),
         txt: { name: accessTxtName(r.name), value: accessTxtValue(r.token) },
-        rules: r.rules,
+        rules: readRules(r.rules),
         orphaned: r.source === "domains" && r.domainId === null,
         verified_at: iso(r.verifiedAt),
         checked_at: iso(r.checkedAt),
@@ -621,7 +630,7 @@ export function joinStore(db: Database): JoinStore {
           .from(joinMemberships)
           .where(eq(joinMemberships.userId, userId))
         return {
-          domains: rows,
+          domains: rows.map((r) => ({ ...r, rules: readRules(r.rules) })),
           requested: new Set(open.map((r) => r.tenantId)),
           joined: new Set(joined.map((r) => r.tenantId)),
         }

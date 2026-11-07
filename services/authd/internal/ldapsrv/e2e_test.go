@@ -384,6 +384,36 @@ func TestSuspendedAccountCannotBind(t *testing.T) {
 	}
 }
 
+// A directory-suspended mailbox (#344) is ACTIVE: it keeps receiving. Only the
+// login is refused, and before the credential cache, Clerk or the company's
+// directory is asked anything.
+func TestDirectorySuspendedMailboxRefusesLoginButKeepsReceiving(t *testing.T) {
+	store := defaultStore()
+	v := &fakeVerifier{outcome: verify.Verified}
+	addr := newFixtureWith(t, store, v, 60, credcache.New(time.Hour))
+
+	// A warm cache: the password was right until the directory switched them off.
+	if err := dial(t, addr).Bind(aliceDN, alicePass); err != nil {
+		t.Fatalf("bind before the suspension: %v", err)
+	}
+	store.accounts[0].Suspended = true
+
+	for i := 0; i < 2; i++ {
+		err := dial(t, addr).Bind(aliceDN, alicePass)
+		if got := resultCode(err); got != goldapclient.LDAPResultInvalidCredentials {
+			t.Fatalf("bind %d = %d, want invalidCredentials", i, got)
+		}
+	}
+	if v.calls != 1 {
+		t.Errorf("verifier called %d times, want only the bind before the suspension", v.calls)
+	}
+
+	f := fmt.Sprintf(filterMailbox, aliceEmail, aliceEmail, aliceEmail, aliceEmail)
+	if got := search(t, addr, f); len(got) != 1 || got[0].DN != aliceDN {
+		t.Fatalf("a suspended mailbox stopped resolving as a recipient: %v", got)
+	}
+}
+
 func TestUnknownDNDoesNotReachClerk(t *testing.T) {
 	v := &fakeVerifier{outcome: verify.Verified}
 	addr := newFixture(t, defaultStore(), v, 60)

@@ -4,6 +4,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { ChevronRight, ScrollText, SearchX } from "lucide-react"
 import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { cn } from "cn"
 import { EmptyState } from "@/components/empty-state"
 import {
@@ -159,7 +160,7 @@ function Rows({
                 <tr
                   className={cn(
                     rowClass,
-                    "cursor-pointer animate-in fade-in-0 duration-300",
+                    "cursor-pointer",
                     // Open, the row and its details read as one block: one
                     // fill, and no rule between them.
                     expanded &&
@@ -173,7 +174,7 @@ function Rows({
                       className="grid size-4 place-items-center"
                       initial={false}
                       animate={{ rotate: expanded ? 90 : 0 }}
-                      transition={{ type: "spring", stiffness: 520, damping: 34 }}
+                      transition={motionTokens.spring.snappy}
                     >
                       <ChevronRight
                         className={cn(
@@ -243,16 +244,19 @@ function Rows({
                             height: "auto",
                             opacity: 1,
                             transition: {
-                              height: { type: "spring", stiffness: 420, damping: 40 },
-                              opacity: { duration: 0.18, delay: 0.04 },
+                              height: motionTokens.spring.smooth,
+                              opacity: {
+                                duration: motionTokens.duration.standard,
+                                delay: motionTokens.duration.instant,
+                              },
                             },
                           }}
                           exit={{
                             height: 0,
                             opacity: 0,
                             transition: {
-                              height: { type: "spring", stiffness: 520, damping: 44 },
-                              opacity: { duration: 0.1 },
+                              height: motionTokens.spring.smooth,
+                              opacity: { duration: motionTokens.duration.fast },
                             },
                           }}
                           className="overflow-hidden"

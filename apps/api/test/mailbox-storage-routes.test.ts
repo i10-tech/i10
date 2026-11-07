@@ -1,6 +1,5 @@
 import { describe, expect, it, mock } from "bun:test"
 import { Hono } from "hono"
-import { MANAGE_MEMBERS } from "../src/console/team-domains.js"
 import { storageAllocations } from "../src/mailboxes/allocation.js"
 import { mountMailboxStorage } from "../src/routes/console/mailbox-storage.js"
 import type { ConsoleDeps } from "../src/routes/console/deps.js"
@@ -17,12 +16,13 @@ import {
 
 /**
  * The console's storage routes: who may size an inbox, and what the statuses are.
- * An owner or admin holds the members-manage permission; a member does not.
+ * An owner or admin holds `members:manage` in our roles table; a member does not.
  */
 
 const ADMIN = "user_admin"
 const MEMBER = "user_member"
 const ORG = "org_acme"
+const MANAGE = "members:manage"
 
 function world(plan: typeof PRO | null = PRO) {
   const tenants = {
@@ -35,8 +35,8 @@ function world(plan: typeof PRO | null = PRO) {
     { id: "p", emailAddress: "pat@globex.test" },
   ])
   const can = mock(
-    async (userId: string, _orgId: string, permission: string) =>
-      userId === ADMIN && permission === MANAGE_MEMBERS,
+    async (_tenantId: string, userId: string, permission: string) =>
+      userId === ADMIN && permission === MANAGE,
   )
   const mailboxStorage = storageAllocations({
     store: memoryStore(tenants, { [ACME]: 3 * GIB }),
@@ -92,7 +92,7 @@ describe("who may size an inbox", () => {
     expect(w.registry.accounts.find((a) => a.id === "k")!.quotas).toEqual({
       maxDiskQuota: 2 * GIB,
     })
-    expect(w.can).toHaveBeenCalledWith(ADMIN, ORG, MANAGE_MEMBERS)
+    expect(w.can).toHaveBeenCalledWith(ACME, ADMIN, MANAGE)
   })
 
   it("answers 403 to a member and changes nothing, in the database or in Stalwart", async () => {

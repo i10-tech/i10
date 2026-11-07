@@ -9,6 +9,7 @@ import type {
 } from "@clerk/shared/types"
 import { Mail, TriangleAlert } from "lucide-react"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
+import { holdScrollFloor } from "@repo/ui/components/lib/glide-scroll"
 import { VerifiedSeal } from "@repo/ui/components/i10/verified-seal"
 import {
   AppleIcon,
@@ -32,6 +33,7 @@ import {
   ProfileBlock,
   ProfileRow,
   clerkReason,
+  RowAction,
 } from "@/components/account/shared"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
@@ -131,18 +133,20 @@ function ProfileEditor({ user }: { user: UserResource }) {
     <div>
       <div className="flex items-center justify-between gap-3">
         <span className="flex min-w-0 items-center gap-3">
-          <Avatar
-            name={name}
-            src={user.hasImage ? user.imageUrl : undefined}
-            size="lg"
-          />
+          {/*
+           * ⚠ CLERK'S IMAGE EVEN WITHOUT AN UPLOAD, AS THE RAIL SHOWS IT
+           * (2026-11-04): `imageUrl` is Clerk's default picture until a photo
+           * is set, and the two avatars of one person must match. Initials are
+           * the fallback, drawn by `Avatar` when the image cannot load.
+           */}
+          <Avatar name={name} src={user.imageUrl} size="lg" />
           <span className="truncate text-sm font-medium">{name}</span>
         </span>
-        {!open && (
+        <RowAction show={!open}>
           <Button variant="ghost" size="sm" onClick={begin}>
             Update profile
           </Button>
-        )}
+        </RowAction>
       </div>
 
       {/* ⚠ IN PLACE, AS CLERK'S DID - the row opens into its own form. */}
@@ -156,9 +160,10 @@ function ProfileEditor({ user }: { user: UserResource }) {
            */}
           <PhotoField
             name={name}
-            src={user.hasImage ? user.imageUrl : undefined}
+            src={user.imageUrl}
             onUpload={upload}
-            onRemove={removePhoto}
+            // Only an uploaded photo can be removed; Clerk's default cannot.
+            onRemove={user.hasImage ? removePhoto : undefined}
             className="flex flex-col gap-7 p-4"
           >
             <div className="grid gap-4 sm:grid-cols-2">
@@ -216,6 +221,7 @@ function Emails({ user }: { user: UserResource }) {
   // What the dialog shows while it closes, after `removing` is cleared.
   const [shown, setShown] = React.useState<EmailAddressResource | null>(null)
   const primaryId = user.primaryEmailAddressId
+  const box = React.useRef<HTMLDivElement>(null)
 
   const emails = [...user.emailAddresses].sort((a, b) =>
     a.id === primaryId ? -1 : b.id === primaryId ? 1 : 0,
@@ -259,7 +265,7 @@ function Emails({ user }: { user: UserResource }) {
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div ref={box} className="flex flex-col gap-1">
       <MotionList>
         {emails.map((email) => {
           const verified = email.verification?.status === "verified"
@@ -322,16 +328,22 @@ function Emails({ user }: { user: UserResource }) {
           user={user}
           resume={verifying}
           onDone={() => {
+            // Closing holds the view still, as every panel here does.
+            if (box.current) holdScrollFloor(box.current)
             setAdding(false)
             setVerifying(null)
           }}
         />
       </Reveal>
-      {!adding && (
-        <div>
-          <AddAction onClick={() => setAdding(true)}>Add email address</AddAction>
-        </div>
-      )}
+      {/*
+       * ⚠ FOLDED AWAY, NOT REMOVED (2026-11-04). Dropped in one frame as the
+       * form opened, and back at full height in one frame as it closed, the
+       * link jolted everything below by its own height against the form's
+       * fold. Opposite the form, the two trade places in one motion.
+       */}
+      <Reveal show={!adding} spacing="">
+        <AddAction onClick={() => setAdding(true)}>Add email address</AddAction>
+      </Reveal>
 
       <ConfirmDialog
         open={removing !== null}

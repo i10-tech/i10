@@ -62,7 +62,7 @@ suite("member store", () => {
     id = await store().createInvitation(acme, {
       clerkOrgId: org,
       email: "New@Acme.test",
-      role: "org:member",
+      role: "member",
       inviterUserId: "u_a",
       expiresAt,
       zone: "Europe/Paris",
@@ -93,6 +93,31 @@ suite("member store", () => {
     expect((await store().byLink(id))?.actionUrl).toBe("https://clerk.test/accept")
     // The link reads only the row it names.
     expect(await store().byLink(crypto.randomUUID())).toBeNull()
+  })
+
+  // #335: what a new membership's role is matched against, and only once.
+  it("lists recent invitations, reads an old Clerk role as ours, and gives each once", async () => {
+    await owner`insert into core.member_invitations
+                  (tenant_id, clerk_org_id, email, role, inviter_user_id, expires_at, zone)
+                values (${acme}, ${org}, 'old@acme.test', 'org:admin', 'u_a',
+                        now() + interval '1 day', 'UTC')`
+    const since = new Date(Date.now() - 3600_000)
+    const recent = await store().recentInvitations(acme, since, "mem_1")
+    expect(recent.map((r) => ({ email: r.email, role: r.role }))).toEqual([
+      { email: "old@acme.test", role: "admin" },
+      { email: "new@acme.test", role: "member" },
+    ])
+    expect(await store().recentInvitations(rival, new Date(0), "mem_1")).toEqual([])
+    const old = recent[0]!.id
+    expect(await store().applyInvitation(acme, old, "mem_1")).toBe(true)
+    // The same membership again (a redelivery) still has it; another never does.
+    expect(await store().applyInvitation(acme, old, "mem_1")).toBe(true)
+    expect(await store().applyInvitation(acme, old, "mem_2")).toBe(false)
+    expect((await store().recentInvitations(acme, since, "mem_1"))[0]!.id).toBe(old)
+    expect(
+      (await store().recentInvitations(acme, since, "mem_2")).map((r) => r.email),
+    ).toEqual(["new@acme.test"])
+    await owner`delete from core.member_invitations where email = 'old@acme.test'`
   })
 
   it("ends a pending row once", async () => {

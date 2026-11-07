@@ -162,9 +162,19 @@ func (c *Cache) Lookup(s Subject, password string) bool {
 // verified outcome - see handleBind, and the package comment in clerkauth for
 // why a rejection must never be remembered.
 func (c *Cache) Store(s Subject, password string) {
-	if c == nil || s.UserID == "" || password == "" {
+	if c == nil {
 		return
 	}
+	c.StoreFor(s, password, c.ttl)
+}
+
+// StoreFor is Store with a shorter lifetime: ttl, never longer than the
+// cache's own. A ttl that is not positive stores nothing. See verify.CacheLimit.
+func (c *Cache) StoreFor(s Subject, password string, ttl time.Duration) {
+	if c == nil || s.UserID == "" || password == "" || ttl <= 0 {
+		return
+	}
+	ttl = min(ttl, c.ttl)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -182,7 +192,7 @@ func (c *Cache) Store(s Subject, password string) {
 	e := entry{
 		mac:     mac(c.key, s, password),
 		epoch:   s.Epoch,
-		expires: c.now().Add(c.ttl),
+		expires: c.now().Add(ttl),
 	}
 	if s.ChangedAt != nil {
 		e.changedAt, e.hasTime = *s.ChangedAt, true

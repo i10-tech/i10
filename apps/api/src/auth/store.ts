@@ -1,6 +1,7 @@
-import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm"
+import { and, desc, eq, gt, isNull, max, or, sql, type SQL } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { apiKeys } from "../db/core.js"
+import { events } from "../db/identity.js"
 import { hashKey, mintKey, type KeyLookup, type KeyRow, type Mode } from "./api-key.js"
 
 /**
@@ -78,6 +79,8 @@ export interface KeySummary {
   prefix: string
   mode: Mode
   scopes: readonly string[]
+  /** Who minted it (a Clerk user id); null for keys from before that was kept. Audit and access, never the key's life. */
+  createdBy: string | null
   createdAt: Date
   lastUsedAt: Date | null
   expiresAt: Date | null
@@ -101,6 +104,8 @@ export interface CreateInput {
 export interface KeyStore {
   create(input: CreateInput): Promise<CreatedKey>
   list(tenantId: string): Promise<KeySummary[]>
+  /** One key of the workspace, revoked or not; null when there is none. */
+  get(tenantId: string, id: string): Promise<KeySummary | null>
   /**
    * Change what a key is allowed to do, without changing the key.
    *
@@ -122,10 +127,32 @@ export interface KeyStore {
   ): Promise<{ key: KeySummary; secretHash: string } | null>
   /** The revoked key's `secret_hash`, so the caller can evict its cache entry. */
   revoke(tenantId: string, id: string): Promise<{ secretHash: string } | null>
+  /**
+   * ⚠ `createdBy` OVERRIDES WHO THE NEW KEY IS ATTRIBUTED TO, and only the
+   * deprovisioning flow passes it (#345): a key rotated on behalf of somebody
+   * who left belongs to the admin who now holds the secret, or the list of
+   * "keys the person created" would still show it.
+   */
   rotate(
     tenantId: string,
     id: string,
+    options?: { createdBy?: string | null },
   ): Promise<{ created: CreatedKey; revokedHash: string } | null>
+  /**
+   * The live (not revoked) keys a person minted, newest first (#345): what an
+   * admin is shown when that person is deprovisioned.
+   */
+  createdBy(tenantId: string, userId: string): Promise<KeySummary[]>
+  /**
+   * Every live key in the workspace whose creator was deprovisioned (#345),
+   * with when. "Live" is not revoked and not expired; "deprovisioned" is the
+   * same fact `wasDeprovisioned` reads: a `member.deprovisioned` event about
+   * the creator in this workspace. One query, not a page of events, so a
+   * leaver from long ago is still found. Newest key first.
+   */
+  createdByDeprovisioned(
+    tenantId: string,
+  ): Promise<Array<{ key: KeySummary; deprovisionedAt: Date }>>
 }
 
 const summaryOf = (row: typeof apiKeys.$inferSelect): KeySummary => ({
@@ -134,6 +161,7 @@ const summaryOf = (row: typeof apiKeys.$inferSelect): KeySummary => ({
   prefix: row.prefix,
   mode: row.mode === "test" ? "test" : "live",
   scopes: row.scopes,
+  createdBy: row.createdBy,
   createdAt: row.createdAt,
   lastUsedAt: row.lastUsedAt,
   expiresAt: row.expiresAt,
@@ -180,6 +208,66 @@ export function keyStore(db: Database): KeyStore {
           .where(eq(apiKeys.tenantId, tenantId))
           .orderBy(desc(apiKeys.createdAt))
         return rows.map(summaryOf)
+      })
+    },
+
+    async get(tenantId, id) {
+      return withTenant(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(apiKeys)
+          .where(and(eq(apiKeys.tenantId, tenantId), eq(apiKeys.id, id)))
+          .limit(1)
+        return row ? summaryOf(row) : null
+      })
+    },
+
+    async createdBy(tenantId, userId) {
+      return withTenant(db, tenantId, async (tx) => {
+        const rows = await tx
+          .select()
+          .from(apiKeys)
+          .where(
+            and(
+              eq(apiKeys.tenantId, tenantId),
+              eq(apiKeys.createdBy, userId),
+              isNull(apiKeys.revokedAt),
+            ),
+          )
+          .orderBy(desc(apiKeys.createdAt))
+        return rows.map(summaryOf)
+      })
+    },
+
+    async createdByDeprovisioned(tenantId) {
+      return withTenant(db, tenantId, async (tx) => {
+        const gone = tx
+          .select({
+            userId: events.subjectUserId,
+            at: max(events.createdAt).as("deprovisioned_at"),
+          })
+          .from(events)
+          .where(
+            and(eq(events.tenantId, tenantId), eq(events.type, "member.deprovisioned")),
+          )
+          .groupBy(events.subjectUserId)
+          .as("gone")
+        const rows = await tx
+          .select({ key: apiKeys, at: gone.at })
+          .from(apiKeys)
+          .innerJoin(gone, eq(gone.userId, apiKeys.createdBy))
+          .where(
+            and(
+              eq(apiKeys.tenantId, tenantId),
+              isNull(apiKeys.revokedAt),
+              or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, sql`now()`)),
+            ),
+          )
+          .orderBy(desc(apiKeys.createdAt))
+        return rows.map((r) => ({
+          key: summaryOf(r.key),
+          deprovisionedAt: r.at as Date,
+        }))
       })
     },
 
@@ -240,7 +328,7 @@ export function keyStore(db: Database): KeyStore {
      * treated as a fresh mint. That would hand back a working credential for a
      * key the customer believes is dead.
      */
-    async rotate(tenantId, id) {
+    async rotate(tenantId, id, options) {
       return withTenant(db, tenantId, async (tx) => {
         const [old] = await tx
           .update(apiKeys)
@@ -261,7 +349,10 @@ export function keyStore(db: Database): KeyStore {
           name: old.name,
           mode: old.mode === "test" ? "test" : "live",
           scopes: old.scopes,
-          createdBy: old.createdBy,
+          createdBy:
+            options && "createdBy" in options
+              ? (options.createdBy ?? null)
+              : old.createdBy,
           expiresAt: old.expiresAt,
         })
 

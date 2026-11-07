@@ -13,6 +13,7 @@ import {
 } from "../src/risk/identity.js"
 import { sessionIdOf, sessionObserver } from "../src/risk/session.js"
 import { countryDistanceKm } from "../src/risk/geo.js"
+import { EDGE_PROOF, EDGE_SECRET } from "./edge-fixture.js"
 
 /**
  * What we see of people (#170): the signed context, the network, the
@@ -295,7 +296,12 @@ describe("the console session observer", () => {
   it("trusts the signed context, and records nothing without an IP", async () => {
     const redis = fakeRedis()
     const { store, rows } = fakeStore()
-    const observe = sessionObserver({ store, redis, secret: SECRET })
+    const observe = sessionObserver({
+      store,
+      redis,
+      secret: SECRET,
+      edgeSecret: EDGE_SECRET,
+    })
     const signed = signClientContext(
       {
         ip: "81.2.69.160",
@@ -321,15 +327,35 @@ describe("the console session observer", () => {
     expect(rows[0]!.deviceId).toBe("d")
   })
 
+  it("records nothing from Cloudflare's headers without the edge proof", async () => {
+    const redis = fakeRedis()
+    const { store, rows } = fakeStore()
+    const observe = sessionObserver({ store, redis, edgeSecret: EDGE_SECRET })
+    const headers = { "cf-connecting-ip": "9.9.9.9", "cf-ipcountry": "DE" }
+    for (const extra of [{}, { "x-i10-edge": "wrong" }] as Record<string, string>[])
+      observe({
+        userId: "u",
+        tenantId: "t",
+        request: new Request("http://x", { headers: { ...headers, ...extra } }),
+      })
+    observe({
+      userId: "u",
+      tenantId: "t",
+      request: new Request("http://x", { headers }),
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(rows).toHaveLength(0)
+  })
+
   it("reads Cloudflare's T1 as Tor and never as a country", async () => {
     const redis = fakeRedis()
     const { store, rows } = fakeStore()
-    const observe = sessionObserver({ store, redis })
+    const observe = sessionObserver({ store, redis, edgeSecret: EDGE_SECRET })
     observe({
       userId: "u",
       tenantId: "t",
       request: new Request("http://x", {
-        headers: { "cf-connecting-ip": "9.9.9.9", "cf-ipcountry": "T1" },
+        headers: { "cf-connecting-ip": "9.9.9.9", "cf-ipcountry": "T1", ...EDGE_PROOF },
       }),
     })
     await new Promise((r) => setTimeout(r, 10))

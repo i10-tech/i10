@@ -1,12 +1,9 @@
-import {
-  Page,
-  PageBody,
-  PageHeader,
-  PageActions,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
+import { Page, PageBody } from "@repo/ui/components/i10/page"
+import { SectionContent } from "@/components/page-frame"
+import { SettingsHeader } from "@/components/settings-header"
 import { SettingsWorkspace } from "@/components/settings-workspace"
+import { tryApi } from "@/lib/api"
+import type { Me } from "@/lib/types"
 
 /**
  * The settings shell.
@@ -19,30 +16,25 @@ import { SettingsWorkspace } from "@/components/settings-workspace"
  * carries a way back - one navigation, in the place navigation already lives.
  *
  * ⚠ AND THE HEADING STILL LIVES HERE, NOT IN EACH PAGE. Eight pages each
- * rendering their own "Settings" title is eight chances for one of them to be
+ * rendering their own title is eight chances for one of them to be
  * two pixels out - which nobody can name and everybody feels as they move
- * between tabs.
+ * between tabs. It now names the active tab, so the title morphs as you move
+ * between tabs while the layout persists and the actions hold still.
  */
-export default function SettingsLayout({
+export default async function SettingsLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const me = await tryApi<Me>("/console/me")
+  const tenant = me.ok ? me.data.tenant : null
+  const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
+
   return (
     <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>Settings</PageTitle>
-          {/*
-           * Which workspace these are the settings of, for people in more than
-           * one. Clerk's hooks throw outside its provider, which is only
-           * mounted with a key - see WorkspaceBar.
-           */}
-          {process.env.CLERK_PUBLISHABLE_KEY && (
-            <PageActions>
-              <SettingsWorkspace />
-            </PageActions>
-          )}
-        </PageHeaderRow>
-      </PageHeader>
+      <SettingsHeader
+        actions={
+          <SettingsWorkspace initialWorkspace={tenant} clerkEnabled={clerkEnabled} />
+        }
+      />
 
       {/*
        * ⚠ A MAX WIDTH, BECAUSE SETTINGS IS PROSE AND FORMS. Without the second
@@ -50,7 +42,9 @@ export default function SettingsLayout({
        * where a label and its field end up a hand's width apart.
        */}
       <PageBody>
-        <div className="min-w-0 max-w-3xl">{children}</div>
+        <div className="min-w-0 max-w-3xl">
+          <SectionContent>{children}</SectionContent>
+        </div>
       </PageBody>
     </Page>
   )

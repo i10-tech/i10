@@ -264,7 +264,10 @@ export async function runMailboxExport(
             if (size === null) {
               const parts: Uint8Array[] = []
               for await (const piece of chunksOf(download.body)) parts.push(piece)
-              body = new Uint8Array(await new Blob(parts).arrayBuffer())
+              // Cast for the DOM typings, as in `streamOf`: no chunk is shared memory.
+              body = new Uint8Array(
+                await new Blob(parts as Uint8Array<ArrayBuffer>[]).arrayBuffer(),
+              )
               size = body.byteLength
             } else {
               body = chunksOf(download.body)

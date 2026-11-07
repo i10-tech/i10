@@ -45,8 +45,18 @@ func (p *Postgres) Pool() *pgxpool.Pool { return p.pool }
 // answer nothing, and should not be routed to.
 func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
+// accountColumns reads managed status in the same query as the account, so the
+// answer the bind acts on cannot be older than the account it belongs to.
+// ⚠ A LEFT JOIN, NOT A COLUMN ON authd.accounts: a managed account is managed
+// before it has a mailbox row, and a missing row must read as "managed" only
+// when authd.managed_accounts says so.
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
-	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch`
+	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
+	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
+	(a.suspended_at IS NOT NULL)`
+
+const accountFrom = `FROM authd.accounts a
+		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
 
 func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([]Account, error) {
 	norm := normalise(addresses)
@@ -55,7 +65,7 @@ func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([
 	}
 	rows, err := p.pool.Query(ctx, `
 		SELECT `+accountColumns+`
-		FROM authd.accounts a
+		`+accountFrom+`
 		WHERE a.active
 		  AND (a.email = ANY($1)
 		       OR EXISTS (SELECT 1 FROM authd.aliases al
@@ -77,7 +87,7 @@ func (p *Postgres) AccountByUID(ctx context.Context, clerkUserID string) (*Accou
 	}
 	rows, err := p.pool.Query(ctx, `
 		SELECT `+accountColumns+`
-		FROM authd.accounts a
+		`+accountFrom+`
 		WHERE a.active AND a.clerk_user_id = $1`, clerkUserID)
 	if err != nil {
 		return nil, fmt.Errorf("projection: account by uid: %w", err)
@@ -145,7 +155,8 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	for rows.Next() {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
-			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch); err != nil {
+			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
+			&a.Managed, &a.ManagedConnection, &a.Suspended); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

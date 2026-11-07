@@ -121,7 +121,8 @@ export function world() {
     },
   }
 
-  // Who is in which Clerk organization, and who holds members-manage.
+  // Who is in which Clerk organization, and who holds `members:manage` in our
+  // roles table.
   const rosters = new Map<string, Set<string>>([
     [
       ACME.orgId,
@@ -137,10 +138,15 @@ export function world() {
   ])
   const admins = new Set([people.alice.userId, people.zed.userId])
 
+  const orgOf = new Map([
+    [ACME.tenantId, ACME.orgId],
+    [GLOBEX.tenantId, GLOBEX.orgId],
+  ])
+
   const service = teamInboxes({
     store,
-    isAdmin: async (userId, orgId) =>
-      admins.has(userId) && rosters.get(orgId)!.has(userId),
+    isAdmin: async (tenantId, userId) =>
+      admins.has(userId) && rosters.get(orgOf.get(tenantId)!)!.has(userId),
     roster: async (orgId) => rosters.get(orgId) ?? new Set(),
     async destroyAccount({ address }) {
       if (failDestroy.on) throw new Error("stalwart is down")

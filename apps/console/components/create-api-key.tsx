@@ -7,6 +7,7 @@ import { Button } from "@repo/ui/components/button/button"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
 import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
 import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
+import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { ValidatedInput } from "@repo/ui/components/i10/validated-field"
 import {
   ApiKeyScopeField,
@@ -112,105 +113,107 @@ export function CreateApiKeyButton({
           }
           style={{ width: "min(calc(100vw - 2rem), 512px)" }}
         >
-          {created ? (
-            <>
-              <div className="space-y-3">
-                <CopyField value={created.secret} className="py-2" />
+          <StepStage step={created ? "secret" : "form"}>
+            {created ? (
+              <div className="space-y-4 pt-1">
+                <div className="space-y-3">
+                  <CopyField value={created.secret} className="py-2" />
 
-                <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
-                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
-                  <span>
-                    Treat it like a password. If it leaks, rotate it - a rotated key
-                    stops working immediately, not at the end of a cache window.
-                  </span>
-                </p>
-              </div>
-
-              <DialogFooter>
-                <Button
-                  onClick={() => {
-                    setOpen(false)
-                    reset()
-                  }}
-                >
-                  I have copied it
-                </Button>
-              </DialogFooter>
-            </>
-          ) : (
-            <form onSubmit={submit}>
-              <div className="space-y-4 py-4">
-                <ValidatedInput
-                  label="Name"
-                  id="key-name"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  autoComplete="off"
-                  maxLength={50}
-                  required="Name this key so you can recognise it later."
-                  autoFocus
-                  hint="e.g. production-api"
-                />
-
-                <div className="space-y-2">
-                  <MorphSelect
-                    label="Mode"
-                    value={mode}
-                    onValueChange={(value) => setMode(value as "live" | "test")}
-                    disabled={pending}
-                    items={[
-                      { value: "live", label: "Live" },
-                      { value: "test", label: "Test" },
-                    ]}
-                    className="w-full"
-                  />
-                  {/*
-                   * ⚠ WHAT THE CHOICE MEANS, UNDER IT, FOR WHICHEVER IS PICKED.
-                   * The dropdown closes over its options, so the explanation
-                   * that used to sit beside each radio lives here instead.
-                   */}
-                  <p className="text-xs text-muted-foreground">
-                    {mode === "live" ? (
-                      <>
-                        Sends real mail and counts against your allowance. Prefixed{" "}
-                        <code className="font-mono">i10_live_</code>.
-                      </>
-                    ) : (
-                      <>
-                        Prefixed <code className="font-mono">i10_test_</code> so it is
-                        greppable in a leak scan and obvious in your own logs.
-                      </>
-                    )}
+                  <p className="flex items-start gap-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
+                    <span>
+                      Treat it like a password. If it leaks, rotate it - a rotated key
+                      stops working immediately, not at the end of a cache window.
+                    </span>
                   </p>
                 </div>
 
-                <ApiKeyScopeField
-                  value={scope}
-                  onChange={setScope}
-                  domains={domains}
-                  disabled={pending}
-                />
+                <DialogFooter>
+                  <Button
+                    onClick={() => {
+                      setOpen(false)
+                      reset()
+                    }}
+                  >
+                    I have copied it
+                  </Button>
+                </DialogFooter>
               </div>
+            ) : (
+              <form onSubmit={submit}>
+                <div className="space-y-4 py-4">
+                  <ValidatedInput
+                    label="Name"
+                    id="key-name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    autoComplete="off"
+                    maxLength={50}
+                    required="Name this key so you can recognise it later."
+                    autoFocus
+                    hint="e.g. production-api"
+                  />
 
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setOpen(false)}
-                  disabled={pending}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  loading={pending}
-                  type="submit"
-                  disabled={pending || !name.trim() || !scopeComplete(scope)}
-                >
-                  Create key
-                </Button>
-              </DialogFooter>
-            </form>
-          )}
+                  <div className="space-y-2">
+                    <MorphSelect
+                      label="Mode"
+                      value={mode}
+                      onValueChange={(value) => setMode(value as "live" | "test")}
+                      disabled={pending}
+                      items={[
+                        { value: "live", label: "Live" },
+                        { value: "test", label: "Test" },
+                      ]}
+                      className="w-full"
+                    />
+                    {/*
+                     * ⚠ WHAT THE CHOICE MEANS, UNDER IT, FOR WHICHEVER IS PICKED.
+                     * The dropdown closes over its options, so the explanation
+                     * that used to sit beside each radio lives here instead.
+                     */}
+                    <p className="text-xs text-muted-foreground">
+                      {mode === "live" ? (
+                        <>
+                          Sends real mail and counts against your allowance. Prefixed{" "}
+                          <code className="font-mono">i10_live_</code>.
+                        </>
+                      ) : (
+                        <>
+                          Prefixed <code className="font-mono">i10_test_</code> so it is
+                          greppable in a leak scan and obvious in your own logs.
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  <ApiKeyScopeField
+                    value={scope}
+                    onChange={setScope}
+                    domains={domains}
+                    disabled={pending}
+                  />
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setOpen(false)}
+                    disabled={pending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    loading={pending}
+                    type="submit"
+                    disabled={pending || !name.trim() || !scopeComplete(scope)}
+                  >
+                    Create key
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </StepStage>
         </DialogContent>
       </Dialog>
     </>

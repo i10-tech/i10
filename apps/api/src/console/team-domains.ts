@@ -2,6 +2,14 @@ import type { TxtLookup } from "../domains/ownership.js"
 import { NO_TENANT } from "../middleware/tenant.js"
 import type { JoinRule } from "../db/core.js"
 import {
+  DEFAULT_ROLE,
+  parseJoinRole,
+  type AddOutcome,
+  type JoinRole,
+  type Permission,
+  type Released,
+} from "./roles.js"
+import {
   cleanRules,
   isFreeMail,
   isHostname,
@@ -30,15 +38,18 @@ import type { AccessDomainRow, JoinStore } from "./join.js"
  * ⚠ THE REMOVED AND BLOCK LISTS ARE CHECKED EVERYWHERE A PERSON COULD GET IN:
  * the suggestion, the request, the instant Join and auto-join at sign-up.
  * Removed: may only ask. Blocked: nothing at all.
+ *
+ * ⚠ WHO MAY RUN IT IS OUR ROLES TABLE SINCE #335, NOT CLERK'S PERMISSIONS.
+ * See console/roles.ts.
  */
 
-export type AddOutcome = "added" | "full"
+export type { AddOutcome }
 
 export interface TeamDomainDeps {
   /** Names of this workspace's domains verified on /domains. */
   verified(tenantId: string): Promise<string[]>
-  /** Whether this person holds `permission` in the organization. */
-  can(userId: string, orgId: string, permission: string): Promise<boolean>
+  /** Whether this person holds `permission` in the workspace: our table, no Clerk call. */
+  can(tenantId: string, userId: string, permission: Permission): Promise<boolean>
   store: JoinStore
   /** Clerk organizations this person already belongs to. */
   memberOrgIds(userId: string): Promise<string[]>
@@ -47,10 +58,22 @@ export interface TeamDomainDeps {
     orgIds: string[],
   ): Promise<Record<string, { name: string; imageUrl: string | null }>>
   /**
-   * Adds a person to the organization with a role. `full` when Clerk refuses
-   * with `organization_membership_quota_exceeded`; already a member is `added`.
+   * Adds a person to the organization with our role (Clerk is told
+   * `org:member`; see `addMember` in console/roles.ts). `full` when Clerk
+   * refuses with `organization_membership_quota_exceeded`; already a member
+   * is `added`.
    */
-  addMember(orgId: string, userId: string, role: string): Promise<AddOutcome>
+  addMember(orgId: string, userId: string, role: JoinRole): Promise<AddOutcome>
+  /**
+   * Whether the actor may take this member out, and their role row out with
+   * it, before Clerk is asked. See `releaseMember` in console/roles.ts.
+   */
+  release(
+    tenantId: string,
+    orgId: string,
+    actorUserId: string,
+    memberUserId: string,
+  ): Promise<Released>
   /** Takes a member out of the organization. Already gone is done. */
   removeMember?(orgId: string, userId: string): Promise<void>
   /** A Clerk invitation; the email goes out through our own auth mail. */
@@ -58,7 +81,7 @@ export interface TeamDomainDeps {
     orgId: string,
     inviterUserId: string,
     email: string,
-    role: string,
+    role: JoinRole,
     tenantId: string,
   ): Promise<void>
   /** A person's VERIFIED addresses, from Clerk. */
@@ -72,6 +95,12 @@ export interface TeamDomainDeps {
    * check, as it was in #326.
    */
   seats?: SeatChecks
+  /**
+   * The names an ACTIVE SSO connection of this workspace covers with a live
+   * proof (#341, identity store `coveredDomains`). Their people are the IdP's
+   * to admit; see `offersFor`.
+   */
+  ssoDomains?(tenantId: string): Promise<string[]>
 }
 
 /**
@@ -91,22 +120,15 @@ export interface SeatChecks {
   }): Promise<void>
 }
 
-/** Changing access domains needs the same permission Clerk's domains did. */
-export const MANAGE_DOMAINS = "org:sys_domains:manage"
-/** Answering requests and removing people needs the one that manages members. */
-export const MANAGE_MEMBERS = "org:sys_memberships:manage"
-
-const DEFAULT_ROLE = "org:member"
-
 type Admin = { tenantId: string; userId: string; orgId?: string }
 
 async function gate(
   d: TeamDomainDeps,
   input: Admin,
-  permission: string,
+  permission: Permission,
 ): Promise<"ok" | "no_org" | "forbidden"> {
   if (!input.orgId) return "no_org"
-  if (!(await d.can(input.userId, input.orgId, permission))) return "forbidden"
+  if (!(await d.can(input.tenantId, input.userId, permission))) return "forbidden"
   return "ok"
 }
 
@@ -139,17 +161,25 @@ export type AddAccessOutcome =
   | { outcome: "ok"; id: string; existed: boolean }
   | {
       outcome:
-        "no_org" | "forbidden" | "invalid" | "free_mail" | "not_verified" | "personal"
+        | "no_org"
+        | "forbidden"
+        | "invalid"
+        | "free_mail"
+        | "not_verified"
+        | "personal"
+        | "microsoft_owned"
     }
 
 export async function addAccessDomain(
   d: TeamDomainDeps,
   input: Admin & { name: string; source: "domains" | "txt" },
 ): Promise<AddAccessOutcome> {
-  const allowed = await gate(d, input, MANAGE_DOMAINS)
+  const allowed = await gate(d, input, "access_domains:manage")
   if (allowed !== "ok") return { outcome: allowed }
   const name = normalizeName(input.name)
   if (!isHostname(name)) return { outcome: "invalid" }
+  if (name === "onmicrosoft.com" || name.endsWith(".onmicrosoft.com"))
+    return { outcome: "microsoft_owned" }
   // ⚠ BEFORE ANY PROOF: no proof makes gmail.com somebody's team.
   if (isFreeMail(name)) return { outcome: "free_mail" }
   // A Personal workspace has one member and never takes anybody in.
@@ -171,7 +201,7 @@ export async function verifyAccessDomain(
   d: TeamDomainDeps,
   input: Admin & { id: string },
 ): Promise<"proven" | "absent" | "unreachable" | "missing" | "no_org" | "forbidden"> {
-  const allowed = await gate(d, input, MANAGE_DOMAINS)
+  const allowed = await gate(d, input, "access_domains:manage")
   if (allowed !== "ok") return allowed
   if (!d.txt) return "unreachable"
   return d.store.verifyTxt(input.tenantId, input.id, d.txt)
@@ -181,7 +211,7 @@ export async function removeAccessDomain(
   d: TeamDomainDeps,
   input: Admin & { id: string },
 ): Promise<"ok" | "missing" | "no_org" | "forbidden"> {
-  const allowed = await gate(d, input, MANAGE_DOMAINS)
+  const allowed = await gate(d, input, "access_domains:manage")
   if (allowed !== "ok") return allowed
   return (await d.store.removeAccessDomain(input.tenantId, input.id)) ? "ok" : "missing"
 }
@@ -195,14 +225,14 @@ export type RulesOutcome =
  * Replaces one access domain's rules.
  *
  * ⚠ VALIDATED AGAINST THE DOMAIN THEY BELONG TO, HERE, NOT IN THE BROWSER: a
- * pattern may not reach above the proven name, and the role must be one
- * Clerk could give. Admin is allowed - the console warns before it is sent.
+ * pattern may not reach above the proven name, and the role is member or
+ * admin - never owner. Admin is allowed - the console warns before it is sent.
  */
 export async function setAccessRules(
   d: TeamDomainDeps,
   input: Admin & { id: string; rules: unknown },
 ): Promise<RulesOutcome> {
-  const allowed = await gate(d, input, MANAGE_DOMAINS)
+  const allowed = await gate(d, input, "access_domains:manage")
   if (allowed !== "ok") return { outcome: allowed }
   const row = (await d.store.accessDomains(input.tenantId)).find(
     (r) => r.id === input.id,
@@ -218,7 +248,7 @@ export async function dismissAccessSuggestion(
   d: TeamDomainDeps,
   input: Admin & { name: string },
 ): Promise<"ok" | "no_org" | "forbidden"> {
-  const allowed = await gate(d, input, MANAGE_DOMAINS)
+  const allowed = await gate(d, input, "access_domains:manage")
   if (allowed !== "ok") return allowed
   await d.store.dismiss(input.tenantId, input.name)
   return "ok"
@@ -236,7 +266,7 @@ export interface Offer {
    * person's `auto` is `suggest`: they may only ask.
    */
   mode: "suggest" | "auto"
-  role: string
+  role: JoinRole
   requested: boolean
   removed: boolean
   /** Already recorded as joined (and so not auto-joined again). */
@@ -246,6 +276,16 @@ export interface Offer {
 /**
  * Every workspace whose rules let this person in, by their verified
  * addresses, less blocked addresses and workspaces in `exceptOrgIds`.
+ *
+ * ⚠ A CONNECTED IdP SUPERSEDES THESE RULES FOR ITS DOMAINS (#341, sso.md
+ * 2.12). An address at a name one of the workspace's ACTIVE SSO connections
+ * covers is not matched against its access rules at all - no suggestion, no
+ * request, no Join, no auto-join at sign-up - because who at that domain gets
+ * in is the IdP's to say now: through JIT, SCIM or an invitation. The match is
+ * redone without those addresses, so a person's other address (a subdomain
+ * the rules reach and the connection does not) still counts. Read under the
+ * matched workspace's own tenant, like its lists; a disabled or draft
+ * connection, or a lapsed proof, gives the rules back.
  */
 export async function offersFor(
   d: TeamDomainDeps,
@@ -257,9 +297,23 @@ export async function offersFor(
   },
 ): Promise<Offer[]> {
   const found = await d.store.accessFor(input)
-  const matches = matchAccess(found.domains, input.emails).filter(
-    (m) => !input.exceptOrgIds.includes(m.clerkOrgId),
+  const tenants = [...new Set(found.domains.map((dom) => dom.tenantId))]
+  const matches = (
+    await Promise.all(
+      tenants.map(async (tenantId) => {
+        const covered = new Set(d.ssoDomains ? await d.ssoDomains(tenantId) : [])
+        const emails = input.emails.filter(
+          (e) => !covered.has(e.trim().toLowerCase().split("@").pop() ?? ""),
+        )
+        return matchAccess(
+          found.domains.filter((dom) => dom.tenantId === tenantId),
+          emails,
+        )
+      }),
+    )
   )
+    .flat()
+    .filter((m) => !input.exceptOrgIds.includes(m.clerkOrgId))
   const offers: Offer[] = []
   for (const m of matches) {
     // ⚠ READ UNDER THE MATCHED WORKSPACE'S TENANT: its lists are its own.
@@ -411,7 +465,7 @@ export async function answerJoinRequest(
   d: TeamDomainDeps,
   input: Admin & { id: string; accept: boolean; block?: boolean },
 ): Promise<AnswerOutcome> {
-  const allowed = await gate(d, input, MANAGE_MEMBERS)
+  const allowed = await gate(d, input, "members:manage")
   if (allowed !== "ok") return allowed
   const request = (await d.store.pending(input.tenantId)).find((r) => r.id === input.id)
   if (!request) return "missing"
@@ -467,7 +521,7 @@ export async function answerJoinRequest(
  * ⚠ WHATEVER THE RULE'S MODE: a request answered after its rule went `off`
  * still gets the role that rule names.
  */
-export function roleFor(rows: AccessDomainRow[], email: string): string {
+export function roleFor(rows: AccessDomainRow[], email: string): JoinRole {
   const host = email.split("@")[1]?.toLowerCase() ?? ""
   const rules = rows
     .filter((r) => r.status === "verified" && within(host, r.name))
@@ -484,12 +538,25 @@ export function roleFor(rows: AccessDomainRow[], email: string): string {
  * ⚠ LISTED BEFORE CLERK IS ASKED. The other order leaves a window - or, if
  * this process dies between the two, a permanent state - where they are out
  * of the workspace and free to auto-join straight back in.
+ *
+ * ⚠ AN OWNER IS ONLY EVER REMOVED BY AN OWNER (#335), and their role row goes
+ * first, under the workspace's lock, so two owners removing each other at
+ * once cannot leave nobody. If Clerk then fails, the row is put back.
  */
 export async function removeTeamMember(
   d: TeamDomainDeps,
   input: Admin & { memberUserId: string; block: boolean },
-): Promise<"ok" | "self" | "no_org" | "forbidden" | "unavailable"> {
-  const allowed = await gate(d, input, MANAGE_MEMBERS)
+): Promise<
+  | "ok"
+  | "self"
+  | "no_org"
+  | "forbidden"
+  | "owner_only"
+  | "last_owner"
+  | "unconfirmed"
+  | "unavailable"
+> {
+  const allowed = await gate(d, input, "members:manage")
   if (allowed !== "ok") return allowed
   if (input.memberUserId === input.userId) return "self"
   if (!d.removeMember || !d.emailsOf) return "unavailable"
@@ -500,8 +567,20 @@ export async function removeTeamMember(
     ...(await d.emailsOf(input.memberUserId)),
     ...(recorded ? [recorded.email] : []),
   ]
-  await d.store.exclude(input.tenantId, emails, input.block ? "blocked" : "removed")
-  await d.removeMember(input.orgId!, input.memberUserId)
+  const released = await d.release(
+    input.tenantId,
+    input.orgId!,
+    input.userId,
+    input.memberUserId,
+  )
+  if (released.outcome !== "ok") return released.outcome
+  try {
+    await d.store.exclude(input.tenantId, emails, input.block ? "blocked" : "removed")
+    await d.removeMember(input.orgId!, input.memberUserId)
+  } catch (error) {
+    await released.undo()
+    throw error
+  }
   await d.store.forgetJoin(input.tenantId, input.memberUserId)
   return "ok"
 }
@@ -513,21 +592,17 @@ export async function removeTeamMember(
  */
 export async function allowAddress(
   d: TeamDomainDeps,
-  input: Admin & { email: string; invite: boolean; role?: string },
-): Promise<"ok" | "no_org" | "forbidden" | "unavailable"> {
-  const allowed = await gate(d, input, MANAGE_MEMBERS)
+  input: Admin & { email: string; invite: boolean; role?: unknown },
+): Promise<"ok" | "no_org" | "forbidden" | "invalid" | "unavailable"> {
+  const allowed = await gate(d, input, "members:manage")
   if (allowed !== "ok") return allowed
   if (input.invite && !d.invite) return "unavailable"
+  const role = input.role === undefined ? DEFAULT_ROLE : parseJoinRole(input.role)
+  if (!role) return "invalid"
   const email = input.email.trim().toLowerCase()
   await d.store.allow(input.tenantId, [email])
   if (input.invite)
-    await d.invite!(
-      input.orgId!,
-      input.userId,
-      email,
-      input.role ?? DEFAULT_ROLE,
-      input.tenantId,
-    )
+    await d.invite!(input.orgId!, input.userId, email, role, input.tenantId)
   return "ok"
 }
 
@@ -543,6 +618,10 @@ export async function allowAddress(
  *
  * ⚠ THROWS ON A CLERK OR DATABASE FAILURE, SO SVIX RETRIES; the whole thing
  * is idempotent (see `autoJoin`). A full workspace is not a failure.
+ *
+ * ⚠ AND NEVER FOR AN ADDRESS AN ACTIVE SSO CONNECTION COVERS (#341,
+ * `offersFor`). A person JIT just created raises `user.created` too; their
+ * workspace already has them, through its IdP, with the IdP's role.
  */
 export async function autoJoinFromWebhook(
   d: TeamDomainDeps,

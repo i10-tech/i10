@@ -1117,6 +1117,317 @@
         ],
         "additionalProperties": false
       },
+      "MemberProvisionedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "member.provisioned"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "connection_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "connection_id",
+              "created_at",
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "MemberDeprovisionedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "member.deprovisioned"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "connection_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "membership",
+                  "account"
+                ]
+              },
+              "cause": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "actor_user_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sessions_revoked": {
+                "type": "integer"
+              },
+              "api_keys": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "user_id",
+              "connection_id",
+              "created_at",
+              "mode",
+              "cause",
+              "actor_user_id",
+              "sessions_revoked",
+              "api_keys"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "SsoConnectionFailedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sso.connection.failed"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "connection_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "trigger": {
+                "type": "string",
+                "enum": [
+                  "sign_in_failed",
+                  "failure_spike",
+                  "no_success"
+                ]
+              },
+              "failures_last_hour": {
+                "type": "integer"
+              },
+              "failures_last_24h": {
+                "type": "integer"
+              },
+              "last_success_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "connection_id",
+              "reason",
+              "trigger",
+              "failures_last_hour",
+              "failures_last_24h",
+              "last_success_at",
+              "created_at"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "SsoCertificateExpiringEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sso.certificate.expiring"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "connection_id": {
+                "type": "string"
+              },
+              "fingerprint": {
+                "type": "string"
+              },
+              "not_after": {
+                "type": "string"
+              },
+              "days": {
+                "type": "integer"
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "test": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "connection_id",
+              "fingerprint",
+              "not_after",
+              "days",
+              "created_at"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "additionalProperties": false
+      },
       "SendEmailResponse": {
         "type": "object",
         "properties": {
@@ -1718,7 +2029,11 @@
                 "email.unsubscribed",
                 "webhook_endpoint.failing",
                 "webhook_endpoint.disabled",
-                "webhook_endpoint.recovered"
+                "webhook_endpoint.recovered",
+                "member.provisioned",
+                "member.deprovisioned",
+                "sso.connection.failed",
+                "sso.certificate.expiring"
               ]
             }
           },
@@ -1940,7 +2255,11 @@
                 "email.unsubscribed",
                 "webhook_endpoint.failing",
                 "webhook_endpoint.disabled",
-                "webhook_endpoint.recovered"
+                "webhook_endpoint.recovered",
+                "member.provisioned",
+                "member.deprovisioned",
+                "sso.connection.failed",
+                "sso.certificate.expiring"
               ]
             },
             "minItems": 1
@@ -2054,7 +2373,11 @@
                       "email.unsubscribed",
                       "webhook_endpoint.failing",
                       "webhook_endpoint.disabled",
-                      "webhook_endpoint.recovered"
+                      "webhook_endpoint.recovered",
+                      "member.provisioned",
+                      "member.deprovisioned",
+                      "sso.connection.failed",
+                      "sso.certificate.expiring"
                     ]
                   }
                 },
@@ -2275,7 +2598,11 @@
                 "email.unsubscribed",
                 "webhook_endpoint.failing",
                 "webhook_endpoint.disabled",
-                "webhook_endpoint.recovered"
+                "webhook_endpoint.recovered",
+                "member.provisioned",
+                "member.deprovisioned",
+                "sso.connection.failed",
+                "sso.certificate.expiring"
               ]
             },
             "minItems": 1
@@ -2508,7 +2835,11 @@
                     "email.unsubscribed",
                     "webhook_endpoint.failing",
                     "webhook_endpoint.disabled",
-                    "webhook_endpoint.recovered"
+                    "webhook_endpoint.recovered",
+                    "member.provisioned",
+                    "member.deprovisioned",
+                    "sso.connection.failed",
+                    "sso.certificate.expiring"
                   ]
                 },
                 "delivered": {
@@ -2644,7 +2975,11 @@
                     "email.unsubscribed",
                     "webhook_endpoint.failing",
                     "webhook_endpoint.disabled",
-                    "webhook_endpoint.recovered"
+                    "webhook_endpoint.recovered",
+                    "member.provisioned",
+                    "member.deprovisioned",
+                    "sso.connection.failed",
+                    "sso.certificate.expiring"
                   ]
                 },
                 "created_at": {
@@ -2697,7 +3032,11 @@
               "email.unsubscribed",
               "webhook_endpoint.failing",
               "webhook_endpoint.disabled",
-              "webhook_endpoint.recovered"
+              "webhook_endpoint.recovered",
+              "member.provisioned",
+              "member.deprovisioned",
+              "sso.connection.failed",
+              "sso.certificate.expiring"
             ]
           }
         },
@@ -2842,7 +3181,11 @@
               "email.unsubscribed",
               "webhook_endpoint.failing",
               "webhook_endpoint.disabled",
-              "webhook_endpoint.recovered"
+              "webhook_endpoint.recovered",
+              "member.provisioned",
+              "member.deprovisioned",
+              "sso.connection.failed",
+              "sso.certificate.expiring"
             ]
           }
         },
@@ -2902,7 +3245,11 @@
                     "email.unsubscribed",
                     "webhook_endpoint.failing",
                     "webhook_endpoint.disabled",
-                    "webhook_endpoint.recovered"
+                    "webhook_endpoint.recovered",
+                    "member.provisioned",
+                    "member.deprovisioned",
+                    "sso.connection.failed",
+                    "sso.certificate.expiring"
                   ]
                 },
                 "status": {
@@ -3013,7 +3360,11 @@
               "email.unsubscribed",
               "webhook_endpoint.failing",
               "webhook_endpoint.disabled",
-              "webhook_endpoint.recovered"
+              "webhook_endpoint.recovered",
+              "member.provisioned",
+              "member.deprovisioned",
+              "sso.connection.failed",
+              "sso.certificate.expiring"
             ]
           },
           "status": {
@@ -3268,7 +3619,11 @@
                     "email.unsubscribed",
                     "webhook_endpoint.failing",
                     "webhook_endpoint.disabled",
-                    "webhook_endpoint.recovered"
+                    "webhook_endpoint.recovered",
+                    "member.provisioned",
+                    "member.deprovisioned",
+                    "sso.connection.failed",
+                    "sso.certificate.expiring"
                   ]
                 },
                 "version": {
@@ -3499,7 +3854,11 @@
                     "email.unsubscribed",
                     "webhook_endpoint.failing",
                     "webhook_endpoint.disabled",
-                    "webhook_endpoint.recovered"
+                    "webhook_endpoint.recovered",
+                    "member.provisioned",
+                    "member.deprovisioned",
+                    "sso.connection.failed",
+                    "sso.certificate.expiring"
                   ]
                 },
                 "delivered": {
@@ -4825,7 +5184,11 @@
                           "email.unsubscribed",
                           "webhook_endpoint.failing",
                           "webhook_endpoint.disabled",
-                          "webhook_endpoint.recovered"
+                          "webhook_endpoint.recovered",
+                          "member.provisioned",
+                          "member.deprovisioned",
+                          "sso.connection.failed",
+                          "sso.certificate.expiring"
                         ]
                       }
                     },
@@ -5106,7 +5469,11 @@
                           "email.unsubscribed",
                           "webhook_endpoint.failing",
                           "webhook_endpoint.disabled",
-                          "webhook_endpoint.recovered"
+                          "webhook_endpoint.recovered",
+                          "member.provisioned",
+                          "member.deprovisioned",
+                          "sso.connection.failed",
+                          "sso.certificate.expiring"
                         ]
                       }
                     },
@@ -5476,7 +5843,11 @@
                           "email.unsubscribed",
                           "webhook_endpoint.failing",
                           "webhook_endpoint.disabled",
-                          "webhook_endpoint.recovered"
+                          "webhook_endpoint.recovered",
+                          "member.provisioned",
+                          "member.deprovisioned",
+                          "sso.connection.failed",
+                          "sso.certificate.expiring"
                         ]
                       }
                     },
@@ -5749,7 +6120,11 @@
                           "email.unsubscribed",
                           "webhook_endpoint.failing",
                           "webhook_endpoint.disabled",
-                          "webhook_endpoint.recovered"
+                          "webhook_endpoint.recovered",
+                          "member.provisioned",
+                          "member.deprovisioned",
+                          "sso.connection.failed",
+                          "sso.certificate.expiring"
                         ]
                       }
                     },
@@ -6022,7 +6397,11 @@
                           "email.unsubscribed",
                           "webhook_endpoint.failing",
                           "webhook_endpoint.disabled",
-                          "webhook_endpoint.recovered"
+                          "webhook_endpoint.recovered",
+                          "member.provisioned",
+                          "member.deprovisioned",
+                          "sso.connection.failed",
+                          "sso.certificate.expiring"
                         ]
                       }
                     },
@@ -6379,7 +6758,11 @@
                       "email.unsubscribed",
                       "webhook_endpoint.failing",
                       "webhook_endpoint.disabled",
-                      "webhook_endpoint.recovered"
+                      "webhook_endpoint.recovered",
+                      "member.provisioned",
+                      "member.deprovisioned",
+                      "sso.connection.failed",
+                      "sso.certificate.expiring"
                     ]
                   }
                 }
@@ -9946,6 +10329,98 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/WebhookEndpointRecoveredEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "member.provisioned": {
+      "post": {
+        "summary": "member.provisioned",
+        "description": "Somebody became a managed member of the workspace: created by just-in-time sign-in, a directory, or claimed by a connection. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberProvisionedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "member.deprovisioned": {
+      "post": {
+        "summary": "member.deprovisioned",
+        "description": "A managed member was deprovisioned. Carries the API keys they created, which are not revoked. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberDeprovisionedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "sso.connection.failed": {
+      "post": {
+        "summary": "sso.connection.failed",
+        "description": "Sign-ins through a connection are failing. At most one per connection every 15 minutes. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoConnectionFailedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx acknowledges it; anything else is retried."
+          }
+        }
+      }
+    },
+    "sso.certificate.expiring": {
+      "post": {
+        "summary": "sso.certificate.expiring",
+        "description": "A SAML identity provider certificate expires in 30, 7 or 1 days, or has expired. Version 1. Signed per Standard Webhooks; dedupe on `id`, which is also the `webhook-id` header.",
+        "tags": [
+          "Webhook events"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoCertificateExpiringEvent"
               }
             }
           }

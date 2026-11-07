@@ -340,3 +340,68 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
     },
   }
 }
+
+export type DirectoryMailboxOutcome =
+  | { status: "created" | "exists"; address: string }
+  /** No Clerk user, or no verified primary address: nothing to give a mailbox to. */
+  | { status: "gone" }
+  /** The primary address is not on a domain THIS workspace hosts mail for. */
+  | { status: "domain_not_hosted" }
+  /** Another account or alias already holds the address. */
+  | { status: "address_taken" }
+  | { status: "limit" }
+
+/**
+ * A mailbox for a person a company's directory activated (#344, sso.md 2.8).
+ *
+ * ⚠ THE SAME TWO STEPS AS `create`, NOT A THIRD PATH. The projection derives
+ * the row from the Clerk user and `directory.activate` flips the gate; nothing
+ * here writes `authd.accounts` itself. What differs is who is asking: a
+ * directory, for a person who may never have signed in, whose account has no
+ * password and whose address is already a verified, primary Clerk address (the
+ * apply job put it there). So there is no password check and no "add the
+ * address" step, and the workspace the directory belongs to must OWN the
+ * domain: a directory can never give anyone a mailbox on somebody else's, or
+ * on i10's own.
+ *
+ * ⚠ IDEMPOTENT. A person who already has this mailbox is `exists` and nothing
+ * is written - the apply job runs this again on every push.
+ */
+export async function provisionForDirectory(
+  deps: ProvisionDeps,
+  input: { tenantId: string; userId: string },
+): Promise<DirectoryMailboxOutcome> {
+  const person = await deps.identity.get(input.userId)
+  if (!person) return { status: "gone" }
+  const primary = (person.user.email_addresses ?? []).find(
+    (e) =>
+      e.id === person.user.primary_email_address_id &&
+      e.verification?.status === "verified",
+  )
+  if (!primary) return { status: "gone" }
+  const address = primary.email_address.trim().toLowerCase()
+
+  if ((await deps.directory.domainOwner(domainOf(address))) !== input.tenantId)
+    return { status: "domain_not_hosted" }
+
+  const existing = await deps.directory.current(input.userId)
+  if (existing?.active && existing.address === address)
+    return { status: "exists", address }
+  if (existing?.address !== address) {
+    if (await deps.directory.addressTaken(address)) return { status: "address_taken" }
+    const capacity = await deps.capacity.check({
+      tenantId: input.tenantId,
+      featureId: deps.featureId,
+      // A row on another domain may be another workspace's seat: count it here.
+      requested: existing && domainOf(existing.address) === domainOf(address) ? 0 : 1,
+      at: (deps.now ?? (() => new Date()))(),
+    })
+    if (capacity.status === "exceeded") return { status: "limit" }
+  }
+
+  const projected = await deps.project(person.user)
+  if (projected.email !== address) return { status: "domain_not_hosted" }
+  const mailbox = await deps.directory.activate(input.userId)
+  if (!mailbox) return { status: "gone" }
+  return { status: "created", address }
+}

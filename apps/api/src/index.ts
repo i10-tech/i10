@@ -28,6 +28,112 @@ import { createInvitationQueue, invitationScheduler } from "./queue/invitation-q
 import { createMailboxQueue, enqueueMailboxJob } from "./queue/mailbox-queue.js"
 import { canAccessMailbox, mailboxJobStore } from "./mailboxes/jobs.js"
 import { memberStore } from "./console/members-db.js"
+import { roleStore } from "./console/roles-db.js"
+import {
+  CLERK_ROLE,
+  addMember as addRuleMember,
+  can,
+  createWorkspace,
+  leaveWorkspace,
+  mayCreateWorkspace,
+  mayRemove,
+  onClerkEvent as onRoleEvent,
+  releaseMember,
+  removeMemberAs,
+  syncRole,
+  type JoinRole,
+  type RolesDeps,
+} from "./console/roles.js"
+import { identityStore } from "./identity/store.js"
+import {
+  clerkIdentityApi,
+  clerkProvisioningApi,
+  slowClerkLogged,
+} from "./identity/clerk.js"
+import {
+  mailboxLifecycle,
+  runDeletion,
+  type DirectoryMailDeps,
+} from "./identity/directory-mail.js"
+import { directoryMailStore } from "./identity/mail-store.js"
+import {
+  createMailboxDeletionQueue,
+  mailboxDeletionScheduler,
+  startMailboxDeletionWorker,
+} from "./queue/mailbox-deletion-queue.js"
+import { directoryStore } from "./identity/scim-store.js"
+import {
+  applyDirectoryUser,
+  directoryDeprovisioned,
+  directoryKicker,
+  directoryPreProvisioned,
+  safeError,
+  scheduleEntries,
+  type DirectoryDeps,
+} from "./identity/directory.js"
+import {
+  createDirectoryQueue,
+  directoryScheduler,
+  startDirectoryWorker,
+} from "./queue/directory-queue.js"
+import {
+  GOOGLE_DIRECTORY_SCOPES,
+  GOOGLE_FETCH_MAX_BYTES,
+  GOOGLE_FETCH_TIMEOUT_MS,
+  checkGoogleDirectoryAccess,
+  createGoogleTokenSource,
+  parseGoogleServiceAccount,
+  stopGoogleWatchChannels,
+} from "./identity/google-directory.js"
+import {
+  createGoogleDirectoryQueue,
+  googlePullScheduler,
+  startGoogleDirectoryScheduler,
+  startGoogleDirectoryWorker,
+} from "./queue/google-directory-queue.js"
+import type { OutboxEntry } from "./identity/directory-ports.js"
+import type { AuditEvent } from "./identity/ports.js"
+import { ssoGate } from "./identity/gate.js"
+import { enforcementGate } from "./identity/enforcement.js"
+import { ssoPolicyStore } from "./identity/policy-store.js"
+import { workspaceGate } from "./identity/workspace-policy.js"
+import { workspacePolicyStore } from "./identity/workspace-policy-store.js"
+import { backchannelLogout } from "./identity/oidc-logout.js"
+import { universalLogout } from "./identity/universal-logout.js"
+import type { Engine } from "./identity/bridge.js"
+import type { Protocol } from "./identity/model.js"
+import { testEngine, testEngineOn } from "./identity/test-engine.js"
+import { oidcEngine } from "./identity/oidc.js"
+import { fetchIdpMetadata, redisReplayCache, samlEngine } from "./identity/saml.js"
+import { forceRefresh } from "./identity/saml-refresh.js"
+import { samlStore } from "./identity/saml-store.js"
+import { guardedFetch } from "./identity/oidc-fetch.js"
+import { auditTap, tapped } from "./identity/audit-tap.js"
+import { identityAlerts, identityMail } from "./identity/alerts.js"
+import { connectionHealthStore } from "./identity/health-store.js"
+import { featureGate } from "./identity/features.js"
+import { siemStore } from "./identity/siem-store.js"
+import { identityWebhooks } from "./webhooks/identity-events.js"
+import {
+  createSiemQueue,
+  siemScheduler,
+  startSiemScheduler,
+  startSiemWorker,
+} from "./queue/siem-queue.js"
+import { passthroughFor } from "./identity/ldap.js"
+import { ldapProbe } from "./identity/ldap-probe.js"
+import { fixedWindow, ssoRateLimit } from "./identity/rate-limit.js"
+import { onIdentityClerkEvent } from "./identity/events.js"
+import {
+  clerkSessionIds,
+  gateReader,
+  startUrlFor,
+  withSsoFreshness,
+} from "./identity/middleware.js"
+import {
+  createIdentitySweepQueue,
+  sweepScheduler,
+} from "./queue/identity-sweep-queue.js"
 import { clerkMembers } from "./console/clerk-members.js"
 import { memberMail } from "./console/member-mail.js"
 import {
@@ -50,7 +156,11 @@ import {
   storageAllocations,
   workspaceOwnership,
 } from "./mailboxes/allocation.js"
-import { mailboxProvisioning } from "./mailboxes/provision.js"
+import {
+  mailboxProvisioning,
+  provisionForDirectory,
+  type ProvisionDeps,
+} from "./mailboxes/provision.js"
 import { createStalwartCaller } from "./mail/stalwart.js"
 import { planAssignmentStore } from "./metering/postgres.js"
 import { mailboxDirectory } from "./mailboxes/store.js"
@@ -98,11 +208,7 @@ import { riskSystem, systemTenantIds } from "./risk/wire.js"
 import { sesStatusStore } from "./ses-status/store.js"
 import { renderDomainTransfer } from "@repo/emails"
 import { joinStore } from "./console/join.js"
-import {
-  autoJoinFromWebhook,
-  MANAGE_MEMBERS,
-  type TeamDomainDeps,
-} from "./console/team-domains.js"
+import { autoJoinFromWebhook, type TeamDomainDeps } from "./console/team-domains.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
 import { domainTransferStore } from "./domains/transfers.js"
 import { emailLookup } from "./send/lookup.js"
@@ -796,9 +902,130 @@ if (systemSender && consoleUrl) {
  * invitation email keeps Clerk's own link.
  */
 const invitationQueue = createInvitationQueue({ redis: queueRedis })
+
+/**
+ * Workspace roles (#335): ours, in `core.workspace_roles`. Every check reads
+ * the table; Clerk is only asked to make and end memberships (always as
+ * `org:member`) and, in the webhook, for a joining person's addresses.
+ */
+const roleRows = roleStore(db)
+const clerkCodes = (error: unknown) =>
+  ((error as { errors?: { code?: string }[] }).errors ?? []).map((e) => e.code)
+const verifiedEmailsOf = async (userId: string) => {
+  try {
+    const user = await clerk.users.getUser(userId)
+    return user.emailAddresses
+      .filter((e) => e.verification?.status === "verified")
+      .map((e) => e.emailAddress.toLowerCase())
+  } catch (error) {
+    // A deleted account has no addresses left; the join record still names one.
+    if (clerkNotFound(error)) return []
+    throw error
+  }
+}
+const roles: RolesDeps = {
+  store: roleRows,
+  tenantOf: (orgId: string) => memberStore(db).tenantOf(orgId),
+  invitations: (tenantId: string, since: Date, membershipId: string) =>
+    memberStore(db).recentInvitations(tenantId, since, membershipId),
+  applyInvitation: (tenantId: string, id: string, membershipId: string) =>
+    memberStore(db).applyInvitation(tenantId, id, membershipId),
+  emailsOf: verifiedEmailsOf,
+  clerk: {
+    /*
+     * ⚠ A FULL WORKSPACE IS AN ANSWER, NOT A FAILURE. Clerk refuses with
+     * `organization_membership_quota_exceeded` when members plus pending
+     * invitations reach the limit; auto-join turns that into a request and
+     * Accept tells the admin what would make room.
+     */
+    create: async (orgId: string, userId: string) => {
+      try {
+        const made = await clerk.organizations.createOrganizationMembership({
+          organizationId: orgId,
+          userId,
+          role: CLERK_ROLE,
+        })
+        return { outcome: "created" as const, membershipId: made.id }
+      } catch (error) {
+        const codes = clerkCodes(error)
+        // Already a member (an invitation got there first) is done.
+        if (codes.includes("already_a_member_in_organization"))
+          return { outcome: "already_member" as const }
+        if (codes.includes("organization_membership_quota_exceeded"))
+          return { outcome: "full" as const }
+        throw error
+      }
+    },
+    remove: async (orgId: string, userId: string) => {
+      try {
+        await clerk.organizations.deleteOrganizationMembership({
+          organizationId: orgId,
+          userId,
+        })
+      } catch (error) {
+        if (!clerkNotFound(error)) throw error
+      }
+    },
+    isMember: async (orgId: string, userId: string) => {
+      const { data } = await clerk.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+        userId: [userId],
+        limit: 1,
+      })
+      return data.length > 0
+    },
+    createOrganization: async (input) => {
+      const made = await clerk.organizations.createOrganization(input)
+      return { id: made.id }
+    },
+    demote: async (orgId: string, userId: string) => {
+      try {
+        await clerk.organizations.updateOrganizationMembership({
+          organizationId: orgId,
+          userId,
+          role: CLERK_ROLE,
+        })
+      } catch (error) {
+        // A membership, or an organization, already gone has nothing to demote.
+        if (!clerkNotFound(error)) throw error
+      }
+    },
+    /*
+     * ⚠ "STILL HERE" IS BOTH: THE ACCOUNT AND THE MEMBERSHIP. A 404 on the user
+     * is a deleted account; anything else that fails is thrown, never read as
+     * gone - see `confirmOwners` in console/roles.ts.
+     */
+    stillMember: async (orgId: string, userId: string) => {
+      try {
+        await clerk.users.getUser(userId)
+      } catch (error) {
+        if (clerkNotFound(error)) return false
+        throw error
+      }
+      const { data } = await clerk.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+        userId: [userId],
+        limit: 1,
+      })
+      return data.length > 0
+    },
+    organizationExists: async (orgId: string) => {
+      try {
+        await clerk.organizations.getOrganization({ organizationId: orgId })
+        return true
+      } catch (error) {
+        if (clerkNotFound(error)) return false
+        throw error
+      }
+    },
+  },
+  log,
+}
+
 const members: MembersDeps = {
   store: memberStore(db),
   clerk: clerkMembers(clerk),
+  roles: roleRows,
   expiry: invitationScheduler(invitationQueue),
   ...(systemSender && consoleUrl
     ? {
@@ -912,6 +1139,7 @@ const observeSession = env.RISK_ENABLED
       ...(risk.takeover ? { takeover: risk.takeover } : {}),
       rescore: (tenantId, trigger) => rescore.rescore([tenantId], trigger),
       ...(env.CLIENT_CONTEXT_SECRET ? { secret: env.CLIENT_CONTEXT_SECRET } : {}),
+      edgeSecret: env.EDGE_SECRET,
       log,
     })
   : undefined
@@ -950,23 +1178,15 @@ const sendPath = {
  * console routes and the `user.created` webhook (auto-join at sign-up) share
  * this one set.
  */
-const clerkCodes = (error: unknown) =>
-  ((error as { errors?: { code?: string }[] }).errors ?? []).map((e) => e.code)
-
 const teamDomains: TeamDomainDeps | null = domains
   ? {
       verified: async (tenantId: string) =>
         (await domains.list(tenantId))
           .filter((domain) => domain.status === "verified")
           .map((domain) => domain.name),
-      can: async (userId: string, orgId: string, permission: string) => {
-        const { data } = await clerk.users.getOrganizationMembershipList({
-          userId,
-          limit: 100,
-        })
-        const membership = data.find((m) => m.organization.id === orgId)
-        return membership?.permissions.includes(permission) ?? false
-      },
+      // ⚠ OUR TABLE, NO CLERK CALL (#335). Clerk's roles are powerless.
+      can: (tenantId, userId, permission) =>
+        can(roleRows, tenantId, userId, permission),
       // Ours since 2026-10-13: Clerk's verified domains are not on our plan.
       store: joinStore(db),
       memberOrgIds: async (userId: string) => {
@@ -997,40 +1217,11 @@ const teamDomains: TeamDomainDeps | null = domains
         )
         return Object.fromEntries(found.filter((f) => f !== null))
       },
-      /*
-       * ⚠ A FULL WORKSPACE IS AN ANSWER, NOT A FAILURE. Clerk refuses with
-       * `organization_membership_quota_exceeded` when members plus pending
-       * invitations reach the limit; auto-join turns that into a request and
-       * Accept tells the admin what would make room.
-       */
-      addMember: async (orgId: string, userId: string, role: string) => {
-        try {
-          await clerk.organizations.createOrganizationMembership({
-            organizationId: orgId,
-            userId,
-            role,
-          })
-          return "added" as const
-        } catch (error) {
-          const codes = clerkCodes(error)
-          // Already a member (an invitation got there first) is done.
-          if (codes.includes("already_a_member_in_organization"))
-            return "added" as const
-          if (codes.includes("organization_membership_quota_exceeded"))
-            return "full" as const
-          throw error
-        }
-      },
-      removeMember: async (orgId: string, userId: string) => {
-        try {
-          await clerk.organizations.deleteOrganizationMembership({
-            organizationId: orgId,
-            userId,
-          })
-        } catch (error) {
-          if (!clerkNotFound(error)) throw error
-        }
-      },
+      // `org:member` in Clerk, the rule's role in our table. See console/roles.ts.
+      addMember: (orgId, userId, role) => addRuleMember(roles, { orgId, userId, role }),
+      release: (tenantId, orgId, actorUserId, memberUserId) =>
+        releaseMember(roles, { tenantId, orgId, actorUserId, userId: memberUserId }),
+      removeMember: roles.clerk.remove,
       /*
        * ⚠ CLERK'S INVITATION, OUR EMAIL. Clerk's own delivery is off; the
        * invitation raises `email.created` and the auth mail path sends ours
@@ -1045,7 +1236,7 @@ const teamDomains: TeamDomainDeps | null = domains
         orgId: string,
         inviterUserId: string,
         email: string,
-        role: string,
+        role: JoinRole,
         tenantId: string,
       ) => {
         const sent = await sendInvitations(members, {
@@ -1060,23 +1251,18 @@ const teamDomains: TeamDomainDeps | null = domains
         if (sent.outcome !== "ok" || sent.sent.length === 0)
           throw new Error(`could not invite ${email}: ${sent.outcome}`)
       },
-      emailsOf: async (userId: string) => {
-        try {
-          const user = await clerk.users.getUser(userId)
-          return user.emailAddresses
-            .filter((e) => e.verification?.status === "verified")
-            .map((e) => e.emailAddress.toLowerCase())
-        } catch (error) {
-          // A deleted account has no addresses left; the join record still names one.
-          if (clerkNotFound(error)) return []
-          throw error
-        }
-      },
+      emailsOf: verifiedEmailsOf,
       isPersonal: async (orgId: string) => {
         const org = await clerk.organizations.getOrganization({ organizationId: orgId })
         return org.publicMetadata?.kind === "personal"
       },
       txt: nodeTxtLookup(),
+      /*
+       * ⚠ A CONNECTED IdP SUPERSEDES AUTO-JOIN FOR ITS DOMAINS (#341): the
+       * names an active SSO connection covers are left out of every match.
+       * `identity` is made further down; this runs per request, long after.
+       */
+      ssoDomains: (tenantId: string) => identity.coveredDomains(tenantId),
       // Member limits per plan (#327): checked before every seat use.
       seats: {
         beforeSeatUse: (tenantId: string, orgId: string) =>
@@ -1125,7 +1311,7 @@ const canAllocateStorage = async (userId: string, tenantId: string) => {
   if (!tenant) return false
   if (!tenant.clerkOrgId) return tenant.ownerClerkUserId === userId
   return Boolean(
-    teamDomains && (await teamDomains.can(userId, tenant.clerkOrgId, MANAGE_MEMBERS)),
+    teamDomains && (await teamDomains.can(tenantId, userId, "members:manage")),
   )
 }
 
@@ -1134,7 +1320,573 @@ const teamInboxService = teamInboxesFor({
   db,
   clerk,
   mail: teamMailFor(env),
+  isAdmin: (tenantId, userId) => can(roleRows, tenantId, userId, "members:manage"),
 })
+
+/**
+ * The identity core (#337): SSO connections, the sign-in bridge, the gate,
+ * the sweeper's scheduling and the managed-account watchdog. See
+ * docs/decisions/sso.md 2.1 to 2.5 and src/identity/.
+ *
+ * ⚠ THE GATE IS WIRED UNCONDITIONALLY. Every session route consults it; it
+ * costs a cached map lookup for anybody who is not managed (identity/gate.ts)
+ * and refuses with 503 when it cannot tell.
+ *
+ * ⚠ THE TEST ENGINE ONLY WHERE env.ts LET IT ON (development, a dev Clerk
+ * instance). Off, `test` connections cannot be made, started or finished.
+ */
+const identityBase = identityStore(db, secrets)
+const identityClerk = slowClerkLogged(
+  clerkIdentityApi(clerk, { secretKey: env.CLERK_SECRET_KEY }),
+  log,
+)
+/*
+ * What the audit log's events set going (#345): customer webhooks (after the
+ * row committed), the connection failure alert, the certificate expiry email.
+ * `identity` is the store with that tap on `record`; everything that audits an
+ * identity change in this process goes through it.
+ */
+const identityHealth = connectionHealthStore(db)
+const identityFeatures = featureGate(db)
+const identityAlertsService =
+  systemSender && consoleUrl
+    ? identityAlerts({
+        mail: identityMail({ sender: systemSender, consoleUrl }),
+        roles: roleRows,
+        workspaceOrg: (tenantId) => identityBase.workspaceOrg(tenantId),
+        workspaceName: (tenantId) => identityBase.workspaceName(tenantId),
+        connectionName: async (tenantId, id) =>
+          (await identityBase.connection(tenantId, id))?.name ?? null,
+        directoryName: async (tenantId, id) =>
+          (await directories.directory(tenantId, id))?.name ?? null,
+        addresses: (orgId, userIds) => clerkMembers(clerk).addresses(orgId, userIds),
+        addressOf: async (userId) => {
+          const user = await identityClerk.user(userId)
+          return (
+            user?.emails.find((e) => e.verified)?.address ??
+            user?.emails[0]?.address ??
+            null
+          )
+        },
+        consoleUrl,
+        log,
+      })
+    : undefined
+const identity = tapped(
+  identityBase,
+  auditTap({
+    ...(webhookQueue
+      ? { webhooks: identityWebhooks({ db, queue: webhookQueue, log }) }
+      : {}),
+    health: identityHealth,
+    ...(identityAlertsService ? { alerts: identityAlertsService } : {}),
+    store: identityBase,
+    connectionStatus: async (tenantId, id) =>
+      (await identityBase.connection(tenantId, id))?.status ?? null,
+    log,
+  }),
+)
+const gateChecker = ssoGate({ store: identity, clerk: identityClerk, log })
+/*
+ * Enforcement, break-glass, setup links and discovery (#340). The enforcement
+ * gate runs in `requireTenant` once the workspace is known; see
+ * identity/enforcement.ts for what it costs.
+ */
+const ssoPolicy = ssoPolicyStore(db)
+const enforcement = enforcementGate({
+  store: ssoPolicy,
+  clerk: identityClerk,
+  log,
+  ...(identityAlertsService
+    ? {
+        onBypass: (input) =>
+          identityAlertsService.bypassUsed(input.tenantId, {
+            userId: input.userId,
+            sessionId: input.sessionId,
+          }),
+      }
+    : {}),
+})
+/*
+ * The workspace's session policy, second-factor rule and IP allowlist (#345).
+ * Console requests meet it in `requireTenant` (through the gate reader below)
+ * and API keys in `requireApiKey`; see identity/workspace-policy.ts for what
+ * it costs and what a replica far from a change may still admit.
+ */
+const workspaceRules = workspacePolicyStore(db)
+const workspace = workspaceGate({
+  store: workspaceRules,
+  identity,
+  clerk: identityClerk,
+  forget: (input) => gateChecker.forget(input),
+  contextSecret: env.CLIENT_CONTEXT_SECRET,
+  edgeSecret: env.EDGE_SECRET,
+  log,
+})
+const sessionIds = clerkSessionIds(clerk, {
+  authorizedParties: env.CONSOLE_ORIGINS,
+  log,
+})
+const authOrigin = env.AUTH_ORIGINS[0]
+const ssoStartUrl = startUrlFor(authOrigin)
+const testEngineEnabled = testEngineOn(env)
+const engines = new Map<Protocol, Engine>(
+  testEngineEnabled && authOrigin ? [["test", testEngine(authOrigin)]] : [],
+)
+if (testEngineEnabled)
+  log.warn(
+    {},
+    "SSO TEST ENGINE ON - anybody who starts a sign-in can assert any identity",
+  )
+/*
+ * The OIDC engine (#338). It needs the secret box (PKCE verifiers and client
+ * secrets are sealed) and the auth app, whose `/sso/callback` is the redirect
+ * URI every IdP is given.
+ *
+ * ⚠ EVERY FETCH IT MAKES IS THE WEBHOOK EGRESS GUARD's, with the same allow
+ * list: `WEBHOOK_EGRESS_ALLOW`, which env.ts refuses in production, is what
+ * lets a local development IdP on 127.0.0.1 be reached and nothing else.
+ */
+const oidc =
+  secrets && authOrigin
+    ? oidcEngine({
+        store: identity,
+        fetch: guardedFetch({
+          vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+        }),
+        redirectUri: new URL("/sso/callback", authOrigin).href,
+        google:
+          env.GOOGLE_SSO_CLIENT_ID && env.GOOGLE_SSO_CLIENT_SECRET
+            ? {
+                clientId: env.GOOGLE_SSO_CLIENT_ID,
+                clientSecret: env.GOOGLE_SSO_CLIENT_SECRET,
+              }
+            : null,
+        log,
+      })
+    : null
+if (oidc) engines.set("oidc", oidc)
+else log.warn({}, "OIDC SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
+/*
+ * The SAML engine (#339). The same needs as OIDC (our SP keys are sealed,
+ * every URL an IdP is given is on the auth app), plus Redis for the
+ * assertion replay cache.
+ *
+ * ⚠ THE CACHE CLIENT FAILS FAST, AND HERE THAT IS A 503, NOT A MISS. Every
+ * other user of `cache` treats an error as "not cached"; the replay cache
+ * throws instead (identity/saml.ts), so an outage refuses SAML sign-ins
+ * rather than letting an assertion be spent twice.
+ */
+const samlRows = samlStore(db)
+const replay = redisReplayCache(cache)
+const samlFetch = guardedFetch({
+  vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+})
+const saml =
+  secrets && authOrigin
+    ? samlEngine({
+        store: identity,
+        saml: samlRows,
+        fetch: samlFetch,
+        replay,
+        forceRefresh: (connection, before) =>
+          forceRefresh(
+            {
+              store: identity,
+              saml: samlRows,
+              log,
+              replay,
+              fetchMetadata: (url) => fetchIdpMetadata(samlFetch, url),
+            },
+            connection,
+            before,
+          ),
+        authOrigin,
+        log,
+      })
+    : null
+if (saml) engines.set("saml", saml)
+else log.warn({}, "SAML SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
+const managedDeps = { store: identity, clerk: identityClerk, log }
+const sweepQueue = createIdentitySweepQueue({ redis: queueRedis })
+const consoleFreshAuth = withSsoFreshness(
+  freshAuth,
+  sessionIds,
+  gateChecker,
+  startUrlFor(authOrigin, "/sso/step-up"),
+  async (userId, sessionId) => {
+    const read = await identity.gateRead(userId, sessionId)
+    if (!read.managed) return null
+    const connectionId = read.session?.connectionId ?? read.managed.connectionId
+    if (!connectionId) return null
+    const connection = await identity.connectionForStart(connectionId)
+    return connection
+      ? {
+          id: connection.id,
+          protocol: connection.protocol,
+          provider: connection.provider,
+        }
+      : null
+  },
+  log,
+)
+const ssoJoinRequests = joinStore(db)
+/*
+ * SCIM directories (#342): the store, the apply queue and the kick that finds
+ * entries nobody scheduled. The routes and the console schedule after their
+ * transaction commits; a Redis failure there is logged, never the request's.
+ */
+const directories = directoryStore(db)
+const directoryQueue = createDirectoryQueue({ redis: queueRedis })
+const directoryEnqueue = directoryScheduler(directoryQueue)
+const scheduleDirectory = (tenantId: string, entries: readonly OutboxEntry[]) =>
+  scheduleEntries({ enqueue: directoryEnqueue, log }, tenantId, entries)
+const kickDirectory = directoryKicker({
+  store: directories,
+  enqueue: directoryEnqueue,
+  log,
+  room: async (tenantId) => {
+    const orgId = await identityBase.workspaceOrg(tenantId)
+    return orgId ? !(await beforeSeatUse(members, tenantId, orgId)).full : false
+  },
+})
+/*
+ * ⚠ ONE SET OF DEPS FOR BOTH WAYS A MAILBOX IS MADE: a person asking for their
+ * own (`/mailboxes`) and a company's directory giving one (#344). The
+ * projection, not a second writer; `MAIL_DOMAINS` is passed for the reason it
+ * is there - i10's own domains are hosted regardless of who owns a
+ * `core.domains` row.
+ *
+ * `storage` and `canAllocate` (B3) only matter to a person sizing their own
+ * inbox; a directory's mailbox is created without an allocation.
+ */
+const mailboxProvisionDeps: ProvisionDeps = {
+  identity: clerkIdentity(clerk),
+  directory: mailboxDir,
+  capacity: postgresMeter(db),
+  project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
+  featureId: MAILBOXES,
+  storage: mailboxStorage,
+  canAllocate: canAllocateStorage,
+}
+/*
+ * Mail from the directory (#344): mailboxes, aliases and lists for the people
+ * a directory activates, and the suspension of a deprovisioned person's. The
+ * deletion of a suspended mailbox is a delayed job on its date.
+ */
+const mailStore = directoryMailStore(db)
+const mailboxDeletionQueue = createMailboxDeletionQueue({ redis: queueRedis })
+const mailDeps: DirectoryMailDeps = {
+  store: mailStore,
+  provision: (input) => provisionForDirectory(mailboxProvisionDeps, input),
+  // ⚠ A MEMBER IS A ROW IN OUR ROLES TABLE (#335), kept in step with Clerk.
+  isMember: async (tenantId, userId) =>
+    (await roles.store.roleOf(tenantId, userId)) !== null,
+  directoryActive: async (tenantId, userId) =>
+    (await directories.personStatus(tenantId, userId)) === "active",
+  scheduleDeletion: mailboxDeletionScheduler(mailboxDeletionQueue),
+  record: (tenantId, event) => identity.record(tenantId, event),
+  log,
+}
+const mailLifecycle = mailboxLifecycle(mailDeps)
+const scimBaseUrl = (directoryId: string) => `${env.SCIM_BASE_URL}/${directoryId}`
+/*
+ * Google Workspace directory sync (#343): domain-wide delegation with our own
+ * service account, outbound HTTP exclusively through `guardedFetch`, and one
+ * groupmq pull at a time per directory.
+ */
+const googleServiceAccount = env.GOOGLE_DIRECTORY_SERVICE_ACCOUNT
+  ? parseGoogleServiceAccount(env.GOOGLE_DIRECTORY_SERVICE_ACCOUNT)
+  : null
+const googleFetch = guardedFetch({
+  vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+  timeoutMs: GOOGLE_FETCH_TIMEOUT_MS,
+  maxBytes: GOOGLE_FETCH_MAX_BYTES,
+})
+const googleTokens = googleServiceAccount
+  ? createGoogleTokenSource({
+      serviceAccount: googleServiceAccount,
+      fetch: googleFetch,
+    })
+  : null
+const googleNotifyUrl = new URL("/google/directory/notify", env.SCIM_BASE_URL).href
+const googleDirectoryQueue = createGoogleDirectoryQueue({ redis: queueRedis })
+const enqueueGooglePull = googlePullScheduler(googleDirectoryQueue)
+const bridge = {
+  store: identity,
+  clerk: identityClerk,
+  engines,
+  /*
+   * ⚠ OUR ROLES CODE (#335), WITH THE ROLE THE GROUP RULES GIVE (#341) - a
+   * joining role, never owner - and #327's capacity as auto-join has it: our
+   * plan's limit is asked before Clerk's (`beforeSeatUse`, which also frees
+   * spots expired invitations still hold), but only for somebody who is not
+   * a member already, or a full workspace would lock its own members out.
+   */
+  join: async (input: {
+    tenantId: string
+    orgId: string
+    userId: string
+    role: JoinRole
+  }) => {
+    const held = await roles.store.roleOf(input.tenantId, input.userId)
+    const inClerk = await roles.clerk.isMember(input.orgId, input.userId)
+    /*
+     * ⚠ A MEMBER ALREADY IS NOT ADDED AGAIN, NOT EVEN ASKED. At the cap, Clerk
+     * answers a create for somebody who is already in with
+     * `organization_membership_quota_exceeded`, not "already a member": its
+     * quota check comes first. That read as "full" and put a member on the
+     * waiting list (2026-11-01). Their role still follows the group rules
+     * through `syncRole`, after this.
+     */
+    if (held !== null && inClerk) return "added" as const
+    if (held === null && !inClerk) {
+      const room = await beforeSeatUse(members, input.tenantId, input.orgId)
+      if (room.full) return "full" as const
+    }
+    return addRuleMember(roles, {
+      orgId: input.orgId,
+      userId: input.userId,
+      role: input.role,
+      source: "sso",
+    })
+  },
+  isExempt: async (tenantId: string, userId: string) => {
+    const role = await roles.store.roleOf(tenantId, userId)
+    return role === "owner" || role === "admin"
+  },
+  // JIT (#341): available; each connection's `jit_enabled` decides.
+  jit: true,
+  // SCIM (#342): a person a directory provisioned, and one it switched off.
+  preProvisioned: directoryPreProvisioned({ store: directories, log }),
+  deprovisioned: directoryDeprovisioned({ store: directories }),
+  syncRole: (input: { tenantId: string; userId: string; role: JoinRole }) =>
+    syncRole(roles, input),
+  // ⚠ THE SAME WAITING LIST AUTO-JOIN FILES INTO (#327): `full`, under Requests.
+  waitlist: (tenantId: string, input: { userId: string; email: string; via: string }) =>
+    ssoJoinRequests.fileRequest(tenantId, { ...input, full: true }),
+  log,
+}
+const apiKeyStore = keyStore(db)
+const siemRows = secrets ? siemStore(db, secrets) : null
+const siemFetch = guardedFetch({
+  vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+})
+const identityConsole = {
+  store: identity,
+  clerk: identityClerk,
+  gate: gateChecker,
+  features: identityFeatures,
+  health: identityHealth,
+  ...(siemRows
+    ? {
+        siem: {
+          store: siemRows,
+          vet: (host: string, signal: AbortSignal) =>
+            vetHost(host, { allow: webhookEgressAllow, signal }),
+          fetch: siemFetch,
+        },
+      }
+    : {}),
+  policy: ssoPolicy,
+  enforcement,
+  workspacePolicy: {
+    store: workspaceRules,
+    gate: workspace,
+    contextSecret: env.CLIENT_CONTEXT_SECRET,
+    edgeSecret: env.EDGE_SECRET,
+  },
+  protocols: [...engines.keys()],
+  universalLogoutUrl: (connectionId: string) =>
+    new URL(`/sso/universal-logout/${connectionId}`, env.SCIM_BASE_URL).href,
+  scim: {
+    store: directories,
+    baseUrl: scimBaseUrl,
+    kick: kickDirectory,
+    schedule: scheduleDirectory,
+    google: {
+      serviceAccount: googleServiceAccount
+        ? {
+            clientEmail: googleServiceAccount.clientEmail,
+            clientId: googleServiceAccount.clientId,
+          }
+        : null,
+      scopes: GOOGLE_DIRECTORY_SCOPES,
+      checkAccess: (input: {
+        tenantId: string
+        adminEmail: string | null
+        domain: string | null
+      }) =>
+        checkGoogleDirectoryAccess(
+          { tokens: googleTokens, fetch: googleFetch, store: directories },
+          input,
+        ),
+      schedulePull: (tenantId: string, directoryId: string) =>
+        enqueueGooglePull({ tenantId, directoryId, cause: "enable" }),
+      stopChannels: (
+        tenantId: string,
+        directoryId: string,
+        adminEmail?: string | null,
+      ) =>
+        stopGoogleWatchChannels(
+          { store: directories, tokens: googleTokens, fetch: googleFetch, log },
+          {
+            tenantId,
+            directoryId,
+            ...(adminEmail !== undefined ? { adminEmail } : {}),
+          },
+        ),
+    },
+  },
+  ...(oidc && authOrigin
+    ? {
+        oidc: {
+          engine: oidc,
+          jwksUrl: (connectionId: string) =>
+            new URL(`/sso/jwks/${connectionId}`, authOrigin).href,
+          // This API's own origin (the one SCIM_BASE_URL names): the IdP's server calls it, form-encoded (#345).
+          backchannelLogoutUrl: (connectionId: string) =>
+            new URL(`/sso/oidc/backchannel/${connectionId}`, env.SCIM_BASE_URL).href,
+        },
+      }
+    : {}),
+  ...(saml ? { saml: { engine: saml, store: samlRows, log } } : {}),
+  // LDAP pass-through (#344). The host is vetted like an OIDC issuer: public
+  // addresses only, the connection pinned to the vetted one.
+  ldap: {
+    probe: ldapProbe({
+      vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+      log,
+    }),
+    take: fixedWindow(cache),
+  },
+  mail: { deps: mailDeps, groups: mailStore },
+  deprovision: {
+    ...managedDeps,
+    mail: mailLifecycle,
+    // ⚠ RECORDED ON THE DEPROVISION EVENT, NEVER REVOKED (#345).
+    keysCreatedBy: async (tenantId: string, userId: string) =>
+      (await apiKeyStore.createdBy(tenantId, userId)).map((k) => ({
+        id: k.id,
+        name: k.name,
+      })),
+    workspaceOrg: (tenantId: string) => identity.workspaceOrg(tenantId),
+    // ⚠ THE ACTOR'S ROLE, NOT THE PERSON'S OWN: deprovisioning is somebody
+    // else taking them out, so it obeys the rule removing somebody obeys.
+    authorize: async (input: {
+      tenantId: string
+      actorUserId: string | null
+      userId: string
+    }) => {
+      if (input.actorUserId === null) return "ok" as const
+      const [actor, target] = await Promise.all([
+        roles.store.roleOf(input.tenantId, input.actorUserId),
+        roles.store.roleOf(input.tenantId, input.userId),
+      ])
+      return mayRemove(actor ?? "member", target ?? "member")
+    },
+    removeMembership: async (input: {
+      tenantId: string
+      orgId: string
+      actorUserId: string | null
+      userId: string
+    }) => {
+      // A directory (null actor) removes as the workspace; leaving's rules then
+      // apply, so the last owner still cannot go.
+      const done =
+        input.actorUserId === null
+          ? await leaveWorkspace(roles, input)
+          : await removeMemberAs(roles, { ...input, actorUserId: input.actorUserId })
+      return done === "ok" ? ("removed" as const) : done
+    },
+  },
+  log,
+}
+
+/*
+ * The apply worker (#342) runs in this process, not in worker.ts: only here are
+ * `roles` (the membership calls), `members` (our plan's capacity) and the
+ * deprovisioning rules composed, and its jobs are immediate, so it does not
+ * need the worker's always-on guarantee. It is closed first on SIGTERM.
+ */
+const directoryDeps: DirectoryDeps = {
+  store: directories,
+  identity,
+  clerk: identityClerk,
+  provisioning: clerkProvisioningApi(clerk),
+  deprovision: identityConsole.deprovision,
+  mail: mailDeps,
+  isMember: (orgId, userId) => roles.clerk.isMember(orgId, userId),
+  seats: (tenantId, orgId) => beforeSeatUse(members, tenantId, orgId),
+  join: (input) =>
+    addRuleMember(roles, {
+      orgId: input.orgId,
+      userId: input.userId,
+      role: input.role,
+      source: "scim",
+    }),
+  isExempt: bridge.isExempt,
+  forget: (input) => gateChecker.forget(input),
+  log,
+}
+const directoryWorker = startDirectoryWorker({
+  queue: directoryQueue,
+  apply: (job) => applyDirectoryUser(directoryDeps, job),
+  name: `api-${process.pid}:directory-apply`,
+  log,
+})
+const mailboxDeletionWorker = startMailboxDeletionWorker({
+  queue: mailboxDeletionQueue,
+  run: (job) => runDeletion(mailDeps, job),
+  name: `api-${process.pid}:mailbox-deletion`,
+  log,
+})
+const googleDirectoryWorker = startGoogleDirectoryWorker({
+  queue: googleDirectoryQueue,
+  deps: {
+    store: directories,
+    tokens: googleTokens,
+    fetch: googleFetch,
+    notifyUrl: googleNotifyUrl,
+    schedule: scheduleDirectory,
+    record: (tenantId, event) => identity.record(tenantId, event),
+    log,
+  },
+  name: `api-${process.pid}:google-directory-pull`,
+})
+const googleDirectoryScheduler = googleTokens
+  ? startGoogleDirectoryScheduler({
+      store: directories,
+      enqueue: enqueueGooglePull,
+      log,
+    })
+  : null
+
+/*
+ * The SIEM export (#345): every minute each replica asks which workspaces are
+ * due; groupmq runs one job per workspace across replicas; the database says
+ * whether the run is really due. See queue/siem-queue.ts.
+ */
+const siemQueue = createSiemQueue({ redis: queueRedis })
+const siemWorker = siemRows
+  ? startSiemWorker({
+      queue: siemQueue,
+      deps: {
+        store: siemRows,
+        fetch: siemFetch,
+        allowed: (tenantId) => identityFeatures.allows(tenantId, "siem_export"),
+        log,
+      },
+      name: `api-${process.pid}:siem-export`,
+    })
+  : null
+const siemSchedulerHandle = siemRows
+  ? startSiemScheduler({
+      due: (after, limit) => siemRows.due(after, limit),
+      enqueue: siemScheduler(siemQueue),
+      log,
+    })
+  : null
 
 const app = createApp({
   suppressions,
@@ -1148,7 +1900,7 @@ const app = createApp({
     cache: redisKeyCache(cache),
     ttlSeconds: env.API_KEY_CACHE_TTL_SECONDS,
   },
-  apiKeys: { store: keyStore(db), cache: redisKeyCache(cache), log },
+  apiKeys: { store: apiKeyStore, cache: redisKeyCache(cache), log },
   /*
    * Saved accounts (#192). `identify` only with an auth origin to check `azp`
    * against - see AUTH_ORIGINS in env.ts.
@@ -1156,6 +1908,7 @@ const app = createApp({
   devices: {
     store: devices,
     clerk: clerkResume(clerk),
+    managed: async (userId: string) => (await identity.managedByUser(userId)) !== null,
     ...(env.AUTH_ORIGINS.length
       ? {
           identify: clerkAuthAppIdentity(clerk, {
@@ -1178,6 +1931,15 @@ const app = createApp({
     // plan assignment on Pro, and Polar charging a card for a workspace nobody
     // could sign in to. See tenants/lifecycle.ts.
     lifecycle,
+    // Workspace roles kept in step with Clerk's memberships (#335).
+    roles: (type: string, data: unknown) => onRoleEvent(roles, type, data),
+    // The SSO sweeper, the managed-account watchdog (#337).
+    identity: (type: string, data: unknown) =>
+      onIdentityClerkEvent(
+        { ...managedDeps, schedule: sweepScheduler(sweepQueue) },
+        type,
+        data,
+      ),
     // Member limits, late acceptances and capacity alerts (#327).
     members: (type: string, data: unknown) => onClerkEvent(members, type, data),
     // Team inboxes follow the workspace (B8).
@@ -1373,6 +2135,144 @@ const app = createApp({
    * a 501 that would claim mailboxes are not a feature.
    */
   sessionAuth: sessions,
+  ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl, enforcement, workspace),
+  apiKeyNetwork: (tenantId: string, headers: Headers) =>
+    workspace.admitApiKey(tenantId, headers),
+  ...(env.AUTH_ORIGINS.length
+    ? {
+        sso: {
+          bridge,
+          gate: gateChecker,
+          identify: clerkAuthAppIdentity(clerk, {
+            authorizedParties: env.AUTH_ORIGINS,
+            log,
+          }),
+          returnOrigins: [...env.AUTH_ORIGINS, ...env.CONSOLE_ORIGINS],
+          testEngine: testEngineEnabled,
+          rateLimit: ssoRateLimit({
+            take: fixedWindow(cache),
+            contextSecret: env.CLIENT_CONTEXT_SECRET,
+            edgeSecret: env.EDGE_SECRET,
+            perConnectionStarts: true,
+          }),
+          ...(oidc
+            ? {
+                oidc,
+                oidcLogout: backchannelLogout(
+                  {
+                    store: identity,
+                    sessions: samlRows,
+                    clerk: identityClerk,
+                    replay,
+                    forget: (input: { userId?: string; sessionId?: string }) =>
+                      gateChecker.forget(input),
+                    fetch: guardedFetch({
+                      vet: (host, signal) =>
+                        vetHost(host, { allow: webhookEgressAllow, signal }),
+                    }),
+                    log,
+                  },
+                  oidc,
+                ),
+              }
+            : {}),
+          ...(saml
+            ? {
+                saml: {
+                  engine: saml,
+                  slo: {
+                    store: identity,
+                    saml: samlRows,
+                    clerk: identityClerk,
+                    replay,
+                    forget: (input: { userId?: string; sessionId?: string }) =>
+                      gateChecker.forget(input),
+                    log,
+                  },
+                },
+              }
+            : {}),
+          universalLogout: universalLogout(
+            {
+              store: identity,
+              sessions: samlRows,
+              samlStore: samlRows,
+              clerk: identityClerk,
+              replay,
+              forget: (input: { userId?: string; sessionId?: string }) =>
+                gateChecker.forget(input),
+              fetch: guardedFetch({
+                vet: (host, signal) =>
+                  vetHost(host, { allow: webhookEgressAllow, signal }),
+              }),
+              log,
+              endpointUrl: (connectionId: string) =>
+                new URL(`/sso/universal-logout/${connectionId}`, env.SCIM_BASE_URL)
+                  .href,
+            },
+            oidc ?? undefined,
+          ),
+          mayManage: (tenantId: string, userId: string) =>
+            can(roleRows, tenantId, userId, "sso:manage"),
+          tenantOfConnection: async (connectionId: string) =>
+            (await identity.connectionForStart(connectionId))?.tenantId ?? null,
+          discovery: { store: ssoPolicy, startUrl: ssoStartUrl },
+          setup: {
+            links: ssoPolicy,
+            identity: identityConsole,
+            bridge,
+            returnOrigins: [...env.AUTH_ORIGINS, ...env.CONSOLE_ORIGINS],
+            take: fixedWindow(cache),
+            contextSecret: env.CLIENT_CONTEXT_SECRET,
+            edgeSecret: env.EDGE_SECRET,
+          },
+        },
+      }
+    : {}),
+  scim: {
+    store: directories,
+    baseUrl: scimBaseUrl,
+    schedule: scheduleDirectory,
+    kick: kickDirectory,
+    record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
+    take: fixedWindow(cache),
+    contextSecret: env.CLIENT_CONTEXT_SECRET,
+    edgeSecret: env.EDGE_SECRET,
+    log,
+  },
+  internalAuthd: {
+    secret: env.AUTHD_API_SECRET,
+    passthrough: (connectionId: string) => passthroughFor(identity, connectionId),
+    log,
+  },
+  googleDirectory: {
+    store: directories,
+    schedulePull: (tenantId: string, directoryId: string) =>
+      enqueueGooglePull({ tenantId, directoryId, cause: "notify" }),
+    record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
+    take: fixedWindow(cache),
+    contextSecret: env.CLIENT_CONTEXT_SECRET,
+    edgeSecret: env.EDGE_SECRET,
+    log,
+  },
+  internalIdentity: {
+    secret: env.IDENTITY_GATEWAY_SECRET,
+    managedByIdentifier: (identifier: string) =>
+      identity.managedByIdentifier(identifier),
+    /*
+     * ⚠ A SESSION NAMES NO USER UNTIL CLERK SAYS WHOSE IT IS. Only the
+     * gateway's self-service routes ask this, and it caches the answer, so
+     * one Clerk read per session per minute at most. A session Clerk does
+     * not know acts as nobody: not managed.
+     */
+    managedBySession: async (sessionId: string) => {
+      const session = await identityClerk.session(sessionId)
+      return session ? (await identity.managedByUser(session.userId)) !== null : false
+    },
+    log,
+  },
+
+  edgeSecret: env.EDGE_SECRET,
 
   /**
    * The dashboard, at `/console`.
@@ -1393,7 +2293,10 @@ const app = createApp({
     sessions,
     tenants: tenantResolver(db),
     activeOrg,
-    freshAuth,
+    // ⚠ STEP-UP FOR MANAGED ACCOUNTS IS THEIR IdP's (sso.md 2.4); see
+    // `withSsoFreshness`. Everybody else is Clerk's `strict`, unchanged.
+    freshAuth: consoleFreshAuth,
+    identity: identityConsole,
     queries: consoleQueries(db, contentStore),
     sesStatus,
     sesReputation,
@@ -1481,15 +2384,31 @@ const app = createApp({
             m.organization.createdBy === userId,
         )
         if (existing) return { id: existing.organization.id, created: false }
-        const made = await clerk.organizations.createOrganization({
+        // ⚠ ITS CREATOR IS DEMOTED IN CLERK AT ONCE (#335), as for any workspace.
+        const made = await createWorkspace(roles, {
           name: "Personal",
+          userId,
           // Clerk slugs are unique across the instance; the user id makes it so.
           slug: `personal-${userId.replace(/^user_/, "").toLowerCase()}`,
-          createdBy: userId,
           maxAllowedMemberships: 1,
           publicMetadata: { kind: "personal" },
         })
         return { id: made.id, created: true }
+      },
+      /*
+       * ⚠ THROUGH THE BACKEND, NOT CLERK-JS IN THE BROWSER (#335), so the
+       * creator's Clerk admin role - which Clerk will not let `creator_role`
+       * go without - is taken away in the same request. Clerk's per-person
+       * creation settings are checked here because the backend skips them.
+       */
+      create: async (userId: string, name: string) => {
+        const [user, { data }] = await Promise.all([
+          clerk.users.getUser(userId),
+          clerk.users.getOrganizationMembershipList({ userId, limit: 100 }),
+        ])
+        const created = data.filter((m) => m.organization.createdBy === userId).length
+        if (!mayCreateWorkspace(user, created)) return "not_allowed" as const
+        return createWorkspace(roles, { name, userId })
       },
       /*
        * ⚠ ONLY THE PERSONAL WORKSPACE OF THE PERSON ASKING. The mark and the
@@ -1512,6 +2431,30 @@ const app = createApp({
         })
         return "ok" as const
       },
+      /*
+       * ⚠ THROUGH THE BACKEND SINCE #335. These were `organization.destroy()`
+       * and `setLogo()` in the browser, which need Clerk system permissions
+       * nobody holds any more; our routes check our roles first. Deleting
+       * leaves the teardown to `organization.deleted`, as before.
+       */
+      remove: async (clerkOrgId: string) => {
+        try {
+          await clerk.organizations.deleteOrganization(clerkOrgId)
+          return "deleted" as const
+        } catch (error) {
+          if (clerkNotFound(error)) return "already_gone" as const
+          throw error
+        }
+      },
+      setLogo: async (clerkOrgId: string, file: Blob, uploaderUserId: string) => {
+        await clerk.organizations.updateOrganizationLogo(clerkOrgId, {
+          file,
+          uploaderUserId,
+        })
+      },
+      removeLogo: async (clerkOrgId: string) => {
+        await clerk.organizations.deleteOrganizationLogo(clerkOrgId)
+      },
     },
     /*
      * ⚠ A HUNDRED IS THE CEILING, NOT A PAGE. Nobody belongs to that many
@@ -1526,6 +2469,7 @@ const app = createApp({
     },
     codeSends: codeCooldown(cache),
     ...(teamDomains ? { teamDomains } : {}),
+    roles,
     members,
     teamInboxes: teamInboxService,
     mailboxStorage,
@@ -1553,6 +2497,46 @@ const app = createApp({
             ? primary.emailAddress.toLowerCase()
             : null
         return { name, primaryEmail, verifiedEmails, createdAt: user.createdAt }
+      },
+    },
+    /*
+     * Account deletion (#336), through the backend: the gateway refuses
+     * `DELETE /v1/me`. Each read throws when Clerk cannot answer, which the
+     * route turns into a 503 rather than a guess.
+     */
+    accounts: {
+      isManaged: async (userId: string) =>
+        (await identity.managedByUser(userId)) !== null,
+      workspaces: async (userId: string) => {
+        const found: { orgId: string; name: string }[] = []
+        for (let offset = 0; ; offset += 100) {
+          const { data, totalCount } = await clerk.users.getOrganizationMembershipList({
+            userId,
+            limit: 100,
+            offset,
+          })
+          for (const m of data)
+            found.push({ orgId: m.organization.id, name: m.organization.name })
+          if (data.length === 0 || offset + data.length >= totalCount) return found
+        }
+      },
+      memberCount: async (orgId: string) => {
+        const org = await clerk.organizations.getOrganization({
+          organizationId: orgId,
+          includeMembersCount: true,
+        })
+        if (typeof org.membersCount !== "number")
+          throw new Error("Clerk did not return a member count")
+        return org.membersCount
+      },
+      remove: async (userId: string) => {
+        try {
+          await clerk.users.deleteUser(userId)
+          return "deleted" as const
+        } catch (error) {
+          if (clerkNotFound(error)) return "already_gone" as const
+          throw error
+        }
       },
     },
     memberships: {
@@ -1666,7 +2650,7 @@ const app = createApp({
           domains,
         }
       : {}),
-    keys: { store: keyStore(db), cache: redisKeyCache(cache) },
+    keys: { store: apiKeyStore, cache: redisKeyCache(cache) },
     ...(secrets
       ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
       : {}),
@@ -1704,19 +2688,7 @@ const app = createApp({
       : {}),
     log,
   },
-  mailboxes: mailboxProvisioning({
-    identity: clerkIdentity(clerk),
-    directory: mailboxDir,
-    capacity: postgresMeter(db),
-    // ⚠ THE PROJECTION, NOT A SECOND WRITER. Provisioning changes Clerk and
-    // then asks the projection to derive the row, exactly as the webhook does;
-    // `MAIL_DOMAINS` is passed for the same reason it is there - i10's own
-    // domains are hosted regardless of who owns a `core.domains` row.
-    project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
-    featureId: MAILBOXES,
-    storage: mailboxStorage,
-    canAllocate: canAllocateStorage,
-  }),
+  mailboxes: mailboxProvisioning(mailboxProvisionDeps),
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),
@@ -1781,8 +2753,8 @@ const app = createApp({
               address,
               teamDomains
                 ? {
-                    isAdmin: (user, orgId) =>
-                      teamDomains.can(user, orgId, MANAGE_MEMBERS),
+                    isAdmin: (user, tenantId) =>
+                      teamDomains.can(tenantId, user, "members:manage"),
                   }
                 : undefined,
             ),
@@ -1828,8 +2800,40 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     // contract `server.close(cb)` had. Passing `true` would close active
     // connections immediately, which is precisely the dropped-request
     // behaviour this block exists to prevent.
-    void server
-      .stop()
+    // ⚠ THE DIRECTORY WORKERS FIRST (#342, #343): a job in flight finishes its
+    // Clerk or Google calls and its marks before the pool and Redis go; an
+    // interrupted one is retried either way, this just avoids doing half of it.
+    googleDirectoryScheduler?.stop()
+    siemSchedulerHandle?.stop()
+    void Promise.all([
+      siemWorker
+        ?.close(15_000)
+        .catch((err) =>
+          log.warn({ ...safeError(err) }, "could not close the SIEM export worker"),
+        ),
+      directoryWorker
+        .close(15_000)
+        .catch((err) =>
+          log.warn({ ...safeError(err) }, "could not close the directory worker"),
+        ),
+      mailboxDeletionWorker
+        .close(15_000)
+        .catch((err) =>
+          log.warn(
+            { ...safeError(err) },
+            "could not close the mailbox deletion worker",
+          ),
+        ),
+      googleDirectoryWorker
+        .close(15_000)
+        .catch((err) =>
+          log.warn(
+            { ...safeError(err) },
+            "could not close the Google directory worker",
+          ),
+        ),
+    ])
+      .then(() => server.stop())
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
       .then(() =>

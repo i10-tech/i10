@@ -674,7 +674,8 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
             authorization: `Bearer ${opts.impersonationToken}`,
             "content-type": "message/rfc822",
           },
-          body: bytes,
+          // Cast for the DOM typings, as in `streamOf`: a message is never shared memory.
+          body: bytes as Uint8Array<ArrayBuffer>,
           signal: controller.signal,
         })
 

@@ -74,6 +74,49 @@ func TestValidateRejectsNonPositiveRate(t *testing.T) {
 	}
 }
 
+func TestPassthroughSettingsGoTogether(t *testing.T) {
+	secret := strings.Repeat("s", MinAPISecretLength)
+	for name, tc := range map[string]struct {
+		url, secret string
+		ok          bool
+	}{
+		"neither":      {"", "", true},
+		"both":         {"http://i10-api.default.svc:3001", secret, true},
+		"url only":     {"http://i10-api:3001", "", false},
+		"secret only":  {"", secret, false},
+		"short secret": {"http://i10-api:3001", "short", false},
+		"not a url":    {"i10-api:3001", secret, false},
+		"file scheme":  {"file:///etc/passwd", secret, false},
+		"no host":      {"https://", secret, false},
+	} {
+		c := valid()
+		c.APIURL, c.APISecret, c.APITimeout = tc.url, tc.secret, 5_000_000_000
+		if err := c.Validate(); (err == nil) != tc.ok {
+			t.Errorf("%s: Validate() = %v, want ok=%v", name, err, tc.ok)
+		}
+	}
+}
+
+// The settings fetch runs inside the pass-through verifier's own timeout, so a
+// fetch that could outlast verify.MaxTimeout is refused, as Clerk's is.
+func TestPassthroughAPITimeoutFitsInsideTheVerifier(t *testing.T) {
+	for _, bad := range []time.Duration{0, -time.Second, 13 * time.Second} {
+		c := valid()
+		c.APIURL, c.APISecret = "http://i10-api:3001", strings.Repeat("s", MinAPISecretLength)
+		c.APITimeout = bad
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "AUTHD_API_TIMEOUT") {
+			t.Errorf("APITimeout=%s accepted or unhelpful: %v", bad, err)
+		}
+	}
+	c := valid()
+	c.APIURL, c.APISecret = "http://i10-api:3001", strings.Repeat("s", MinAPISecretLength)
+	c.APITimeout = 12 * time.Second
+	if err := c.Validate(); err != nil {
+		t.Errorf("APITimeout=12s rejected: %v", err)
+	}
+}
+
 // The cache is allowed to be long only because revocation does not wait for it.
 // The ceiling is what stops a later edit quietly turning the timer back into the
 // thing that decides how long a revoked credential works.

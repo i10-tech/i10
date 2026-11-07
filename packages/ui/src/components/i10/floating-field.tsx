@@ -335,18 +335,23 @@ function Frame({
         "px-6 pt-1.5 text-2xs leading-4",
         "transition-colors duration-(--duration-instant) ease-(--ease-linear)",
         /*
-         * ⚠ `min-h-4` IS THE RESERVATION, AND IT IS THE WHOLE POINT OF THE
+         * ⚠ `min-h-5.5` IS THE RESERVATION, AND IT IS THE WHOLE POINT OF THE
          * FLOW VERSION. A message that appears on blur without it pushes every
          * field below it down by twenty pixels - on a four-field form the
          * submit button moves under the cursor between the mousedown and the
-         * click. Sixteen reserved pixels remove a class of misclick that is
+         * click. Reserving one whole line removes a class of misclick that is
          * invisible until somebody hits the wrong button.
+         *
+         * ⚠ 22PX, NOT 16: THE MINIMUM INCLUDES THE `pt-1.5`. At `min-h-4` an
+         * empty row was 16px and a one-line message 22px, so every "reserved"
+         * error still pushed what was below it by six pixels. It matches
+         * `ONE_LINE`.
          */
         reserveHint === "open"
           ? // Nothing to say, no room taken - not even the padding.
             !hint && "pt-0"
           : reserveHint
-            ? "min-h-4"
+            ? "min-h-5.5"
             : /*
                * ⚠ `pointer-events-none` BECAUSE IT NOW HANGS OVER SOMETHING
                * ELSE. Out of flow, this strip sits in the gap above whatever
