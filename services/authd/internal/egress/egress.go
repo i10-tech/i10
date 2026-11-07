@@ -2,8 +2,8 @@
 // behalf.
 //
 // ⚠ EVERY HOST AUTHD DIALS FOR A BIND WAS CHOSEN BY A CUSTOMER'S ADMIN: the LDAP
-// server of a pass-through connection (internal/passthrough) and the Okta org of
-// an Okta one (internal/okta). Left unchecked, either is a way to make this pod
+// server of a pass-through connection (internal/passthrough) and the token
+// endpoint of an OIDC one (internal/oidc). Left unchecked, either is a way to make this pod
 // connect to the cluster, the node or the cloud metadata service, so both go
 // through Vet.
 package egress

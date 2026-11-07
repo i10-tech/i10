@@ -342,39 +342,42 @@ describe("LDAP pass-through settings: refusals", () => {
     )
   })
 
-  // ⚠ ONE PLACE FOR A CONNECTION'S PASSWORDS (#383): identity-okta-mail.ts refuses
-  // the other direction.
-  it("refuses to enable while Okta mail sign-in is on, and says so on the record", async () => {
-    const w = app()
-    await w.ready()
-    const row = w.store.connections.get(CONNECTION)!
-    w.store.connections.set(CONNECTION, {
-      ...row,
-      config: { ...row.config, oktaMail: { enabled: true } },
+  // ⚠ ONE PLACE FOR A CONNECTION'S PASSWORDS (#383): identity-oidc-mail.ts refuses
+  // the other direction. The key an Okta-only row used before the lane was generic
+  // counts as much as the new one.
+  for (const key of ["oidcMail", "oktaMail"]) {
+    it(`refuses to enable while OIDC mail sign-in is on (${key}), and says so on the record`, async () => {
+      const w = app()
+      await w.ready()
+      const row = w.store.connections.get(CONNECTION)!
+      w.store.connections.set(CONNECTION, {
+        ...row,
+        config: { ...row.config, [key]: { enabled: true } },
+      })
+      const res = await w.call("user_admin", "PUT", w.base, { enabled: true })
+      expect(res.status).toBe(409)
+      expect(await res.json()).toMatchObject({
+        name: "ldap_refused",
+        reason: "oidc_enabled",
+      })
+      expect(w.stored().enabled).toBeFalsy()
+      expect(w.last()).toMatchObject({
+        type: "connection.ldap_refused",
+        reason: "oidc_enabled",
+      })
+      // Turned off, it is the same request that now works.
+      w.store.connections.set(CONNECTION, {
+        ...row,
+        config: {
+          ...w.store.connections.get(CONNECTION)!.config,
+          [key]: { enabled: false },
+        },
+      })
+      expect(
+        (await w.call("user_admin", "PUT", w.base, { enabled: true })).status,
+      ).toBe(200)
     })
-    const res = await w.call("user_admin", "PUT", w.base, { enabled: true })
-    expect(res.status).toBe(409)
-    expect(await res.json()).toMatchObject({
-      name: "ldap_refused",
-      reason: "okta_enabled",
-    })
-    expect(w.stored().enabled).toBeFalsy()
-    expect(w.last()).toMatchObject({
-      type: "connection.ldap_refused",
-      reason: "okta_enabled",
-    })
-    // Turned off, it is the same request that now works.
-    w.store.connections.set(CONNECTION, {
-      ...row,
-      config: {
-        ...w.store.connections.get(CONNECTION)!.config,
-        oktaMail: { enabled: false },
-      },
-    })
-    expect((await w.call("user_admin", "PUT", w.base, { enabled: true })).status).toBe(
-      200,
-    )
-  })
+  }
 
   it("refuses to test before the settings are whole, without reaching out", async () => {
     const w = app()

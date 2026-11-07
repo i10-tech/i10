@@ -25,27 +25,30 @@ const NamePrefix = "passthrough:"
 // Binder's own TotalTimeout is set from it in main.
 const VerifyTimeout = 10 * time.Second
 
-// OktaMaxCacheTTL is how long an Okta success may stand in for asking Okta again.
+// OIDCMaxCacheTTL is how long an OIDC-lane success may stand in for asking the
+// provider again. It is the ONE constant for every preset.
 //
 // ⚠ FIFTEEN MINUTES IS A STOPGAP, NOT A DESIGN. The long credential cache is safe
-// only where a password change reaches authd (verify.CacheLimit), and for Okta
-// that is an event hook raising `credential_epoch` on a password change, a
-// suspension, a lock or a deprovision (issue #383, B9 step 2b). Until a
+// only where a password change reaches authd (verify.CacheLimit), and no OIDC
+// provider here sends one: for Okta that would be an event hook raising
+// `credential_epoch` on a password change, a suspension, a lock or a deprovision
+// (issue #383, B9 step 2b), and nothing generic exists for the others. Until a
 // connection's hook is built and verified, nothing tells authd, so this caps how
-// long a changed or revoked Okta password keeps opening mail. 2b's verified hook
-// is what may lift it to the full AUTHD_CRED_CACHE_TTL.
-const OktaMaxCacheTTL = 15 * time.Minute
+// long a changed or revoked password keeps opening mail. 2b's verified hook is
+// what may lift it for an Okta connection, and only for one.
+const OIDCMaxCacheTTL = 15 * time.Minute
 
 // FailureBudget is how many wrong passwords authd forwards to a company's
 // identity provider for one account in one window.
 //
-// ⚠ A COMPANY'S DIRECTORY LOCKS THE REAL ACCOUNT, and so does its Okta org.
-// Active Directory's default is a handful of failures, Okta's is ten, and a
-// locked account answers exactly like a wrong password. A mail client retrying a
-// stale saved password every few seconds would lock the person out of their own
-// SSO, so authd counts what it forwards (internal/budgetstore) and answers busy
-// once the budget is spent. Three in fifteen minutes leaves room for a person's
-// own typos, and well under either threshold.
+// ⚠ A COMPANY'S DIRECTORY LOCKS THE REAL ACCOUNT, and so does its identity
+// provider. Active Directory's default is a handful of failures, Okta's is ten,
+// and a locked account answers exactly like a wrong password (Okta, Keycloak and
+// PingFederate all do). A mail client retrying a stale saved password every few
+// seconds would lock the person out of their own SSO, so authd counts what it
+// forwards (internal/budgetstore) and answers busy once the budget is spent.
+// Three in fifteen minutes leaves room for a person's own typos, and well under
+// any of those thresholds.
 var FailureBudget = verify.Budget{Max: 3, Window: 15 * time.Minute}
 
 // Directory answers one managed account's bind through its connection's lane.
@@ -57,15 +60,15 @@ type Directory interface {
 var _ Directory = (*Service)(nil)
 
 // Verifier checks a managed account's password against its company's identity
-// provider: its LDAP directory or its Okta org, whichever its connection runs.
-// It is the "passthrough:<connection>" verify.Verifier.
+// provider: its LDAP directory or its OIDC provider, whichever its connection
+// runs. It is the "passthrough:<connection>" verify.Verifier.
 //
 // ⚠ THE LANE IS LEARNED INSIDE Verify, not by the resolver. Which lane a
 // connection runs is the API's answer, and the resolver may do no I/O, so the
 // name cannot carry it. What keeps the lanes apart in the credential cache
 // instead: the LDAP lane never stores a success (MaxCacheTTL is 0 for it), so
-// no entry it minted can answer for an Okta account; and an Okta success is
-// cached for OktaMaxCacheTTL at most.
+// no entry it minted can answer for an OIDC account; and an OIDC success is
+// cached for OIDCMaxCacheTTL at most.
 //
 // ⚠ ONE VERIFIER PER BIND, never shared: `lane` is written by Verify and read by
 // MaxCacheTTL straight after it, on the same goroutine. ManagedResolver.Resolve
@@ -103,11 +106,12 @@ func (v *Verifier) Budget() *verify.Budget {
 // the directory; the flight still collapses a client's simultaneous connections
 // into one bind, and a directory bind costs milliseconds, not Okta's seconds.
 //
-// Okta's passwords can be cached, briefly: see OktaMaxCacheTTL. Anything else,
-// including a lane that was never reached, is not cached.
+// An OIDC provider's passwords can be cached, briefly: see OIDCMaxCacheTTL. A
+// provider's call takes one to seven seconds and a mail client reconnects all
+// day. Anything else, including a lane that was never reached, is not cached.
 func (v *Verifier) MaxCacheTTL() time.Duration {
-	if v.lane == LaneOkta {
-		return OktaMaxCacheTTL
+	if v.lane == LaneOIDC {
+		return OIDCMaxCacheTTL
 	}
 	return 0
 }
@@ -125,10 +129,10 @@ func (v *Verifier) Verify(ctx context.Context, account *projection.Account, pass
 		return verify.Verified, nil
 	case Rejected:
 		// The reason is what tells a wrong password from an address the
-		// directory does not know, or from an Okta org that still wants a second
-		// factor (okta_mfa_required), so it is logged here; the bind logs only
+		// directory does not know, or from a provider that still wants a second
+		// factor (oidc_mfa_required), so it is logged here; the bind logs only
 		// that the verifier rejected.
-		v.log.Info("pass-through rejected", "reason", res.Reason, "lane", res.Lane, "uid", account.ClerkUserID, "connection", v.connection)
+		v.log.Info("pass-through rejected", "reason", res.Reason, "lane", res.Lane, "preset", res.Preset, "uid", account.ClerkUserID, "connection", v.connection)
 		return verify.Rejected, nil
 	default:
 		return verify.Unavailable, fmt.Errorf("passthrough: %s", res.Reason)

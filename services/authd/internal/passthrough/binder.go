@@ -58,9 +58,11 @@ const (
 type Result struct {
 	Outcome Outcome
 	Reason  string
-	// Lane is the lane that answered (LaneLDAP, LaneOkta), or "" when none did:
+	// Lane is the lane that answered (LaneLDAP, LaneOIDC), or "" when none did:
 	// the connection is off, or its settings could not be had.
 	Lane string
+	// Preset is the OIDC preset that answered, for the log; "" for any other lane.
+	Preset string
 }
 
 // Binder walks one bind against a company's directory.

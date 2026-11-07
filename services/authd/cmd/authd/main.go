@@ -27,7 +27,7 @@ import (
 	"github.com/i10-tech/i10/services/authd/internal/config"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
-	"github.com/i10-tech/i10/services/authd/internal/okta"
+	"github.com/i10-tech/i10/services/authd/internal/oidc"
 	"github.com/i10-tech/i10/services/authd/internal/passthrough"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
@@ -84,9 +84,9 @@ func run() error {
 		managed = passthrough.NewService(
 			passthrough.NewCache(src, passthrough.MaxCacheTTL),
 			&passthrough.Binder{TotalTimeout: passthrough.VerifyTimeout},
-			&okta.Client{},
+			&oidc.Client{},
 		)
-		log.Info("pass-through (ldap, okta) enabled for managed accounts")
+		log.Info("pass-through (ldap, oidc) enabled for managed accounts")
 	} else {
 		log.Warn("pass-through is not configured: managed accounts cannot bind")
 	}
