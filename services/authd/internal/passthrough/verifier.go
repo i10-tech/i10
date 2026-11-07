@@ -25,37 +25,62 @@ const NamePrefix = "passthrough:"
 // Binder's own TotalTimeout is set from it in main.
 const VerifyTimeout = 10 * time.Second
 
-// FailureBudget is how many wrong passwords authd forwards to a company's
-// directory for one account in one window.
+// OktaMaxCacheTTL is how long an Okta success may stand in for asking Okta again.
 //
-// ⚠ A COMPANY'S DIRECTORY LOCKS THE REAL ACCOUNT. Active Directory's default is
-// a handful of failures, and a locked account answers exactly like a wrong
-// password. A mail client retrying a stale saved password every few seconds
-// would lock the person out of their own SSO, so authd counts what it forwards
-// (internal/budgetstore) and answers busy once the budget is spent. Three in
-// fifteen minutes leaves room for a person's own typos.
+// ⚠ FIFTEEN MINUTES IS A STOPGAP, NOT A DESIGN. The long credential cache is safe
+// only where a password change reaches authd (verify.CacheLimit), and for Okta
+// that is an event hook raising `credential_epoch` on a password change, a
+// suspension, a lock or a deprovision (issue #383, B9 step 2b). Until a
+// connection's hook is built and verified, nothing tells authd, so this caps how
+// long a changed or revoked Okta password keeps opening mail. 2b's verified hook
+// is what may lift it to the full AUTHD_CRED_CACHE_TTL.
+const OktaMaxCacheTTL = 15 * time.Minute
+
+// FailureBudget is how many wrong passwords authd forwards to a company's
+// identity provider for one account in one window.
+//
+// ⚠ A COMPANY'S DIRECTORY LOCKS THE REAL ACCOUNT, and so does its Okta org.
+// Active Directory's default is a handful of failures, Okta's is ten, and a
+// locked account answers exactly like a wrong password. A mail client retrying a
+// stale saved password every few seconds would lock the person out of their own
+// SSO, so authd counts what it forwards (internal/budgetstore) and answers busy
+// once the budget is spent. Three in fifteen minutes leaves room for a person's
+// own typos, and well under either threshold.
 var FailureBudget = verify.Budget{Max: 3, Window: 15 * time.Minute}
 
-// Directory answers one managed account's bind through its connection's
-// directory. *Service is the production one; tests put a script in its place.
+// Directory answers one managed account's bind through its connection's lane.
+// *Service is the production one; tests put a script in its place.
 type Directory interface {
 	Bind(ctx context.Context, connectionID, email, password string) Result
 }
 
 var _ Directory = (*Service)(nil)
 
-// Verifier checks a managed account's password against its company's directory.
+// Verifier checks a managed account's password against its company's identity
+// provider: its LDAP directory or its Okta org, whichever its connection runs.
 // It is the "passthrough:<connection>" verify.Verifier.
 //
-// ⚠ THE TWO ANSWERS THAT ARE NOT "WRONG PASSWORD". The directory not answering,
-// the path to it being blocked or its TLS failing, our service account being
-// refused and the settings API being down are all Unavailable, and the bind
-// reports them as such. Only the directory's own no is Rejected. See Service.Bind
-// for the walk, and Result for the reason codes.
+// ⚠ THE LANE IS LEARNED INSIDE Verify, not by the resolver. Which lane a
+// connection runs is the API's answer, and the resolver may do no I/O, so the
+// name cannot carry it. What keeps the lanes apart in the credential cache
+// instead: the LDAP lane never stores a success (MaxCacheTTL is 0 for it), so
+// no entry it minted can answer for an Okta account; and an Okta success is
+// cached for OktaMaxCacheTTL at most.
+//
+// ⚠ ONE VERIFIER PER BIND, never shared: `lane` is written by Verify and read by
+// MaxCacheTTL straight after it, on the same goroutine. ManagedResolver.Resolve
+// builds a new one every time.
+//
+// ⚠ THE TWO ANSWERS THAT ARE NOT "WRONG PASSWORD". The provider not answering,
+// the path to it being blocked or its TLS failing, our service account or the
+// org's setup being refused and the settings API being down are all Unavailable,
+// and the bind reports them as such. Only the provider's own no is Rejected. See
+// Service.Bind for the walk, and Result for the reason codes.
 type Verifier struct {
 	svc        Directory
 	connection string
 	log        *slog.Logger
+	lane       string
 }
 
 // Name implements verify.Verifier.
@@ -70,31 +95,40 @@ func (v *Verifier) Budget() *verify.Budget {
 	return &b
 }
 
-// MaxCacheTTL implements verify.CacheLimit: a directory's answer is never
-// cached.
+// MaxCacheTTL implements verify.CacheLimit, for the lane Verify just used.
 //
 // ⚠ NOTHING TELLS authd THAT A COMPANY'S DIRECTORY CHANGED A PASSWORD. There is
 // no event hook into Active Directory, so a cached success would keep the old
-// password opening mail for the whole credential-cache TTL. Every bind asks the
-// directory; the flight still collapses a client's simultaneous connections
+// password opening mail for the whole credential-cache TTL. Every LDAP bind asks
+// the directory; the flight still collapses a client's simultaneous connections
 // into one bind, and a directory bind costs milliseconds, not Okta's seconds.
-func (*Verifier) MaxCacheTTL() time.Duration { return 0 }
+//
+// Okta's passwords can be cached, briefly: see OktaMaxCacheTTL. Anything else,
+// including a lane that was never reached, is not cached.
+func (v *Verifier) MaxCacheTTL() time.Duration {
+	if v.lane == LaneOkta {
+		return OktaMaxCacheTTL
+	}
+	return 0
+}
 
 var _ verify.CacheLimit = (*Verifier)(nil)
 
 // Verify implements verify.Verifier. The password reaches nothing but the
-// directory's own bind; the error is a reason code, never the password, a
-// secret or a DN.
+// provider's own check; the error is a reason code, never the password, a
+// secret, a token or a DN.
 func (v *Verifier) Verify(ctx context.Context, account *projection.Account, password string) (verify.Outcome, error) {
 	res := v.svc.Bind(ctx, v.connection, account.Email, password)
+	v.lane = res.Lane
 	switch res.Outcome {
 	case Verified:
 		return verify.Verified, nil
 	case Rejected:
 		// The reason is what tells a wrong password from an address the
-		// directory does not know, so it is logged here; the bind logs only that
-		// the verifier rejected.
-		v.log.Info("pass-through rejected", "reason", res.Reason, "uid", account.ClerkUserID, "connection", v.connection)
+		// directory does not know, or from an Okta org that still wants a second
+		// factor (okta_mfa_required), so it is logged here; the bind logs only
+		// that the verifier rejected.
+		v.log.Info("pass-through rejected", "reason", res.Reason, "lane", res.Lane, "uid", account.ClerkUserID, "connection", v.connection)
 		return verify.Rejected, nil
 	default:
 		return verify.Unavailable, fmt.Errorf("passthrough: %s", res.Reason)

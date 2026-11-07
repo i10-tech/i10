@@ -3,6 +3,7 @@ import { isIP } from "node:net"
 import { z } from "zod"
 import type { Connection } from "./model.js"
 import type { IdentityStore } from "./ports.js"
+import { oktaMailFor, type OktaMailSettings } from "./okta-mail.js"
 import { isPermittedAddress } from "../webhooks/egress.js"
 
 /**
@@ -315,12 +316,31 @@ export const LDAP_SETTING_FIELDS = [
   "userFilter",
 ] as const
 
-/** What authd is told about a connection: nothing, or everything it needs to bind. */
+/**
+ * What authd is told about a connection: nothing, or the lane its managed
+ * accounts' passwords are asked of and everything that lane needs.
+ *
+ * ⚠ `enabled` STAYS ON EVERY ANSWER, beside `lane`. An authd from before the
+ * lane existed reads an Okta answer as an LDAP one with no host (unavailable),
+ * not as "off" (a refusal that tells mail clients the password is wrong), so the
+ * two can roll out in either order. A missing `lane` is LDAP to a new authd.
+ */
 export type PassthroughAnswer =
-  { enabled: false } | ({ enabled: true } & PassthroughSettings)
+  | { enabled: false }
+  | ({ enabled: true; lane: "ldap" } & PassthroughSettings)
+  | ({ enabled: true; lane: "okta" } & OktaMailSettings)
 
 /**
  * The answer to authd's question (routes/authd.ts), from the stored rows.
+ *
+ * ⚠ ONE LANE, THE LDAP ONE IF BOTH ARE ON. The console refuses to turn either on
+ * while the other is (routes/console/identity-okta-mail.ts, identity-ldap.ts),
+ * so a connection with both enabled is something a route did not do: a row
+ * edited by hand, or two writes that raced. LDAP wins, and the reason is what it
+ * protects: it was here first, so adding Okta can never change whose directory
+ * an existing LDAP connection's members' passwords go to. The `enabled` flag
+ * picks the lane, not completeness: an LDAP lane that is on but half set answers
+ * "off" and does not fall through to Okta.
  *
  * ⚠ ENABLED ONLY IF THE SETTINGS ARE WHOLE. A half-set connection answers
  * "off", which authd turns into a refusal - never into a bind against a host
@@ -334,8 +354,11 @@ export async function passthroughFor(
   const connection = await store.connectionForStart(connectionId)
   if (!connection) return { enabled: false }
   const stored = storedLdap(connection)
-  if (stored.enabled !== true) return { enabled: false }
-  const secrets = await store.connectionSecrets(connection.tenantId, connection.id)
-  const settings = completeSettings(stored, secrets ? sealedLdap(secrets) : {})
-  return settings ? { enabled: true, ...settings } : { enabled: false }
+  if (stored.enabled === true) {
+    const secrets = await store.connectionSecrets(connection.tenantId, connection.id)
+    const settings = completeSettings(stored, secrets ? sealedLdap(secrets) : {})
+    return settings ? { enabled: true, lane: "ldap", ...settings } : { enabled: false }
+  }
+  const okta = oktaMailFor(connection)
+  return okta ? { enabled: true, lane: "okta", ...okta } : { enabled: false }
 }

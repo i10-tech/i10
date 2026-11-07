@@ -189,6 +189,11 @@ import { tenantProfileStore } from "./console/tenant.js"
 import { usageStore } from "./console/usage.js"
 import { tenantResolver } from "./middleware/tenant.js"
 import { projectClerkUser } from "./projection/writer.js"
+import {
+  raiseAgainWhenAuthdForgets,
+  raiseConnectionCredentialEpochs,
+} from "./projection/connection-epoch.js"
+import { raiseCredentialEpoch } from "./projection/credential-epoch.js"
 import { MAILBOXES } from "./metering/levels.js"
 import { offlineIdentity, sesIdentity } from "./domains/identity.js"
 import { configurationSetsFor } from "./send/configuration-sets.js"
@@ -1699,6 +1704,10 @@ const identityConsole = {
   protocols: [...engines.keys()],
   universalLogoutUrl: (connectionId: string) =>
     new URL(`/sso/universal-logout/${connectionId}`, env.SCIM_BASE_URL).href,
+  oktaHook: {
+    url: (connectionId: string) =>
+      new URL(`/webhooks/okta/${connectionId}`, env.SCIM_BASE_URL).href,
+  },
   scim: {
     store: directories,
     baseUrl: scimBaseUrl,
@@ -1759,6 +1768,20 @@ const identityConsole = {
       log,
     }),
     take: fixedWindow(cache),
+  },
+  // Okta as the place an Okta connection's IMAP passwords are asked (#383).
+  oktaMail: {
+    invalidate: async (connectionId: string) => {
+      const raise = () => raiseConnectionCredentialEpochs(db, connectionId)
+      await raise()
+      raiseAgainWhenAuthdForgets(raise, {
+        onFailure: (error) =>
+          log.error(
+            { connectionId, err: error instanceof Error ? error.name : "unknown" },
+            "could not raise the credential epoch again after authd's settings expired",
+          ),
+      })
+    },
   },
   mail: { deps: mailDeps, groups: mailStore },
   deprovision: {
@@ -2250,6 +2273,16 @@ const app = createApp({
     schedulePull: (tenantId: string, directoryId: string) =>
       enqueueGooglePull({ tenantId, directoryId, cause: "notify" }),
     record: (tenantId: string, event: AuditEvent) => identity.record(tenantId, event),
+    take: fixedWindow(cache),
+    contextSecret: env.CLIENT_CONTEXT_SECRET,
+    edgeSecret: env.EDGE_SECRET,
+    log,
+  },
+  oktaEventHooks: {
+    store: identity,
+    raiseEpoch: async (clerkUserId: string) => {
+      await raiseCredentialEpoch(db, clerkUserId)
+    },
     take: fixedWindow(cache),
     contextSecret: env.CLIENT_CONTEXT_SECRET,
     edgeSecret: env.EDGE_SECRET,

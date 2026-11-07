@@ -104,14 +104,14 @@ func TestTheVerifierMapsEveryDirectoryAnswerToTheTriState(t *testing.T) {
 		result Result
 		want   verify.Outcome
 	}{
-		"verified":                    {Result{Verified, ReasonVerified}, verify.Verified},
-		"a wrong password":            {Result{Rejected, ReasonUserBindRejected}, verify.Rejected},
-		"an address it does not know": {Result{Rejected, ReasonUserNotFound}, verify.Rejected},
-		"pass-through switched off":   {Result{Rejected, ReasonPassthroughOff}, verify.Rejected},
-		"the directory is down":       {Result{Unavailable, ReasonDialFailed}, verify.Unavailable},
-		"tls would not come up":       {Result{Unavailable, ReasonTLSFailed}, verify.Unavailable},
-		"our service account failed":  {Result{Unavailable, ReasonServiceBindFailed}, verify.Unavailable},
-		"the settings API is down":    {Result{Unavailable, ReasonSettingsDown}, verify.Unavailable},
+		"verified":                    {Result{Outcome: Verified, Reason: ReasonVerified}, verify.Verified},
+		"a wrong password":            {Result{Outcome: Rejected, Reason: ReasonUserBindRejected}, verify.Rejected},
+		"an address it does not know": {Result{Outcome: Rejected, Reason: ReasonUserNotFound}, verify.Rejected},
+		"pass-through switched off":   {Result{Outcome: Rejected, Reason: ReasonPassthroughOff}, verify.Rejected},
+		"the directory is down":       {Result{Outcome: Unavailable, Reason: ReasonDialFailed}, verify.Unavailable},
+		"tls would not come up":       {Result{Outcome: Unavailable, Reason: ReasonTLSFailed}, verify.Unavailable},
+		"our service account failed":  {Result{Outcome: Unavailable, Reason: ReasonServiceBindFailed}, verify.Unavailable},
+		"the settings API is down":    {Result{Outcome: Unavailable, Reason: ReasonSettingsDown}, verify.Unavailable},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := &scripted{result: tc.result}

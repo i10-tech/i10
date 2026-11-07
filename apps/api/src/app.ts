@@ -70,6 +70,10 @@ import {
 import { createDeviceRoutes, type DeviceRouteDeps } from "./routes/devices.js"
 import type { EmailLookup } from "./send/lookup.js"
 import { createMtaHookRoutes, type MtaHookRouteDeps } from "./routes/mta-hook.js"
+import {
+  createOktaEventHooks,
+  type OktaEventHookRouteDeps,
+} from "./routes/okta-event-hooks.js"
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
@@ -173,6 +177,8 @@ export interface AppDeps {
   scim?: ScimRouteDeps
   /** Google Workspace directory watch notifications (#343), at `/google/directory/notify`. */
   googleDirectory?: GoogleDirectoryRouteDeps
+  /** Okta Event Hooks (#383), at `/webhooks/okta/<connection id>`. */
+  oktaEventHooks?: OktaEventHookRouteDeps
   /** The Clerk gateway's managed-account lookup (#337), at `/internal/identity`. */
   internalIdentity?: InternalIdentityDeps
   /** authd's pass-through lookup (#344), at `/internal/authd`. */
@@ -577,6 +583,12 @@ export function createApp(deps: AppDeps = {}) {
   // GitHub App events for connected templates (#235), same prefix, same rule:
   // the signature is the whole of the authorization.
   app.route("/webhooks", createGithubWebhooks(deps.githubWebhooks))
+
+  // Okta Event Hooks (#383): a customer's Okta org telling us a person's account
+  // changed, so their cached mail password stops working. Same prefix, same
+  // exclusion from the document, and the same rule: the secret the owner gave
+  // their Okta admin is the whole of the authorization.
+  app.route("/webhooks", createOktaEventHooks(deps.oktaEventHooks))
 
   // The dashboard. Mounted unconditionally so an unconfigured deployment
   // answers 501 with a reason rather than 404 - which would read as the console

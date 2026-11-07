@@ -46,9 +46,10 @@ accepts mail. That limitation was what forced pre-creating every mailbox.
 A bind never talks to Clerk directly. `internal/verify` defines the seam: a
 `Verifier` checks one password against one identity provider, and a `Resolver`
 picks the verifier for an account. Today there are two: Clerk, for every account
-no SSO connection manages, and the company's own LDAP directory (`passthrough`),
-for the ones one does. The resolver is `passthrough.ManagedResolver`; choosing a
-provider is its job and not `handleBind`'s.
+no SSO connection manages, and the company's own identity provider
+(`passthrough`), for the ones one does: its LDAP directory or its Okta org,
+whichever the connection runs. The resolver is `passthrough.ManagedResolver`;
+choosing a provider is its job and not `handleBind`'s.
 
 Every verifier answers with the same tri-state outcome, and the third state is
 the one that matters:
@@ -66,8 +67,14 @@ workspace that later switches provider can never be answered from an entry the
 old provider minted. A resolver that cannot decide is `unavailable`, never
 `invalidCredentials`.
 
+⚠ The name does not say which lane a managed account's connection runs. That is
+the API's answer, fetched inside `Verify`, and the resolver does no I/O. What
+keeps the lanes apart in the cache instead is that the LDAP lane never stores a
+success and an Okta success is cached for 15 minutes at most (see "The Okta
+lane").
+
 Clerk has no budget: its `verify_password` was measured not to feed lockout. A
-company's directory has one, below.
+company's directory and a company's Okta org have one, below.
 
 ## The credential cache
 
@@ -149,9 +156,9 @@ follower.
 Some providers lock the REAL account after a few failures (Okta: about ten, and a
 locked account answers exactly like a wrong password). i10 must never be what
 spends them. A verifier with a `Budget{Max, Window}` gets this protection; Clerk
-has none, so none of it runs for Clerk. The company directory verifier has one,
-**3 per 15 minutes** (`passthrough.FailureBudget`), because Active Directory and
-its kin lock the real account too.
+has none, so none of it runs for Clerk. The company verifier has one, for either
+lane, **3 per 15 minutes** (`passthrough.FailureBudget`), because Active
+Directory and Okta lock the real account too.
 
 - **Shared.** Both Stalwart pods run an authd, so the count is the table
   `authd.bind_failure_budget` (`clerk_user_id`, `window_start`, `count`). It holds
@@ -191,7 +198,7 @@ that, so:
 | Longest verifier           | 12 s  | `verify.MaxTimeout`, clamped per bind              |
 | One budget reserve/release | 1 s   | `budgetOpTimeout`                                  |
 | Clerk                      | 5 s   | `AUTHD_CLERK_TIMEOUT`, refused above 12 s          |
-| Company directory          | 10 s  | `passthrough.VerifyTimeout`: settings fetch + walk |
+| Company directory / Okta   | 10 s  | `passthrough.VerifyTimeout`: settings fetch + walk |
 | Pass-through settings call | 5 s   | `AUTHD_API_TIMEOUT`, refused above 12 s            |
 | LDAP read/write deadline   | 30 s  | `main.go`; above both, so an answer can be written |
 
@@ -218,17 +225,25 @@ about how often Clerk is actually unavailable before the risk is worth taking.
 An account a company's SSO connection manages (sso.md 2.3) has no Clerk
 password: its company took it away, and its password belongs to the company's
 directory. So authd **never** sends such an account to Clerk's `verify_password`.
-Per connection it does one of two things:
+Per connection it does one of three things:
 
 - **LDAP pass-through** to the company's own LDAP server (Okta LDAP Interface,
   Google Secure LDAP, Entra Domain Services, AD, JumpCloud). One password, theirs.
+- **Okta**, for an Okta connection: the org's OAuth password grant. One password,
+  theirs, and no secret held by us at all (see "The Okta lane").
 - **Nothing.** The bind is refused with `invalidCredentials` and a reason code in
   the log, and IMAP is off for that connection's managed accounts. This is the
   state of every connection until pass-through is set up, tested and enabled.
 
-There is no mailbox password and no ROPC.
+A connection runs one lane at a time. The console refuses to turn either on while
+the other is, and if a row somehow has both on, the API answers LDAP: it was
+there first, so adding Okta can never change whose directory an existing LDAP
+connection's passwords go to.
 
-The directory is a `verify.Verifier` (`passthrough.Verifier`, named
+There is no mailbox password stored. Nothing in any lane is a hash, an app
+password or a per-device secret.
+
+The company's provider is a `verify.Verifier` (`passthrough.Verifier`, named
 `passthrough:<connection id>`), behind the same bind path as Clerk:
 
 ```
@@ -241,10 +256,12 @@ Stalwart ──LDAP bind──▶ authd ──▶ projection lookup  (active? su
                          └──── credential cache ─▶ flight ─▶ identical-failure memory
                                ─▶ throttle ─▶ failure budget (3 / 15 min, managed only)
                                ─▶ verify:
-                                    settings (API, cached ≤60s)
-                                    resolve + vet host ─▶ dial the vetted IP
-                                    TLS (ldaps | StartTLS, verified) ─▶ service bind
-                                    search: exactly one entry ─▶ bind as that entry
+                                    settings (API, cached ≤60s): which lane?
+                                    LDAP: resolve + vet host ─▶ dial the vetted IP
+                                          TLS (ldaps | StartTLS, verified) ─▶ service bind
+                                          search: exactly one entry ─▶ bind as that entry
+                                    Okta: resolve + vet host ─▶ dial the vetted IP
+                                          TLS (verified) ─▶ POST {issuer}/v1/token
 ```
 
 **Choosing the verifier does no I/O.** `ManagedResolver` reads the projection row
@@ -263,20 +280,29 @@ because an account is managed before it has a mailbox row.
 
 **Where the settings come from.** `POST /internal/authd/passthrough` on the API,
 authenticated by `AUTHD_API_SECRET` (constant-time compare, 401 otherwise),
-answers the connection's decrypted settings: host, port (389 or 636), TLS mode
-(`ldaps` or `starttls`; plaintext does not exist), an optional pinned CA, the
-search base, the user filter (`{email}` is replaced by the address, RFC 4515
-escaped) and the service account. The API holds them sealed with the
-connection's other secrets and lets an admin enable them only after a setup test
-passed in the last 24 hours.
+answers `{ "enabled": false }`, or `enabled: true` with a `lane`:
 
-**The walk**, in this order and no other:
+- `"ldap"`: the connection's decrypted settings: host, port (389 or 636), TLS
+  mode (`ldaps` or `starttls`; plaintext does not exist), an optional pinned CA,
+  the search base, the user filter (`{email}` is replaced by the address, RFC
+  4515 escaped) and the service account. The API holds them sealed with the
+  connection's other secrets and lets an admin enable them only after a setup
+  test passed in the last 24 hours.
+- `"okta"`: `issuer` and `clientId`, and nothing else. Neither is a secret.
+
+`enabled` stays on every answer, and a missing `lane` is read as LDAP, so the API
+and authd roll out in either order. A lane this authd does not know is an error
+(unavailable), never "off". Both lanes check the host with the same guard
+(`internal/egress`), which is the API's list.
+
+**The LDAP walk**, in this order and no other:
 
 1. An empty password is refused before any network call.
 2. The host is resolved and **every** address must be public: loopback,
    private, link-local (so cloud metadata), CGNAT, multicast, reserved and the
    IPv6 tunnelling ranges are refused, IPv4-mapped IPv6 judged as the IPv4 it
-   carries. One bad address refuses the name. The same list as the API's guard.
+   carries. One bad address refuses the name. The same list as the API's guard
+   (`internal/egress`).
 3. authd dials the vetted **address**, not the name again, with the name as the
    TLS server name. `ldaps` is TLS from the first byte; `starttls` is the first
    operation and nothing is sent before it. The certificate is verified against
@@ -318,8 +344,8 @@ answer is no either way; after three attempts it reads `busy` instead of
   pass-through or rotating the service secret takes up to a minute to reach
   authd. It holds a service secret in the clear in this process for that long,
   and nowhere else.
-- **A pass-through success:** never cached. The verifier caps the credential
-  cache at zero (`verify.CacheLimit`), so every bind asks the directory.
+- **An LDAP success:** never cached. The verifier caps the credential cache at
+  zero (`verify.CacheLimit`), so every bind asks the directory.
 
   ⚠ **Nothing tells authd that a company's directory changed a password.** There
   is no event hook into Active Directory, so a cached success would keep the old
@@ -328,12 +354,98 @@ answer is no either way; after three attempts it reads `busy` instead of
   an IdP's event hooks raising `credential_epoch`). The flight still collapses a
   client's simultaneous connections into one directory bind.
 
+- **An Okta success:** cached, for 15 minutes at most
+  (`passthrough.OktaMaxCacheTTL`), because an Okta call takes one to seven
+  seconds and a mail client reconnects all day. See "The Okta lane" for what ends
+  an entry early and why 15 minutes is a stopgap.
 - **A rejection or an outage:** never cached. A rejection is remembered only as
   the failure budget's identical-retry memory (minutes, in memory).
 
 The log carries reason codes (`user_not_found`, `ambiguous_entry`,
-`user_bind_rejected`, `host_blocked`, `tls_failed`, ...), never the password,
-the service secret, a filter or a DN the directory returned.
+`user_bind_rejected`, `host_blocked`, `tls_failed`, `okta_mfa_required`, ...),
+never the password, the service secret, a token, a filter or a DN the directory
+returned.
+
+## The Okta lane (#383)
+
+An Okta connection's managed accounts are asked of the customer's own Okta org,
+with Okta's OAuth password grant. i10 holds **no secret** for it: the
+authorization server's URL (`https://<org host>/oauth2/default`, or
+`/oauth2/<server id>`) and a **public** client id (an Okta native app with
+`token_endpoint_auth_method: none`, the `password` grant allowed). Both are in
+the connection's `config.oktaMail`, set by an owner in the console
+(`PUT /identity/connections/:id/okta-mail`, step-up) and validated there and again
+by `okta.Settings.Validate`.
+
+What the customer's Okta admin has to have set up is Okta's side: the app, an
+authorization-server access policy and rule that allow the `password` grant for
+it, and **an app sign-in policy whose rule is "Password" only**, assigned to the
+app. Without that last one Okta answers the right password with "denied by sign
+on policy" (below).
+
+One request, `POST {issuer}/v1/token`, form-encoded: `grant_type=password`,
+`username=<the account's address>`, `password`, `scope=openid`, `client_id`. No
+client credential of any kind is sent. The mapping was probed against a real org
+and is exact:
+
+| Okta answers                                             | Outcome       | LDAP answer            | Reason in the log                             | Budget slot |
+| -------------------------------------------------------- | ------------- | ---------------------- | --------------------------------------------- | ----------- |
+| `200` with an `access_token`                             | `Verified`    | `success`              | `verified`                                    | given back  |
+| `400 invalid_grant`, "credentials provided were invalid" | `Rejected`    | `invalidCredentials`   | `okta_invalid_credentials`                    | **kept**    |
+| `400 invalid_grant`, "denied by sign on policy"          | `Rejected`    | `invalidCredentials`   | **`okta_mfa_required`**                       | kept        |
+| any other `invalid_grant`                                | `Rejected`    | `invalidCredentials`   | `okta_invalid_credentials`                    | kept        |
+| `invalid_client`, `unauthorized_client`, any other `4xx` | `Unavailable` | **`unavailable` (52)** | `okta_config_<error code>`, or `_unknown`     | given back  |
+| `429`, `5xx`, a redirect, a `200` that is not a token    | `Unavailable` | **`unavailable` (52)** | `okta_rate_limited`, `okta_server_error`, ... | given back  |
+| timeout, DNS, dial, TLS, or a host the guard refuses     | `Unavailable` | **`unavailable` (52)** | `timeout`, `dns_failed`, `host_blocked`, ...  | given back  |
+
+⚠ **A locked Okta account answers exactly like a wrong password.** Ten wrong
+passwords lock the REAL account (the default policy), and Okta then says "the
+credentials provided were invalid" for the right one too. authd cannot tell the
+two apart, so the failure budget above (3 per 15 minutes, shared in Postgres) and
+the identical-retry memory are what keep i10 from spending a person's ten. Both
+apply to this lane exactly as to LDAP.
+
+⚠ **Any `invalid_grant` is a rejection.** It is a statement about the person's
+credentials by definition, and a rejection keeps its budget slot while an
+unavailable answer gives it back. Calling an unrecognised one "unavailable" would
+let a mail client retry a refusal Okta really counted, without limit.
+
+`okta_mfa_required` is the right password refused because the app's sign-in
+policy still wants a second factor. The client sees `invalidCredentials`; the log
+says why, so the console can later tell the admin to add the password-only
+policy. Nothing Okta says is copied into a log line: an answer is reduced to a
+fixed reason code, and an error code that is not lower-case words is dropped.
+
+**Egress.** The issuer is the customer's choice, so `internal/okta` connects only
+through `internal/egress`: the name is resolved, every address must be public, and
+the connection goes to the vetted address with the issuer's name as the TLS server
+name (TLS 1.2 or later, system roots, no pin). No proxy from the environment is
+used, and a redirect is never followed: either would carry the password where
+nobody configured. The response is read to 64 KiB.
+
+**Cache.** An Okta success is cached for **15 minutes** (`OktaMaxCacheTTL`), not
+the full `AUTHD_CRED_CACHE_TTL`. The long cache is safe only where a password
+change reaches authd, and for Okta that is an event hook raising
+`credential_epoch` on a password change, a suspension, a lock or a deprovision
+(B9 step 2b). Until a connection's hook is built and verified nothing tells authd,
+so 15 minutes is the longest a changed Okta password keeps opening mail. 2b's
+verified hook is what may lift it. Three things end an entry sooner:
+
+- the projection lookup, which runs first: a suspended or deprovisioned account is
+  refused at the next bind;
+- a change to the connection's Okta settings (a different org or client, or
+  Okta mail sign-in switched off), which raises the `credential_epoch` of every
+  account the connection manages, now and once more just after authd's own
+  60-second copy of the settings has expired
+  (`apps/api/src/projection/connection-epoch.ts`);
+- `credential_epoch` itself, for any other revocation.
+
+⚠ **The lane is not in the verifier's name.** Which lane a connection runs is the
+API's answer, fetched inside `Verify`, and the resolver does no I/O, so the name
+is `passthrough:<connection id>` for both. An LDAP success is never cached, so
+nothing it minted can answer for an Okta account; an Okta success is cached, and
+the settings-change epoch raise above is what stops it answering after the
+connection leaves Okta.
 
 ## Suspended mailboxes (#344)
 
@@ -435,8 +547,11 @@ internal/config      env loading, the loopback guard
 internal/directory   the LDAP view: entries, DNs, filter evaluation
 internal/verify      the Verifier / Resolver / BudgetStore seam, Outcome
 internal/clerkauth   the Clerk verifier: verify_password and its status mapping
-internal/passthrough the company-directory verifier and ManagedResolver: settings
-                     client, host guard, the LDAP walk
+internal/passthrough the company verifier and ManagedResolver: settings client,
+                     the lane choice, the LDAP walk
+internal/okta        the Okta password grant: validation, the vetted dial, the
+                     answer mapping (oktatest is its fake endpoint)
+internal/egress      which addresses authd may connect to for a tenant
 internal/credcache   verified-password cache and the remembered refusals
 internal/inflight    one verification for concurrent identical binds
 internal/budgetstore the shared failure budget in Postgres

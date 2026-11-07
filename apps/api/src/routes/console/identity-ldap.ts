@@ -20,6 +20,7 @@ import {
   type LdapSettingsInput,
   type StoredLdap,
 } from "../../identity/ldap.js"
+import { storedOktaMail } from "../../identity/okta-mail.js"
 import { PROBE_RESULTS, type LdapProbe } from "../../identity/ldap-probe.js"
 import type { fixedWindow, Limit } from "../../identity/rate-limit.js"
 
@@ -71,7 +72,7 @@ const conflict = (reason: string, message: string) =>
   ({ statusCode: 409, name: "ldap_refused" as const, reason, message }) as const
 
 class LdapRefused extends Error {
-  constructor(readonly reason: "incomplete" | "not_tested") {
+  constructor(readonly reason: "incomplete" | "not_tested" | "okta_enabled") {
     super(reason)
     this.name = "LdapRefused"
   }
@@ -82,6 +83,8 @@ const REFUSALS: Record<LdapRefused["reason"], string> = {
     "Set the host, port, TLS mode, search base, user filter and the service account first.",
   not_tested:
     "Run the setup test on these settings first. A pass is good for 24 hours, for the settings it ran on.",
+  okta_enabled:
+    "Turn Okta mail sign-in off first. A connection asks its members' passwords of one place.",
 }
 
 function setupView(connection: Connection, now: Date): Record<string, unknown> {
@@ -208,6 +211,11 @@ export function mountIdentityLdap(app: Hono, d: ConsoleDeps): void {
         }
         if (input.enabled !== undefined) {
           if (input.enabled) {
+            // ⚠ ONE PLACE FOR PASSWORDS: identity-okta-mail.ts refuses the other
+            // direction, and both look under this row lock (passthroughFor says
+            // who wins if a row got both on some other way).
+            if (storedOktaMail({ config: cur.config }).enabled === true)
+              throw new LdapRefused("okta_enabled")
             if (!completeSettings(next, sealed)) throw new LdapRefused("incomplete")
             if (!testIsFresh(next, now)) throw new LdapRefused("not_tested")
           }

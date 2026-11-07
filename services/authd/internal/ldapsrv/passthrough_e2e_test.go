@@ -96,11 +96,17 @@ var (
 // failing is an API that cannot be reached.
 type failing struct{ err error }
 
-func (f failing) Fetch(context.Context, string) (*passthrough.Settings, error) { return nil, f.err }
+func (f failing) Fetch(context.Context, string) (*passthrough.Answer, error) { return nil, f.err }
 
+// fixedSource answers every connection with the same LDAP settings, or off.
 type fixedSource struct{ s *passthrough.Settings }
 
-func (f fixedSource) Fetch(context.Context, string) (*passthrough.Settings, error) { return f.s, nil }
+func (f fixedSource) Fetch(context.Context, string) (*passthrough.Answer, error) {
+	if f.s == nil {
+		return nil, nil
+	}
+	return &passthrough.Answer{Lane: passthrough.LaneLDAP, LDAP: f.s}, nil
+}
 
 func code(err error) uint16 { return resultCode(err) }
 
@@ -199,7 +205,7 @@ func TestAManagedAccountWithoutPassThroughIsRefused(t *testing.T) {
 		dir  passthrough.Directory
 		conn string
 	}{
-		"the connection has it off": {dir: passthrough.NewService(fixedSource{nil}, &passthrough.Binder{}), conn: connAcme},
+		"the connection has it off": {dir: passthrough.NewService(fixedSource{nil}, &passthrough.Binder{}, nil), conn: connAcme},
 		"no pass-through at all":    {dir: nil, conn: connAcme},
 		"the connection is gone":    {dir: &fakeDirectory{result: resultVerified}, conn: ""},
 	}
@@ -226,7 +232,7 @@ func TestAManagedAccountWithoutPassThroughIsRefused(t *testing.T) {
 func TestAnUnreachableAPIIsUnavailableNeverAFallbackToClerk(t *testing.T) {
 	store := managedStore()
 	clerk := &fakeVerifier{outcome: verify.Verified}
-	svc := passthrough.NewService(failing{errors.New("api down")}, &passthrough.Binder{})
+	svc := passthrough.NewService(failing{errors.New("api down")}, &passthrough.Binder{}, nil)
 	addr, budget := managedFixture(t, store, clerk, svc, nil)
 
 	if got := bindCarol(t, addr, carolPass); got != goldapclient.LDAPResultUnavailable {
@@ -433,7 +439,7 @@ func directoryService(t *testing.T, dir *ldaptest.Server, mutate func(*passthrou
 			return (&net.Dialer{}).DialContext(ctx, network, dir.Addr)
 		},
 		DialTimeout: time.Second, OpTimeout: 2 * time.Second, TotalTimeout: 5 * time.Second,
-	})
+	}, nil)
 }
 
 type lookup map[string][]netip.Addr
