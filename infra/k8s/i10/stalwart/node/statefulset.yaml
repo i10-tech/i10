@@ -254,7 +254,7 @@ spec:
           # Built from services/authd by .github/workflows/build.yml. `prod-latest`
           # matches every other i10 workload: the Build job tags prod-<sha> and
           # prod-latest only on main, so staging can never publish over it.
-          image: ghcr.io/i10-tech/i10-authd:prod-3e0c92a17bf456e7e027370f2763d479d7091a27@sha256:caaefc5f5c2331852b3ed129ff401ce0491650956f8fefa2282882f27a221aa7
+          image: ghcr.io/i10-tech/i10-authd:prod-a02e72a3b1badad841e137308389ab80bb84bc09@sha256:f17801ac15fe54b68800f5773559de4a611269daf439bb472d65306639f1841b
 
           securityContext:
             allowPrivilegeEscalation: false
