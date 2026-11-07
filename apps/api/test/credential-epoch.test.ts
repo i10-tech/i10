@@ -19,7 +19,9 @@ describe("raising the credential epoch", () => {
   // ⚠ A read-then-write would let two writers land on the same number, and a
   // missed raise is a cached password outliving its revocation.
   it("increments inside the statement rather than reading and writing back", () => {
-    expect(statement().sql).toContain('"credential_epoch" = "authd"."accounts"."credential_epoch" + 1')
+    expect(statement().sql).toContain(
+      '"credential_epoch" = "authd"."accounts"."credential_epoch" + 1',
+    )
   })
 
   it("touches one account only, by Clerk user id", () => {

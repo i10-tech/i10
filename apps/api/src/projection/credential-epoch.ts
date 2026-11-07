@@ -25,7 +25,10 @@ import { accounts } from "../db/schema.js"
  * Returns the unexecuted statement, to be awaited, so a test can read its SQL.
  * A user with no row is a no-op: there is nothing cached for them.
  */
-export function raiseCredentialEpoch(db: Pick<Database, "update">, clerkUserId: string) {
+export function raiseCredentialEpoch(
+  db: Pick<Database, "update">,
+  clerkUserId: string,
+) {
   return db
     .update(accounts)
     .set({
