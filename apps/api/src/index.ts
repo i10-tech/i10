@@ -1799,8 +1799,13 @@ const identityConsole = {
     }),
     take: fixedWindow(cache),
   },
-  // Okta as the place an Okta connection's IMAP passwords are asked (#383).
-  oktaMail: {
+  // A connection's OIDC provider (Okta, Keycloak, Auth0, ...) as the place its
+  // IMAP passwords are asked (#383). Its discovery document is read through the
+  // same egress guard as every other IdP request.
+  oidcMail: {
+    fetch: guardedFetch({
+      vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
+    }),
     invalidate: async (connectionId: string) => {
       const raise = () => raiseConnectionCredentialEpochs(db, connectionId)
       await raise()

@@ -89,20 +89,23 @@ describe("POST /internal/authd/passthrough", () => {
     expect(w.calls).toEqual([ID])
   })
 
-  it("answers an Okta connection with the issuer and the client id, and nothing secret", async () => {
-    const okta: PassthroughAnswer = {
+  it("answers an OIDC connection with the preset, the endpoint and the client id, and nothing secret", async () => {
+    const oidc: PassthroughAnswer = {
       enabled: true,
-      lane: "okta",
+      lane: "oidc",
+      preset: "okta",
       issuer: "https://acme.okta.com/oauth2/default",
+      tokenEndpoint: "https://acme.okta.com/oauth2/default/v1/token",
       clientId: "0oa1b2c3d4e5f6g7h8i9",
+      extra: {},
     }
-    const w = app({ answer: async () => okta })
+    const w = app({ answer: async () => oidc })
     const res = await w.post(
       { Authorization: `Bearer ${SECRET}` },
       { connectionId: ID },
     )
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual(okta)
+    expect(await res.json()).toEqual(oidc)
   })
 
   it("passes 'off' on as off", async () => {

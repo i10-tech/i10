@@ -80,8 +80,8 @@ func TestHTTPSourceSendsTheSecretAndReadsTheAnswer(t *testing.T) {
 	if gotAuth != "Bearer "+secret || gotPath != "/internal/authd/passthrough" || gotBody != `{"connectionId":"conn-1"}` {
 		t.Errorf("request = %q %q %q", gotAuth, gotPath, gotBody)
 	}
-	// No `lane` is the shape the API had before Okta: LDAP.
-	if a.Lane != LaneLDAP || a.Okta != nil || a.LDAP == nil ||
+	// No `lane` is the shape the API had before the OIDC lanes: LDAP.
+	if a.Lane != LaneLDAP || a.OIDC != nil || a.LDAP == nil ||
 		a.LDAP.Host != "ldap.acme.test" || a.LDAP.Port != 636 || a.LDAP.BindSecret != "s" {
 		t.Errorf("answer = %+v", a)
 	}
@@ -100,14 +100,31 @@ func fetchFrom(t *testing.T, body string) (*Answer, error) {
 func TestHTTPSourceReadsTheLaneTheAPINames(t *testing.T) {
 	a, err := fetchFrom(t, `{"enabled":true,"lane":"ldap","host":"ldap.acme.test","port":636,"tlsMode":"ldaps",
 		"searchBase":"dc=acme","userFilter":"(mail={email})","bindDn":"cn=svc","bindSecret":"s"}`)
-	if err != nil || a == nil || a.Lane != LaneLDAP || a.LDAP == nil || a.LDAP.Host != "ldap.acme.test" || a.Okta != nil {
+	if err != nil || a == nil || a.Lane != LaneLDAP || a.LDAP == nil || a.LDAP.Host != "ldap.acme.test" || a.OIDC != nil {
 		t.Fatalf("ldap lane: %+v, %v", a, err)
 	}
 
-	a, err = fetchFrom(t, `{"enabled":true,"lane":"okta","issuer":"https://acme.okta.com/oauth2/default","clientId":"0oa1b2c3d4e5f6g7h8i9"}`)
-	if err != nil || a == nil || a.Lane != LaneOkta || a.LDAP != nil || a.Okta == nil ||
-		a.Okta.Issuer != "https://acme.okta.com/oauth2/default" || a.Okta.ClientID != "0oa1b2c3d4e5f6g7h8i9" {
-		t.Fatalf("okta lane: %+v, %v", a, err)
+	a, err = fetchFrom(t, `{"enabled":true,"lane":"oidc","preset":"auth0","issuer":"https://acme.auth0.com","tokenEndpoint":"https://acme.auth0.com/oauth/token",
+		"clientId":"Zk3q9XvYw0aB5cD7","extra":{"realm":"Employees","audience":"https://mail"}}`)
+	if err != nil || a == nil || a.Lane != LaneOIDC || a.LDAP != nil || a.OIDC == nil ||
+		a.OIDC.Preset != "auth0" || a.OIDC.Issuer != "https://acme.auth0.com" || a.OIDC.TokenEndpoint != "https://acme.auth0.com/oauth/token" ||
+		a.OIDC.ClientID != "Zk3q9XvYw0aB5cD7" || a.OIDC.Extra["realm"] != "Employees" || a.OIDC.Extra["audience"] != "https://mail" {
+		t.Fatalf("oidc lane: %+v, %v", a, err)
+	}
+}
+
+// ⚠ AN API FROM BEFORE THE GENERIC LANE answers an Okta connection with just an
+// issuer and a client id. It is the okta preset, and its token endpoint was always
+// the issuer's /v1/token.
+func TestHTTPSourceStillReadsTheOldOktaLane(t *testing.T) {
+	a, err := fetchFrom(t, `{"enabled":true,"lane":"okta","issuer":"https://acme.okta.com/oauth2/default","clientId":"0oa1b2c3d4e5f6g7h8i9"}`)
+	if err != nil || a == nil || a.Lane != LaneOIDC || a.LDAP != nil || a.OIDC == nil ||
+		a.OIDC.Preset != "okta" || a.OIDC.Issuer != "https://acme.okta.com/oauth2/default" ||
+		a.OIDC.TokenEndpoint != "https://acme.okta.com/oauth2/default/v1/token" || a.OIDC.ClientID != "0oa1b2c3d4e5f6g7h8i9" {
+		t.Fatalf("old okta lane: %+v, %v", a, err)
+	}
+	if err := a.OIDC.Validate(); err != nil {
+		t.Errorf("what it reads is not valid settings: %v", err)
 	}
 }
 
@@ -120,7 +137,7 @@ func TestHTTPSourceDoesNotReadALaneItDoesNotKnowAsOff(t *testing.T) {
 }
 
 func TestHTTPSourceAnswersAnOffConnectionOfAnyLaneAsNil(t *testing.T) {
-	for _, body := range []string{`{"enabled":false}`, `{"enabled":false,"lane":"okta"}`} {
+	for _, body := range []string{`{"enabled":false}`, `{"enabled":false,"lane":"oidc"}`} {
 		if a, err := fetchFrom(t, body); a != nil || err != nil {
 			t.Fatalf("%s: Fetch = %v, %v; want nil, nil", body, a, err)
 		}

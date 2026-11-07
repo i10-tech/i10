@@ -47,8 +47,8 @@ A bind never talks to Clerk directly. `internal/verify` defines the seam: a
 `Verifier` checks one password against one identity provider, and a `Resolver`
 picks the verifier for an account. Today there are two: Clerk, for every account
 no SSO connection manages, and the company's own identity provider
-(`passthrough`), for the ones one does: its LDAP directory or its Okta org,
-whichever the connection runs. The resolver is `passthrough.ManagedResolver`;
+(`passthrough`), for the ones one does: its LDAP directory or its OIDC provider
+(Okta, Keycloak, Auth0, ...), whichever the connection runs. The resolver is `passthrough.ManagedResolver`;
 choosing a provider is its job and not `handleBind`'s.
 
 Every verifier answers with the same tri-state outcome, and the third state is
@@ -70,11 +70,11 @@ old provider minted. A resolver that cannot decide is `unavailable`, never
 ⚠ The name does not say which lane a managed account's connection runs. That is
 the API's answer, fetched inside `Verify`, and the resolver does no I/O. What
 keeps the lanes apart in the cache instead is that the LDAP lane never stores a
-success and an Okta success is cached for 15 minutes at most (see "The Okta
+success and an OIDC success is cached for 15 minutes at most (see "The OIDC
 lane").
 
 Clerk has no budget: its `verify_password` was measured not to feed lockout. A
-company's directory and a company's Okta org have one, below.
+company's directory and a company's OIDC provider have one, below.
 
 ## The credential cache
 
@@ -173,7 +173,7 @@ locked account answers exactly like a wrong password). i10 must never be what
 spends them. A verifier with a `Budget{Max, Window}` gets this protection; Clerk
 has none, so none of it runs for Clerk. The company verifier has one, for either
 lane, **3 per 15 minutes** (`passthrough.FailureBudget`), because Active
-Directory and Okta lock the real account too.
+Directory and the OIDC providers lock the real account too.
 
 - **Shared.** Both Stalwart pods run an authd, so the count is the table
   `authd.bind_failure_budget` (`clerk_user_id`, `window_start`, `count`). It holds
@@ -213,7 +213,7 @@ that, so:
 | Longest verifier           | 12 s  | `verify.MaxTimeout`, clamped per bind              |
 | One budget reserve/release | 1 s   | `budgetOpTimeout`                                  |
 | Clerk                      | 5 s   | `AUTHD_CLERK_TIMEOUT`, refused above 12 s          |
-| Company directory / Okta   | 10 s  | `passthrough.VerifyTimeout`: settings fetch + walk |
+| Company directory / OIDC   | 10 s  | `passthrough.VerifyTimeout`: settings fetch + walk |
 | Pass-through settings call | 5 s   | `AUTHD_API_TIMEOUT`, refused above 12 s            |
 | LDAP read/write deadline   | 30 s  | `main.go`; above both, so an answer can be written |
 
@@ -244,16 +244,18 @@ Per connection it does one of three things:
 
 - **LDAP pass-through** to the company's own LDAP server (Okta LDAP Interface,
   Google Secure LDAP, Entra Domain Services, AD, JumpCloud). One password, theirs.
-- **Okta**, for an Okta connection: the org's OAuth password grant. One password,
-  theirs, and no secret held by us at all (see "The Okta lane").
+- **OIDC**, for a connection whose provider has a password grant (Okta, Keycloak,
+  Auth0, PingFederate, FusionAuth, or any other that takes a public client's):
+  the provider's OAuth password grant. One password, theirs, and no secret held
+  by us at all (see "The OIDC lane").
 - **Nothing.** The bind is refused with `invalidCredentials` and a reason code in
   the log, and IMAP is off for that connection's managed accounts. This is the
   state of every connection until pass-through is set up, tested and enabled.
 
 A connection runs one lane at a time. The console refuses to turn either on while
 the other is, and if a row somehow has both on, the API answers LDAP: it was
-there first, so adding Okta can never change whose directory an existing LDAP
-connection's passwords go to.
+there first, so adding an OIDC lane can never change whose directory an existing
+LDAP connection's passwords go to.
 
 There is no mailbox password stored. Nothing in any lane is a hash, an app
 password or a per-device secret.
@@ -275,8 +277,8 @@ Stalwart ──LDAP bind──▶ authd ──▶ projection lookup  (active? su
                                     LDAP: resolve + vet host ─▶ dial the vetted IP
                                           TLS (ldaps | StartTLS, verified) ─▶ service bind
                                           search: exactly one entry ─▶ bind as that entry
-                                    Okta: resolve + vet host ─▶ dial the vetted IP
-                                          TLS (verified) ─▶ POST {issuer}/v1/token
+                                    OIDC: resolve + vet host ─▶ dial the vetted IP
+                                          TLS (verified) ─▶ POST the token endpoint
 ```
 
 **Choosing the verifier does no I/O.** `ManagedResolver` reads the projection row
@@ -303,7 +305,11 @@ answers `{ "enabled": false }`, or `enabled: true` with a `lane`:
   4515 escaped) and the service account. The API holds them sealed with the
   connection's other secrets and lets an admin enable them only after a setup
   test passed in the last 24 hours.
-- `"okta"`: `issuer` and `clientId`, and nothing else. Neither is a secret.
+- `"oidc"`: `preset`, `issuer`, `tokenEndpoint`, `clientId` and `extra` (the
+  preset's optional form fields), and nothing else. None of it is a secret. An API
+  from before the lane was generic answers an Okta connection as `"okta"` with just
+  `issuer` and `clientId`; that is still read, as the okta preset with the issuer's
+  `/v1/token`.
 
 `enabled` stays on every answer, and a missing `lane` is read as LDAP, so the API
 and authd roll out in either order. A lane this authd does not know is an error
@@ -369,98 +375,169 @@ answer is no either way; after three attempts it reads `busy` instead of
   an IdP's event hooks raising `credential_epoch`). The flight still collapses a
   client's simultaneous connections into one directory bind.
 
-- **An Okta success:** cached, for 15 minutes at most
-  (`passthrough.OktaMaxCacheTTL`), because an Okta call takes one to seven
-  seconds and a mail client reconnects all day. See "The Okta lane" for what ends
-  an entry early and why 15 minutes is a stopgap.
+- **An OIDC success:** cached, for 15 minutes at most
+  (`passthrough.OIDCMaxCacheTTL`, one constant for every preset), because a
+  provider's call takes one to seven seconds and a mail client reconnects all day.
+  See "The OIDC lane" for what ends an entry early and why 15 minutes is a
+  stopgap.
 - **A rejection or an outage:** never cached. A rejection is remembered only as
   the failure budget's identical-retry memory (minutes, in memory).
 
 The log carries reason codes (`user_not_found`, `ambiguous_entry`,
-`user_bind_rejected`, `host_blocked`, `tls_failed`, `okta_mfa_required`, ...),
+`user_bind_rejected`, `host_blocked`, `tls_failed`, `oidc_mfa_required`, ...),
 never the password, the service secret, a token, a filter or a DN the directory
 returned.
 
-## The Okta lane (#383)
+## The OIDC lane (#383)
 
-An Okta connection's managed accounts are asked of the customer's own Okta org,
-with Okta's OAuth password grant. i10 holds **no secret** for it: the
-authorization server's URL (`https://<org host>/oauth2/default`, or
-`/oauth2/<server id>`) and a **public** client id (an Okta native app with
-`token_endpoint_auth_method: none`, the `password` grant allowed). Both are in
-the connection's `config.oktaMail`, set by an owner in the console
-(`PUT /identity/connections/:id/okta-mail`, step-up) and validated there and again
-by `okta.Settings.Validate`.
+A connection whose provider has an OAuth password grant has its managed accounts
+asked of the customer's own provider: Okta, Keycloak, Auth0, PingFederate,
+FusionAuth, or any other OpenID Connect provider whose token endpoint takes a
+**public** client's `password` grant (the `generic` preset). i10 holds **no
+secret** for it: the issuer, the token endpoint, a public client id and a few
+optional plain form fields. They are in the connection's `config.oidcMail`, set by
+an owner in the console (`PUT /identity/connections/:id/oidc-mail`, step-up) and
+validated there and again by `oidc.Settings.Validate`. An Okta-only
+`config.oktaMail` from before the lane was generic is still read, as the okta
+preset, and replaced by the next write; nothing is migrated in bulk.
 
-What the customer's Okta admin has to have set up is Okta's side: the app, an
-authorization-server access policy and rule that allow the `password` grant for
-it, and **an app sign-in policy whose rule is "Password" only**, assigned to the
-app. Without that last one Okta answers the right password with "denied by sign
-on policy" (below).
+OneLogin is not a preset: its password grant is documented only with
+`Authorization: Basic <client id>:<client secret>`, and this lane holds no client
+secret. Entra and Google have their own mail sign-in.
 
-One request, `POST {issuer}/v1/token`, form-encoded: `grant_type=password`,
-`username=<the account's address>`, `password`, `scope=openid`, `client_id`. No
-client credential of any kind is sent. The mapping was probed against a real org
-and is exact:
+**The token endpoint is discovered, once, when an owner saves.** The owner gives
+the issuer. The API reads `{issuer}/.well-known/openid-configuration` through its
+egress guard, takes `token_endpoint`, and refuses the save when the document lists
+`grant_types_supported` without `password` (Auth0 with a realm may list its
+`password-realm` grant instead). The endpoint must be `https` on **the issuer's own
+host, exactly**: same name, port 443, a plain path, no query. Not "the same
+registrable domain": `acme.okta.com` and `evil.okta.com` share `okta.com`, and no
+preset splits its issuer and token endpoint across hosts. A provider that does is
+refused on save, loudly. PingFederate on its default port 9031 is refused for the
+same reason (no port).
 
-| Okta answers                                             | Outcome       | LDAP answer            | Reason in the log                             | Budget slot |
-| -------------------------------------------------------- | ------------- | ---------------------- | --------------------------------------------- | ----------- |
-| `200` with an `access_token`                             | `Verified`    | `success`              | `verified`                                    | given back  |
-| `400 invalid_grant`, "credentials provided were invalid" | `Rejected`    | `invalidCredentials`   | `okta_invalid_credentials`                    | **kept**    |
-| `400 invalid_grant`, "denied by sign on policy"          | `Rejected`    | `invalidCredentials`   | **`okta_mfa_required`**                       | kept        |
-| any other `invalid_grant`                                | `Rejected`    | `invalidCredentials`   | `okta_invalid_credentials`                    | kept        |
-| `invalid_client`, `unauthorized_client`, any other `4xx` | `Unavailable` | **`unavailable` (52)** | `okta_config_<error code>`, or `_unknown`     | given back  |
-| `429`, `5xx`, a redirect, a `200` that is not a token    | `Unavailable` | **`unavailable` (52)** | `okta_rate_limited`, `okta_server_error`, ... | given back  |
-| timeout, DNS, dial, TLS, or a host the guard refuses     | `Unavailable` | **`unavailable` (52)** | `timeout`, `dns_failed`, `host_blocked`, ...  | given back  |
+authd does **not** fetch discovery at bind time. The endpoint is the one the owner
+approved, and authd re-validates it at every bind with the same rules, including
+the host rule. A provider that later moves its token endpoint breaks sign-in until
+an owner saves again, which is an outage an admin can see and fix; an endpoint
+that quietly followed the provider's document would let whoever can change that
+document choose where every member's password goes.
 
-⚠ **A locked Okta account answers exactly like a wrong password.** Ten wrong
-passwords lock the REAL account (the default policy), and Okta then says "the
-credentials provided were invalid" for the right one too. authd cannot tell the
-two apart, so the failure budget above (3 per 15 minutes, shared in Postgres) and
-the identical-retry memory are what keep i10 from spending a person's ten. Both
-apply to this lane exactly as to LDAP.
+What the customer's admin has to have set up is the provider's side: a **public**
+client (no secret) with the password grant allowed, and no second factor demanded
+of it.
+
+| Preset       | Client id                | Optional fields (none secret)   | The provider's side                                                                                                                                                                                                                                             |
+| ------------ | ------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `okta`       | `0oa` + 17 characters    | `scope`                         | A native app (`token_endpoint_auth_method: none`), an access-policy rule allowing `password`, and an app sign-in policy whose rule is "Password" only. The issuer must be a custom authorization server (`/oauth2/<id>`); the org server has no password grant. |
+| `keycloak`   | any printable, up to 256 | `scope`                         | A public client with Direct Access Grants on.                                                                                                                                                                                                                   |
+| `auth0`      | any printable, up to 256 | `audience`, `realm`, `scope`    | A Native application with the Password grant; a Default Directory in tenant settings, or a `realm` (the `password-realm` grant).                                                                                                                                |
+| `ping`       | any printable, up to 256 | `validator_id`, `scope`         | A client with authentication None and Resource Owner Password Credentials allowed.                                                                                                                                                                              |
+| `fusionauth` | any printable, up to 256 | `scope`                         | An application with the Password grant enabled and client authentication not required.                                                                                                                                                                          |
+| `generic`    | any printable, up to 256 | `audience`, `resource`, `scope` | Whatever the provider calls the above.                                                                                                                                                                                                                          |
+
+One request to the token endpoint, form-encoded: `grant_type=password` (Auth0 with
+a realm: `http://auth0.com/oauth/grant-type/password-realm`), `username=<the
+account's address>`, `password`, `scope=openid` unless the owner set one,
+`client_id`, and the preset's optional fields. No client credential of any kind is
+sent, and no field the request owns (`grant_type`, `username`, `password`,
+`client_id`, `client_secret`) can be set as an optional one.
+
+The mapping, for every preset; a preset adds the refusals it can tell apart (next
+table):
+
+| The provider answers                                     | Outcome       | LDAP answer            | Reason in the log                                                                           | Budget slot |
+| -------------------------------------------------------- | ------------- | ---------------------- | ------------------------------------------------------------------------------------------- | ----------- |
+| `200` with an `access_token`                             | `Verified`    | `success`              | `verified`                                                                                  | given back  |
+| a refusal the preset tells apart (next table)            | `Rejected`    | `invalidCredentials`   | `oidc_mfa_required`, `oidc_account_locked`, `oidc_account_disabled`, `oidc_action_required` | **kept**    |
+| any other `invalid_grant`, at any status                 | `Rejected`    | `invalidCredentials`   | `oidc_invalid_credentials`                                                                  | kept        |
+| `invalid_client`, `unauthorized_client`, any other `4xx` | `Unavailable` | **`unavailable` (52)** | `oidc_config_<error code>`, or `_unknown`                                                   | given back  |
+| `429`, `5xx`, a redirect, a `200` that is not a token    | `Unavailable` | **`unavailable` (52)** | `oidc_rate_limited`, `oidc_server_error`, ...                                               | given back  |
+| timeout, DNS, dial, TLS, or a host the guard refuses     | `Unavailable` | **`unavailable` (52)** | `timeout`, `dns_failed`, `host_blocked`, ...                                                | given back  |
+
+What each preset tells apart (`internal/oidc/presets.go`, with the source beside
+each row there). Everything not listed is a plain `invalid_grant`, and a plain
+`invalid_grant` is a rejection whatever its text says:
+
+| Preset       | The provider says                                                                                              | Reason                                                             | Source                                                      |
+| ------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `okta`       | `400 invalid_grant`, "denied by sign on policy"                                                                | `oidc_mfa_required`                                                | probed on a real org (#383)                                 |
+| `okta`       | a locked account                                                                                               | (none: it says "credentials ... invalid", as for a wrong password) | probed on a real org (#383)                                 |
+| `keycloak`   | `invalid_grant`, "Account disabled"                                                                            | `oidc_account_disabled`                                            | phasetwo.io/blog/keycloak-invalid-grant (probed on 26.7.3)  |
+| `keycloak`   | `invalid_grant`, "Account is not fully set up" (a required action)                                             | `oidc_action_required`                                             | same                                                        |
+| `keycloak`   | wrong password, unknown user **and brute-force lockout**: "Invalid user credentials"                           | (none: the same text by design)                                    | same; Keycloak's admin guide                                |
+| `auth0`      | `403 mfa_required`                                                                                             | `oidc_mfa_required`                                                | auth0.com/docs, "Authenticate Using the ROPG Flow with MFA" |
+| `auth0`      | `429 too_many_attempts`, "Your account has been blocked ..."                                                   | `oidc_account_locked`                                              | auth0/docs-v2 (error codes)                                 |
+| `auth0`      | `429 too_many_attempts`, "suspicious login behavior" (our address, not the person)                             | `Unavailable`, `oidc_rate_limited`                                 | same                                                        |
+| `auth0`      | `blocked_user`; legacy `401 unauthorized`, "user is blocked"                                                   | `oidc_account_disabled`                                            | same; not confirmed for `/oauth/token`                      |
+| `auth0`      | `403 access_denied`, `invalid_user_password`                                                                   | `oidc_invalid_credentials`                                         | same                                                        |
+| `ping`       | `invalid_grant` whose text is the password credential validator's own                                          | (none: it is the customer's directory's wording)                   | docs.pingidentity.com, "OAuth grant type parameters"        |
+| `fusionauth` | `two_factor_required`, or `error_reason` `multi_factor_challenge_required`                                     | `oidc_mfa_required`                                                | fusionauth.io/docs/apis/oauth/oauth-error; FusionAuth forum |
+| `fusionauth` | `error_reason` `user_locked`                                                                                   | `oidc_account_locked`                                              | same                                                        |
+| `fusionauth` | `error_reason` `user_expired`, `login_prevented`                                                               | `oidc_account_disabled`                                            | same                                                        |
+| `fusionauth` | `change_password_required` or a `change_password_*`, `*_verification_required`, `registration_required` reason | `oidc_action_required`                                             | same                                                        |
+| `generic`    | `mfa_required`, `two_factor_required`                                                                          | `oidc_mfa_required`                                                | the codes Auth0 and FusionAuth use                          |
+| `generic`    | `interaction_required`, `consent_required`, `login_required`                                                   | `oidc_action_required`                                             | OpenID Connect Core 3.1.2.6                                 |
+
+⚠ **What is and is not verified.** Okta's answers were probed against a real org.
+Keycloak's were probed on 26.7.3 by a third party (the post above). Auth0's,
+PingFederate's and FusionAuth's are quoted from vendor documentation and not
+probed against a live tenant, and the exact HTTP status of a Keycloak or FusionAuth
+refusal varies by release, which is why the mapping never keys on it.
+Descriptions are human text and change, so a phrase only ever refines a rejection
+into a more specific one: a provider that rewords it is still a rejection.
+
+⚠ **A locked account usually answers exactly like a wrong password.** Okta,
+Keycloak and PingFederate all do (Keycloak on purpose). Ten wrong passwords lock
+the REAL Okta account (the default policy). authd cannot tell the two apart where
+the provider does not, so the failure budget above (3 per 15 minutes, shared in
+Postgres) and the identical-retry memory are what keep i10 from spending a
+person's attempts. Both apply to this lane exactly as to LDAP.
 
 ⚠ **Any `invalid_grant` is a rejection.** It is a statement about the person's
-credentials by definition, and a rejection keeps its budget slot while an
-unavailable answer gives it back. Calling an unrecognised one "unavailable" would
-let a mail client retry a refusal Okta really counted, without limit.
+credentials by definition (RFC 6749 5.2), and a rejection keeps its budget slot
+while an unavailable answer gives it back. Calling an unrecognised one
+"unavailable" would let a mail client retry a refusal the provider really counted,
+without limit. Keycloak says 401, Auth0 403 and Okta 400 for the same thing.
 
-`okta_mfa_required` is the right password refused because the app's sign-in
-policy still wants a second factor. The client sees `invalidCredentials`; the log
-says why, so the console can later tell the admin to add the password-only
-policy. Nothing Okta says is copied into a log line: an answer is reduced to a
-fixed reason code, and an error code that is not lower-case words is dropped.
+`oidc_mfa_required` is the right password refused because the provider still wants
+a second factor. The client sees `invalidCredentials`; the log says why (and which
+preset), so the console can later tell the admin to allow a password-only sign-in
+for mail. Nothing a provider says is copied into a log line: an answer is reduced
+to a fixed reason code, and an error code that is not lower-case words is dropped.
 
-**Egress.** The issuer is the customer's choice, so `internal/okta` connects only
-through `internal/egress`: the name is resolved, every address must be public, and
-the connection goes to the vetted address with the issuer's name as the TLS server
-name (TLS 1.2 or later, system roots, no pin). No proxy from the environment is
-used, and a redirect is never followed: either would carry the password where
-nobody configured. The response is read to 64 KiB.
+**Egress.** The token endpoint is the customer's choice, so `internal/oidc`
+connects only through `internal/egress`: the name is resolved, every address must
+be public, and the connection goes to the vetted address with the endpoint's name
+as the TLS server name (TLS 1.2 or later, system roots, no pin). No proxy from the
+environment is used, and a redirect is never followed: either would carry the
+password where nobody configured. The response is read to 64 KiB. The API's
+discovery request goes through the same guard (`guardedFetch`).
 
-**Cache.** An Okta success is cached for **15 minutes** (`OktaMaxCacheTTL`), not
+**Cache.** An OIDC success is cached for **15 minutes** (`OIDCMaxCacheTTL`), not
 the full `AUTHD_CRED_CACHE_TTL`. The long cache is safe only where a password
-change reaches authd, and for Okta that is an event hook raising
-`credential_epoch` on a password change, a suspension, a lock or a deprovision
-(B9 step 2b). Until a connection's hook is built and verified nothing tells authd,
-so 15 minutes is the longest a changed Okta password keeps opening mail. 2b's
-verified hook is what may lift it. Three things end an entry sooner:
+change reaches authd, and no OIDC provider here sends one; for Okta that would be
+an event hook raising `credential_epoch` on a password change, a suspension, a
+lock or a deprovision (B9 step 2b). Until a connection's hook is built and
+verified nothing tells authd, so 15 minutes is the longest a changed password
+keeps opening mail. 2b's verified hook is what may lift it, for an Okta connection
+and only for one. Three things end an entry sooner:
 
 - the projection lookup, which runs first: a suspended or deprovisioned account is
   refused at the next bind;
-- a change to the connection's Okta settings (a different org or client, or
-  Okta mail sign-in switched off), which raises the `credential_epoch` of every
-  account the connection manages, now and once more just after authd's own
-  60-second copy of the settings has expired
+- a change to the connection's OIDC settings (a different provider, client, preset
+  or field, or OIDC mail sign-in switched off), which raises the `credential_epoch`
+  of every account the connection manages, now and once more just after authd's
+  own 60-second copy of the settings has expired
   (`apps/api/src/projection/connection-epoch.ts`);
 - `credential_epoch` itself, for any other revocation.
 
 ⚠ **The lane is not in the verifier's name.** Which lane a connection runs is the
 API's answer, fetched inside `Verify`, and the resolver does no I/O, so the name
 is `passthrough:<connection id>` for both. An LDAP success is never cached, so
-nothing it minted can answer for an Okta account; an Okta success is cached, and
+nothing it minted can answer for an OIDC account; an OIDC success is cached, and
 the settings-change epoch raise above is what stops it answering after the
-connection leaves Okta.
+connection leaves OIDC.
 
 ## Suspended mailboxes (#344)
 
@@ -564,8 +641,9 @@ internal/verify      the Verifier / Resolver / BudgetStore seam, Outcome
 internal/clerkauth   the Clerk verifier: verify_password and its status mapping
 internal/passthrough the company verifier and ManagedResolver: settings client,
                      the lane choice, the LDAP walk
-internal/okta        the Okta password grant: validation, the vetted dial, the
-                     answer mapping (oktatest is its fake endpoint)
+internal/oidc        the OIDC password grant: the preset table, validation, the
+                     vetted dial, the answer mapping (oidctest is its fake
+                     endpoint, with one fixture per preset)
 internal/egress      which addresses authd may connect to for a tenant
 internal/credcache   verified-password cache and the remembered refusals
 internal/inflight    one verification for concurrent identical binds

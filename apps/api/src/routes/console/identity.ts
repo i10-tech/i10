@@ -52,9 +52,9 @@ import { mountIdentityMail, type MailConsoleDeps } from "./identity-mail.js"
 import { mountIdentityScim, type ScimConsoleDeps } from "./identity-scim.js"
 import { mountIdentityLdap, type LdapConsoleDeps } from "./identity-ldap.js"
 import {
-  mountIdentityOktaMail,
-  type OktaMailConsoleDeps,
-} from "./identity-okta-mail.js"
+  mountIdentityOidcMail,
+  type OidcMailConsoleDeps,
+} from "./identity-oidc-mail.js"
 import {
   mountIdentityOktaHook,
   type OktaHookConsoleDeps,
@@ -87,7 +87,7 @@ import {
  *   ...    /identity/connections/:id/saml[/...]         SAML settings (#339, identity-saml.ts)
  *   ...    /identity/directories[/:id[/tokens|/conflicts]] SCIM directories (#342, identity-scim.ts)
  *   ...    /identity/connections/:id/ldap[/service|/test] LDAP pass-through for IMAP (#344, identity-ldap.ts)
- *   ...    /identity/connections/:id/okta-mail           Okta password grant for IMAP (#383, identity-okta-mail.ts)
+ *   ...    /identity/connections/:id/oidc-mail           OIDC password grant for IMAP (#383, identity-oidc-mail.ts)
  *   ...    /identity/connections/:id/okta-event-hook[/secret] Okta event hook secret (#383, identity-okta-hook.ts)
  *   ...    /identity/connections/:id/bypass[/:userId]     the bypass list (#340, identity-break-glass.ts)
  *   ...    /identity/owner-exemption[/...]               the owner exemption (#340, identity-break-glass.ts)
@@ -117,8 +117,8 @@ export interface IdentityConsoleDeps {
   mail?: MailConsoleDeps
   /** LDAP pass-through for managed accounts' IMAP (#344). Absent: its routes answer 501. */
   ldap?: LdapConsoleDeps
-  /** Okta as the place an Okta connection's managed accounts' IMAP passwords are asked (#383). Absent: 501. */
-  oktaMail?: OktaMailConsoleDeps
+  /** A connection's OIDC provider as the place its managed accounts' IMAP passwords are asked (#383). Absent: 501. */
+  oidcMail?: OidcMailConsoleDeps
   /** The universal logout endpoint URL for an Okta connection. */
   universalLogoutUrl?: (connectionId: string) => string
   /** An Okta connection's event hook (#383). Absent: its routes answer 501. */
@@ -317,7 +317,7 @@ export function mountIdentity(app: Hono, d: ConsoleDeps): void {
   mountIdentityScim(app, d)
   mountIdentityMail(app, d)
   mountIdentityLdap(app, d)
-  mountIdentityOktaMail(app, d)
+  mountIdentityOidcMail(app, d)
   mountIdentityOktaHook(app, d)
   mountIdentityBreakGlass(app, d)
   mountIdentitySetupLinks(app, d)

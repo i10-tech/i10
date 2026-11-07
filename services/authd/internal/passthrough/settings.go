@@ -9,8 +9,10 @@
 //     and the bind walked (binder.go): bind as the service account, find the
 //     one entry for the address, bind as that entry with the password given.
 //     Success is that last bind and nothing else.
-//   - Okta: the org's password grant (internal/okta). No service account and no
-//     secret at all, only the issuer URL and a public client id.
+//   - OIDC: the provider's password grant (internal/oidc), for Okta, Keycloak,
+//     Auth0, PingFederate, FusionAuth and any other provider that takes a public
+//     client's. No service account and no secret at all, only the token endpoint
+//     and a public client id.
 //
 // There is no mailbox password stored here and no fallback. A connection
 // without pass-through has no IMAP, and an outage anywhere on this path is
@@ -38,7 +40,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/i10-tech/i10/services/authd/internal/okta"
+	"github.com/i10-tech/i10/services/authd/internal/oidc"
 )
 
 // Settings are one connection's pass-through settings, as the API answers them.
@@ -84,15 +86,19 @@ func (s *Settings) Validate() error {
 // at most one (apps/api/src/identity/ldap.ts, passthroughFor, says which).
 const (
 	LaneLDAP = "ldap"
-	LaneOkta = "okta"
+	LaneOIDC = "oidc"
 )
 
+// laneOktaWire is what an API from before the generic lane called an Okta
+// connection. It is only ever READ, and becomes the okta preset of LaneOIDC.
+const laneOktaWire = "okta"
+
 // Answer is what the API says a connection does with a managed account's
-// password: exactly one of LDAP and Okta is set, the one Lane names.
+// password: exactly one of LDAP and OIDC is set, the one Lane names.
 type Answer struct {
 	Lane string
 	LDAP *Settings
-	Okta *okta.Settings
+	OIDC *oidc.Settings
 }
 
 // Source says how a connection answers a managed account's password. A nil
@@ -134,14 +140,22 @@ func NewHTTPSource(baseURL, secret string, timeout time.Duration) (*HTTPSource, 
 //
 // ⚠ `enabled` STAYS ON THE WIRE and still decides "off", and a missing `lane` is
 // LDAP, so the API and authd can roll out in either order. An authd from before
-// `lane` reads an Okta answer as an LDAP one with no host (bad settings, so
+// `lane` reads an OIDC answer as an LDAP one with no host (bad settings, so
 // unavailable), not as "off" (a refusal that tells mail clients the password is
-// wrong).
+// wrong). An authd from before `oidc` reads it as an unknown lane, which is an
+// error and so unavailable for the same reason.
+//
+// ⚠ `lane: "okta"` IS STILL READ, as the okta preset: an API from before the
+// generic lane answers an Okta connection with just `issuer` and `clientId`, and
+// its token endpoint was always the issuer's /v1/token.
 type wire struct {
-	Enabled  bool   `json:"enabled"`
-	Lane     string `json:"lane"`
-	Issuer   string `json:"issuer"`
-	ClientID string `json:"clientId"`
+	Enabled       bool              `json:"enabled"`
+	Lane          string            `json:"lane"`
+	Issuer        string            `json:"issuer"`
+	ClientID      string            `json:"clientId"`
+	Preset        string            `json:"preset"`
+	TokenEndpoint string            `json:"tokenEndpoint"`
+	Extra         map[string]string `json:"extra"`
 	Settings
 }
 
@@ -151,8 +165,15 @@ func (w *wire) answer() (*Answer, error) {
 	case "", LaneLDAP:
 		s := w.Settings
 		return &Answer{Lane: LaneLDAP, LDAP: &s}, nil
-	case LaneOkta:
-		return &Answer{Lane: LaneOkta, Okta: &okta.Settings{Issuer: w.Issuer, ClientID: w.ClientID}}, nil
+	case LaneOIDC:
+		return &Answer{Lane: LaneOIDC, OIDC: &oidc.Settings{
+			Preset: w.Preset, Issuer: w.Issuer, TokenEndpoint: w.TokenEndpoint,
+			ClientID: w.ClientID, Extra: w.Extra,
+		}}, nil
+	case laneOktaWire:
+		return &Answer{Lane: LaneOIDC, OIDC: &oidc.Settings{
+			Preset: oidc.PresetOkta, Issuer: w.Issuer, TokenEndpoint: w.Issuer + "/v1/token", ClientID: w.ClientID,
+		}}, nil
 	}
 	// An API newer than this authd. Not "off": that would read as a connection
 	// with no IMAP, and be cached as such.

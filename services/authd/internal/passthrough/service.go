@@ -3,7 +3,7 @@ package passthrough
 import (
 	"context"
 
-	"github.com/i10-tech/i10/services/authd/internal/okta"
+	"github.com/i10-tech/i10/services/authd/internal/oidc"
 	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
 
@@ -11,16 +11,16 @@ import (
 type Service struct {
 	src    Source
 	binder *Binder
-	okta   *okta.Client
+	oidc   *oidc.Client
 }
 
 // NewService joins a settings source (normally a Cache over the API) to the two
-// lanes' clients. A nil oktaClient is the production one.
-func NewService(src Source, binder *Binder, oktaClient *okta.Client) *Service {
-	if oktaClient == nil {
-		oktaClient = &okta.Client{}
+// lanes' clients. A nil oidcClient is the production one.
+func NewService(src Source, binder *Binder, oidcClient *oidc.Client) *Service {
+	if oidcClient == nil {
+		oidcClient = &oidc.Client{}
 	}
-	return &Service{src: src, binder: binder, okta: oktaClient}
+	return &Service{src: src, binder: binder, oidc: oidcClient}
 }
 
 // Bind answers one managed account's bind through its connection's lane.
@@ -40,14 +40,14 @@ func (s *Service) Bind(ctx context.Context, connectionID, email, password string
 		res := s.binder.Bind(ctx, *answer.LDAP, email, password)
 		res.Lane = LaneLDAP
 		return res
-	case answer.Lane == LaneOkta && answer.Okta != nil:
-		res := s.okta.Verify(ctx, *answer.Okta, email, password)
-		return Result{Outcome: outcomeOf(res.Outcome), Reason: res.Reason, Lane: LaneOkta}
+	case answer.Lane == LaneOIDC && answer.OIDC != nil:
+		res := s.oidc.Verify(ctx, *answer.OIDC, email, password)
+		return Result{Outcome: outcomeOf(res.Outcome), Reason: res.Reason, Lane: LaneOIDC, Preset: answer.OIDC.Preset}
 	}
 	return Result{Outcome: Unavailable, Reason: ReasonBadSettings}
 }
 
-// outcomeOf is the Okta client's answer in this package's own tri-state.
+// outcomeOf is the OIDC client's answer in this package's own tri-state.
 func outcomeOf(o verify.Outcome) Outcome {
 	switch o {
 	case verify.Verified:
