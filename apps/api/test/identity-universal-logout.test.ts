@@ -108,6 +108,7 @@ async function world(
     null,
   )
 
+  const epoch = { fail: false }
   const engine = oidcEngine({
     store: store.store,
     fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
@@ -124,6 +125,12 @@ async function world(
       clerk: clerk.clerk,
       replay: replay.replay,
       forget: (input) => forgotten.push(input),
+      // Recorded in the Clerk call list, so the ORDER against the revocations is
+      // something a test can read.
+      raiseCredentialEpoch: async (clerkUserId: string) => {
+        if (epoch.fail) throw new Error("database down")
+        clerk.calls.push(`raiseEpoch:${clerkUserId}`)
+      },
       fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
       log,
       endpointUrl: (id: string) =>
@@ -293,6 +300,7 @@ async function world(
     clerk,
     replay,
     forgotten,
+    epoch,
     bound,
     call,
     live,
@@ -304,6 +312,87 @@ async function world(
     samlConn,
   }
 }
+
+/**
+ * ⚠ A UNIVERSAL LOGOUT ENDS SESSIONS; authd's CACHE OF A VERIFIED MAIL PASSWORD IS
+ * NOT ONE OF THEM. Okta says the person is out, their IMAP client still holds a
+ * password authd verified an hour ago and remembers for two, and nothing but the
+ * credential epoch reaches that cache. Raised AFTER the sessions are revoked (the
+ * external change first, then the signal that makes it count), and whether or not
+ * any session was bound.
+ */
+describe("Universal Logout and the mail password cache", () => {
+  const ada = {
+    sub_id: { format: "iss_sub", iss: "https://idp.acme.test", sub: "00u_ada" },
+  }
+
+  it("raises the epoch of the person it logs out, after revoking their sessions", async () => {
+    const w = await world()
+    w.bound("sess_1", { sub: "00u_ada" })
+    const outcome = await w.call({ token: await w.mintOidcToken(), body: ada })
+    expect(outcome).toEqual({ outcome: "logged_out", revoked: 1 })
+    expect(w.clerk.calls).toEqual(["revokeSession:sess_1", "raiseEpoch:user_00u_ada"])
+  })
+
+  it("raises it for somebody with no session open, which is the mail client's case", async () => {
+    const w = await world()
+    w.store.identities.push({
+      id: "id_1",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      subject: "00u_ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+      lastLoginAt: null,
+    })
+    const outcome = await w.call({ token: await w.mintOidcToken(), body: ada })
+    expect(outcome).toEqual({ outcome: "logged_out", revoked: 0 })
+    expect(w.clerk.calls).toEqual(["raiseEpoch:user_ada"])
+  })
+
+  it("raises it for a person found by email as well", async () => {
+    const w = await world()
+    w.bound("sess_1", { sub: "00u_ada", email: "ada@acme.test" })
+    const outcome = await w.call({
+      token: await w.mintOidcToken(),
+      body: { sub_id: { format: "email", email: "ada@acme.test" } },
+    })
+    expect(outcome).toEqual({ outcome: "logged_out", revoked: 1 })
+    expect(w.clerk.calls.filter((c) => c.startsWith("raiseEpoch"))).toEqual([
+      "raiseEpoch:user_00u_ada",
+    ])
+  })
+
+  it("raises nothing for a subject it cannot place, or a token it refuses", async () => {
+    const w = await world()
+    expect(
+      await w.call({
+        token: await w.mintOidcToken(),
+        body: {
+          sub_id: { format: "iss_sub", iss: "https://idp.acme.test", sub: "nobody" },
+        },
+      }),
+    ).toEqual({ outcome: "not_found" })
+    expect(
+      (await w.call({ token: await w.mintOidcToken({ rogueKey: true }), body: ada }))
+        .outcome,
+    ).toBe("bad_auth")
+    expect(w.clerk.calls).toEqual([])
+  })
+
+  // ⚠ A FAILED RAISE IS A FAILED LOGOUT, LIKE A FAILED REVOKE: the token is given
+  // back, so the IdP's retry does both again rather than being told it was done.
+  it("is a failed logout when the epoch cannot be raised, and the token can be tried again", async () => {
+    const w = await world()
+    w.bound("sess_1", { sub: "00u_ada" })
+    const token = await w.mintOidcToken()
+    w.epoch.fail = true
+    expect((await w.call({ token, body: ada })).outcome).toBe("cannot_log_out")
+    w.epoch.fail = false
+    expect((await w.call({ token, body: ada })).outcome).toBe("logged_out")
+    expect(w.clerk.calls).toContain("raiseEpoch:user_00u_ada")
+  })
+})
 
 describe("Okta Universal Logout for OIDC connections", () => {
   it("revokes active sessions for an existing subject with iss_sub format", async () => {

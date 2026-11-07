@@ -50,10 +50,24 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 // ⚠ A LEFT JOIN, NOT A COLUMN ON authd.accounts: a managed account is managed
 // before it has a mailbox row, and a missing row must read as "managed" only
 // when authd.managed_accounts says so.
+//
+// ⚠ EVERY REASON A BIND IS REFUSED BEFORE THE CREDENTIAL CACHE IS READ FROM THIS
+// ONE ROW: suspension, a payment hold, a Clerk ban or lock, and whether SSO is
+// required for the address. They share the query so none can be older than the
+// account they belong to, and so a new one cannot be added to the search path
+// and forgotten on the bind path.
+//
+// ⚠ A REQUIRED DOMAIN BINDS ONLY ITS OWN WORKSPACE'S ACCOUNTS (`tenant_id`). The
+// mirror is recomputed on the changes that move it, but a row left behind for a
+// name that has since changed hands must not lock out the new owner's people.
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
 	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
-	(a.suspended_at IS NOT NULL)`
+	(a.suspended_at IS NOT NULL), (a.payment_hold_at IS NOT NULL), a.banned,
+	(a.locked AND (a.locked_until IS NULL OR a.locked_until > now())),
+	EXISTS (SELECT 1 FROM authd.required_domains rd
+	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
+	          AND rd.tenant_id = a.tenant_id)`
 
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
@@ -156,7 +170,8 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
 			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
-			&a.Managed, &a.ManagedConnection, &a.Suspended); err != nil {
+			&a.Managed, &a.ManagedConnection, &a.Suspended, &a.PaymentHold,
+			&a.Banned, &a.Locked, &a.SSORequired); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

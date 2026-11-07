@@ -108,6 +108,23 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 
+	// ⚠ THE SAME FOR EVERY OTHER REASON THE ROW GIVES FOR TURNING A LOGIN OFF, AND
+	// FOR THE SAME REASON: each is read from the row this bind already holds, so it
+	// takes effect on both pods at once, and each comes before the verifier and the
+	// credential cache so that a password that was right yesterday cannot open it.
+	//
+	//   - a payment hold: the workspace has no paid plan. Mail still arrives; paying
+	//     again clears the column and the next bind works.
+	//   - Clerk's ban or lock: neither moves `clerk_updated_at` the way a password
+	//     change does, and verify_password may still say yes for the user.
+	//
+	// Same answer as a wrong password, by design.
+	if reason := refusedByRow(account); reason != "" {
+		s.log.Info("bind rejected", "reason", reason, "uid", uid)
+		w.Write(res)
+		return
+	}
+
 	// Which provider holds this person's password. A resolver that cannot say is
 	// not evidence about the password either.
 	v, err := s.resolver.Resolve(ctx, account)
@@ -181,6 +198,20 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		resp.SetDiagnosticMessage(answer.diag)
 	}
 	w.Write(resp)
+}
+
+// refusedByRow names why the account row alone turns this login away, or "".
+// Suspension is checked before it, with its own reason, in handleBind.
+func refusedByRow(a *projection.Account) string {
+	switch {
+	case a.PaymentHold:
+		return "payment_hold"
+	case a.Banned:
+		return "account_banned"
+	case a.Locked:
+		return "account_locked"
+	}
+	return ""
 }
 
 // bindAnswer is what a verification concluded, shared by every bind that

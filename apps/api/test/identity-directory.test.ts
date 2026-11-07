@@ -1695,6 +1695,82 @@ describe("mail from the directory", () => {
     expect(w.mail.canLogin("user_ada")).toBe(true)
   })
 
+  /*
+   * ⚠ THE DIRECTORY SAYS THE PERSON IS OFF, SO THEIR MAILBOX IN THIS WORKSPACE
+   * GOES, WHETHER OR NOT THIS WORKSPACE MANAGES THEM. `deprovision` answers
+   * `not_managed` before it suspends anything for somebody the workspace does not
+   * manage - never claimed, released earlier, or managed by another workspace -
+   * and that used to be the end of it: the mailbox kept its login, on a password
+   * authd had cached for hours.
+   */
+  describe("a person the directory switches off who is not managed here", () => {
+    it("loses the login of their mailbox when the account was released earlier", async () => {
+      const { w, p } = await provisionedWithMailbox()
+      w.identity.managed.delete("user_ada")
+      await change(w, p.id, [{ op: "replace", value: { active: false } }])
+      expect(await apply(w, p.id)).toMatchObject({ action: "deprovisioned" })
+      expect(w.mail.canLogin("user_ada")).toBe(false)
+      expect(w.mail.delivers("ada@acme.test")).toBe(true)
+      expect(w.mail.rows.get(`${TENANT}/user_ada`)).toMatchObject({
+        state: "suspended",
+      })
+      expect(types(w)).toContain("mailbox.suspended")
+      // Said in the identity audit log too, with why it was not a deprovision.
+      expect(w.identity.events).toContainEqual(
+        expect.objectContaining({
+          type: "mailbox.suspended_unmanaged",
+          subjectUserId: "user_ada",
+          reason: "directory_inactive",
+        }),
+      )
+    })
+
+    it("loses it when ANOTHER workspace manages the account", async () => {
+      const { w, p } = await provisionedWithMailbox()
+      w.identity.managed.set("user_ada", {
+        clerkUserId: "user_ada",
+        tenantId: OTHER_TENANT,
+        connectionId: CONNECTION,
+        reason: "claimed",
+        emails: ["ada@acme.test"],
+      })
+      await change(w, p.id, [{ op: "replace", value: { active: false } }])
+      await apply(w, p.id)
+      expect(w.mail.canLogin("user_ada")).toBe(false)
+      // Still the other workspace's account: neither released nor banned from here.
+      expect(w.identity.managed.get("user_ada")?.tenantId).toBe(OTHER_TENANT)
+    })
+
+    it("loses it when Clerk no longer knows the account", async () => {
+      const { w, p } = await provisionedWithMailbox()
+      w.clerk.users.delete("user_ada")
+      await change(w, p.id, [{ op: "replace", value: { active: false } }])
+      await apply(w, p.id)
+      expect(w.mail.canLogin("user_ada")).toBe(false)
+    })
+
+    it("is the same once more on a retry, and a mailbox that is not theirs here is left alone", async () => {
+      const { w, p } = await provisionedWithMailbox()
+      w.identity.managed.delete("user_ada")
+      await change(w, p.id, [{ op: "replace", value: { active: false } }])
+      await apply(w, p.id)
+      await change(w, p.id, [{ op: "replace", path: "title", value: "x" }])
+      await apply(w, p.id)
+      expect(
+        w.identity.events.filter((e) => e.type === "mailbox.suspended_unmanaged"),
+      ).toHaveLength(1)
+
+      // A mailbox in ANOTHER workspace (the account's tenant differs) is not touched.
+      const away = mailWorld({ hosted: { "acme.test": OTHER_TENANT } })
+      away.mail.give("user_ada", "ada@acme.test", OTHER_TENANT)
+      const q = await push(away)
+      await away.dirs.store.linkUser(TENANT, q.id, "user_ada")
+      await change(away, q.id, [{ op: "replace", value: { active: false } }])
+      await apply(away, q.id)
+      expect(away.mail.canLogin("user_ada")).toBe(true)
+    })
+  })
+
   it("the last owner is not suspended: the mailbox stays open while the membership stays", async () => {
     const w = mailWorld({ owners: ["user_ada"] })
     const p = await push(w)

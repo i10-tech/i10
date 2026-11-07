@@ -1,4 +1,4 @@
-import { and, eq, inArray, not, sql } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm"
 import { union } from "drizzle-orm/pg-core"
 import type { Mailbox } from "@repo/contracts"
 import type { Database } from "../db/client.js"
@@ -114,6 +114,166 @@ function toMailbox(row: AccountRow): Mailbox {
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
+/** The lowercased domain half of an address column. */
+const domainOfEmail = sql`lower(split_part(${accounts.email}, '@', 2))`
+
+/**
+ * The accounts that belong to a workspace: the ones on a domain it hosts mail for
+ * NOW, whatever `tenant_id` says, and the ones `tenant_id` names on a domain
+ * nobody else hosts.
+ *
+ * ⚠ THE DOMAIN'S OWNER IS THE ANSWER, AND `tenant_id` IS ONLY THE FALLBACK. The
+ * column is written from the domain's owner on every projection event, so it is
+ * stale until a person's next Clerk event after a domain changes hands, and null
+ * for a mailbox from before it was filled in. Going by the column alone has two
+ * failures: a deprovision is told "no mailbox" for a person whose row was never
+ * re-derived, and - worse - a workspace being deleted would suspend people on a
+ * domain another workspace has since proved. So a name another workspace hosts
+ * is never ours, whatever the column says; the column counts only where no one
+ * else does (a domain already released in a redelivered termination, say).
+ *
+ * ⚠ BOTH SUBQUERIES ARE UNCORRELATED, so Postgres reads `core.mailbox_domains()`
+ * once per statement and not once per account.
+ */
+const inWorkspace = (tenantId: string) =>
+  or(
+    sql`${domainOfEmail} in (
+      select lower(name) from core.mailbox_domains() where tenant_id = ${tenantId}::uuid
+    )`,
+    and(
+      eq(accounts.tenantId, tenantId),
+      sql`${domainOfEmail} not in (
+        select lower(name) from core.mailbox_domains()
+         where tenant_id is not null and tenant_id <> ${tenantId}::uuid
+      )`,
+    ),
+  )!
+
+/**
+ * Everything that turns a login off or on, other than a company's directory
+ * (below), in ONE place: a workspace's, a domain's or a payment's.
+ *
+ * ⚠ EVERY FUNCTION ONLY EVER TOUCHES THE LOGIN. `active` stays true and no row is
+ * deleted, so the mailbox keeps receiving and its mail is kept for an owner to
+ * export, reassign or delete. authd refuses the bind from these columns before
+ * its credential cache is read (services/authd ldapsrv/bind.go), which is what
+ * makes each take effect on both pods on the next login.
+ *
+ * ⚠ NO RESUME HERE FOR A SUSPENSION. `suspended_at` is lifted only by the owner's
+ * and the directory's path (`directoryMail.resume`), never by an event that merely
+ * looks like the opposite of the one that set it: re-adding a removed member must
+ * not quietly give back a login. A payment hold is the exception because payment
+ * is its whole reason, and it is a column of its own.
+ *
+ * ⚠ THEY TAKE A WRITER, NOT A TRANSACTION, so a caller with one (the Clerk event
+ * that changes membership, say) can make the revocation part of it.
+ */
+type Writer = Pick<Database, "update" | "delete" | "select">
+
+export const mailAccess = {
+  /** Every mailbox of the workspace. Returns who was newly suspended. */
+  async suspendWorkspace(db: Writer, tenantId: string, at: Date): Promise<string[]> {
+    const done = await db
+      .update(accounts)
+      .set({ suspendedAt: at, updatedAt: sql`now()` })
+      .where(and(inWorkspace(tenantId), isNull(accounts.suspendedAt)))
+      .returning({ id: accounts.clerkUserId })
+    return done.map((r) => r.id)
+  },
+
+  /**
+   * The mailboxes whose primary address is on a domain the workspace is giving
+   * up, and the aliases on it.
+   *
+   * ⚠ THE ALIASES GO, THE ACCOUNTS BEHIND THEM STAY. An alias is a recipient, so
+   * one on a domain the workspace gave up would go on receiving mail for a name
+   * it no longer owns - and, as a login name, on opening it. A person whose
+   * PRIMARY address is elsewhere keeps their mailbox and loses only that name;
+   * one whose primary is on the domain is suspended outright (no address left).
+   * The Clerk event that follows deletes such a row altogether (`projectUser`
+   * finds no hosted address), which is the existing rule for somebody who gives
+   * up their address; the suspension is what closes the login until then.
+   *
+   * ⚠ THE CALLER HAS ALREADY CHECKED THAT NO OTHER WORKSPACE HOSTS THE NAME
+   * (`holdsName` says whether this one does), so this only reaches its own:
+   * `tenant_id` is this workspace's, or null on a name this one hosts - a mailbox
+   * from before the column was filled in can only have been theirs.
+   */
+  async suspendDomain(
+    db: Writer,
+    tenantId: string,
+    domain: string,
+    at: Date,
+    holdsName: boolean,
+  ): Promise<{ suspended: string[]; aliases: string[] }> {
+    const name = domain.toLowerCase()
+    const mine = holdsName
+      ? or(eq(accounts.tenantId, tenantId), isNull(accounts.tenantId))
+      : eq(accounts.tenantId, tenantId)
+    const suspended = await db
+      .update(accounts)
+      .set({ suspendedAt: at, updatedAt: sql`now()` })
+      .where(and(mine, isNull(accounts.suspendedAt), sql`${domainOfEmail} = ${name}`))
+      .returning({ id: accounts.clerkUserId })
+    const gone = await db
+      .delete(aliases)
+      .where(
+        and(
+          sql`lower(split_part(${aliases.address}, '@', 2)) = ${name}`,
+          inArray(
+            aliases.clerkUserId,
+            db.select({ id: accounts.clerkUserId }).from(accounts).where(mine),
+          ),
+        ),
+      )
+      .returning({ address: aliases.address })
+    return {
+      suspended: suspended.map((r) => r.id),
+      aliases: gone.map((r) => r.address),
+    }
+  },
+
+  /**
+   * The workspace's paid plan has lapsed: no login, mail keeps arriving. Idempotent.
+   * Returns how many mailboxes it newly held.
+   */
+  async hold(db: Writer, tenantId: string, at: Date): Promise<number> {
+    const done = await db
+      .update(accounts)
+      .set({ paymentHoldAt: at, updatedAt: sql`now()` })
+      .where(and(inWorkspace(tenantId), isNull(accounts.paymentHoldAt)))
+      .returning({ id: accounts.clerkUserId })
+    return done.length
+  },
+
+  /** The workspace pays again. Lifts the hold and nothing else. Idempotent. */
+  async release(db: Writer, tenantId: string): Promise<number> {
+    const done = await db
+      .update(accounts)
+      .set({ paymentHoldAt: null, updatedAt: sql`now()` })
+      .where(and(inWorkspace(tenantId), isNotNull(accounts.paymentHoldAt)))
+      .returning({ id: accounts.clerkUserId })
+    return done.length
+  },
+}
+
+/**
+ * `billing/grants.ts`'s `MailPaymentHold` over the projection: ONE wiring, used by
+ * the API and by the reconciler CronJob that repairs a lost Polar webhook.
+ *
+ * ⚠ BOTH MUST HAVE IT. The reconciler is the backstop for a revocation whose event
+ * never arrived, so a grant path built without this would leave exactly those
+ * workspaces' logins open - the ones nobody was told about.
+ */
+export const paymentHold = (db: Writer) => ({
+  hold: async (tenantId: string) => {
+    await mailAccess.hold(db, tenantId, new Date())
+  },
+  release: async (tenantId: string) => {
+    await mailAccess.release(db, tenantId)
+  },
+})
+
 /**
  * Everything a company's directory (#344) writes to the projection, in ONE
  * place beside `activate`: suspension, directory aliases, directory lists.
@@ -129,7 +289,13 @@ type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
  * clause is the whole isolation, as in `metering/levels.ts`.
  */
 export const directoryMail = {
-  /** The account a workspace's domain gave this person, or null. */
+  /**
+   * The account a workspace's domain gave this person, or null.
+   *
+   * ⚠ BY THE DOMAIN'S OWNER AS WELL AS `tenant_id` (`inWorkspace`), so a
+   * deprovision cannot be told "no mailbox" for one whose column was never
+   * re-derived.
+   */
   async account(tx: Tx, tenantId: string, userId: string) {
     const [row] = await tx
       .select({
@@ -138,7 +304,7 @@ export const directoryMail = {
         suspendedAt: accounts.suspendedAt,
       })
       .from(accounts)
-      .where(and(eq(accounts.clerkUserId, userId), eq(accounts.tenantId, tenantId)))
+      .where(and(eq(accounts.clerkUserId, userId), inWorkspace(tenantId)))
       .limit(1)
     return row ?? null
   },
@@ -154,7 +320,7 @@ export const directoryMail = {
         suspendedAt: sql`coalesce(${accounts.suspendedAt}, ${at.toISOString()}::timestamptz)`,
         updatedAt: sql`now()`,
       })
-      .where(and(eq(accounts.clerkUserId, userId), eq(accounts.tenantId, tenantId)))
+      .where(and(eq(accounts.clerkUserId, userId), inWorkspace(tenantId)))
       .returning({ id: accounts.clerkUserId })
     return done.length > 0
   },
@@ -163,7 +329,7 @@ export const directoryMail = {
     const done = await tx
       .update(accounts)
       .set({ suspendedAt: null, updatedAt: sql`now()` })
-      .where(and(eq(accounts.clerkUserId, userId), eq(accounts.tenantId, tenantId)))
+      .where(and(eq(accounts.clerkUserId, userId), inWorkspace(tenantId)))
       .returning({ id: accounts.clerkUserId })
     return done.length > 0
   },

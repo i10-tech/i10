@@ -19,6 +19,11 @@ export interface ClerkUser {
   first_name?: string | null
   last_name?: string | null
   updated_at?: number | null
+  /** Clerk's own flags. Absent on an older payload, which reads as "no". */
+  banned?: boolean | null
+  locked?: boolean | null
+  /** Seconds left in a lockout, as of when the user was read. */
+  lockout_expires_in_seconds?: number | null
 }
 
 export interface Mailbox {
@@ -29,6 +34,15 @@ export interface Mailbox {
   aliases: string[]
   displayName: string
   clerkUpdatedAt: Date | null
+  /**
+   * ⚠ NULL IS "THE PAYLOAD DID NOT SAY", NOT "NO". The writer leaves the column
+   * as it was for it: a payload shape that omitted the field must never be read
+   * as lifting a ban, which would fail open on the one thing it is there for.
+   */
+  banned: boolean | null
+  locked: boolean | null
+  /** When a lockout ends; null on a locked user is indefinite. */
+  lockedUntil: Date | null
 }
 
 /**
@@ -47,10 +61,19 @@ export interface Mailbox {
  *
  * Returning null is meaningful: the caller deletes any existing row, so a user
  * who gives up their i10 address stops being a recipient.
+ *
+ * ⚠ BAN AND LOCK ARE PROJECTED BECAUSE CLERK'S verify_password IGNORES THEM.
+ * Probed against its dev instance 2026-11-07, with the right password: a banned
+ * user answered 200 `verified: true`, and so did a locked one, whose lockout
+ * (an hour, from `POST /users/{id}/lock`) ends with no event and whose manual
+ * unlock does not move `updated_at`. A password change DOES move `updated_at`
+ * (1794087726410 -> 1794087730199), which is why the credential cache needs no
+ * extra signal for one. `now` is the clock the lockout's end is counted from.
  */
 export function projectUser(
   user: ClerkUser,
   hostedDomains: readonly string[],
+  now: Date = new Date(),
 ): Mailbox | null {
   const hosted = new Set(hostedDomains.map((d) => d.toLowerCase().replace(/^@/, "")))
 
@@ -78,7 +101,25 @@ export function projectUser(
     aliases: sorted.filter((e) => e.address !== primary.address).map((e) => e.address),
     displayName: [user.first_name, user.last_name].filter(Boolean).join(" ").trim(),
     clerkUpdatedAt: toDate(user.updated_at),
+    banned: typeof user.banned === "boolean" ? user.banned : null,
+    locked: typeof user.locked === "boolean" ? user.locked : null,
+    lockedUntil: lockoutEnd(user, now),
   }
+}
+
+/**
+ * When a lockout ends: `now` plus the seconds Clerk reports, or null when it
+ * reports none (indefinite, or not locked at all - `locked` says which).
+ *
+ * ⚠ COUNTED FROM RECEIPT, NOT FROM THE LOCK. The webhook may be a little late, so
+ * this errs towards a lockout that ends later than Clerk's own, never earlier.
+ */
+function lockoutEnd(user: ClerkUser, now: Date): Date | null {
+  if (user.locked !== true) return null
+  const seconds = user.lockout_expires_in_seconds
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0)
+    return null
+  return new Date(now.getTime() + seconds * 1000)
 }
 
 /**

@@ -57,6 +57,7 @@ import { withMemberLimitSync } from "./console/members.js"
 import pino from "pino"
 import { subscriptionOps } from "./billing/db.js"
 import { subscriptionGrants } from "./billing/grants.js"
+import { paymentHold } from "./mailboxes/store.js"
 import { polarClient } from "./billing/polar.js"
 import { reconcileSubscriptions } from "./billing/reconcile.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
@@ -426,6 +427,9 @@ await withMonitor(
               log,
             }),
           ),
+          // ⚠ A LAPSE THE WEBHOOK NEVER REPORTED IS FOUND HERE, and it must hold the
+          // workspace's mail logins as the webhook path does (billing/grants.ts).
+          mail: paymentHold(db),
           log,
         }),
         options: {

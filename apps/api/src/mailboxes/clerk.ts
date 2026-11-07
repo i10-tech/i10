@@ -64,6 +64,13 @@ function toWire(user: User): ClerkUser {
     first_name: user.firstName,
     last_name: user.lastName,
     updated_at: user.updatedAt,
+    // ⚠ THE BAN TRAVELS WITH THE USER; THE LOCK DOES NOT, ON PURPOSE. Without the
+    // ban a mailbox provisioned from this read would be projected as unbanned,
+    // overwriting what the webhook set. The SDK's `User` says whether somebody is
+    // locked but not when the lockout ends, and a lock with no end would be kept
+    // for ever (Clerk sends nothing when one runs out), so the lock is left to the
+    // webhook, whose payload carries the end (projection/clerk-user.ts).
+    banned: user.banned,
     email_addresses: user.emailAddresses.map((e) => ({
       id: e.id,
       email_address: e.emailAddress,

@@ -100,6 +100,7 @@ import { workspaceGate } from "./identity/workspace-policy.js"
 import { workspacePolicyStore } from "./identity/workspace-policy-store.js"
 import { backchannelLogout } from "./identity/oidc-logout.js"
 import { universalLogout } from "./identity/universal-logout.js"
+import { raiseCredentialEpoch } from "./projection/credential-epoch.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
@@ -163,7 +164,8 @@ import {
 } from "./mailboxes/provision.js"
 import { createStalwartCaller } from "./mail/stalwart.js"
 import { planAssignmentStore } from "./metering/postgres.js"
-import { mailboxDirectory } from "./mailboxes/store.js"
+import { mailboxDirectory, paymentHold } from "./mailboxes/store.js"
+import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
 import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
 import { onTeamInboxEvent } from "./team-inboxes/sync.js"
 import { clerkIdentity, notFound as clerkNotFound } from "./mailboxes/clerk.js"
@@ -193,7 +195,6 @@ import {
   raiseAgainWhenAuthdForgets,
   raiseConnectionCredentialEpochs,
 } from "./projection/connection-epoch.js"
-import { raiseCredentialEpoch } from "./projection/credential-epoch.js"
 import { MAILBOXES } from "./metering/levels.js"
 import { offlineIdentity, sesIdentity } from "./domains/identity.js"
 import { configurationSetsFor } from "./send/configuration-sets.js"
@@ -545,6 +546,27 @@ log.info(
  */
 const subscriptions = subscriptionOps(db)
 
+/*
+ * ⚠ THE MAIL LOGINS THAT END FOR REASONS OUTSIDE A DIRECTORY (mailboxes/revoke.ts):
+ * a member who leaves, a workspace that is deleted, a domain that is removed.
+ * Hoisted this far up because the domain store, the tenant lifecycle and the
+ * billing grants all call it; `roles` and `identity` are read only when one of
+ * them fires, which is after boot.
+ */
+const mailStore = directoryMailStore(db)
+const mailAccessRevocation = mailRevocation({
+  db,
+  mail: mailStore,
+  // ⚠ A MEMBER IS A ROW IN OUR ROLES TABLE (#335), kept in step with Clerk.
+  isMember: async (tenantId, userId) =>
+    (await roles.store.roleOf(tenantId, userId)) !== null,
+  managedHere: async (tenantId, userId) =>
+    (await identity.managedByUser(userId))?.tenantId === tenantId,
+  leaver: () => mailLifecycle,
+  record: (tenantId, event) => identity.record(tenantId, event),
+  log,
+})
+
 /**
  * ⚠ THE ONLY OBJECT IN THIS PROCESS THAT CAN MOVE A CUSTOMER BETWEEN PLANS, and
  * it reaches exactly two places: `subscriptionGrants`, which acts on verified
@@ -571,6 +593,8 @@ const entitlements = postgresEntitlements({
 const grants = subscriptionGrants({
   subscriptions,
   entitlements: withMemberLimitSync(entitlements, () => members),
+  // ⚠ A LAPSED SUBSCRIPTION HOLDS THE WORKSPACE'S MAIL LOGINS; paying lifts them.
+  mail: paymentHold(db),
   log,
 })
 
@@ -657,6 +681,8 @@ const domains = secrets
       // later is an adapter, not a migration.
       zones: powerDnsZones(db),
       log,
+      // ⚠ A REMOVED DOMAIN'S MAILBOXES STOP SIGNING IN, BEFORE ITS ROW GOES.
+      onRemoving: (tenantId, name) => mailAccessRevocation.domainGone(tenantId, name),
       // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is nowhere
       // safe to keep a DKIM private key, so the routes answer 501 rather than
       // storing one in the clear - the same rule webhooks already follow.
@@ -674,6 +700,11 @@ const lifecycle = tenantLifecycle({
    * else was ever going to tear them down.
    */
   ...(domains ? { domains } : {}),
+  // ⚠ A DELETED WORKSPACE'S MAILBOXES KEEP RECEIVING AND STOP SIGNING IN.
+  mail: {
+    suspendWorkspace: (tenantId) =>
+      mailAccessRevocation.workspaceGone(tenantId, "workspace_deleted"),
+  },
   organizations: {
     /*
      * ⚠ IT COUNTS MEMBERS RATHER THAN ASKING WHETHER THE ORGANIZATION EXISTS,
@@ -1579,7 +1610,6 @@ const mailboxProvisionDeps: ProvisionDeps = {
  * a directory activates, and the suspension of a deprovisioned person's. The
  * deletion of a suspended mailbox is a delayed job on its date.
  */
-const mailStore = directoryMailStore(db)
 const mailboxDeletionQueue = createMailboxDeletionQueue({ redis: queueRedis })
 const mailDeps: DirectoryMailDeps = {
   store: mailStore,
@@ -1963,6 +1993,17 @@ const app = createApp({
         type,
         data,
       ),
+    // A member who leaves loses the login of their mailbox in the workspace.
+    mailAccess: (type: string, data: unknown) =>
+      onMailAccessEvent(
+        {
+          revocation: mailAccessRevocation,
+          tenantOf: (orgId: string) => members.store.tenantOf(orgId),
+          log,
+        },
+        type,
+        data,
+      ),
     // Member limits, late acceptances and capacity alerts (#327).
     members: (type: string, data: unknown) => onClerkEvent(members, type, data),
     // Team inboxes follow the workspace (B8).
@@ -2224,6 +2265,8 @@ const app = createApp({
               replay,
               forget: (input: { userId?: string; sessionId?: string }) =>
                 gateChecker.forget(input),
+              raiseCredentialEpoch: (clerkUserId: string) =>
+                raiseCredentialEpoch(db, clerkUserId),
               fetch: guardedFetch({
                 vet: (host, signal) =>
                   vetHost(host, { allow: webhookEgressAllow, signal }),

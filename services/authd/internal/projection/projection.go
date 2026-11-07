@@ -38,6 +38,28 @@ type Account struct {
 	// the account invisible and stop delivery.
 	Suspended bool
 
+	// PaymentHold is true while the account's workspace has no paid plan: the
+	// mailbox keeps receiving mail and NO BIND succeeds, until payment clears it
+	// (`authd.accounts.payment_hold_at`). Like Suspended it is read from the same
+	// row as the bind and acted on ahead of the credential cache.
+	PaymentHold bool
+
+	// Banned and Locked are Clerk's own flags for the user, projected by the
+	// webhook. ⚠ CLERK'S verify_password ANSWERS YES FOR BOTH (probed against its
+	// dev instance 2026-11-07, see `authd.accounts.banned` in apps/api/src/db/
+	// schema.ts), so a bind refuses them itself and never lets the answer, or a
+	// cached one, decide. Locked is already false once the lockout has run out:
+	// Clerk says nothing when it does, so the query reads the clock.
+	Banned bool
+	Locked bool
+
+	// SSORequired is true when the account's address is on a domain an active
+	// connection REQUIRES SSO for (`authd.required_domains`). A managed account
+	// is answered by its company's directory whatever this says; an account that
+	// is not managed has no password to ask for, and the resolver refuses it
+	// rather than asking Clerk.
+	SSORequired bool
+
 	Aliases  []string
 	MemberOf []string // group names, not DNs; the caller renders DNs
 }

@@ -38,7 +38,11 @@ import type {
   ManagedRow,
   RelinkResult,
 } from "./ports.js"
-import { mirrorManaged, unmirrorManaged } from "./authd-mirror.js"
+import {
+  mirrorManaged,
+  mirrorRequiredDomains,
+  unmirrorManaged,
+} from "./authd-mirror.js"
 
 const toRule = (r: typeof groupRoleRules.$inferSelect): GroupRoleRule => ({
   id: r.id,
@@ -268,13 +272,17 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     },
 
     async updateConnection(tenantId, id, patch) {
-      const [row] = await withTenant(db, tenantId, (tx) =>
-        tx
+      const [row] = await withTenant(db, tenantId, async (tx) => {
+        const updated = await tx
           .update(connections)
           .set({ ...patch, updatedAt: new Date() })
           .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
-          .returning(),
-      )
+          .returning()
+        // ⚠ IN THE SAME TRANSACTION: "required" turned on or off, or the connection
+        // going live or dark, is a change of whose Clerk password authd accepts.
+        if (updated.length > 0) await mirrorRequiredDomains(tx, tenantId)
+        return updated
+      })
       return row ? toConnection(row) : null
     },
 
@@ -344,7 +352,10 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
           .values({ tenantId, connectionId, joinDomainId })
           .onConflictDoNothing()
           .returning({ id: connectionDomains.joinDomainId })
-        if (made.length > 0) return "added" as const
+        if (made.length > 0) {
+          await mirrorRequiredDomains(tx, tenantId)
+          return "added" as const
+        }
         const [held] = await tx
           .select({ connectionId: connectionDomains.connectionId })
           .from(connectionDomains)
@@ -357,8 +368,8 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     },
 
     async removeDomain(tenantId, connectionId, joinDomainId) {
-      const gone = await withTenant(db, tenantId, (tx) =>
-        tx
+      const gone = await withTenant(db, tenantId, async (tx) => {
+        const removed = await tx
           .delete(connectionDomains)
           .where(
             and(
@@ -367,8 +378,10 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
               eq(connectionDomains.joinDomainId, joinDomainId),
             ),
           )
-          .returning({ id: connectionDomains.joinDomainId }),
-      )
+          .returning({ id: connectionDomains.joinDomainId })
+        if (removed.length > 0) await mirrorRequiredDomains(tx, tenantId)
+        return removed
+      })
       return gone.length > 0
     },
 

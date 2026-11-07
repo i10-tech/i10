@@ -148,6 +148,35 @@ describe("what authd is told", () => {
     ).toEqual({ enabled: false })
   })
 
+  // ⚠ THE `enabled` SWITCH IS THE PASS-THROUGH'S OWN, LEFT ON WHEN AN OWNER
+  // DISABLES THE CONNECTION, SO IT CANNOT BE THE ONLY THING THAT DECIDES.
+  it.each(["draft", "testing", "disabled"] as const)(
+    "answers off for a %s connection, whatever its pass-through says",
+    async (status) => {
+      const w = memoryStore({ connections: [connection({ status, config: whole })] })
+      w.secrets.set(CONNECTION, sealed)
+      expect(await passthroughFor(w.store, CONNECTION)).toEqual({ enabled: false })
+    },
+  )
+
+  it("answers off once no live proof covers the connection - lapsed, displaced or none", async () => {
+    const w = memoryStore({
+      connections: [connection({ config: whole })],
+      live: { [CONNECTION]: [] },
+    })
+    w.secrets.set(CONNECTION, sealed)
+    expect(await passthroughFor(w.store, CONNECTION)).toEqual({ enabled: false })
+  })
+
+  it("answers again when the connection is live and a proof is back", async () => {
+    const w = memoryStore({
+      connections: [connection({ config: whole })],
+      live: { [CONNECTION]: ["acme.test"] },
+    })
+    w.secrets.set(CONNECTION, sealed)
+    expect(await passthroughFor(w.store, CONNECTION)).toMatchObject({ enabled: true })
+  })
+
   it("does not turn a failure into an answer", async () => {
     const store = world(whole, sealed)
     store.connectionSecrets = async () => {

@@ -33,6 +33,77 @@ describe("projectUser", () => {
       aliases: [],
       displayName: "Alice Example",
       clerkUpdatedAt: new Date(Date.UTC(2026, 7, 30, 9, 0, 0)),
+      banned: null,
+      locked: null,
+      lockedUntil: null,
+    })
+  })
+
+  // ⚠ CLERK'S verify_password ANSWERS 200 `verified: true` FOR A BANNED USER AND
+  // A LOCKED ONE (probed on the dev instance 2026-11-07), so authd refuses them
+  // from what is projected here. The payload shapes below are the probe's.
+  describe("ban and lock", () => {
+    const hosted = {
+      email_addresses: [addr("idn_1", "alice@i10.tech")],
+      primary_email_address_id: "idn_1",
+    }
+    const NOW = new Date("2026-11-07T12:00:00Z")
+
+    it("projects a ban", () => {
+      const m = projectUser(
+        user({ ...hosted, banned: true, locked: false }),
+        HOSTED,
+        NOW,
+      )
+      expect(m).toMatchObject({ banned: true, locked: false, lockedUntil: null })
+    })
+
+    it("projects a lock with the end Clerk reports, counted from now", () => {
+      const m = projectUser(
+        user({
+          ...hosted,
+          banned: false,
+          locked: true,
+          lockout_expires_in_seconds: 3599,
+        }),
+        HOSTED,
+        NOW,
+      )
+      expect(m).toMatchObject({
+        banned: false,
+        locked: true,
+        lockedUntil: new Date(NOW.getTime() + 3599_000),
+      })
+    })
+
+    it("a lock Clerk gives no end for is indefinite", () => {
+      const m = projectUser(user({ ...hosted, locked: true }), HOSTED, NOW)
+      expect(m).toMatchObject({ locked: true, lockedUntil: null })
+    })
+
+    it("an unlocked user carries no end, whatever the payload says", () => {
+      const m = projectUser(
+        user({ ...hosted, locked: false, lockout_expires_in_seconds: 99 }),
+        HOSTED,
+        NOW,
+      )
+      expect(m).toMatchObject({ locked: false, lockedUntil: null })
+    })
+
+    // ⚠ UNKNOWN IS NOT "NO": the writer keeps the row's value for null, so a payload
+    // that omitted the fields can never lift a ban.
+    it("a payload without the fields says nothing, which is not the same as no", () => {
+      expect(projectUser(user(hosted), HOSTED, NOW)).toMatchObject({
+        banned: null,
+        locked: null,
+        lockedUntil: null,
+      })
+    })
+
+    it("an explicit false is a lift", () => {
+      expect(
+        projectUser(user({ ...hosted, banned: false, locked: false }), HOSTED, NOW),
+      ).toMatchObject({ banned: false, locked: false })
     })
   })
 

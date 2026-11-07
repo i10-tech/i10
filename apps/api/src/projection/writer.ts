@@ -185,6 +185,9 @@ async function applyUser(
       email: mailbox.email,
       displayName: mailbox.displayName || null,
       clerkUpdatedAt: mailbox.clerkUpdatedAt,
+      banned: mailbox.banned ?? false,
+      locked: mailbox.locked ?? false,
+      lockedUntil: mailbox.lockedUntil,
       // ⚠ THE TENANT IS THE ONE THAT OWNS THE DOMAIN, NOT THE USER'S CLERK ORG.
       // A mailbox on acme.com belongs to whoever proved they control acme.com;
       // the person holding it may be in several organisations or none. It is
@@ -201,6 +204,20 @@ async function applyUser(
         email: sql`excluded.email`,
         displayName: sql`excluded.display_name`,
         clerkUpdatedAt: sql`excluded.clerk_updated_at`,
+        // ⚠ BAN AND LOCK ARE CLERK'S AND REWRITTEN ON EVERY EVENT, so lifting one
+        // at Clerk lifts it here. The ordering guard below applies to them as to
+        // the rest: an older delivery cannot ban or unban over a newer one.
+        //
+        // ⚠ A FIELD THE PAYLOAD DID NOT CARRY KEEPS WHAT THE ROW HAS (null on the
+        // mailbox): only an explicit false lifts a ban or a lock.
+        banned:
+          mailbox.banned === null ? sql`${accounts.banned}` : sql`excluded.banned`,
+        locked:
+          mailbox.locked === null ? sql`${accounts.locked}` : sql`excluded.locked`,
+        lockedUntil:
+          mailbox.locked === null
+            ? sql`${accounts.lockedUntil}`
+            : sql`excluded.locked_until`,
         // Re-derived on every write, so a domain that changed hands - or was
         // verified after the mailbox existed - is corrected by the next event
         // rather than needing a backfill.
