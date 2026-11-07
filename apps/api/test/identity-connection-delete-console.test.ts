@@ -89,15 +89,18 @@ describe("delete draft connection console route", () => {
     )
   })
 
-  it("limits deletion to fresh owners", async () => {
+  it("limits deletion to owners", async () => {
     for (const user of ["user_admin", "user_member"]) {
       const w = appFor()
       expect((await w.call(user, "DELETE", w.path)).status).toBe(403)
       expect(w.world.connections.has(CONNECTION)).toBe(true)
     }
+  })
+
+  it("lets an owner without a fresh sign-in delete an unused draft", async () => {
     const stale = appFor({}, { fresh: false })
-    expect((await stale.call("user_owner", "DELETE", stale.path)).status).toBe(403)
-    expect(stale.world.connections.has(CONNECTION)).toBe(true)
+    expect((await stale.call("user_owner", "DELETE", stale.path)).status).toBe(200)
+    expect(stale.world.connections.has(CONNECTION)).toBe(false)
   })
 
   it("refuses live statuses and used drafts without deleting them", async () => {
