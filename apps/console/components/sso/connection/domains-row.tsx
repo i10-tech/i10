@@ -6,11 +6,7 @@ import { Button } from "@repo/ui/components/button/button"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { teamAccessDomains, type AccessDomain } from "@/lib/actions"
-import {
-  addSsoDomain,
-  removeSsoDomain,
-  ssoConnections,
-} from "@/lib/sso-actions"
+import { addSsoDomain, removeSsoDomain, ssoConnections } from "@/lib/sso-actions"
 import { domainChoices } from "@/lib/sso-domain-choices"
 import { toastDone, toastFailure } from "@/lib/toast"
 import type { SsoAbilities, SsoConnection } from "@/lib/sso-types"
@@ -183,8 +179,8 @@ export function DomainsRow({
 
           {choices.some((d) => d.coveredBy) && (
             <p className="text-xs text-muted-foreground">
-              A domain belongs to one connection. To move one here, remove it from the other
-              connection first.
+              A domain belongs to one connection. To move one here, remove it from the
+              other connection first.
             </p>
           )}
 

@@ -3,6 +3,7 @@
 Scope: how open source products build the SSO admin setup. Code was read from shallow clones (sentry, posthog, infisical, dub, grafana, mattermost, cal.com) and from public docs. Paths below are relative to each repo root. Images are in `gallery/<product>/`.
 
 Method notes and limits:
+
 - I could not drive the products, so page anatomy comes from code plus doc screenshots. Guesses are labelled GUESS.
 - Motion: none of the products defines SSO-specific motion in the files I read. Sentry setup is server-rendered Django with Bootstrap tabs. The rest use stock design-system dialogs and sheets whose animation lives in shared components I did not read (Infisical `@app/components/v3`, PostHog `LemonModal`, Dub `Modal`, Grafana `CollapsableSection`). I give no motion values because I did not see any. Treat motion as an open gap in this survey.
 - Dropped for thin SSO UI: Cal.com (SAML lives in a private ee package, the open repo only has login-side `packages/features/auth/lib/identityProviders.ts`), Plane, Twenty, Ente (not investigated further, no SSO admin UI surfaced in the time available).
@@ -11,6 +12,7 @@ Method notes and limits:
 ## Per product
 
 ### Sentry
+
 - **Location**: Org settings > Authentication, its own page. Route `auth/` at `static/app/router/routes.tsx:1120`; nav at `static/app/views/settings/organization/userOrgNavigationConfiguration.tsx:191`.
 - **Flow**: Provider list page (`static/app/views/settings/organizationAuth/organizationAuthList.tsx:73-116`) is a single Panel titled "Choose a provider". Each row is a logo, name, one-line description ("Enable your organization to sign in with %s") and a **Configure** button (`providerItem.tsx:94-129`). Providers are sorted by a hard-coded popularity table (Google, GitHub, Okta, Active Directory, SAML2, OneLogin, Rippling, Auth0, JumpCloud; `organizationAuthList.tsx:18-28`), then plan-locked ones are sorted to the end and show a muted "disabled" tag with a lock and a hovercard (`providerItem.tsx:171-188`). Generic SAML is labelled "SAML2" with the description "your preferred SAML2 compliant provider like Ping Identity, Google SAML, Keycloak, or VMware Identity Manager" (`providerItem.tsx:68-80`).
 - **Steps for SAML2** (pipeline views `src/sentry/auth/providers/saml2/generic/views.py:54-93`): (1) pick a provider (1 decision), (2) "Register Identity Provider" with three tabs, Metadata URL / XML / IdP Data (`generic/templates/sentry_auth_saml2/select-idp.html`), (3) "Map Attributes" form (`AttributeMappingForm`, `saml2/forms.py:112`), (4) a configure page showing the SP metadata URL for the IdP. Rough cost: 1 provider click, 1 pasted URL (or 4 fields on the IdP Data tab: entity id, SSO URL, optional SLO URL, x509), attribute mapping fields, 1-3 copy actions. The pipeline puts IdP details before SP details, so an admin has to bounce between tabs.
@@ -22,6 +24,7 @@ Method notes and limits:
 - Images: `gallery/sentry/01-05` from https://docs.sentry.io/organization/authentication/sso/saml2/ (the `/mdx-images/saml2-*.png` files).
 
 ### PostHog
+
 - **Location**: Org settings > Authentication > "Authentication Domains" (`frontend/src/scenes/settings/SettingsMap.tsx:2380-2392`). Not a separate page: it is a section with a table.
 - **Anatomy**: SSO is configured per **verified domain**. A table with columns Domain name, Automatic provisioning (switch), Enforce SSO (select), Integrations (SAML / OIDC / SCIM badges, green when on, muted with a lock when plan-locked, each with a tooltip) and a "More" menu (`frontend/src/scenes/settings/organization/VerifiedDomains/VerifiedDomains.tsx:153-400`). Domain verification is a TXT record modal (`VerifyDomainModal.tsx:42`).
 - **Legacy flow**: "Configure SAML" opens a modal (`ConfigureSAMLModal.tsx`). **Redesign** (behind feature flag `SSO_SETTINGS_REDESIGN`, `VerifiedDomains.tsx:132`) navigates to a full scene `IdentityProviderConfigScene.tsx` titled "Configure SAML", with this order: name field ("For example, Okta production"), copyable SP values (ACS consumer URL, Relay state, Audience / entity ID), then 3 typed fields (ACS URL, entity id, X.509 cert with a 10-row textarea), then a divider and a "Domains" radio (All domains / Selected domains, with descriptions) plus a multiselect (`IdentityProviderDomainScope.tsx:46-82`), then Save and Cancel, and a Danger zone with a type-to-confirm delete (`IdentityProviderConfigScene.tsx:204-270`). `SAMLConfigFields.tsx:51-56` shows a blue banner: "SAML remains disabled until you enter the ACS URL, entity ID, and X.509 certificate. You can save a partial configuration."
@@ -32,6 +35,7 @@ Method notes and limits:
 - Images: none retrievable. The docs page https://posthog.com/docs/settings/sso had only generic Cloudinary art. `identityProviderConfigLogic`/stories could render it but I did not run anything.
 
 ### Infisical (strongest reference)
+
 - **Location**: Organization settings > Security tab > SSO, section `OrgSsoTab` (`frontend/src/pages/organization/SettingsPage/components/OrgSsoTab/OrgSsoTab.tsx`). Own tab in settings, two-column grid: left column holds provider card and Email Domains, right column holds the Enforcement card (`OrgSsoTab.tsx:430-470`).
 - **Empty state**: one card "Connect an Identity Provider" with an Empty block, "No identity providers connected", and the copy "Verify a domain first to add a connection." when no email domain exists (`OrgSsoTab.tsx:346-376`). An info Alert "Email domain verification required" tells you to verify a domain before configuring an IdP (`OrgSsoTab.tsx:88-97`). So domain-first ordering is explicit.
 - **Protocol picker**: Dialog "Add Identity Provider", "Pick a protocol to configure.", RadioGroup of SAML / OIDC / LDAP rows, each with a one-line description ("Standard enterprise SSO - Okta, Azure, Google Workspace"), and a primary Connect button disabled until a choice is made (`OrgSsoTab.tsx:503-557`). No logos at this level. "Switch Method" in the card menu reopens the chooser with the current protocol excluded, and a confirm dialog warns that the current config will be cleared (`OrgSsoTab.tsx:577-586`).
@@ -44,6 +48,7 @@ Method notes and limits:
 - Images: `gallery/infisical/01-06` from https://infisical.com/docs/documentation/platform/sso/okta and `/google-saml` (mintlify S3). Note 02 and 03 are the IdP-side Okta screens, kept because they show Okta's numbered "needed to configure" list that Infisical mirrors with numbered values; 01 and 05 are Infisical-side.
 
 ### Dub
+
 - **Location**: Workspace settings > Security (`apps/web/app/app.dub.co/(dashboard)/[slug]/(ee)/settings/security/page-client.tsx`), a card "SAML Single Sign-On" and a sibling SCIM card (`.../security/saml.tsx`, `scim.tsx`). Enterprise plan only for enforcement (`saml.tsx` Switch `disabled={plan !== "enterprise"}`).
 - **Anatomy**: the card has a status row (logo of the configured IdP, "Okta SAML", "SAML SSO is configured for your workspace", a menu with Remove) and a footer row with a Switch: "Require workspace members to login with SAML to access this workspace" plus a blue badge with the domain when enforced (`saml.tsx:132-228`). Unconfigured state reads "Choose an identity provider to get started." (`saml.tsx:73-82`).
 - **Setup modal**: one small centred modal, lock icon, "Configure SAML", sub copy "Select a provider to configure SAML for your Dub workspace." A native `<select>` of 3 providers (Okta, Entra ID, Google) then exactly one input, labelled per provider: "Metadata URL" (Okta), "App Federation Metadata URL" (Entra), "XML Metadata File" upload (Google) (`apps/web/ui/modals/saml-modal.tsx:82-211`; labels from `packages/utils/src/constants/saml.ts:1-38`). Below the select, a text link "Read the guide on Okta SSO". Submit "Save changes" is disabled until a provider is picked. Toasts via sonner on success and error (`saml-modal.tsx:68-77`).
@@ -55,6 +60,7 @@ Method notes and limits:
 - Images: `gallery/dub/01` (modal, https://assets.dub.co/help/okta-saml-modal.png), `02` (security page, https://assets.dub.co/cms/saml-directory-sync-2.png), `03` (SCIM modal with two values to copy, https://assets.dub.co/help/okta-scim-modal-configured.png).
 
 ### Grafana
+
 - **Location**: Administration > Authentication, a page `navId="authentication"` (`public/app/features/auth-config/AuthProvidersListPage.tsx:81-134`). Own page with a **grid of provider Cards** (`Grid minColumnWidth={34}`), each showing a name, the protocol label (OAuth, LDAP, SAML) and enabled state. Each Card links to `/admin/authentication/<provider>`. OSS builds also show non-clickable-upsell SAML and SCIM cards (`AuthProvidersListPage.tsx:123-128`).
 - **Config page**: single form `max-width 600px` (`ProviderConfigForm.tsx:160`) with `CollapsableSection`s, **only the first open** (`isOpen={index === 0}`, line 182): General settings, User mapping, Extra security measures (`fields.tsx:23-25`, generic_oauth sections at `fields.tsx:73-110`). Fields show or hide through `dependsOn` toggles (for example `defineAllowedGroups`). Advanced options live in the closed sections.
 - **Buttons**: "Save and enable" (primary), "Save" (secondary), "Discard", and a more-actions menu with "Reset to default values" (`ProviderConfigForm.tsx:206-243`). After save, a 300 ms delayed redirect back to the list (`ProviderConfigForm.tsx:97-101`) and a toast "Settings saved". `FormPrompt` blocks navigation when dirty (line 161).
@@ -64,17 +70,20 @@ Method notes and limits:
 - Images: none. Grafana docs pages had no SSO UI screenshots in the HTML I fetched.
 
 ### GitLab (docs only)
+
 - **Location**: Group > Settings > SAML SSO (https://docs.gitlab.com/user/group/saml_sso/). Page is a group-level form: the GitLab-provided values (Identifier, Assertion consumer service URL, GitLab single sign-on URL, and a **GitLab metadata URL** that some IdPs can ingest directly) then IdP SSO URL and certificate fingerprint, a **"Verify SAML Configuration"** button (the only real test step among the products here), enable checkbox, default membership role, and two enforcement checkboxes: "Enforce SSO-only authentication for web activity" and one for Git and Dependency Proxy. Docs include a per-IdP field mapping table (for OneLogin: Identifier = Audience, ACS URL = Recipient / ACS) which is the same idea as Infisical's per-provider labels, but in prose.
 - **Steal**: Verify button; offering the SP metadata URL so the admin pastes one thing into the IdP; separate enforcement for web vs Git.
 - **Bad**: per-IdP guidance in docs rather than in the form; the NameID "persistent" warning is told to be ignored in docs (copy mismatch).
 - Images: none obtained.
 
 ### Mattermost
+
 - **Location**: System Console > Authentication > SAML 2.0 (`webapp/channels/src/components/admin_console/admin_definition.tsx:4693-4702`).
 - **Anatomy**: one flat settings page driven by a schema array, with about 30 fields in order: Enable, Sync with LDAP, IdP metadata URL, IdP URL, descriptor URL, certificate file, Verify, ACS URL, SP identifier, Encrypt, private key, public cert, Sign request, algorithms, then 10+ attribute fields (email, username, id, guest, admin, first, last, nickname, position, locale), login button text (`admin_definition.tsx:4706-5150` keys). Provider-specific advice is only in docs.
 - **Bad (the anti-pattern)**: no sections for common vs advanced, no provider picker, no test. Good only as a reminder of what happens when schema-driven settings pages grow.
 
 ### Supabase (docs only)
+
 - **Location**: Organization settings > SSO (https://supabase.com/docs/guides/platform/sso). For project users it is CLI only (docs "Single Sign-On with SAML 2.0 for Projects").
 - **Anatomy** (screenshot `gallery/supabase/01`): one card form. Master switch "Enable Single Sign-On"; "Enable SP-initiated login" switch with the note that email domains are required; "Metadata" with **URL / Upload file tabs**; "Attribute mapping" with **preset chips GSuite, Azure, Okta** that fill the mapping fields, plus "Add another" per attribute; "Automatically add users to organization on sign up" switch; Cancel and Save changes.
 - **Steal**: IdP preset chips that autofill the advanced mapping; metadata URL and file as tabs; switches with plain-English descriptions.
@@ -83,16 +92,16 @@ Method notes and limits:
 
 ## Comparison
 
-| Product | Location | Form factor | Setup steps (decisions / typed or pasted / copies) | IdP logos | Test step | Enforcement control |
-|---|---|---|---|---|---|---|
-| Sentry | Org settings > Authentication (own page) | Row list, then Django wizard (provider, IdP, attributes) | 1 / 1-4 plus mapping / about 1-3 | Yes, on the list | No | Checkbox "Require SSO" in settings form |
-| PostHog | Org settings > Authentication > domains table | Table plus modal (legacy) or full scene (flag) | 3 (domain, scope, enforce) / 4-5 / 3 plus TXT | No | No | Per-domain select (which provider) |
-| Infisical | Org settings > Security > SSO tab | Empty-state card, protocol dialog, Sheet | 3 (protocol, provider, enable) / 3 / 2 plus TXT | No (names only) | No | Toggle in separate card, confirm dialog with break-glass |
-| Dub | Workspace > Security | Card plus one small modal | 2 / 1 / 0 | Yes, once configured | No | Switch in the same card, domain badge |
-| Grafana | Administration > Authentication | Card grid, then one long form with collapsibles | 1 / 8-14 / varies | No | Validation only (Enterprise SAML) | Not a toggle: disabling the provider |
-| GitLab | Group > Settings > SAML SSO | Single form | 0 / 2-3 / 3-4 | No | Verify SAML Configuration button | Two checkboxes (web, Git) |
-| Mattermost | System Console > SAML 2.0 | One flat page | 0 / 10-30 / 3 | No | No | Enable toggle only |
-| Supabase | Org settings > SSO | Single card form | 1 / 1-4 / 0 | No | No | Not seen |
+| Product    | Location                                      | Form factor                                              | Setup steps (decisions / typed or pasted / copies) | IdP logos            | Test step                         | Enforcement control                                      |
+| ---------- | --------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------- | -------------------- | --------------------------------- | -------------------------------------------------------- |
+| Sentry     | Org settings > Authentication (own page)      | Row list, then Django wizard (provider, IdP, attributes) | 1 / 1-4 plus mapping / about 1-3                   | Yes, on the list     | No                                | Checkbox "Require SSO" in settings form                  |
+| PostHog    | Org settings > Authentication > domains table | Table plus modal (legacy) or full scene (flag)           | 3 (domain, scope, enforce) / 4-5 / 3 plus TXT      | No                   | No                                | Per-domain select (which provider)                       |
+| Infisical  | Org settings > Security > SSO tab             | Empty-state card, protocol dialog, Sheet                 | 3 (protocol, provider, enable) / 3 / 2 plus TXT    | No (names only)      | No                                | Toggle in separate card, confirm dialog with break-glass |
+| Dub        | Workspace > Security                          | Card plus one small modal                                | 2 / 1 / 0                                          | Yes, once configured | No                                | Switch in the same card, domain badge                    |
+| Grafana    | Administration > Authentication               | Card grid, then one long form with collapsibles          | 1 / 8-14 / varies                                  | No                   | Validation only (Enterprise SAML) | Not a toggle: disabling the provider                     |
+| GitLab     | Group > Settings > SAML SSO                   | Single form                                              | 0 / 2-3 / 3-4                                      | No                   | Verify SAML Configuration button  | Two checkboxes (web, Git)                                |
+| Mattermost | System Console > SAML 2.0                     | One flat page                                            | 0 / 10-30 / 3                                      | No                   | No                                | Enable toggle only                                       |
+| Supabase   | Org settings > SSO                            | Single card form                                         | 1 / 1-4 / 0                                        | No                   | No                                | Not seen                                                 |
 
 Counts are my reading of the code and docs, not measured sessions.
 
@@ -110,6 +119,7 @@ Counts are my reading of the code and docs, not measured sessions.
 10. **Safe undo and honest partial saves**: Grafana "Reset to default values" and the dirty-form navigation prompt (`ProviderConfigForm.tsx:161`), PostHog "You can save a partial configuration" banner (`SAMLConfigFields.tsx:51-56`), type-the-name-to-delete (`IdentityProviderConfigScene.tsx:247`).
 
 ## Cross-cutting observations
+
 - The three best-feeling flows (Dub, Infisical, Supabase) all put the master switch or enforcement in the same visual unit as the config, not on a separate settings page.
 - Nobody uses a multi-step wizard with a progress indicator in the open source set; Sentry's pipeline is the only stepwise flow and it is server-rendered with no progress indicator.
 - Generic SAML is treated as the default/fallback (Infisical `default:` branch, Sentry "SAML2" row with named examples). OIDC is a separate protocol choice (Infisical, PostHog), not a provider.

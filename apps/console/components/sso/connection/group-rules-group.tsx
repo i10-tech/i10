@@ -98,7 +98,8 @@ export function GroupRulesGroup({
           <div className="space-y-3">
             {entra && (
               <p className="text-xs text-muted-foreground">
-                In Microsoft Entra, enter the group&apos;s Object ID (GUID), not its display name.
+                In Microsoft Entra, enter the group&apos;s Object ID (GUID), not its
+                display name.
               </p>
             )}
 
@@ -109,7 +110,10 @@ export function GroupRulesGroup({
                 {rules.length > 0 && (
                   <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
                     {rules.map((r) => (
-                      <li key={r.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                      <li
+                        key={r.id}
+                        className="flex items-center gap-3 px-3 py-2 text-sm"
+                      >
                         <span className="w-8 text-xs text-muted-foreground">
                           {r.precedence}
                         </span>

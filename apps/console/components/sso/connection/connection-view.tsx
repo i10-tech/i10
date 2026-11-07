@@ -30,10 +30,7 @@ export function ConnectionView({
 }) {
   const [connection, setConnection] = React.useState(initial)
 
-  const onChange = React.useCallback(
-    (next: SsoConnection) => setConnection(next),
-    [],
-  )
+  const onChange = React.useCallback((next: SsoConnection) => setConnection(next), [])
 
   return (
     <div className="space-y-8 pb-12">
@@ -85,34 +82,19 @@ export function ConnectionView({
 
       <div className="space-y-2">
         <h3 className="text-sm font-medium">Roles from groups</h3>
-        <GroupRulesGroup
-          connection={connection}
-          abilities={abilities}
-        />
+        <GroupRulesGroup connection={connection} abilities={abilities} />
       </div>
 
       <div className="space-y-2">
         <h3 className="text-sm font-medium">Test</h3>
-        <TestSection
-          connection={connection}
-          authOrigin={authOrigin}
-        />
+        <TestSection connection={connection} authOrigin={authOrigin} />
       </div>
 
       <div className="space-y-4 pt-4 border-t border-border">
         <h3 className="text-sm font-medium text-muted-foreground">Advanced settings</h3>
-        <ProviderSettings
-          connection={connection}
-          abilities={abilities}
-        />
-        <SetupLinksRow
-          connection={connection}
-          authOrigin={authOrigin}
-        />
-        <LdapRow
-          connection={connection}
-          abilities={abilities}
-        />
+        <ProviderSettings connection={connection} abilities={abilities} />
+        <SetupLinksRow connection={connection} authOrigin={authOrigin} />
+        <LdapRow connection={connection} abilities={abilities} />
         {connection.provider === "okta" && (
           <UniversalLogoutRow connection={connection} />
         )}

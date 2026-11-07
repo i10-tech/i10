@@ -8,12 +8,7 @@ import { refreshSamlMetadata, saveSaml } from "@/lib/sso-actions"
 import { toastDone, toastError } from "@/lib/toast"
 import type { SamlSetup, SsoAbilities, SsoConnection } from "@/lib/sso-types"
 import { SettingsGroup, SettingsRow } from "../settings-card"
-import {
-  connectionWriteNeedsStepUp,
-  isLocked,
-  OwnerNote,
-  useSsoCall,
-} from "../shared"
+import { connectionWriteNeedsStepUp, isLocked, OwnerNote, useSsoCall } from "../shared"
 import { SamlCertificates } from "./saml-certificates"
 import { SamlSpValues } from "./saml-sp-values"
 

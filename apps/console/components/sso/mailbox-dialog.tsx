@@ -10,20 +10,11 @@ import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { formatExact } from "@/lib/format"
-import {
-  NEXT_LABEL,
-  daysInRange,
-  deletionDate,
-} from "@/lib/mailbox"
+import { NEXT_LABEL, daysInRange, deletionDate } from "@/lib/mailbox"
 import { useResetOnOpen } from "@/lib/react"
 import { chooseMailboxNext } from "@/lib/sso-policy-actions"
 import { toastDone } from "@/lib/toast"
-import type {
-  MailboxNext,
-  MailboxRow,
-  Mailboxes,
-  NextChoice,
-} from "@/lib/sso-types"
+import type { MailboxNext, MailboxRow, Mailboxes, NextChoice } from "@/lib/sso-types"
 import type { Member } from "./members"
 import { useSsoCall } from "./shared"
 

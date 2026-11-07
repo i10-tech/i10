@@ -170,7 +170,8 @@ export function Header({
             to: "testing",
             label: "Move to testing",
             title: "Move to testing?",
-            description: "You can run test sign-ins and edit settings before turning it on.",
+            description:
+              "You can run test sign-ins and edit settings before turning it on.",
             confirmLabel: "Move to testing",
             done: "Testing",
           })
@@ -213,7 +214,9 @@ export function Header({
         <div className="flex min-w-0 items-center gap-3">
           <IdpMark
             idp={
-              connection.provider === "generic" ? connection.protocol : connection.provider
+              connection.provider === "generic"
+                ? connection.protocol
+                : connection.provider
             }
             className="size-9"
           />
@@ -255,11 +258,7 @@ export function Header({
           )}
         </div>
 
-        <HeaderMenu
-          connection={connection}
-          domains={domains}
-          onChange={onChange}
-        />
+        <HeaderMenu connection={connection} domains={domains} onChange={onChange} />
       </div>
 
       <StatusLine

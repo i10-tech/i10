@@ -49,9 +49,11 @@ export function NewPeopleGroup({
   const mfaNote = mfaCapabilityNote(connection)
 
   const [loginsOpen, setLoginsOpen] = React.useState(false)
-  const { data: relinks, setData: setRelinks, failed: relinksFailed } = useRemote(() =>
-    relinkRequests(connection.id),
-  )
+  const {
+    data: relinks,
+    setData: setRelinks,
+    failed: relinksFailed,
+  } = useRemote(() => relinkRequests(connection.id))
 
   const entra = connection.provider === "entra"
 
@@ -138,8 +140,8 @@ export function NewPeopleGroup({
           )}
           {caps?.canProveFreshAuth === "no" && (
             <p className="text-xs text-muted-foreground">
-              {caps.label} cannot prove a fresh sign-in, so step-up prompts use i10&apos;s
-              own verification.
+              {caps.label} cannot prove a fresh sign-in, so step-up prompts use
+              i10&apos;s own verification.
             </p>
           )}
         </div>
@@ -217,7 +219,8 @@ export function NewPeopleGroup({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{r.email ?? r.clerkUserId}</span>
                       <span className="block truncate text-xs text-muted-foreground">
-                        Asked <Time iso={r.createdAt} />, expires <Time iso={r.expiresAt} />
+                        Asked <Time iso={r.createdAt} />, expires{" "}
+                        <Time iso={r.expiresAt} />
                       </span>
                     </span>
                     <Button

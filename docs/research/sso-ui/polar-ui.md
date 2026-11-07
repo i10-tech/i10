@@ -23,11 +23,13 @@ There is no wizard. The page is one vertical stack (`SSOSettings.tsx:72`, `Box f
 **B. Domain gate (info Alert).** Shown only if domains loaded and none verified (`SSOSettings.tsx:73-90`). Title "Verify your email domain". Body: "SSO only works for a domain you own. [Add and verify it] before adding a connection." Link goes to `/settings/domains`. One-sentence prerequisite, nothing else.
 
 **C. Connections.**
+
 - Empty (`SSOSettings.tsx:100-106`): `SettingsSection title="Connections"` containing `EmptyState` with `LogIn` icon (text-5xl, gray-500), title "No SSO connections", description "Add a connection so members can sign in with your identity provider." No button inside the empty state; the only CTA is the page header button.
 - Populated (`:92-98`): `SettingsGroup title="Connections"`, one `SettingsGroupRow` per connection (`SSOConnectionRow.tsx:58-97`): title (name, else issuer) in `Text variant=title` (14px medium), `Status` chip "Enabled" green / "Disabled" gray (small), issuer URL beneath in muted caption, a ghost icon button (ellipsis-vertical, `aria-label="Connection actions"`) opening a dropdown: **Edit / Enable|Disable / Delete**. Enable and Disable act immediately, no confirm; failure toasts "Update failed".
 - Delete: `ConfirmModal` title "Delete SSO connection", "Members will no longer be able to sign in with this connection." destructive, button text defaults to "Delete" (`SSOConnectionRow.tsx:98-105`). No typed confirmation.
 
 **D. Create (right drawer, `NewSSOConnectionModal.tsx`).** Header "New SSO connection" (`heading-xs`, 20/24px). Fields in this order (`SSOConnectionFormFields.tsx:69-194`):
+
 1. "Identity provider" select: Google Workspace | Custom OIDC provider. Default `custom` (`NewSSOConnectionModal.tsx:30`). Choosing Google writes issuer `https://accounts.google.com` and auth method `client_secret` (`:41-50`).
 2. "Callback URL" read-only mono field with a "Copy" button; hint "Register this redirect URI with your identity provider." (`:89-93`).
 3. "Name", placeholder "Acme SSO (optional)".
@@ -37,7 +39,7 @@ There is no wizard. The page is one vertical stack (`SSOSettings.tsx:72`, `Box f
 7. If client secret: "Client secret" password input (required). If private key JWT: "JWKS URL" copy field, hint "Configure your identity provider to fetch Polar's public keys from this URL."
 8. Google only: "Workspace domain", placeholder "acme.com (optional)", live hint "Appended to the sign-in URL as ?...&hd=acme.com" else "Preselects accounts from this domain on Google's sign-in screen, via the hd parameter." (`SSOAuthorizationParamsFields.tsx:53-76`).
 9. Always: "Additional authorization parameters" with key/value rows, a "Remove" secondary button per row, "Add parameter" small secondary button. Zero rows by default.
-Submit "Create" (`:103-109`). Connection is created **disabled** (`enabled: false`, `:61`). Toast: "SSO connection created" / "Enable it once your identity provider is configured." Drawer closes. Server validation errors are mapped onto fields (`setValidationErrors`) plus a toast "Connection creation failed".
+   Submit "Create" (`:103-109`). Connection is created **disabled** (`enabled: false`, `:61`). Toast: "SSO connection created" / "Enable it once your identity provider is configured." Drawer closes. Server validation errors are mapped onto fields (`setValidationErrors`) plus a toast "Connection creation failed".
 
 **E. Domain verification** is not on this page. It lives on `settings/domains` (`W/components/Settings/OrganizationDomainsSettings.tsx`): a single `SettingsGroupItem` "Domains" - "Prove you own a domain by adding a DNS TXT record." (`:69-71`), a list of rows (`rounded-s`, `background-card`, 12px/8px padding), each showing domain and "Pending verification" or "Verified on {date}". Pending rows show a small "Verify" button and an X icon button, and expand a `DomainDnsRecord` (`DomainDnsRecord.tsx:12-27`): label "Name" + mono copy field, label "Value" + mono copy field. Below the list: one input (placeholder `example.com`, Enter submits) plus "Add" (`:142-165`). Footnote: "Keep the TXT record in place once verified: Polar checks it again during reviews." Failed verify toasts "Domain not verified yet". No polling, no auto-recheck in the UI, no countdown.
 
@@ -77,6 +79,7 @@ Sketchable:
 ```
 
 Values:
+
 - Grouped card: `SettingsGroup` = section title (`Text variant=body`, 16px, h2) + optional muted caption, then a box with `borderRadius l` (16px), 1px `border-primary`, `overflow hidden`, children separated by 1px top rules (`SettingsGroup.tsx:32-59`). Items: `paddingHorizontal xl` 24px, `paddingVertical l` 16px; item title `Text variant=title` (14px, medium), description 14px muted; layouts `split`, `stacked`, `inline` (`:69-95`).
 - Section rhythm: rowGap 2xl (32px) between groups, rowGap m (12px) title to card.
 - Type: Geist; role sizes from `O/tokens/semantics.stylex.ts:63-90`: title 14/medium, body 16, label 12/medium, caption 12. Heading-xs drawer title is 20px (24px at md).
@@ -91,6 +94,7 @@ Values:
 ## 5. Motion
 
 All Motion (`motion/react`, the framer-motion successor), no springs.
+
 - Drawer (`O/components/InlineModal.tsx:66-97`): scrim `backgroundColor rgba(0,0,0,0) -> rgba(0,0,0,0.5)` (default tween, no custom duration); panel `x: 100% -> 0, opacity 0 -> 1`, **0.32s, ease [0,0,0,1]** (comments say it mirrors the `slow` + `decelerate` tokens, "a tween settles without the overshoot an underdamped spring produces", `:87-89`). Exit **0.2s, ease [0.3,0,1,1]**. `AnimatePresence` on a portal. Esc and scrim mousedown close. Body scroll locked. `react-focus-lock` with an iframe escape hatch.
 - Centered modal: `opacity 0->1, scale 0.99->1, 0.1s easeInOut` (`Modal.tsx:88-90`). No exit animation (no AnimatePresence).
 - Page body: fade 0.3s in and out (`DashboardLayout`).
@@ -112,6 +116,7 @@ All Motion (`motion/react`, the framer-motion successor), no springs.
 ## 7. What Polar does worse, and why it still feels better
 
 Worse than a good product should:
+
 - Domain verification is on another page; the user leaves the flow and has to come back. "Add connection" is disabled with no inline reason.
 - No test sign-in, no "it works" confirmation, no indicator that the IdP side is correct. Enabling is a buried menu item and the connection is created disabled, so the user ends the drawer with nothing visibly working.
 - No per-IdP instructions, no logos, no Okta/Entra, no SAML, no SCIM, no discovery from an issuer URL (the user must know the issuer).
@@ -122,6 +127,7 @@ Worse than a good product should:
 - "Additional authorization parameters" is a raw key/value editor exposed to every user, with a non-descriptive "Remove" text button per row.
 
 Why it still feels better:
+
 - Restraint. At most four blocks, each a plain bordered card, each with one title and one control. There is no tab bar, no stepper, no sidebar of sub-sections, no badge soup.
 - State is expressed in a single sentence that changes (the Enforce description), not in extra UI.
 - Dense forms are short: Custom OIDC is three fields. Google is two.

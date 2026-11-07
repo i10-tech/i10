@@ -10,12 +10,7 @@ import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { Time } from "@/components/time"
 import { useMounted } from "@/lib/react"
 import { ssoTestRuns } from "@/lib/sso-actions"
-import {
-  groupsNote,
-  latestPass,
-  providerFailure,
-  wouldDo,
-} from "@/lib/sso-runs"
+import { groupsNote, latestPass, providerFailure, wouldDo } from "@/lib/sso-runs"
 import { toastDone, toastError } from "@/lib/toast"
 import type { SsoConnection, TestRun } from "@/lib/sso-types"
 import { Advanced, StatusLine } from "../settings-card"
@@ -59,7 +54,8 @@ export function TestSection({
 
   let chipLabel = "Not tested"
   let chipTone: BadgeTone = "neutral"
-  let sentence: React.ReactNode = "No test has passed in the last 24 hours. Requiring SSO needs one."
+  let sentence: React.ReactNode =
+    "No test has passed in the last 24 hours. Requiring SSO needs one."
 
   if (pass) {
     chipLabel = "Passed"

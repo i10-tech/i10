@@ -10,12 +10,7 @@ import { saveOidc, saveOidcSecret } from "@/lib/sso-actions"
 import { toastDone } from "@/lib/toast"
 import type { OidcSetup, SsoAbilities, SsoConnection } from "@/lib/sso-types"
 import { SettingsGroup, SettingsRow } from "../settings-card"
-import {
-  connectionWriteNeedsStepUp,
-  isLocked,
-  OwnerNote,
-  useSsoCall,
-} from "../shared"
+import { connectionWriteNeedsStepUp, isLocked, OwnerNote, useSsoCall } from "../shared"
 import { OidcKeys } from "./oidc-keys"
 
 const CLIENT_AUTH_LABEL: Record<string, string> = {
@@ -91,11 +86,14 @@ export function OidcSettings({
           issuer: after.issuer ?? "",
           discoveryUrl: after.discoveryUrl ?? "",
           clientId: after.clientId ?? "",
-          clientAuth: after.clientAuth ?? after.clientAuthMethods[0] ?? "client_secret_basic",
+          clientAuth:
+            after.clientAuth ?? after.clientAuthMethods[0] ?? "client_secret_basic",
           scopes: (after.scopes ?? after.defaults.scopes ?? []).join(" "),
           mfaAcrValues: after.mfaAcrValues.join(", "),
         })
-        setSecretExpiresAt(after.secretExpiresAt ? after.secretExpiresAt.slice(0, 10) : "")
+        setSecretExpiresAt(
+          after.secretExpiresAt ? after.secretExpiresAt.slice(0, 10) : "",
+        )
         toastDone("Settings saved")
       }
     } finally {
@@ -116,7 +114,9 @@ export function OidcSettings({
       if (after) {
         setData(after)
         setSecret("")
-        setSecretExpiresAt(after.secretExpiresAt ? after.secretExpiresAt.slice(0, 10) : "")
+        setSecretExpiresAt(
+          after.secretExpiresAt ? after.secretExpiresAt.slice(0, 10) : "",
+        )
         toastDone("Secret saved")
       }
     } finally {

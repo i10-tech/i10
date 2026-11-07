@@ -22,6 +22,7 @@ export function directoryStateText(d: SsoDirectory): string {
   }
   const parts: string[] = [`${d.users} ${d.users === 1 ? "person" : "people"}`]
   if (d.pending > 0) parts.push(`${d.pending} waiting`)
-  if (d.conflicts > 0) parts.push(`${d.conflicts} ${d.conflicts === 1 ? "conflict" : "conflicts"}`)
+  if (d.conflicts > 0)
+    parts.push(`${d.conflicts} ${d.conflicts === 1 ? "conflict" : "conflicts"}`)
   return parts.join(" · ")
 }

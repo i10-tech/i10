@@ -5,11 +5,7 @@ import { CopyField } from "@repo/ui/components/i10/copy-field"
 import type { SsoConnection } from "@/lib/sso-types"
 import { Advanced } from "../settings-card"
 
-export function UniversalLogoutRow({
-  connection,
-}: {
-  connection: SsoConnection
-}) {
+export function UniversalLogoutRow({ connection }: { connection: SsoConnection }) {
   if (connection.provider !== "okta") return null
 
   return (
@@ -23,8 +19,8 @@ export function UniversalLogoutRow({
     >
       <div className="space-y-2 pt-2">
         <p className="text-sm text-muted-foreground">
-          Set it in Okta under the app&apos;s Universal Logout settings; it needs Adaptive
-          MFA or Identity Threat Protection, so it is optional.
+          Set it in Okta under the app&apos;s Universal Logout settings; it needs
+          Adaptive MFA or Identity Threat Protection, so it is optional.
         </p>
         {connection.universalLogoutUrl ? (
           <CopyField value={connection.universalLogoutUrl} />

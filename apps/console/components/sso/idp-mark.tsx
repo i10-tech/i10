@@ -66,7 +66,10 @@ function MicrosoftEntra({ className }: { className?: string }) {
         d="m7.853,1.507L.353,9.967c-.579.654-.428,1.642.323,2.111,0,0,2.776,1.735,3.126,1.954.388.242,1.033.511,1.715.511.621,0,1.198-.18,1.676-.487,0,0,.001,0,.002-.001l1.805-1.128-4.364-2.728,4.365-4.924V1s0,0,0,0c-.424,0-.847.169-1.147.507Z"
         fill="#6DF"
       />
-      <polygon points="4.636 10.199 4.688 10.231 9 12.927 9.001 12.927 9.001 12.927 9.001 5.276 9 5.275 4.636 10.199" fill="#CBF8FF" />
+      <polygon
+        points="4.636 10.199 4.688 10.231 9 12.927 9.001 12.927 9.001 12.927 9.001 5.276 9 5.275 4.636 10.199"
+        fill="#CBF8FF"
+      />
       <path
         d="m17.324,12.078c.751-.469.902-1.457.323-2.111l-4.921-5.551c-.397-.185-.842-.291-1.313-.291-.925,0-1.752.399-2.302,1.026l-.109.123h0s4.364,4.924,4.364,4.924h0s0,0,0,0l-4.365,2.728v4.073c.287,0,.573-.078.823-.234l7.5-4.688Z"
         fill="#074793"
@@ -75,7 +78,10 @@ function MicrosoftEntra({ className }: { className?: string }) {
         d="m9.001,1v4.275s.109-.123.109-.123c.55-.627,1.377-1.026,2.302-1.026.472,0,.916.107,1.313.291l-2.579-2.909c-.299-.338-.723-.507-1.146-.507Z"
         fill="#0294E4"
       />
-      <polygon points="13.365 10.199 13.365 10.199 13.365 10.199 9.001 5.276 9.001 12.926 13.365 10.199" fill="#96BCC2" />
+      <polygon
+        points="13.365 10.199 13.365 10.199 13.365 10.199 9.001 5.276 9.001 12.926 13.365 10.199"
+        fill="#96BCC2"
+      />
     </svg>
   )
 }
@@ -87,10 +93,7 @@ function OpenIdConnect({ className }: { className?: string }) {
         className="fill-current"
         d="M804.8 316.8C720 264 601.6 231.2 472 231.2C211.2 231.2 0 361.6 0 522.4C0 669.6 176 790.4 404 811.2V726.4C250.4 707.2 135.2 623.2 135.2 522.4C135.2 408 285.6 314.4 472 314.4C564.8 314.4 648.8 337.6 709.6 375.2L623.2 428.8H892.8V262.4L804.8 316.8Z"
       />
-      <path
-        d="M404 87.2V726.4L404 811.2L539.2 726.4V0L404 87.2Z"
-        fill="#F7931E"
-      />
+      <path d="M404 87.2V726.4L404 811.2L539.2 726.4V0L404 87.2Z" fill="#F7931E" />
     </svg>
   )
 }
@@ -121,7 +124,8 @@ function Glyph({ idp }: { idp: string }) {
   if (idp === "jumpcloud") return <JumpCloud className="size-[55%]" />
   if (idp === "onelogin") return <OneLogin className="size-[55%]" />
   if (idp === "ping") return <PingIdentity className="size-[55%]" />
-  if (idp === "entra" || idp === "microsoft") return <MicrosoftEntra className="size-[55%]" />
+  if (idp === "entra" || idp === "microsoft")
+    return <MicrosoftEntra className="size-[55%]" />
   if (idp === "google") return <GoogleIcon className="size-[55%]" aria-hidden />
   if (idp === "oidc") return <OpenIdConnect className="size-[55%]" />
   if (idp === "saml") return <Saml className="size-[55%]" />

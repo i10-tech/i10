@@ -47,9 +47,7 @@ export function LiveStep({
         enforcement: "required_domain",
       })
       if (!required.ok) {
-        setError(
-          `Single sign-on is on, but we could not require it: ${required.error}`,
-        )
+        setError(`Single sign-on is on, but we could not require it: ${required.error}`)
         onLive(live.data)
         return
       }

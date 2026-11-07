@@ -126,8 +126,8 @@ export function SessionsGroup({
         <p>The shorter limit between this connection and the workspace policy wins.</p>
         {connection.provider === "entra" && (
           <p>
-            Signing out of Microsoft does not sign people out of i10. Sessions end at the
-            longest session limit, or when your directory deactivates someone.
+            Signing out of Microsoft does not sign people out of i10. Sessions end at
+            the longest session limit, or when your directory deactivates someone.
           </p>
         )}
         {sessionNote && <p>{sessionNote}</p>}

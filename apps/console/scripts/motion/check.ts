@@ -30,7 +30,13 @@ type Step = {
   note?: string
   exact?: boolean
 }
-type Flow = { name: string; scheme?: "light" | "dark"; width?: number; height?: number; steps: Step[] }
+type Flow = {
+  name: string
+  scheme?: "light" | "dark"
+  width?: number
+  height?: number
+  steps: Step[]
+}
 
 const args = process.argv.slice(2)
 const flag = (name: string) => {
@@ -51,14 +57,19 @@ function target(page: Page, s: Step): Locator {
   if (s.label) return page.getByLabel(s.label, { exact: s.exact ?? false }).first()
   if (s.text) return page.getByText(s.text, { exact: s.exact ?? false }).first()
   return page
-    .getByRole((s.role ?? "button") as "button", { name: s.name, exact: s.exact ?? true })
+    .getByRole((s.role ?? "button") as "button", {
+      name: s.name,
+      exact: s.exact ?? true,
+    })
     .first()
 }
 
 async function act(page: Page, s: Step) {
-  if (s.do === "goto") await page.goto(base + s.url, { waitUntil: "commit", timeout: 90000 })
+  if (s.do === "goto")
+    await page.goto(base + s.url, { waitUntil: "commit", timeout: 90000 })
   else if (s.do === "click") await target(page, s).click({ timeout: 20000 })
-  else if (s.do === "fill") await target(page, s).fill(s.value ?? "", { timeout: 20000 })
+  else if (s.do === "fill")
+    await target(page, s).fill(s.value ?? "", { timeout: 20000 })
   else if (s.do === "hover") await target(page, s).hover({ timeout: 20000 })
   else if (s.do === "press") await page.keyboard.press(s.value ?? "Enter")
   else if (s.do === "wait") await page.waitForTimeout(s.ms ?? 500)
@@ -70,10 +81,19 @@ async function grabFrames(page: Page, dir: string, ms: number) {
   const cdp = await page.context().newCDPSession(page)
   let n = 0
   cdp.on("Page.screencastFrame", (frame) => {
-    writeFileSync(join(dir, `${String(n++).padStart(3, "0")}.jpg`), Buffer.from(frame.data, "base64"))
-    void cdp.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(() => {})
+    writeFileSync(
+      join(dir, `${String(n++).padStart(3, "0")}.jpg`),
+      Buffer.from(frame.data, "base64"),
+    )
+    void cdp
+      .send("Page.screencastFrameAck", { sessionId: frame.sessionId })
+      .catch(() => {})
   })
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 70, everyNthFrame: 1 })
+  await cdp.send("Page.startScreencast", {
+    format: "jpeg",
+    quality: 70,
+    everyNthFrame: 1,
+  })
   return async () => {
     await page.waitForTimeout(0)
     await cdp.send("Page.stopScreencast").catch(() => {})
@@ -108,23 +128,35 @@ for (const flow of flows) {
       : null
     if (step.do === "goto") {
       await act(page, step)
-      await page.waitForFunction(() => Boolean(window.__motion), null, { timeout: 30000 })
+      await page.waitForFunction(() => Boolean(window.__motion), null, {
+        timeout: 30000,
+      })
       await page.evaluate(() => window.__motion.start())
     } else {
-      await target(page, step).waitFor({ timeout: 20000 }).catch(() => {})
+      await target(page, step)
+        .waitFor({ timeout: 20000 })
+        .catch(() => {})
       await page.evaluate(() => window.__motion.start())
       await act(page, step)
     }
     await page.waitForTimeout(window_)
-    const report = await page.evaluate(
-      (o) => window.__motion.stop(o),
-      { jump: JUMP, appear: APPEAR },
-    )
+    const report = await page.evaluate((o) => window.__motion.stop(o), {
+      jump: JUMP,
+      appear: APPEAR,
+    })
     const saved = stopFrames ? await stopFrames() : null
-    const issues = report.issues as { kind: string; t: number; name: string; detail: string }[]
+    const issues = report.issues as {
+      kind: string
+      t: number
+      name: string
+      detail: string
+    }[]
     flagged += issues.length
-    console.log(`  ${title}: ${report.frames} frames${saved ? `, ${saved.frames} saved` : ""}, ${issues.length ? `${issues.length} flagged` : "clean"}`)
-    for (const i of issues.slice(0, 12)) console.log(`    ${i.kind} at ${i.t}ms ${i.name}: ${i.detail}`)
+    console.log(
+      `  ${title}: ${report.frames} frames${saved ? `, ${saved.frames} saved` : ""}, ${issues.length ? `${issues.length} flagged` : "clean"}`,
+    )
+    for (const i of issues.slice(0, 12))
+      console.log(`    ${i.kind} at ${i.t}ms ${i.name}: ${i.detail}`)
     if (issues.length > 12) console.log(`    and ${issues.length - 12} more`)
   }
   await context.close()
@@ -137,7 +169,11 @@ declare global {
   interface Window {
     __motion: {
       start(): void
-      stop(o: { jump: number; appear: number }): { frames: number; ms: number; issues: unknown[] }
+      stop(o: { jump: number; appear: number }): {
+        frames: number
+        ms: number
+        issues: unknown[]
+      }
     }
   }
 }

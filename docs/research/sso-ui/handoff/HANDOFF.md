@@ -8,13 +8,13 @@ Background is in the memory file `sso-ui-pass.md`. The earlier session was `4494
 
 The UI pass itself landed, uncommitted, on `fix/sso-setup-friction`: `/settings/sso`, `/settings/sso/connect`, `/settings/sso/[id]`, `/settings/security`. After that, a motion and micro-interaction sweep went to five Gemini Flash agents (agy), one worktree each. All five stopped on the Flash 5-hour quota at 15:09. Nothing from the sweep is reviewed or landed.
 
-| Worktree | Agent's own diff | State |
-|---|---|---|
-| `~/.worktrees/i10/motion-sso` | 20 files, +483 / -234 | Google fix and domain errors through our validator are in. The DNS "looking it up" timeline (`full-sso.cont.txt`, second paragraph) is not. The rest of its list is unchecked. |
-| `~/.worktrees/i10/motion-shell` | 12 files, +245 / -41, plus `flows/shell.json` | Workspace select, switch landing, `ButtonLink` press feedback. Never reported. Closest to done; other areas' press feedback depends on its `ButtonLink`. Review its onboarding-gate change carefully. |
-| `~/.worktrees/i10/motion-settings` | 8 files, +300 / -135 | Team page done; the rest of its sweep is not. |
-| `~/.worktrees/i10/motion-sending` | 2 files, +44 / -5, plus `flows/sending.json` | Almost nothing; spent its time measuring. |
-| `~/.worktrees/i10/motion-data` | 1 file, +2 / -2, plus `flows/data.json` | Almost nothing; spent its time measuring. |
+| Worktree                           | Agent's own diff                              | State                                                                                                                                                                                                 |
+| ---------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/.worktrees/i10/motion-sso`      | 20 files, +483 / -234                         | Google fix and domain errors through our validator are in. The DNS "looking it up" timeline (`full-sso.cont.txt`, second paragraph) is not. The rest of its list is unchecked.                        |
+| `~/.worktrees/i10/motion-shell`    | 12 files, +245 / -41, plus `flows/shell.json` | Workspace select, switch landing, `ButtonLink` press feedback. Never reported. Closest to done; other areas' press feedback depends on its `ButtonLink`. Review its onboarding-gate change carefully. |
+| `~/.worktrees/i10/motion-settings` | 8 files, +300 / -135                          | Team page done; the rest of its sweep is not.                                                                                                                                                         |
+| `~/.worktrees/i10/motion-sending`  | 2 files, +44 / -5, plus `flows/sending.json`  | Almost nothing; spent its time measuring.                                                                                                                                                             |
+| `~/.worktrees/i10/motion-data`     | 1 file, +2 / -2, plus `flows/data.json`       | Almost nothing; spent its time measuring.                                                                                                                                                             |
 
 How to read a worktree: each one's git index holds the UI pass baseline, so `git -C <worktree> diff` (unstaged, no HEAD) is that agent's work alone. `git diff HEAD` also shows the whole baseline (~80 files) and is noise.
 

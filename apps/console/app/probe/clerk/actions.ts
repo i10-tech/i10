@@ -46,7 +46,8 @@ async function setSelfServe(key: string, orgId: string) {
     }),
   })
   const body = (await res.json()) as Record<string, unknown>
-  if (!res.ok) throw new Error(`Clerk refused the self-serve switches: ${JSON.stringify(body)}`)
+  if (!res.ok)
+    throw new Error(`Clerk refused the self-serve switches: ${JSON.stringify(body)}`)
   return body
 }
 
@@ -83,15 +84,17 @@ export async function ensureProbeOrg(): Promise<ProbeState> {
     })
 
   const flags = await setSelfServe(key, org.id)
-  const { data: connections } = await clerk.enterpriseConnections.getEnterpriseConnectionList({
-    organizationId: org.id,
-  })
+  const { data: connections } =
+    await clerk.enterpriseConnections.getEnterpriseConnectionList({
+      organizationId: org.id,
+    })
 
   return {
     orgId: org.id,
     role: "org:admin",
     selfServeSso: (flags.self_serve_sso_enabled as boolean | undefined) ?? null,
-    selfServeDirectorySync: (flags.self_serve_directory_sync_enabled as boolean | undefined) ?? null,
+    selfServeDirectorySync:
+      (flags.self_serve_directory_sync_enabled as boolean | undefined) ?? null,
     connections: connections.map((c) => JSON.parse(JSON.stringify(c)) as unknown),
   }
 }

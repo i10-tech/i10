@@ -25,7 +25,8 @@ function InternalMount({ name }: { name: "ConfigureSSO" | "ConfigureDirectorySyn
     return () => unmount?.call(clerk, el)
   }, [clerk, mount, unmount])
 
-  if (!mount) return <p className="text-sm text-muted-foreground">This clerk-js has no {name}.</p>
+  if (!mount)
+    return <p className="text-sm text-muted-foreground">This clerk-js has no {name}.</p>
   return <div ref={node} />
 }
 
@@ -57,12 +58,15 @@ export function ClerkProbe() {
       <header className="flex flex-col gap-2">
         <h1 className="text-xl font-medium">Clerk org-component probe</h1>
         <p className="text-sm text-muted-foreground">
-          Dev instance only. Prepare makes you Clerk admin of the probe organization (our roles
-          webhook demotes you again while the tunnel is up, so press it before each look) and turns
-          on its self-serve SSO and directory sync.
+          Dev instance only. Prepare makes you Clerk admin of the probe organization
+          (our roles webhook demotes you again while the tunnel is up, so press it
+          before each look) and turns on its self-serve SSO and directory sync.
         </p>
         <div className="flex gap-2">
-          <button className="rounded-md border px-3 py-1.5 text-sm" onClick={() => void prepare()}>
+          <button
+            className="rounded-md border px-3 py-1.5 text-sm"
+            onClick={() => void prepare()}
+          >
             Prepare
           </button>
           {TABS.map((t) => (
@@ -87,13 +91,19 @@ export function ClerkProbe() {
           )}
         </section>
       ) : (
-        <p className="text-sm text-muted-foreground">Press Prepare to activate the probe organization.</p>
+        <p className="text-sm text-muted-foreground">
+          Press Prepare to activate the probe organization.
+        </p>
       )}
 
       {state && (
         <details>
-          <summary className="cursor-pointer text-sm">Backend view of the probe organization</summary>
-          <pre className="overflow-x-auto text-xs">{JSON.stringify(state, null, 2)}</pre>
+          <summary className="cursor-pointer text-sm">
+            Backend view of the probe organization
+          </summary>
+          <pre className="overflow-x-auto text-xs">
+            {JSON.stringify(state, null, 2)}
+          </pre>
         </details>
       )}
     </main>

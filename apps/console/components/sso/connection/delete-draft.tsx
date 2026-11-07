@@ -9,11 +9,7 @@ import { toastDone } from "@/lib/toast"
 import type { SsoConnection } from "@/lib/sso-types"
 import { useSsoCall } from "../shared"
 
-export function DeleteDraft({
-  connection,
-}: {
-  connection: SsoConnection
-}) {
+export function DeleteDraft({ connection }: { connection: SsoConnection }) {
   const call = useSsoCall()
   const router = useRouter()
   const [deleting, setDeleting] = React.useState(false)

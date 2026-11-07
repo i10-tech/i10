@@ -32,14 +32,18 @@ export function ScimDirectory({
     <div className="space-y-3">
       {directory.baseUrl && (
         <div className="space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">SCIM base URL</span>
+          <span className="text-xs font-medium text-muted-foreground">
+            SCIM base URL
+          </span>
           <CopyField value={directory.baseUrl} />
         </div>
       )}
 
       {liveTokens.length > 0 && (
         <div className="space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">Active tokens</span>
+          <span className="text-xs font-medium text-muted-foreground">
+            Active tokens
+          </span>
           <ul className="divide-y divide-border rounded-xl border border-border">
             {liveTokens.map((t) => (
               <li key={t.id} className="flex items-center gap-3 px-3 py-2 text-sm">
@@ -48,12 +52,18 @@ export function ScimDirectory({
                   <span className="block text-xs text-muted-foreground">
                     Made <Time iso={t.createdAt} />
                     {t.lastUsedAt ? (
-                      <> - used <Time iso={t.lastUsedAt} /></>
+                      <>
+                        {" "}
+                        - used <Time iso={t.lastUsedAt} />
+                      </>
                     ) : (
                       " - never used"
                     )}
                     {t.expiresAt && (
-                      <> - ends <Time iso={t.expiresAt} mode="exact" /></>
+                      <>
+                        {" "}
+                        - ends <Time iso={t.expiresAt} mode="exact" />
+                      </>
                     )}
                   </span>
                 </span>

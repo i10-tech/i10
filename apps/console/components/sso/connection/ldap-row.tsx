@@ -9,7 +9,12 @@ import { Textarea } from "@repo/ui/components/i10/textarea"
 import { Time } from "@/components/time"
 import { ldapSetup, saveLdap, testLdap } from "@/lib/sso-actions"
 import { toastDone, toastError } from "@/lib/toast"
-import type { LdapSetup, LdapTestOutcome, SsoAbilities, SsoConnection } from "@/lib/sso-types"
+import type {
+  LdapSetup,
+  LdapTestOutcome,
+  SsoAbilities,
+  SsoConnection,
+} from "@/lib/sso-types"
 import { Advanced, SettingsGroup, SettingsRow } from "../settings-card"
 import { isLocked, Loading, OwnerNote, useRemote, useSsoCall } from "../shared"
 import { LdapServiceAccount } from "./ldap-service-account"
@@ -19,7 +24,8 @@ const TEST_RESULT: Record<LdapTestOutcome["result"], string> = {
   unreachable: "We could not reach the server. Check the host and port.",
   tls_failed: "We reached the server but could not trust its certificate.",
   service_bind_failed: "The service account was refused. Check its DN and secret.",
-  user_not_found: "The service account worked, but the filter found nobody with that address.",
+  user_not_found:
+    "The service account worked, but the filter found nobody with that address.",
   user_bind_failed: "The person was found, but their password was refused.",
 }
 
@@ -35,7 +41,9 @@ export function LdapRow({
   return (
     <Advanced
       label="Mail access (LDAP pass-through)"
-      summary={data?.enabled ? "Pass-through active" : "Check mail passwords against LDAP"}
+      summary={
+        data?.enabled ? "Pass-through active" : "Check mail passwords against LDAP"
+      }
     >
       {!data ? (
         <Loading failed={failed} />
@@ -244,14 +252,18 @@ function LdapContent({
             </Button>
             {outcome && (
               <p
-                className={outcome.result === "ok" ? "text-sm" : "text-sm text-destructive"}
+                className={
+                  outcome.result === "ok" ? "text-sm" : "text-sm text-destructive"
+                }
               >
                 {TEST_RESULT[outcome.result]}
               </p>
             )}
             <p className="text-xs text-muted-foreground">
               {data.tested && data.testedAt ? (
-                <>A test passed <Time iso={data.testedAt} /> on these settings.</>
+                <>
+                  A test passed <Time iso={data.testedAt} /> on these settings.
+                </>
               ) : (
                 "No passing test on the current settings."
               )}

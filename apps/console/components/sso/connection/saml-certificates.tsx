@@ -38,7 +38,9 @@ export function SamlCertificates({
           <div>
             <p className="text-sm font-medium">Provider certificates</p>
             {data.certificates.length === 0 ? (
-              <p className="mt-1 text-sm text-muted-foreground">No certificate saved.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                No certificate saved.
+              </p>
             ) : (
               <ul className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border">
                 {data.certificates.map((cert) => (

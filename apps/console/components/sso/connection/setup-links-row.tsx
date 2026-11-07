@@ -49,8 +49,9 @@ export function SetupLinksRow({
       <div className="space-y-3 pt-2">
         <div className="flex items-start justify-between gap-4">
           <p className="text-sm text-muted-foreground">
-            Send your IT contact a link to enter the provider&apos;s settings and run a test
-            without an account. It works only while the connection is in draft or testing.
+            Send your IT contact a link to enter the provider&apos;s settings and run a
+            test without an account. It works only while the connection is in draft or
+            testing.
           </p>
           <Button
             size="sm"

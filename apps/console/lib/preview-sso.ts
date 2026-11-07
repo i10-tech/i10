@@ -253,12 +253,17 @@ const PREVIEW_PRESETS: SsoConnections["presets"] = {
       label: "Okta",
       issuerHint: "https://example.okta.com",
       requires: ["issuer", "clientId", "clientSecret"],
-      clientAuthMethods: ["client_secret_basic", "client_secret_post", "private_key_jwt"],
+      clientAuthMethods: [
+        "client_secret_basic",
+        "client_secret_post",
+        "private_key_jwt",
+      ],
     },
     {
       id: "entra",
       label: "Microsoft Entra ID",
-      issuerHint: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0",
+      issuerHint:
+        "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0",
       requires: ["issuer", "clientId", "clientSecret"],
       clientAuthMethods: ["client_secret_post"],
     },
@@ -295,7 +300,11 @@ const PREVIEW_PRESETS: SsoConnections["presets"] = {
       label: "Other OpenID Connect provider",
       issuerHint: "https://identity.example.com",
       requires: ["issuer", "clientId", "clientSecret"],
-      clientAuthMethods: ["client_secret_basic", "client_secret_post", "private_key_jwt"],
+      clientAuthMethods: [
+        "client_secret_basic",
+        "client_secret_post",
+        "private_key_jwt",
+      ],
     },
   ],
   saml: [
@@ -1226,7 +1235,7 @@ function saveWalkOidc(id: string, change: Partial<OidcSetup>): OidcSetup {
   const next = { ...walk.oidc.get(id)!, ...change }
   next.ready = Boolean(
     next.provider === "google" ||
-      (next.issuer && next.clientId && next.clientSecretSet),
+    (next.issuer && next.clientId && next.clientSecretSet),
   )
   walk.oidc.set(id, next)
   return next
@@ -1237,8 +1246,7 @@ function saveWalkSaml(id: string, change: Record<string, unknown>): SamlSetup {
     walk.saml.get(id) ??
     newSamlSetup(
       id,
-      walk.created.get(id) ??
-        ({ provider: "generic", name: "SAML" } as SsoConnection),
+      walk.created.get(id) ?? ({ provider: "generic", name: "SAML" } as SsoConnection),
     )
   const next: SamlSetup = { ...current, ...(change as Partial<SamlSetup>) }
   if (change.metadataUrl !== undefined) {
@@ -1254,8 +1262,7 @@ function saveWalkSaml(id: string, change: Record<string, unknown>): SamlSetup {
         next.certificates = [
           {
             id: `cert_${Date.now()}`,
-            fingerprint:
-              "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD",
+            fingerprint: "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD",
             subject: `CN=${next.label} Signing Certificate`,
             notBefore: new Date().toISOString(),
             notAfter: fromNow(365),
@@ -1274,8 +1281,7 @@ function saveWalkSaml(id: string, change: Record<string, unknown>): SamlSetup {
       next.certificates = [
         {
           id: `cert_${Date.now()}`,
-          fingerprint:
-            "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD",
+          fingerprint: "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD",
           subject: `CN=${next.label} Uploaded Certificate`,
           notBefore: new Date().toISOString(),
           notAfter: fromNow(365),
@@ -1286,7 +1292,7 @@ function saveWalkSaml(id: string, change: Record<string, unknown>): SamlSetup {
   }
   next.ready = Boolean(
     (next.idpEntityId && next.ssoUrl && next.certificates.length > 0) ||
-      (next.idpMetadataUrl && next.certificates.length > 0),
+    (next.idpMetadataUrl && next.certificates.length > 0),
   )
   walk.saml.set(id, next)
   return next
@@ -1294,9 +1300,7 @@ function saveWalkSaml(id: string, change: Record<string, unknown>): SamlSetup {
 
 export function ssoRoutes(notFound: unknown): Route[] {
   const findConn = (id: string) =>
-    walk.created.get(id) ??
-    PREVIEW_CONNECTIONS.find((c) => c.id === id) ??
-    notFound
+    walk.created.get(id) ?? PREVIEW_CONNECTIONS.find((c) => c.id === id) ?? notFound
   const findDir = (id: string) =>
     PREVIEW_DIRECTORIES.find((d) => d.id === id) ?? notFound
 
@@ -1400,7 +1404,8 @@ export function ssoRoutes(notFound: unknown): Route[] {
       (m, _query, method, body) => {
         const conn = findConn(m[1]!)
         if (conn === notFound) return notFound
-        const joinDomainId = (body as { joinDomainId?: string } | undefined)?.joinDomainId
+        const joinDomainId = (body as { joinDomainId?: string } | undefined)
+          ?.joinDomainId
         const domain = walk.access.find((d) => d.id === joinDomainId)
         if (method === "POST" && domain && walk.created.has(m[1]!))
           walk.created.set(m[1]!, {
@@ -1530,8 +1535,10 @@ export function ssoRoutes(notFound: unknown): Route[] {
             certificates: [...current.certificates, newCert],
           }
           updated.ready = Boolean(
-            (updated.idpEntityId && updated.ssoUrl && updated.certificates.length > 0) ||
-              (updated.idpMetadataUrl && updated.certificates.length > 0),
+            (updated.idpEntityId &&
+              updated.ssoUrl &&
+              updated.certificates.length > 0) ||
+            (updated.idpMetadataUrl && updated.certificates.length > 0),
           )
           walk.saml.set(m[1]!, updated)
           return updated
@@ -1568,7 +1575,8 @@ export function ssoRoutes(notFound: unknown): Route[] {
           spCertificates: [
             ...setup.spCertificates,
             {
-              fingerprint: "55:66:77:88:99:00:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77",
+              fingerprint:
+                "55:66:77:88:99:00:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77",
               certificate: FAKE_SP_CERT,
               notAfter: fromNow(365),
               createdAt: new Date().toISOString(),
@@ -1764,10 +1772,7 @@ export function ssoRoutes(notFound: unknown): Route[] {
         return result
       },
     ],
-    [
-      /^\/console\/identity\/owner-exemption$/,
-      () => OWNER_EXEMPTION,
-    ],
+    [/^\/console\/identity\/owner-exemption$/, () => OWNER_EXEMPTION],
     [
       /^\/console\/identity\/owner-exemption\/off-request$/,
       (_m, _query, method) => {
@@ -1877,10 +1882,7 @@ export function ssoRoutes(notFound: unknown): Route[] {
       /^\/console\/identity\/directories\/([^/]+)\/groups\/([^/]+)\/mail$/,
       (m) => (findDir(m[1]!) === notFound ? notFound : { ok: true }),
     ],
-    [
-      /^\/console\/identity\/mailboxes$/,
-      () => MAILBOXES,
-    ],
+    [/^\/console\/identity\/mailboxes$/, () => MAILBOXES],
     [
       /^\/console\/identity\/mailboxes\/([^/]+)\/next$/,
       (_m, _query, _method, body) => {
@@ -1954,7 +1956,7 @@ export function ssoRoutes(notFound: unknown): Route[] {
           const updated: SiemSettingsAnswer = {
             configured: true,
             settings: {
-              ...(SIEM_SETTINGS.settings!),
+              ...SIEM_SETTINGS.settings!,
               ...input,
             },
           }

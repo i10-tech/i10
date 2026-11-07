@@ -185,8 +185,7 @@ export function AddDirectoryFlow({
                 <Button
                   loading={busy}
                   disabled={
-                    !name.trim() ||
-                    (isGoogle && (!adminEmail.trim() || !domain.trim()))
+                    !name.trim() || (isGoogle && (!adminEmail.trim() || !domain.trim()))
                   }
                   onClick={() => void handleCreate()}
                 >
@@ -205,12 +204,14 @@ export function AddDirectoryFlow({
         <div className="space-y-3 pt-2">
           {selected === "okta" && (
             <p className="text-sm text-muted-foreground">
-              In Okta Admin Console, open Applications &gt; your app &gt; Provisioning &gt; Integration:
+              In Okta Admin Console, open Applications &gt; your app &gt; Provisioning
+              &gt; Integration:
             </p>
           )}
           {selected === "entra" && (
             <p className="text-sm text-muted-foreground">
-              In Microsoft Entra admin center, open Enterprise Applications &gt; your app &gt; Provisioning &gt; Admin Credentials:
+              In Microsoft Entra admin center, open Enterprise Applications &gt; your
+              app &gt; Provisioning &gt; Admin Credentials:
             </p>
           )}
           {selected === "generic" && (
@@ -263,16 +264,21 @@ export function AddDirectoryFlow({
       {googleResult && (
         <div className="space-y-3 pt-2">
           <p className="text-sm text-muted-foreground">
-            In Google Admin console under Security &gt; Access and data control &gt; API controls &gt; Manage Domain Wide Delegation:
+            In Google Admin console under Security &gt; Access and data control &gt; API
+            controls &gt; Manage Domain Wide Delegation:
           </p>
 
           <div className="space-y-2">
             <div>
-              <span className="text-xs font-medium text-muted-foreground">Client ID</span>
+              <span className="text-xs font-medium text-muted-foreground">
+                Client ID
+              </span>
               <CopyField value={googleResult.google?.clientId ?? ""} />
             </div>
             <div>
-              <span className="text-xs font-medium text-muted-foreground">OAuth scopes</span>
+              <span className="text-xs font-medium text-muted-foreground">
+                OAuth scopes
+              </span>
               <CopyField value={(googleResult.google?.scopes ?? []).join(",")} />
             </div>
           </div>

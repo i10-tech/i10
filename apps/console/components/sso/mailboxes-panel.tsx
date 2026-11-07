@@ -16,17 +16,9 @@ import {
   deletionDate,
   nextSummary,
 } from "@/lib/mailbox"
-import {
-  mailboxes,
-  saveLeaverDefault,
-} from "@/lib/sso-policy-actions"
+import { mailboxes, saveLeaverDefault } from "@/lib/sso-policy-actions"
 import { toastDone } from "@/lib/toast"
-import type {
-  LeaverAction,
-  MailboxRow,
-  Mailboxes,
-  SsoAbilities,
-} from "@/lib/sso-types"
+import type { LeaverAction, MailboxRow, Mailboxes, SsoAbilities } from "@/lib/sso-types"
 import { NextDialog } from "./mailbox-dialog"
 import { ClerkMembers, memberLabel, type Member } from "./members"
 import { Block, Loading, useRemote, useSsoCall } from "./shared"
@@ -80,10 +72,16 @@ export function MailboxesPanel({
                   <span className="block truncate text-xs text-muted-foreground">
                     {nextSummary(row, nameOf)}
                     {row.suspendedAt && (
-                      <> Switched off <Time iso={row.suspendedAt} />.</>
+                      <>
+                        {" "}
+                        Switched off <Time iso={row.suspendedAt} />.
+                      </>
                     )}
                     {row.next === "delete" && row.deleteAt && (
-                      <> Deletes <Time iso={row.deleteAt} mode="exact" />.</>
+                      <>
+                        {" "}
+                        Deletes <Time iso={row.deleteAt} mode="exact" />.
+                      </>
                     )}
                   </span>
                 </span>
@@ -213,7 +211,9 @@ function LeaverDefault({
             variant="secondary"
             size="sm"
             disabled={unchanged || invalid || blocked}
-            onClick={() => (action === "delete_after" ? setConfirming(true) : void save())}
+            onClick={() =>
+              action === "delete_after" ? setConfirming(true) : void save()
+            }
           >
             {action === "delete_after" ? "Save deletion default" : "Save default"}
           </Button>
