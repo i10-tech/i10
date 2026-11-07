@@ -31,7 +31,7 @@ export default function SsoRelinkRequested({
           : `${count} people have signed in with changed identity provider logins for ${connection} in ${workspace}. Only an owner can approve the new logins before they can sign in.`}
       </Text>
       <Text style={styles.text}>
-        Review and approve waiting logins on the connection's Access tab.
+        Review and approve waiting logins on the connection&apos;s Access tab.
       </Text>
       <ActionButton href={url}>Review waiting logins</ActionButton>
       <FallbackLink href={url} />

@@ -1,3 +1,4 @@
+/* global document, getComputedStyle, requestAnimationFrame, window */
 // Runs in the page. Records every visible element's box and effective opacity once per frame.
 ;(() => {
   const ids = new WeakMap()
@@ -102,7 +103,11 @@
       o !== b && o.x <= b.x + 1 && o.y <= b.y + 1 && o.x + o.w >= b.x + b.w - 1 && o.y + o.h >= b.y + b.h - 1
     const kept = issues
       .filter((i) => !i.box || !issues.some((o) => o.box && o.kind === i.kind && o.t === i.t && contains(o.box, i.box)))
-      .map(({ box, ...rest }) => rest)
+      .map((i) => {
+        const rest = { ...i }
+        delete rest.box
+        return rest
+      })
     return { frames: frames.length, ms: frames.at(-1)?.t ?? 0, issues: kept }
   }
   try {
@@ -111,5 +116,7 @@
         if (!entry.hadRecentInput && entry.value > 0.001 && window.__motion.running)
           window.__motion.shifts.push({ t: Math.round(entry.startTime), value: entry.value })
     }).observe({ type: "layout-shift", buffered: false })
-  } catch {}
+  } catch {
+    // layout-shift entries are Chromium-only; elsewhere the sampler runs without them.
+  }
 })()
