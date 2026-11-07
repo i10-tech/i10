@@ -1,4 +1,12 @@
-package passthrough
+// Package egress decides which addresses authd may connect to on a tenant's
+// behalf.
+//
+// ⚠ EVERY HOST AUTHD DIALS FOR A BIND WAS CHOSEN BY A CUSTOMER'S ADMIN: the LDAP
+// server of a pass-through connection (internal/passthrough) and the Okta org of
+// an Okta one (internal/okta). Left unchecked, either is a way to make this pod
+// connect to the cluster, the node or the cloud metadata service, so both go
+// through Vet.
+package egress
 
 import (
 	"context"
@@ -8,11 +16,10 @@ import (
 	"strings"
 )
 
-// blocked is every range a pass-through connection may not go to: the same
-// list as the API's egress guard (apps/api/src/webhooks/egress.ts, which
-// vets the host when the setup test runs). The API and authd must agree, or a
-// host the setup test accepted would be refused at the first bind - or worse,
-// the reverse.
+// blocked is every range authd may not connect to: the same list as the API's
+// egress guard (apps/api/src/webhooks/egress.ts, which vets the host when a
+// setup test runs). The API and authd must agree, or a host the setup test
+// accepted would be refused at the first bind - or worse, the reverse.
 var blocked = mustPrefixes(
 	// IPv4
 	"0.0.0.0/8",       // "this network", including 0.0.0.0
@@ -79,9 +86,9 @@ type Resolver interface {
 
 var (
 	// ErrBlocked: the host is, or resolves to, an address we will not connect to.
-	ErrBlocked = errors.New("passthrough: host is not a public address")
+	ErrBlocked = errors.New("egress: host is not a public address")
 	// ErrUnresolved: DNS had no answer.
-	ErrUnresolved = errors.New("passthrough: host did not resolve")
+	ErrUnresolved = errors.New("egress: host did not resolve")
 )
 
 // Vet resolves host and returns the one address to connect to.

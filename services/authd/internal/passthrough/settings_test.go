@@ -73,15 +73,57 @@ func TestHTTPSourceSendsTheSecretAndReadsTheAnswer(t *testing.T) {
 	}))
 	defer srv.Close()
 	src, _ := NewHTTPSource(srv.URL+"/", secret, time.Second)
-	s, err := src.Fetch(context.Background(), "conn-1")
-	if err != nil || s == nil {
-		t.Fatalf("Fetch = %v, %v", s, err)
+	a, err := src.Fetch(context.Background(), "conn-1")
+	if err != nil || a == nil {
+		t.Fatalf("Fetch = %v, %v", a, err)
 	}
 	if gotAuth != "Bearer "+secret || gotPath != "/internal/authd/passthrough" || gotBody != `{"connectionId":"conn-1"}` {
 		t.Errorf("request = %q %q %q", gotAuth, gotPath, gotBody)
 	}
-	if s.Host != "ldap.acme.test" || s.Port != 636 || s.BindSecret != "s" {
-		t.Errorf("settings = %+v", s)
+	// No `lane` is the shape the API had before Okta: LDAP.
+	if a.Lane != LaneLDAP || a.Okta != nil || a.LDAP == nil ||
+		a.LDAP.Host != "ldap.acme.test" || a.LDAP.Port != 636 || a.LDAP.BindSecret != "s" {
+		t.Errorf("answer = %+v", a)
+	}
+}
+
+func fetchFrom(t *testing.T, body string) (*Answer, error) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	src, _ := NewHTTPSource(srv.URL, strings.Repeat("k", 32), time.Second)
+	return src.Fetch(context.Background(), "c")
+}
+
+func TestHTTPSourceReadsTheLaneTheAPINames(t *testing.T) {
+	a, err := fetchFrom(t, `{"enabled":true,"lane":"ldap","host":"ldap.acme.test","port":636,"tlsMode":"ldaps",
+		"searchBase":"dc=acme","userFilter":"(mail={email})","bindDn":"cn=svc","bindSecret":"s"}`)
+	if err != nil || a == nil || a.Lane != LaneLDAP || a.LDAP == nil || a.LDAP.Host != "ldap.acme.test" || a.Okta != nil {
+		t.Fatalf("ldap lane: %+v, %v", a, err)
+	}
+
+	a, err = fetchFrom(t, `{"enabled":true,"lane":"okta","issuer":"https://acme.okta.com/oauth2/default","clientId":"0oa1b2c3d4e5f6g7h8i9"}`)
+	if err != nil || a == nil || a.Lane != LaneOkta || a.LDAP != nil || a.Okta == nil ||
+		a.Okta.Issuer != "https://acme.okta.com/oauth2/default" || a.Okta.ClientID != "0oa1b2c3d4e5f6g7h8i9" {
+		t.Fatalf("okta lane: %+v, %v", a, err)
+	}
+}
+
+// ⚠ AN API NEWER THAN THIS AUTHD IS AN OUTAGE, not "off": off is a refusal, and
+// would be cached for a minute as "this connection has no IMAP".
+func TestHTTPSourceDoesNotReadALaneItDoesNotKnowAsOff(t *testing.T) {
+	if a, err := fetchFrom(t, `{"enabled":true,"lane":"entra"}`); err == nil || a != nil {
+		t.Fatalf("Fetch = %v, %v; want an error", a, err)
+	}
+}
+
+func TestHTTPSourceAnswersAnOffConnectionOfAnyLaneAsNil(t *testing.T) {
+	for _, body := range []string{`{"enabled":false}`, `{"enabled":false,"lane":"okta"}`} {
+		if a, err := fetchFrom(t, body); a != nil || err != nil {
+			t.Fatalf("%s: Fetch = %v, %v; want nil, nil", body, a, err)
+		}
 	}
 }
 
@@ -109,17 +151,17 @@ func TestNewHTTPSourceValidates(t *testing.T) {
 
 type countingSource struct {
 	calls atomic.Int32
-	s     *Settings
+	a     *Answer
 	err   error
 }
 
-func (c *countingSource) Fetch(context.Context, string) (*Settings, error) {
+func (c *countingSource) Fetch(context.Context, string) (*Answer, error) {
 	c.calls.Add(1)
-	return c.s, c.err
+	return c.a, c.err
 }
 
 func TestCacheKeepsAnAnswerForAtMostAMinute(t *testing.T) {
-	src := &countingSource{s: &Settings{Host: "h"}}
+	src := &countingSource{a: &Answer{Lane: LaneLDAP, LDAP: &Settings{Host: "h"}}}
 	// Asked for an hour; capped.
 	c := NewCache(src, time.Hour)
 	if c.ttl != MaxCacheTTL {
@@ -179,7 +221,7 @@ func TestCacheRemembersOffForTheSameMinute(t *testing.T) {
 }
 
 func TestCacheCanBeSwitchedOff(t *testing.T) {
-	src := &countingSource{s: &Settings{}}
+	src := &countingSource{a: &Answer{Lane: LaneLDAP, LDAP: &Settings{}}}
 	c := NewCache(src, 0)
 	_, _ = c.Fetch(context.Background(), "a")
 	_, _ = c.Fetch(context.Background(), "a")

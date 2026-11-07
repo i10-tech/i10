@@ -7,14 +7,16 @@ import { equalSecrets } from "../webhooks/signing.js"
 /**
  * What `services/authd` asks of the API (#344).
  *
- *   POST /internal/authd/passthrough  { connectionId } -> the connection's LDAP
- *                                     pass-through settings, decrypted
+ *   POST /internal/authd/passthrough  { connectionId } -> where the connection's
+ *                                     managed accounts' passwords are asked:
+ *                                     off, its LDAP directory (settings
+ *                                     decrypted) or its Okta org (#383)
  *
- * ⚠ THE ANSWER CARRIES THE COMPANY'S SERVICE ACCOUNT SECRET IN THE CLEAR, so
+ * ⚠ THE LDAP ANSWER CARRIES THE COMPANY'S SERVICE ACCOUNT SECRET IN THE CLEAR, so
  * the caller is checked first and in constant time against `AUTHD_API_SECRET`,
  * before the body is even read. No secret configured is a 503, never "open".
  * Nothing is cached by anyone on the way (`no-store`); authd keeps an answer
- * in memory for at most a minute.
+ * in memory for at most a minute. The Okta answer holds no secret at all.
  *
  * ⚠ EVERY FAILURE IS A 503, NEVER `enabled: false`. authd turns a 503 into
  * "directory unavailable" for managed accounts; an "off" given on an outage

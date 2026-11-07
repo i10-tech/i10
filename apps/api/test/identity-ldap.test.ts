@@ -107,6 +107,7 @@ describe("what authd is told", () => {
   it("answers the decrypted settings for an enabled, whole connection", async () => {
     expect(await passthroughFor(world(whole, sealed), CONNECTION)).toEqual({
       enabled: true,
+      lane: "ldap",
       host: "ldap.acme.test",
       port: 636,
       tlsMode: "ldaps",

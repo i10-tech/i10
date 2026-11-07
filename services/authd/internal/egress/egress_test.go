@@ -1,4 +1,4 @@
-package passthrough
+package egress
 
 import (
 	"context"

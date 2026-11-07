@@ -12,6 +12,7 @@ const SECRET = "authd-shared-secret-0123456789abcdef"
 const ID = "33333333-3333-4333-8333-333333333333"
 const ENABLED: PassthroughAnswer = {
   enabled: true,
+  lane: "ldap",
   host: "ldap.acme.test",
   port: 636,
   tlsMode: "ldaps",
@@ -86,6 +87,22 @@ describe("POST /internal/authd/passthrough", () => {
     expect(res.headers.get("cache-control")).toBe("no-store")
     expect(await res.json()).toEqual(ENABLED)
     expect(w.calls).toEqual([ID])
+  })
+
+  it("answers an Okta connection with the issuer and the client id, and nothing secret", async () => {
+    const okta: PassthroughAnswer = {
+      enabled: true,
+      lane: "okta",
+      issuer: "https://acme.okta.com/oauth2/default",
+      clientId: "0oa1b2c3d4e5f6g7h8i9",
+    }
+    const w = app({ answer: async () => okta })
+    const res = await w.post(
+      { Authorization: `Bearer ${SECRET}` },
+      { connectionId: ID },
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(okta)
   })
 
   it("passes 'off' on as off", async () => {

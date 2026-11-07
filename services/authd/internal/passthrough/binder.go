@@ -11,6 +11,8 @@ import (
 	"time"
 
 	ldap "github.com/go-ldap/ldap/v3"
+
+	"github.com/i10-tech/i10/services/authd/internal/egress"
 )
 
 // Outcome is the tri-state a bind needs, as in clerkauth: "we could not find
@@ -56,12 +58,15 @@ const (
 type Result struct {
 	Outcome Outcome
 	Reason  string
+	// Lane is the lane that answered (LaneLDAP, LaneOkta), or "" when none did:
+	// the connection is off, or its settings could not be had.
+	Lane string
 }
 
 // Binder walks one bind against a company's directory.
 type Binder struct {
 	// Resolver is DNS for the host check; net.DefaultResolver when nil.
-	Resolver Resolver
+	Resolver egress.Resolver
 	// Dial opens the connection to the VETTED address. Production dials TCP;
 	// tests point it at their directory.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
@@ -72,7 +77,7 @@ type Binder struct {
 	TotalTimeout time.Duration
 }
 
-func (b *Binder) resolver() Resolver {
+func (b *Binder) resolver() egress.Resolver {
 	if b.Resolver != nil {
 		return b.Resolver
 	}
@@ -100,25 +105,25 @@ func (b *Binder) Bind(ctx context.Context, s Settings, email, password string) R
 	// servers answer it with success. The caller refuses it too; this is the
 	// last line.
 	if password == "" {
-		return Result{Rejected, ReasonEmptyPassword}
+		return Result{Outcome: Rejected, Reason: ReasonEmptyPassword}
 	}
 	if err := s.Validate(); err != nil {
-		return Result{Unavailable, ReasonBadSettings}
+		return Result{Outcome: Unavailable, Reason: ReasonBadSettings}
 	}
 	roots, ok := rootsFor(s.CAPem)
 	if !ok {
-		return Result{Unavailable, ReasonBadSettings}
+		return Result{Outcome: Unavailable, Reason: ReasonBadSettings}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, orDefault(b.TotalTimeout, 15*time.Second))
 	defer cancel()
 
-	addr, err := Vet(ctx, b.resolver(), s.Host)
+	addr, err := egress.Vet(ctx, b.resolver(), s.Host)
 	switch {
-	case errors.Is(err, ErrBlocked):
-		return Result{Unavailable, ReasonHostBlocked}
+	case errors.Is(err, egress.ErrBlocked):
+		return Result{Outcome: Unavailable, Reason: ReasonHostBlocked}
 	case err != nil:
-		return Result{Unavailable, ReasonDNSFailed}
+		return Result{Outcome: Unavailable, Reason: ReasonDNSFailed}
 	}
 
 	conn, res := b.connect(ctx, s, addr, roots)
@@ -131,7 +136,7 @@ func (b *Binder) Bind(ctx context.Context, s Settings, email, password string) R
 	// The service account first. Whatever it answers is about OUR settings,
 	// not about the person, so none of it is a rejection.
 	if err := conn.Bind(s.BindDN, s.BindSecret); err != nil {
-		return Result{Unavailable, ReasonServiceBindFailed}
+		return Result{Outcome: Unavailable, Reason: ReasonServiceBindFailed}
 	}
 
 	res2, dn := search(conn, s, email)
@@ -142,11 +147,11 @@ func (b *Binder) Bind(ctx context.Context, s Settings, email, password string) R
 	// ⚠ THE ONLY SUCCESS: the person's own bind, with the password they gave.
 	if err := conn.Bind(dn, password); err != nil {
 		if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
-			return Result{Rejected, ReasonUserBindRejected}
+			return Result{Outcome: Rejected, Reason: ReasonUserBindRejected}
 		}
-		return Result{Unavailable, ReasonUserBindError}
+		return Result{Outcome: Unavailable, Reason: ReasonUserBindError}
 	}
-	return Result{Verified, ReasonVerified}
+	return Result{Outcome: Verified, Reason: ReasonVerified}
 }
 
 // rootsFor is the pinned CA as a pool, or nil for the system roots. The bool is
@@ -174,7 +179,7 @@ func (b *Binder) connect(ctx context.Context, s Settings, addr netip.Addr, roots
 	defer cancel()
 	raw, err := dial(dialCtx, "tcp", net.JoinHostPort(addr.String(), strconv.Itoa(s.Port)))
 	if err != nil {
-		return nil, Result{Unavailable, ReasonDialFailed}
+		return nil, Result{Outcome: Unavailable, Reason: ReasonDialFailed}
 	}
 	// The whole walk's deadline, on the socket itself: a server that stops
 	// answering mid-handshake cannot hold a goroutine past it.
@@ -190,7 +195,7 @@ func (b *Binder) connect(ctx context.Context, s Settings, addr netip.Addr, roots
 		t := tls.Client(raw, cfg)
 		if err := t.HandshakeContext(ctx); err != nil {
 			_ = raw.Close()
-			return nil, Result{Unavailable, ReasonTLSFailed}
+			return nil, Result{Outcome: Unavailable, Reason: ReasonTLSFailed}
 		}
 		conn := ldap.NewConn(t, true)
 		conn.Start()
@@ -204,7 +209,7 @@ func (b *Binder) connect(ctx context.Context, s Settings, addr netip.Addr, roots
 	// bind is ever sent in the clear.
 	if err := conn.StartTLS(cfg); err != nil {
 		conn.Close()
-		return nil, Result{Unavailable, ReasonTLSFailed}
+		return nil, Result{Outcome: Unavailable, Reason: ReasonTLSFailed}
 	}
 	return conn, Result{}
 }
@@ -224,15 +229,15 @@ func search(conn *ldap.Conn, s Settings, email string) (Result, string) {
 	)
 	res, err := conn.Search(req)
 	if err != nil && !ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded) {
-		return Result{Unavailable, ReasonSearchFailed}, ""
+		return Result{Outcome: Unavailable, Reason: ReasonSearchFailed}, ""
 	}
 	switch {
 	case res == nil || len(res.Entries) == 0:
-		return Result{Rejected, ReasonUserNotFound}, ""
+		return Result{Outcome: Rejected, Reason: ReasonUserNotFound}, ""
 	case len(res.Entries) > 1 || err != nil:
-		return Result{Rejected, ReasonAmbiguousEntry}, ""
+		return Result{Outcome: Rejected, Reason: ReasonAmbiguousEntry}, ""
 	case res.Entries[0].DN == "":
-		return Result{Rejected, ReasonEmptyDN}, ""
+		return Result{Outcome: Rejected, Reason: ReasonEmptyDN}, ""
 	}
 	return Result{}, res.Entries[0].DN
 }
