@@ -302,6 +302,17 @@ spec:
             - name: AUTHD_CLERK_SECRET_KEY
               valueFrom:
                 secretKeyRef: { name: i10-shared, key: CLERK_SECRET_KEY }
+            # LDAP pass-through: authd asks the API for a connection's directory
+            # settings. Both or neither, or authd refuses to start. The secret is
+            # in i10-shared because the API reads that Secret too, so one Doppler
+            # value is both ends. Unset, managed accounts are refused.
+            - {
+                name: AUTHD_API_URL,
+                value: "http://i10-api.i10-prod.svc.cluster.local",
+              }
+            - name: AUTHD_API_SECRET
+              valueFrom:
+                secretKeyRef: { name: i10-shared, key: AUTHD_API_SECRET }
             # Protects the shared Clerk budget (1000 req/10s across all of i10)
             # from one mail client stuck in a retry loop. NOT lockout protection -
             # the backend verify_password endpoint does not feed Clerk's counter.
