@@ -36,12 +36,17 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 
 func (p *Postgres) Close() { p.pool.Close() }
 
+// Pool is the connection pool, for the one other thing authd writes: the shared
+// failure budget (internal/budgetstore). It is shared rather than duplicated so
+// that the PgBouncer settings above apply to it too.
+func (p *Postgres) Pool() *pgxpool.Pool { return p.pool }
+
 // Ping is used by the readiness probe. authd with an unreachable projection can
 // answer nothing, and should not be routed to.
 func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
-	coalesce(a.description, ''), a.active, a.clerk_updated_at`
+	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch`
 
 func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([]Account, error) {
 	norm := normalise(addresses)
@@ -140,7 +145,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	for rows.Next() {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
-			&a.Description, &a.Active, &a.ClerkUpdatedAt); err != nil {
+			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

@@ -22,12 +22,14 @@ import (
 
 	ldap "github.com/vjeantet/ldapserver"
 
+	"github.com/i10-tech/i10/services/authd/internal/budgetstore"
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/config"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
+	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
 
 // version is stamped at build time with -ldflags "-X main.version=<sha>".
@@ -70,6 +72,10 @@ func run() error {
 	go sweepLoop(ctx, limiter, log)
 
 	srv := ldap.NewServer()
+	// Both are connection-level deadlines, reset each time a request is read, and
+	// both are deliberately well above ldapsrv.DefaultOpTimeout (14s) and
+	// Stalwart's own 15s directory timeout: a bind that takes the whole of its
+	// operation deadline must still be able to write its answer.
 	srv.ReadTimeout = 30 * time.Second
 	srv.WriteTimeout = 30 * time.Second
 	srv.Handle(ldapsrv.New(ldapsrv.Options{
@@ -77,10 +83,13 @@ func run() error {
 		ServiceBindDN:     cfg.ServiceBindDN,
 		ServiceBindSecret: cfg.ServiceBindSecret,
 		Store:             store,
-		Verifier:          clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout),
-		Limiter:           limiter,
-		CredCache:         credcache.New(cfg.CredCacheTTL),
-		Logger:            log,
+		// Every account is verified by Clerk today. Choosing a provider per
+		// workspace is a different Resolver, not a change to the bind path.
+		Resolver:  verify.Fixed(clerkauth.New(cfg.ClerkBaseURL, cfg.ClerkSecretKey, cfg.ClerkTimeout)),
+		Budget:    budgetstore.NewPostgres(store.Pool()),
+		Limiter:   limiter,
+		CredCache: credcache.New(cfg.CredCacheTTL),
+		Logger:    log,
 	}).Routes())
 
 	// The listener is created here, on this goroutine, rather than inside
