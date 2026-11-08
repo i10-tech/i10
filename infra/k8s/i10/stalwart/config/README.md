@@ -35,8 +35,9 @@ updates it in place, so re-applying converges rather than duplicating.
 
 In practice you do not run that by hand. `../bootstrap.sh` does the whole
 sequence - apply, ensure the tracer, reload, restart, verify, and print the DNS
-records the server expects - and it is idempotent, so it is also the thing to
-run after any edit to this file:
+records the server expects - and it is idempotent. Since #412 Argo runs it for
+you after every sync (next section); by hand it is for a restart, a fresh
+install and a preview:
 
 ```sh
 ./infra/k8s/i10/stalwart/bootstrap.sh            # apply and roll
@@ -44,6 +45,84 @@ run after any edit to this file:
 ./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # show what would change
 PLAN_FILE=path ./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # a branch's plan
 ```
+
+## Applied by Argo (#412)
+
+`../apply-hook.yaml` is a PostSync hook Job in the `i10-stalwart` Argo app. It
+runs the same `bootstrap.sh` as `--in-cluster --if-changed`, so there is one
+engine and two ways of reaching Stalwart: a port-forward and `kubectl exec` by
+hand, the pods' own addresses and plain sockets in the Job. A merged edit to
+`plan.ndjson` is applied and verified with no human step.
+
+What one run does:
+
+1. **Gate.** A dry run against the live server. If it says every object is
+   `unchanged`, the Job logs "Nothing changed" and ends: a sync that did not
+   touch the plan costs a few reads. If the plan has a schema error, or names an
+   environment variable the pods do not have, the dry run fails the sync before
+   anything is written.
+2. **Apply** once, through the edge node (`i10-stalwart-0`). The settings live
+   in the shared Postgres store, so applying on the second node too would only
+   repeat the writes. The applier writes every operation, not only the changed
+   ones, as it always has; each is idempotent.
+3. **Reload on every node**, each addressed directly, so it does not depend on
+   the coordinator carrying the request.
+4. **Verify** against both nodes: the SMTP greeting and the certificate served
+   without SNI (edge), the autoconfig and MTA-STS paths (both), and the `relay`
+   listener. A failure fails the sync; the plan is already applied by then, and
+   the log says so.
+
+⚠ **THE JOB NEVER RESTARTS A POD.** A restart is a mail blip, and a plan change
+should not cost one by default. Which settings need one is not something the
+Job can decide with certainty, so it applies the plan, reloads, and tells a
+person. The dry run names the object types this README documents as read only
+at startup - `Certificate` and `SystemSettings` (the served certificate),
+`Role` and `Authentication` (the cached permission set), `Cache` (sizes),
+`BlobStore`, `InMemoryStore`, `Coordinator` and `ClusterRole` (store and role
+settings) - and when the plan changed one of them the log ends
+
+```
+! A PERSON MUST RESTART THE PODS: run ./bootstrap.sh by hand on psl-vps.
+! Restart needed for: Cache (read at startup, a reload does not apply them)
+```
+
+That list is what is PROVEN, not everything: it is by object type, so it
+over-reports, and a startup-read setting that is not on it would be missed. When
+unsure, restart.
+
+⚠ **THE PODS HAVE ALREADY ROLLED BEFORE THE HOOK RUNS.** Editing `plan.ndjson`
+renames the ConfigMap (it carries the content hash), which rolls both pods; the
+hook runs after they are Healthy. A startup-read setting is therefore applied
+after the startup that should have read it, which is exactly why the line above
+asks for a second restart. The Job's pod is deleted when it succeeds, so that
+line is readable only while the sync is open: after a plan change that touches
+the list, run `./bootstrap.sh` by hand, do not wait to be told.
+
+⚠ **THE ENVIRONMENT CHECK CANNOT `exec`, SO IT ASKS THE POD SPEC.** By hand the
+check lists the running container's variables. The Job has no `exec` (its Role
+is `get` on the two pods and nothing else), so it reads each pod's spec: a name
+passes if the pod's `env` lists it, or if the pod takes `envFrom` the
+`i10-stalwart` Secret and the Job, which takes the same Secret, holds that key.
+It cannot see a key added to the Secret after a pod started. That is narrow in
+practice - a plan change rolls the pods first, and they start with the Secret as
+it is then - but a hand re-run of the hook after adding a key to Doppler
+passes without the pods having it. `./bootstrap.sh --dry-run` by hand asks the
+running container and does not.
+
+- **Credential.** `STALWART_RECOVERY_ADMIN` and every `@fromSecret` value reach
+  the Job through `envFrom: i10-stalwart`. They are never put in argv or printed.
+- **Never wedges a sync.** `hook-delete-policy: BeforeHookCreation,HookSucceeded`
+  (the policy, and the reason for it, are in `workloads/api.yaml`),
+  `activeDeadlineSeconds: 300` and `backoffLimit: 1`. A failed run's pod stays
+  for reading until the next sync.
+- **Network.** No NetworkPolicy was added: `allow-same-namespace` already admits
+  every pod in `i10-prod` to the pods' ports, and policies only add.
+- **The script is its own ConfigMap**, `i10-stalwart-apply`, not part of
+  `i10-stalwart-config`, whose hash rolls the Stalwart pods.
+- **Not in the Job:** the two checks that read pod logs (authd, the stdout
+  tracer), and the DNS listing. They need `pods/log`, and say nothing about a
+  plan. `./bootstrap.sh --verify` runs them.
+- **A third node** has to be named in the Job's `STALWART_NODES` and in its Role.
 
 ⚠ **IT SPEAKS STALWART'S MANAGEMENT API DIRECTLY, OVER A PORT-FORWARD.** It used
 to start one `stalwart-cli` pod per command - an image pull, a scheduling round

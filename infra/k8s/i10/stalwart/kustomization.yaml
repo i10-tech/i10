@@ -14,6 +14,8 @@ resources:
   - service.yaml
   - networkpolicy.yaml
   - cert-reload.yaml
+  # Applies config/plan.ndjson after every sync (#412), by running bootstrap.sh.
+  - apply-hook.yaml
   - ingressroute.yaml
 
 # The generated name carries a content hash, so editing either file rolls the
@@ -25,9 +27,17 @@ resources:
 # effect on restart; plan.ndjson does nothing until bootstrap.sh applies it
 # against the server, and the objects in it need `Action/ReloadSettings` after
 # that. The ConfigMap carries the plan into the pod so it can be applied there;
-# it does not apply it. See config/README.md.
+# it does not apply it - the PostSync Job in apply-hook.yaml does, once the pods
+# are healthy. See config/README.md, "Applied by Argo".
+#
+# ⚠ THE SECOND ConfigMap IS bootstrap.sh FOR THAT JOB, AND IT MUST STAY SEPARATE.
+# Put in the first, an edit to the script would change the hash the Stalwart
+# pods mount and restart a mail server over a shell script.
 configMapGenerator:
   - name: i10-stalwart-config
     files:
       - config/config.json
       - config/plan.ndjson
+  - name: i10-stalwart-apply
+    files:
+      - bootstrap.sh
