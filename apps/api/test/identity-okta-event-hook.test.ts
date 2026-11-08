@@ -5,7 +5,9 @@ import type { ConsoleDeps } from "../src/routes/console/deps.js"
 import type { Role } from "../src/console/roles.js"
 import { mountIdentity } from "../src/routes/console/identity.js"
 import {
+  CONNECTION_EVENT_TYPES,
   CREDENTIAL_EVENT_TYPES,
+  HOOK_EVENT_TYPES,
   HOOK_SECRET_PREFIX,
   MAX_EVENT_AGE_MS,
   mintHookSecret,
@@ -65,6 +67,7 @@ interface Logged {
 function world(
   options: {
     raise?: (clerkUserId: string) => Promise<void>
+    raiseConnection?: (connectionId: string) => Promise<void>
     limits?: OktaEventHookRouteDeps["limits"]
   } = {},
 ) {
@@ -88,6 +91,7 @@ function world(
     ],
   })
   const raised: string[] = []
+  const connectionsRaised: string[] = []
   const logged: Logged[] = []
   const deps: OktaEventHookRouteDeps = {
     store: mem.store,
@@ -95,6 +99,11 @@ function world(
       options.raise ??
       (async (id) => {
         raised.push(id)
+      }),
+    raiseConnection:
+      options.raiseConnection ??
+      (async (id) => {
+        connectionsRaised.push(id)
       }),
     take: fixedWindow(null),
     contextSecret: undefined,
@@ -143,7 +152,20 @@ function world(
   const deliver = (events: unknown[], auth: string | null = a.secret) =>
     call("POST", CONNECTION, { auth, body: delivery(events) })
 
-  return { mem, a, b, stray, app, raised, logged, link, call, deliver, deps }
+  return {
+    mem,
+    a,
+    b,
+    stray,
+    app,
+    raised,
+    connectionsRaised,
+    logged,
+    link,
+    call,
+    deliver,
+    deps,
+  }
 }
 
 const delivery = (events: unknown[]) => ({
@@ -203,8 +225,9 @@ describe("Okta event hook: what the secret is", () => {
     expect(storedOktaHook({ config: { oktaEventHook: "x" } })).toEqual({})
   })
 
-  it("subscribes the hook to exactly the seven credential events", () => {
+  it("names exactly the eight events that raise one person", () => {
     expect([...CREDENTIAL_EVENT_TYPES].sort()).toEqual([
+      "application.user_membership.remove",
       "user.account.lock",
       "user.account.reset_password",
       "user.account.update_password",
@@ -213,6 +236,27 @@ describe("Okta event hook: what the secret is", () => {
       "user.lifecycle.suspend",
       "user.session.clear",
     ])
+  })
+
+  it("names exactly the nine events that raise the whole connection, none of them a mapping event Okta cannot send", () => {
+    expect([...CONNECTION_EVENT_TYPES].sort()).toEqual([
+      "application.lifecycle.deactivate",
+      "policy.lifecycle.activate",
+      "policy.lifecycle.deactivate",
+      "policy.lifecycle.update",
+      "policy.rule.activate",
+      "policy.rule.add",
+      "policy.rule.deactivate",
+      "policy.rule.delete",
+      "policy.rule.update",
+    ])
+  })
+
+  it("lists each event once in what the hook is subscribed to", () => {
+    expect([...HOOK_EVENT_TYPES].sort()).toEqual(
+      [...CREDENTIAL_EVENT_TYPES, ...CONNECTION_EVENT_TYPES].sort(),
+    )
+    expect(new Set(HOOK_EVENT_TYPES).size).toBe(HOOK_EVENT_TYPES.length)
   })
 })
 
@@ -424,6 +468,84 @@ describe("Okta event hook: which events raise whose epoch", () => {
       }),
     ])
     expect(w.raised).toEqual(["user_bob"])
+  })
+
+  describe("a change to the rules rather than to a person", () => {
+    // Policy events target the policy or rule, so they name nobody.
+    const policy = (type: string, over: Record<string, unknown> = {}) =>
+      event(type, { target: [{ id: "0pr_rule", type: "PolicyEntity" }], ...over })
+
+    for (const type of [...CONNECTION_EVENT_TYPES].sort()) {
+      it(`${type} raises the connection once and no person`, async () => {
+        const w = await seeded()
+        const res = await w.deliver([policy(type)])
+        expect(res.status).toBe(200)
+        expect(w.connectionsRaised).toEqual([CONNECTION])
+        expect(w.raised).toEqual([])
+      })
+    }
+
+    it("raises the connection once however many such events a delivery holds", async () => {
+      const w = await seeded()
+      await w.deliver([
+        policy("policy.rule.update"),
+        policy("policy.lifecycle.deactivate"),
+        policy("application.lifecycle.deactivate"),
+      ])
+      expect(w.connectionsRaised).toEqual([CONNECTION])
+    })
+
+    it("raises nothing for a stale event or an attempt that changed nothing", async () => {
+      const w = await seeded()
+      await w.deliver([
+        policy("policy.rule.update", { published: ago(MAX_EVENT_AGE_MS + 1000) }),
+        policy("policy.rule.add", { outcome: { result: "FAILURE" } }),
+        policy("policy.rule.delete", { outcome: { result: "SKIPPED" } }),
+      ])
+      expect(w.connectionsRaised).toEqual([])
+      expect(w.raised).toEqual([])
+    })
+
+    it("acts when the timestamp is unreadable", async () => {
+      const w = await seeded()
+      await w.deliver([policy("policy.rule.update", { published: "yesterday-ish" })])
+      expect(w.connectionsRaised).toEqual([CONNECTION])
+    })
+
+    it("does not raise the connection for a person's event", async () => {
+      const w = await seeded()
+      await w.deliver([event("user.account.update_password")])
+      expect(w.connectionsRaised).toEqual([])
+    })
+
+    it("is a 503 when the connection raise fails, so Okta sends it again", async () => {
+      const w = await seeded({
+        raiseConnection: async () => {
+          throw new Error("database is down")
+        },
+      })
+      const res = await w.deliver([policy("policy.rule.update")])
+      expect(res.status).toBe(503)
+      expect(res.headers.get("retry-after")).not.toBeNull()
+    })
+
+    it("does both when a delivery mixes a person and a policy change", async () => {
+      const w = await seeded()
+      await w.deliver([
+        event("user.account.lock"),
+        policy("policy.rule.update"),
+        policy("policy.rule.add"),
+      ])
+      expect(w.raised).toEqual(["user_ada"])
+      expect(w.connectionsRaised).toEqual([CONNECTION])
+    })
+
+    it("raises the person who lost the app", async () => {
+      const w = await seeded()
+      await w.deliver([event("application.user_membership.remove")])
+      expect(w.raised).toEqual(["user_ada"])
+      expect(w.connectionsRaised).toEqual([])
+    })
   })
 
   describe("when no link has the Okta id", () => {
@@ -700,7 +822,7 @@ describe("Okta event hook: making the secret", () => {
       header: "Authorization",
       secretSet: true,
       hint: secret.slice(0, HOOK_SECRET_PREFIX.length + 4),
-      events: [...CREDENTIAL_EVENT_TYPES],
+      events: [...HOOK_EVENT_TYPES],
     })
     expect(JSON.stringify(body)).not.toContain(w.stored().secretHash)
   })

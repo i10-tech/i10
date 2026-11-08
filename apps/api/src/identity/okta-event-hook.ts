@@ -45,7 +45,8 @@ export const HOOK_SECRET_PREFIX = "i10_okh_"
  * ⚠ `user.session.end` IS DELIBERATELY NOT HERE: it fires on every ordinary
  * sign-out, and a sign-out does not change a password. `user.lifecycle.
  * delete.completed` is not event-hook-eligible, so `delete.initiated` is the
- * delete signal Okta can send.
+ * delete signal Okta can send. `application.user_membership.remove` is a person
+ * losing the app (the User target), which is how an assignment ends.
  */
 export const CREDENTIAL_EVENT_TYPES: ReadonlySet<string> = new Set([
   "user.account.update_password",
@@ -55,7 +56,42 @@ export const CREDENTIAL_EVENT_TYPES: ReadonlySet<string> = new Set([
   "user.lifecycle.delete.initiated",
   "user.account.lock",
   "user.session.clear",
+  "application.user_membership.remove",
 ])
+
+/**
+ * The event types that raise EVERY managed account of the connection, for a
+ * change to the rules people are held to rather than to a person. All are
+ * event-hook-eligible in Okta's catalog.
+ *
+ * ⚠ WE RAISE CONNECTION-WIDE BECAUSE A POLICY EVENT DOES NOT NAME THE APP: its
+ * target is the policy or rule, so there is no telling whether it concerns the
+ * mail app. The cost of guessing wrong is one extra provider check per person
+ * at their next login, and a raise can never admit anyone.
+ *
+ * ⚠ SWITCHING AN APP TO ANOTHER POLICY IS NOT HERE AND CANNOT BE:
+ * `policy.mapping.create` (and `.delete`, `policy.lifecycle.delete`,
+ * `application.policy.sign_on.*`) are not event-hook-eligible, so Okta rejects
+ * a subscription to them. That one change still waits out the cache (fifteen
+ * minutes on the OIDC lane).
+ */
+export const CONNECTION_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "policy.rule.add",
+  "policy.rule.update",
+  "policy.rule.delete",
+  "policy.rule.activate",
+  "policy.rule.deactivate",
+  "policy.lifecycle.update",
+  "policy.lifecycle.activate",
+  "policy.lifecycle.deactivate",
+  "application.lifecycle.deactivate",
+])
+
+/** Everything the hook is worth subscribing to: the one list the console shows. */
+export const HOOK_EVENT_TYPES: readonly string[] = [
+  ...CREDENTIAL_EVENT_TYPES,
+  ...CONNECTION_EVENT_TYPES,
+]
 
 /**
  * An event published longer ago than this is not acted on.
@@ -196,7 +232,7 @@ export type OktaEventHookOutcome =
   | {
       outcome: "processed"
       received: number
-      /** Of a credential type, recent, and not a failed attempt. */
+      /** Of a credential or connection type, recent, and not a failed attempt. */
       relevant: number
       stale: number
       unreadable: number
@@ -204,12 +240,16 @@ export type OktaEventHookOutcome =
       unknown: number
       /** People whose epoch was raised, once each however many events named them. */
       raised: number
+      /** Whether every managed account of the connection was raised, once. */
+      connectionRaised: boolean
     }
 
 export interface OktaEventHookDeps {
   store: Pick<IdentityStore, "identityBySubject" | "identityByEmail">
   /** `raiseCredentialEpoch` against the API's database. */
   raiseEpoch(clerkUserId: string): Promise<void>
+  /** `raiseConnectionCredentialEpochs` against the API's database. */
+  raiseConnection(connectionId: string): Promise<void>
   log: Logger
   now?: () => Date
 }
@@ -244,12 +284,15 @@ export async function applyOktaEvents(
 
   const people = new Map<string, Person>()
   const counts = { relevant: 0, stale: 0, unreadable: 0 }
+  let wholeConnection = false
   const events = parsed.data.data.events
   for (const raw of events) {
     // ⚠ THE TYPE FIRST, ON THE RAW OBJECT: an event of another type is none of
     // our business however oddly it is shaped.
     const type = (raw as { eventType?: unknown } | null)?.eventType
-    if (typeof type !== "string" || !CREDENTIAL_EVENT_TYPES.has(type)) continue
+    if (typeof type !== "string") continue
+    const ofConnection = CONNECTION_EVENT_TYPES.has(type)
+    if (!ofConnection && !CREDENTIAL_EVENT_TYPES.has(type)) continue
     const event = OktaEvent.safeParse(raw)
     if (!event.success) {
       counts.unreadable++
@@ -265,6 +308,10 @@ export async function applyOktaEvents(
       continue
     }
     counts.relevant++
+    if (ofConnection) {
+      wholeConnection = true
+      continue
+    }
     /*
      * The person is the event's User target. Self-service password events can
      * carry the person only as the actor, so a User actor stands in when no
@@ -320,6 +367,21 @@ export async function applyOktaEvents(
         )
       }
   }
+  // ONCE however many policy events the delivery holds: one statement covers
+  // every managed account of the connection.
+  if (wholeConnection)
+    try {
+      await d.raiseConnection(connection.id)
+    } catch (err) {
+      failed++
+      d.log.error(
+        {
+          connectionId: connection.id,
+          err: err instanceof Error ? err.name : "unknown",
+        },
+        "could not apply an Okta policy event to the connection's mail credential epochs",
+      )
+    }
   // ⚠ ONE FAILURE FAILS THE DELIVERY so Okta sends it again; the people who
   // were raised are raised again, which changes nothing.
   if (failed > 0) return { outcome: "unavailable" }
@@ -330,9 +392,16 @@ export async function applyOktaEvents(
     ...counts,
     unknown,
     raised: raised.size,
+    connectionRaised: wholeConnection,
   }
   d.log.info(
-    { connectionId: connection.id, ...counts, received: events.length, unknown },
+    {
+      connectionId: connection.id,
+      ...counts,
+      received: events.length,
+      unknown,
+      connectionRaised: wholeConnection,
+    },
     "handled an Okta event hook delivery",
   )
   return done

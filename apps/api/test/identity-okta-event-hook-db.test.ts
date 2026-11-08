@@ -7,6 +7,7 @@ import * as schema from "../src/db/schema.js"
 import { identityStore } from "../src/identity/store.js"
 import { mintHookSecret } from "../src/identity/okta-event-hook.js"
 import { fixedWindow } from "../src/identity/rate-limit.js"
+import { raiseConnectionCredentialEpochs } from "../src/projection/connection-epoch.js"
 import { raiseCredentialEpoch } from "../src/projection/credential-epoch.js"
 import { createOktaEventHooks } from "../src/routes/okta-event-hooks.js"
 import { secretBox } from "../src/webhooks/signing.js"
@@ -76,6 +77,9 @@ suite("Okta event hook against Postgres", () => {
         store: store(),
         raiseEpoch: async (id) => {
           await raiseCredentialEpoch(database, id)
+        },
+        raiseConnection: async (id) => {
+          await raiseConnectionCredentialEpochs(database, id)
         },
         take: fixedWindow(null),
         contextSecret: undefined,

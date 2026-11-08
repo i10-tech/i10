@@ -5,7 +5,7 @@ import { requireFreshAuth } from "../../middleware/session.js"
 import { can, type Permission } from "../../console/roles.js"
 import type { Connection } from "../../identity/model.js"
 import {
-  CREDENTIAL_EVENT_TYPES,
+  HOOK_EVENT_TYPES,
   mintHookSecret,
   storedOktaHook,
 } from "../../identity/okta-event-hook.js"
@@ -52,7 +52,7 @@ function view(connection: Connection, hook: OktaHookConsoleDeps) {
     hint: stored.secretHash ? (stored.hint ?? null) : null,
     issuedAt: stored.secretHash ? (stored.issuedAt ?? null) : null,
     // What to subscribe the hook to.
-    events: [...CREDENTIAL_EVENT_TYPES],
+    events: [...HOOK_EVENT_TYPES],
   }
 }
 
