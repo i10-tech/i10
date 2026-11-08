@@ -2,15 +2,16 @@
 #
 # Bring a Stalwart instance from "the pod is running" to "mail works".
 #
-# ⚠ THIS SCRIPT EXISTS BECAUSE ARGO CANNOT DO THIS PART. Everything under this
-# directory is applied by Argo, but Stalwart's real configuration lives inside
-# its own database and is reached over its management API - not through
-# Kubernetes objects. `plan.ndjson` is carried into the pod by a ConfigMap and
-# then does nothing at all until something applies it. This is that something.
+# ⚠ THIS SCRIPT EXISTS BECAUSE ARGO CANNOT APPLY THIS PART ITSELF. Everything
+# under this directory is applied by Argo, but Stalwart's real configuration
+# lives inside its own database and is reached over its management API - not
+# through Kubernetes objects. `plan.ndjson` is carried into the pod by a
+# ConfigMap and then does nothing at all until something applies it. This is
+# that something, and since #412 Argo runs it too (below).
 #
-# It is idempotent. Run it after any change to plan.ndjson, and run it on a
-# fresh install. The one non-idempotent object it touches - the Tracer, which
-# has no natural key to match on - is created only when absent.
+# It is idempotent. Run it on a fresh install, and by hand whenever a restart is
+# wanted. The one non-idempotent object it touches - the Tracer, which has no
+# natural key to match on - is created only when absent.
 #
 #   ./bootstrap.sh              apply, reload, restart, verify
 #   ./bootstrap.sh --verify     verify only, change nothing
@@ -23,9 +24,31 @@
 #                               preview a plan that is not deployed yet - a
 #                               branch's, before merge. Dry-run only: a real
 #                               apply always reads what Argo deployed.
+#   ./bootstrap.sh --if-changed apply only when a dry run says the plan changes
+#                               something; otherwise say so and stop.
+#   ./bootstrap.sh --in-cluster run inside a pod instead of through kubectl. No
+#                               restart, ever. See below.
 #
-# Runs anywhere `kubectl` reaches the cluster and `python3` exists - on psl-vps
-# as `mo` needs no sudo.
+# By hand it runs anywhere `kubectl` reaches the cluster and `python3` exists -
+# on psl-vps as `mo` needs no sudo.
+#
+# ⚠ THE AUTOMATIC PATH IS THIS SAME FILE, RUN AS `--in-cluster --if-changed` BY
+# THE PostSync HOOK Job IN apply-hook.yaml. One code path, two transports: the
+# plan engine, the dry-run gate, the reload and the verification are shared, and
+# only how they reach Stalwart differs - a port-forward and `kubectl exec` by
+# hand, the pods' own addresses and plain sockets in the Job. In the Job:
+#   - the plan is the mounted ConfigMap Argo just synced, and the admin
+#     credential and every `@fromSecret` value come from the Job's environment
+#     (envFrom i10-stalwart), never from argv and never printed;
+#   - the settings live in the shared Postgres store, so the plan is applied
+#     ONCE, through the edge node, and the reload is sent to EVERY node;
+#   - the pods are never restarted. A restart is a mail blip on every plan
+#     change, and which settings need one cannot be decided with certainty. The
+#     dry run names the ones the README documents as read at startup and the Job
+#     logs "Restart needed for: ...", which means a person runs this script by
+#     hand. See config/README.md, "Applied by Argo".
+#   - nothing is written unless the whole plan dry-runs clean: a schema error or
+#     a variable the pods lack stops it before the first write.
 #
 # ⚠ ON A GENUINELY FRESH INSTALL, READ config/README.md FIRST. The first
 # administrator comes from STALWART_RECOVERY_ADMIN, which must already be in the
@@ -37,17 +60,26 @@ NS="${NS:-i10-prod}"
 POD="${POD:-i10-stalwart-0}"
 SECRET="${SECRET:-i10-stalwart}"
 CONFIGMAP_PREFIX="i10-stalwart-config"
+# In-cluster only: where the hook mounts the deployed ConfigMap, and the pods to
+# reach, edge first - the edge node takes the apply and the checks. Naming them
+# keeps the hook's Role to `get` on exactly these two pods.
+PLAN_MOUNT="${PLAN_MOUNT:-/etc/stalwart-plan}"
+NODES_WANTED="${STALWART_NODES:-i10-stalwart-0 i10-stalwart-internal-0}"
 
 VERIFY_ONLY=false
 DRY_RUN=false
 RESTART=true
+IF_CHANGED=false
+IN_CLUSTER=false
 for arg in "$@"; do
   case "$arg" in
     --verify) VERIFY_ONLY=true ;;
     --no-restart) RESTART=false ;;
     --dry-run) DRY_RUN=true ;;
+    --if-changed) IF_CHANGED=true ;;
+    --in-cluster) IN_CLUSTER=true ;;
     -h | --help)
-      sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^set -euo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -67,14 +99,27 @@ die() {
 
 command -v python3 >/dev/null || die "python3 is required - it speaks to Stalwart's API"
 
-# ⚠ ASK THE CLUSTER BEFORE ASKING FOR THE POD. `kubectl get pod` fails the same
-# way when kubectl points at no cluster at all, and reporting that as "pod not
-# found" sent a laptop without a context looking for a StatefulSet problem that
-# did not exist.
-kubectl get namespace "$NS" >/dev/null 2>&1 ||
-  die "kubectl cannot reach namespace $NS (context: $(kubectl config current-context 2>/dev/null || echo none)) - run this on psl-vps, or point kubectl at the cluster"
-kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
-  die "pod $POD not found in $NS - is the StatefulSet synced?"
+# ⚠ NEVER A RESTART IN THE CLUSTER. The Job has no right to delete a pod, and a
+# restart that nobody asked for is a mail blip on every plan change.
+[ "$IN_CLUSTER" = true ] && RESTART=false
+
+if [ "$IN_CLUSTER" = true ]; then
+  # The Job's whole contract with the cluster is its environment, its mounted
+  # files and `get` on two pods; there is no kubectl and no kubeconfig.
+  [ -n "${STALWART_RECOVERY_ADMIN:-}" ] ||
+    die "STALWART_RECOVERY_ADMIN is not in the environment - the Job needs envFrom secret/$SECRET"
+  [ -r "$PLAN_MOUNT/plan.ndjson" ] ||
+    die "no plan at $PLAN_MOUNT/plan.ndjson - is the deployed ConfigMap mounted there?"
+else
+  # ⚠ ASK THE CLUSTER BEFORE ASKING FOR THE POD. `kubectl get pod` fails the same
+  # way when kubectl points at no cluster at all, and reporting that as "pod not
+  # found" sent a laptop without a context looking for a StatefulSet problem that
+  # did not exist.
+  kubectl get namespace "$NS" >/dev/null 2>&1 ||
+    die "kubectl cannot reach namespace $NS (context: $(kubectl config current-context 2>/dev/null || echo none)) - run this on psl-vps, or point kubectl at the cluster"
+  kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
+    die "pod $POD not found in $NS - is the StatefulSet synced?"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The API client
@@ -106,6 +151,10 @@ kubectl get pod -n "$NS" "$POD" >/dev/null 2>&1 ||
 HELPER=$(mktemp "${TMPDIR:-/tmp}/stalwart-api.XXXXXX")
 PF_PID=""
 PF_PORT=$((20000 + RANDOM % 20000))
+# Where the next API call goes: the port-forward by hand, a pod's address in the
+# Job. NODES is "name address" per line, edge first, and exists in the Job only.
+BASE_URL=""
+NODES=""
 
 disconnect() {
   if [ -n "$PF_PID" ]; then
@@ -120,7 +169,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-raw=$(kubectl get secret -n "$NS" "$SECRET" -o jsonpath='{.data.STALWART_RECOVERY_ADMIN}' | base64 -d)
+if [ "$IN_CLUSTER" = true ]; then
+  raw="$STALWART_RECOVERY_ADMIN"
+else
+  raw=$(kubectl get secret -n "$NS" "$SECRET" -o jsonpath='{.data.STALWART_RECOVERY_ADMIN}' | base64 -d)
+fi
 [ -n "$raw" ] || die "STALWART_RECOVERY_ADMIN is empty in secret/$SECRET"
 case "$raw" in
   *:*) ;;
@@ -128,24 +181,61 @@ case "$raw" in
 esac
 
 api() {
-  STALWART_AUTH="$raw" STALWART_BASE="http://127.0.0.1:$PF_PORT" STALWART_NS="$NS" STALWART_SECRET="$SECRET" STALWART_POD="$POD" python3 "$HELPER" "$@"
+  STALWART_AUTH="$raw" STALWART_BASE="$BASE_URL" STALWART_NS="$NS" STALWART_SECRET="$SECRET" STALWART_POD="$POD" \
+    STALWART_NODES="$NODES_WANTED" STALWART_IN_CLUSTER="$IN_CLUSTER" python3 "$HELPER" "$@"
+}
+
+# A pod address as a URL host: IPv6 needs brackets, IPv4 does not.
+url_host() {
+  case "$1" in
+    *:*) printf '[%s]' "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 # ⚠ A PORT-FORWARD IS BOUND TO ONE POD, NOT TO THE SERVICE. It dies with the pod
 # it picked, so the restart below disconnects first and connects again after.
+#
+# ⚠ IN THE JOB THERE IS NO PORT-FORWARD, AND THE ADDRESSES ARE THE PODS', NOT
+# THE SERVICE'S. The Service picks either node at random and the apply and the
+# reload want to be told which; the pods' own addresses (read through the API,
+# Ready only) also let the Job prove that BOTH nodes answer. The cluster's
+# NetworkPolicies already admit it - `allow-same-namespace` takes every pod in
+# i10-prod on every port - so no rule was added. The first seconds of a new pod
+# reach nothing while kube-router builds its sets, which is what `wait` rides out.
 connect() {
   disconnect
+  if [ "$IN_CLUSTER" = true ]; then
+    NODES=$(api nodes) || die "could not find the Stalwart pods ($NODES_WANTED) through the API"
+    local name ip
+    while read -r name ip; do
+      [ -n "$name" ] || continue
+      (BASE_URL="http://$(url_host "$ip"):8080" && api wait) ||
+        die "Stalwart's API did not answer on $name ($ip)"
+    done <<<"$NODES"
+    BASE_URL="http://$(url_host "$(printf '%s\n' "$NODES" | awk 'NR==1 {print $2}')"):8080"
+    ok "Stalwart answers on every node: $(printf '%s\n' "$NODES" | awk '{printf "%s%s", sep, $1; sep=", "}')"
+    return
+  fi
+  BASE_URL="http://127.0.0.1:$PF_PORT"
   kubectl port-forward -n "$NS" svc/i10-stalwart "$PF_PORT:8080" >/dev/null 2>&1 &
   PF_PID=$!
   api wait || die "Stalwart's API did not answer through a port-forward on $PF_PORT"
 }
 
 cat >"$HELPER" <<'PY'
-import base64, gzip, json, os, subprocess, sys, time, urllib.error, urllib.request
+import base64, gzip, json, os, ssl, subprocess, sys, time, urllib.error, urllib.request
 
 BASE = os.environ["STALWART_BASE"]
 AUTH = "Basic " + base64.b64encode(os.environ["STALWART_AUTH"].encode()).decode()
 USING = ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"]
+# True in the PostSync Job: no kubectl, no exec - the pods are asked through the
+# Kubernetes API and the secret's values come from the environment.
+IN_CLUSTER = os.environ.get("STALWART_IN_CLUSTER") == "true"
+
+# Exit status of `apply --dry-run --detect` when the plan would change something.
+# Not 1, which is every failure.
+PENDING = 10
 
 
 def ok(msg):
@@ -418,9 +508,12 @@ def upsert(c, op, cache, dry=False):
                 fail(f"{label} `{cid}`: not properties of {label}: {', '.join(bad)}")
         for cid in to_create:
             print(f"   + would create {label} `{cid}`")
+            pending.append(label)
         for sid, patch in to_update:
             diff = changes(next(o for o in known if o.get("id") == sid), patch)
             print(f"   ~ {label} {sid}: " + (f"would change {', '.join(diff)}" if diff else "unchanged"))
+            if diff:
+                pending.append(label)
         return 0, 0
     created = create_objects(c, to_create, known) if to_create else 0
     for sid, patch in to_update:
@@ -444,8 +537,44 @@ def update(c, op, dry=False):
         current = (got.get("list") or [{}])[0]
         diff = changes(current, op["value"])
         print(f"   ~ {c[2:]} {sid}: " + (f"would change {', '.join(diff)}" if diff else "unchanged"))
+        if diff:
+            pending.append(c[2:])
         return
     update_object(c, sid, op["value"])
+
+
+def kube_get(path):
+    # The pod's own service account, read the way every in-cluster client does.
+    # Only the Job calls this, and its Role allows `get` on two named pods.
+    sa = "/var/run/secrets/kubernetes.io/serviceaccount"
+    host = os.environ["KUBERNETES_SERVICE_HOST"]
+    host = f"[{host}]" if ":" in host else host
+    req = urllib.request.Request(f"https://{host}:{os.environ.get('KUBERNETES_SERVICE_PORT', '443')}{path}")
+    req.add_header("Authorization", "Bearer " + open(f"{sa}/token").read().strip())
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context(cafile=f"{sa}/ca.crt")) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        fail(f"GET {path} answered {e.code}: {e.read()[:200].decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        fail(f"GET {path} failed: {e.reason}")
+
+
+def node_pods():
+    ns = os.environ["STALWART_NS"]
+    return {n: kube_get(f"/api/v1/namespaces/{ns}/pods/{n}") for n in os.environ["STALWART_NODES"].split()}
+
+
+def nodes():
+    # "name address" per line, in the order STALWART_NODES names them. A pod that
+    # is not Ready has an address that answers nothing, so it is refused here
+    # rather than timing out later.
+    for name, pod in node_pods().items():
+        status = pod.get("status", {})
+        ready = any(c.get("type") == "Ready" and c.get("status") == "True" for c in status.get("conditions", []))
+        if not status.get("podIP") or not ready:
+            fail(f"pod {name} is not Ready - the hook runs after the sync is healthy, so something is wrong")
+        print(name, status["podIP"])
 
 
 _secret = None
@@ -466,6 +595,12 @@ def from_secret(value):
         return value
     if set(value) != {"@fromSecret"}:
         return {k: from_secret(v) for k, v in value.items()}
+    key = value["@fromSecret"]
+    if IN_CLUSTER:
+        # The Job's envFrom is that same Secret, so the value is already here.
+        if not os.environ.get(key):
+            fail(f"`{key}` is missing or empty in secret/{os.environ['STALWART_SECRET']}")
+        return os.environ[key]
     if _secret is None:
         out = subprocess.run(
             ["kubectl", "get", "secret", "-n", os.environ["STALWART_NS"],
@@ -475,7 +610,6 @@ def from_secret(value):
         if out.returncode != 0:
             fail(f"cannot read secret/{os.environ['STALWART_SECRET']}: {out.stderr.decode()[:200]}")
         _secret = json.loads(out.stdout).get("data") or {}
-    key = value["@fromSecret"]
     if not _secret.get(key):
         fail(f"`{key}` is missing or empty in secret/{os.environ['STALWART_SECRET']}")
     return base64.b64decode(_secret[key]).decode()
@@ -502,6 +636,9 @@ def require_env(ops):
     wanted = set().union(*(env_names(op) for op in ops))
     if not wanted:
         return
+    if IN_CLUSTER:
+        require_env_in_cluster(wanted)
+        return
     out = subprocess.run(
         ["kubectl", "exec", "-n", os.environ["STALWART_NS"], os.environ["STALWART_POD"],
          "-c", "stalwart", "--", "sh", "-c", "env | cut -d= -f1"],
@@ -513,6 +650,56 @@ def require_env(ops):
     if missing:
         fail("the plan names variables the running container does not have: "
              + ", ".join(missing) + " - add them to Doppler, restart the pod, then re-run")
+
+
+def require_env_in_cluster(wanted):
+    # ⚠ THE SAME REFUSAL WITHOUT `exec`: ask each pod's SPEC what it was given.
+    # A container gets a variable two ways, and both are visible to the API. An
+    # explicit `env` entry is in the spec by name (STALWART_DB_PASSWORD, the TLS
+    # pair). `envFrom` hands over a Secret's keys, which the Job holds too,
+    # because it takes the same Secret the same way - so a name in the Job's
+    # environment counts only for a pod whose spec really lists that Secret.
+    #
+    # ⚠ WHAT THIS CANNOT SEE: a key added to the Secret after a pod started. The
+    # kubelet resolves envFrom once, at container start, and the API does not
+    # say when. Narrow in practice, because a plan change rolls both pods (the
+    # ConfigMap name carries the content hash) before this runs, and they start
+    # with the Secret as it is then. A hand re-run of the hook after adding a
+    # key to Doppler is the case it misses; `./bootstrap.sh --dry-run` by hand
+    # asks the running container and does not.
+    missing = set()
+    for name, pod in node_pods().items():
+        container = next((c for c in pod["spec"]["containers"] if c["name"] == "stalwart"), None)
+        if container is None:
+            fail(f"pod {name} has no `stalwart` container")
+        have = {e["name"] for e in container.get("env", [])}
+        if os.environ["STALWART_SECRET"] in {
+            (ref.get("secretRef") or {}).get("name") for ref in container.get("envFrom", [])
+        }:
+            have |= set(os.environ)
+        missing |= wanted - have
+    if missing:
+        fail("the plan names variables the Stalwart pods do not have: "
+             + ", ".join(sorted(missing)) + " - add them to Doppler, let a sync roll the pods, then sync again")
+
+
+# ⚠ THE OBJECTS WHOSE CHANGES A RELOAD DOES NOT APPLY, from config/README.md:
+# the certificate that is served (Certificate, and SystemSettings'
+# defaultCertificateId), the cached per-account permission set (Role,
+# Authentication), the cache sizes (Cache), and store and cluster-role settings,
+# which are read once at startup. Named by OBJECT, not by field, so it
+# over-reports - a changed SystemSettings hostname is on it too - and over-
+# reporting is the right way to be wrong: it costs one log line, where missing
+# one leaves the old behaviour running until the next restart. It is a list of
+# what we have PROVEN needs a restart, not of everything that does.
+STARTUP_READ = {
+    "Certificate", "SystemSettings", "Role", "Authentication", "Cache",
+    "BlobStore", "InMemoryStore", "Coordinator", "ClusterRole", "DataStore",
+}
+
+# What a dry run found it would write, one entry per object type touched. Only
+# `apply --dry-run --detect` reads it.
+pending = []
 
 
 def absent(c, op, cache, dry=False):
@@ -530,6 +717,7 @@ def absent(c, op, cache, dry=False):
         names = ", ".join(str(o.get(p)) for p in match_on)
         if dry:
             print(f"   - would destroy {label} {o['id']} ({names})")
+            pending.append(label)
             continue
         (res,) = jmap([[f"{c}/set", {"destroy": [o["id"]]}, "d"]])
         if o["id"] not in (res.get("destroyed") or []):
@@ -541,7 +729,7 @@ def absent(c, op, cache, dry=False):
     return 0 if dry else len(gone)
 
 
-def apply(text, dry=False):
+def apply(text, dry=False, detect=False):
     ops = [from_secret(json.loads(line)) for line in text.splitlines() if line.strip()]
     require_env(ops)
     kinds = {}
@@ -574,14 +762,31 @@ def apply(text, dry=False):
         total_updated += updated
     if not dry:
         ok(f"done: {total_updated} updated, {total_created} created")
+    elif detect:
+        # The line the shell greps, and the exit status it branches on: PENDING
+        # when the plan would write anything, 0 when it would write nothing.
+        touched = sorted(set(pending))
+        if not touched:
+            print("   Nothing would change.")
+            return 0
+        print("   Would change: " + ", ".join(touched))
+        startup = sorted(set(touched) & STARTUP_READ)
+        if startup:
+            print("   Restart needed for: " + ", ".join(startup)
+                  + " (read at startup, a reload does not apply them)")
+        return PENDING
+    return 0
 
 
 def main():
     cmd, args = sys.argv[1], sys.argv[2:]
     if cmd == "wait":
         # The port-forward takes a moment to listen; anything but a refused
-        # connection means Stalwart itself is answering.
-        for _ in range(50):
+        # connection means Stalwart itself is answering. In the Job the wait is
+        # longer: a new pod's address is dropped, not refused, for the second or
+        # two kube-router takes to admit it.
+        deadline = time.time() + float(os.environ.get("STALWART_WAIT_SECONDS") or (90 if IN_CLUSTER else 10))
+        while time.time() < deadline:
             try:
                 urllib.request.urlopen(BASE + "/jmap/session", timeout=2)
                 return
@@ -590,8 +795,10 @@ def main():
             except Exception:
                 time.sleep(0.2)
         sys.exit(1)
+    elif cmd == "nodes":
+        nodes()
     elif cmd == "apply":
-        apply(sys.stdin.read(), dry="--dry-run" in args)
+        sys.exit(apply(sys.stdin.read(), dry="--dry-run" in args, detect="--detect" in args))
     elif cmd == "listener":
         names = {o.get("name") for o in fetch_all("x:NetworkListener")}
         sys.exit(0 if args[0] in names else 1)
@@ -634,18 +841,46 @@ connect
 # ─────────────────────────────────────────────────────────────────────────────
 # Verification - used at the end, and on its own with --verify.
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# ⚠ ONE BODY, TWO WAYS TO RUN A PROBE. By hand a probe runs INSIDE the edge pod
+# (`kubectl exec`) against 127.0.0.1. In the Job it runs in the Job's own shell
+# against the pod's address, because the Job has no exec - the alpine/k8s image
+# ships the same busybox nc and curl, so the commands are the same text. A
+# command sees its target as $H.
+#
+# ⚠ AND THE JOB SKIPS THE TWO CHECKS THAT READ POD LOGS (authd, the tracer). They
+# need `pods/log`, a wider right than this hook should hold, and neither says
+# anything about a plan: the tracer is not in plan.ndjson. `--verify` by hand
+# still runs them.
+probe() {
+  local cmd="H=$1; $2"
+  if [ "$IN_CLUSTER" = true ]; then
+    sh -c "$cmd"
+  else
+    kubectl exec -n "$NS" "$POD" -c stalwart -- sh -c "$cmd"
+  fi
+}
+
+# shellcheck disable=SC2016  # the single-quoted probes are expanded by the sh that runs them
 verify() {
-  local failures=0
+  local failures=0 edge hosts h
 
   say "Verifying"
+
+  if [ "$IN_CLUSTER" = true ]; then
+    edge=$(printf '%s\n' "$NODES" | awk 'NR==1 {print $2}')
+    hosts=$(printf '%s\n' "$NODES" | awk '{print $2}')
+  else
+    edge=127.0.0.1
+    hosts=127.0.0.1
+  fi
 
   # ⚠ THE CONTAINER HAS NO openssl AND ITS /bin/sh IS BUSYBOX. No `/dev/tcp`
   # either - that is a bash feature. Both checks below are written against what
   # the image actually ships: nc and curl. Getting this wrong once produced two
   # confident failures against a server that was working perfectly.
   local greeting
-  greeting=$(kubectl exec -n "$NS" "$POD" -c stalwart -- \
-    sh -c 'printf "QUIT\r\n" | timeout 5 nc 127.0.0.1 25 | head -1' 2>/dev/null || true)
+  greeting=$(probe "$edge" 'printf "QUIT\r\n" | timeout 5 nc "$H" 25 | head -1' 2>/dev/null || true)
   case "$greeting" in
     *mail.i10.tech*) ok "SMTP greeting: ${greeting%%$'\r'*}" ;;
     "") warn "could not read the SMTP greeting" ;;
@@ -665,8 +900,7 @@ verify() {
   # It then fails to speak HTTP to an SMTP port, which does not matter: the TLS
   # handshake has already happened and -v has already printed the peer subject.
   local subject
-  subject=$(kubectl exec -n "$NS" "$POD" -c stalwart -- \
-    sh -c 'curl -sv --max-time 5 --insecure https://127.0.0.1:465 2>&1 | grep -m1 "subject:"' 2>/dev/null || true)
+  subject=$(probe "$edge" 'curl -sv --max-time 5 --insecure "https://$H:465" 2>&1 | grep -m1 "subject:"' 2>/dev/null || true)
   subject=$(printf '%s' "$subject" | sed 's/^[* ]*subject: *//')
   case "$subject" in
     *i10.tech*) ok "certificate without SNI: $subject" ;;
@@ -677,24 +911,30 @@ verify() {
       ;;
   esac
 
-  local code
-  for path in "/mail/config-v1.1.xml?emailaddress=probe@i10.tech" "/.well-known/mta-sts.txt"; do
-    code=$(kubectl exec -n "$NS" "$POD" -c stalwart -- \
-      curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080$path" 2>/dev/null || echo 000)
-    if [ "$code" = "200" ]; then
-      ok "$path → 200"
-    else
-      warn "$path → $code"
-      failures=$((failures + 1))
-    fi
+  # Every node serves these (JMAP and the web endpoints are on both), so the Job
+  # asks each; by hand it is the one pod it always was.
+  local code where=""
+  for h in $hosts; do
+    [ "$IN_CLUSTER" = true ] && where="$h "
+    for path in "/mail/config-v1.1.xml?emailaddress=probe@i10.tech" "/.well-known/mta-sts.txt"; do
+      code=$(probe "$h" "curl -s -o /dev/null -w '%{http_code}' \"http://\$H:8080$path\"" 2>/dev/null || echo 000)
+      if [ "$code" = "200" ]; then
+        ok "$where$path → 200"
+      else
+        warn "$where$path → $code"
+        failures=$((failures + 1))
+      fi
+    done
   done
 
   # authd is the other half of every login. A bind that never reaches Clerk is
   # indistinguishable, from the client's side, from a wrong password.
-  if kubectl logs -n "$NS" "$POD" -c authd --tail=200 2>/dev/null | grep -q '"msg":"listening"'; then
-    ok "authd is listening"
-  else
-    warn "authd has not logged 'listening' recently"
+  if [ "$IN_CLUSTER" = false ]; then
+    if kubectl logs -n "$NS" "$POD" -c authd --tail=200 2>/dev/null | grep -q '"msg":"listening"'; then
+      ok "authd is listening"
+    else
+      warn "authd has not logged 'listening' recently"
+    fi
   fi
 
   # ⚠ THE LISTENER THE SEND WORKER DIALS, CHECKED BY NAME RATHER THAN ASSUMED.
@@ -712,7 +952,9 @@ verify() {
   # ⚠ THE TRAP THAT COST A DAY. The default Tracer writes to /var/log/stalwart,
   # which does not exist on a read-only root filesystem - so the server logs
   # NOTHING and every problem has to be diagnosed from outside.
-  if [ "$(kubectl logs -n "$NS" "$POD" -c stalwart --tail=5 2>/dev/null | wc -l)" -gt 0 ]; then
+  if [ "$IN_CLUSTER" = true ]; then
+    warn "log-based checks (authd, the stdout tracer) skipped in the Job - ./bootstrap.sh --verify runs them"
+  elif [ "$(kubectl logs -n "$NS" "$POD" -c stalwart --tail=5 2>/dev/null | wc -l)" -gt 0 ]; then
     ok "stalwart is logging to stdout"
   else
     warn "stalwart has logged nothing - the Stdout tracer is missing or needs a restart"
@@ -731,7 +973,16 @@ fi
 # ⚠ TWO FUNCTIONS, BECAUSE ONLY THE PLAN MAY GO DOWN THE PIPE. The lookup
 # prints progress and can `die`; run inside a pipeline it would do both in a
 # subshell - its progress line parsed as a plan operation, its exit ignored.
+#
+# In the Job the deployed ConfigMap IS the mounted one - the Job's volume names
+# it, and Argo's kustomize build rewrites that name to the hashed one it just
+# synced - so there is nothing to look up.
 find_plan() {
+  if [ "$IN_CLUSTER" = true ]; then
+    CM="$PLAN_MOUNT"
+    ok "using the mounted ConfigMap ($PLAN_MOUNT/plan.ndjson)"
+    return
+  fi
   CM=$(kubectl get configmap -n "$NS" -o name |
     grep -o "${CONFIGMAP_PREFIX}-[a-z0-9]*" | head -1) ||
     die "no $CONFIGMAP_PREFIX-* ConfigMap in $NS - has Argo synced?"
@@ -739,7 +990,11 @@ find_plan() {
   ok "using ConfigMap $CM"
 }
 plan_text() {
-  kubectl get configmap -n "$NS" "$CM" -o jsonpath='{.data.plan\.ndjson}'
+  if [ "$IN_CLUSTER" = true ]; then
+    cat "$PLAN_MOUNT/plan.ndjson"
+  else
+    kubectl get configmap -n "$NS" "$CM" -o jsonpath='{.data.plan\.ndjson}'
+  fi
 }
 
 if [ "$DRY_RUN" = true ]; then
@@ -756,6 +1011,29 @@ if [ "$DRY_RUN" = true ]; then
   exit 0
 fi
 
+restart_note=""
+if [ "$IF_CHANGED" = true ]; then
+  say "Checking whether plan.ndjson changes anything"
+  # ⚠ THE GATE, AND IT IS THE DRY RUN, NOT A HASH. A plan that has not changed
+  # since it was applied reports every object `unchanged` (the README's check
+  # that the engine and the server agree), so an Argo sync that changed nothing
+  # here ends after a few reads. And it is the same dry run that refuses a
+  # schema error or a variable the pods lack - BEFORE anything is written, which
+  # is why a bad plan fails the sync and leaves the server as it was.
+  find_plan
+  gate=0
+  gate_out=$(plan_text | api apply --dry-run --detect) || gate=$?
+  [ -z "$gate_out" ] || printf '%s\n' "$gate_out"
+  case "$gate" in
+    0)
+      say "Nothing changed - the plan is already applied."
+      exit 0
+      ;;
+    10) restart_note=$(printf '%s\n' "$gate_out" | grep 'Restart needed for' || true) ;;
+    *) die "the plan cannot be applied as written - nothing was written" ;;
+  esac
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 say "Applying plan.ndjson"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -764,7 +1042,7 @@ say "Applying plan.ndjson"
 # generated. Reading it from there rather than from the working copy is what
 # makes this reflect what is DEPLOYED - running it against an uncommitted local
 # edit would configure the server from something no one else can see.
-find_plan
+[ -n "${CM:-}" ] || find_plan
 plan_text | api apply || die "the plan did not apply cleanly"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -789,8 +1067,20 @@ say "Reloading settings"
 # ⚠ APPLYING IS NOT ACTIVATING. Directory data takes effect immediately, but
 # listeners, MTA rules, directory backends and telemetry are parsed once into an
 # in-memory snapshot. Every object in plan.ndjson is in that category.
-api reload || die "reload failed"
-ok "settings reloaded"
+#
+# ⚠ BY HAND ONE RELOAD IS ENOUGH, BECAUSE THE RESTART BELOW REACHES EVERY NODE.
+# The Job never restarts, so it asks each node to reload itself rather than
+# relying on the coordinator to carry the request.
+if [ "$IN_CLUSTER" = true ]; then
+  while read -r name ip; do
+    [ -n "$name" ] || continue
+    (BASE_URL="http://$(url_host "$ip"):8080" && api reload) || die "reload failed on $name"
+    ok "settings reloaded on $name"
+  done <<<"$NODES"
+else
+  api reload || die "reload failed"
+  ok "settings reloaded"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 if [ "$RESTART" = true ]; then
@@ -831,10 +1121,31 @@ if [ "$RESTART" = true ]; then
   done
   sleep 3
   connect
+elif [ "$IN_CLUSTER" = true ]; then
+  # ⚠ THE JOB NEVER RESTARTS, AND IT SAYS SO WHEN IT MATTERS. The plan change
+  # that brought us here already rolled both pods (the ConfigMap name carries
+  # the content hash), but it did so BEFORE this hook applied anything - so a
+  # startup-read setting applied just now is not live until the next restart.
+  # The Job's log is deleted when it succeeds (HookSucceeded), so this line is
+  # only there to read while the sync is open; the durable answer is the list in
+  # config/README.md, "Applied by Argo".
+  if [ -n "$restart_note" ]; then
+    warn "A PERSON MUST RESTART THE PODS: run ./bootstrap.sh by hand on psl-vps."
+    warn "$(printf '%s' "$restart_note" | sed 's/^ *//')"
+  else
+    ok "nothing applied is read at startup, so no restart is needed"
+  fi
 else
   warn "skipping the restart - the certificate, tracer and cached permissions may be stale"
 fi
 
+# By hand a failed check is a warning: a person is reading it and can judge. In
+# the Job it fails the sync, which is the only way anyone is told.
+if [ "$IN_CLUSTER" = true ]; then
+  verify || die "verification found problems - the plan IS applied; see above"
+  say "Applied and verified."
+  exit 0
+fi
 verify || warn "verification found problems; see above"
 
 # ─────────────────────────────────────────────────────────────────────────────

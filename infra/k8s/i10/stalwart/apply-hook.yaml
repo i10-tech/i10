@@ -1,0 +1,159 @@
+# Applies config/plan.ndjson to Stalwart after every sync, as an Argo PostSync
+# hook (#412). It runs bootstrap.sh - the same file a person runs by hand - as
+# `--in-cluster --if-changed`; read the header of that script for what the Job
+# does and does not do. This file is only the shell around it.
+#
+# ⚠ A POSTSYNC HOOK, SO IT RUNS AFTER THE PODS HAVE ROLLED, NOT BEFORE. Any edit
+# to plan.ndjson renames the ConfigMap (the name carries the content hash), which
+# rolls both Stalwart pods; Argo runs this once they are Healthy. Two things
+# follow. The pods the hook talks to already hold the new Secret and the new
+# ConfigMap. And a setting Stalwart reads only at startup is applied AFTER that
+# startup, so it is not live until a person restarts - the Job logs which ones.
+# It cannot be a PreSync hook: on a first install there is no Stalwart for it to
+# talk to, and a hook that cannot finish blocks the sync forever.
+#
+# ⚠ THE HOOK POLICY IS THE SAME TWO-PART ONE AS i10-api-migrate, FOR THE SAME
+# REASON. A Job's `spec.template` is immutable; with HookSucceeded alone, a
+# failed Job keeps its name and the next sync's recreate is rejected, which
+# blocks the PostSync phase of every sync after it. BeforeHookCreation clears the
+# corpse first, HookSucceeded cleans up after a pass, and a failed run's pod
+# stays readable until the next sync. See workloads/api.yaml.
+#
+# ⚠ BOUNDED TWICE. A hung Stalwart must fail the sync visibly, not hold it:
+# `wait` inside the script gives up after 90s, each API call after 30s, and
+# activeDeadlineSeconds ends the Job whatever it is doing. backoffLimit 1 lets a
+# node that was mid-restart answer the second time, and no more.
+#
+# ⚠ NO NetworkPolicy WAS ADDED, AND THAT WAS CHECKED RATHER THAN ASSUMED. The
+# namespace denies ingress by default and re-admits `allow-same-namespace` - every
+# pod in i10-prod, every port - which is what lets this Job reach 8080, 25 and
+# 465 on the pods. Policies are additive, so a narrower rule here would change
+# nothing, and the Job has no Service and accepts no connection. There is no
+# egress policy on it. What the network does cost is the first second or two: a
+# new pod's address is dropped until kube-router admits it, which the script's
+# wait rides out.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: i10-stalwart-apply
+  namespace: i10-prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: i10-stalwart-apply
+  namespace: i10-prod
+rules:
+  # ⚠ THE WHOLE OF ITS RIGHTS: READ TWO PODS BY NAME. It needs their addresses
+  # (the Service picks a node at random and the apply wants to be told which) and
+  # their `env`, to refuse a plan that names a variable they lack. No Secret
+  # access - the values arrive in the Job's own environment - no `exec`, no
+  # `pods/log`, no delete, no list.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+    resourceNames: ["i10-stalwart-0", "i10-stalwart-internal-0"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: i10-stalwart-apply
+  namespace: i10-prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: i10-stalwart-apply
+subjects:
+  - kind: ServiceAccount
+    name: i10-stalwart-apply
+    namespace: i10-prod
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: i10-stalwart-apply
+  namespace: i10-prod
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      # ⚠ NOT `part-of: i10-stalwart`, AND NOT `name: i10-stalwart`. The first is
+      # what the i10-stalwart Service selects and what bootstrap.sh restarts; the
+      # second is what allow-public-mail admits from the internet. This pod is
+      # neither a node nor reachable.
+      labels:
+        app.kubernetes.io/name: i10-stalwart-apply
+    spec:
+      restartPolicy: Never
+      serviceAccountName: i10-stalwart-apply
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: apply
+          # ⚠ THE IMAGE cert-reload.yaml ALREADY PULLS, because it has what the
+          # script needs and nothing else in the cluster does: python3 3.12,
+          # bash, curl and busybox nc (checked by running it). Pinned by digest -
+          # the tag is a moving target on a mirror of Alpine edge. See the note
+          # there on why registry.k8s.io/kubectl will not do: no shell.
+          image: alpine/k8s:1.34.1@sha256:ec714df3813b5405292860f8a1c55c5727bf8c33c88992f1e981efad8065547f
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          command:
+            - bash
+            - /opt/stalwart-apply/bootstrap.sh
+            - --in-cluster
+            - --if-changed
+          env:
+            # python writes nothing under a read-only root; HOME and TMPDIR are
+            # the one writable mount.
+            - { name: HOME, value: /tmp }
+            - { name: TMPDIR, value: /tmp }
+            - { name: PYTHONDONTWRITEBYTECODE, value: "1" }
+            - name: NS
+              valueFrom:
+                fieldRef: { fieldPath: metadata.namespace }
+            # Edge first: it takes the apply and the checks. A node added later
+            # has to be named here, and in the Role above.
+            - { name: STALWART_NODES, value: "i10-stalwart-0 i10-stalwart-internal-0" }
+          # ⚠ THE WHOLE SECRET, THE WAY THE PODS TAKE IT, AND NOT KEY BY KEY. The
+          # plan can name any of its keys through `@fromSecret`, and the script
+          # compares the keys the Job holds against the pods' own spec, so
+          # taking exactly what they take is what makes that comparison honest.
+          # The credential is STALWART_RECOVERY_ADMIN in here; the script passes
+          # it to its helper through the environment and never prints it.
+          envFrom:
+            - secretRef: { name: i10-stalwart }
+          volumeMounts:
+            # The ConfigMap the Stalwart pods mount, by its generated name:
+            # kustomize rewrites `i10-stalwart-config` here to the hashed one it
+            # just built, so this is the plan that is DEPLOYED, nothing else.
+            - { name: plan, mountPath: /etc/stalwart-plan, readOnly: true }
+            - { name: script, mountPath: /opt/stalwart-apply, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: plan
+          configMap:
+            name: i10-stalwart-config
+            items:
+              - { key: plan.ndjson, path: plan.ndjson }
+        # bootstrap.sh itself, in a ConfigMap of its own (kustomization.yaml). It
+        # is NOT added to i10-stalwart-config: that one's hash rolls the Stalwart
+        # pods, and editing a script must not restart a mail server.
+        - name: script
+          configMap:
+            name: i10-stalwart-apply
+        - name: tmp
+          emptyDir: {}
