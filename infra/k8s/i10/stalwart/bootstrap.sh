@@ -843,10 +843,10 @@ say "DNS records this server expects"
 #
 # ⚠ ON A REBUILD THE DKIM KEYS ARE NEW. Stalwart generates its signing keys at
 # first boot and holds the private halves in its own database. A rebuilt server
-# has different keys under different selectors, so the DKIM records in
-# infra/tofu/stacks/dns are WRONG until they are replaced from this output - and
-# the failure is silent: mail sends, DKIM fails, DMARC alignment fails, and it
-# lands in spam.
+# has different keys under different selectors. i10.tech's DnsServer (B4)
+# publishes them in Cloudflare by itself; if it cannot (no token, wrong scope),
+# the new key stays `pending`, mail goes out signed by nothing, DMARC alignment
+# fails on direct-route mail, and it lands in spam. Check DkimSignature stages.
 #
 # TLSA records are filtered out on purpose. Stalwart offers 22 of them; DANE
 # pins the certificate, cert-manager renews every 60 days, and nothing updates
@@ -856,7 +856,7 @@ warn "This is what Stalwart SUGGESTS, not what i10 publishes."
 warn "  infra/tofu/stacks/dns is the authority. It deliberately differs:"
 warn "  DMARC stays p=none until the reports are clean (Stalwart proposes p=reject),"
 warn "  and the report addresses point at a mailbox that exists."
-warn "  What you DO need from here after a rebuild is the two _domainkey records."
+warn "  The _domainkey records are published by Stalwart itself (B4), not from here."
 zone=$(api zone || true)
 if [ -n "$zone" ]; then
   printf '%s\n' "$zone" | grep -v " TLSA " | sed 's/^/   /'
