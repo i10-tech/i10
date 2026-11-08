@@ -156,15 +156,31 @@ done
 # "stale images" on a rollout that then came up perfectly. A revision that
 # changed nothing in this Application starts no operation at all, so the rule
 # is "none running", not "one succeeded for this revision".
+#
+# ⚠ BUT ONE THAT FAILED FOR THIS REVISION IS A FAILED DEPLOY. A hook Job that
+# exits non-zero (i10-stalwart's PostSync apply, #412) ends the operation
+# `Failed` while the app still reads `Synced`, because every manifest WAS
+# applied - so "none running" alone would pass it. Only an operation for THIS
+# sha counts: an old failure is not this deploy's, and a revision that changed
+# nothing in the app starts no operation at all.
 deadline=$((SECONDS + SYNC_TIMEOUT))
-revision="" sync="" health="" phase="" synced=false
+revision="" sync="" health="" phase="" op_revision="" synced=false
 
 while (( SECONDS < deadline )); do
-  read -r revision sync health phase < <(
+  # `phase` before `op_revision`: a Running operation has no syncResult yet, and
+  # `read` fills fields from the left.
+  read -r revision sync health phase op_revision < <(
     kubectl get application "$APP" -n "$NAMESPACE" -o \
-      jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status} {.status.operationState.phase}' \
+      jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status} {.status.operationState.phase} {.status.operationState.syncResult.revision}' \
       2>/dev/null
   )
+
+  if [[ "$op_revision" == "$SHA" && ( "$phase" == "Failed" || "$phase" == "Error" ) ]]; then
+    echo "verify-rollout: FAILED - Argo's sync of ${SHORT} ended ${phase}" >&2
+    kubectl get application "$APP" -n "$NAMESPACE" -o \
+      jsonpath='  {.status.operationState.message}{"\n"}{range .status.operationState.syncResult.resources[?(@.hookPhase=="Failed")]}  hook {.kind}/{.name}: {.message}{"\n"}{end}' >&2 2>&1
+    exit 1
+  fi
 
   if [[ "$revision" == "$SHA" && "$sync" == "Synced" \
         && "$phase" != "Running" && "$phase" != "Terminating" ]]; then
