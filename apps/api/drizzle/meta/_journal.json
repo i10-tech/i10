@@ -1016,6 +1016,13 @@
       "when": 1794087766533,
       "tag": "0144_authd_close_signin_gaps",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1794110307534,
+      "tag": "0145_authd_required_exempt",
+      "breakpoints": true
     }
   ]
 }

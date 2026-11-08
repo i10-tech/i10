@@ -148,7 +148,8 @@ const (
 	// ReasonSSORequired is an account that is NOT managed but whose address is on a
 	// domain an active connection requires SSO for: its Clerk password is not
 	// accepted any more, and it becomes managed (and gets its company's password)
-	// by signing in through SSO.
+	// by signing in through SSO. Not the people the SSO layer exempts (owners and
+	// admins while the owner exemption is on, a connection's bypass list).
 	ReasonSSORequired = "sso_required"
 )
 
@@ -183,6 +184,15 @@ var _ verify.Verifier = refusal{}
 // can never match it. That is what makes the switch take effect on the next bind
 // on every pod, not after the cache's two hours.
 //
+// ⚠ EXCEPT THE PEOPLE SSO ITSELF EXEMPTS (`SSOExempt`): owners and admins while
+// the owner exemption is on, and whoever the connection's bypass list names. They
+// keep their Clerk password for mail, as they keep their way into the console,
+// and are answered by Unmanaged like an account nothing is required of. Taking
+// somebody out of the exemption is a revocation and works the same way as turning
+// "required" on: the next bind resolves them to the refusal, whose name differs
+// from Unmanaged's, so the password Unmanaged cached for them stops matching with
+// no query of its own.
+//
 // The resolver does no I/O. Whether the connection has pass-through settings,
 // and what they are, is fetched inside Verify, where the verifier's own timeout
 // bounds it.
@@ -200,7 +210,7 @@ type ManagedResolver struct {
 // Resolve implements verify.Resolver.
 func (r *ManagedResolver) Resolve(_ context.Context, account *projection.Account) (verify.Verifier, error) {
 	switch {
-	case !account.Managed && account.SSORequired:
+	case !account.Managed && account.SSORequired && !account.SSOExempt:
 		return refusal{ReasonSSORequired}, nil
 	case !account.Managed:
 		return r.Unmanaged, nil

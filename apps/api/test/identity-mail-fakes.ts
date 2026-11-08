@@ -2,6 +2,7 @@ import type {
   DirectoryMailDeps,
   DirectoryMailStore,
   LeaverAction,
+  LoginBlock,
   MailboxLifecycle,
   MailboxNote,
   MailboxRow,
@@ -31,6 +32,8 @@ interface Account {
   address: string
   active: boolean
   suspended: boolean
+  /** A payment hold, a Clerk ban or lock: refused whatever `suspended` says. */
+  blocks: LoginBlock[]
   aliases: Set<string>
   lists: Set<string>
 }
@@ -45,6 +48,8 @@ export function memoryMail(
     default?: { action: LeaverAction; days: number | null }
     members?: string[]
     directoryActive?: string[]
+    /** People every enabled directory that knows them says are deactivated. */
+    directoryDeactivated?: string[]
   } = {},
 ) {
   const hosted = new Map(Object.entries(init.hosted ?? { "acme.test": TENANT }))
@@ -65,6 +70,7 @@ export function memoryMail(
   const scheduled: { tenantId: string; clerkUserId: string; at: Date }[] = []
   const members = new Set(init.members ?? [])
   const active = new Set(init.directoryActive ?? [])
+  const deactivated = new Set(init.directoryDeactivated ?? [])
   const provisionResults = new Map<string, DirectoryMailboxOutcome>()
   const settings = {
     default: init.default ?? { action: "keep" as LeaverAction, days: null },
@@ -82,6 +88,7 @@ export function memoryMail(
       address,
       active,
       suspended: false,
+      blocks: [],
       aliases: new Set(),
       lists: new Set(),
     })
@@ -107,7 +114,7 @@ export function memoryMail(
     async account(tenantId, userId) {
       const a = accounts.get(userId)
       return a && a.tenantId === tenantId && a.active
-        ? { address: a.address, suspended: a.suspended }
+        ? { address: a.address, suspended: a.suspended, blocks: [...a.blocks] }
         : null
     },
     async recordActive(tenantId, userId, address) {
@@ -143,9 +150,10 @@ export function memoryMail(
       audit(tenantId, event)
       return "suspended"
     },
-    async resume(tenantId, userId, event) {
+    async resume(tenantId, userId, event, options) {
       const a = accounts.get(userId)
       const row = rows.get(key(tenantId, userId))
+      if (options?.memberOnly && !members.has(userId)) return "not_member"
       if (!a || a.tenantId !== tenantId) return "none"
       if (row?.state !== "suspended" && !a.suspended) return "none"
       a.suspended = false
@@ -263,6 +271,9 @@ export function memoryMail(
     async directoryActive(_t, userId) {
       return active.has(userId)
     },
+    async directoryDeactivated(_t, userId) {
+      return deactivated.has(userId)
+    },
     async scheduleDeletion(job, at) {
       if (fail.scheduling) throw new Error("redis down")
       scheduled.push({ tenantId: job.tenantId, clerkUserId: job.clerkUserId, at })
@@ -287,6 +298,7 @@ export function memoryMail(
     scheduled,
     members,
     active,
+    deactivated,
     managers,
     hosted,
     fail,

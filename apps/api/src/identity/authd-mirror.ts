@@ -1,8 +1,17 @@
 import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
-import { joinDomains } from "../db/core.js"
-import { connectionDomains, connections } from "../db/identity.js"
-import { authdManagedAccounts, authdRequiredDomains } from "../db/schema.js"
+import { joinDomains, workspaceRoles } from "../db/core.js"
+import {
+  bypassUsers,
+  connectionDomains,
+  connections,
+  workspaceSettings,
+} from "../db/identity.js"
+import {
+  authdManagedAccounts,
+  authdRequiredDomains,
+  authdRequiredExempt,
+} from "../db/schema.js"
 
 /**
  * What authd is told about managed accounts (#344): ONE place that writes
@@ -110,24 +119,130 @@ export async function mirrorRequiredDomains(tx: Tx, tenantId: string): Promise<v
             notInArray(authdRequiredDomains.domain, [...wanted.keys()]),
           ),
     )
+  if (wanted.size > 0) {
+    const now = new Date()
+    await tx
+      .insert(authdRequiredDomains)
+      .values(
+        [...wanted].map(([domain, connectionId]) => ({
+          domain,
+          tenantId,
+          connectionId,
+          updatedAt: now,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: authdRequiredDomains.domain,
+        set: {
+          tenantId: sql`excluded.tenant_id`,
+          connectionId: sql`excluded.connection_id`,
+          updatedAt: now,
+        },
+      })
+  }
+  // ⚠ WHO IS EXEMPT FOLLOWS WHICH CONNECTIONS REQUIRE, so a connection that starts
+  // or stops requiring changes the set in the same transaction.
+  await mirrorRequiredExempt(tx, tenantId)
+}
+
+/**
+ * Brings `authd.required_exempt` for one workspace to what its roles, settings
+ * and bypass lists say NOW: a person is there for each connection that requires
+ * SSO (`authd.required_domains`) while they are
+ *   - an owner or admin of the workspace and the owner exemption is on
+ *     (`owner_exemption`), or
+ *   - a member on that connection's bypass list (`bypass`).
+ * That is who the console's enforcement gate (identity/enforcement.ts) lets past
+ * "required" without SSO, and the owner decided they keep their Clerk password
+ * for mail too.
+ *
+ * It RECOMPUTES rather than applying a delta, like `mirrorRequiredDomains`, and
+ * every caller runs it from inside the tenant transaction of the change that can
+ * move it: a bypass entry added or removed, the owner exemption approved off or
+ * back on, ANY role write (console/roles-db.ts `transact`, the one writer of
+ * `core.workspace_roles`, so a demotion or a removed member is covered), and every
+ * change `mirrorRequiredDomains` already follows.
+ *
+ * ⚠ UNDER ONE LOCK PER WORKSPACE, AND IT HAS TO BE THIS ONE. A recompute reads
+ * the facts and writes the set; two at once, each blind to the other's uncommitted
+ * change, would let the one that commits last put back a pass the other had just
+ * taken away - a revoked person exempt again with nothing left to correct it.
+ * Serialised, whoever takes the lock reads everything committed before it.
+ * `_xact_` because PgBouncer pools by transaction; the lock goes with the commit.
+ *
+ * ⚠ A BYPASS ENTRY COUNTS ONLY WHILE THE PERSON IS A MEMBER. The console never
+ * sees a bypass entry of somebody who has left, because they cannot reach it; mail
+ * has no such door, so a stale entry must not keep a removed person's login open.
+ *
+ * ⚠ ONLY A CONNECTION THAT REQUIRES, per `authd.required_domains`: a bypass entry
+ * on a draft or testing connection says nothing about mail until it is active and
+ * requires. Nothing here applies to a managed account, which authd answers from
+ * its company's directory whatever this says.
+ */
+export async function mirrorRequiredExempt(tx: Tx, tenantId: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`authd_required_exempt:${tenantId}`}, 0))`,
+  )
+  const required = await tx
+    .selectDistinct({ connectionId: authdRequiredDomains.connectionId })
+    .from(authdRequiredDomains)
+    .where(eq(authdRequiredDomains.tenantId, tenantId))
+  const ids = required.map((r) => r.connectionId)
+
+  const wanted = new Map<
+    string,
+    { connectionId: string; clerkUserId: string; source: string }
+  >()
+  const want = (connectionId: string, clerkUserId: string, source: string) =>
+    wanted.set(`${connectionId}:${clerkUserId}:${source}`, {
+      connectionId,
+      clerkUserId,
+      source,
+    })
+
+  if (ids.length > 0) {
+    // No row means the defaults, and the default is exempt (decision 7).
+    const [settings] = await tx
+      .select({ exemption: workspaceSettings.ownerExemption })
+      .from(workspaceSettings)
+      .where(eq(workspaceSettings.tenantId, tenantId))
+      .limit(1)
+    if (settings?.exemption ?? true) {
+      const privileged = await tx
+        .select({ userId: workspaceRoles.clerkUserId })
+        .from(workspaceRoles)
+        .where(
+          and(
+            eq(workspaceRoles.tenantId, tenantId),
+            inArray(workspaceRoles.role, ["owner", "admin"]),
+          ),
+        )
+      for (const id of ids)
+        for (const p of privileged) want(id, p.userId, "owner_exemption")
+    }
+    const listed = await tx
+      .select({
+        connectionId: bypassUsers.connectionId,
+        userId: bypassUsers.clerkUserId,
+      })
+      .from(bypassUsers)
+      .innerJoin(
+        workspaceRoles,
+        and(
+          eq(workspaceRoles.tenantId, bypassUsers.tenantId),
+          eq(workspaceRoles.clerkUserId, bypassUsers.clerkUserId),
+        ),
+      )
+      .where(
+        and(eq(bypassUsers.tenantId, tenantId), inArray(bypassUsers.connectionId, ids)),
+      )
+    for (const l of listed) want(l.connectionId, l.userId, "bypass")
+  }
+
+  await tx.delete(authdRequiredExempt).where(eq(authdRequiredExempt.tenantId, tenantId))
   if (wanted.size === 0) return
   const now = new Date()
-  await tx
-    .insert(authdRequiredDomains)
-    .values(
-      [...wanted].map(([domain, connectionId]) => ({
-        domain,
-        tenantId,
-        connectionId,
-        updatedAt: now,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: authdRequiredDomains.domain,
-      set: {
-        tenantId: sql`excluded.tenant_id`,
-        connectionId: sql`excluded.connection_id`,
-        updatedAt: now,
-      },
-    })
+  const values = [...wanted.values()].map((w) => ({ ...w, tenantId, updatedAt: now }))
+  for (let i = 0; i < values.length; i += 500)
+    await tx.insert(authdRequiredExempt).values(values.slice(i, i + 500))
 }

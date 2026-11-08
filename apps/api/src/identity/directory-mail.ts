@@ -75,6 +75,12 @@ export type ManagerRead =
 
 export type MailboxNote = "domain_not_hosted" | "limit" | "address_taken"
 
+/**
+ * Why a login is still refused when `suspended_at` is not the reason: each is
+ * lifted by something else, and a resume must never lift them.
+ */
+export type LoginBlock = "payment_hold" | "banned" | "locked"
+
 export interface DirectoryMailStore {
   /** The tenant owning a verified, mail-hosting domain, or null. */
   hostedBy(domain: string): Promise<string | null>
@@ -88,11 +94,14 @@ export interface DirectoryMailStore {
   ): Promise<void>
   mailbox(tenantId: string, clerkUserId: string): Promise<MailboxRow | null>
   mailboxes(tenantId: string): Promise<MailboxRow[]>
-  /** The person's mailbox as the projection has it (this workspace's only). */
+  /**
+   * The person's mailbox as the projection has it (this workspace's only).
+   * `blocks`: what else refuses the login (a payment hold, a Clerk ban or lock).
+   */
   account(
     tenantId: string,
     clerkUserId: string,
-  ): Promise<{ address: string; suspended: boolean } | null>
+  ): Promise<{ address: string; suspended: boolean; blocks: LoginBlock[] } | null>
   /** The lifecycle row of an active mailbox. */
   recordActive(tenantId: string, clerkUserId: string, address: string): Promise<void>
   /**
@@ -107,12 +116,24 @@ export interface DirectoryMailStore {
     at: Date,
     audit: AuditEvent,
   ): Promise<"suspended" | "already" | "no_mailbox">
-  /** Lifts it, clears the plan and the routes. `none`: it was not suspended. */
+  /**
+   * Lifts it, clears the plan and the routes. `none`: it was not suspended.
+   *
+   * ⚠ ONLY `suspended_at`: a payment hold, a Clerk ban or lock and every other
+   * reason the login is refused are columns of their own and stay as they are.
+   *
+   * `memberOnly`: refuses (`not_member`) unless the person holds a role row in the
+   * workspace, read in the SAME transaction under a row lock, so a removal that is
+   * committing at this moment either lands first (and this refuses) or waits for
+   * this to commit (and its own suspension then follows). A directory's
+   * reactivation does not ask: it has its own membership step.
+   */
   resume(
     tenantId: string,
     clerkUserId: string,
     audit: AuditEvent,
-  ): Promise<"resumed" | "none">
+    options?: { memberOnly?: boolean },
+  ): Promise<"resumed" | "none" | "not_member">
   /** Changes what a SUSPENDED mailbox does next. `not_suspended`: refused. */
   choose(
     tenantId: string,
@@ -165,6 +186,12 @@ export interface DirectoryMailDeps {
   isMember(tenantId: string, userId: string): Promise<boolean>
   /** Whether ANY enabled directory of the workspace says the person is active. */
   directoryActive(tenantId: string, userId: string): Promise<boolean>
+  /**
+   * Whether the workspace's enabled directories know the person and EVERY one says
+   * they are deactivated (`personStatus` "inactive"). False when none knows them:
+   * somebody no directory has ever heard of is not a leaver of one.
+   */
+  directoryDeactivated(tenantId: string, userId: string): Promise<boolean>
   /** Puts the deletion on the queue for its date; a failure is not the caller's. */
   scheduleDeletion(
     job: { tenantId: string; clerkUserId: string; dueAt: number },
@@ -535,6 +562,89 @@ export async function chooseNext(
   if (done === "not_suspended") return { outcome: "not_suspended" }
   if (plan.deleteAt) await scheduleDeletion(d, input, plan.deleteAt)
   return { outcome: "ok", next: plan.next }
+}
+
+// ── The owner's resume ──────────────────────────────────────────────────────
+
+export type ResumeOutcome =
+  /** `stillBlocked`: what else refuses the login, which a resume does not lift. */
+  | { outcome: "resumed"; stillBlocked: LoginBlock[] }
+  | { outcome: "not_suspended" }
+  /** The person is not a member of the workspace now. */
+  | { outcome: "not_member" }
+  /** A directory still says they are deactivated: only the directory brings them back. */
+  | { outcome: "directory_deactivated" }
+  /** The mailbox's address is on a domain this workspace no longer hosts mail for. */
+  | { outcome: "domain_not_hosted" }
+
+/**
+ * An owner or admin gives a suspended mailbox its login back: the way out of a
+ * suspension that no directory will lift - a member who was removed and is back,
+ * a person an admin suspended for good reason and has since cleared.
+ *
+ * ⚠ IT CLEARS `suspended_at` AND NOTHING ELSE. A payment hold is lifted by paying,
+ * and a Clerk ban or lock by Clerk; an owner's resume must not undo either, so the
+ * outcome says what still refuses the login and the console tells the owner.
+ *
+ * ⚠ IT REFUSES WHAT WOULD FIGHT THE REASON THE MAILBOX WAS SUSPENDED:
+ *   - NOT A MEMBER (also re-checked inside the store's transaction): the mailbox was
+ *     suspended because they left, and a removed person's login does not come back
+ *     with a click. Add them to the workspace first.
+ *   - A DIRECTORY STILL SAYS THEY ARE DEACTIVATED: the company's directory is the
+ *     authority on its leavers, and resuming one by hand would only be undone by its
+ *     next push, with a login open in between. The directory reactivates them.
+ *   - THE DOMAIN IS NOT THIS WORKSPACE'S ANY MORE: a mailbox suspended because its
+ *     domain was removed must not open again on a name the workspace does not hold.
+ * A directory's deactivation racing this resume heals itself at that directory's
+ * next push, which suspends again; a removal does not repeat, hence the lock.
+ *
+ * ⚠ EVERY ATTEMPT IS AUDITED WITH THE ACTOR, refusals too.
+ */
+export async function resumeMailbox(
+  d: DirectoryMailDeps,
+  input: { tenantId: string; clerkUserId: string; actorUserId: string },
+): Promise<ResumeOutcome> {
+  const t = input.tenantId
+  const refuse = async (
+    outcome: ResumeOutcome,
+    why: string,
+  ): Promise<ResumeOutcome> => {
+    await d.record(t, {
+      type: "mailbox.resume_refused",
+      actorUserId: input.actorUserId,
+      subjectUserId: input.clerkUserId,
+      reason: why,
+    })
+    return outcome
+  }
+  const [account, row] = await Promise.all([
+    d.store.account(t, input.clerkUserId),
+    d.store.mailbox(t, input.clerkUserId),
+  ])
+  if (!account || (!account.suspended && row?.state !== "suspended"))
+    return refuse({ outcome: "not_suspended" }, "not_suspended")
+  if (!(await d.isMember(t, input.clerkUserId)))
+    return refuse({ outcome: "not_member" }, "not_member")
+  if (await d.directoryDeactivated(t, input.clerkUserId))
+    return refuse({ outcome: "directory_deactivated" }, "directory_deactivated")
+  if ((await d.store.hostedBy(domainOf(account.address))) !== t)
+    return refuse({ outcome: "domain_not_hosted" }, "domain_not_hosted")
+
+  const done = await d.store.resume(
+    t,
+    input.clerkUserId,
+    {
+      type: "mailbox.resumed",
+      actorUserId: input.actorUserId,
+      subjectUserId: input.clerkUserId,
+      reason: "owner",
+      data: { stillBlocked: account.blocks },
+    },
+    { memberOnly: true },
+  )
+  if (done === "not_member") return refuse({ outcome: "not_member" }, "not_member")
+  if (done === "none") return refuse({ outcome: "not_suspended" }, "not_suspended")
+  return { outcome: "resumed", stillBlocked: account.blocks }
 }
 
 // ── Deletion ────────────────────────────────────────────────────────────────

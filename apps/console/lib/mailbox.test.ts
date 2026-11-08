@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { daysInRange, deletionDate, nextSummary } from "./mailbox"
+import { daysInRange, deletionDate, nextSummary, resumeNote } from "./mailbox"
 
 describe("the date a deletion lands on", () => {
   it("is the chosen number of days from now", () => {
@@ -54,5 +54,24 @@ describe("one line on a suspended mailbox", () => {
         name,
       ),
     ).toBe("Open to a delegate.")
+  })
+})
+
+describe("what an owner is told after resuming a mailbox", () => {
+  it("says the person can sign in when nothing else refuses them", () => {
+    expect(resumeNote("ada@acme.dev", [])).toBe("ada@acme.dev can sign in again.")
+  })
+  it("says what a resume did not lift, so nobody has to find out from the person", () => {
+    expect(resumeNote("ada@acme.dev", ["payment_hold"])).toBe(
+      "ada@acme.dev is resumed, but it cannot sign in yet: the workspace's plan is unpaid.",
+    )
+    expect(resumeNote("ada@acme.dev", ["banned", "locked"])).toBe(
+      "ada@acme.dev is resumed, but it cannot sign in yet: the account is banned and the account is locked.",
+    )
+  })
+  it("lists three reasons with commas and a last and", () => {
+    expect(resumeNote("a@b.dev", ["payment_hold", "banned", "locked"])).toContain(
+      "unpaid, the account is banned and the account is locked.",
+    )
   })
 })

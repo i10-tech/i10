@@ -392,6 +392,62 @@ export const authdRequiredDomains = authd.table(
 )
 
 /**
+ * Who keeps their Clerk password for mail on a required domain, as authd needs it.
+ *
+ * "Required" refuses the Clerk password of every account that is not managed
+ * (`required_domains`). The people SSO itself exempts keep it, as they keep their
+ * way into the console: owners and admins while the workspace's owner exemption is
+ * on (`owner_exemption`), and whoever a connection's bypass list names (`bypass`).
+ * A row says "this person is exempt from THIS connection's requirement", and
+ * authd reads it beside the required domain in the one account query.
+ *
+ * ⚠ EVERY ROW IS A PASS, SO A ROW LEFT BEHIND IS A REVOCATION THAT NEVER HAPPENED.
+ * Nothing here is a flag that somebody has to remember to clear: the whole
+ * workspace's set is RECOMPUTED from the roles, the settings, the bypass lists and
+ * `required_domains` (identity/authd-mirror.ts `mirrorRequiredExempt`), under one
+ * lock per workspace, in the same transaction as every change to any of them.
+ * Removing somebody from the bypass list or the exemption, demoting an admin,
+ * removing a member or turning "required" off all end in a recompute that no longer
+ * lists them, and authd reads that at the next bind, ahead of its credential cache.
+ *
+ * ⚠ NOTHING HERE EXPIRES, AND THAT IS THE SOURCES' DOING, NOT THIS TABLE'S. The
+ * bypass list has no end date and the owner exemption is a switch (its two-owner
+ * request to turn it off times out, but the exemption stays ON until approved), so
+ * there is no moment for a clock to lift. A source that gains an expiry must put it
+ * in this table's recompute AND in authd's query (`expires_at > now()`): a recompute
+ * only runs when something is written, and a lapse writes nothing.
+ *
+ * ⚠ ONE WRITER: identity/authd-mirror.ts. The foreign keys are the backstop: a
+ * connection or a workspace deleted takes its rows with it.
+ */
+export const authdRequiredExempt = authd.table(
+  "required_exempt",
+  {
+    connectionId: uuid("connection_id").notNull(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** `owner_exemption` (an owner or admin while the exemption is on) or `bypass` (a connection's list). */
+    source: text("source").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.connectionId, t.clerkUserId, t.source] }),
+    index("required_exempt_tenant_idx").on(t.tenantId),
+    foreignKey({
+      name: "authd_exempt_connection_fk",
+      columns: [t.connectionId],
+      foreignColumns: [connections.id],
+    }).onDelete("cascade"),
+    check(
+      "required_exempt_source_check",
+      sql`"source" in ('owner_exemption', 'bypass')`,
+    ),
+  ],
+)
+
+/**
  * Webhook delivery is at-least-once and unordered.
  *
  * Recording the Svix message id makes replays idempotent. Out-of-order delivery

@@ -376,6 +376,15 @@ export interface Mailboxes {
   limits: { minDays: number; maxDays: number }
 }
 
+/** What still refuses a login after `suspended_at` is lifted: each is cleared elsewhere. */
+export type LoginBlock = "payment_hold" | "banned" | "locked"
+
+/** `POST /identity/mailboxes/:userId/resume`. */
+export interface ResumedMailbox {
+  ok: true
+  stillBlocked: LoginBlock[]
+}
+
 /** A choice for a suspended mailbox, as `PUT .../next` takes it. */
 export type NextChoice =
   | { next: "keep" }

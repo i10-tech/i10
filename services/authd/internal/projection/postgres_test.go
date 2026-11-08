@@ -180,7 +180,8 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 	}
 	t.Cleanup(w.Close)
 
-	const id, email, slug, conn = "user_gates_test", "gates-test@required.test", "gates-test", "66666666-6666-4666-8666-666666666666"
+	const id, email, slug, conn, otherConn = "user_gates_test", "gates-test@required.test", "gates-test",
+		"66666666-6666-4666-8666-666666666666", "99999999-9999-4999-8999-999999999999"
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		if _, err := w.Exec(ctx, sql, args...); err != nil {
@@ -223,7 +224,8 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 		}
 		// The search path and the bind path share the column list.
 		if byAddr[0].PaymentHold != got.PaymentHold || byAddr[0].Banned != got.Banned ||
-			byAddr[0].Locked != got.Locked || byAddr[0].SSORequired != got.SSORequired {
+			byAddr[0].Locked != got.Locked || byAddr[0].SSORequired != got.SSORequired ||
+			byAddr[0].SSOExempt != got.SSOExempt {
 			t.Fatalf("search read %+v, bind read %+v", byAddr[0], got)
 		}
 		return *got
@@ -275,8 +277,43 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 		t.Fatalf("a required domain of another workspace marked this account: %+v", a)
 	}
 	exec(`UPDATE authd.accounts SET tenant_id = (SELECT id FROM core.tenants WHERE slug = $2) WHERE clerk_user_id = $1`, id, slug)
+
+	// ⚠ WHO SSO EXEMPTS IS READ FROM THE SAME ROW, THROUGH THE CONNECTION THAT
+	// REQUIRES THE DOMAIN. `authd.required_exempt` is new too: the `authd` role has to
+	// read it through the schema's default privileges.
+	if a := read(); !a.SSORequired || a.SSOExempt {
+		t.Fatalf("a required, unexempt account read as %+v", a)
+	}
+	exec(`INSERT INTO identity.connections (id, tenant_id, name, protocol)
+		SELECT $1::uuid, id, 'Other connection', 'saml' FROM core.tenants WHERE slug = $2`, otherConn, slug)
+	grant := func(connection, source string) {
+		exec(`INSERT INTO authd.required_exempt (connection_id, tenant_id, clerk_user_id, source)
+			SELECT $1::uuid, id, $2, $3 FROM core.tenants WHERE slug = $4`, connection, id, source, slug)
+	}
+	// A pass for ANOTHER connection says nothing about this domain's.
+	grant(otherConn, "bypass")
+	if a := read(); !a.SSORequired || a.SSOExempt {
+		t.Fatalf("a bypass for another connection exempted the account: %+v", a)
+	}
+	grant(conn, "owner_exemption")
+	if a := read(); !a.SSORequired || !a.SSOExempt {
+		t.Fatalf("an exempt owner on a required domain read as %+v", a)
+	}
+	// A row left behind for a name that changed hands exempts nobody there either.
+	exec(`UPDATE authd.accounts SET tenant_id = NULL WHERE clerk_user_id = $1`, id)
+	if a := read(); a.SSORequired || a.SSOExempt {
+		t.Fatalf("another workspace's domain marked this account: %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET tenant_id = (SELECT id FROM core.tenants WHERE slug = $2) WHERE clerk_user_id = $1`, id, slug)
+	// Removed from the exemption: the very next read says so.
+	exec(`DELETE FROM authd.required_exempt WHERE clerk_user_id = $1 AND connection_id = $2::uuid`, id, conn)
+	if a := read(); !a.SSORequired || a.SSOExempt {
+		t.Fatalf("losing the exemption did not show: %+v", a)
+	}
+	// And an exemption means nothing once the domain is not required at all.
+	grant(conn, "bypass")
 	exec(`DELETE FROM authd.required_domains WHERE domain = 'required.test'`)
-	if a := read(); a.SSORequired {
+	if a := read(); a.SSORequired || a.SSOExempt {
 		t.Fatalf("turning the requirement off did not restore the account: %+v", a)
 	}
 }

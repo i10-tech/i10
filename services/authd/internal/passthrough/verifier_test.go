@@ -154,3 +154,30 @@ func TestTheVerifierFitsInsideTheBindWindowAndCarriesTheDirectoryBudget(t *testi
 		t.Error("changing the budget a verifier returned changed the package's")
 	}
 }
+
+// ⚠ SSO REQUIRED REFUSES THE CLERK PASSWORD, EXCEPT FOR THE PEOPLE SSO EXEMPTS.
+// The refusal's name differs from Clerk's, which is what makes losing the
+// exemption bite on the next bind: a password cached under "clerk" cannot match it.
+func TestTheResolverRefusesARequiredDomainExceptForTheExempt(t *testing.T) {
+	r := &ManagedResolver{Unmanaged: clerkStub{}, Directory: &scripted{}, Log: quiet}
+
+	required := resolve(t, r, projection.Account{ClerkUserID: "u", SSORequired: true})
+	if required.Name() != ReasonSSORequired {
+		t.Fatalf("an unexempt account on a required domain resolved to %q, want %q", required.Name(), ReasonSSORequired)
+	}
+	exempt := resolve(t, r, projection.Account{ClerkUserID: "u", SSORequired: true, SSOExempt: true})
+	if exempt.Name() != "clerk" {
+		t.Fatalf("an exempt account on a required domain resolved to %q, want clerk", exempt.Name())
+	}
+	if exempt.Name() == required.Name() {
+		t.Fatal("the refusal and Clerk share a name: a cached Clerk password would outlive the exemption")
+	}
+
+	// An account that is managed is answered by its directory whatever the flags say.
+	managed := resolve(t, r, projection.Account{
+		ClerkUserID: "u", Managed: true, ManagedConnection: "c1", SSORequired: true, SSOExempt: true,
+	})
+	if managed.Name() != NamePrefix+"c1" {
+		t.Fatalf("a managed account resolved to %q, want its connection's verifier", managed.Name())
+	}
+}

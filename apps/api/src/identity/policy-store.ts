@@ -14,6 +14,7 @@ import {
   workspaceSettings,
 } from "../db/identity.js"
 import { NO_TENANT } from "../middleware/tenant.js"
+import { mirrorRequiredExempt } from "./authd-mirror.js"
 import type { Enforcement } from "./model.js"
 import type {
   BypassEntry,
@@ -291,13 +292,16 @@ export function ssoPolicyStore(db: Database): SsoPolicyStore {
           })
           .onConflictDoNothing()
           .returning({ id: bypassUsers.clerkUserId })
-        return made.length > 0 ? ("added" as const) : ("exists" as const)
+        // ⚠ A BYPASS ENTRY IS A PASS TO MAIL TOO, SO authd'S COPY MOVES WITH IT.
+        if (made.length === 0) return "exists" as const
+        await mirrorRequiredExempt(tx, tenantId)
+        return "added" as const
       })
     },
 
     async removeBypass(tenantId, connectionId, clerkUserId) {
-      const [gone] = await withTenant(db, tenantId, (tx) =>
-        tx
+      return withTenant(db, tenantId, async (tx) => {
+        const [gone] = await tx
           .delete(bypassUsers)
           .where(
             and(
@@ -306,9 +310,13 @@ export function ssoPolicyStore(db: Database): SsoPolicyStore {
               eq(bypassUsers.clerkUserId, clerkUserId),
             ),
           )
-          .returning(),
-      )
-      return gone ? toBypass(gone) : null
+          .returning()
+        // ⚠ A REMOVAL IS A REVOCATION: the person's Clerk password stops opening
+        // their mail at the next bind, in the same transaction.
+        if (!gone) return null
+        await mirrorRequiredExempt(tx, tenantId)
+        return toBypass(gone)
+      })
     },
 
     async ownerExemption(tenantId, now) {
@@ -380,6 +388,8 @@ export function ssoPolicyStore(db: Database): SsoPolicyStore {
             updatedAt: now,
           })
           .where(eq(workspaceSettings.tenantId, tenantId))
+        // ⚠ OWNERS AND ADMINS LOSE THEIR MAIL PASS WITH THE EXEMPTION.
+        await mirrorRequiredExempt(tx, tenantId)
         return { outcome: "applied" as const, requestedBy }
       })
     },
@@ -414,6 +424,7 @@ export function ssoPolicyStore(db: Database): SsoPolicyStore {
             updatedAt: new Date(),
           })
           .where(eq(workspaceSettings.tenantId, tenantId))
+        await mirrorRequiredExempt(tx, tenantId)
         return true
       })
     },

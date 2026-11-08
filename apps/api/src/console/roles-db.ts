@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { workspaceRoles } from "../db/core.js"
+import { mirrorRequiredExempt } from "../identity/authd-mirror.js"
 import {
   readRole,
   type Decision,
@@ -117,6 +118,13 @@ export function roleStore(db: Database): RoleStore {
               set: values,
             })
         }
+        /*
+         * ⚠ THE ROLE IS ALSO A PASS TO MAIL: an owner or admin keeps their Clerk
+         * password where SSO is required (authd.required_exempt). This is the one
+         * writer of `workspace_roles`, so a demotion or a removed member reaches
+         * authd here, in the same transaction, and takes effect at the next bind.
+         */
+        if (decision.writes.length > 0) await mirrorRequiredExempt(tx, tenantId)
         return decision.result
       })
     },

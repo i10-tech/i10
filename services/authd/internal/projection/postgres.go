@@ -60,6 +60,16 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 // ⚠ A REQUIRED DOMAIN BINDS ONLY ITS OWN WORKSPACE'S ACCOUNTS (`tenant_id`). The
 // mirror is recomputed on the changes that move it, but a row left behind for a
 // name that has since changed hands must not lock out the new owner's people.
+//
+// ⚠ WHO IS EXEMPT FROM IT IS READ FROM THE SAME ROW OF THE SAME QUERY, THROUGH THE
+// CONNECTION THAT REQUIRES THE DOMAIN. `authd.required_exempt` has a row for a
+// person exactly while they are an owner or admin of the workspace with its owner
+// exemption on, or on that connection's bypass list; the API recomputes it in the
+// transaction of every change to any of those, so adding or removing somebody
+// shows at the next bind on both pods. It is joined on the domain's own connection
+// and tenant, so a pass for one connection says nothing about another's. Nothing in
+// it expires by itself (see `authd.required_exempt` in apps/api/src/db/schema.ts),
+// which is why no clock is read here.
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
 	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
@@ -67,7 +77,13 @@ const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	(a.locked AND (a.locked_until IS NULL OR a.locked_until > now())),
 	EXISTS (SELECT 1 FROM authd.required_domains rd
 	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
-	          AND rd.tenant_id = a.tenant_id)`
+	          AND rd.tenant_id = a.tenant_id),
+	EXISTS (SELECT 1 FROM authd.required_domains rd
+	        JOIN authd.required_exempt ex
+	          ON ex.connection_id = rd.connection_id AND ex.tenant_id = rd.tenant_id
+	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
+	          AND rd.tenant_id = a.tenant_id
+	          AND ex.clerk_user_id = a.clerk_user_id)`
 
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
@@ -171,7 +187,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
 			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
 			&a.Managed, &a.ManagedConnection, &a.Suspended, &a.PaymentHold,
-			&a.Banned, &a.Locked, &a.SSORequired); err != nil {
+			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

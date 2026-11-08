@@ -1884,6 +1884,10 @@ export function ssoRoutes(notFound: unknown): Route[] {
     ],
     [/^\/console\/identity\/mailboxes$/, () => MAILBOXES],
     [
+      /^\/console\/identity\/mailboxes\/([^/]+)\/resume$/,
+      () => ({ ok: true, stillBlocked: [] }),
+    ],
+    [
       /^\/console\/identity\/mailboxes\/([^/]+)\/next$/,
       (_m, _query, _method, body) => {
         const choice = (body ?? {}) as { next?: string }

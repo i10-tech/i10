@@ -770,6 +770,25 @@ acs|slo/<id>` on the auth origin; the entity id is the metadata URL).
 - **The bypass list:** a person passes only when every connection covering them
   lists them; each bypass sign-in is audited once per session
   (`sso.bypass_used`). The alert email to the other admins is #345's.
+- **Mail keeps the same exemptions (owner's decision, 2026-11-08).** Where
+  "required" refuses the Clerk password for mail (`sso_required`, authd), an
+  unmanaged owner or admin (while the owner exemption is on) and anyone on the
+  bypass list of the connection that requires the domain keep it, as they keep
+  the console. authd reads it in the account query from `authd.required_exempt`,
+  which the API recomputes under one lock per workspace in the transaction of
+  every change that can move it: a bypass entry, the exemption, any role write,
+  and whatever changes what requires SSO. Taking somebody out is refused at the
+  next bind, ahead of the credential cache. Nothing in it expires, because
+  neither source does. Mail asks no passkey of an exempt person (authd cannot
+  see one) and records no `sso.bypass_used`; a bypass entry counts only while the
+  person is a member.
+- **Resuming a suspended mailbox is an admin's** (the resume route under
+  `/identity/mailboxes/:userId`, step-up, audited with the actor). It clears
+  `suspended_at` only, so a payment hold, a Clerk ban or lock stay and the answer
+  says which. It refuses a person who is not a member (checked again in the
+  store's transaction under a lock), one a directory still says is deactivated,
+  and one whose domain the workspace no longer hosts. Re-adding a removed member
+  does not resume.
 - **Setup links:** `i10_setup_` tokens, stored hashed, one connection, 1 to 168
   hours (default 72), revocable with a reason, and revoked when the connection
   leaves draft or testing. A link may read and set the IdP settings (including a

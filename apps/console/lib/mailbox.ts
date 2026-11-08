@@ -1,4 +1,4 @@
-import type { LeaverAction, MailboxNext, MailboxRow } from "./sso-types"
+import type { LeaverAction, LoginBlock, MailboxNext, MailboxRow } from "./sso-types"
 
 /**
  * Directory mail (#344): the words for what happens to a person's mailbox when
@@ -38,6 +38,27 @@ export function daysInRange(
   limits: { minDays: number; maxDays: number },
 ): boolean {
   return Number.isInteger(days) && days >= limits.minDays && days <= limits.maxDays
+}
+
+const BLOCK_REASON: Record<LoginBlock, string> = {
+  payment_hold: "the workspace's plan is unpaid",
+  banned: "the account is banned",
+  locked: "the account is locked",
+}
+
+/**
+ * What to tell an owner once a mailbox is resumed. A resume lifts the suspension
+ * and nothing else, so a payment hold or a ban that is still there is said, not
+ * left for them to find out from a person who still cannot sign in.
+ */
+export function resumeNote(address: string, blocks: readonly LoginBlock[]): string {
+  if (blocks.length === 0) return `${address} can sign in again.`
+  const why = blocks.map((b) => BLOCK_REASON[b])
+  const list =
+    why.length === 1
+      ? why[0]
+      : `${why.slice(0, -1).join(", ")} and ${why[why.length - 1]}`
+  return `${address} is resumed, but it cannot sign in yet: ${list}.`
 }
 
 /** One line on what a suspended mailbox is set to do, for its row. */
