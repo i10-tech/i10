@@ -43,6 +43,7 @@
     "AWS_REGION",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
+    "CLERK_PROXY_URL",
     "CLERK_PUBLISHABLE_KEY",
     "CLERK_SECRET_KEY",
     "CLERK_SIGN_IN_URL",
@@ -94,6 +95,7 @@
     "WORKER_JOB_TIMEOUT_MS",
     "WORKER_MAX_ATTEMPTS",
     "CLIENT_CONTEXT_SECRET",
+    "EDGE_SECRET",
     "IPINFO_TOKEN",
     "LAYA_API_KEY",
     "LAYA_URL",
@@ -101,6 +103,9 @@
     "METERING_TEST_API_DATABASE_URL",
     "METERING_TEST_DATABASE_URL",
     "MAILBOX_ROUTE_TEST_DATABASE_URL",
+    "MAILBOX_AUTH_TEST_API_DATABASE_URL",
+    "MAILBOX_AUTH_TEST_DATABASE_URL",
+    "MAILBOX_QUOTA_TEST_DATABASE_URL",
     "RISK_ACT_SES_POLICY",
     "RISK_ACT_TAKEOVER",
     "RISK_ACT_TIERS",
@@ -120,6 +125,18 @@
     // stale the day a second provider is registered. It also covers
     // DNS_OAUTH_REDIRECT_BASE and the broker's URL and secret.
     "DNS_OAUTH_*",
+    // ⚠ AND AGAIN FOR SSO (#337-#345), found 2026-10-28 by the local IdP lab:
+    // the gateway secret, authd, Google sign-in and directory, the test engine
+    // and the SCIM base URL were all stripped, so dev showed prod's SCIM URL.
+    // NODE_EXTRA_CA_CERTS lets the API trust the lab's CA (tools/sso-lab).
+    "AUTHD_API_SECRET",
+    "GOOGLE_DIRECTORY_SERVICE_ACCOUNT",
+    "GOOGLE_SSO_CLIENT_ID",
+    "GOOGLE_SSO_CLIENT_SECRET",
+    "IDENTITY_GATEWAY_SECRET",
+    "IDENTITY_TEST_ENGINE",
+    "NODE_EXTRA_CA_CERTS",
+    "SCIM_BASE_URL",
     "AWS_ACCOUNT_ID",
     "CONTENT_BODY_CACHE_MB",
     "CONTENT_KEYS",
@@ -149,6 +166,7 @@
     "RISK_TEST_DATABASE_URL",
     "STORAGE_TEST_API_DATABASE_URL",
     "STORAGE_TEST_DATABASE_URL",
+    "TEAM_INBOX_TEST_DATABASE_URL",
     "TEMPLATES_TEST_DATABASE_URL",
     "WEBHOOKS_LAB_SLOW",
     "WEBHOOKS_TEST_DATABASE_URL",

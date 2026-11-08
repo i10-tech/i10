@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { accounts, aliases, webhookEvents } from "../db/schema.js"
+import { mailboxIdCache } from "../mail/jmap-as.js"
 import { projectUser, type ClerkUser } from "./clerk-user.js"
 
 /**
@@ -79,7 +80,7 @@ export async function applyClerkEvent(
 
       case "user.deleted": {
         const { id } = (data ?? {}) as { id?: string }
-        if (id) await tx.delete(accounts).where(eq(accounts.clerkUserId, id))
+        if (id) await removeAccount(tx, id)
         return { outcome: "removed" }
       }
 
@@ -117,6 +118,23 @@ export async function projectClerkUser(
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 /**
+ * Deletes a user's mailbox row and forgets the Stalwart account id cached for it.
+ *
+ * ⚠ THE CACHE DROP IS WHAT STOPS A DELETED MAILBOX RESOLVING. Stalwart answers
+ * for the id of an account that no longer exists (see `mail/jmap-as.ts`), so a
+ * cached one would keep reading and writing a phantom. Forgetting before the
+ * transaction commits is deliberate: a rollback only costs one extra lookup.
+ */
+async function removeAccount(tx: Tx, clerkUserId: string): Promise<void> {
+  const gone = await tx
+    .delete(accounts)
+    .where(eq(accounts.clerkUserId, clerkUserId))
+    .returning({ email: accounts.email })
+
+  for (const { email } of gone) mailboxIdCache.forget(email)
+}
+
+/**
  * Brings one user's rows in line with Clerk.
  *
  * ⚠ `active` IS NEVER WRITTEN HERE. It is the subscription gate - whether the
@@ -149,9 +167,16 @@ async function applyUser(
     // No hosted address: either they never had one, or they gave it up. Either
     // way they must stop resolving as a recipient. Aliases and memberships
     // cascade.
-    await tx.delete(accounts).where(eq(accounts.clerkUserId, user.id))
+    await removeAccount(tx, user.id)
     return { outcome: "removed" }
   }
+
+  // The address this user held before, so a rename drops its cached account id.
+  const [previous] = await tx
+    .select({ email: accounts.email })
+    .from(accounts)
+    .where(eq(accounts.clerkUserId, user.id))
+    .limit(1)
 
   const updated = await tx
     .insert(accounts)
@@ -160,6 +185,9 @@ async function applyUser(
       email: mailbox.email,
       displayName: mailbox.displayName || null,
       clerkUpdatedAt: mailbox.clerkUpdatedAt,
+      banned: mailbox.banned ?? false,
+      locked: mailbox.locked ?? false,
+      lockedUntil: mailbox.lockedUntil,
       // ⚠ THE TENANT IS THE ONE THAT OWNS THE DOMAIN, NOT THE USER'S CLERK ORG.
       // A mailbox on acme.com belongs to whoever proved they control acme.com;
       // the person holding it may be in several organisations or none. It is
@@ -176,6 +204,20 @@ async function applyUser(
         email: sql`excluded.email`,
         displayName: sql`excluded.display_name`,
         clerkUpdatedAt: sql`excluded.clerk_updated_at`,
+        // ⚠ BAN AND LOCK ARE CLERK'S AND REWRITTEN ON EVERY EVENT, so lifting one
+        // at Clerk lifts it here. The ordering guard below applies to them as to
+        // the rest: an older delivery cannot ban or unban over a newer one.
+        //
+        // ⚠ A FIELD THE PAYLOAD DID NOT CARRY KEEPS WHAT THE ROW HAS (null on the
+        // mailbox): only an explicit false lifts a ban or a lock.
+        banned:
+          mailbox.banned === null ? sql`${accounts.banned}` : sql`excluded.banned`,
+        locked:
+          mailbox.locked === null ? sql`${accounts.locked}` : sql`excluded.locked`,
+        lockedUntil:
+          mailbox.locked === null
+            ? sql`${accounts.lockedUntil}`
+            : sql`excluded.locked_until`,
         // Re-derived on every write, so a domain that changed hands - or was
         // verified after the mailbox existed - is corrected by the next event
         // rather than needing a backfill.
@@ -193,14 +235,23 @@ async function applyUser(
 
   if (updated.length === 0) return { outcome: "stale" }
 
+  if (previous && previous.email !== updated[0]!.email) {
+    mailboxIdCache.forget(previous.email)
+  }
+
   // Aliases are replaced wholesale rather than diffed. The set is small, it is
   // two statements either way, and a diff still has to get removal right.
+  //
+  // ⚠ ONLY THE ONES CLERK GAVE (`source = 'clerk'`). A company's directory
+  // lists addresses of its own (#344, mailboxes/store.ts), and replacing those
+  // here would delete them the next time the person edits their profile.
   if (mailbox.aliases.length > 0) {
     await tx
       .delete(aliases)
       .where(
         and(
           eq(aliases.clerkUserId, mailbox.clerkUserId),
+          eq(aliases.source, "clerk"),
           not(inArray(aliases.address, mailbox.aliases)),
         ),
       )
@@ -214,10 +265,15 @@ async function applyUser(
       )
       .onConflictDoUpdate({
         target: aliases.address,
-        set: { clerkUserId: sql`excluded.clerk_user_id` },
+        // An address Clerk now vouches for is Clerk's, whoever listed it first.
+        set: { clerkUserId: sql`excluded.clerk_user_id`, source: "clerk" },
       })
   } else {
-    await tx.delete(aliases).where(eq(aliases.clerkUserId, mailbox.clerkUserId))
+    await tx
+      .delete(aliases)
+      .where(
+        and(eq(aliases.clerkUserId, mailbox.clerkUserId), eq(aliases.source, "clerk")),
+      )
   }
 
   return { outcome: "upserted", email: updated[0]!.email }

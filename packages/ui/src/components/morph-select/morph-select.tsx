@@ -424,7 +424,9 @@ export function MorphSelect({ label, hideLabel = false, items, value, defaultVal
           animate={open ? { opacity: 1, y: 0, filter: "blur(0px)" } : { opacity: 0, y: reduced ? 0 : -6, filter: reduced ? "blur(0px)" : `blur(${blur.subtle}px)` }}
           transition={open ? { y: GROW, opacity: { duration: .2, ease: enter, delay: reduced ? 0 : .04 }, filter: { duration: .22, ease: enter, delay: .04 } } : { duration: .1, ease: standard }}>
           <div ref={scrollRef} className={styles.scroll}>
-            <div id={listId} className={styles.options} role="listbox" aria-labelledby={labelId}>
+            {/* A mouse leaving the list hands the highlight back to the chosen option, where it opened; a hover must not outlive the pointer (2026-11-04). */}
+            <div id={listId} className={styles.options} role="listbox" aria-labelledby={labelId}
+              onPointerLeave={event => { if (event.pointerType === "mouse") setActive(selected); }}>
               <motion.span className={styles.highlight} style={{ y: hy, height: hh, opacity: ho }} aria-hidden="true" />
               {visibleSections.map(section => {
                 const rows = section.options.map(option => {

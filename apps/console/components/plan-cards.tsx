@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Check } from "lucide-react"
 import { Button } from "@repo/ui/components/button/button"
+import { Reveal } from "@repo/ui/components/i10/reveal"
 import { cn } from "cn"
 import { changePlan, resumeSubscription, startCheckout } from "@/lib/actions"
 import { openPolarCheckout, untilCheckoutReadable } from "@/lib/polar-embed"
@@ -685,13 +686,13 @@ export function PlanCards({
              * "Scheduled" on its own invites the question this is supposed to
              * answer - when, and what happens in the meantime.
              */}
-            {scheduled && (
-              <p className="mt-2 text-xs text-muted-foreground">
+            <Reveal show={Boolean(scheduled)} spacing="pt-2">
+              <p className="text-xs text-muted-foreground">
                 You move here{" "}
                 {scheduledAt ? `on ${scheduledAt}` : "at the end of this period"}. Your{" "}
                 {current?.name ?? "current"} allowance continues until then.
               </p>
-            )}
+            </Reveal>
 
             {/*
              * ⚠ THE CONSEQUENCE IS SPELLED OUT UNDER THE BUTTON THAT CAUSES IT,
@@ -699,18 +700,21 @@ export function PlanCards({
              * somebody needs are that sending continues and when it stops, and
              * both are short enough to sit here.
              */}
-            {leaving && confirming?.id === plan.id && (
-              <p className="mt-2 text-xs text-muted-foreground">
+            <Reveal
+              show={Boolean(leaving && confirming?.id === plan.id)}
+              spacing="pt-2"
+            >
+              <p className="text-xs text-muted-foreground">
                 Your {current?.name} allowance continues until the end of the period you
                 have paid for. Press again to confirm, or pick another plan.
               </p>
-            )}
+            </Reveal>
 
-            {leaving && endingAt !== null && (
-              <p className="mt-2 text-xs text-muted-foreground">
+            <Reveal show={Boolean(leaving && endingAt !== null)} spacing="pt-2">
+              <p className="text-xs text-muted-foreground">
                 Your subscription already ends on {endingAt}. You move here then.
               </p>
-            )}
+            </Reveal>
           </li>
         )
       })}

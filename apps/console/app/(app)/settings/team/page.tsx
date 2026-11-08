@@ -12,13 +12,13 @@ export const metadata: Metadata = { title: "Team" }
 /**
  * Members, roles and invitations.
  *
- * ⚠ OURS SINCE 2026-10-12, DRAWN OVER CLERK'S DATA. This was Clerk's
- * `<OrganizationProfile />`, kept deliberately - membership, roles and who may
- * invite are Clerk's to answer, and projecting them into our database would
- * put a stale "who is an admin" exactly where authorization reads it. That
- * still holds: the panel (components/team-panel.tsx) reads and writes through
- * Clerk's organization API and checks Clerk's permissions; only the drawing is
- * ours. Clerk's original is at /reference/clerk/organization-profile.
+ * ⚠ OURS SINCE 2026-10-12, DRAWN OVER CLERK'S MEMBERSHIPS. This was Clerk's
+ * `<OrganizationProfile />`. Who is in is still Clerk's answer; since #335
+ * roles and who may invite are OURS - Clerk gives every member the same
+ * powerless role, because a Clerk admin could change memberships around
+ * every check we make - and the panel (components/team-panel.tsx) reads them
+ * from our API, which is where every change goes. Clerk's original is at
+ * /reference/clerk/organization-profile.
  */
 export default async function TeamSettingsPage() {
   /*

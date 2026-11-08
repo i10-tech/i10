@@ -36,6 +36,11 @@ import type { PasswordCheckDeps } from "../../console/password-check.js"
 import type { TeamDomainDeps } from "../../console/team-domains.js"
 import type { Reservation } from "../../console/code-cooldown.js"
 import type { MembersDeps } from "../../console/members.js"
+import type { RolesDeps } from "../../console/roles.js"
+import type { AccountDeps } from "../../console/account-deletion.js"
+import type { IdentityConsoleDeps } from "./identity.js"
+import type { TeamInboxes } from "../../team-inboxes/service.js"
+import type { StorageAllocations } from "../../mailboxes/allocation.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -149,6 +154,13 @@ export interface ConsoleDeps extends TenantAuthDeps {
   organizations?: {
     rename(clerkOrgId: string, name: string): Promise<void>
     /**
+     * A new team workspace for this person (#335): created through the
+     * backend, its creator demoted in Clerk at once (`createWorkspace` in
+     * console/roles.ts). `not_allowed` when Clerk's own settings for them
+     * would have refused it.
+     */
+    create?(userId: string, name: string): Promise<{ id: string } | "not_allowed">
+    /**
      * This person's Personal workspace, made if they have none (#325): named
      * "Personal", limited to one member. `created` is false when it existed.
      */
@@ -162,6 +174,14 @@ export interface ConsoleDeps extends TenantAuthDeps {
       userId: string,
       name: string,
     ): Promise<"ok" | "not_personal">
+    /**
+     * Deletes the organization (#335): Clerk's `organization.deleted` then
+     * tears the tenant down, as it always has. Already gone is `already_gone`.
+     */
+    remove?(clerkOrgId: string): Promise<"deleted" | "already_gone">
+    /** The workspace's logo, through Clerk's backend API (#335). */
+    setLogo?(clerkOrgId: string, file: Blob, uploaderUserId: string): Promise<void>
+    removeLogo?(clerkOrgId: string): Promise<void>
   }
   /**
    * The Clerk organizations a person belongs to - where an accepted domain may
@@ -198,11 +218,37 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   teamDomains?: TeamDomainDeps
   /**
+   * Workspace roles (#335): who may do what, from our table. Optional like
+   * the rest; without it every check that needs a role refuses, and the
+   * routes that change roles answer 501.
+   */
+  roles?: RolesDeps
+  /**
+   * SSO connections, member sessions and deprovisioning (#337). Optional:
+   * without it the identity routes answer 501.
+   */
+  identity?: IdentityConsoleDeps
+  /**
+   * Deleting a person's account through our API (#336), since the Clerk
+   * gateway refuses `DELETE /v1/me`. Optional; without it the route answers 501.
+   */
+  accounts?: AccountDeps
+  /**
    * Member limits per plan, invitations with a chosen expiry and capacity
    * alerts (#327). Optional; without it invitations answer 501 and the Team
    * page and /usage show no member counts.
    */
   members?: MembersDeps
+  /**
+   * Shared addresses the workspace's people read and send from (B8). Optional;
+   * without it the routes answer 501.
+   */
+  teamInboxes?: TeamInboxes
+  /**
+   * Splitting the workspace's storage across its inboxes (B3), for owners and
+   * admins. Optional; without it the routes answer 501.
+   */
+  mailboxStorage?: StorageAllocations
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

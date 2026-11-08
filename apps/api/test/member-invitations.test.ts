@@ -17,6 +17,7 @@ import {
   withdrawInvitation,
 } from "../src/console/members.js"
 import { answerJoinRequest, joinNow } from "../src/console/team-domains.js"
+import { clerkMembers } from "../src/console/clerk-members.js"
 import { ACME, world } from "./member-fixtures.js"
 import { deps as teamDeps } from "./team-access-fixtures.js"
 
@@ -37,7 +38,7 @@ const invite = (
     orgId: ACME.orgId,
     userId: "user_admin",
     emails: ["new@acme.test"],
-    role: "org:member",
+    role: "member",
     expiresAt: inHours(36),
     zone: "Europe/Paris",
     country: "FR",
@@ -75,6 +76,70 @@ describe("expiry bounds", () => {
     expect(clerkDays(at(25), NOW)).toBe(2)
     expect(clerkDays(at(36), NOW)).toBe(2)
     expect(clerkDays(at(7 * 24), NOW)).toBe(7)
+  })
+})
+
+describe("an invitation's role (#335)", () => {
+  it("is ours: member or admin, Clerk's old keys taken as ours", async () => {
+    const w = world({ now: NOW })
+    expect((await invite(w, { role: "org:admin" })).outcome).toBe("ok")
+    expect(w.rows[0]!.role).toBe("admin")
+  })
+  it("never owner, and never something we do not have", async () => {
+    expect(await invite(world({ now: NOW }), { role: "owner" })).toEqual({
+      outcome: "invalid",
+      error: "An invitation can't make anyone an owner.",
+    })
+    for (const role of ["org:sys_memberships:manage", "", undefined])
+      expect(await invite(world({ now: NOW }), { role })).toEqual({
+        outcome: "invalid",
+        error: "Pick a role.",
+      })
+  })
+  it("Clerk's invitation is always org:member", async () => {
+    const asked: unknown[] = []
+    const fake = {
+      organizations: {
+        createOrganizationInvitation: async (input: unknown) => {
+          asked.push(input)
+          return { id: "inv_1" }
+        },
+      },
+    }
+    await clerkMembers(fake as never).invite({
+      orgId: ACME.orgId,
+      inviterUserId: "user_admin",
+      email: "new@acme.test",
+      expiresInDays: 2,
+    })
+    expect(asked).toEqual([
+      {
+        organizationId: ACME.orgId,
+        inviterUserId: "user_admin",
+        emailAddress: "new@acme.test",
+        role: "org:member",
+        expiresInDays: 2,
+      },
+    ])
+  })
+  it("the alert's addresses are only the members asked for", async () => {
+    const fake = {
+      organizations: {
+        getOrganizationMembershipList: async () => ({
+          data: [
+            { publicUserData: { userId: "user_owner", identifier: "o@acme.test" } },
+            { publicUserData: { userId: "user_m", identifier: "m@acme.test" } },
+            { publicUserData: { userId: "user_ops", identifier: "+15550100" } },
+          ],
+        }),
+      },
+    }
+    expect(
+      await clerkMembers(fake as never).addresses(ACME.orgId, [
+        "user_owner",
+        "user_ops",
+      ]),
+    ).toEqual(["o@acme.test"])
   })
 })
 
@@ -164,7 +229,7 @@ describe("revoking before every seat use", () => {
 
   it("is asked by auto-join and by accepting a request", async () => {
     const asked: string[] = []
-    const t = teamDeps([{ pattern: "pslhq.app", mode: "auto", role: "org:member" }], {
+    const t = teamDeps([{ pattern: "pslhq.app", mode: "auto", role: "member" }], {
       seats: {
         beforeSeatUse: async (tenantId) => {
           asked.push(tenantId)
@@ -358,6 +423,8 @@ describe("capacity alerts", () => {
       "owner@acme.test",
       "ops@acme.test",
     ])
+    // ⚠ OWNERS AND ADMINS FROM OUR TABLE (#335), never the member.
+    expect(w.addressed[0]).toEqual(["user_owner", "user_ops"])
     // Under 80% re-arms; back over sends again.
     w.state.members = 12
     await evaluateAlerts(w.d, ACME.tenantId, ACME.orgId)
@@ -386,7 +453,7 @@ describe("capacity alerts", () => {
 describe("accept and notify", () => {
   it("adds them and tells them a spot opened up", async () => {
     const notified: unknown[] = []
-    const t = teamDeps([{ pattern: "pslhq.app", mode: "auto", role: "org:member" }], {
+    const t = teamDeps([{ pattern: "pslhq.app", mode: "auto", role: "member" }], {
       seats: {
         beforeSeatUse: async () => ({ full: false }),
         accepted: async (input) => void notified.push(input),
@@ -409,7 +476,7 @@ describe("accept and notify", () => {
       }),
     ).toBe("ok")
     expect(t.added).toEqual([
-      { orgId: "org_acme", userId: "user_wait", role: "org:member" },
+      { orgId: "org_acme", userId: "user_wait", role: "member" },
     ])
     expect(notified).toEqual([
       { tenantId: "t_acme", requestId: id, email: "wait@pslhq.app", waited: true },

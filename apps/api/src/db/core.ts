@@ -21,6 +21,7 @@ import {
   vector,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
+import type { JoinRole } from "../console/roles.js"
 import type { RetiringSecret } from "../webhooks/keys.js"
 import type { ReplayFilter } from "../webhooks/replay.js"
 
@@ -130,6 +131,14 @@ export const webhookEventType = core.enum("webhook_event_type", [
   "webhook_endpoint.failing",
   "webhook_endpoint.disabled",
   "webhook_endpoint.recovered",
+  /**
+   * ⚠ NOT FROM SES EITHER: the identity core's (#345), raised after the audit
+   * event that records the change commits.
+   */
+  "member.provisioned",
+  "member.deprovisioned",
+  "sso.connection.failed",
+  "sso.certificate.expiring",
 ])
 
 /**
@@ -853,7 +862,7 @@ export const joinDomains = core.table(
       .notNull()
       .default(sql`replace(gen_random_uuid()::text, '-', '')`),
     /** Pattern -> mode -> role, most specific first wins. See console/access-rules.ts. */
-    rules: jsonb("rules").$type<JoinRule[]>().notNull().default([]),
+    rules: jsonb("rules").$type<StoredJoinRule[]>().notNull().default([]),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
     lapsedAt: timestamp("lapsed_at", { withTimezone: true }),
@@ -862,6 +871,9 @@ export const joinDomains = core.table(
   },
   (t) => [
     uniqueIndex("join_domains_tenant_name_unique").on(t.tenantId, t.name),
+    // The target of identity.connection_domains' tenant-matched foreign key
+    // (#337): a proof can only ever be covered by its own workspace's SSO.
+    unique("join_domains_id_tenant_unique").on(t.id, t.tenantId),
     index("join_domains_name_idx").on(t.name),
     pgPolicy("join_domains_workspace", {
       for: "all",
@@ -880,9 +892,18 @@ export interface JoinRule {
   /** `pslhq.app`, `dev.pslhq.app`, or `*.pslhq.app` (any depth). */
   pattern: string
   mode: "off" | "suggest" | "auto"
-  /** The Clerk role given on joining by this rule - auto-join, or approval. */
-  role: string
+  /** Our role given on joining by this rule - auto-join, or approval (#335). */
+  role: JoinRole
 }
+
+/**
+ * A rule as the column holds it.
+ *
+ * ⚠ ROWS FROM BEFORE #335 SAY `org:member` OR `org:admin`, Clerk's keys. They
+ * are read through `readJoinRole` (console/roles.ts) and only ever written
+ * back as ours.
+ */
+export type StoredJoinRule = Omit<JoinRule, "role"> & { role: string }
 
 /**
  * Somebody asking to join a workspace they were suggested (2026-10-13), or
@@ -1098,6 +1119,14 @@ export const memberInvitations = core.table(
     actionUrl: text("action_url"),
     /** `pending`, `accepted`, `withdrawn` or `expired`. */
     status: text("status").notNull().default("pending"),
+    /**
+     * The Clerk membership this invitation's role was given to (#335), and
+     * when. Set once: an invitation never gives its role to a second
+     * membership - somebody removed and back in by another door is not an
+     * admin again because an old invitation said so.
+     */
+    appliedMembershipId: text("applied_membership_id"),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -1147,6 +1176,61 @@ export const memberAlerts = core.table(
   },
   (t) => [
     pgPolicy("member_alerts_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Who may do what in a workspace (#335): one row per member, with their role.
+ *
+ * ⚠ THE ROLE IS OURS AND CLERK'S IS NOT CONSULTED. Every Clerk membership is
+ * `org:member` - reads only - because a Clerk admin can change memberships at
+ * Clerk's Frontend API around everything we check (probe P6). The roles and
+ * what they permit are console/roles.ts; this is where each member's lives.
+ *
+ * ⚠ NO ROW READS AS MEMBER, NEVER AS ANYTHING MORE. Owners and admins always
+ * have one: the creator's is written on `organization.created`, everybody
+ * else's on `organizationMembership.created` or by our own `addMember`, and
+ * the backfill wrote the ones from before.
+ *
+ * ⚠ `clerk_membership_id` IS WHAT MAKES THE WEBHOOKS SAFE IN ANY ORDER. A
+ * redelivered `created` for the same membership changes nothing; one for a
+ * NEW membership (they left and came back) replaces the old role; a late
+ * `deleted` for an old one leaves the new one alone. See `membershipCreated`.
+ *
+ * ⚠ THE WORKSPACE'S OWN ROWS ONLY, and every write goes through
+ * `RoleStore.transact`, which takes one lock per workspace so "is this the
+ * last owner" is never answered against rows another request is changing.
+ */
+export const workspaceRoles = core.table(
+  "workspace_roles",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Clerk's user id. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** `owner`, `admin` or `member`. See console/roles.ts. */
+    role: text("role").notNull(),
+    /** Null until Clerk's `organizationMembership.created` names it. */
+    clerkMembershipId: text("clerk_membership_id"),
+    /** Why the row says what it says: `creator`, `invitation`, `access_rule`... */
+    source: text("source").notNull(),
+    /** The Clerk user who gave it; null when the system did. */
+    grantedBy: text("granted_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.clerkUserId] }),
+    index("workspace_roles_tenant_role_idx").on(t.tenantId, t.role),
+    // ⚠ UNQUALIFIED: a CHECK is created with its table, before a qualified name
+    // for it could be relied on. Adding a role means adding it here as well.
+    check("workspace_roles_role_check", sql`"role" in ('owner', 'admin', 'member')`),
+    pgPolicy("workspace_roles_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
@@ -4220,6 +4304,51 @@ export const identityEvents = core.table(
 )
 
 /**
+ * Failed sign-ins to a hosted mailbox, as Stalwart reported them (#384).
+ *
+ * ⚠ NOT `identity_events`, AND KEEPING THEM APART IS THE WHOLE POINT. Every
+ * reader of that table treats each row as a sighting of the person themselves:
+ * their subnets are "familiar", the accounts behind a subnet are "peers". A
+ * failed login is somebody ELSE at an address the owner has never used, so
+ * filed there it would make an attacker's network look familiar to the victim
+ * and link every account one brute-forcing address touched. Here a row says
+ * only "someone failed to sign in to this mailbox from this address".
+ *
+ * ⚠ ONLY MAILBOXES WE HOST, AND ONLY ONES WITH A WORKSPACE. Scanners try
+ * random usernames all day; the ingest drops any account that is not in
+ * `authd.accounts`, so this table never grows with noise. Scoped per
+ * workspace like the rest of what the score reads, since the mailbox belongs
+ * to one.
+ *
+ * ⚠ THE RAW IP IS KEPT AS RECEIVED AND NOTHING NULLS IT YET. The hourly run
+ * that clears `identity_events.ip` after 90 days does not know this table.
+ */
+export const mailboxAuthFailures = core.table(
+  "mailbox_auth_failures",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The mailbox address, lowercased. */
+    account: text("account").notNull(),
+    ip: text("ip"),
+    /** `a.b.c` for IPv4, the /48 for IPv6, as `identity_events.subnet`. */
+    subnet: text("subnet"),
+    /** Stalwart's listener that took the attempt: `imap`, `submissions`... */
+    listener: text("listener"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("mailbox_auth_failures_account_idx").on(t.tenantId, t.account, t.occurredAt),
+    tenantPolicy("mailbox_auth_failures_tenant", t.tenantId),
+  ],
+)
+
+/**
  * What a workspace turned out to be, for training the model (#170).
  *
  * ⚠ THE FEATURES ARE STORED WITH THE LABEL, AS THEY WERE WHEN IT WAS GIVEN.
@@ -4807,6 +4936,48 @@ export const deviceResumes = core.table(
       for: "all",
       using: sql`${t.userId} = current_setting('app.user_id', true)`,
       withCheck: sql`${t.userId} = current_setting('app.user_id', true)`,
+    }),
+  ],
+)
+
+/**
+ * Mailbox import and export background jobs (#385).
+ *
+ * Tracks the state, progress, and content-store references for mailbox migrations:
+ * exporting a mailbox to an archive (zip of EMLs) and importing an archive into a mailbox.
+ */
+export const mailboxJobs = core.table(
+  "mailbox_jobs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    mailboxAddress: text("mailbox_address").notNull(),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("pending"),
+    totalMessages: integer("total_messages").notNull().default(0),
+    processedMessages: integer("processed_messages").notNull().default(0),
+    totalFolders: integer("total_folders").notNull().default(0),
+    processedFolders: integer("processed_folders").notNull().default(0),
+    objectKey: text("object_key"),
+    error: text("error"),
+    errorCode: text("error_code"),
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("mailbox_jobs_tenant_idx").on(t.tenantId, t.status),
+    index("mailbox_jobs_address_idx").on(t.mailboxAddress),
+    pgPolicy("mailbox_jobs_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
     }),
   ],
 )

@@ -29,6 +29,8 @@ import { useAdoptDomain } from "@/components/domain-live"
 import { rememberLeaving } from "@/lib/dns-connect"
 import { activateDomain } from "@/lib/domain-activation"
 import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
+import { useRetained } from "@/lib/react"
+import { SWAP } from "@/components/list/table"
 import { toastDone, toastError, toastFailure, toastPending } from "@/lib/toast"
 import {
   draftStillSet,
@@ -338,6 +340,7 @@ export function AddDomainSteps({
    * ask, and it would offer to connect a provider for a domain we refuse.
    */
   const current = answeredHere && !refusedHere ? answeredHere.inspection : null
+  const shownInspection = useRetained(current)
   const provider = current?.provider ?? null
 
   // ⚠ DELEGATION IS DISABLED, NOT HIDDEN, WHERE THE PROVIDER'S EDITOR HAS NO NS
@@ -680,7 +683,7 @@ export function AddDomainSteps({
               type="button"
               onClick={() => setAdvanced((open) => !open)}
               aria-expanded={advanced}
-              className="flex cursor-pointer items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              className="flex cursor-pointer items-center gap-1 text-sm text-muted-foreground hover:text-foreground active:opacity-70 transition-opacity"
             >
               <ChevronIcon
                 state={advanced}
@@ -701,6 +704,7 @@ export function AddDomainSteps({
                 containerClassName="max-w-xs"
                 autoComplete="off"
                 spellCheck={false}
+                reserveHint
                 hint={
                   <>
                     The envelope address every message uses, whichever way it leaves.
@@ -769,7 +773,11 @@ export function AddDomainSteps({
       >
         <div className="space-y-5">
           {/* What we found about where its DNS lives. */}
-          {current && <DetectionPanel inspection={current} connected={connected} />}
+          <Reveal show={Boolean(current)} spacing="pb-1">
+            {shownInspection && (
+              <DetectionPanel inspection={shownInspection} connected={connected} />
+            )}
+          </Reveal>
 
           <fieldset className="space-y-2">
             <legend className="mb-2 text-sm font-medium">
@@ -854,11 +862,17 @@ export function AddDomainSteps({
         >
           <div className="space-y-6">
             {/* Exactly as the domain page lays them out, status column and all. */}
-            {created ? (
-              <DnsRecordGroups records={created.records} />
-            ) : (
-              <RecordsPlaceholder />
-            )}
+            <AnimatePresence mode="wait" initial={false}>
+              {created ? (
+                <motion.div key="records" {...SWAP}>
+                  <DnsRecordGroups records={created.records} />
+                </motion.div>
+              ) : (
+                <motion.div key="placeholder" {...SWAP}>
+                  <RecordsPlaceholder />
+                </motion.div>
+              )}
+            </AnimatePresence>
             <div className="flex flex-wrap items-center gap-2">
               {/*
                * ⚠ ONLY THIS BUTTON (2026-10-03). This step exists because

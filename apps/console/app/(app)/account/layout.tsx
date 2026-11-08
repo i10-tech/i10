@@ -5,6 +5,7 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/i10/page"
+import { SectionContent } from "@/components/page-frame"
 
 /**
  * The account shell.
@@ -33,7 +34,9 @@ export default function AccountLayout({
       </PageHeader>
 
       <PageBody>
-        <div className="min-w-0 max-w-3xl">{children}</div>
+        <div className="min-w-0 max-w-3xl">
+          <SectionContent>{children}</SectionContent>
+        </div>
       </PageBody>
     </Page>
   )

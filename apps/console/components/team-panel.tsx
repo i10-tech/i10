@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useAuth, useClerk, useOrganization, useSession, useUser } from "@clerk/nextjs"
+import { useClerk, useOrganization, useUser } from "@clerk/nextjs"
 import type {
   OrganizationMembershipResource,
   OrganizationResource,
@@ -30,6 +30,8 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
 import {
   answerJoinRequest,
+  changeMemberRole,
+  leaveWorkspace,
   makeTeamWorkspace,
   removeTeamMember,
   sendInvitations,
@@ -38,13 +40,18 @@ import {
   teamInvitations,
   teamJoinRequests,
   teamJoins,
+  teamRoles,
   withdrawInvitation,
   type AccessDomain,
   type JoinRecord,
   type JoinRequest,
+  type JoinRole,
   type PendingInvitation,
   type TeamCapacity,
+  type TeamRoles,
 } from "@/lib/actions"
+import { roleItems, roleLabel } from "@/lib/roles"
+import type { WorkspaceRole } from "@/lib/types"
 import { InviteExpiry, defaultExpiry, type Expiry } from "@/components/invite-expiry"
 import {
   expiresLine,
@@ -58,7 +65,7 @@ import { atDomain, ruleForAddress } from "@/lib/access-match"
 import { useCreateWorkspace } from "@/lib/create-workspace"
 import { announceWorkspacesChanged } from "@/lib/workspace-name"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
-import { useReverify, useStepUp } from "@/lib/step-up"
+import { useStepUp } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 
 /**
@@ -71,9 +78,10 @@ import { toastDone, toastError } from "@/lib/toast"
  * ⚠ THE SAME LAYOUT AS THE ACCOUNT PAGE, which is the same layout Clerk used
  * for both: blocks, and rows with the label on the left.
  *
- * ⚠ WHO CAN DO WHAT IS CLERK'S ANSWER, NOT OURS. `has({ permission })` reads
- * the session's organization permissions - the same check Clerk's panel used
- * to decide which buttons to draw - and Clerk's API refuses anything else.
+ * ⚠ WHO CAN DO WHAT IS OUR ANSWER SINCE #335, NOT CLERK'S. Every member is
+ * `org:member` in Clerk, so `membership.role` and `has()` say the same thing
+ * about everybody; the roles and the reader's permissions come from
+ * `/console/team/roles`, and the API checks them again on every write.
  */
 export function TeamPanel() {
   const { isLoaded, organization, membership } = useOrganization()
@@ -89,7 +97,7 @@ export function TeamPanel() {
   if (organization.publicMetadata?.kind === "personal") {
     return <PersonalWorkspace organization={organization} />
   }
-  return <Team organization={organization} membership={membership} />
+  return <Team organization={organization} />
 }
 
 /**
@@ -148,28 +156,24 @@ function PersonalWorkspace({ organization }: { organization: OrganizationResourc
   )
 }
 
-function Team({
-  organization,
-  membership,
-}: {
-  organization: OrganizationResource
-  membership: OrganizationMembershipResource
-}) {
-  const { has } = useAuth()
-  const manage =
-    has?.({ permission: "org:sys_memberships:manage" }) ??
-    membership.role === "org:admin"
-  const domains =
-    has?.({ permission: "org:sys_domains:manage" }) ?? membership.role === "org:admin"
+/** The roles an access rule may give: never owner. */
+const RULE_ROLES = roleItems<JoinRole>(["member", "admin"])
 
-  const [roles, setRoles] = React.useState<{ value: string; label: string }[]>([])
-  React.useEffect(() => {
-    void organization.getRoles({ pageSize: 50 }).then(
-      (result) =>
-        setRoles(result.data.map((role) => ({ value: role.key, label: role.name }))),
-      () => setRoles([]),
-    )
-  }, [organization])
+function Team({ organization }: { organization: OrganizationResource }) {
+  /*
+   * ⚠ ONE READ OF THE ROLES FOR THE WHOLE PAGE (#335): every member's, and
+   * the reader's own permissions, which decide every block below. Re-read
+   * after a role changes, and when the workspace does.
+   */
+  const [roles, setRoles] = React.useState<TeamRoles | null>(null)
+  const loadRoles = React.useCallback(() => {
+    void teamRoles().then((result) => setRoles(result.ok ? result.data : null))
+  }, [])
+  React.useEffect(loadRoles, [loadRoles, organization.id])
+  const permitted = (permission: string) =>
+    roles?.me.permissions.includes(permission) ?? false
+  const manage = permitted("members:manage")
+  const domains = permitted("access_domains:manage")
 
   // Invitations are listed beside the members; sending one refreshes both.
   const [invitesVersion, setInvitesVersion] = React.useState(0)
@@ -217,6 +221,7 @@ function Team({
           <Members
             manage={manage}
             roles={roles}
+            onRolesChanged={loadRoles}
             access={access ? access.domains : []}
             onRemoved={() => {
               setListsVersion((v) => v + 1)
@@ -227,7 +232,7 @@ function Team({
         {manage && (
           <ProfileRow label="Invitations">
             <Invitations
-              roles={roles}
+              invitable={roles?.me.invitable ?? []}
               capacity={capacity}
               version={invitesVersion}
               onChanged={() => {
@@ -251,7 +256,7 @@ function Team({
       {domains && (
         <ProfileBlock title="Team access">
           <ProfileRow label="Domains">
-            <AccessDomains state={access} roles={roles} onChange={loadAccess} />
+            <AccessDomains state={access} roles={RULE_ROLES} onChange={loadAccess} />
           </ProfileRow>
         </ProfileBlock>
       )}
@@ -284,17 +289,23 @@ function who(data: OrganizationMembershipResource["publicUserData"]) {
 
 /**
  * Clerk's members list: each member with their photo, name and address, when
- * they joined, their role (a picker for an admin, as Clerk's was) and a menu
- * to remove them. "You" on the person reading it.
+ * they joined, their role (a picker for whoever may change it) and a menu to
+ * remove them. "You" on the person reading it.
+ *
+ * ⚠ THE LIST IS CLERK'S, THE ROLES ARE OURS (#335). Names, photos and who is
+ * in come from Clerk's membership list; each role, and what the reader may
+ * give, from `/console/team/roles`. Somebody we hold no role for is a member.
  */
 function Members({
   manage,
   roles,
+  onRolesChanged,
   access,
   onRemoved,
 }: {
   manage: boolean
-  roles: { value: string; label: string }[]
+  roles: TeamRoles | null
+  onRolesChanged: () => void
   access: AccessDomain[]
   onRemoved: () => void
 }) {
@@ -302,7 +313,6 @@ function Members({
     member: OrganizationMembershipResource
     block: boolean
   } | null>(null)
-  const reverify = useReverify()
   const stepUp = useStepUp()
   /** How each member got in through an access domain (#326), by user id. */
   const [joins, setJoins] = React.useState<Record<string, JoinRecord>>({})
@@ -316,7 +326,12 @@ function Members({
     )
   }, [])
   const { user } = useUser()
-  const { session } = useSession()
+  const roleOf = React.useMemo(
+    () => new Map((roles?.data ?? []).map((r) => [r.user_id, r.role])),
+    [roles],
+  )
+  const grantable = roles?.me.grantable ?? []
+  const pickable = roleItems(grantable)
   /*
    * ⚠ CLERK'S OWN PAGINATED LIST, WITH `keepPreviousData` (2026-10-12) - the
    * hook `<OrganizationProfile />` read. Fetching by hand re-ran whenever
@@ -342,35 +357,28 @@ function Members({
         : (memberships?.data ?? [])
   const load = () => void memberships?.revalidate?.()
 
-  async function changeRole(member: OrganizationMembershipResource, role: string) {
-    if (role === member.role) return
+  async function changeRole(userId: string, from: WorkspaceRole, to: WorkspaceRole) {
+    if (to === from) return
     /*
-     * ⚠ THE LAST ADMIN CANNOT STEP DOWN (2026-10-12). A workspace with no
-     * admin has nobody who can invite, change roles, turn domains on or
-     * delete it - and nobody left who could fix that. The picker stays on
-     * Admin and says why; promote somebody else first.
+     * ⚠ THE LAST OWNER CANNOT STEP DOWN (#335; it was the last admin until
+     * then). A workspace with no owner has nobody who can delete it or make
+     * a new owner - and nobody left who could fix that. The picker stays on
+     * Owner and says why; the API refuses it too.
      */
-    const admins = (members ?? []).filter((m) => m.role === "org:admin").length
-    if (member.role === "org:admin" && role !== "org:admin" && admins <= 1) {
-      toastError("You are the only admin", {
-        description: "Make someone else an admin first, then change your own role.",
+    const owners = [...roleOf.values()].filter((r) => r === "owner").length
+    if (from === "owner" && owners <= 1) {
+      toastError("You are the only owner", {
+        description: "Make someone else an owner first, then change your own role.",
       })
       return
     }
-    try {
-      const done = await reverify(() => member.update({ role }))
-      /*
-       * ⚠ YOUR OWN ROLE: THE SESSION IS RE-READ AT ONCE, as Clerk's panel
-       * leaves to its token. The pickers here hang on `has()`, which reads
-       * the session token - without this a self-demoted member keeps an
-       * admin's controls until the token renews. Demoting yourself is one
-       * way, as in Clerk: a member cannot change roles, their own included.
-       */
-      if (done && member.publicUserData?.userId === user?.id) await session?.reload()
-      load()
-    } catch (error) {
-      toastError("Could not change that role", clerkReason(error))
+    const result = await changeMemberRole(userId, to)
+    if (!result.ok) {
+      toastError("Could not change that role", { description: result.error })
+      return
     }
+    // Your own role too: the pickers hang on our answer, re-read at once.
+    onRolesChanged()
   }
 
   if (!members)
@@ -384,18 +392,22 @@ function Members({
           // ⚠ BY USER ID, NOT THE MEMBERSHIP'S OWN COPY: Clerk's active
           // membership can carry no `publicUserData`, which made nobody "You"
           // and gave the reader a role picker - and a Remove - on themselves.
-          const mine = member.publicUserData?.userId === user?.id
+          const userId = member.publicUserData?.userId ?? ""
+          const mine = userId !== "" && userId === user?.id
+          const role = roleOf.get(userId) ?? "member"
+          // An admin sees an owner's role, and cannot change or remove them.
+          const canPick = userId !== "" && grantable.includes(role)
+          const canRemove =
+            manage && !mine && (role !== "owner" || grantable.includes("owner"))
           return (
             <MotionItem key={member.publicUserData?.userId ?? member.id}>
               <div className="flex items-center justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-3">
                   <Avatar
                     name={name}
-                    src={
-                      member.publicUserData?.hasImage
-                        ? member.publicUserData.imageUrl
-                        : undefined
-                    }
+                    // Clerk's picture, its default without an upload; letters
+                    // only when it cannot load, as every avatar here.
+                    src={member.publicUserData?.imageUrl}
                   />
                   <span className="min-w-0">
                     <span className="flex items-center gap-2 text-sm">
@@ -416,24 +428,23 @@ function Members({
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
-                  {/* Your own role too (2026-10-12), with the last-admin guard above. */}
-                  {manage && roles.length > 0 ? (
+                  {/* Your own role too (2026-10-12), with the last-owner guard above. */}
+                  {canPick ? (
                     <MorphSelect
                       label={`Role for ${name}`}
                       hideLabel
-                      items={roles}
-                      value={member.role}
-                      onValueChange={(role) => void changeRole(member, role)}
+                      items={pickable}
+                      value={role}
+                      onValueChange={(next) =>
+                        void changeRole(userId, role, next as WorkspaceRole)
+                      }
                     />
                   ) : (
-                    <Badge
-                      size="sm"
-                      tone={member.role === "org:admin" ? "info" : "neutral"}
-                    >
-                      {member.roleName}
+                    <Badge size="sm" tone={role === "member" ? "neutral" : "info"}>
+                      {roleLabel(role)}
                     </Badge>
                   )}
-                  {manage && !mine && (
+                  {canRemove && (
                     <RowMenu visible label={name}>
                       <DropdownMenuItem
                         className="text-danger"
@@ -450,7 +461,7 @@ function Members({
                     </RowMenu>
                   )}
                   {/* Leaving is its own block below; this keeps the pickers in line. */}
-                  {manage && mine && <span aria-hidden className="size-7" />}
+                  {manage && !canRemove && <span aria-hidden className="size-7" />}
                 </span>
               </div>
             </MotionItem>
@@ -530,12 +541,13 @@ function removeCopy(
  * sent, with what would make room - the API refuses it too.
  */
 function Invitations({
-  roles,
+  invitable,
   capacity,
   version,
   onChanged,
 }: {
-  roles: { value: string; label: string }[]
+  /** What the reader may invite as (#335): member or admin, never owner. */
+  invitable: JoinRole[]
   capacity: TeamCapacity | null
   version: number
   onChanged: () => void
@@ -543,7 +555,8 @@ function Invitations({
   const [pending, setPending] = React.useState<PendingInvitation[] | null>(null)
   const [open, setOpen] = React.useState(false)
   const [emails, setEmails] = React.useState<string[]>([])
-  const [role, setRole] = React.useState<string | null>(null)
+  const [role, setRole] = React.useState<JoinRole | null>(null)
+  const roles = roleItems(invitable)
   const [expiry, setExpiry] = React.useState<Expiry>(() => defaultExpiry())
   const [sending, setSending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -558,11 +571,7 @@ function Invitations({
   React.useEffect(load, [load, version])
 
   const chosenRole =
-    role ??
-    roles.find((r) => r.value === "org:member")?.value ??
-    roles[0]?.value ??
-    null
-  const roleName = (key: string) => roles.find((r) => r.value === key)?.label ?? key
+    role ?? roles.find((r) => r.value === "member")?.value ?? roles[0]?.value ?? null
 
   const free = capacity?.free ?? null
   const tooMany = free !== null && emails.length > free
@@ -641,31 +650,36 @@ function Invitations({
         </p>
       )}
       <MotionList>
-        {(pending ?? []).map((invitation) => (
-          <MotionItem key={invitation.id}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0">
-                <span className="block truncate text-sm">{invitation.email}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {expiresLine(new Date(invitation.expires_at), now)} ·{" "}
-                  {roleName(invitation.role)}
-                </span>
-              </span>
-              <RowMenu visible label={invitation.email}>
-                <DropdownMenuItem
-                  className="text-danger"
-                  onSelect={() => setWithdrawing(invitation)}
-                >
-                  Withdraw invitation
-                </DropdownMenuItem>
-              </RowMenu>
-            </div>
+        {pending && pending.length === 0 && !open ? (
+          <MotionItem key="empty">
+            <p className="pt-1.5 text-sm text-muted-foreground">
+              No pending invitations.
+            </p>
           </MotionItem>
-        ))}
+        ) : (
+          (pending ?? []).map((invitation) => (
+            <MotionItem key={invitation.id}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm">{invitation.email}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {expiresLine(new Date(invitation.expires_at), now)} ·{" "}
+                    {roleLabel(invitation.role)}
+                  </span>
+                </span>
+                <RowMenu visible label={invitation.email}>
+                  <DropdownMenuItem
+                    className="text-danger"
+                    onSelect={() => setWithdrawing(invitation)}
+                  >
+                    Withdraw invitation
+                  </DropdownMenuItem>
+                </RowMenu>
+              </div>
+            </MotionItem>
+          ))
+        )}
       </MotionList>
-      {pending && pending.length === 0 && !open && (
-        <p className="pt-1.5 text-sm text-muted-foreground">No pending invitations.</p>
-      )}
 
       <Reveal show={open} spacing="pt-3">
         <form
@@ -696,7 +710,7 @@ function Invitations({
               label="Role"
               items={roles}
               value={chosenRole}
-              onValueChange={(value) => setRole(value)}
+              onValueChange={(value) => setRole(value as JoinRole)}
             />
           )}
           <InviteExpiry
@@ -706,16 +720,20 @@ function Invitations({
               setExpiry(next)
             }}
           />
-          {tooMany && capacity && (
-            <p className="-mt-3 text-xs text-danger">
-              {capacity.free === 0
+          <Reveal show={Boolean(tooMany && capacity)} spacing="pt-0">
+            <p className="text-xs text-danger">
+              {capacity?.free === 0
                 ? "This workspace is full."
-                : `Only ${capacity.free} ${capacity.free === 1 ? "spot is" : "spots are"} free.`}{" "}
-              To make room, {roomText(capacity.reasons)}.
+                : `Only ${capacity?.free} ${capacity?.free === 1 ? "spot is" : "spots are"} free.`}{" "}
+              To make room, {roomText(capacity?.reasons ?? [])}.
             </p>
-          )}
-          {warning && <p className="-mt-3 text-xs text-warning">{warning}</p>}
-          {error && <p className="-mt-3 text-xs text-danger">{error}</p>}
+          </Reveal>
+          <Reveal show={Boolean(warning)} spacing="pt-0">
+            <p className="text-xs text-warning">{warning}</p>
+          </Reveal>
+          <Reveal show={Boolean(error)} spacing="pt-0">
+            <p className="text-xs text-danger">{error}</p>
+          </Reveal>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
@@ -836,8 +854,6 @@ function Requests({
 
   if (!requests)
     return <p className="pt-1.5 text-sm text-muted-foreground">Loading requests…</p>
-  if (requests.length === 0)
-    return <p className="pt-1.5 text-sm text-muted-foreground">No requests to join.</p>
 
   return (
     <div className="flex flex-col gap-2">
@@ -847,54 +863,60 @@ function Requests({
         </p>
       )}
       <MotionList>
-        {requests.map((request) => (
-          <MotionItem key={request.id}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0">
-                <span className="flex items-center gap-2 text-sm">
-                  <span className="truncate">{request.email}</span>
-                  {request.full && (
-                    <Badge size="sm" tone="warning">
-                      Waiting for room
-                    </Badge>
-                  )}
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  {request.full
-                    ? `Tried to join automatically ${shortDate(new Date(request.created_at))} while the workspace was full`
-                    : `Asked ${shortDate(new Date(request.created_at))} · via ${request.via ? `@${request.via}` : atDomain(request.email)}`}
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy !== null}
-                  onClick={() => void answer(request, false)}
-                >
-                  Decline
-                </Button>
-                <Button
-                  size="sm"
-                  loading={busy === request.id}
-                  disabled={busy !== null || full}
-                  onClick={() => void answer(request, true)}
-                >
-                  Accept and notify
-                </Button>
-                <RowMenu visible label={request.email}>
-                  <DropdownMenuItem
-                    className="text-danger"
-                    disabled={busy !== null}
-                    onSelect={() => void answer(request, false, true)}
-                  >
-                    Decline and block
-                  </DropdownMenuItem>
-                </RowMenu>
-              </span>
-            </div>
+        {requests.length === 0 ? (
+          <MotionItem key="empty">
+            <p className="pt-1.5 text-sm text-muted-foreground">No requests to join.</p>
           </MotionItem>
-        ))}
+        ) : (
+          requests.map((request) => (
+            <MotionItem key={request.id}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2 text-sm">
+                    <span className="truncate">{request.email}</span>
+                    {request.full && (
+                      <Badge size="sm" tone="warning">
+                        Waiting for room
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {request.full
+                      ? `Tried to join automatically ${shortDate(new Date(request.created_at))} while the workspace was full`
+                      : `Asked ${shortDate(new Date(request.created_at))} · via ${request.via ? `@${request.via}` : atDomain(request.email)}`}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void answer(request, false)}
+                  >
+                    Decline
+                  </Button>
+                  <Button
+                    size="sm"
+                    loading={busy === request.id}
+                    disabled={busy !== null || full}
+                    onClick={() => void answer(request, true)}
+                  >
+                    Accept and notify
+                  </Button>
+                  <RowMenu visible label={request.email}>
+                    <DropdownMenuItem
+                      className="text-danger"
+                      disabled={busy !== null}
+                      onSelect={() => void answer(request, false, true)}
+                    >
+                      Decline and block
+                    </DropdownMenuItem>
+                  </RowMenu>
+                </span>
+              </div>
+            </MotionItem>
+          ))
+        )}
       </MotionList>
     </div>
   )
@@ -902,9 +924,14 @@ function Requests({
 
 // ── Leave ────────────────────────────────────────────────────────────────────
 
-/** Clerk's "Leave organization": confirmed by typing its name. */
+/**
+ * Clerk's "Leave organization": confirmed by typing its name.
+ *
+ * ⚠ THROUGH OUR API SINCE #335, NOT `user.leaveOrganization()`, so the only
+ * owner is told to hand over first instead of leaving a workspace nobody can
+ * run. The API's refusal is shown as it stands.
+ */
 function Leave({ organization }: { organization: OrganizationResource }) {
-  const { user } = useUser()
   const clerk = useClerk()
   const router = useRouter()
   const [open, setOpen] = React.useState(false)
@@ -926,16 +953,20 @@ function Leave({ organization }: { organization: OrganizationResource }) {
         doneLabel="Left"
         confirmWord={organization.name}
         onConfirm={async () => {
-          if (!user) return false
-          try {
-            await user.leaveOrganization(organization.id)
-            await clerk.setActive({ organization: null })
-            router.push("/")
-            return true
-          } catch (error) {
-            toastError("Could not leave this workspace", clerkReason(error))
+          const result = await leaveWorkspace()
+          if (!result.ok) {
+            toastError("Could not leave this workspace", { description: result.error })
             return false
           }
+          try {
+            await clerk.setActive({ organization: null })
+          } catch (error) {
+            toastError("You left, but could not switch workspace", clerkReason(error))
+          }
+          // Left on the server: the pickers drop it now, not on their next refetch.
+          announceWorkspacesChanged()
+          router.push("/")
+          return true
         }}
       />
     </div>

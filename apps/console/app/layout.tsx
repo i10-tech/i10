@@ -10,6 +10,7 @@ import { ToastHost } from "@repo/ui/components/i10/toasts"
 import { ArcNext } from "@repo/ui/components/i10/arc-next"
 import { ActivateWorkspace } from "@/components/activate-workspace"
 import { StepUpProvider } from "@/lib/step-up"
+import { authOrigin } from "@/lib/sso-server"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -54,6 +55,10 @@ function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider
       publishableKey={publishableKey}
+      // Only when set: see middleware.ts, which carries the same option.
+      {...(process.env.CLERK_PROXY_URL
+        ? { proxyUrl: process.env.CLERK_PROXY_URL }
+        : {})}
       signInUrl={process.env.CLERK_SIGN_IN_URL}
       signUpUrl={process.env.CLERK_SIGN_UP_URL}
       /*
@@ -87,7 +92,7 @@ function Providers({ children }: { children: React.ReactNode }) {
        * with no Clerk key gets a fallback that cannot prompt and therefore
        * cannot delete anything the API would have refused.
        */}
-      <StepUpProvider>{children}</StepUpProvider>
+      <StepUpProvider authOrigin={authOrigin()}>{children}</StepUpProvider>
     </ClerkProvider>
   )
 }

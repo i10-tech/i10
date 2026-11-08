@@ -1,0 +1,44 @@
+<project>
+i10, a bun monorepo. You work in your own git worktree on the console app, apps/console (Next.js; read apps/console/AGENTS.md). Four other agents work at the same time on other areas in other worktrees.
+
+The owner cares intensely about micro-interactions and catches every jerk by eye. Your job is that they stop having to. These are their words about what is wrong:
+- Something that appears out of thin air, a split second after the rest, is not acceptable. A step or panel must animate open with its content already inside. Reference: Profile & security, Security tab, adding another email (components/account/): it animates down with the input already there.
+- A list that goes from 1 item to 0 must animate its last item and its container away. No jump at the end of an animation (e.g. a flex gap that stays until an element unmounts).
+- Parts of a page must load together. If one card is there at once and another pops in later, the slow one's data belongs in the page's server render (fetch it in page.tsx, pass it as a prop) so they arrive together. Never let late content move the page: reserve the space or render it with the page.
+- Errors under an input go in the input's own reserved hint area (FloatingInput `hint`, `state="invalid"`, reserveHint) so nothing below moves; messages needing more room roll open smoothly, using what the field already does. Say exactly what is wrong, never a generic error.
+- Anything pressed gives feedback at once: a button that navigates or waits shows it was pressed (spinner or pending state), with no width change.
+- Do not choose for the user: never auto-open or auto-select something they did not ask for.
+- Do not start something the user has not finished yet (no checking a DNS record we only just displayed).
+Learn the principle from those examples and hunt for the same class of problem everywhere in your area, whether or not it is listed.
+</project>
+
+<tool>
+apps/console/scripts/motion/check.ts plays interactions in real Chrome and reports, frame by frame, snap (an element moved far more in one frame than the frames around it), pop-in and pop-out (arrived or left whole in one frame). Read its header. From apps/console:
+  CONSOLE_PREVIEW=1 NEXT_DIST_DIR=.next-preview bun x next dev --turbopack --port PORT   (run in the background, in preview mode, no login needed)
+  bun scripts/motion/check.ts scripts/motion/flows/YOURFLOW.json --base http://localhost:PORT
+Add --frames to save 30 fps screenshots to .motion/ and open them to look. See flows/sso.json for the format. The first run of a route compiles and can drop frames, so warm a page with curl first, and re-run before trusting a finding. Timing noise exists, so judge findings, and do not chase a one-off that fails to repeat. Write your flow file covering every interaction on your pages: loads, opening and closing things, adding and removing rows, errors, tabs, dialogs. Run it BEFORE changing anything and keep the output. Do not edit sampler.js or check.ts: if the tool is wrong about something, say so in the report.
+</tool>
+
+<rules>
+- Motion: Reveal (packages/ui/src/components/i10/reveal.tsx), AutoHeight, StepStage, tokens in packages/ui/src/components/lib/motion-tokens.ts. No new motion values, no plain conditional that snaps. Children inside Reveal must stay rendered until it has closed. Honor reduced motion. Do not animate things which should not move, like list data arriving, keystrokes or frequent keyboard actions.
+- Keep behavior: server actions, step-ups (useSsoCall, useStepUp), role checks, copy meaning. This is polish, not a redesign. Do not restructure pages. Do not change lib/*-actions.ts signatures or apps/api unless your task says so.
+- Only touch files in your area below. A fix that belongs in a shared file you do not own goes in your report rather than your diff.
+- Fixtures live in lib/preview*.ts. Add to them only if your flow needs a state; keep their shapes real. Only the sso agent edits preview-sso.ts.
+- Never write the em dash character; use a hyphen. No narrating comments. Sentence case. No dead code.
+- Do not run git add, commit, stash, reset, checkout or push; the index holds a baseline. No skills, arenas, swarms or subagents. Stop your dev server when finished.
+- A failing test is yours to explain. Never call one pre-existing unless you ran it against /Users/mohamedabdulkhalek/i10 and saw it fail there.
+</rules>
+
+<gates>
+From apps/console: bun x tsc --noEmit, bun x eslint <files you touched> --max-warnings 0, bun test. Then re-run your flow file.
+</gates>
+
+<report>
+End with: files changed; each problem fixed (what, where, why it happened); your flow's flagged count before and after, with what remains and why; things you found but left because they are in a file you do not own; gate output verbatim. Do not claim what you did not run. You will not commit; the orchestrator reviews and lands.
+</report>
+
+<task port="3025">
+Area: app/(app)/(home)/**, emails, logs, broadcasts, contacts, segments, topics, suppressions, mailboxes, reference, templates and app/(editor)/** with their components, including components/list/**. scripts/motion/flows/data.json. Sweep with the tool, fix what you find. Tables and lists: filter changes, pagination, row actions, selection bars, empty to full and full to empty, detail panels, dialogs. Data that refreshes must not jump the page. Do not animate rows simply because data arrived, and do not touch the template editor's editing behavior: only its panels and dialogs.
+</task>
+
+An earlier run was cut off. Any edits it made are in the working tree: read git diff first and keep what holds up. Spend your time fixing rather than measuring: warm each route with curl first, run the tool only on flows you changed, and do not run a whole-area flow more than twice.

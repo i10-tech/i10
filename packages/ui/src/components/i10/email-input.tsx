@@ -163,6 +163,13 @@ export function EmailInput({
                 // `className` (the console's mono `text-xs`) comes along too.
                 "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-6 text-base whitespace-pre",
                 className,
+                // ⚠ `leading-[normal]`, LAST, SO NO CALLER UNDOES IT (2026-11-04). An
+                // input centres its text on the font's own line height, not the
+                // `line-height` it is given; at the 24px it inherited, the ghost
+                // sat 2px above the typed text (measured row by row: the ghost
+                // "m" on 440-448 beside a typed "o" on 442-451). At `normal` the
+                // two lines are the same pixels.
+                "leading-[normal]",
               )}
             >
               <span className="invisible">{current}</span>

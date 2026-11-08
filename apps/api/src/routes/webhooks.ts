@@ -64,6 +64,40 @@ export interface ClerkWebhookDeps {
    * `organizationMembership.created` and `organizationMembership.deleted`.
    */
   members?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * Workspace roles (#335): the creator becomes owner on
+   * `organization.created`; `organizationMembership.created` and `.deleted`
+   * keep our table in step with Clerk, and `.created` and `.updated` set any
+   * powerful Clerk role back to `org:member`. Outside the dedupe and
+   * idempotent, in any order - see `onClerkEvent` in console/roles.ts.
+   *
+   * ⚠ ALSO NEEDS `organizationMembership.updated` SUBSCRIBED ON CLERK'S
+   * WEBHOOK ENDPOINT, beside the ones `members` needs.
+   */
+  roles?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * The identity core (#337): the SSO sweeper on `session.created`, the
+   * managed-account watchdog on `user.updated`, links forgotten on
+   * `user.deleted`. Outside the dedupe and idempotent - see
+   * identity/events.ts.
+   *
+   * ⚠ NEEDS `session.created` SUBSCRIBED ON CLERK'S WEBHOOK ENDPOINT.
+   */
+  identity?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * Team inboxes follow the workspace: a removed member leaves them, a deleted
+   * workspace loses them. Outside the dedupe and idempotent, like the others.
+   * See team-inboxes/sync.ts for the events it needs subscribed.
+   */
+  teamInboxes?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * A member who leaves a workspace loses the login of their mailbox in it
+   * (mailboxes/revoke.ts). Outside the dedupe and idempotent, like the others.
+   *
+   * ⚠ ABSENT MEANS A REMOVED MEMBER KEEPS THEIR MAIL LOGIN, which is why it is wired
+   * wherever `roles` is. Needs `organizationMembership.deleted` subscribed.
+   */
+  mailAccess?: (type: string, data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -152,9 +186,19 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // Provisioning is the opposite: if it failed the first time, the retry is
       // the only chance to fix it, and swallowing that leaves somebody with an
       // account that can never send. Both halves are idempotent on their own.
+      // ⚠ BEFORE PROVISIONING, UNLIKE `members`. A deleted organization's tenant
+      // is what tells us whose inboxes to remove, and the lifecycle handler below
+      // is the thing that retires it.
+      const teamInboxes = (await deps.teamInboxes?.(event.type, event.data)) ?? null
       const provisioned = await provision(deps, event.type, event.data)
-      // After provisioning, so a new organization's tenant exists to read.
+      // After provisioning, so a new organization's tenant exists to read -
+      // and before members, whose capacity alerts go to the owners and admins.
+      const roles = (await deps.roles?.(event.type, event.data)) ?? null
+      // ⚠ AFTER ROLES, which has already taken the row of a person who left: the
+      // mailbox is suspended only for somebody who is no longer a member.
+      const mailAccess = (await deps.mailAccess?.(event.type, event.data)) ?? null
       const members = (await deps.members?.(event.type, event.data)) ?? null
+      const identity = (await deps.identity?.(event.type, event.data)) ?? null
 
       // ⚠ OUTSIDE THE DEDUPE FOR THE SAME REASON PROVISIONING IS, and safe for
       // a different one. `applyClerkEvent` claims the Svix id and answers
@@ -173,7 +217,11 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
           type: event.type,
           outcome: result.outcome,
           ...(provisioned ? { provisioned } : {}),
+          ...(roles ? { roles } : {}),
+          ...(mailAccess ? { mailAccess } : {}),
           ...(members ? { members } : {}),
+          ...(identity ? { identity } : {}),
+          ...(teamInboxes ? { teamInboxes } : {}),
           ...(emailed ? { emailed } : {}),
         },
         "clerk webhook applied",

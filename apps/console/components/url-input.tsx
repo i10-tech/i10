@@ -113,7 +113,9 @@ export function UrlInput({
         underlay={
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 start-6 flex items-center font-mono text-sm whitespace-pre text-muted-foreground"
+            // `leading-[normal]`: an input centres its text on the font's own line
+            // height, so the prefix must too - see the ghost in email-input.
+            className="pointer-events-none absolute inset-y-0 start-6 flex items-center font-mono text-sm leading-[normal] whitespace-pre text-muted-foreground"
           >
             <HttpsPrefix show={affix} />
           </span>

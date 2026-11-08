@@ -23,6 +23,7 @@ import type {
 import { ArrivalQuery } from "@/components/arrival-query"
 import { ARRIVAL } from "@/lib/arrival"
 import { readArrival } from "@/lib/arrival-server"
+import { OPEN_RAIL_ON_CURRENT } from "@/lib/step-rail"
 
 export const metadata: Metadata = { title: "Set up" }
 
@@ -248,6 +249,13 @@ export default async function OnboardingPage({
         plans={plans.ok ? plans.data.data : []}
         billing={billing}
         checkoutId={checkoutId}
+        // Somebody who joined a workspace its owner already named and set up.
+        joined={
+          !creating &&
+          me.ok &&
+          me.data.access !== null &&
+          me.data.access.role !== "owner"
+        }
         // ⚠ HOW THEY LAND ON THE STEP THEY LEFT FROM - a reload, or a return
         // from checkout, would otherwise re-derive from the facts and put
         // somebody who paid on the last step back on "Verify". From a cookie,
@@ -265,6 +273,9 @@ export default async function OnboardingPage({
           creating ? 0 : ownPublished(published, domains.ok ? domains.data.data : [])
         }
       />
+      {/* Opens a resumed flow on its step before the first paint. */}
+      {/* eslint-disable-next-line react/no-danger -- static script, no user data */}
+      <script dangerouslySetInnerHTML={{ __html: OPEN_RAIL_ON_CURRENT }} />
     </main>
   )
 }

@@ -1,4 +1,4 @@
-import type { Hono } from "hono"
+import type { Context, Hono } from "hono"
 import { WEBHOOK_EVENT_TYPES } from "../../webhooks/catalog.js"
 import { statsQuery, windowFrom } from "../webhook-stats.js"
 import { DELIVERY_HTTP_CLASSES } from "../../webhooks/history.js"
@@ -13,8 +13,12 @@ import {
   updateWebhookEndpointSchema,
 } from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
+import { revokeKey, rotateKey } from "../../auth/key-actions.js"
 import { domainScope, scopedDomains } from "../../auth/scope.js"
 import { requireFreshAuth } from "../../middleware/session.js"
+import { keyAccess, type KeyAccess } from "../../console/api-key-access.js"
+import type { AuditEvent } from "../../identity/ports.js"
+import type { KeySummary } from "../../auth/store.js"
 import type { ConsoleDeps } from "./deps.js"
 import { asId, notFound, notWired, readJson, validation } from "./http.js"
 
@@ -92,37 +96,122 @@ async function resolveScope(
   return { ok: true, scopes: names.map(domainScope) }
 }
 
+const forbidden = (message: string) =>
+  ({ statusCode: 403, name: "forbidden" as const, message }) as const
+
 export function mountCredentials(app: Hono, d: ConsoleDeps): void {
   // ───────────────────────────────────────────────────────────────────────────
   // API keys
   // ───────────────────────────────────────────────────────────────────────────
 
+  /**
+   * ⚠ EVERY KEY ROUTE ASKS `keyAccess` - see console/api-key-access.ts for the
+   * rules. A member reaches only the keys they created; admins and owners all
+   * of them; the keys of a deprovisioned person are an owner's alone.
+   *
+   * ⚠ NOT YOURS IS A 404, NOT A 403. The list never shows a member another
+   * person's key, so an id that is not theirs must answer exactly as an id that
+   * does not exist - a 403 would confirm that the key is there. A key the
+   * caller CAN see but may not touch (its creator was deprovisioned) is a 403,
+   * because hiding it would contradict the list.
+   *
+   * ⚠ EVERY CHANGE IS AUDITED WITH ITS ACTOR, in the identity audit log. The
+   * change has already happened by then and, for a create or a rotation, the
+   * secret exists nowhere else: a failed audit write is logged loudly and does
+   * not take the response with it.
+   */
+  const audit = async (tenantId: string, event: AuditEvent) => {
+    try {
+      if (!d.identity) {
+        d.log.warn(
+          { tenantId, type: event.type },
+          "an API key changed but the audit log is not wired",
+        )
+        return
+      }
+      await d.identity.store.record(tenantId, event)
+    } catch (error) {
+      d.log.error(
+        { err: String(error), tenantId, type: event.type },
+        "an API key changed but its audit event could not be written",
+      )
+    }
+  }
+
+  /** The key, if the caller may act on it; otherwise the response to give. */
+  const authorize = async (
+    c: Context,
+    id: string | undefined,
+  ): Promise<{ key: KeySummary; access: KeyAccess } | { refusal: Response }> => {
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const missing = { refusal: c.json(notFound("No such key."), 404) }
+    if (!id || !d.keys) return missing
+    const key = await d.keys.store.get(tenantId, id)
+    if (!key) return missing
+    const access = await keyAccess(d, tenantId, userId)
+    const verdict = await access.decide(key)
+    if (verdict === "hidden") return missing
+    if (verdict === "owner_only") {
+      return {
+        refusal: c.json(
+          forbidden(
+            "The person who created this key left the workspace. Only an owner can change it.",
+          ),
+          403,
+        ),
+      }
+    }
+    return { key, access }
+  }
+
   app.get("/api-keys", async (c) => {
     if (!d.keys) return c.json(notWired("API keys"), 501)
     const { tenantId } = c.get("auth")
-    const keys = await d.keys.store.list(tenantId)
+    const { userId } = c.get("user")
+    const access = await keyAccess(d, tenantId, userId)
+    const verdicts = new Map<string, "allowed" | "owner_only">()
+    const keys: KeySummary[] = []
+    for (const k of await d.keys.store.list(tenantId)) {
+      const verdict = await access.decide(k)
+      if (verdict === "hidden") continue
+      verdicts.set(k.id, verdict)
+      keys.push(k)
+    }
+    const people = await creatorsOf(d, keys)
     return c.json({
-      data: keys.map((k) => ({
-        id: k.id,
-        name: k.name,
-        // ⚠ THE PREFIX, NEVER THE KEY. Nothing stores the secret - see
-        // auth/store.ts - so this cannot leak it even by accident, and the
-        // prefix is what a person matches against their own environment.
-        prefix: k.prefix,
-        mode: k.mode,
-        scopes: k.scopes,
-        /*
-         * ⚠ DERIVED FROM `scopes`, AND PLURAL NOW. A key may be limited to
-         * several domains - two products sharing a deploy, say - and an empty
-         * list is every domain. The `domain:` encoding stays the API's business;
-         * the console only ever sees names.
-         */
-        domains: scopedDomains(k.scopes),
-        created_at: k.createdAt.toISOString(),
-        last_used_at: k.lastUsedAt?.toISOString() ?? null,
-        expires_at: k.expiresAt?.toISOString() ?? null,
-        revoked_at: k.revokedAt?.toISOString() ?? null,
-      })),
+      data: keys.map((k) => {
+        const actionable = verdicts.get(k.id) === "allowed" && k.revokedAt === null
+        return {
+          // ⚠ THE FLAGS ARE THE ROUTES' OWN ANSWER, so the console hides exactly
+          // what the API would refuse.
+          can_rotate: actionable,
+          can_revoke: actionable,
+          can_edit: actionable,
+          created_by: k.createdBy
+            ? (people.get(k.createdBy) ?? { id: k.createdBy, name: null, email: null })
+            : null,
+          id: k.id,
+          name: k.name,
+          // ⚠ THE PREFIX, NEVER THE KEY. Nothing stores the secret - see
+          // auth/store.ts - so this cannot leak it even by accident, and the
+          // prefix is what a person matches against their own environment.
+          prefix: k.prefix,
+          mode: k.mode,
+          scopes: k.scopes,
+          /*
+           * ⚠ DERIVED FROM `scopes`, AND PLURAL NOW. A key may be limited to
+           * several domains - two products sharing a deploy, say - and an empty
+           * list is every domain. The `domain:` encoding stays the API's business;
+           * the console only ever sees names.
+           */
+          domains: scopedDomains(k.scopes),
+          created_at: k.createdAt.toISOString(),
+          last_used_at: k.lastUsedAt?.toISOString() ?? null,
+          expires_at: k.expiresAt?.toISOString() ?? null,
+          revoked_at: k.revokedAt?.toISOString() ?? null,
+        }
+      }),
     })
   })
 
@@ -150,6 +239,18 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
         // key matters during an incident; tying the key's life to an employee's
         // account would take production sending down when they leave.
         createdBy: userId,
+      })
+
+      await audit(tenantId, {
+        type: "api_key.created",
+        actorUserId: userId,
+        subjectUserId: userId,
+        data: {
+          keyId: created.id,
+          name: created.name,
+          mode: created.mode,
+          domains: scopedDomains(created.scopes),
+        },
       })
 
       return c.json(
@@ -194,28 +295,46 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
    * failure the delete route documents with a quieter symptom - nothing looks
    * wrong, the restriction simply is not in force yet.
    */
-  app.patch("/api-keys/:id", async (c) => {
+  /*
+   * ⚠ STEP-UP, BECAUSE THIS IS A PERMISSION CHANGE ON A LIVE CREDENTIAL. A
+   * stolen session could widen a key narrowed to staging and send as
+   * production; narrowing is the same request with the same risk of being
+   * somebody else's. See `requireFreshAuth`.
+   */
+  app.patch("/api-keys/:id", requireFreshAuth, async (c) => {
     if (!d.keys) return c.json(notWired("API keys"), 501)
     const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const id = asId(c.req.param("id"))
+    const found = await authorize(c, id)
+    if ("refusal" in found) return found.refusal
     const body = await readJson(c)
 
     const scope = await resolveScope(d, tenantId, body?.domains)
     if (!scope.ok) return c.json(validation(scope.error), 422)
 
-    const updated = await d.keys.store.setScopes(
-      tenantId,
-      c.req.param("id"),
-      scope.scopes,
-    )
-    // Revoked, or not theirs. One answer for both: see the delete route.
+    const updated = await d.keys.store.setScopes(tenantId, id!, scope.scopes)
+    // Revoked: the same answer as a key that is not there.
     if (!updated) return c.json(notFound("No such key."), 404)
+
+    await audit(tenantId, {
+      type: "api_key.scope_changed",
+      actorUserId: userId,
+      subjectUserId: found.key.createdBy,
+      data: {
+        keyId: id,
+        name: found.key.name,
+        from: scopedDomains(found.key.scopes),
+        to: scopedDomains(updated.key.scopes),
+      },
+    })
 
     if (d.keys.cache) {
       try {
         await d.keys.cache.del(cacheKeyFor(updated.secretHash))
       } catch (error) {
         d.log.error(
-          { err: String(error), tenantId, keyId: c.req.param("id") },
+          { err: String(error), tenantId, keyId: id },
           "changed a key's scope but could not evict its cache entry",
         )
         /*
@@ -255,58 +374,59 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
   app.delete("/api-keys/:id", requireFreshAuth, async (c) => {
     if (!d.keys) return c.json(notWired("API keys"), 501)
     const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const id = asId(c.req.param("id"))
+    const found = await authorize(c, id)
+    if ("refusal" in found) return found.refusal
 
-    const revoked = await d.keys.store.revoke(tenantId, c.req.param("id"))
-    if (!revoked) return c.json(notFound("No key with that id."), 404)
-
-    /*
-     * ⚠ THE CACHE EVICTION IS HALF OF REVOCATION AND ITS FAILURE IS A 500.
-     * A verified key lives in Redis for the TTL; without deleting that entry
-     * the key keeps working for up to a minute after the customer was told it
-     * was dead. Reporting success while a leaked credential is still live is
-     * the worst possible answer - they stop looking. The row stays revoked, so
-     * a retry converges.
-     */
-    if (d.keys.cache) {
-      try {
-        await d.keys.cache.del(cacheKeyFor(revoked.secretHash))
-      } catch (error) {
-        d.log.error(
-          { err: String(error), tenantId, keyId: c.req.param("id") },
-          "revoked a key but could not evict it from the cache",
-        )
-        return c.json(
-          {
-            statusCode: 500,
-            name: "internal_server_error" as const,
-            message:
-              "The key was revoked but may stay usable for up to a minute. Retry to confirm.",
-          },
-          500,
-        )
-      }
+    const revoked = await revokeKey(d.keys, tenantId, id!, d.log)
+    if (revoked.status === "not_found")
+      return c.json(notFound("No key with that id."), 404)
+    // ⚠ AUDITED BEFORE THE CACHE VERDICT: the row is revoked either way.
+    await audit(tenantId, {
+      type: "api_key.revoked",
+      actorUserId: userId,
+      subjectUserId: found.key.createdBy,
+      data: { keyId: id, name: found.key.name },
+    })
+    // ⚠ A 500, NOT A SUCCESS: see `revokeKey` for why the cache half matters.
+    if (revoked.status === "cache_failed") {
+      return c.json(
+        {
+          statusCode: 500,
+          name: "internal_server_error" as const,
+          message:
+            "The key was revoked but may stay usable for up to a minute. Retry to confirm.",
+        },
+        500,
+      )
     }
 
-    return c.json({ id: c.req.param("id"), deleted: true })
+    return c.json({ id, deleted: true })
   })
 
-  app.post("/api-keys/:id/rotate", async (c) => {
+  /*
+   * ⚠ STEP-UP, BECAUSE THE OLD KEY DIES THE MOMENT THIS RETURNS AND A NEW
+   * SECRET IS HANDED OVER. A stolen session could otherwise mint itself a
+   * working credential and cut the real one off.
+   */
+  app.post("/api-keys/:id/rotate", requireFreshAuth, async (c) => {
     if (!d.keys) return c.json(notWired("API keys"), 501)
     const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const id = asId(c.req.param("id"))
+    const found = await authorize(c, id)
+    if ("refusal" in found) return found.refusal
 
-    const rotated = await d.keys.store.rotate(tenantId, c.req.param("id"))
-    if (!rotated) return c.json(notFound("No key with that id."), 404)
-
-    if (d.keys.cache) {
-      try {
-        await d.keys.cache.del(cacheKeyFor(rotated.revokedHash))
-      } catch (error) {
-        d.log.error(
-          { err: String(error), tenantId },
-          "rotated a key but could not evict the old one from the cache",
-        )
-      }
-    }
+    const rotated = await rotateKey(d.keys, tenantId, id!, d.log)
+    if (rotated.status === "not_found")
+      return c.json(notFound("No key with that id."), 404)
+    await audit(tenantId, {
+      type: "api_key.rotated",
+      actorUserId: userId,
+      subjectUserId: found.key.createdBy,
+      data: { keyId: id, name: found.key.name, newKeyId: rotated.created.id },
+    })
 
     return c.json(
       {
@@ -658,6 +778,32 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
       }),
     )
   })
+}
+
+/**
+ * Who made each key, as the Team page names people: Clerk's name and primary
+ * address. A person Clerk cannot answer for still shows by id - the list must
+ * not fail because one lookup did.
+ */
+async function creatorsOf(d: ConsoleDeps, keys: KeySummary[]) {
+  const ids = [...new Set(keys.flatMap((k) => (k.createdBy ? [k.createdBy] : [])))]
+  const found = new Map<
+    string,
+    { id: string; name: string | null; email: string | null }
+  >()
+  if (!d.people) return found
+  const people = d.people
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const p = await people.get(id)
+        found.set(id, { id, name: p.name || null, email: p.primaryEmail })
+      } catch (error) {
+        d.log.warn({ err: String(error) }, "could not name the creator of an API key")
+      }
+    }),
+  )
+  return found
 }
 
 /** A time from the console's query string, or nothing when it is not one. */

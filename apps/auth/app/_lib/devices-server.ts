@@ -1,4 +1,5 @@
 import "server-only"
+import { clientContextHeader } from "./client-context"
 import type { NextRequest } from "next/server"
 import { SAVED_LIMIT } from "./remembered-cookie"
 
@@ -88,15 +89,55 @@ function apiBase(): string {
   return "http://localhost:3001"
 }
 
+/**
+ * How long a call that FINISHES an SSO sign-in may take (the OIDC callback,
+ * the SAML ACS). A first sign-in creates the Clerk user, claims and links the
+ * account and makes them a member, several Clerk round trips; one took 30 s
+ * on a freshly started API (2026-11-01) while the 5 s default gave up at 5,
+ * so the person saw "temporarily unavailable" for a sign-in that succeeded
+ * and was never handed over. Every other call stays short.
+ */
+export const FINISH_SIGN_IN_MS = 30_000
+
 export async function callApi(
   path: string,
   body: unknown,
   headers: Record<string, string> = {},
+  timeoutMs = 5000,
 ): Promise<Response> {
+  const context = await clientContextHeader()
   return fetch(`${apiBase()}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
+    headers: {
+      "content-type": "application/json",
+      ...(context ? { "x-i10-client": context } : {}),
+      ...headers,
+    },
     body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+}
+
+/** Any method, for the routes a setup link drives (`PUT /sso/setup/<token>/oidc`). */
+export async function callApiAs(
+  method: "GET" | "POST" | "PUT",
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  return fetch(`${apiBase()}${path}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  })
+}
+
+/** A GET to the API, for what it publishes (an OIDC connection's JWKS, #338). */
+export async function getApi(path: string): Promise<Response> {
+  return fetch(`${apiBase()}${path}`, {
+    method: "GET",
     cache: "no-store",
     signal: AbortSignal.timeout(5000),
   })

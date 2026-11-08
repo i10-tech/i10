@@ -79,7 +79,7 @@ suite("team access domains", () => {
 
   it("matches a seeker at a subdomain through the parent's row, and nobody else", async () => {
     await store().setRules(acme, acmeId, [
-      { pattern: `*.${acmeDomain}`, mode: "auto", role: "org:member" },
+      { pattern: `*.${acmeDomain}`, mode: "auto", role: "member" },
     ])
     const seen = await store().accessFor({
       currentTenantId: NO_TENANT,
@@ -93,6 +93,28 @@ suite("team access domains", () => {
       emails: ["x@elsewhere.test"],
     })
     expect(stranger.domains).toEqual([])
+  })
+
+  // #335: rules written before hold Clerk's keys, and read as ours everywhere.
+  it("reads a rule's old Clerk role as ours, for the workspace and for a seeker", async () => {
+    await owner`update core.join_domains
+                   set rules = ${owner.json([
+                     { pattern: `*.${acmeDomain}`, mode: "auto", role: "org:admin" },
+                   ])}
+                 where id = ${acmeId}`
+    const [row] = await store().accessDomains(acme)
+    expect(row!.rules).toEqual([
+      { pattern: `*.${acmeDomain}`, mode: "auto", role: "admin" },
+    ])
+    const seen = await store().accessFor({
+      currentTenantId: NO_TENANT,
+      userId: "user_s",
+      emails: [`s@dev.${acmeDomain}`],
+    })
+    expect(seen.domains[0]!.rules[0]!.role).toBe("admin")
+    await store().setRules(acme, acmeId, [
+      { pattern: `*.${acmeDomain}`, mode: "auto", role: "member" },
+    ])
   })
 
   it("files a request and records a join into the other workspace, which the person can read", async () => {

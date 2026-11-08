@@ -748,6 +748,36 @@ requires it - and Amazon drops a DSN for mail it did not send. One return path
 for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
 return path".
 
+### Mailbox events: `auth.failed` and `limit.quota`
+
+Two more events in the include list are about a mailbox, not a message. They
+carry `accountName`, `remoteIp` and `listenerId` and no VERP sender, so
+`apps/api/src/webhooks/stalwart-account.ts` handles them apart from the
+delivery path; they never reach a customer's webhook endpoint.
+
+| Stalwart event | What the API does                                                                    |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `auth.failed`  | one row in `core.mailbox_auth_failures`: account, workspace, address, subnet         |
+| `limit.quota`  | tells the workspace once per mailbox per UTC day (logs only until a template exists) |
+
+⚠ **Failures for an account we do not host are dropped.** Scanners try random
+usernames all day and Stalwart reports each one. An address that is not in
+`authd.accounts`, or is hosted with no workspace (i10's own mailboxes), writes
+nothing and counts as `ignored`.
+
+⚠ **They are kept out of `core.identity_events` on purpose.** Every risk reader
+there treats a row as the person's own sighting, so a failure filed there would
+make an attacker's network look familiar to the owner and link unrelated
+accounts that one brute-forcing address touched. Nothing reads
+`mailbox_auth_failures` into the score yet; `mailboxAuthFailureSummary`
+(`apps/api/src/risk/mailbox-auth.ts`) is the read.
+
+`security.authentication-ban`, `security.too-many-attempts` and
+`limit.blob-quota` are not subscribed: the first two fire off the failures
+already seen, and the blob quota is a per-upload ceiling, not a full mailbox.
+Both events are deduplicated on `authd.webhook_events` like everything else,
+since each of the two nodes posts its own copy.
+
 ## The mailbox lever
 
 `MtaOutboundStrategy.route` is an expression evaluated **per recipient**, and it
@@ -1023,3 +1053,43 @@ WebHook and the StoreLookup reach cluster addresses today; the hook goes to
 `i10-api.i10-prod.svc.cluster.local` the same way, but that is an inference.
 If it is blocked the symptom is `mta-hook.error` in Stalwart's log and `451` for
 every mailbox send.
+
+## Team inboxes: one role, and what is still to probe (B8, #382)
+
+A team inbox (`support@`) is a row in the directory. `apps/api` writes
+`authd.groups` and `authd.group_members`; authd already serves them as a
+`groupOfNames` (so `filterRecipient` accepts the address) and as `memberOf` on
+each member (`attrMemberOf`). Members reach it through their own sign-in:
+shared folders over IMAP, a second account over JMAP.
+
+The Sent copy is not Stalwart config: no setting copies a send-as-group message
+into the group's Sent, and Sieve cannot (the submission script has no account).
+`i10-team-sent` (a CronJob, `workloads/team-sent.yaml`) copies what members sent
+as the address, over JMAP, and is idempotent by Message-ID.
+
+⚠ **A GROUP CANNOT RECEIVE MAIL WITHOUT A ROLE, AND 1.0 GIVES IT NONE.**
+Probed on prod on 2026-11-06 with `probe-team@i10.tech`: Stalwart created the
+Group account on the first delivery, then refused that delivery with
+`security.unauthorized` (`emailReceive`) and a 550, because
+`Authentication.defaultGroupRoleIds` was empty. The plan adds the `i10 Group`
+role, which grants `emailReceive` and nothing else, and makes it the default
+group role. With that permission the message was stored in the group's mailbox.
+
+⚠ **THE GROUP'S REGISTRY NAME IS THE LOCAL PART** (`probe-team`), as a user's
+is, not the directory's full-address name. Two workspaces' `support@` share it;
+`jmap-as` tells them apart by the exact `emailAddress`.
+
+Also probed on 2026-11-06 and fine: the impersonation key may `Email/copy` from
+a member into the group's `Sent Items`; `Email/query` takes `from` and `after`
+with `inMailbox`; a member sees the group as `Shared Folders/<address>/...`
+through `memberOf` alone (after #394, which made authd answer the read of a
+group's DN that Stalwart resolves `memberOf` with); a member may send `From:`
+the group address; destroying the Group account and then the directory row
+leaves the address refused with 550.
+
+⚠ **REMOVING A MEMBER'S DIRECTORY ROW DOES NOT REVOKE THEIR ACCESS.** Stalwart
+refreshes memberships only when it looks the account up in the directory again,
+and an open mail client may not cause that for hours: access was still there 15
+minutes after the row was deleted. Clearing the group from the member's
+`memberGroupIds` in the registry revoked it at once, so the API does that first
+on every removal (`revokeGroup`) and changes the rows second.

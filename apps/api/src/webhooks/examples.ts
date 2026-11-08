@@ -61,6 +61,46 @@ export function exampleData(
     case "email.sent":
     case "email.delivered":
       return base
+    case "member.provisioned":
+      return {
+        user_id: "user_00000000000000000000000000",
+        connection_id: "00000000-0000-7000-8000-000000000002",
+        source: "jit",
+        created_at: at.toISOString(),
+        test: true,
+      }
+    case "member.deprovisioned":
+      return {
+        user_id: "user_00000000000000000000000000",
+        connection_id: "00000000-0000-7000-8000-000000000002",
+        mode: "membership",
+        cause: "scim",
+        actor_user_id: null,
+        sessions_revoked: 2,
+        api_keys: [{ id: "00000000-0000-7000-8000-000000000003", name: "Production" }],
+        created_at: at.toISOString(),
+        test: true,
+      }
+    case "sso.connection.failed":
+      return {
+        connection_id: "00000000-0000-7000-8000-000000000002",
+        reason: "signature_invalid",
+        trigger: "failure_spike",
+        failures_last_hour: 42,
+        failures_last_24h: 57,
+        last_success_at: new Date(at.getTime() - 3 * 3_600_000).toISOString(),
+        created_at: at.toISOString(),
+        test: true,
+      }
+    case "sso.certificate.expiring":
+      return {
+        connection_id: "00000000-0000-7000-8000-000000000002",
+        fingerprint: "3fa9c1d2e4b5a6978877665544332211ffeeddccbbaa99887766554433221100",
+        not_after: new Date(at.getTime() + 7 * 86_400_000).toISOString(),
+        days: 7,
+        created_at: at.toISOString(),
+        test: true,
+      }
     case "webhook_endpoint.failing":
     case "webhook_endpoint.disabled":
     case "webhook_endpoint.recovered": {

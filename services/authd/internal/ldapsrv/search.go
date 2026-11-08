@@ -40,7 +40,7 @@ func (s *Server) handleSearch(w ldap.ResponseWriter, m *ldap.Message) {
 	ctx, cancel := s.opContext()
 	defer cancel()
 
-	entries, err := s.candidates(ctx, filter)
+	entries, err := s.candidates(ctx, filter, string(r.BaseObject()), r.Scope())
 	if err != nil {
 		s.log.Error("search: projection lookup failed", "filter", r.FilterString(), "err", err)
 		res := ldap.NewSearchResultDoneResponse(ldap.LDAPResultUnavailable)
@@ -78,7 +78,12 @@ func (s *Server) handleSearch(w ldap.ResponseWriter, m *ldap.Message) {
 //
 // The set only has to be a superset - Match does the authoritative filtering
 // afterwards - so it errs towards fetching too much rather than too little.
-func (s *Server) candidates(ctx context.Context, filter message.Filter) ([]*directory.Entry, error) {
+func (s *Server) candidates(
+	ctx context.Context,
+	filter message.Filter,
+	base string,
+	scope message.ENUMERATED,
+) ([]*directory.Entry, error) {
 	var entries []*directory.Entry
 	seen := map[string]bool{}
 	add := func(e *directory.Entry) {
@@ -130,6 +135,32 @@ func (s *Server) candidates(ctx context.Context, filter message.Filter) ([]*dire
 		}
 		for _, g := range groups {
 			add(s.groupEntry(g))
+		}
+	}
+
+	// ⚠ A READ OF ONE ENTRY BY ITS DN, WHICH IS HOW STALWART RESOLVES memberOf.
+	// It takes each group DN from a user's memberOf and reads that entry
+	// (base scope, usually `(objectClass=*)`) for its mail address. Without
+	// this, that read found no candidate, Stalwart dropped every membership,
+	// and team inbox members saw nothing (probed on 1.0.3, #382).
+	if scope == ldap.SearchRequestScopeBaseObject {
+		if name := directory.GroupNameFromDN(base, s.baseDN); name != "" {
+			groups, err := s.store.GroupsByName(ctx, []string{name})
+			if err != nil {
+				return nil, err
+			}
+			for _, g := range groups {
+				add(s.groupEntry(g))
+			}
+		}
+		if uid := directory.UIDFromDN(base, s.baseDN); uid != "" {
+			account, err := s.store.AccountByUID(ctx, uid)
+			if err != nil {
+				return nil, err
+			}
+			if account != nil {
+				add(s.accountEntry(*account))
+			}
 		}
 	}
 

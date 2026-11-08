@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/node"
+import { EDGE_HEADER } from "./identity/edge.js"
 
 /**
  * Error reporting, and the one thing that notices a job which never ran.
@@ -48,6 +49,7 @@ export type Service =
   | "risk-score"
   | "content-store"
   | "retention"
+  | "team-sent"
 
 export interface ObservabilityOptions {
   /**
@@ -188,7 +190,23 @@ const MAX_DEPTH = 12
 
 /** Exported for the test that proves nothing gets past the walk. */
 export function scrubEvent<T>(event: T): T {
-  return walk(event, 0, new WeakSet()) as T
+  const out = walk(event, 0, new WeakSet()) as T
+  dropEdgeProof(out)
+  return out
+}
+
+/**
+ * ⚠ `x-i10-edge` IS A SECRET, NOT A HEADER TO REPORT. A request header map on
+ * an event would carry it verbatim, and no string pattern can recognise it, so
+ * it is removed by name.
+ */
+function dropEdgeProof(event: unknown): void {
+  const headers = (event as { request?: { headers?: Record<string, unknown> } } | null)
+    ?.request?.headers
+  if (!headers || typeof headers !== "object") return
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === EDGE_HEADER) delete headers[key]
+  }
 }
 
 function walk(value: unknown, depth: number, seen: WeakSet<object>): unknown {

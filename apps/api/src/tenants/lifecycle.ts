@@ -152,6 +152,16 @@ export interface LifecycleDeps {
   domains?: DomainReleaser
   /** Asked before terminating on a `user.deleted`. Never on an org event. */
   organizations?: OrganizationLiveness
+  /**
+   * The workspace's mailboxes lose their login (mailboxes/revoke.ts
+   * `workspaceGone`): mail keeps arriving and is kept, nobody signs in.
+   *
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS LOUD FOR THE SAME REASON `polar` AND `domains`
+   * ARE. Termination marks the tenant dead and leaves every `authd.accounts` row
+   * active, so without this a deleted workspace's people go on reading their mail
+   * on a password authd has cached for hours.
+   */
+  mail?: { suspendWorkspace(tenantId: string): Promise<number> }
   freePlanId: string
   log: Logger
 }
@@ -229,6 +239,38 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
     }
   }
 
+  /**
+   * Takes every mailbox login of a dead workspace away. Never throws: the failure
+   * is returned, so the billing stop is not delayed by it and `finish` raises it.
+   * A workspace with no mailboxes costs one empty statement.
+   */
+  async function closeMail(tenantId: string, clerkOrgId: string): Promise<unknown> {
+    if (!deps.mail) {
+      deps.log.error(
+        { tenantId, clerkOrgId },
+        "workspace deleted but mailbox sign-in cannot be closed - its people " +
+          "can STILL SIGN IN to their mailboxes, and a password authd has cached " +
+          "keeps working for hours",
+      )
+      return null
+    }
+    try {
+      const suspended = await deps.mail.suspendWorkspace(tenantId)
+      if (suspended > 0)
+        deps.log.warn(
+          { tenantId, clerkOrgId, suspended },
+          "suspended the mailboxes of a terminated workspace",
+        )
+      return null
+    } catch (error) {
+      deps.log.error(
+        { tenantId, clerkOrgId, err: String(error) },
+        "workspace terminated, but its mailboxes could not be suspended - retrying",
+      )
+      return error
+    }
+  }
+
   /** The whole of a termination, for one organization we know is gone. */
   async function terminate(clerkOrgId: string): Promise<LifecycleOutcome> {
     const ended = await deps.tenants.terminate(clerkOrgId, deps.freePlanId)
@@ -242,6 +284,14 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
     }
 
     /*
+     * ⚠ THE LOGINS FIRST, AND BEFORE ANYTHING THAT CAN THROW. A workspace nobody
+     * can sign in to is not one whose people should be reading mail, and the
+     * billing stop below can throw and be retried; the mailboxes must not wait
+     * for that. A failure here is held, not raised - see `closeMail`.
+     */
+    const mailFailure = await closeMail(ended.tenantId, clerkOrgId)
+
+    /*
      * ⚠ THE DOMAINS GO ON THE WAY OUT OF EVERY EXIT BELOW, NOT AT ONE OF THEM.
      * There are three ways a termination finishes - no subscription, no Polar
      * client, a revoke that succeeded - and a teardown attached to the last of
@@ -250,6 +300,10 @@ export function tenantLifecycle(deps: LifecycleDeps): TenantLifecycle {
      */
     const finish = async (outcome: LifecycleOutcome): Promise<LifecycleOutcome> => {
       await release(ended.tenantId, clerkOrgId)
+      // ⚠ RETHROWN LAST, so billing and the teardown above are never held up by
+      // it, and Svix retries what failed: a termination that left the logins open
+      // answers 500 and runs again.
+      if (mailFailure) throw mailFailure
       return outcome
     }
 

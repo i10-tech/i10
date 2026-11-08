@@ -7,6 +7,7 @@ import { authEmailDelivery } from "../src/auth-email/deliver.js"
 import { invitationEmail } from "../src/console/members.js"
 import { deps as teamDeps } from "./team-access-fixtures.js"
 import { ACME, world } from "./member-fixtures.js"
+import { rolesDeps, row } from "./role-fixtures.js"
 
 /**
  * The member routes (#327): the codes the invitation form branches on, the
@@ -16,17 +17,26 @@ import { ACME, world } from "./member-fixtures.js"
 
 const NOW = new Date("2027-03-15T12:00:00Z")
 
+/**
+ * ⚠ THE PERMISSION IS OUR ROLES TABLE'S (#335): the reader is an admin there,
+ * or a member - and so is `can` on the team deps, which reads the same thing.
+ */
 function appWith(w: ReturnType<typeof world>, canManage = true) {
-  const t = teamDeps([{ pattern: "pslhq.app", mode: "auto", role: "org:member" }], {
+  const t = teamDeps([{ pattern: "pslhq.app", mode: "auto", role: "member" }], {
     can: async () => canManage,
   })
+  const r = rolesDeps({ rows: [row("user_admin", canManage ? "admin" : "member")] })
   const app = new Hono()
   app.use("*", async (c, next) => {
     c.set("auth", { apiKeyId: "", tenantId: ACME.tenantId, scopes: [], mode: "live" })
     c.set("user", { userId: "user_admin", orgId: ACME.orgId })
     await next()
   })
-  mountTeam(app, { teamDomains: t.d, members: w.d } as unknown as ConsoleDeps)
+  mountTeam(app, {
+    teamDomains: t.d,
+    members: w.d,
+    roles: r.d,
+  } as unknown as ConsoleDeps)
   return app
 }
 
@@ -39,7 +49,7 @@ const call = (app: Hono, method: string, path: string, body?: unknown) =>
 
 const form = {
   emails: ["new@acme.test"],
-  role: "org:member",
+  role: "member",
   expires_at: new Date(NOW.getTime() + 24 * 3600_000).toISOString(),
   zone: "America/New_York",
   country: "US",

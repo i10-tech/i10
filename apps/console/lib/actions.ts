@@ -29,7 +29,11 @@ import type {
   WebhookTransformation,
   WebhookTransformationResult,
   Workspace,
+  WorkspaceRole,
 } from "@/lib/types"
+
+/** The roles a person can join with, by invitation or access rule (#335). */
+export type JoinRole = Exclude<WorkspaceRole, "owner">
 
 /**
  * Every mutation the console performs.
@@ -587,8 +591,8 @@ export interface AccessRule {
   /** `pslhq.app`, `dev.pslhq.app`, or `*.pslhq.app` (any depth). */
   pattern: string
   mode: AccessMode
-  /** The Clerk role given on joining by this rule. */
-  role: string
+  /** Our role given on joining by this rule (#335): never owner. */
+  role: JoinRole
 }
 
 export interface AccessDomain {
@@ -732,6 +736,109 @@ export async function answerJoinRequest(id: string, accept: boolean, block = fal
   )
 }
 
+// ── Roles (#335) ───────────────────────────────────────────────────────────
+
+export interface TeamRoles {
+  /** Every member we hold a role for; anybody missing is a member. */
+  data: { user_id: string; role: WorkspaceRole }[]
+  /** The reader: their role, what it lets them do, and what they may give. */
+  me: {
+    role: WorkspaceRole
+    permissions: string[]
+    grantable: WorkspaceRole[]
+    invitable: JoinRole[]
+  }
+}
+
+/** Every member's role, and the reader's own, from our API - never Clerk's. */
+export async function teamRoles() {
+  return run(() => api<TeamRoles>("/console/team/roles"), [], {
+    refreshCaller: false,
+  })
+}
+
+/** 409 `last_owner` when it would leave the workspace with no owner. */
+export async function changeMemberRole(userId: string, role: WorkspaceRole) {
+  return run(
+    () =>
+      api<{ user_id: string; role: WorkspaceRole }>(
+        `/console/team/members/${encodeURIComponent(userId)}/role`,
+        { method: "PUT", body: { role } },
+      ),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/** Leaves the active workspace. 409 `last_owner` for its only owner. */
+export async function leaveWorkspace() {
+  return run(() => api<{ ok: true }>("/console/team/leave", { method: "POST" }), [], {
+    refreshCaller: false,
+  })
+}
+
+/**
+ * Deletes the active workspace (#335): owners only, behind step-up. The
+ * tenant is torn down by Clerk's `organization.deleted`, as before.
+ */
+export async function deleteWorkspace() {
+  return run(
+    () => api<{ deleted: true }>("/console/workspace", { method: "DELETE" }),
+    [],
+    {
+      refreshCaller: false,
+    },
+  )
+}
+
+/**
+ * Deletes the signed-in person's whole account (#336), through our API:
+ * Clerk's gateway refuses `DELETE /v1/me` at the Frontend API. A 409
+ * `sole_owner` names the workspaces in `body.workspaces` and says what to do
+ * in its message; a 403 carries the step-up hint.
+ */
+export async function deleteAccount() {
+  return run(
+    () => api<{ deleted: true }>("/console/me/account", { method: "DELETE" }),
+    [],
+    {
+      refreshCaller: false,
+    },
+  )
+}
+
+/** The workspace's logo, through our API since Clerk's roles are powerless. */
+export async function setWorkspaceLogo(form: FormData) {
+  const file: unknown = form.get("file")
+  if (!(file instanceof Blob)) {
+    return {
+      ok: false as const,
+      error: "Choose an image.",
+      name: "validation_error",
+      status: 422,
+    }
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  return run(
+    () =>
+      api<{ ok: true }>("/console/workspace/logo", {
+        method: "PUT",
+        rawBody: bytes,
+        contentType: file.type || "image/png",
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+export async function removeWorkspaceLogo() {
+  return run(
+    () => api<{ ok: true }>("/console/workspace/logo", { method: "DELETE" }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
 /** Removes a member onto the removed list, or (`block`) the block list. */
 export async function removeTeamMember(userId: string, block: boolean) {
   return run(
@@ -799,7 +906,7 @@ export async function teamCapacity() {
 export interface PendingInvitation {
   id: string
   email: string
-  role: string
+  role: JoinRole
   expires_at: string
   /** The zone the expiry was worded in, and the country when one was picked. */
   zone: string
@@ -825,7 +932,7 @@ export async function teamInvitations() {
  */
 export async function sendInvitations(input: {
   emails: string[]
-  role: string
+  role: JoinRole
   expires_at: string
   zone: string
   country: string | null
@@ -2152,6 +2259,22 @@ export async function createPersonalWorkspace() {
     () =>
       api<{ organization_id: string }>("/console/workspaces/personal", {
         method: "POST",
+      }),
+    [],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * Creates a team workspace (#335) through our API, which demotes its creator
+ * in Clerk at once. Answers the Clerk organization to activate.
+ */
+export async function createTeamWorkspace(name: string) {
+  return run(
+    () =>
+      api<{ organization_id: string }>("/console/workspaces", {
+        method: "POST",
+        body: { name },
       }),
     [],
     { refreshCaller: false },

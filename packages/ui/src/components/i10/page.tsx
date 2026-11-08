@@ -62,7 +62,7 @@ export function PageHeaderRow({ className, ...props }: React.ComponentProps<"div
   return (
     <div
       className={cn(
-        "flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-3",
+        "flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-3",
         className,
       )}
       {...props}
@@ -112,7 +112,7 @@ export function PageActions({ className, ...props }: React.ComponentProps<"div">
   return (
     <div
       data-slot="page-actions"
-      className={cn("flex shrink-0 items-center gap-2", className)}
+      className={cn("flex min-h-9 shrink-0 items-center gap-2", className)}
       {...props}
     />
   )

@@ -54,6 +54,25 @@ import { pollReputation, sesReputationReader } from "./ses-status/reputation-pol
 import { reputationStore } from "./ses-status/reputation-store.js"
 import { sesStatusService } from "./ses-status/service.js"
 import { sesStatusStore } from "./ses-status/store.js"
+import { identityStore } from "./identity/store.js"
+import { auditTap, tapped } from "./identity/audit-tap.js"
+import { identityAlerts, identityMail } from "./identity/alerts.js"
+import { identityWebhooks } from "./webhooks/identity-events.js"
+import { roleStore } from "./console/roles-db.js"
+import { clerkMembers } from "./console/clerk-members.js"
+import { samlStore } from "./identity/saml-store.js"
+import { fetchIdpMetadata } from "./identity/saml.js"
+import {
+  checkDirectoryStaleSync,
+  checkDirectoryTokens,
+  checkOidcSecret,
+  dailySamlPass,
+} from "./identity/saml-refresh.js"
+import { connectionHealthStore } from "./identity/health-store.js"
+import { directoryStore } from "./identity/scim-store.js"
+import { sql as dsql } from "drizzle-orm"
+import { guardedFetch } from "./identity/oidc-fetch.js"
+import { parseAllowList, vetHost } from "./webhooks/egress.js"
 
 const log = pino({ name: "i10-domain-recheck" })
 const env = loadEnv()
@@ -149,6 +168,106 @@ await withMonitor(
       if (env.SES_ENABLED) await pollSesStatuses(db, sql)
 
       /*
+       * ⚠ SAML METADATA AND CERTIFICATE EXPIRY RIDE THIS PASS TOO (#339): one
+       * daily job across every workspace already exists. Its failure is
+       * reported without failing the domain re-check, which has written
+       * what it found.
+       */
+      try {
+        const allow = parseAllowList(env.WEBHOOK_EGRESS_ALLOW)
+        const fetch = guardedFetch({
+          vet: (host, signal) => vetHost(host, { allow, signal }),
+        })
+        const base = identityStore(db, null)
+        const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+        const consoleUrl = env.CONSOLE_ORIGINS[0]
+        const samlSummary = await withSystemSender(db, sql, async (sender) => {
+          /*
+           * ⚠ A CERTIFICATE ALERT IS A WEBHOOK AND AN EMAIL (#345), through the
+           * same tap the API puts on `record`. The webhook rows are written and
+           * the worker's sweep queues them (this job has no delivery queue);
+           * the email needs our sender, and without one only the audit event
+           * and the webhook exist.
+           */
+          const health = connectionHealthStore(db)
+          const scim = directoryStore(db)
+          const tap = auditTap({
+            webhooks: identityWebhooks({ db, log }),
+            ...(sender && consoleUrl
+              ? {
+                  alerts: identityAlerts({
+                    mail: identityMail({ sender, consoleUrl }),
+                    roles: roleStore(db),
+                    workspaceOrg: (tenantId) => base.workspaceOrg(tenantId),
+                    workspaceName: (tenantId) => base.workspaceName(tenantId),
+                    connectionName: async (tenantId, id) =>
+                      (await base.connection(tenantId, id))?.name ?? null,
+                    directoryName: async (tenantId, id) =>
+                      (await scim.directory(tenantId, id))?.name ?? null,
+                    addresses: (orgId, userIds) =>
+                      clerkMembers(clerk).addresses(orgId, userIds),
+                    // Not used by the certificate alert.
+                    addressOf: async () => null,
+                    consoleUrl,
+                    log,
+                  }),
+                }
+              : {}),
+            health,
+            store: base,
+            connectionStatus: async (tenantId, id) =>
+              (await base.connection(tenantId, id))?.status ?? null,
+            log,
+          })
+          const tappedStore = tapped(base, tap)
+          const summary = await dailySamlPass({
+            // Metadata and certificates are public: no secret box is needed.
+            store: tappedStore,
+            saml: samlStore(db),
+            fetchMetadata: (url) => fetchIdpMetadata(fetch, url),
+            log,
+          })
+
+          const now = new Date()
+          try {
+            const tenantRows = (await db.execute(
+              dsql`select id from core.tenants`,
+            )) as unknown as { id: string }[]
+            for (const { id: tenantId } of tenantRows) {
+              try {
+                const conns = await base.connections(tenantId)
+                for (const conn of conns) {
+                  if (conn.protocol === "oidc") {
+                    await checkOidcSecret({ store: tappedStore, log }, conn, now)
+                  }
+                }
+                const dirs = await scim.directories(tenantId)
+                for (const dir of dirs) {
+                  await checkDirectoryStaleSync({ store: tappedStore, log }, dir, now)
+                  await checkDirectoryTokens(
+                    { store: tappedStore, health, log },
+                    dir,
+                    dir.tokens,
+                    now,
+                  )
+                }
+              } catch (err) {
+                log.error({ err, tenantId }, "failed identity expiry check for tenant")
+              }
+            }
+          } catch (err) {
+            log.error({ err }, "failed reading tenants for identity expiry check")
+          }
+
+          return summary
+        })
+        log.info(samlSummary, "SAML metadata and certificate pass complete")
+      } catch (error) {
+        log.error({ err: error }, "SAML metadata and certificate pass failed")
+        captureError(error, { phase: "recheck-saml" })
+      }
+
+      /*
        * ⚠ EVERY LOOKUP FAILING IS OUR PROBLEM, NOT THE CUSTOMERS'. A pass that
        * could not ask anything writes nothing and stands nobody down, which is
        * indistinguishable in the data from a pass where everything was fine.
@@ -172,6 +291,52 @@ await withMonitor(
 )
 
 /**
+ * Runs `run` with our system sender (or null where mail is not configured),
+ * over a send queue that is closed afterwards.
+ *
+ * ⚠ THE SAME SENDER THE API BUILDS, from the same helper (`systemSenderFor`),
+ * so a notice sent from this job cannot drift from one sent from the API.
+ */
+async function withSystemSender<T>(
+  db: ReturnType<typeof createDb>["db"],
+  sql: ReturnType<typeof createDb>["sql"],
+  run: (sender: Awaited<ReturnType<typeof systemSenderFor>>) => Promise<T>,
+): Promise<T> {
+  const redis = createQueueClient(env.REDIS_URL)
+  redis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
+  try {
+    const queue = (cls: "transactional" | "bulk") =>
+      createSendQueue({
+        redis,
+        class: cls,
+        jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
+        maxAttempts: env.WORKER_MAX_ATTEMPTS,
+      })
+    return await run(
+      await systemSenderFor({
+        sql,
+        db,
+        queues: { transactional: queue("transactional"), bulk: queue("bulk") },
+        metering: resilient(
+          postgresMetering({
+            db,
+            featureId: env.METERING_FEATURE_ID,
+            freePlanId: env.METERING_FREE_PLAN_ID,
+            log,
+          }),
+          log,
+        ),
+        from: env.AUTH_EMAIL_FROM,
+        tenantSlug: env.AUTH_EMAIL_TENANT_SLUG,
+        log,
+      }),
+    )
+  } finally {
+    await redis.quit().catch(() => {})
+  }
+}
+
+/**
  * The daily re-read of every SES tenant's sending status (#157) and
  * reputation (#158).
  *
@@ -188,89 +353,65 @@ async function pollSesStatuses(
   db: ReturnType<typeof createDb>["db"],
   sql: ReturnType<typeof createDb>["sql"],
 ) {
-  const redis = createQueueClient(env.REDIS_URL)
-  redis.on("error", (err: Error) => log.error({ err }, "send queue unavailable"))
   try {
-    const queue = (cls: "transactional" | "bulk") =>
-      createSendQueue({
-        redis,
-        class: cls,
-        jobTimeoutMs: env.WORKER_JOB_TIMEOUT_MS,
-        maxAttempts: env.WORKER_MAX_ATTEMPTS,
-      })
-    const sender = await systemSenderFor({
-      sql,
-      db,
-      queues: { transactional: queue("transactional"), bulk: queue("bulk") },
-      metering: resilient(
-        postgresMetering({
-          db,
-          featureId: env.METERING_FEATURE_ID,
-          freePlanId: env.METERING_FREE_PLAN_ID,
+    await withSystemSender(db, sql, async (sender) => {
+      const consoleUrl = env.CONSOLE_ORIGINS[0]
+      const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
+      const store = sesStatusStore(db)
+      const ses = new SESv2Client({ region: env.AWS_REGION })
+      const notice =
+        sender && consoleUrl
+          ? ownerNotice({ db, clerk, sender, consoleUrl })
+          : undefined
+
+      const summary = await pollTenantStatuses({
+        reader: sesTenantStatusReader(ses),
+        store,
+        service: sesStatusService({
+          store,
+          ...(notice ? { notice } : {}),
           log,
+          alert: captureError,
         }),
         log,
-      ),
-      from: env.AUTH_EMAIL_FROM,
-      tenantSlug: env.AUTH_EMAIL_TENANT_SLUG,
-      log,
-    })
-    const consoleUrl = env.CONSOLE_ORIGINS[0]
-    const clerk = createClerkClient({ secretKey: env.CLERK_SECRET_KEY })
-    const store = sesStatusStore(db)
-    const ses = new SESv2Client({ region: env.AWS_REGION })
-    const notice =
-      sender && consoleUrl ? ownerNotice({ db, clerk, sender, consoleUrl }) : undefined
+      })
+      log.info(summary, "SES tenant status poll complete")
+      if (summary.failed > 0) {
+        captureError(
+          new Error(`${summary.failed} SES tenant status(es) could not be read`),
+          {
+            phase: "recheck-ses-status",
+          },
+        )
+      }
 
-    const summary = await pollTenantStatuses({
-      reader: sesTenantStatusReader(ses),
-      store,
-      service: sesStatusService({
-        store,
-        ...(notice ? { notice } : {}),
-        log,
-        alert: captureError,
-      }),
-      log,
-    })
-    log.info(summary, "SES tenant status poll complete")
-    if (summary.failed > 0) {
-      captureError(
-        new Error(`${summary.failed} SES tenant status(es) could not be read`),
-        {
-          phase: "recheck-ses-status",
-        },
-      )
-    }
-
-    /*
-     * ⚠ REPUTATION AFTER STATUS, AND ITS OWN FAILURE COUNT (#158). A missing
-     * IAM grant for `ListRecommendations` must not stop the status poll that
-     * enforces pauses - so it runs second and reports separately.
-     */
-    const reputation = reputationStore(db)
-    const found = await pollReputation({
-      reader: sesReputationReader(ses),
-      store: reputation,
-      service: reputationService({
+      /*
+       * ⚠ REPUTATION AFTER STATUS, AND ITS OWN FAILURE COUNT (#158). A missing
+       * IAM grant for `ListRecommendations` must not stop the status poll that
+       * enforces pauses - so it runs second and reports separately.
+       */
+      const reputation = reputationStore(db)
+      const found = await pollReputation({
+        reader: sesReputationReader(ses),
         store: reputation,
-        ...(notice ? { notice } : {}),
+        service: reputationService({
+          store: reputation,
+          ...(notice ? { notice } : {}),
+          log,
+          alert: (message, level, context) => captureMessage(message, level, context),
+        }),
         log,
-        alert: (message, level, context) => captureMessage(message, level, context),
-      }),
-      log,
+      })
+      log.info(found, "SES reputation poll complete")
+      if (found.failed > 0) {
+        captureError(
+          new Error(`${found.failed} SES tenant reputation(s) could not be read`),
+          { phase: "recheck-ses-reputation" },
+        )
+      }
     })
-    log.info(found, "SES reputation poll complete")
-    if (found.failed > 0) {
-      captureError(
-        new Error(`${found.failed} SES tenant reputation(s) could not be read`),
-        { phase: "recheck-ses-reputation" },
-      )
-    }
   } catch (error) {
     log.error({ err: error }, "SES tenant status poll failed")
     captureError(error, { phase: "recheck-ses-status" })
-  } finally {
-    await redis.quit().catch(() => {})
   }
 }

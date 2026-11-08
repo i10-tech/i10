@@ -1,0 +1,11 @@
+{
+  // Every module in src/ uses only standard fetch types, so the tests type-check
+  // the same files under `bun` types too.
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules"]
+}

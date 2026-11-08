@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useAuth, useClerk, useOrganization } from "@clerk/nextjs"
+import { useClerk, useOrganization } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
 import { Button } from "@repo/ui/components/button/button"
@@ -9,20 +9,20 @@ import { CopyField } from "@repo/ui/components/i10/copy-field"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { TextMorph } from "@repo/ui/components/text-morph/text-morph"
-import {
-  ProfileBlock,
-  ProfileRow,
-  clerkReason,
-  useFollowOpen,
-} from "@/components/account/shared"
+import { ProfileBlock, ProfileRow, useFollowOpen } from "@/components/account/shared"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { DeletionWarning } from "@/components/deletion-warning"
 import { PhotoField } from "@/components/photo-field"
-import { renameWorkspace } from "@/lib/actions"
+import {
+  deleteWorkspace,
+  removeWorkspaceLogo,
+  renameWorkspace,
+  setWorkspaceLogo,
+} from "@/lib/actions"
 import { formatExact } from "@/lib/format"
-import { useReverify } from "@/lib/step-up"
+import { useStepUp } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
-import type { BillingState } from "@/lib/types"
+import type { BillingState, Me } from "@/lib/types"
 import { announceWorkspaceName, announceWorkspacesChanged } from "@/lib/workspace-name"
 
 /**
@@ -30,18 +30,23 @@ import { announceWorkspaceName, announceWorkspacesChanged } from "@/lib/workspac
  * blocks and rows, and a workspace profile that opens the way your own
  * profile does - the logo and name in one card that takes a dropped image
  * anywhere on it. What Clerk's `<OrganizationProfile />` "General" page was.
+ *
+ * ⚠ WHAT IT OFFERS IS OUR ANSWER (#335): `access` from `/console/me`, never
+ * Clerk's `has()` - every Clerk member holds the same powerless role. The
+ * logo and the delete go through our API, which checks the same roles again.
  */
 export function WorkspaceGeneral({
   tenant,
   billing,
+  access,
 }: {
   tenant: { id: string; slug: string; name: string; created_at: string } | null
   billing: BillingState | null
+  access: Me["access"]
 }) {
   const { organization } = useOrganization()
-  const { has } = useAuth()
-  const canEdit = has?.({ permission: "org:sys_profile:manage" }) ?? false
-  const canDelete = has?.({ permission: "org:sys_profile:delete" }) ?? false
+  const canEdit = access?.permissions.includes("workspace:manage") ?? false
+  const canDelete = access?.permissions.includes("workspace:delete") ?? false
 
   return (
     <div>
@@ -145,7 +150,12 @@ function WorkspaceProfile({
     }
   }
 
-  const logo = org.hasImage ? org.imageUrl : undefined
+  /*
+   * ⚠ CLERK'S IMAGE EVEN WITHOUT AN UPLOAD (2026-11-04), as the switcher and
+   * the settings picker show it, so one workspace has one picture everywhere.
+   * The letters are `Avatar`'s fallback when it cannot load.
+   */
+  const logo = org.imageUrl
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
@@ -170,25 +180,36 @@ function WorkspaceProfile({
             shape="square"
             className="flex flex-col gap-7 p-4"
             onUpload={async (file) => {
-              try {
-                await org.setLogo({ file })
-                announceWorkspacesChanged()
-                toastDone("Logo updated")
-                // Finished, as a saved name is: the card closes.
-                setOpen(false)
-              } catch (error) {
-                toastError("Could not upload that logo", clerkReason(error))
-                throw error
+              const form = new FormData()
+              form.set("file", file)
+              const result = await setWorkspaceLogo(form)
+              if (!result.ok) {
+                toastError("Could not upload that logo", { description: result.error })
+                throw new Error(result.error)
               }
+              // Clerk's copy, which the logo here and the switcher read.
+              await org.reload().catch(() => {})
+              announceWorkspacesChanged()
+              toastDone("Logo updated")
+              // Finished, as a saved name is: the card closes.
+              setOpen(false)
             }}
-            onRemove={async () => {
-              try {
-                await org.setLogo({ file: null })
-                announceWorkspacesChanged()
-              } catch (error) {
-                toastError("Could not remove the logo", clerkReason(error))
-              }
-            }}
+            // Only an uploaded logo can be removed; Clerk's default cannot.
+            onRemove={
+              org.hasImage
+                ? async () => {
+                    const result = await removeWorkspaceLogo()
+                    if (!result.ok) {
+                      toastError("Could not remove the logo", {
+                        description: result.error,
+                      })
+                      return
+                    }
+                    await org.reload().catch(() => {})
+                    announceWorkspacesChanged()
+                  }
+                : undefined
+            }
           >
             <FloatingInput
               id="workspace-name"
@@ -233,7 +254,7 @@ function DeleteWorkspace({
   const { organization } = useOrganization()
   const clerk = useClerk()
   const router = useRouter()
-  const reverify = useReverify()
+  const stepUp = useStepUp()
   const [open, setOpen] = React.useState(false)
   return (
     <div className="flex items-center justify-between gap-3">
@@ -254,18 +275,26 @@ function DeleteWorkspace({
         confirmWord={name}
         onConfirm={async () => {
           if (!organization) return false
-          try {
-            const done = await reverify(() => organization.destroy())
-            if (done === null) return false
-            await clerk.setActive({ organization: null })
-            // The pickers drop it now, not on their next refetch.
-            announceWorkspacesChanged()
-            router.push("/")
-            return true
-          } catch (error) {
-            toastError("Could not delete the workspace", clerkReason(error))
+          /*
+           * ⚠ THROUGH OUR API SINCE #335, NOT `organization.destroy()`: the
+           * Clerk permission that took is nobody's any more. Owners only,
+           * checked there; the step-up is asked first, as for every delete.
+           */
+          if (!(await stepUp())) return false
+          const result = await deleteWorkspace()
+          if (!result.ok) {
+            toastError("Could not delete the workspace", { description: result.error })
             return false
           }
+          try {
+            await clerk.setActive({ organization: null })
+          } catch {
+            // It is deleted either way; the next page load has no workspace.
+          }
+          // The pickers drop it now, not on their next refetch.
+          announceWorkspacesChanged()
+          router.push("/")
+          return true
         }}
       >
         <DeletionWarning billing={billing} scope="workspace" />

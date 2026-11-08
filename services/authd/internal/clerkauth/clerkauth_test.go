@@ -7,7 +7,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/i10-tech/i10/services/authd/internal/projection"
+	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
+
+var user123 = &projection.Account{ClerkUserID: "user_123"}
 
 // The response bodies below are the real ones, captured by probing a live Clerk
 // development instance. None of this behaviour is documented, so the tests are
@@ -17,20 +22,20 @@ func TestVerifyStatusMapping(t *testing.T) {
 		name    string
 		status  int
 		body    string
-		want    Outcome
+		want    verify.Outcome
 		wantErr bool
 	}{
 		{
 			name:   "verified",
 			status: http.StatusOK,
 			body:   `{"verified":true}`,
-			want:   Verified,
+			want:   verify.Verified,
 		},
 		{
 			name:   "wrong password",
 			status: http.StatusUnprocessableEntity,
 			body:   `{"errors":[{"message":"incorrect password","code":"form_password_incorrect"}]}`,
-			want:   Rejected,
+			want:   verify.Rejected,
 		},
 		{
 			// An OAuth-only user who has not set a password yet. This must be a
@@ -39,7 +44,7 @@ func TestVerifyStatusMapping(t *testing.T) {
 			name:   "no password set",
 			status: http.StatusBadRequest,
 			body:   `{"errors":[{"message":"no password set","long_message":"This user does not have a password set for their account","code":"no_password_set"}]}`,
-			want:   Rejected,
+			want:   verify.Rejected,
 		},
 		{
 			// A 400 we do not recognise is a contract change or our own bug.
@@ -47,28 +52,28 @@ func TestVerifyStatusMapping(t *testing.T) {
 			name:    "unrecognised 400",
 			status:  http.StatusBadRequest,
 			body:    `{"errors":[{"code":"something_new"}]}`,
-			want:    Unavailable,
+			want:    verify.Unavailable,
 			wantErr: true,
 		},
 		{
 			name:    "rate limited",
 			status:  http.StatusTooManyRequests,
 			body:    `{}`,
-			want:    Unavailable,
+			want:    verify.Unavailable,
 			wantErr: true,
 		},
 		{
 			name:    "clerk down",
 			status:  http.StatusInternalServerError,
 			body:    `{}`,
-			want:    Unavailable,
+			want:    verify.Unavailable,
 			wantErr: true,
 		},
 		{
 			name:    "our own key is bad",
 			status:  http.StatusUnauthorized,
 			body:    `{}`,
-			want:    Unavailable,
+			want:    verify.Unavailable,
 			wantErr: true,
 		},
 		{
@@ -77,7 +82,7 @@ func TestVerifyStatusMapping(t *testing.T) {
 			name:    "user missing from clerk",
 			status:  http.StatusNotFound,
 			body:    `{"errors":[{"code":"resource_not_found"}]}`,
-			want:    Unavailable,
+			want:    verify.Unavailable,
 			wantErr: true,
 		},
 	}
@@ -97,7 +102,7 @@ func TestVerifyStatusMapping(t *testing.T) {
 			defer srv.Close()
 
 			got, err := New(srv.URL, "sk_test_x", time.Second).
-				Verify(context.Background(), "user_123", "hunter2")
+				Verify(context.Background(), user123, "hunter2")
 			if got != tc.want {
 				t.Errorf("outcome = %v, want %v", got, tc.want)
 			}
@@ -115,8 +120,8 @@ func TestVerifyTransportFailureIsUnavailable(t *testing.T) {
 	srv.Close() // nothing is listening now
 
 	got, err := New(url, "sk_test_x", 500*time.Millisecond).
-		Verify(context.Background(), "user_123", "hunter2")
-	if got != Unavailable {
+		Verify(context.Background(), user123, "hunter2")
+	if got != verify.Unavailable {
 		t.Fatalf("outcome = %v, want Unavailable", got)
 	}
 	if err == nil {
@@ -132,8 +137,8 @@ func TestVerifyTimeoutIsUnavailable(t *testing.T) {
 	defer srv.Close()
 
 	got, _ := New(srv.URL, "sk_test_x", 20*time.Millisecond).
-		Verify(context.Background(), "user_123", "hunter2")
-	if got != Unavailable {
+		Verify(context.Background(), user123, "hunter2")
+	if got != verify.Unavailable {
 		t.Fatalf("outcome = %v, want Unavailable", got)
 	}
 }
@@ -148,7 +153,7 @@ func TestErrorsDoNotContainThePassword(t *testing.T) {
 	defer srv.Close()
 
 	_, err := New(srv.URL, "sk_test_x", time.Second).
-		Verify(context.Background(), "user_123", secret)
+		Verify(context.Background(), user123, secret)
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -168,8 +173,23 @@ func TestVerifySendsPasswordAsJSON(t *testing.T) {
 	defer srv.Close()
 
 	_, _ = New(srv.URL, "sk_test_x", time.Second).
-		Verify(context.Background(), "user_123", `a"quote\and\\slash`)
+		Verify(context.Background(), user123, `a"quote\and\\slash`)
 	if want := `{"password":"a\"quote\\and\\\\slash"}`; got != want {
 		t.Errorf("body = %s, want %s", got, want)
+	}
+}
+
+// Clerk's verify_password does not feed lockout (measured), so it has no failure
+// budget, and the bind path's budget machinery must never engage for it.
+func TestClerkIsABudgetlessVerifier(t *testing.T) {
+	c := New("https://api.clerk.com/v1", "sk_test_x", 5*time.Second)
+	if c.Name() != "clerk" {
+		t.Errorf("Name() = %q, want clerk", c.Name())
+	}
+	if c.Budget() != nil {
+		t.Errorf("Budget() = %+v, want nil", c.Budget())
+	}
+	if c.Timeout() != 5*time.Second {
+		t.Errorf("Timeout() = %s, want the configured 5s", c.Timeout())
 	}
 }

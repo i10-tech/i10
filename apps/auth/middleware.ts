@@ -33,11 +33,27 @@ export default clerkMiddleware({
    * compile in as `undefined` for good.
    */
   publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+  /**
+   * ⚠ ONLY WHEN SET, SO PRODUCTION IS EXACTLY AS BEFORE THE GATEWAY.
+   * `CLERK_PROXY_URL` points the handshake at the Clerk gateway
+   * (services/clerk-gateway); locally that is https://clerk.i10.localhost in
+   * front of the dev instance. Production needs no value at all: the gateway
+   * answers clerk.i10.tech, the very host the publishable key already names.
+   */
+  ...(process.env.CLERK_PROXY_URL ? { proxyUrl: process.env.CLERK_PROXY_URL } : {}),
 })
 
+/*
+ * ⚠ THE SAML ROUTES AN IdP DRIVES AND `/sso/start` ARE OUTSIDE CLERK'S
+ * MIDDLEWARE (#339). The ACS and SLO receive cross-site POSTs and redirects
+ * from the IdP, and `/sso/start` receives the interstitial's form POST, with
+ * neither needing a Clerk context; a Clerk handshake redirect there would turn
+ * a POST into a GET and lose the body. `/sso/saml/logout`, `/sso/step-up` and
+ * `/sso/test-run` stay inside: they read the session.
+ */
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/((?!_next|sso/(?:start$|saml/(?:acs|slo|metadata)/)|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
   ],
 }

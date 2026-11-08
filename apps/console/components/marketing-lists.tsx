@@ -2,12 +2,19 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { AnimatePresence, motion } from "motion/react"
 import { Layers, Megaphone, SearchX, Tag, Users } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { EmptyState } from "@/components/empty-state"
 import { ListCard, ListGrid, MotionBody, MotionRow } from "@/components/list/motion"
-import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
+import {
+  ListCell,
+  ListHead,
+  ListHeader,
+  ListTable,
+  SWAP,
+} from "@/components/list/table"
 import {
   FilterSelect,
   ListToolbar,
@@ -139,91 +146,105 @@ export function BroadcastsList({ broadcasts }: { broadcasts: BroadcastSummary[] 
       />
 
       <div className="pt-4">
-        {shown.length === 0 ? (
-          <NoMatch onClear={clear} />
-        ) : view === "grid" ? (
-          <ListGrid>
-            {shown.map((b) => (
-              <ListCard key={b.id} id={b.id} href={`/broadcasts/${b.id}`}>
-                <div className="flex items-center gap-3">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
-                    <Megaphone className="size-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{b.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {b.subject || <em>No subject yet</em>}
-                    </p>
-                  </div>
-                </div>
-                <Status
-                  status={broadcastTone(b.status)}
-                  label={BROADCAST_STATUS[b.status] ?? b.status}
-                />
-                <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span className="flex min-w-0 items-center gap-1.5 truncate">
-                    <Layers className="size-3.5 shrink-0" />
-                    <span className="truncate">{b.segment_name ?? "No segment"}</span>
-                  </span>
-                  <span className="shrink-0" title={b.sent_at ?? b.created_at}>
-                    {b.recipient_count !== null &&
-                      `${formatNumber(b.recipient_count)} · `}
-                    {formatRelative(b.sent_at ?? b.created_at)}
-                  </span>
-                </div>
-              </ListCard>
-            ))}
-          </ListGrid>
-        ) : (
-          <ListTable>
-            <ListHeader>
-              <ListHead>Name</ListHead>
-              <ListHead className="w-[9rem]">Status</ListHead>
-              <ListHead className="hidden w-[12rem] md:table-cell">Segment</ListHead>
-              <ListHead className="hidden w-[8rem] text-right sm:table-cell">
-                Recipients
-              </ListHead>
-              <ListHead className="w-[9rem] text-right">Updated</ListHead>
-            </ListHeader>
-            <MotionBody>
-              {shown.map((b) => (
-                <MotionRow key={b.id} href={`/broadcasts/${b.id}`}>
-                  <ListCell className="max-w-0">
-                    <Link
-                      href={`/broadcasts/${b.id}`}
-                      className="block truncate font-medium outline-none hover:underline focus-visible:underline"
-                    >
-                      {b.name}
-                    </Link>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {b.subject || <em>No subject yet</em>}
-                    </p>
-                  </ListCell>
-                  <ListCell>
+        <AnimatePresence mode="wait" initial={false}>
+          {shown.length === 0 ? (
+            <motion.div key="no-match" {...SWAP}>
+              <NoMatch onClear={clear} />
+            </motion.div>
+          ) : view === "grid" ? (
+            <motion.div key="grid" {...SWAP}>
+              <ListGrid>
+                {shown.map((b) => (
+                  <ListCard key={b.id} id={b.id} href={`/broadcasts/${b.id}`}>
+                    <div className="flex items-center gap-3">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
+                        <Megaphone className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{b.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {b.subject || <em>No subject yet</em>}
+                        </p>
+                      </div>
+                    </div>
                     <Status
                       status={broadcastTone(b.status)}
                       label={BROADCAST_STATUS[b.status] ?? b.status}
                     />
-                  </ListCell>
-                  <ListCell className="hidden max-w-0 md:table-cell">
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {b.segment_name ?? "-"}
-                    </span>
-                  </ListCell>
-                  <ListCell className="tabular hidden text-right text-xs text-muted-foreground sm:table-cell">
-                    {b.recipient_count === null ? "-" : formatNumber(b.recipient_count)}
-                  </ListCell>
-                  <ListCell
-                    className="text-right text-xs whitespace-nowrap text-muted-foreground"
-                    title={b.sent_at ?? b.created_at}
-                  >
-                    {formatRelative(b.sent_at ?? b.created_at)}
-                  </ListCell>
-                </MotionRow>
-              ))}
-            </MotionBody>
-          </ListTable>
-        )}
+                    <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="flex min-w-0 items-center gap-1.5 truncate">
+                        <Layers className="size-3.5 shrink-0" />
+                        <span className="truncate">
+                          {b.segment_name ?? "No segment"}
+                        </span>
+                      </span>
+                      <span className="shrink-0" title={b.sent_at ?? b.created_at}>
+                        {b.recipient_count !== null &&
+                          `${formatNumber(b.recipient_count)} · `}
+                        {formatRelative(b.sent_at ?? b.created_at)}
+                      </span>
+                    </div>
+                  </ListCard>
+                ))}
+              </ListGrid>
+            </motion.div>
+          ) : (
+            <motion.div key="table" {...SWAP}>
+              <ListTable>
+                <ListHeader>
+                  <ListHead>Name</ListHead>
+                  <ListHead className="w-[9rem]">Status</ListHead>
+                  <ListHead className="hidden w-[12rem] md:table-cell">
+                    Segment
+                  </ListHead>
+                  <ListHead className="hidden w-[8rem] text-right sm:table-cell">
+                    Recipients
+                  </ListHead>
+                  <ListHead className="w-[9rem] text-right">Updated</ListHead>
+                </ListHeader>
+                <MotionBody>
+                  {shown.map((b) => (
+                    <MotionRow key={b.id} href={`/broadcasts/${b.id}`}>
+                      <ListCell className="max-w-0">
+                        <Link
+                          href={`/broadcasts/${b.id}`}
+                          className="block truncate font-medium outline-none hover:underline focus-visible:underline"
+                        >
+                          {b.name}
+                        </Link>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {b.subject || <em>No subject yet</em>}
+                        </p>
+                      </ListCell>
+                      <ListCell>
+                        <Status
+                          status={broadcastTone(b.status)}
+                          label={BROADCAST_STATUS[b.status] ?? b.status}
+                        />
+                      </ListCell>
+                      <ListCell className="hidden max-w-0 md:table-cell">
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {b.segment_name ?? "-"}
+                        </span>
+                      </ListCell>
+                      <ListCell className="tabular hidden text-right text-xs text-muted-foreground sm:table-cell">
+                        {b.recipient_count === null
+                          ? "-"
+                          : formatNumber(b.recipient_count)}
+                      </ListCell>
+                      <ListCell
+                        className="text-right text-xs whitespace-nowrap text-muted-foreground"
+                        title={b.sent_at ?? b.created_at}
+                      >
+                        {formatRelative(b.sent_at ?? b.created_at)}
+                      </ListCell>
+                    </MotionRow>
+                  ))}
+                </MotionBody>
+              </ListTable>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )
@@ -259,89 +280,100 @@ export function SegmentsList({ segments }: { segments: SegmentRow[] }) {
       />
 
       <div className="pt-4">
-        {shown.length === 0 ? (
-          <NoMatch onClear={clear} />
-        ) : view === "grid" ? (
-          <ListGrid>
-            {shown.map((s) => (
-              <ListCard
-                key={s.id}
-                id={s.id}
-                href={href(s)}
-                menu={<SegmentActions id={s.id} name={s.name} />}
-              >
-                <div className="flex items-center gap-3 pr-8">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
-                    <Layers className="size-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{s.name}</p>
-                    {s.description && (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {s.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-auto flex items-end justify-between gap-2">
-                  <p>
-                    <span className="tabular text-2xl font-medium tracking-tight">
-                      {formatNumber(s.contact_count)}
-                    </span>{" "}
-                    <span className="text-xs text-muted-foreground">
-                      {s.contact_count === 1 ? "contact" : "contacts"}
-                    </span>
-                  </p>
-                  <span className="text-xs text-muted-foreground" title={s.created_at}>
-                    {formatRelative(s.created_at)}
-                  </span>
-                </div>
-              </ListCard>
-            ))}
-          </ListGrid>
-        ) : (
-          <ListTable>
-            <ListHeader>
-              <ListHead>Name</ListHead>
-              <ListHead className="w-[9rem] text-right">Contacts</ListHead>
-              <ListHead className="w-[9rem] text-right">Created</ListHead>
-              <ListHead className="w-12">
-                <span className="sr-only">Actions</span>
-              </ListHead>
-            </ListHeader>
-            <MotionBody>
-              {shown.map((s) => (
-                <MotionRow key={s.id} href={href(s)}>
-                  <ListCell className="max-w-0">
-                    <Link
-                      href={href(s)}
-                      className="block truncate font-medium outline-none hover:underline focus-visible:underline"
-                    >
-                      {s.name}
-                    </Link>
-                    {s.description && (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {s.description}
-                      </p>
-                    )}
-                  </ListCell>
-                  <ListCell className="tabular text-right">
-                    {formatNumber(s.contact_count)}
-                  </ListCell>
-                  <ListCell
-                    className="text-right text-xs whitespace-nowrap text-muted-foreground"
-                    title={s.created_at}
+        <AnimatePresence mode="wait" initial={false}>
+          {shown.length === 0 ? (
+            <motion.div key="no-match" {...SWAP}>
+              <NoMatch onClear={clear} />
+            </motion.div>
+          ) : view === "grid" ? (
+            <motion.div key="grid" {...SWAP}>
+              <ListGrid>
+                {shown.map((s) => (
+                  <ListCard
+                    key={s.id}
+                    id={s.id}
+                    href={href(s)}
+                    menu={<SegmentActions id={s.id} name={s.name} />}
                   >
-                    {formatRelative(s.created_at)}
-                  </ListCell>
-                  <ListCell className="py-1.5 text-right">
-                    <SegmentActions id={s.id} name={s.name} />
-                  </ListCell>
-                </MotionRow>
-              ))}
-            </MotionBody>
-          </ListTable>
-        )}
+                    <div className="flex items-center gap-3 pr-8">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
+                        <Layers className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{s.name}</p>
+                        {s.description && (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {s.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-auto flex items-end justify-between gap-2">
+                      <p>
+                        <span className="tabular text-2xl font-medium tracking-tight">
+                          {formatNumber(s.contact_count)}
+                        </span>{" "}
+                        <span className="text-xs text-muted-foreground">
+                          {s.contact_count === 1 ? "contact" : "contacts"}
+                        </span>
+                      </p>
+                      <span
+                        className="text-xs text-muted-foreground"
+                        title={s.created_at}
+                      >
+                        {formatRelative(s.created_at)}
+                      </span>
+                    </div>
+                  </ListCard>
+                ))}
+              </ListGrid>
+            </motion.div>
+          ) : (
+            <motion.div key="table" {...SWAP}>
+              <ListTable>
+                <ListHeader>
+                  <ListHead>Name</ListHead>
+                  <ListHead className="w-[9rem] text-right">Contacts</ListHead>
+                  <ListHead className="w-[9rem] text-right">Created</ListHead>
+                  <ListHead className="w-12">
+                    <span className="sr-only">Actions</span>
+                  </ListHead>
+                </ListHeader>
+                <MotionBody>
+                  {shown.map((s) => (
+                    <MotionRow key={s.id} href={href(s)}>
+                      <ListCell className="max-w-0">
+                        <Link
+                          href={href(s)}
+                          className="block truncate font-medium outline-none hover:underline focus-visible:underline"
+                        >
+                          {s.name}
+                        </Link>
+                        {s.description && (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {s.description}
+                          </p>
+                        )}
+                      </ListCell>
+                      <ListCell className="tabular text-right">
+                        {formatNumber(s.contact_count)}
+                      </ListCell>
+                      <ListCell
+                        className="text-right text-xs whitespace-nowrap text-muted-foreground"
+                        title={s.created_at}
+                      >
+                        {formatRelative(s.created_at)}
+                      </ListCell>
+                      <ListCell className="py-1.5 text-right">
+                        <SegmentActions id={s.id} name={s.name} />
+                      </ListCell>
+                    </MotionRow>
+                  ))}
+                </MotionBody>
+              </ListTable>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )
@@ -401,88 +433,98 @@ export function TopicsList({ topics }: { topics: TopicRow[] }) {
       />
 
       <div className="pt-4">
-        {shown.length === 0 ? (
-          <NoMatch onClear={clear} />
-        ) : view === "grid" ? (
-          <ListGrid>
-            {shown.map((t) => (
-              <ListCard key={t.id} id={t.id} menu={<TopicActions topic={t} />}>
-                <div className="flex items-center gap-3 pr-8">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
-                    <Tag className="size-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{t.name}</p>
-                    {t.description && (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {t.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge tone="neutral">{defaultLabel(t)}</Badge>
-                  <Badge
-                    tone={t.visibility === "public" ? "info" : "neutral"}
-                    className="capitalize"
-                  >
-                    {t.visibility}
-                  </Badge>
-                </div>
-                <p className="mt-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Users className="size-3.5" />
-                  <span className="tabular text-foreground">
-                    {formatNumber(t.subscriber_count)}
-                  </span>
-                  {t.subscriber_count === 1 ? "subscriber" : "subscribers"}
-                </p>
-              </ListCard>
-            ))}
-          </ListGrid>
-        ) : (
-          <ListTable>
-            <ListHeader>
-              <ListHead>Name</ListHead>
-              <ListHead className="hidden w-[11rem] md:table-cell">Default</ListHead>
-              <ListHead className="w-[8rem]">Visibility</ListHead>
-              <ListHead className="w-[9rem] text-right">Subscribers</ListHead>
-              <ListHead className="w-12">
-                <span className="sr-only">Actions</span>
-              </ListHead>
-            </ListHeader>
-            <MotionBody>
-              {shown.map((t) => (
-                <MotionRow key={t.id}>
-                  <ListCell className="max-w-0">
-                    <p className="truncate font-medium">{t.name}</p>
-                    {t.description && (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {t.description}
-                      </p>
-                    )}
-                  </ListCell>
-                  <ListCell className="hidden md:table-cell">
-                    <Badge tone="neutral">{defaultLabel(t)}</Badge>
-                  </ListCell>
-                  <ListCell>
-                    <Badge
-                      tone={t.visibility === "public" ? "info" : "neutral"}
-                      className="capitalize"
-                    >
-                      {t.visibility}
-                    </Badge>
-                  </ListCell>
-                  <ListCell className="tabular text-right">
-                    {formatNumber(t.subscriber_count)}
-                  </ListCell>
-                  <ListCell className="py-1.5 text-right">
-                    <TopicActions topic={t} />
-                  </ListCell>
-                </MotionRow>
-              ))}
-            </MotionBody>
-          </ListTable>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          {shown.length === 0 ? (
+            <motion.div key="no-match" {...SWAP}>
+              <NoMatch onClear={clear} />
+            </motion.div>
+          ) : view === "grid" ? (
+            <motion.div key="grid" {...SWAP}>
+              <ListGrid>
+                {shown.map((t) => (
+                  <ListCard key={t.id} id={t.id} menu={<TopicActions topic={t} />}>
+                    <div className="flex items-center gap-3 pr-8">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
+                        <Tag className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{t.name}</p>
+                        {t.description && (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {t.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge tone="neutral">{defaultLabel(t)}</Badge>
+                      <Badge
+                        tone={t.visibility === "public" ? "info" : "neutral"}
+                        className="capitalize"
+                      >
+                        {t.visibility}
+                      </Badge>
+                    </div>
+                    <p className="mt-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Users className="size-3.5" />
+                      <span className="tabular text-foreground">
+                        {formatNumber(t.subscriber_count)}
+                      </span>
+                      {t.subscriber_count === 1 ? "subscriber" : "subscribers"}
+                    </p>
+                  </ListCard>
+                ))}
+              </ListGrid>
+            </motion.div>
+          ) : (
+            <motion.div key="table" {...SWAP}>
+              <ListTable>
+                <ListHeader>
+                  <ListHead>Name</ListHead>
+                  <ListHead className="hidden w-[11rem] md:table-cell">
+                    Default
+                  </ListHead>
+                  <ListHead className="w-[8rem]">Visibility</ListHead>
+                  <ListHead className="w-[9rem] text-right">Subscribers</ListHead>
+                  <ListHead className="w-12">
+                    <span className="sr-only">Actions</span>
+                  </ListHead>
+                </ListHeader>
+                <MotionBody>
+                  {shown.map((t) => (
+                    <MotionRow key={t.id}>
+                      <ListCell className="max-w-0">
+                        <p className="truncate font-medium">{t.name}</p>
+                        {t.description && (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {t.description}
+                          </p>
+                        )}
+                      </ListCell>
+                      <ListCell className="hidden md:table-cell">
+                        <Badge tone="neutral">{defaultLabel(t)}</Badge>
+                      </ListCell>
+                      <ListCell>
+                        <Badge
+                          tone={t.visibility === "public" ? "info" : "neutral"}
+                          className="capitalize"
+                        >
+                          {t.visibility}
+                        </Badge>
+                      </ListCell>
+                      <ListCell className="tabular text-right">
+                        {formatNumber(t.subscriber_count)}
+                      </ListCell>
+                      <ListCell className="py-1.5 text-right">
+                        <TopicActions topic={t} />
+                      </ListCell>
+                    </MotionRow>
+                  ))}
+                </MotionBody>
+              </ListTable>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )

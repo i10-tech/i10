@@ -1,0 +1,32 @@
+# TLS front for the lab. i10 refuses to talk to an IdP, an S3 endpoint or a
+# webhook receiver that is not https, with a certificate it can verify, at a
+# dotted host name (apps/api/src/identity/model.ts, routes/console/identity-oidc.ts,
+# identity/ldap.ts). *.lab.localhost resolves to loopback in browsers and in
+# getaddrinfo on macOS, and the leaf certificate certs.sh makes covers it.
+{
+	auto_https off
+	log {
+		output stderr
+		level ERROR
+	}
+}
+
+https://kc.lab.localhost:8443 {
+	tls /certs/lab.crt /certs/lab.key
+	reverse_proxy keycloak:8080
+}
+
+https://ak.lab.localhost:9443 {
+	tls /certs/lab.crt /certs/lab.key
+	reverse_proxy authentik-server:9000
+}
+
+https://s3.lab.localhost:9012 {
+	tls /certs/lab.crt /certs/lab.key
+	reverse_proxy minio:9000
+}
+
+https://hooks.lab.localhost:8090 {
+	tls /certs/lab.crt /certs/lab.key
+	reverse_proxy webhook-catcher:8080
+}

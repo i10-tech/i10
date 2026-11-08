@@ -36,12 +36,57 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 
 func (p *Postgres) Close() { p.pool.Close() }
 
+// Pool is the connection pool, for the one other thing authd writes: the shared
+// failure budget (internal/budgetstore). It is shared rather than duplicated so
+// that the PgBouncer settings above apply to it too.
+func (p *Postgres) Pool() *pgxpool.Pool { return p.pool }
+
 // Ping is used by the readiness probe. authd with an unreachable projection can
 // answer nothing, and should not be routed to.
 func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
+// accountColumns reads managed status in the same query as the account, so the
+// answer the bind acts on cannot be older than the account it belongs to.
+// ⚠ A LEFT JOIN, NOT A COLUMN ON authd.accounts: a managed account is managed
+// before it has a mailbox row, and a missing row must read as "managed" only
+// when authd.managed_accounts says so.
+//
+// ⚠ EVERY REASON A BIND IS REFUSED BEFORE THE CREDENTIAL CACHE IS READ FROM THIS
+// ONE ROW: suspension, a payment hold, a Clerk ban or lock, and whether SSO is
+// required for the address. They share the query so none can be older than the
+// account they belong to, and so a new one cannot be added to the search path
+// and forgotten on the bind path.
+//
+// ⚠ A REQUIRED DOMAIN BINDS ONLY ITS OWN WORKSPACE'S ACCOUNTS (`tenant_id`). The
+// mirror is recomputed on the changes that move it, but a row left behind for a
+// name that has since changed hands must not lock out the new owner's people.
+//
+// ⚠ WHO IS EXEMPT FROM IT IS READ FROM THE SAME ROW OF THE SAME QUERY, THROUGH THE
+// CONNECTION THAT REQUIRES THE DOMAIN. `authd.required_exempt` has a row for a
+// person exactly while they are an owner or admin of the workspace with its owner
+// exemption on, or on that connection's bypass list; the API recomputes it in the
+// transaction of every change to any of those, so adding or removing somebody
+// shows at the next bind on both pods. It is joined on the domain's own connection
+// and tenant, so a pass for one connection says nothing about another's. Nothing in
+// it expires by itself (see `authd.required_exempt` in apps/api/src/db/schema.ts),
+// which is why no clock is read here.
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
-	coalesce(a.description, ''), a.active, a.clerk_updated_at`
+	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
+	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
+	(a.suspended_at IS NOT NULL), (a.payment_hold_at IS NOT NULL), a.banned,
+	(a.locked AND (a.locked_until IS NULL OR a.locked_until > now())),
+	EXISTS (SELECT 1 FROM authd.required_domains rd
+	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
+	          AND rd.tenant_id = a.tenant_id),
+	EXISTS (SELECT 1 FROM authd.required_domains rd
+	        JOIN authd.required_exempt ex
+	          ON ex.connection_id = rd.connection_id AND ex.tenant_id = rd.tenant_id
+	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
+	          AND rd.tenant_id = a.tenant_id
+	          AND ex.clerk_user_id = a.clerk_user_id)`
+
+const accountFrom = `FROM authd.accounts a
+		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
 
 func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([]Account, error) {
 	norm := normalise(addresses)
@@ -50,7 +95,7 @@ func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([
 	}
 	rows, err := p.pool.Query(ctx, `
 		SELECT `+accountColumns+`
-		FROM authd.accounts a
+		`+accountFrom+`
 		WHERE a.active
 		  AND (a.email = ANY($1)
 		       OR EXISTS (SELECT 1 FROM authd.aliases al
@@ -72,7 +117,7 @@ func (p *Postgres) AccountByUID(ctx context.Context, clerkUserID string) (*Accou
 	}
 	rows, err := p.pool.Query(ctx, `
 		SELECT `+accountColumns+`
-		FROM authd.accounts a
+		`+accountFrom+`
 		WHERE a.active AND a.clerk_user_id = $1`, clerkUserID)
 	if err != nil {
 		return nil, fmt.Errorf("projection: account by uid: %w", err)
@@ -120,13 +165,29 @@ func (p *Postgres) GroupsForMember(ctx context.Context, clerkUserID string) ([]G
 	return p.scanAndFillGroups(ctx, rows)
 }
 
+func (p *Postgres) GroupsByName(ctx context.Context, names []string) ([]Group, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT g.name, coalesce(g.email, ''), coalesce(g.description, '')
+		FROM authd.groups g
+		WHERE g.name = ANY($1)`, names)
+	if err != nil {
+		return nil, fmt.Errorf("projection: groups by name: %w", err)
+	}
+	return p.scanAndFillGroups(ctx, rows)
+}
+
 func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	defer rows.Close()
 	var out []Account
 	for rows.Next() {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
-			&a.Description, &a.Active, &a.ClerkUpdatedAt); err != nil {
+			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
+			&a.Managed, &a.ManagedConnection, &a.Suspended, &a.PaymentHold,
+			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

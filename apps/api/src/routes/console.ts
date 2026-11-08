@@ -8,6 +8,8 @@ import type { ConsoleDeps } from "./console/deps.js"
 import { notWired } from "./console/http.js"
 import { mountAccount } from "./console/account.js"
 import { mountTeam } from "./console/team.js"
+import { mountTeamInboxes } from "./console/team-inboxes.js"
+import { mountMailboxStorage } from "./console/mailbox-storage.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountTemplates } from "./console/templates.js"
@@ -16,6 +18,7 @@ import { mountCredentials } from "./console/credentials.js"
 import { mountDns } from "./console/dns.js"
 import { mountDomains } from "./console/domains.js"
 import { mountSending } from "./console/sending.js"
+import { mountIdentity } from "./console/identity.js"
 
 export type { ConsoleDeps }
 
@@ -61,15 +64,18 @@ declare module "hono" {
 /**
  * Routes about the PERSON, which answer for somebody with no workspace (#325):
  * what they are suggested, asking to join, joining at once where a rule says
- * auto-join, what happened at sign-up (#326), and making a Personal
- * workspace. Everything else needs an active organization.
+ * auto-join, what happened at sign-up (#326), and making a workspace,
+ * Personal or team (#335). Everything else needs an active organization.
  */
 const WITHOUT_WORKSPACE = new Set([
   "/me/join-suggestions",
   "/me/join-requests",
   "/me/joins",
   "/me/arrivals",
+  "/workspaces",
   "/workspaces/personal",
+  // Deleting the account (#336): a person with no workspace can still leave.
+  "/me/account",
 ])
 
 export function createConsole(deps?: ConsoleDeps) {
@@ -204,6 +210,13 @@ export function createConsole(deps?: ConsoleDeps) {
     c.set("bodyLimited", true)
     return csvBodyLimit(c, next)
   })
+  // ⚠ A WORKSPACE LOGO IS RAW IMAGE BYTES (#335): the editor's 512px square,
+  // which a PNG can take past 256 KB.
+  const logoBodyLimit = bodyLimit({ maxSize: 2 * 1024 * 1024, onError: tooLarge })
+  app.use("/workspace/logo", async (c, next) => {
+    c.set("bodyLimited", true)
+    return logoBodyLimit(c, next)
+  })
   for (const path of [
     "/templates/upload",
     "/templates/assets",
@@ -237,6 +250,8 @@ export function createConsole(deps?: ConsoleDeps) {
    */
   mountAccount(app, d)
   mountTeam(app, d)
+  mountTeamInboxes(app, d)
+  mountMailboxStorage(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)
@@ -245,6 +260,7 @@ export function createConsole(deps?: ConsoleDeps) {
   mountTemplates(app, d)
   mountGithub(app, d)
   mountDns(app, d)
+  mountIdentity(app, d)
 
   return app
 }

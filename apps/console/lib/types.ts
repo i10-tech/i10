@@ -83,7 +83,15 @@ export interface Me {
   tenant: TenantProfile | null
   billing: BillingState
   onboarding: OnboardingState
+  /**
+   * The reader's role in the active workspace and what it lets them do
+   * (#335) - ours, never Clerk's `has()`. Null with no workspace.
+   */
+  access: { role: WorkspaceRole; permissions: string[] } | null
 }
+
+/** Workspace roles (#335). Clerk's roles are powerless; these are the real ones. */
+export type WorkspaceRole = "owner" | "admin" | "member"
 
 export interface DailyStat {
   date: string
@@ -293,12 +301,27 @@ export interface ApiKeyRow {
   last_used_at: string | null
   expires_at: string | null
   revoked_at: string | null
+  /** Who made the key; null for keys from before that was kept. */
+  created_by: { id: string; name: string | null; email: string | null } | null
+  /**
+   * ⚠ THE API'S OWN ANSWER, never worked out here: a member handles only the
+   * keys they created, and an owner alone handles a deprovisioned person's.
+   */
+  can_rotate: boolean
+  can_revoke: boolean
+  can_edit: boolean
 }
 
 /** ⚠ `secret` IS PRESENT EXACTLY ONCE, IN THE CREATE RESPONSE. Nothing stores it. */
 export interface CreatedApiKey extends Omit<
   ApiKeyRow,
-  "last_used_at" | "expires_at" | "revoked_at"
+  | "last_used_at"
+  | "expires_at"
+  | "revoked_at"
+  | "created_by"
+  | "can_rotate"
+  | "can_revoke"
+  | "can_edit"
 > {
   secret: string
 }

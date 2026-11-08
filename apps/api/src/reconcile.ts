@@ -52,10 +52,12 @@
 import { createClerkClient } from "@clerk/backend"
 import { memberStore } from "./console/members-db.js"
 import { clerkMembers } from "./console/clerk-members.js"
+import { roleStore } from "./console/roles-db.js"
 import { withMemberLimitSync } from "./console/members.js"
 import pino from "pino"
 import { subscriptionOps } from "./billing/db.js"
 import { subscriptionGrants } from "./billing/grants.js"
+import { paymentHold } from "./mailboxes/store.js"
 import { polarClient } from "./billing/polar.js"
 import { reconcileSubscriptions } from "./billing/reconcile.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
@@ -64,7 +66,8 @@ import { captureError, initObservability, withMonitor } from "./observability.js
 import { postgresEntitlements, postgresLedger } from "./metering/service.js"
 import { flushUsage } from "./metering/ingest.js"
 import { sampleStorage } from "./mail/storage.js"
-import { stalwartStorage } from "./mail/stalwart.js"
+import { createStalwartCaller, stalwartStorage } from "./mail/stalwart.js"
+import { reconcileQuotas } from "./mail/quota.js"
 import {
   needsAttention,
   reconcileSes,
@@ -251,8 +254,8 @@ await withMonitor(
     // ── storage sample ──────────────────────────────────────────────────────
     //
     // ⚠ IT RUNS HERE RATHER THAN ON ITS OWN SCHEDULE BECAUSE IT IS THE SAME KIND
-    // OF WORK: a number that lives somewhere else, pulled on a cadence, with
-    // nobody waiting on it. Thirty minutes is far finer than a storage limit
+    // OF WORK: numbers that live somewhere else, pulled on a cadence, with
+    // nobody waiting on them. Thirty minutes is far finer than a storage limit
     // needs - the figure moves in megabytes over hours.
     if (env.STALWART_URL && env.STALWART_API_TOKEN) {
       try {
@@ -274,10 +277,26 @@ await withMonitor(
         captureError(error)
         process.exitCode = 1
       }
+
+      try {
+        const quotaReport = await reconcileQuotas({
+          db,
+          call: createStalwartCaller({
+            baseUrl: env.STALWART_URL,
+            token: env.STALWART_API_TOKEN,
+          }),
+          log,
+        })
+        log.info(quotaReport, "mailbox quota reconcile complete")
+      } catch (error) {
+        log.error({ err: error }, "mailbox quota reconcile failed")
+        captureError(error)
+        process.exitCode = 1
+      }
     } else {
       log.warn(
         { stalwart: Boolean(env.STALWART_URL) },
-        "storage not sampled - STALWART_URL or STALWART_API_TOKEN is unset",
+        "storage and quotas not reconciled - STALWART_URL or STALWART_API_TOKEN is unset",
       )
     }
 
@@ -404,9 +423,13 @@ await withMonitor(
               clerk: clerkMembers(
                 createClerkClient({ secretKey: env.CLERK_SECRET_KEY }),
               ),
+              roles: roleStore(db),
               log,
             }),
           ),
+          // ⚠ A LAPSE THE WEBHOOK NEVER REPORTED IS FOUND HERE, and it must hold the
+          // workspace's mail logins as the webhook path does (billing/grants.ts).
+          mail: paymentHold(db),
           log,
         }),
         options: {

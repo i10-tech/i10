@@ -1,0 +1,20 @@
+[
+  {
+    "name": "sso-overview-load",
+    "steps": [{ "do": "goto", "url": "/settings/sso", "window": 3000 }]
+  },
+  {
+    "name": "sso-setup-first-time",
+    "steps": [
+      { "do": "goto", "url": "/settings/sso/connect", "window": false },
+      { "do": "wait", "ms": 1500 },
+      { "do": "click", "name": "Okta", "window": 2500 },
+      { "do": "fill", "label": "Add a domain", "value": "hello.com", "window": false },
+      { "do": "click", "name": "Add", "window": 2000 },
+      { "do": "click", "name": "Use another domain", "window": 1500 },
+      { "do": "hover", "text": "hello.com", "window": 800 },
+      { "do": "click", "name": "Remove hello.com", "window": 1500 },
+      { "do": "click", "name": "Change", "window": 2000 }
+    ]
+  }
+]

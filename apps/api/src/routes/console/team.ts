@@ -1,9 +1,9 @@
+import { MICROSOFT_DOMAIN_ADVICE } from "../../identity/microsoft-domain.js"
 import type { Hono } from "hono"
 import type { ConsoleDeps } from "./deps.js"
 import { asId, notFound, notWired, readJson, validation } from "./http.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import {
-  MANAGE_MEMBERS,
   addAccessDomain,
   allowAddress,
   answerJoinRequest,
@@ -19,6 +19,7 @@ import {
   verifyAccessDomain,
 } from "../../console/team-domains.js"
 import { seats } from "../../console/members.js"
+import { accessOf, leaveWorkspace, setRole } from "../../console/roles.js"
 import { mountMembers } from "./members.js"
 
 /**
@@ -26,8 +27,9 @@ import { mountMembers } from "./members.js"
  * removed and block lists - and the person's side of it, which works with no
  * workspace at all (see WITHOUT_WORKSPACE in routes/console.ts).
  *
- * ⚠ EVERY ADMIN ROUTE ASKS CLERK FOR THE PERMISSION, through
- * console/team-domains.ts, rather than trusting the console to hide buttons.
+ * ⚠ EVERY ADMIN ROUTE CHECKS THE PERMISSION IN OUR ROLES TABLE (#335),
+ * through console/team-domains.ts and console/roles.ts, rather than trusting
+ * the console to hide buttons - and never Clerk's roles, which are powerless.
  * And every person route decides from their VERIFIED addresses, read here
  * from Clerk, never from the body.
  */
@@ -36,6 +38,21 @@ const forbidden = (message: string) =>
   ({ statusCode: 403, name: "forbidden" as const, message }) as const
 
 const noTeam = validation("Team access needs a team workspace.")
+
+/**
+ * Another owner could not be confirmed with Clerk (`confirmOwners`): refused
+ * rather than risk a workspace with no real owner. Worth a retry.
+ */
+const unconfirmed = {
+  statusCode: 503,
+  name: "service_unavailable" as const,
+  message:
+    "We could not confirm the workspace's other owners just now. Try again in a minute.",
+} as const
+
+/** The last owner, refused: the console shows this as it stands. */
+const lastOwner = (message: string) =>
+  ({ statusCode: 409, name: "last_owner" as const, message }) as const
 
 /** A newly signed-up person is auto-joined by onboarding too, for a day. */
 const ARRIVAL_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -93,6 +110,8 @@ export function mountTeam(app: Hono, d: ConsoleDeps): void {
           ),
           422,
         )
+      case "microsoft_owned":
+        return c.json(validation(MICROSOFT_DOMAIN_ADVICE), 422)
       case "invalid":
         return c.json(validation("That is not a domain name."), 422)
       default:
@@ -260,8 +279,104 @@ export function mountTeam(app: Hono, d: ConsoleDeps): void {
       )
     if (outcome === "forbidden")
       return c.json(forbidden("Only an admin can remove members."), 403)
+    if (outcome === "owner_only")
+      return c.json(forbidden("Only an owner can remove an owner."), 403)
+    if (outcome === "last_owner")
+      return c.json(
+        lastOwner("A workspace needs an owner. Make someone else an owner first."),
+        409,
+      )
+    if (outcome === "unconfirmed") return c.json(unconfirmed, 503)
     if (outcome === "no_org") return c.json(noTeam, 422)
     return c.json(notWired("Removing members"), 501)
+  })
+
+  // ── Roles (#335) ───────────────────────────────────────────────────────────
+
+  /**
+   * Every member's role, and the reader's own: what they may do and which
+   * roles they may give. The Team page draws its pickers from this, never
+   * from Clerk's `membership.role` or `has()`.
+   *
+   * ⚠ A MEMBER WITH NO ROW IS NOT LISTED, and the console reads them as
+   * member - the same answer every check gives.
+   */
+  app.get("/team/roles", async (c) => {
+    if (!d.roles) return c.json(notWired("Workspace roles"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const [rows, me] = await Promise.all([
+      d.roles.store.list(tenantId),
+      accessOf(d.roles.store, tenantId, userId),
+    ])
+    return c.json({
+      data: rows.map((r) => ({ user_id: r.userId, role: r.role })),
+      me,
+    })
+  })
+
+  /** Changes a member's role. Only an owner can make or unmake an owner. */
+  app.put("/team/members/:userId/role", async (c) => {
+    if (!d.roles) return c.json(notWired("Workspace roles"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId, orgId } = c.get("user")
+    if (!orgId) return c.json(noTeam, 422)
+    const body = await readJson(c)
+    const target = c.req.param("userId")
+    const changed = await setRole(d.roles, {
+      tenantId,
+      orgId,
+      actorUserId: userId,
+      userId: target,
+      role: body?.role,
+    })
+    switch (changed.outcome) {
+      case "ok":
+        // ⚠ A ROLE DECIDES WHO IS EXEMPT FROM "REQUIRED" SSO (#340).
+        d.identity?.enforcement?.forgetTenant(tenantId)
+        return c.json({ user_id: target, role: changed.to })
+      case "invalid":
+        return c.json(validation("Pick a role: owner, admin or member."), 422)
+      case "missing":
+        return c.json(notFound("That person is not a member of this workspace."), 404)
+      case "forbidden":
+        return c.json(forbidden("Only an admin can change roles."), 403)
+      case "owner_only":
+        return c.json(forbidden("Only an owner can make or remove owners."), 403)
+      case "unconfirmed":
+        return c.json(unconfirmed, 503)
+      default:
+        return c.json(
+          lastOwner(
+            "A workspace needs an owner. Make someone else an owner, then change this role.",
+          ),
+          409,
+        )
+    }
+  })
+
+  /**
+   * Leaves the workspace.
+   *
+   * ⚠ THROUGH US RATHER THAN `user.leaveOrganization()` IN THE BROWSER, so
+   * the last owner is refused with a reason instead of leaving a workspace
+   * nobody can run. See `leaveWorkspace`.
+   */
+  app.post("/team/leave", async (c) => {
+    if (!d.roles) return c.json(notWired("Leaving workspaces"), 501)
+    const { tenantId } = c.get("auth")
+    const { userId, orgId } = c.get("user")
+    if (!orgId) return c.json(noTeam, 422)
+    const outcome = await leaveWorkspace(d.roles, { tenantId, orgId, userId })
+    if (outcome === "unconfirmed") return c.json(unconfirmed, 503)
+    if (outcome === "last_owner")
+      return c.json(
+        lastOwner(
+          "You are the only owner. Make someone else an owner first, or delete the workspace.",
+        ),
+        409,
+      )
+    return c.json({ ok: true })
   })
 
   /** The removed and block lists. Admins only: they name people. */
@@ -269,7 +384,7 @@ export function mountTeam(app: Hono, d: ConsoleDeps): void {
     if (!d.teamDomains) return c.json({ data: [] })
     const { tenantId } = c.get("auth")
     const { userId, orgId } = c.get("user")
-    if (!orgId || !(await d.teamDomains.can(userId, orgId, MANAGE_MEMBERS)))
+    if (!orgId || !(await d.teamDomains.can(tenantId, userId, "members:manage")))
       return c.json({ data: [] })
     return c.json({ data: await d.teamDomains.store.exclusions(tenantId) })
   })
@@ -288,12 +403,13 @@ export function mountTeam(app: Hono, d: ConsoleDeps): void {
       orgId,
       email,
       invite: body?.invite === true,
-      ...(typeof body?.role === "string" ? { role: body.role } : {}),
+      ...(body?.role !== undefined ? { role: body.role } : {}),
     })
     if (outcome === "ok") return c.json({ ok: true })
     if (outcome === "forbidden")
       return c.json(forbidden("Only an admin can change who may join."), 403)
     if (outcome === "no_org") return c.json(noTeam, 422)
+    if (outcome === "invalid") return c.json(validation("Pick a role."), 422)
     return c.json(notWired("Invitations"), 501)
   })
 

@@ -1,0 +1,162 @@
+[
+  {
+    "name": "domains-overview",
+    "steps": [
+      { "do": "goto", "url": "/domains", "window": 3000 },
+      { "do": "fill", "label": "Search domains", "value": "acme", "window": 1500 },
+      { "do": "fill", "label": "Search domains", "value": "", "window": 1500 },
+      { "do": "click", "role": "checkbox", "name": "Select acme.com", "window": 1500 },
+      { "do": "click", "name": "Copy names", "window": 1500 },
+      { "do": "click", "name": "Delete", "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 },
+      { "do": "click", "name": "Actions for acme.com", "window": 1500 },
+      { "do": "click", "text": "Delete domain", "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 }
+    ]
+  },
+  {
+    "name": "domains-add",
+    "steps": [
+      { "do": "goto", "url": "/domains/new", "window": 2500 },
+      { "do": "click", "text": "Advanced options", "window": 1500 },
+      { "do": "click", "text": "Advanced options", "window": 1500 },
+      { "do": "fill", "label": "Domain", "value": "mytest.com", "window": false },
+      { "do": "wait", "ms": 700 },
+      { "do": "click", "name": "Continue", "window": 2000 },
+      { "do": "click", "text": "Keep the records in my zone", "window": 1500 },
+      { "do": "click", "name": "Manual setup", "window": 2000 },
+      {
+        "do": "click",
+        "name": "I’ve added the records",
+        "exact": false,
+        "window": 2000
+      }
+    ]
+  },
+  {
+    "name": "domain-detail",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/domains/1f7a1c00-0000-4000-8000-000000000001",
+        "window": 3000
+      },
+      { "do": "click", "role": "tab", "name": "Configuration", "window": 1500 },
+      { "do": "click", "role": "tab", "name": "Records", "window": 1500 },
+      { "do": "click", "role": "tab", "name": "Configuration", "window": 1500 },
+      { "do": "click", "role": "switch", "label": "Open tracking", "window": 1500 },
+      { "do": "click", "role": "switch", "label": "Open tracking", "window": 1500 },
+      { "do": "click", "name": "Transfer", "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 },
+      { "do": "click", "name": "Delete domain", "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 }
+    ]
+  },
+  {
+    "name": "api-keys-overview",
+    "steps": [
+      { "do": "goto", "url": "/api-keys", "window": 3000 },
+      { "do": "fill", "label": "Search API keys", "value": "staging", "window": 1500 },
+      { "do": "fill", "label": "Search API keys", "value": "", "window": 1500 },
+      { "do": "click", "name": "Actions for staging", "window": 1500 },
+      { "do": "click", "text": "Change scope", "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 },
+      { "do": "click", "name": "Actions for staging", "window": 1500 },
+      { "do": "click", "text": "Rotate", "exact": true, "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 },
+      { "do": "click", "name": "Actions for staging", "window": 1500 },
+      { "do": "click", "text": "Revoke", "exact": true, "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 }
+    ]
+  },
+  {
+    "name": "api-keys-create",
+    "steps": [
+      { "do": "goto", "url": "/api-keys", "window": false },
+      { "do": "wait", "ms": 500 },
+      { "do": "click", "name": "Create key", "window": 2000 },
+      { "do": "fill", "label": "Name", "value": "test-key", "window": false },
+      { "do": "click", "name": "Create key", "window": 2000 },
+      { "do": "click", "name": "I have copied it", "window": 2000 }
+    ]
+  },
+  {
+    "name": "webhooks-overview",
+    "steps": [
+      { "do": "goto", "url": "/webhooks", "window": 3000 },
+      {
+        "do": "click",
+        "role": "tab",
+        "name": "Deliveries",
+        "exact": false,
+        "window": 2000
+      },
+      {
+        "do": "click",
+        "role": "tab",
+        "name": "Endpoints",
+        "exact": false,
+        "window": 2000
+      },
+      { "do": "click", "name": "Add endpoint", "window": 2000 },
+      { "do": "click", "name": "Continue", "window": 2000 },
+      {
+        "do": "fill",
+        "label": "Endpoint URL",
+        "value": "https://example.com/webhook",
+        "window": false
+      },
+      {
+        "do": "fill",
+        "label": "Description",
+        "value": "My test webhook",
+        "window": false
+      },
+      { "do": "click", "name": "Back", "window": 2000 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 }
+    ]
+  },
+  {
+    "name": "webhook-detail",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/webhooks/5f7a1c00-0000-4000-8000-000000000001",
+        "window": 3000
+      },
+      { "do": "click", "role": "tab", "name": "Deliveries", "window": 2000 },
+      { "do": "click", "role": "tab", "name": "Replays", "window": 2000 },
+      { "do": "click", "role": "tab", "name": "Transformation", "window": 2000 },
+      { "do": "click", "role": "tab", "name": "Settings", "window": 2000 },
+      { "do": "click", "role": "switch", "label": "Limit the rate", "window": 1500 },
+      { "do": "click", "role": "switch", "label": "Limit the rate", "window": 1500 },
+      { "do": "click", "name": "Rotate secret", "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 },
+      { "do": "click", "name": "Delete endpoint", "window": 1500 },
+      { "do": "click", "name": "Cancel", "exact": false, "window": 1500 }
+    ]
+  },
+  {
+    "name": "onboarding-flow",
+    "steps": [
+      { "do": "goto", "url": "/onboarding", "window": 3000 },
+      { "do": "click", "name": "Change", "window": 1500 },
+      {
+        "do": "fill",
+        "label": "Workspace name",
+        "value": "Acme Corp",
+        "window": false
+      },
+      { "do": "click", "name": "Continue", "window": 2000 },
+      {
+        "do": "fill",
+        "label": "Domain",
+        "value": "acme-onboarding.com",
+        "window": false
+      },
+      { "do": "wait", "ms": 700 },
+      { "do": "click", "name": "Continue", "window": 2000 },
+      { "do": "click", "name": "Manual setup", "window": 2500 }
+    ]
+  }
+]

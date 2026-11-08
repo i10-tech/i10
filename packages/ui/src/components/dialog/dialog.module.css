@@ -7,6 +7,8 @@
 .keyframes.content[data-state="open"] { animation: content-fade-in var(--duration-fast) var(--ease-enter) both, content-rise-in var(--duration-spring) var(--ease-spring) both; }
 .keyframes.content[data-state="closed"] { animation: content-out var(--duration-fast) var(--ease-standard) both; }
 .content:focus { outline: none; }
+/* A password manager's list sits in the page outside the dialog. Radix sets body pointer-events to none, which that list inherits, so clicks fell through it. The overlay already covers the page, so nothing else can be reached. */
+:global(body):has(.overlay[data-state="open"]) { pointer-events: auto !important; }
 /* While the layers leave, clicks pass through, so the trigger can reopen the dialog mid-exit. Radix sets pointer-events inline on the overlay. */
 .overlay[data-state="closed"], .content[data-state="closed"] { pointer-events: none !important; }
 .header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-5); padding: var(--space-6); border-bottom: 1px solid var(--border); }

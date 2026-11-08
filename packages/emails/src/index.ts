@@ -22,6 +22,17 @@ import TemplateReview, { templateReviewSubject } from "./templates/template-revi
 import WebhookHealth, { webhookHealthSubject } from "./templates/webhook-health.js"
 import MemberCapacity, { memberCapacitySubject } from "./templates/member-capacity.js"
 import JoinAccepted, { joinAcceptedSubject } from "./templates/join-accepted.js"
+import SsoBypassUsed, { ssoBypassUsedSubject } from "./templates/sso-bypass-used.js"
+import SsoCertificateExpiring, {
+  ssoCertificateExpiringSubject,
+  type ExpiringCredentialKind,
+} from "./templates/sso-certificate-expiring.js"
+import SsoDirectorySyncFailed, {
+  ssoDirectorySyncFailedSubject,
+} from "./templates/sso-directory-sync-failed.js"
+import SsoRelinkRequested, {
+  ssoRelinkRequestedSubject,
+} from "./templates/sso-relink-requested.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -414,6 +425,73 @@ export async function renderJoinAccepted(
   const element = JoinAccepted(props)
   return {
     subject: joinAcceptedSubject(props.workspace, props.waited),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * Somebody skipped the SSO requirement through the bypass list (#345). To the
+ * workspace's other owners and admins; see apps/api/src/identity/alerts.ts.
+ */
+export async function renderSsoBypassUsed(
+  props: React.ComponentProps<typeof SsoBypassUsed>,
+): Promise<RenderedEmail> {
+  const element = SsoBypassUsed(props)
+  return {
+    subject: ssoBypassUsedSubject(props.workspace),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+export { ssoCertificateExpiringSubject, type ExpiringCredentialKind }
+export { ssoRelinkRequestedSubject }
+
+/**
+ * A SAML identity provider certificate or credential is expiring or expired (#345).
+ * To the workspace's owners and SSO admins; see apps/api/src/identity/alerts.ts.
+ */
+export async function renderSsoCertificateExpiring(
+  props: React.ComponentProps<typeof SsoCertificateExpiring>,
+): Promise<RenderedEmail> {
+  const element = SsoCertificateExpiring(props)
+  return {
+    subject: ssoCertificateExpiringSubject(
+      props.days,
+      props.connection,
+      props.credential,
+    ),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * A directory sync pull failed (#343). To the workspace's owners and SSO
+ * admins; see apps/api/src/identity/alerts.ts.
+ */
+export async function renderSsoDirectorySyncFailed(
+  props: React.ComponentProps<typeof SsoDirectorySyncFailed>,
+): Promise<RenderedEmail> {
+  const element = SsoDirectorySyncFailed(props)
+  return {
+    subject: ssoDirectorySyncFailedSubject(props.directory),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+/**
+ * One or more changed logins are waiting for approval after an IdP subject change (#345).
+ * Sent only to workspace owners; see apps/api/src/identity/alerts.ts.
+ */
+export async function renderSsoRelinkRequested(
+  props: React.ComponentProps<typeof SsoRelinkRequested>,
+): Promise<RenderedEmail> {
+  const element = SsoRelinkRequested(props)
+  return {
+    subject: ssoRelinkRequestedSubject(props.count, props.connection),
     html: await render(element),
     text: await render(element, { plainText: true }),
   }

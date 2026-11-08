@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
+import { AutoHeight } from "@repo/ui/components/i10/auto-height"
 import { formatExact } from "@/lib/format"
 import type { JourneyIcon, JourneyStep, JourneyTone } from "@/lib/journey"
 import { useMounted } from "@/lib/react"
@@ -174,10 +175,17 @@ export function Journey({
               className={cn("mt-0.5 size-4 shrink-0", NOTICE_TONE[notice.tone].icon)}
             />
           )}
-          <p className="min-w-0 text-muted-foreground">
-            <span className="font-medium text-foreground">{notice.title}:</span>{" "}
-            {notice.body}
-          </p>
+          {/*
+           * ⚠ THE CAPTION'S HEIGHT ANIMATES. A lookup that comes back with a
+           * longer reason ("We cannot see the record yet...") wraps to a second
+           * line, and the box grew in one frame, dropping everything under it.
+           */}
+          <AutoHeight className="min-w-0 flex-1" grow="animate">
+            <p className="text-muted-foreground">
+              <span className="font-medium text-foreground">{notice.title}:</span>{" "}
+              {notice.body}
+            </p>
+          </AutoHeight>
         </div>
       )}
       <div className="relative mt-3 overflow-x-auto">

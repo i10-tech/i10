@@ -932,6 +932,97 @@
       "when": 1793895767219,
       "tag": "0132_mailbox_mail_all_ses",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1793993423422,
+      "tag": "0133_mailbox_auth_failures",
+      "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1793995652037,
+      "tag": "0134_team_inboxes",
+      "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1793997686186,
+      "tag": "0135_mailbox_storage_allocation",
+      "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1794000201349,
+      "tag": "0136_mailbox_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1794014359061,
+      "tag": "0137_authd_credential_epoch_and_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1794014373914,
+      "tag": "0138_authd_budget_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1794050538197,
+      "tag": "0139_sso_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794050550225,
+      "tag": "0140_identity_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794050551028,
+      "tag": "0141_saml_connections_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1794050551830,
+      "tag": "0142_google_directories_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1794050552643,
+      "tag": "0143_siem_exports_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1794087766533,
+      "tag": "0144_authd_close_signin_gaps",
+      "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1794110307534,
+      "tag": "0145_authd_required_exempt",
+      "breakpoints": true
     }
   ]
 }

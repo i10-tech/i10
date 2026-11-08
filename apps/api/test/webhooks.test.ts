@@ -8,8 +8,13 @@ import { beforeEach, describe, expect, it, mock } from "bun:test"
 // `import { createApp } from "../src/app.js"` would then be evaluated before
 // this line ran, and the route would hold the real writer. The `await import`
 // is load-bearing, not a leftover.
+//
+// ⚠ THE REST OF THE MODULE STAYS REAL. bun keeps a module mock for the whole run,
+// so a file that loads after this one and imports anything else from the writer
+// would fail with "Export named ... not found".
 const applyClerkEvent = mock()
-mock.module("../src/projection/writer.js", () => ({ applyClerkEvent }))
+const writer = { ...(await import("../src/projection/writer.js")) }
+mock.module("../src/projection/writer.js", () => ({ ...writer, applyClerkEvent }))
 
 const { createApp } = await import("../src/app.js")
 
@@ -361,6 +366,132 @@ describe("membership events arriving from Clerk", () => {
   it("answers 500 when the hook fails, so Svix retries", async () => {
     members.mockRejectedValueOnce(new Error("clerk down"))
     expect((await send("msg_accept")).status).toBe(500)
+  })
+})
+
+/**
+ * Workspace roles (#335): the roles hook sees every event, even a duplicate,
+ * after provisioning made the tenant and before the members hook mails the
+ * owners and admins - and a failure is a 500 so Svix retries.
+ */
+describe("role events arriving from Clerk", () => {
+  const order: string[] = []
+  const roles = mock(async (type: string) => {
+    order.push(`roles:${type}`)
+    return `role:${type}`
+  })
+  const members = mock(async (type: string) => {
+    order.push(`members:${type}`)
+    return null
+  })
+  const created = JSON.stringify({
+    type: "organization.created",
+    data: { id: "org_acme", name: "Acme", created_by: "user_1" },
+  })
+  const send = (id: string) =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        provisioning: {
+          onOrganizationCreated: async () => {
+            order.push("provision")
+            return "tenant_created"
+          },
+        },
+        roles,
+        members,
+      },
+    }).request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(created, id),
+      body: created,
+    })
+
+  beforeEach(() => {
+    order.length = 0
+    roles.mockClear()
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+  })
+
+  it("runs after provisioning and before members, even as a duplicate", async () => {
+    const res = await send("msg_org")
+    expect(res.status).toBe(200)
+    expect(order).toEqual([
+      "provision",
+      "roles:organization.created",
+      "members:organization.created",
+    ])
+  })
+
+  it("answers 500 when the hook fails, so Svix retries", async () => {
+    roles.mockRejectedValueOnce(new Error("database down"))
+    expect((await send("msg_org")).status).toBe(500)
+  })
+})
+
+/**
+ * A member who leaves a workspace loses the login of their mailbox in it
+ * (mailboxes/revoke.ts). The hook runs after the roles hook has taken the row,
+ * so "not a member" is already true when it asks, and a failure is a 500: a
+ * missed suspension is a login that stays open.
+ */
+describe("a member leaving, arriving from Clerk", () => {
+  const order: string[] = []
+  const roles = mock(async (type: string) => {
+    order.push(`roles:${type}`)
+    return null
+  })
+  const mailAccess = mock(async (type: string) => {
+    order.push(`mailAccess:${type}`)
+    return "mailbox:suspended"
+  })
+  const members = mock(async (type: string) => {
+    order.push(`members:${type}`)
+    return null
+  })
+  const left = JSON.stringify({
+    type: "organizationMembership.deleted",
+    data: {
+      id: "orgmem_1",
+      organization: { id: "org_acme" },
+      public_user_data: { user_id: "user_ada" },
+    },
+  })
+  const send = (id: string) =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        roles,
+        mailAccess,
+        members,
+      },
+    }).request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(left, id),
+      body: left,
+    })
+
+  beforeEach(() => {
+    order.length = 0
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+  })
+
+  it("runs after roles and before members, even as a duplicate", async () => {
+    expect((await send("msg_left")).status).toBe(200)
+    expect(order).toEqual([
+      "roles:organizationMembership.deleted",
+      "mailAccess:organizationMembership.deleted",
+      "members:organizationMembership.deleted",
+    ])
+  })
+
+  it("answers 500 when the suspension fails, so Svix retries", async () => {
+    mailAccess.mockRejectedValueOnce(new Error("database down"))
+    expect((await send("msg_left")).status).toBe(500)
   })
 })
 

@@ -71,6 +71,77 @@ const endpointEvent = z
   })
   .strict()
 
+/**
+ * About your workspace's single sign-on (#345), not about an email.
+ *
+ * ⚠ IDS AND REASONS ONLY. A payload is built from the identity audit log, which
+ * never holds a token, a code, an assertion or an IdP response, and these
+ * schemas are strict so a field added to the audit data does not leak here
+ * without a test failing.
+ */
+const memberEvent = {
+  /** The person's i10 account id. */
+  user_id: z.string(),
+  /** The connection that signs them in; null for a directory (SCIM, Google). */
+  connection_id: z.string().nullable(),
+  created_at: z.string(),
+  /** Present, and true, only on test events. */
+  test: z.literal(true).optional(),
+}
+
+const memberProvisioned = z
+  .object({
+    ...memberEvent,
+    /** How they became managed: `jit`, `scim`, `claimed` or `linked`. */
+    source: z.string(),
+  })
+  .strict()
+
+const memberDeprovisioned = z
+  .object({
+    ...memberEvent,
+    /** `membership` (removed from the workspace) or `account` (banned everywhere). */
+    mode: z.enum(["membership", "account"]),
+    /** Why: `admin`, `scim`, `google_directory`... */
+    cause: z.string().nullable(),
+    /** Who did it; null when a directory did. */
+    actor_user_id: z.string().nullable(),
+    sessions_revoked: z.number().int(),
+    /** The API keys they created, still live: yours to rotate. Never the secrets. */
+    api_keys: z.array(z.object({ id: z.string(), name: z.string() }).strict()),
+  })
+  .strict()
+
+const connectionFailed = z
+  .object({
+    connection_id: z.string(),
+    /** What the sign-in failed on, as the audit log words it. */
+    reason: z.string().nullable(),
+    /** `sign_in_failed`: one failure; `failure_spike` / `no_success`: the connection is failing. */
+    trigger: z.enum(["sign_in_failed", "failure_spike", "no_success"]),
+    failures_last_hour: z.number().int(),
+    failures_last_24h: z.number().int(),
+    last_success_at: z.string().nullable(),
+    created_at: z.string(),
+    /** Present, and true, only on test events. */
+    test: z.literal(true).optional(),
+  })
+  .strict()
+
+const certificateExpiring = z
+  .object({
+    connection_id: z.string(),
+    /** SHA-256 of the certificate, to tell which one. */
+    fingerprint: z.string(),
+    not_after: z.string(),
+    /** The threshold crossed: 30, 7, 1, or 0 for expired. */
+    days: z.number().int(),
+    created_at: z.string(),
+    /** Present, and true, only on test events. */
+    test: z.literal(true).optional(),
+  })
+  .strict()
+
 export const webhookEventData = {
   "email.sent": base,
   "email.delivered": base,
@@ -105,6 +176,10 @@ export const webhookEventData = {
   "webhook_endpoint.failing": endpointEvent,
   "webhook_endpoint.disabled": endpointEvent,
   "webhook_endpoint.recovered": endpointEvent,
+  "member.provisioned": memberProvisioned,
+  "member.deprovisioned": memberDeprovisioned,
+  "sso.connection.failed": connectionFailed,
+  "sso.certificate.expiring": certificateExpiring,
 } as const satisfies Record<z.infer<typeof webhookEventName>, z.ZodType>
 
 export interface WebhookEventCatalogEntry {
@@ -179,6 +254,30 @@ export const WEBHOOK_EVENT_CATALOG: readonly WebhookEventCatalogEntry[] = [
     version: 1,
     description:
       "An endpoint that was failing or disabled delivered successfully again.",
+  },
+  {
+    type: "member.provisioned",
+    version: 1,
+    description:
+      "Somebody became a managed member of the workspace: created by just-in-time sign-in, a directory, or claimed by a connection.",
+  },
+  {
+    type: "member.deprovisioned",
+    version: 1,
+    description:
+      "A managed member was deprovisioned. Carries the API keys they created, which are not revoked.",
+  },
+  {
+    type: "sso.connection.failed",
+    version: 1,
+    description:
+      "Sign-ins through a connection are failing. At most one per connection every 15 minutes.",
+  },
+  {
+    type: "sso.certificate.expiring",
+    version: 1,
+    description:
+      "A SAML identity provider certificate expires in 30, 7 or 1 days, or has expired.",
   },
 ]
 

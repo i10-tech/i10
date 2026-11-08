@@ -68,3 +68,22 @@ docs.i10.localhost {
 	tls internal
 	reverse_proxy host.docker.internal:3003
 }
+
+# The Clerk gateway (services/clerk-gateway) under `wrangler dev`, in front of
+# the DEV instance's Frontend API. Only used when the apps are started with
+# CLERK_PROXY_URL=https://clerk.i10.localhost; see services/clerk-gateway/README.md.
+#
+# ⚠ HTTPS TO WRANGLER, WITH ITS CERTIFICATE UNCHECKED, AND ONLY HERE. wrangler
+# dev rewrites response headers naming this host onto the protocol the request
+# reached it with, so a plain-http hop turned Clerk's https redirects into http
+# ones (see wrangler.jsonc `dev`). The hop is loopback to a self-signed
+# certificate; there is nothing to verify it against.
+clerk.i10.localhost {
+	tls internal
+	reverse_proxy https://host.docker.internal:3006 {
+		header_up Host {host}
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}

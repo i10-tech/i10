@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Folder, LayoutTemplate, Loader2, Plus, Upload } from "lucide-react"
+import { Folder, LayoutTemplate, Plus, Upload } from "lucide-react"
 import { Button } from "@repo/ui/components/button/button"
 import {
   DropdownMenu,
@@ -51,8 +51,8 @@ export function NewTemplateMenu({ folderId = null }: { folderId?: string | null 
     <>
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" disabled={creating}>
-            {creating ? <Loader2 className="animate-spin" /> : <Plus />}
+          <Button size="sm" loading={creating}>
+            <Plus />
             New
           </Button>
         </DropdownMenuTrigger>

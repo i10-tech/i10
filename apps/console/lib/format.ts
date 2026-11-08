@@ -85,39 +85,48 @@ export function formatDay(day: string): string {
 }
 
 /**
- * "2 minutes ago", "3 days ago".
+ * "2 minutes ago", "3 days ago" - and "in 3 hours", "in 7 days" for an instant
+ * still ahead, such as an expiry.
  *
- * ⚠ IT RETURNS AN ABSOLUTE DATE PAST A WEEK, because "37 days ago" is a number
- * somebody has to do arithmetic on. Relative time is useful exactly while it is
- * still relative to now.
+ * ⚠ IT RETURNS AN ABSOLUTE DATE PAST A WEEK, IN EITHER DIRECTION, because "37
+ * days ago" is a number somebody has to do arithmetic on. Relative time is
+ * useful exactly while it is still relative to now.
  *
  * ⚠ AND IT READS `Date.now()`, SO IT HAS THE SAME RULE AS `formatExact`: not
  * during the first render of a client component. A row that is 59 seconds old
  * on the server and 61 seconds old at hydration says two different things, and
  * React treats that as a mismatch. Use `<Time>`.
  */
-export function formatRelative(iso: string): string {
+export function formatRelative(iso: string, now: number = Date.now()): string {
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return iso
 
-  const seconds = Math.round((Date.now() - then) / 1000)
+  const delta = Math.round((now - then) / 1000)
+  const future = delta < 0
+  const seconds = Math.abs(delta)
+  const phrase = (span: string) => (future ? `in ${span}` : `${span} ago`)
 
+  // ⚠ "JUST NOW" BOTH WAYS: a row we just wrote is seconds ahead whenever the
+  // browser's clock runs behind the server's, and most instants here are past.
   if (seconds < 45) return "just now"
-  if (seconds < 90) return "a minute ago"
+  if (seconds < 90) return phrase("a minute")
 
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes} minutes ago`
+  if (minutes < 60) return phrase(`${minutes} minutes`)
 
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`
+  if (hours < 24) return phrase(`${hours} hour${hours === 1 ? "" : "s"}`)
 
+  // A seven-day expiry is the common future case, and "in 7 days" says it
+  // better than a date the reader has to count towards.
   const days = Math.round(hours / 24)
-  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`
+  if (days < 7 || (future && days === 7))
+    return phrase(`${days} day${days === 1 ? "" : "s"}`)
 
   return new Date(then).toLocaleDateString("en-US", {
     day: "numeric",
     month: "short",
-    ...(new Date(then).getUTCFullYear() === new Date().getUTCFullYear()
+    ...(new Date(then).getUTCFullYear() === new Date(now).getUTCFullYear()
       ? {}
       : { year: "numeric" }),
   })

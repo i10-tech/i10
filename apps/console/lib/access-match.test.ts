@@ -9,9 +9,9 @@ const domain = (over: Partial<AccessDomain> = {}): AccessDomain => ({
   status: "verified",
   txt: { name: "_i10-access.pslhq.app", value: "i10-access=x" },
   rules: [
-    { pattern: "pslhq.app", mode: "suggest", role: "org:member" },
-    { pattern: "*.pslhq.app", mode: "auto", role: "org:member" },
-    { pattern: "dev.pslhq.app", mode: "off", role: "org:member" },
+    { pattern: "pslhq.app", mode: "suggest", role: "member" },
+    { pattern: "*.pslhq.app", mode: "auto", role: "member" },
+    { pattern: "dev.pslhq.app", mode: "off", role: "member" },
   ],
   orphaned: false,
   verified_at: null,
@@ -33,7 +33,7 @@ describe("ruleForAddress", () => {
   it("never covers a parent of the proven name", () => {
     const sub = domain({
       name: "notifications.pslhq.app",
-      rules: [{ pattern: "*.pslhq.app", mode: "auto", role: "org:member" }],
+      rules: [{ pattern: "*.pslhq.app", mode: "auto", role: "member" }],
     })
     expect(ruleForAddress([sub], "a@pslhq.app")).toBeNull()
   })

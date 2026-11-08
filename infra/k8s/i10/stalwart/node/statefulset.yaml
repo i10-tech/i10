@@ -254,7 +254,7 @@ spec:
           # Built from services/authd by .github/workflows/build.yml. `prod-latest`
           # matches every other i10 workload: the Build job tags prod-<sha> and
           # prod-latest only on main, so staging can never publish over it.
-          image: ghcr.io/i10-tech/i10-authd:prod-99ce5b12c001e8ae174537b27f932e99aa17db7d@sha256:0ac5cb124656d5a4c19eaa276195ae96d16845dae3d9036dbe50334cebc8f925
+          image: ghcr.io/i10-tech/i10-authd:prod-1b28e2aa69a422ce80fa693bd4ff9c2097411025@sha256:c28af8ecc68c8fda7b400df42ab157b5d25de4097c30d1a7a41190ce58cf26be
 
           securityContext:
             allowPrivilegeEscalation: false
@@ -302,6 +302,17 @@ spec:
             - name: AUTHD_CLERK_SECRET_KEY
               valueFrom:
                 secretKeyRef: { name: i10-shared, key: CLERK_SECRET_KEY }
+            # LDAP pass-through: authd asks the API for a connection's directory
+            # settings. Both or neither, or authd refuses to start. The secret is
+            # in i10-shared because the API reads that Secret too, so one Doppler
+            # value is both ends. Unset, managed accounts are refused.
+            - {
+                name: AUTHD_API_URL,
+                value: "http://i10-api.i10-prod.svc.cluster.local",
+              }
+            - name: AUTHD_API_SECRET
+              valueFrom:
+                secretKeyRef: { name: i10-shared, key: AUTHD_API_SECRET }
             # Protects the shared Clerk budget (1000 req/10s across all of i10)
             # from one mail client stuck in a retry loop. NOT lockout protection -
             # the backend verify_password endpoint does not feed Clerk's counter.

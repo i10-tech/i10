@@ -1,0 +1,1025 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { sql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/postgres-js"
+import postgres from "postgres"
+import { assertRlsSubject, type Database } from "../src/db/client.js"
+import * as schema from "../src/db/schema.js"
+import { identityStore } from "../src/identity/store.js"
+import { hashSecret } from "../src/identity/model.js"
+import { secretBox } from "../src/webhooks/signing.js"
+
+/**
+ * The identity schema against a real database as `i10_api` (#337): every
+ * outsider read is a row-level-security policy, and only Postgres can say each
+ * one admits exactly the rows its value names and nothing else.
+ *
+ *   TEMPLATES_TEST_DATABASE_URL=postgres://i10:i10@localhost:5433/templates_scratch bun test test/identity-db.test.ts
+ */
+const URL = process.env.TEMPLATES_TEST_DATABASE_URL
+const API_URL = URL?.replace(/\/\/[^@]+@/, "//i10_api:i10_api@")
+const suite = URL ? describe : describe.skip
+
+let owner: ReturnType<typeof postgres>
+let db: ReturnType<typeof postgres>
+let database: Database
+const acme = crypto.randomUUID()
+const rival = crypto.randomUUID()
+const suffix = acme.slice(0, 8)
+const live = `acme-${suffix}.test`
+const displaced = `old-${suffix}.test`
+let liveProof = ""
+let displacedProof = ""
+const ada = `user_ada_${suffix}`
+const box = secretBox("ab".repeat(32))
+
+suite("identity schema", () => {
+  beforeAll(async () => {
+    owner = postgres(URL!, { max: 2, onnotice: () => {} })
+    db = postgres(API_URL!, { max: 4, onnotice: () => {} })
+    database = drizzle(db, { schema }) as unknown as Database
+    for (const [id, name] of [
+      [acme, "Acme"],
+      [rival, "Rival"],
+    ] as const)
+      await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id, clerk_org_id)
+                  values (${id}, ${`i-${id.slice(0, 8)}`}, ${name}, ${`owner-${id}`}, ${`org_${id.slice(0, 8)}`})`
+    const [a] =
+      await owner`insert into core.join_domains (tenant_id, name, clerk_org_id, source, verified_at)
+                            values (${acme}, ${live}, 'org_a', 'txt', now()) returning id`
+    const [b] =
+      await owner`insert into core.join_domains (tenant_id, name, clerk_org_id, source, verified_at, displaced_at)
+                            values (${acme}, ${displaced}, 'org_a', 'txt', now(), now()) returning id`
+    liveProof = a!.id as string
+    displacedProof = b!.id as string
+  })
+  afterAll(async () => {
+    await owner`delete from core.tenants where id in (${acme}, ${rival})`
+    await owner.end()
+    await db.end()
+  })
+
+  const store = () => identityStore(database, box)
+
+  it("keeps the boot check passing with the new schema", async () => {
+    await assertRlsSubject(db)
+  })
+
+  let connectionId = ""
+  it("covers only live proofs of the workspace, and each proof once", async () => {
+    const made = await store().createConnection(acme, {
+      name: "Acme",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "user_owner",
+    })
+    connectionId = made.id
+    expect(made.status).toBe("draft")
+    expect(await store().addDomain(acme, connectionId, liveProof)).toBe("added")
+    expect(await store().addDomain(acme, connectionId, liveProof)).toBe("added")
+    expect(await store().addDomain(acme, connectionId, displacedProof)).toBe(
+      "not_found",
+    )
+    // Another workspace cannot name Acme's proof.
+    expect(await store().addDomain(rival, connectionId, liveProof)).toBe("not_found")
+    const second = await store().createConnection(acme, {
+      name: "B",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    expect(await store().addDomain(acme, second.id, liveProof)).toBe("taken")
+    expect(await store().liveDomains(acme, connectionId)).toEqual([live])
+  })
+
+  it("starts Entra and Okta connections with a 7 day session cap, and others with none", async () => {
+    const made = async (provider: string, protocol: "saml" | "oidc") =>
+      (
+        await store().createConnection(acme, {
+          name: provider,
+          protocol,
+          provider,
+          createdBy: "u",
+        })
+      ).maxSessionSeconds
+    expect(await made("entra", "saml")).toBe(604800)
+    expect(await made("okta", "saml")).toBe(604800)
+    expect(await made("entra", "oidc")).toBe(604800)
+    expect(await made("google", "oidc")).toBeNull()
+  })
+
+  it("deletes only an unused draft and leaves its audit event", async () => {
+    const [proof] =
+      await owner`insert into core.join_domains (tenant_id, name, clerk_org_id, source, verified_at)
+                  values (${acme}, ${`delete-${suffix}.test`}, 'org_a', 'txt', now()) returning id`
+    const draft = await store().createConnection(acme, {
+      name: "Delete me",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    expect(await store().addDomain(acme, draft.id, proof!.id as string)).toBe("added")
+    await store().record(acme, { type: "draft.before_delete", connectionId: draft.id })
+    expect(await store().deleteDraftConnection(acme, draft.id)).toBe("deleted")
+    expect(await store().connection(acme, draft.id)).toBeNull()
+    expect(
+      (await store().events(acme, { limit: 20 })).some(
+        (event) => event.type === "draft.before_delete",
+      ),
+    ).toBe(true)
+    const replacement = await store().createConnection(acme, {
+      name: "Replacement",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    expect(await store().addDomain(acme, replacement.id, proof!.id as string)).toBe(
+      "added",
+    )
+
+    const liveConnection = await store().createConnection(acme, {
+      name: "Live",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    await owner`update identity.connections set status = 'active' where id = ${liveConnection.id}`
+    expect(await store().deleteDraftConnection(acme, liveConnection.id)).toBe(
+      "not_draft",
+    )
+
+    const used = await store().createConnection(acme, {
+      name: "Used",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    await owner`insert into identity.identities (tenant_id, connection_id, subject, clerk_user_id)
+                values (${acme}, ${used.id}, 'used-subject', 'user_used')`
+    expect(await store().deleteDraftConnection(acme, used.id)).toBe("in_use")
+  })
+
+  it("stops counting a domain the moment its proof is displaced", async () => {
+    await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
+    expect(await store().liveDomains(acme, connectionId)).toEqual([])
+    const [listed] = await store().connections(acme)
+    expect(listed!.domains).toEqual([
+      { joinDomainId: liveProof, name: live, live: false },
+    ])
+    await owner`update core.join_domains set displaced_at = null where id = ${liveProof}`
+    expect(await store().liveDomains(acme, connectionId)).toEqual([live])
+  })
+
+  it("refuses, in the database itself, a row that points at another workspace's connection or proof", async () => {
+    // As the owner, so no policy is in the way: only the composite keys are.
+    // ⚠ AWAITED INSIDE: a postgres.js query is lazy, and `.rejects` alone
+    // never runs it (the test then hangs).
+    const refusal = async (run: () => Promise<unknown>) => {
+      try {
+        await run()
+        return "accepted"
+      } catch (error) {
+        return String(error)
+      }
+    }
+    expect(
+      await refusal(
+        () => owner`insert into identity.identities (tenant_id, connection_id, subject, clerk_user_id)
+                    values (${rival}, ${connectionId}, 'x', 'user_x')`,
+      ),
+    ).toMatch(/identities_connection_fk/)
+    const [theirs] =
+      await owner`insert into identity.connections (tenant_id, name, protocol)
+                                 values (${rival}, 'R', 'test') returning id`
+    expect(
+      await refusal(
+        () => owner`insert into identity.connection_domains (tenant_id, connection_id, join_domain_id)
+                    values (${rival}, ${theirs!.id}, ${displacedProof})`,
+      ),
+    ).toMatch(/connection_domains_proof_fk/)
+    await owner`delete from identity.connections where id = ${theirs!.id}`
+  })
+
+  it("keeps the audit log append only, even for its own workspace", async () => {
+    await store().record(acme, { type: "test.event", reason: "kept" })
+    const changed = await database.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${acme}, true)`)
+      const updated = await tx.execute(
+        sql`update identity.events set reason = 'rewritten' where tenant_id = ${acme}::uuid returning id`,
+      )
+      const deleted = await tx.execute(
+        sql`delete from identity.events where tenant_id = ${acme}::uuid returning id`,
+      )
+      return [...updated, ...deleted].length
+    })
+    expect(changed).toBe(0)
+    const rows = await store().events(acme, { limit: 50 })
+    expect(rows.some((r) => r.reason === "kept")).toBe(true)
+    expect(rows.some((r) => r.reason === "rewritten")).toBe(false)
+  })
+
+  it("reads a connection by id with no workspace, and never another workspace's through its own", async () => {
+    expect((await store().connectionForStart(connectionId))?.tenantId).toBe(acme)
+    expect(await store().connectionForStart("not-a-uuid")).toBeNull()
+    expect(await store().connection(rival, connectionId)).toBeNull()
+    expect(await store().connections(rival)).toEqual([])
+  })
+
+  it("spends an attempt's state, code and secret once each, read only by their own hash", async () => {
+    const state = "s".repeat(43)
+    const { id } = await store().createAttempt({
+      tenantId: acme,
+      connectionId,
+      purpose: "sign_in",
+      stateHash: hashSecret(state),
+      bindingHash: hashSecret("b".repeat(43)),
+      pkceVerifier: "verifier-in-the-clear",
+      expiresAt: new Date(Date.now() + 600_000),
+    })
+    const [raw] =
+      await owner`select pkce_verifier from identity.login_attempts where id = ${id}`
+    expect(String(raw!.pkce_verifier).startsWith("v1.")).toBe(true)
+    const read = await store().attemptByState(hashSecret(state))
+    expect(read).toMatchObject({
+      id,
+      tenantId: acme,
+      pkceVerifier: "verifier-in-the-clear",
+    })
+    expect(await store().attemptByState(hashSecret("t".repeat(43)))).toBeNull()
+
+    expect(await store().consumeAttempt(acme, id, new Date())).toBe(true)
+    expect(await store().consumeAttempt(acme, id, new Date())).toBe(false)
+    expect(await store().consumeAttempt(rival, id, new Date())).toBe(false)
+
+    await store().finishAttempt(acme, id, {
+      outcome: "signed_in",
+      clerkUserId: ada,
+      handoffCodeHash: hashSecret("c".repeat(43)),
+      handoffExpiresAt: new Date(Date.now() + 120_000),
+    })
+    expect(
+      (await store().attemptByHandoffCode(hashSecret("c".repeat(43))))?.clerkUserId,
+    ).toBe(ada)
+    expect(await store().claimRedeem(acme, id, new Date())).toBe(true)
+    expect(await store().claimRedeem(acme, id, new Date())).toBe(false)
+    await store().recordToken(acme, id, {
+      signInTokenId: "sit_1",
+      mintedAt: new Date(),
+      handoffSecretHash: hashSecret("h".repeat(43)),
+    })
+    expect(
+      (await store().attemptByHandoffSecret(hashSecret("h".repeat(43))))?.signInTokenId,
+    ).toBe("sit_1")
+    expect(await store().markBound(acme, id, "sess_1", new Date())).toBe(true)
+    expect(await store().markBound(acme, id, "sess_1", new Date())).toBe(false)
+  })
+
+  it("makes an account managed by one workspace only, readable by the user and by its addresses", async () => {
+    const row = {
+      clerkUserId: ada,
+      tenantId: acme,
+      connectionId,
+      reason: "claimed" as const,
+      emails: [`ada@${live}`],
+    }
+    expect(await store().claimManaged(acme, row)).toBe("created")
+    expect(await store().claimManaged(acme, row)).toBe("kept")
+    expect(await store().claimManaged(rival, { ...row, tenantId: rival })).toBe(
+      "elsewhere",
+    )
+    expect((await store().managedByUser(ada))?.tenantId).toBe(acme)
+    expect(await store().managedByUser("user_nobody")).toBeNull()
+    expect(await store().managedByIdentifier(`ada@${live}`)).toBe(true)
+    expect(await store().managedByIdentifier(`ADA@${live}`)).toBe(true)
+    expect(await store().managedByIdentifier(`eve@${live}`)).toBe(false)
+    // Another workspace can neither see nor release it.
+    expect(await store().releaseManaged(rival, ada)).toBe(false)
+  })
+
+  it("names the live connection that covers the person's domain now, not the one they were claimed through", async () => {
+    const route = async () =>
+      (
+        (await store().gateRead(ada, "sess_route")) as {
+          managed: { connectionId: string | null }
+        }
+      ).managed.connectionId
+    await owner`update identity.connections set status = 'active' where id = ${connectionId}`
+    expect(await route()).toBe(connectionId)
+
+    // The domain moves to another connection, which is not live yet: nobody
+    // can sign Ada in, so no connection is named (2026-11-01: the gate named
+    // the old one, which could no longer vouch for her address - a loop).
+    const moved = await store().createConnection(acme, {
+      name: "Moved",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "user_owner",
+    })
+    await owner`delete from identity.connection_domains where connection_id = ${connectionId}`
+    expect(await store().addDomain(acme, moved.id, liveProof)).toBe("added")
+    expect(await route()).toBeNull()
+    await owner`update identity.connections set status = 'active' where id = ${moved.id}`
+    expect(await route()).toBe(moved.id)
+
+    // An admin goes only where they are linked (#338): `moved` would refuse
+    // her `role_exempt`, so it is not named until she is linked on it.
+    await owner`insert into core.workspace_roles (tenant_id, clerk_user_id, role, source)
+                values (${acme}, ${ada}, 'admin', 'test')`
+    expect(await route()).toBeNull()
+    await owner`insert into identity.identities (tenant_id, connection_id, subject, clerk_user_id)
+                values (${acme}, ${moved.id}, 'ada-subject', ${ada})`
+    expect(await route()).toBe(moved.id)
+    await owner`delete from identity.identities where connection_id = ${moved.id}`
+    await owner`delete from core.workspace_roles where tenant_id = ${acme} and clerk_user_id = ${ada}`
+
+    // A displaced proof covers nothing.
+    await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
+    expect(await route()).toBeNull()
+    await owner`update core.join_domains set displaced_at = null where id = ${liveProof}`
+
+    // Back as the rest of the suite expects it.
+    await owner`delete from identity.connection_domains where connection_id = ${moved.id}`
+    await owner`delete from identity.connections where id = ${moved.id}`
+    expect(await store().addDomain(acme, connectionId, liveProof)).toBe("added")
+    await owner`update identity.connections set status = 'draft' where id = ${connectionId}`
+  })
+
+  it("answers the gate in one read: unmanaged, unbound, bound with its connection", async () => {
+    expect(await store().gateRead("user_nobody", "sess_x")).toEqual({ managed: null })
+    // The connection is still a draft: it can sign nobody in, so none is named.
+    expect(await store().gateRead(ada, "sess_unbound")).toEqual({
+      managed: { tenantId: acme, connectionId: null },
+      session: null,
+    })
+    const at = new Date()
+    await store().bindSession(acme, {
+      sessionId: `sess_${suffix}`,
+      clerkUserId: ada,
+      connectionId,
+      identityId: null,
+      idpSession: "idp-1",
+      authTime: at,
+      at,
+      freshAt: at,
+    })
+    const read = await store().gateRead(ada, `sess_${suffix}`)
+    expect(read).toMatchObject({
+      managed: { tenantId: acme },
+      session: {
+        sessionId: `sess_${suffix}`,
+        connectionStatus: "draft",
+        domainLive: true,
+        revokedAt: null,
+      },
+    })
+    // A displaced proof takes the bound session's domain with it.
+    await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
+    expect((await store().gateRead(ada, `sess_${suffix}`)) as unknown).toMatchObject({
+      session: { domainLive: false },
+    })
+    await owner`update core.join_domains set displaced_at = null where id = ${liveProof}`
+    // Somebody else asking about Ada's session sees nothing of it.
+    expect(await store().gateRead("user_eve", `sess_${suffix}`)).toEqual({
+      managed: null,
+    })
+    expect(
+      await store().revokeSessionRow(acme, `sess_${suffix}`, "admin", new Date()),
+    ).toBe(true)
+    expect(
+      await store().revokeSessionRow(acme, `sess_${suffix}`, "admin", new Date()),
+    ).toBe(false)
+    expect(await store().sessionsOf(acme, ada)).toEqual([])
+  })
+
+  it("keeps every table behind the tenant boundary for a direct query", async () => {
+    const seen = await db.begin(async (tx) => {
+      await tx`select set_config('app.tenant_id', ${rival}, true)`
+      return {
+        connections: await tx`select id from identity.connections`,
+        managed: await tx`select clerk_user_id from identity.managed_accounts`,
+        sessions: await tx`select session_id from identity.sso_sessions`,
+        attempts: await tx`select id from identity.login_attempts`,
+      }
+    })
+    expect(seen.connections).toHaveLength(0)
+    expect(seen.managed).toHaveLength(0)
+    expect(seen.sessions).toHaveLength(0)
+    expect(seen.attempts).toHaveLength(0)
+  })
+
+  it("writes and reads the audit log and the deprovisioning setting", async () => {
+    expect(await store().deprovisionMode(acme)).toBe("membership")
+    await store().setDeprovisionMode(acme, "account", "user_owner")
+    expect(await store().deprovisionMode(acme)).toBe("account")
+    expect(await store().deprovisionMode(rival)).toBe("membership")
+    await store().record(acme, {
+      type: "connection.created",
+      actorUserId: "user_owner",
+      connectionId,
+    })
+    const [event] = await store().events(acme, { limit: 10 })
+    expect(event).toMatchObject({
+      type: "connection.created",
+      actorUserId: "user_owner",
+    })
+    expect(await store().events(rival, { limit: 10 })).toEqual([])
+  })
+
+  it("lists a connection's test runs newest first, for its own workspace only (#340)", async () => {
+    await store().recordTestRun(acme, {
+      connectionId,
+      attemptId: crypto.randomUUID(),
+      outcome: "failed",
+      reason: "email_unverified",
+      claims: { email: "a@x.test" },
+      resolution: { refused: "email_unverified" },
+    })
+    await store().recordTestRun(acme, {
+      connectionId,
+      attemptId: crypto.randomUUID(),
+      outcome: "passed",
+      reason: null,
+      claims: { email: "b@x.test" },
+      resolution: { path: "jit" },
+    })
+    const runs = await store().testRuns(acme, connectionId, 10)
+    expect(runs.map((r) => r.outcome)).toEqual(["passed", "failed"])
+    expect(runs[0]!.claims).toEqual({ email: "b@x.test" })
+    expect(await store().testRuns(acme, connectionId, 1)).toHaveLength(1)
+    expect(await store().testRuns(rival, connectionId, 10)).toEqual([])
+  })
+
+  it("seals a connection's secrets at rest and opens them only for its workspace (#338)", async () => {
+    expect(await store().connectionSecrets(acme, connectionId)).toEqual({})
+    const written = await store().setConnectionSecrets(acme, connectionId, () => ({
+      secrets: { oidc: { clientSecret: "client-secret-at-rest" } },
+      config: { oidc: { clientSecretSet: true } },
+    }))
+    expect(written?.config).toEqual({ oidc: { clientSecretSet: true } })
+    const [row] =
+      await owner`select secrets, config from identity.connections where id = ${connectionId}`
+    expect(String(row!.secrets)).toStartWith("v1.")
+    expect(String(row!.secrets)).not.toContain("client-secret-at-rest")
+    expect(await store().connectionSecrets(acme, connectionId)).toEqual({
+      oidc: { clientSecret: "client-secret-at-rest" },
+    })
+    expect(await store().connectionSecrets(rival, connectionId)).toBeNull()
+    expect(
+      await store().setConnectionSecrets(rival, connectionId, () => ({
+        secrets: { oidc: {} },
+        config: {},
+      })),
+    ).toBeNull()
+    // The connection as every other read returns it carries no secret.
+    expect(JSON.stringify(await store().connection(acme, connectionId))).not.toContain(
+      "client-secret-at-rest",
+    )
+  })
+
+  it("forgets a deleted user's links and managed row", async () => {
+    await store().link(acme, {
+      connectionId,
+      subject: "okta|ada",
+      clerkUserId: ada,
+      email: null,
+    })
+    await store().forgetUser(acme, ada)
+    expect(await store().identityBySubject(acme, connectionId, "okta|ada")).toBeNull()
+    expect(await store().managedByUser(ada)).toBeNull()
+  })
+
+  // ── #341: group rules, the JIT lock, what an SSO domain covers ──
+
+  const refusal = async (run: () => Promise<unknown>) => {
+    try {
+      await run()
+      return "accepted"
+    } catch (error) {
+      return String(error)
+    }
+  }
+
+  it("keeps group rules per connection, ordered, unique by group and capped (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Rules",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    try {
+      const admin = await store().createGroupRule(acme, {
+        connectionId: mine.id,
+        groupValue: "eng-admins",
+        role: "admin",
+        precedence: 20,
+        createdBy: "user_owner",
+      })
+      const staff = await store().createGroupRule(acme, {
+        connectionId: mine.id,
+        groupValue: "staff",
+        role: "member",
+        precedence: 5,
+        createdBy: "user_owner",
+      })
+      if (typeof admin === "string" || typeof staff === "string")
+        throw new Error("rules were not created")
+      expect(admin).toMatchObject({
+        groupValue: "eng-admins",
+        role: "admin",
+        precedence: 20,
+      })
+      expect(
+        (await store().groupRules(acme, mine.id)).map((r) => r.groupValue),
+      ).toEqual(["staff", "eng-admins"])
+      // One rule per group, in the database itself.
+      expect(
+        await store().createGroupRule(acme, {
+          connectionId: mine.id,
+          groupValue: "staff",
+          role: "admin",
+          precedence: 1,
+          createdBy: "u",
+        }),
+      ).toBe("exists")
+      expect(
+        await store().updateGroupRule(acme, mine.id, admin.id, { groupValue: "staff" }),
+      ).toBe("exists")
+      expect(
+        await store().updateGroupRule(acme, mine.id, admin.id, {
+          precedence: 1,
+          role: "member",
+        }),
+      ).toMatchObject({ groupValue: "eng-admins", precedence: 1, role: "member" })
+      // A tie goes to the older rule (uuidv7 ids sort by creation).
+      await store().updateGroupRule(acme, mine.id, staff.id, { precedence: 1 })
+      expect(
+        (await store().groupRules(acme, mine.id)).map((r) => r.groupValue),
+      ).toEqual(["eng-admins", "staff"])
+      // The wrong connection or an unknown rule is not found.
+      expect(
+        await store().updateGroupRule(acme, connectionId, admin.id, { precedence: 2 }),
+      ).toBeNull()
+      expect(await store().deleteGroupRule(acme, connectionId, admin.id)).toBeNull()
+      expect(
+        await store().deleteGroupRule(acme, mine.id, crypto.randomUUID()),
+      ).toBeNull()
+
+      // The cap is 100; two creations racing for the last place get one place.
+      for (let i = 0; i < 97; i++)
+        await owner`insert into identity.group_role_rules (tenant_id, connection_id, group_value, role, precedence)
+                    values (${acme}, ${mine.id}, ${`filler-${i}`}, 'member', ${i})`
+      const racing = await Promise.all(
+        ["last-a", "last-b"].map((groupValue) =>
+          store().createGroupRule(acme, {
+            connectionId: mine.id,
+            groupValue,
+            role: "member",
+            precedence: 1,
+            createdBy: "u",
+          }),
+        ),
+      )
+      expect(racing.filter((r) => typeof r !== "string")).toHaveLength(1)
+      expect(racing.filter((r) => r === "too_many")).toHaveLength(1)
+      expect(await store().groupRules(acme, mine.id)).toHaveLength(100)
+
+      expect(await store().deleteGroupRule(acme, mine.id, staff.id)).toMatchObject({
+        groupValue: "staff",
+      })
+      expect(await store().groupRules(acme, mine.id)).toHaveLength(99)
+    } finally {
+      // Rules go with their connection (cascade); nothing is left behind.
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+    const [left] =
+      await owner`select count(*)::int as n from identity.group_role_rules where connection_id = ${mine.id}`
+    expect(left!.n).toBe(0)
+  })
+
+  it("hides group rules from another workspace and refuses a cross-workspace row (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Rules RLS",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    try {
+      const made = await store().createGroupRule(acme, {
+        connectionId: mine.id,
+        groupValue: "secret-group",
+        role: "admin",
+        precedence: 1,
+        createdBy: "u",
+      })
+      if (typeof made === "string") throw new Error("rule was not created")
+      // The rival names Acme's connection and rule and gets nothing, changes nothing.
+      expect(await store().groupRules(rival, mine.id)).toEqual([])
+      expect(
+        await store().createGroupRule(rival, {
+          connectionId: mine.id,
+          groupValue: "planted",
+          role: "admin",
+          precedence: 1,
+          createdBy: "u",
+        }),
+      ).toBe("not_found")
+      expect(
+        await store().updateGroupRule(rival, mine.id, made.id, { role: "member" }),
+      ).toBeNull()
+      expect(await store().deleteGroupRule(rival, mine.id, made.id)).toBeNull()
+      expect(await store().groupRules(acme, mine.id)).toMatchObject([
+        { groupValue: "secret-group", role: "admin" },
+      ])
+      // A direct query as the rival sees no rule at all.
+      const seen = await db.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${rival}, true)`
+        return tx`select id from identity.group_role_rules`
+      })
+      expect(seen).toHaveLength(0)
+      // As the owner, with no policy in the way, the composite key still refuses it.
+      expect(
+        await refusal(
+          () => owner`insert into identity.group_role_rules (tenant_id, connection_id, group_value, role, precedence)
+                      values (${rival}, ${mine.id}, 'x', 'admin', 1)`,
+        ),
+      ).toMatch(/group_role_rules_connection_fk/)
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
+
+  it("refuses an owner role and an out-of-range precedence in the table itself (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Rules checks",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    try {
+      const insert = (role: string, precedence: number) => () =>
+        owner`insert into identity.group_role_rules (tenant_id, connection_id, group_value, role, precedence)
+              values (${acme}, ${mine.id}, ${`g-${role}-${precedence}`}, ${role}, ${precedence})`
+      expect(await refusal(insert("owner", 1))).toMatch(/group_role_rules_role_check/)
+      expect(await refusal(insert("", 1))).toMatch(/group_role_rules_role_check/)
+      expect(await refusal(insert("member", -1))).toMatch(
+        /group_role_rules_precedence_check/,
+      )
+      expect(await refusal(insert("member", 10_001))).toMatch(
+        /group_role_rules_precedence_check/,
+      )
+      expect(await refusal(insert("admin", 10_000))).toBe("accepted")
+      // And the update path: a patch cannot smuggle owner past the store either.
+      const [rule] = await store().groupRules(acme, mine.id)
+      // (Drizzle wraps the driver's error; the constraint is in its cause.)
+      const smuggled = await store()
+        .updateGroupRule(acme, mine.id, rule!.id, { role: "owner" as never })
+        .then(
+          () => "accepted",
+          (error: { cause?: unknown }) => String(error.cause),
+        )
+      expect(smuggled).toMatch(/group_role_rules_role_check/)
+      expect((await store().groupRules(acme, mine.id))[0]).toMatchObject({
+        role: "admin",
+      })
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
+
+  it("serialises provisioning per address, across connections, and links in the lock's transaction (#341)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "JIT lock",
+      protocol: "test",
+      provider: "generic",
+      createdBy: "u",
+    })
+    const key = { connectionId: mine.id, email: `grace@${live}` }
+    const order: string[] = []
+    const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    try {
+      const run = async (name: string, subject: string, userId: string) =>
+        store().provisionLocked(acme, key, async (lock) => {
+          order.push(`${name}:in`)
+          const found = await lock.identityBySubject(subject)
+          // Long enough for the other call to be waiting on the lock.
+          await pause(150)
+          if (found) {
+            order.push(`${name}:found`)
+            return found.clerkUserId
+          }
+          await lock.link({ subject, clerkUserId: userId, email: key.email })
+          order.push(`${name}:linked`)
+          return userId
+        })
+      const results = await Promise.all([
+        run("a", "okta|grace", "user_jit_a"),
+        run("b", "okta|grace", "user_jit_b"),
+      ])
+      // One got in first and linked; the other waited, then SAW that link.
+      const winner = order[0]!.split(":")[0]!
+      const loser = winner === "a" ? "b" : "a"
+      expect(order).toEqual([
+        `${winner}:in`,
+        `${winner}:linked`,
+        `${loser}:in`,
+        `${loser}:found`,
+      ])
+      expect(results[0]).toBe(results[1]!)
+      expect(
+        await store().identityBySubject(acme, mine.id, "okta|grace"),
+      ).toMatchObject({ clerkUserId: results[0] })
+
+      // A different address does not wait for this one.
+      const t0 = Date.now()
+      await Promise.all([
+        store().provisionLocked(acme, key, async () => pause(200)),
+        store().provisionLocked(
+          acme,
+          { connectionId: mine.id, email: `ada@${live}` },
+          async () => pause(200),
+        ),
+      ])
+      expect(Date.now() - t0).toBeLessThan(380)
+
+      // The same address through ANOTHER connection does wait: the lock is
+      // the address's, which is what Clerk makes unique.
+      const t1 = Date.now()
+      await Promise.all([
+        store().provisionLocked(acme, key, async () => pause(200)),
+        store().provisionLocked(
+          acme,
+          { connectionId: crypto.randomUUID(), email: key.email },
+          async () => pause(200),
+        ),
+      ])
+      expect(Date.now() - t1).toBeGreaterThanOrEqual(400)
+
+      // A failure inside the lock rolls the link back: nobody is half-linked.
+      await expect(
+        store().provisionLocked(acme, key, async (lock) => {
+          await lock.link({
+            subject: "okta|rolled",
+            clerkUserId: "user_x",
+            email: key.email,
+          })
+          throw new Error("clerk went away")
+        }),
+      ).rejects.toThrow("clerk went away")
+      expect(await store().identityBySubject(acme, mine.id, "okta|rolled")).toBeNull()
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
+
+  it("reads the workspace's name and the names an active connection covers (#341)", async () => {
+    expect(await store().workspaceName(acme)).toBe("Acme")
+    expect(await store().workspaceName(rival)).toBe("Rival")
+    expect(await store().workspaceName(crypto.randomUUID())).toBeNull()
+
+    // `connectionId` holds the live proof and is still a draft here.
+    expect(await store().coveredDomains(acme)).toEqual([])
+    try {
+      await store().updateConnection(acme, connectionId, { status: "testing" })
+      expect(await store().coveredDomains(acme)).toEqual([])
+      await store().updateConnection(acme, connectionId, { status: "active" })
+      expect(await store().coveredDomains(acme)).toEqual([live])
+      // Another workspace is covered by nothing of Acme's.
+      expect(await store().coveredDomains(rival)).toEqual([])
+      // A displaced proof no longer covers anyone.
+      await owner`update core.join_domains set displaced_at = now() where id = ${liveProof}`
+      expect(await store().coveredDomains(acme)).toEqual([])
+      await owner`update core.join_domains set displaced_at = null where id = ${liveProof}`
+      expect(await store().coveredDomains(acme)).toEqual([live])
+      await store().updateConnection(acme, connectionId, { status: "disabled" })
+      expect(await store().coveredDomains(acme)).toEqual([])
+    } finally {
+      await store().updateConnection(acme, connectionId, { status: "draft" })
+    }
+    expect(await store().coveredDomains(acme)).toEqual([])
+  })
+
+  it("records when a connection has ever delivered groups (groupsLastSeenAt, P0 #3)", async () => {
+    const mine = await store().createConnection(acme, {
+      name: "Groups Seen",
+      protocol: "oidc",
+      provider: "okta",
+      createdBy: "u",
+    })
+    try {
+      expect(mine.groupsLastSeenAt).toBeNull()
+      const at = new Date("2026-11-02T12:00:00.000Z")
+      // Another workspace cannot stamp this connection's groups_last_seen_at.
+      await store().noteGroupsSeen(rival, mine.id, at)
+      expect((await store().connection(acme, mine.id))?.groupsLastSeenAt).toBeNull()
+
+      await store().noteGroupsSeen(acme, mine.id, at)
+      const after = await store().connection(acme, mine.id)
+      expect(after?.groupsLastSeenAt?.toISOString()).toBe(at.toISOString())
+      expect(
+        (await store().connectionForStart(mine.id))?.groupsLastSeenAt?.toISOString(),
+      ).toBe(at.toISOString())
+    } finally {
+      await owner`delete from identity.connections where id = ${mine.id}`
+    }
+  })
+
+  it("defaults a connection to asking an owner, refuses a bad relink value, and keeps the UPN opt-in off (sso.md 2.22)", async () => {
+    const made = await store().createConnection(acme, {
+      name: "Relink Defaults",
+      protocol: "oidc",
+      provider: "entra",
+      createdBy: "u",
+    })
+    try {
+      expect(made.relink).toBe("ask")
+      expect(made.upnAsEmail).toBe(false)
+      const patched = await store().updateConnection(acme, made.id, {
+        relink: "auto",
+        upnAsEmail: true,
+      })
+      expect(patched).toMatchObject({ relink: "auto", upnAsEmail: true })
+      // ⚠ AWAITED INSIDE: a postgres.js query is lazy.
+      const refusal = async () => {
+        try {
+          await owner`update identity.connections set relink = 'whenever' where id = ${made.id}`
+          return "accepted"
+        } catch (error) {
+          return String(error)
+        }
+      }
+      expect(await refusal()).toMatch(/connections_relink_check/)
+    } finally {
+      await owner`delete from identity.connections where id = ${made.id}`
+    }
+  })
+
+  describe("changed IdP subjects (sso.md 2.22)", () => {
+    let conn = ""
+    let otherConn = ""
+    const ids: Record<string, string> = {}
+    const hour = 3_600_000
+    const at = new Date("2026-11-02T12:00:00.000Z")
+    const later = new Date(at.getTime() + 7 * 24 * hour)
+
+    beforeAll(async () => {
+      conn = (
+        await store().createConnection(acme, {
+          name: "Relinks",
+          protocol: "test",
+          provider: "generic",
+          createdBy: "u",
+        })
+      ).id
+      otherConn = (
+        await store().createConnection(acme, {
+          name: "Relinks other",
+          protocol: "test",
+          provider: "generic",
+          createdBy: "u",
+        })
+      ).id
+      for (const [name, subject, user, connection] of [
+        ["a", "okta|a", "user_a", conn],
+        ["b", "okta|b", "user_b", conn],
+        ["c", "okta|c", "user_c", otherConn],
+      ] as const)
+        ids[name] = (
+          await store().link(acme, {
+            connectionId: connection,
+            subject,
+            clerkUserId: `${user}_${suffix}`,
+            email: `${name}@${live}`,
+          })
+        ).id
+    })
+    afterAll(async () => {
+      await owner`delete from identity.connections where id in (${conn}, ${otherConn})`
+    })
+
+    const ask = (identityId: string, newSubject: string, over = {}) =>
+      store().requestRelink(acme, {
+        connectionId: conn,
+        identityId,
+        newSubject,
+        emailHash: hashSecret("a@x"),
+        now: at,
+        expiresAt: later,
+        ...over,
+      })
+
+    it("files one pending request per identity: the same subject changes nothing, another replaces it", async () => {
+      expect(await ask(ids.a!, "okta|a2")).toBe("created")
+      expect(await ask(ids.a!, "okta|a2")).toBe("exists")
+      expect(await ask(ids.a!, "okta|a3")).toBe("created")
+      const rows =
+        await owner`select new_subject, email_hash from identity.relink_requests where identity_id = ${ids.a!}`
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.new_subject).toBe("okta|a3")
+      // The address is only a hash at rest.
+      expect(rows[0]!.email_hash).toBe(hashSecret("a@x"))
+    })
+
+    it("files nothing for an identity of another connection or workspace", async () => {
+      expect(await ask(ids.c!, "okta|c2")).toBe("exists")
+      expect(
+        await store().requestRelink(rival, {
+          connectionId: conn,
+          identityId: ids.b!,
+          newSubject: "okta|b2",
+          emailHash: "h",
+          now: at,
+          expiresAt: later,
+        }),
+      ).toBe("exists")
+      const rows =
+        await owner`select 1 from identity.relink_requests where identity_id in (${ids.b!}, ${ids.c!})`
+      expect(rows).toHaveLength(0)
+    })
+
+    it("lists pending requests with the identity's address, for its own workspace only, never an expired one", async () => {
+      const [mine] = await store().relinkRequests(acme, conn, at)
+      expect(mine).toMatchObject({
+        identityId: ids.a!,
+        email: `a@${live}`,
+        connectionId: conn,
+      })
+      expect(await store().relinkRequests(rival, conn, at)).toEqual([])
+      expect(await store().relinkRequests(acme, otherConn, at)).toEqual([])
+      expect(await store().relinkRequests(acme, conn, later)).toEqual([])
+      // An expired request is no request: the same subject files a fresh one.
+      expect(
+        await ask(ids.a!, "okta|a3", {
+          now: later,
+          expiresAt: new Date(later.getTime() + 7 * 24 * hour),
+        }),
+      ).toBe("created")
+      expect(await store().relinkRequests(acme, conn, later)).toHaveLength(1)
+      await owner`delete from identity.relink_requests where identity_id = ${ids.a!}`
+      expect(await ask(ids.a!, "okta|a2")).toBe("created")
+    })
+
+    it("hides requests from another workspace's direct query", async () => {
+      const seen = await db.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${rival}, true)`
+        return tx`select id from identity.relink_requests`
+      })
+      expect(seen).toHaveLength(0)
+    })
+
+    it("moves a subject only while it is still the one read, and never onto one that is taken", async () => {
+      const move = (identityId: string, from: string, to: string, tenant = acme) =>
+        store().relinkIdentity(tenant, { connectionId: conn, identityId, from, to })
+      expect(await move(ids.a!, "okta|wrong", "okta|a9")).toEqual({ outcome: "gone" })
+      expect(await move(ids.a!, "okta|a", "okta|b")).toEqual({ outcome: "conflict" })
+      expect(await move(ids.a!, "okta|a", "okta|a9", rival)).toEqual({
+        outcome: "gone",
+      })
+      expect((await store().identityBySubject(acme, conn, "okta|a"))?.id).toBe(ids.a!)
+      const moved = await move(ids.a!, "okta|a", "okta|a9")
+      expect(moved).toMatchObject({
+        outcome: "moved",
+        identityId: ids.a!,
+        from: "okta|a",
+        to: "okta|a9",
+      })
+      expect(await store().identityBySubject(acme, conn, "okta|a")).toBeNull()
+      expect((await store().identityBySubject(acme, conn, "okta|a9"))?.id).toBe(ids.a!)
+      // Its pending request went with the move.
+      expect(await store().relinkRequests(acme, conn, at)).toEqual([])
+      await move(ids.a!, "okta|a9", "okta|a")
+    })
+
+    it("approves a request in one step, refuses a clash without losing it, and rejects by deleting", async () => {
+      await ask(ids.a!, "okta|a2")
+      const [request] = await store().relinkRequests(acme, conn, at)
+      const approve = (requestId: string, tenant = acme, now = at) =>
+        store().approveRelink(tenant, { connectionId: conn, requestId, now })
+      expect(await approve(request!.id, rival)).toEqual({ outcome: "not_found" })
+      expect(await approve(request!.id, acme, later)).toEqual({ outcome: "not_found" })
+      const done = await approve(request!.id)
+      expect(done).toMatchObject({ outcome: "moved", from: "okta|a", to: "okta|a2" })
+      expect(await approve(request!.id)).toEqual({ outcome: "not_found" })
+      expect((await store().identityBySubject(acme, conn, "okta|a2"))?.id).toBe(ids.a!)
+
+      // The new subject already belongs to B: nothing moves, the request stays.
+      await ask(ids.a!, "okta|b")
+      const [clash] = await store().relinkRequests(acme, conn, at)
+      expect(await approve(clash!.id)).toEqual({ outcome: "conflict" })
+      expect((await store().identityBySubject(acme, conn, "okta|a2"))?.id).toBe(ids.a!)
+      expect(await store().relinkRequests(acme, conn, at)).toHaveLength(1)
+
+      expect(await store().rejectRelink(rival, conn, clash!.id)).toBeNull()
+      expect(await store().rejectRelink(acme, otherConn, clash!.id)).toBeNull()
+      expect(await store().rejectRelink(acme, conn, clash!.id)).toEqual({
+        identityId: ids.a!,
+      })
+      expect(await store().relinkRequests(acme, conn, at)).toEqual([])
+    })
+
+    it("takes a request with its identity", async () => {
+      await ask(ids.b!, "okta|b2")
+      expect(await store().relinkRequests(acme, conn, at)).toHaveLength(1)
+      await owner`delete from identity.identities where id = ${ids.b!}`
+      expect(await store().relinkRequests(acme, conn, at)).toEqual([])
+    })
+  })
+})

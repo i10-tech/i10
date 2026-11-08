@@ -1,5 +1,6 @@
 import * as React from "react"
 import Link from "next/link"
+import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { cn } from "cn"
 import arc from "@repo/ui/components/sortable-data-table/sortable-data-table.module.css"
 
@@ -90,13 +91,23 @@ export function ListTile({
   )
 }
 
+/**
+ * A list swapping between its table, grid and empty state: the old one fades
+ * out before the new one fades in. With `AnimatePresence mode="wait"
+ * initial={false}`, so a page that loads already full or empty does not fade.
+ */
+export const SWAP = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: {
+    duration: motionTokens.duration.fast,
+    ease: [...motionTokens.ease.standard],
+  },
+} as const
+
 export function ListRow({ className, ...props }: React.ComponentProps<"tr">) {
-  return (
-    <tr
-      className={cn(rowClass, "animate-in fade-in-0 duration-300", className)}
-      {...props}
-    />
-  )
+  return <tr className={cn(rowClass, className)} {...props} />
 }
 
 export function ListCell({ className, ...props }: React.ComponentProps<"td">) {

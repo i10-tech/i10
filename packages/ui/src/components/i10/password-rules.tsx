@@ -1,7 +1,16 @@
 "use client"
 
-import { useState } from "react"
-import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react"
+import { useEffect, useState } from "react"
+import {
+  AnimatePresence,
+  animate,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+  type MotionValue,
+  type Variants,
+} from "motion/react"
 import { cn } from "cn"
 import { motionTokens } from "../lib/motion-tokens"
 import {
@@ -20,7 +29,7 @@ import styles from "../password-strength/password-strength.module.css"
  * it. Guidance only: Clerk enforces the actual policy on submit.
  *
  * ⚠ AND ARC'S STRENGTH METER ABOVE THE LIST (2026-10-12), lifted the same way:
- * four segments that fill in a wave and change tone, and the strength word
+ * four segments that fill one after another, like a progress bar, and change tone, and the strength word
  * that rises as it improves and drops as it falls. Our input stays ours.
  *
  * ⚠ THE METER SCORES AGAINST ARC'S FOUR RULES, NOT ONLY THE ONES THE POLICY
@@ -128,6 +137,32 @@ const fade: Variants = {
   exit: { opacity: 0, transition: { duration: motionTokens.duration.instant } },
 }
 
+/** Seconds per segment the bar travels, plus a little for the ease at the end. */
+const PER_SEGMENT = 0.13
+const SETTLE = 0.08
+
+/**
+ * One segment: its share of the bar's single progress value, so it cannot
+ * start filling until the one before it is full.
+ */
+function Segment({
+  progress,
+  index,
+}: {
+  progress: MotionValue<number>
+  index: number
+}) {
+  const x = useTransform(
+    progress,
+    (p) => `${(Math.min(1, Math.max(0, p - index)) - 1) * 101}%`,
+  )
+  return (
+    <span className={styles.segment}>
+      <motion.span className={styles.fill} style={{ x }} />
+    </span>
+  )
+}
+
 /** Arc's four-segment meter and strength word, for a password field we own. */
 function StrengthMeter({
   value,
@@ -141,21 +176,45 @@ function StrengthMeter({
   const strength = estimateStrength(value, createPasswordRules({ minLength }), {
     shortLength: minLength,
   })
-  // Which way the word moves, and where a pasted password's wave starts.
+  // Which way the word moves.
   const rank = strength.short ? 0.5 : strength.level
   const [track, setTrack] = useState({
     rank,
     level: strength.level,
-    previousLevel: strength.level,
     direction: 1,
   })
   if (track.rank !== rank)
     setTrack({
       rank,
       level: strength.level,
-      previousLevel: track.level,
       direction: rank > track.rank ? 1 : -1,
     })
+
+  /*
+   * ⚠ ONE PROGRESS VALUE, NOT FOUR SPRINGS (2026-11-04). Each segment had its
+   * own spring on a 50ms stagger, so a password typed or pasted fast filled two
+   * or three at once, side by side. Now the bar is one value from 0 to 4 and a
+   * segment shows its slice of it: the second starts exactly when the first is
+   * full, emptying runs right to left, and a change mid-fill carries on from
+   * where the bar is. The time grows with the distance, so a jump of three
+   * reads as three segments filling one after another rather than one leap.
+   */
+  const progress = useMotionValue<number>(strength.level)
+  useEffect(() => {
+    if (reduced) {
+      progress.jump(strength.level)
+      return
+    }
+    const distance = Math.abs(strength.level - progress.get())
+    if (distance < 0.001) return
+    const controls = animate(progress, strength.level, {
+      duration: SETTLE + PER_SEGMENT * distance,
+      // Soft at both ends, so each segment takes about as long as the next;
+      // an ease-out left the last one crawling (120, 85, 85, then 280ms).
+      ease: [0.37, 0, 0.63, 1],
+    })
+    return () => controls.stop()
+  }, [strength.level, reduced, progress])
 
   return (
     <div className={styles.field} data-level={strength.level}>
@@ -169,30 +228,9 @@ function StrengthMeter({
           aria-valuenow={strength.level}
           aria-valuetext={strength.level ? strength.label : "No password yet"}
         >
-          {[0, 1, 2, 3].map((index) => {
-            const on = index < strength.level
-            // A pasted password fills left to right; clearing empties right to left.
-            const wave = on
-              ? index - track.previousLevel
-              : track.previousLevel - 1 - index
-            return (
-              <span key={index} className={styles.segment}>
-                <motion.span
-                  className={styles.fill}
-                  initial={false}
-                  animate={{ x: on ? "0%" : "-101%" }}
-                  transition={
-                    reduced
-                      ? { duration: 0 }
-                      : {
-                          ...motionTokens.spring.smooth,
-                          delay: Math.max(0, wave) * (on ? 0.05 : 0.03),
-                        }
-                  }
-                />
-              </span>
-            )
-          })}
+          {[0, 1, 2, 3].map((index) => (
+            <Segment key={index} progress={progress} index={index} />
+          ))}
         </div>
         <span className={styles.word} aria-hidden="true">
           <AnimatePresence mode="popLayout" initial={false} custom={track.direction}>

@@ -1,7 +1,11 @@
 import type { MiddlewareHandler } from "hono"
 import { sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
-import type { ActiveOrgReader, SessionVerifier } from "./session.js"
+import {
+  ssoGateRefusal,
+  type ActiveOrgReader,
+  type SessionVerifier,
+} from "./session.js"
 
 /**
  * The console's credential: a signed-in person, resolved to the tenant whose
@@ -174,6 +178,15 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
   }
 
   /*
+   * ⚠ THE SSO GATE BEFORE ANYTHING IS RESOLVED (#337). A managed account on a
+   * session that skipped its IdP stops here with `403 sso_required`, whatever
+   * route and whatever workspace - including the routes that work without
+   * one. Its cost for everybody else is in identity/gate.ts.
+   */
+  const refused = await ssoGateRefusal(c, outcome.userId)
+  if (refused) return refused
+
+  /*
    * ⚠ A FAILED ORG LOOKUP IS A 503, NOT A FALLBACK TO THE PERSONAL TENANT.
    * `tenant_for_principal` reads a null org as "personal", so answering null
    * here would not degrade the request - it would silently perform it against a
@@ -245,6 +258,16 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
       409,
     )
   }
+
+  /*
+   * ⚠ AND THE WORKSPACE'S OWN ENFORCEMENT ONCE THE WORKSPACE IS KNOWN (#340).
+   * A workspace that requires SSO refuses its covered members on a session
+   * its IdP did not bind - here, for this workspace only: its setting never
+   * reaches the person's other workspaces, nor the routes that work without
+   * one.
+   */
+  const enforced = await ssoGateRefusal(c, outcome.userId, tenantId)
+  if (enforced) return enforced
 
   c.set("auth", {
     // ⚠ THE EMPTY STRING SAYS "NO KEY", AND IT IS NOT A PLACEHOLDER FOR ONE.

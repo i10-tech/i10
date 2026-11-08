@@ -142,6 +142,110 @@ export function messageIdFrom(envelopeSender: unknown): string | null {
 }
 
 /**
+ * The mailbox a Stalwart event is about.
+ *
+ * `accountName` is what Stalwart's own log lines carry on these events (for
+ * example `mohamed@i10.tech`); lowercased, because the projection stores
+ * addresses that way.
+ */
+export function accountFrom(data: Record<string, unknown> | undefined): string | null {
+  const name = data?.["accountName"]
+  return typeof name === "string" && name.trim() ? name.trim().toLowerCase() : null
+}
+
+/** The client's address, as Stalwart saw it on the connection. */
+export function clientIpFrom(data: Record<string, unknown> | undefined): string | null {
+  const ip = data?.["remoteIp"]
+  return typeof ip === "string" && ip.trim() ? ip.trim() : null
+}
+
+/**
+ * Events about a mailbox rather than a message: a failed sign-in, a full quota.
+ *
+ * ⚠ SEPARATE FROM `interpretStalwartEvent`, WHICH IS THE DELIVERY PATH. These
+ * have no VERP sender and no message, write nowhere near `message_events`, and
+ * must never reach a customer's webhook endpoint - folding them into
+ * `NormalisedEvent` would make every consumer of that type handle a shape it
+ * cannot use.
+ *
+ * ⚠ WHY THESE TWO AND NOT THEIR NEIGHBOURS. `security.authentication-ban`,
+ * `security.too-many-attempts` and `limit.blob-quota` would be redundant here:
+ * the first two fire off the same failures this already sees, one per ban
+ * rather than one per attempt, and the blob quota is a per-upload ceiling, not
+ * a mailbox being full.
+ */
+export type StalwartAccountEvent =
+  | {
+      type: "auth.failed"
+      account: string
+      ip: string | null
+      listener: string | null
+      occurredAt: Date
+      sourceEventId: string
+    }
+  | {
+      type: "limit.quota"
+      account: string
+      occurredAt: Date
+      sourceEventId: string
+    }
+
+export function interpretStalwartAccountEvent(
+  event: StalwartEvent,
+  fallbackAt: Date = new Date(),
+): StalwartAccountEvent | null {
+  if (event.type !== "auth.failed" && event.type !== "limit.quota") return null
+
+  const data = event.data ?? {}
+  const account = accountFrom(data)
+  if (!account) return null
+
+  const occurredAt = parseDate(event.createdAt) ?? fallbackAt
+  if (event.type === "limit.quota") {
+    return {
+      type: "limit.quota",
+      account,
+      occurredAt,
+      sourceEventId: quotaEventId(account, occurredAt),
+    }
+  }
+
+  const ip = clientIpFrom(data)
+  const listener = stringOf(data["listenerId"])
+  return {
+    type: "auth.failed",
+    account,
+    ip,
+    listener,
+    occurredAt,
+    // The same content-derived key as `sourceEventIdFor`, for the same reason:
+    // Stalwart's own id is different on every resend, and each node posts its
+    // own copy. Two failures from one address in one tick collapse into one,
+    // which undercounts a burst by a hair and is cheaper than trusting the id.
+    sourceEventId: prefixedHash(
+      ["auth.failed", event.createdAt ?? "", account, ip ?? "", listener ?? ""].join(
+        " ",
+      ),
+    ),
+  }
+}
+
+/**
+ * ⚠ ONE QUOTA NOTICE PER MAILBOX PER DAY, NOT ONE PER EVENT. Stalwart reports
+ * `limit.quota` for every message it refuses, so a full mailbox on a busy
+ * address fires it many times a minute; keyed on the event, each would be a
+ * fresh claim and a fresh notification to the workspace. The UTC day is the
+ * window, so a mailbox that stays full is mentioned again tomorrow.
+ */
+function quotaEventId(account: string, at: Date): string {
+  return prefixedHash(["limit.quota", at.toISOString().slice(0, 10), account].join(" "))
+}
+
+function prefixedHash(canonical: string): string {
+  return `stalwart_${createHash("sha256").update(canonical).digest("hex").slice(0, 32)}`
+}
+
+/**
  * A dedupe key that survives a redelivery.
  *
  * ⚠ STALWART'S OWN `id` DOES NOT, AND USING IT WOULD HAVE BEEN THE BUG. It is
@@ -171,7 +275,7 @@ export function sourceEventIdFor(event: StalwartEvent): string {
     String(data["queueId"] ?? ""),
     firstRecipient(data["to"]) ?? "",
   ].join(" ")
-  return `stalwart_${createHash("sha256").update(canonical).digest("hex").slice(0, 32)}`
+  return prefixedHash(canonical)
 }
 
 /**

@@ -37,6 +37,7 @@ COPY packages/next/package.json packages/next/
 COPY packages/node/package.json packages/node/
 COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
+COPY services/clerk-gateway/package.json services/clerk-gateway/
 COPY services/template-renderer/package.json services/template-renderer/
 # BUN_INSTALL_CACHE_DIR is set explicitly rather than left to default under
 # $HOME, so the cache mount below targets a path that does not move when the
@@ -76,7 +77,7 @@ RUN bunx turbo run build --filter=@i10/api
 RUN set -eu; \
     for entry in index worker migrate sweep reconcile recheck \
                  domain-catchup domain-prove domain-orphans risk-score risk-admin \
-                 content-store retention; do \
+                 content-store retention team-sent; do \
       if [ ! -f "apps/api/dist/${entry}.js" ]; then \
         echo "dist/${entry}.js is missing - bun build moved the output layout."; \
         echo "Found instead:"; ls apps/api/dist; \

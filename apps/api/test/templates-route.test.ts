@@ -179,7 +179,9 @@ describe("uploading a template image (#244)", () => {
       app.request("/templates/assets", {
         method: "POST",
         headers: { "Content-Type": "image/png" },
-        body: bytes,
+        // A Blob: the XML typings (#339) bring in the DOM lib, whose BodyInit
+        // takes no bare Uint8Array.
+        body: new Blob([bytes as Uint8Array<ArrayBuffer>]),
       })
   }
 

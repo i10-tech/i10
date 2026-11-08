@@ -4,14 +4,8 @@ import type { WebhookHealthEvent } from "@repo/contracts"
 import type { Queue } from "groupmq"
 import { withTenant, type Database } from "../db/client.js"
 import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
-import {
-  planAssignments,
-  webhookDeliveries,
-  webhookEndpoints,
-  webhookHealthEvents,
-} from "../db/core.js"
-import { pollingRow } from "./kinds.js"
-import { policyForPlan } from "./schedule.js"
+import { webhookEndpoints, webhookHealthEvents } from "../db/core.js"
+import { fanOutToSubscribers, type FannedOut } from "./fanout.js"
 
 /**
  * Telling a workspace about its own endpoints (#284): one starts failing, is
@@ -179,13 +173,6 @@ export const onDisabled = (
 // Operational webhooks
 // ---------------------------------------------------------------------------
 
-export interface FannedOut {
-  id: string
-  endpointId: string
-  tenantId: string
-  occurredAt: Date
-}
-
 /**
  * Records a `webhook_endpoint.*` delivery to every other endpoint subscribed
  * to it, and marks the event fanned out. Idempotent: an event already fanned
@@ -218,65 +205,24 @@ export async function fanOutHealthEvent(
       .limit(1)
     if (!event) return []
 
-    const type = `webhook_endpoint.${event.kind}` as const
-    const endpoints = await tx
-      .update(webhookEndpoints)
-      .set({ nextSequence: sql`${webhookEndpoints.nextSequence} + 1` })
-      .where(
-        and(
-          eq(webhookEndpoints.enabled, true),
-          sql`${webhookEndpoints.id} <> ${event.endpointId}`,
-          sql`${webhookEndpoints.events} @> ARRAY[${type}]::core.webhook_event_type[]`,
-        ),
-      )
-      .returning({
-        id: webhookEndpoints.id,
-        sequence: webhookEndpoints.nextSequence,
-        kind: webhookEndpoints.kind,
-      })
-
     await tx
       .update(webhookHealthEvents)
       .set({ fannedOutAt: new Date() })
       .where(eq(webhookHealthEvents.id, event.id))
-    if (endpoints.length === 0) return []
-
-    const [assignment] = await tx
-      .select({ planId: planAssignments.planId })
-      .from(planAssignments)
-      .where(eq(planAssignments.tenantId, tenantId))
-      .limit(1)
-    const data = {
-      endpoint_id: event.endpointId,
-      url: event.url,
-      reason: event.reason,
-      failing_since: iso(event.failingSince),
-      created_at: event.occurredAt.toISOString(),
-    }
-    const rows = await tx
-      .insert(webhookDeliveries)
-      .values(
-        endpoints.map((endpoint) => ({
-          tenantId,
-          endpointId: endpoint.id,
-          retryPolicy: policyForPlan(assignment?.planId),
-          sequence: endpoint.sequence,
-          eventType: type,
-          occurredAt: event.occurredAt,
-          payload: data as never,
-          ...pollingRow(endpoint.kind),
-        })),
-      )
-      .returning({ id: webhookDeliveries.id, endpointId: webhookDeliveries.endpointId })
-    const sent = new Set(endpoints.filter((e) => e.kind !== "polling").map((e) => e.id))
-    return rows
-      .filter((r) => sent.has(r.endpointId))
-      .map((r) => ({
-        id: r.id,
-        endpointId: r.endpointId,
-        tenantId,
-        occurredAt: event.occurredAt,
-      }))
+    return fanOutToSubscribers(tx, {
+      tenantId,
+      type: `webhook_endpoint.${event.kind}`,
+      occurredAt: event.occurredAt,
+      // ⚠ NEVER TO THE ENDPOINT IT IS ABOUT (see above).
+      exceptEndpointId: event.endpointId,
+      data: {
+        endpoint_id: event.endpointId,
+        url: event.url,
+        reason: event.reason,
+        failing_since: iso(event.failingSince),
+        created_at: event.occurredAt.toISOString(),
+      },
+    })
   })
 }
 

@@ -5,6 +5,7 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/i10/page"
+import { SectionContent } from "@/components/page-frame"
 
 /**
  * The frame for the unlisted Clerk reference pages (2026-10-12).
@@ -24,7 +25,9 @@ export default function ReferenceLayout({
         </PageHeaderRow>
       </PageHeader>
       <PageBody>
-        <div className="min-w-0 max-w-3xl">{children}</div>
+        <div className="min-w-0 max-w-3xl">
+          <SectionContent>{children}</SectionContent>
+        </div>
       </PageBody>
     </Page>
   )
