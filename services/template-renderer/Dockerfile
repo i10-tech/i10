@@ -10,7 +10,7 @@
 
 # ⚠ THE BUN TAG MOVES WITH THE OTHER FOUR PLACES THAT HOLD IT - see
 # apps/api/Dockerfile.
-FROM oven/bun:1.4.2-alpine AS build
+FROM oven/bun:1.4.3-alpine AS build
 WORKDIR /repo
 COPY bun.lock bunfig.toml package.json ./
 # Only the workspaces this build needs, and every workspace they depend on;
