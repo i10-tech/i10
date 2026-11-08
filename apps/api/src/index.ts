@@ -2333,6 +2333,9 @@ const app = createApp({
     raiseEpoch: async (clerkUserId: string) => {
       await raiseCredentialEpoch(db, clerkUserId)
     },
+    raiseConnection: async (connectionId: string) => {
+      await raiseConnectionCredentialEpochs(db, connectionId)
+    },
     take: fixedWindow(cache),
     contextSecret: env.CLIENT_CONTEXT_SECRET,
     edgeSecret: env.EDGE_SECRET,
