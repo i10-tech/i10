@@ -20,10 +20,11 @@ import type { Database } from "../db/client.js"
  * these writes `authd.accounts` and not only the thing it is named for.
  *
  * ⚠ NOTHING HERE RESUMES. Re-adding a removed member does not lift the
- * suspension: an owner decides about the mailbox (the existing resume,
- * identity/directory-mail.ts `store.resume`, which a directory's reactivation
- * also calls). A login that came back on its own is the failure this exists to
- * close.
+ * suspension: an owner or admin decides about the mailbox (`resumeMailbox` in
+ * identity/directory-mail.ts, behind `POST /identity/mailboxes/:userId/resume`,
+ * which refuses somebody who is not a member and clears `suspended_at` only), or
+ * a directory's reactivation does (`store.resume`). A login that came back on its
+ * own is the failure this exists to close.
  */
 
 export interface MailRevocationDeps {

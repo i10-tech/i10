@@ -10,6 +10,7 @@ import type {
   Mailboxes,
   DeprovisionedPerson,
   NextChoice,
+  ResumedMailbox,
   RotatedDeprovisionedKey,
   SavedIpAllowlist,
   SessionPolicy,
@@ -68,6 +69,14 @@ export async function chooseMailboxNext(userId: string, choice: NextChoice) {
     api<{ ok: true; next: string }>(`/console/identity/mailboxes/${enc(userId)}/next`, {
       method: "PUT",
       body: choice,
+    }),
+  )
+}
+
+export async function resumeMailbox(userId: string) {
+  return run(() =>
+    api<ResumedMailbox>(`/console/identity/mailboxes/${enc(userId)}/resume`, {
+      method: "POST",
     }),
   )
 }

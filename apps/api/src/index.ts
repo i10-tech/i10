@@ -1619,6 +1619,8 @@ const mailDeps: DirectoryMailDeps = {
     (await roles.store.roleOf(tenantId, userId)) !== null,
   directoryActive: async (tenantId, userId) =>
     (await directories.personStatus(tenantId, userId)) === "active",
+  directoryDeactivated: async (tenantId, userId) =>
+    (await directories.personStatus(tenantId, userId)) === "inactive",
   scheduleDeletion: mailboxDeletionScheduler(mailboxDeletionQueue),
   record: (tenantId, event) => identity.record(tenantId, event),
   log,

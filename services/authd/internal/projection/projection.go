@@ -60,6 +60,19 @@ type Account struct {
 	// rather than asking Clerk.
 	SSORequired bool
 
+	// SSOExempt is true when that requirement does not apply to this person: an
+	// owner or admin while the workspace's owner exemption is on, or somebody on
+	// the bypass list of the connection that requires SSO for their domain
+	// (`authd.required_exempt`). The owner's decision is that they keep their Clerk
+	// password for mail as they keep their way into the console.
+	//
+	// ⚠ ONLY MEANINGFUL WITH SSORequired, AND ONLY EVER READ FROM THE SAME QUERY AS
+	// IT. It is true only while the account's domain is required, for the
+	// connection that requires it, so removing a person from the exemption makes the
+	// very next bind read false and the resolver refuse them again, ahead of the
+	// credential cache.
+	SSOExempt bool
+
 	Aliases  []string
 	MemberOf []string // group names, not DNs; the caller renders DNs
 }

@@ -302,6 +302,11 @@ export const directoryMail = {
         email: accounts.email,
         active: accounts.active,
         suspendedAt: accounts.suspendedAt,
+        // What else refuses the login, so a resume can say what it did not lift.
+        paymentHoldAt: accounts.paymentHoldAt,
+        banned: accounts.banned,
+        // ⚠ LOCKED ONLY WHILE THE LOCKOUT HAS NOT RUN OUT, as authd reads it.
+        locked: sql<boolean>`(${accounts.locked} and (${accounts.lockedUntil} is null or ${accounts.lockedUntil} > now()))`,
       })
       .from(accounts)
       .where(and(eq(accounts.clerkUserId, userId), inWorkspace(tenantId)))

@@ -8,6 +8,7 @@ import {
   LEAVER_MAX_DAYS,
   LEAVER_MIN_DAYS,
   chooseNext,
+  resumeMailbox,
   runDue,
   setGroupMail,
   type DirectoryMailDeps,
@@ -23,6 +24,7 @@ import type { GroupMailStore } from "../../identity/mail-store.js"
  *   DELETE /identity/directories/:id/groups/:groupId/mail   opts it out
  *   GET    /identity/mailboxes                              suspended and directory-given mailboxes
  *   PUT    /identity/mailboxes/:userId/next                 { next, delegateUserId?, days? } what a suspended mailbox does next
+ *   POST   /identity/mailboxes/:userId/resume               an admin gives a suspended mailbox its login back
  *   PUT    /identity/mail/leavers                           { action, days? } the workspace's default
  *
  * "Create mailboxes" itself is a setting of the directory
@@ -102,6 +104,18 @@ const REFUSALS: Record<string, string> = {
     "This group's name is an address on a domain this workspace does not host mail for.",
   invalid_address: "Enter a valid list address.",
   taken: "That address is already a mailbox, an alias or another list.",
+}
+
+const RESUME_REFUSALS: Record<
+  "not_member" | "directory_deactivated" | "domain_not_hosted",
+  string
+> = {
+  not_member:
+    "That person is not a member of this workspace. Add them back first, then resume the mailbox.",
+  directory_deactivated:
+    "A directory still says this person is deactivated. Reactivate them there and the mailbox comes back on its own.",
+  domain_not_hosted:
+    "This mailbox is on a domain the workspace no longer hosts mail for. Add the domain back first.",
 }
 
 export function mountIdentityMail(app: Hono, d: ConsoleDeps): void {
@@ -248,6 +262,30 @@ export function mountIdentityMail(app: Hono, d: ConsoleDeps): void {
           422,
         )
     }
+  })
+
+  app.post("/identity/mailboxes/:userId/resume", requireFreshAuth, async (c) => {
+    const mail = wired()
+    if (!mail) return c.json(notWired("Directory mail"), 501)
+    // ⚠ OWNERS AND ADMINS ONLY, FOR EVERY MAILBOX INCLUDING THEIR OWN. A member
+    // holds no permission here, so a person suspended for leaving cannot lift it
+    // themselves, and neither can anybody else without one.
+    if (!(await allowed(c, "sso:manage")))
+      return c.json(forbidden("Only an admin can resume a mailbox."), 403)
+    const target = c.req.param("userId") ?? ""
+    if (!CLERK_ID.test(target)) return c.json(notFound(), 404)
+    const { tenantId } = c.get("auth")
+    const { userId } = c.get("user")
+    const done = await resumeMailbox(mail.deps, {
+      tenantId,
+      clerkUserId: target,
+      actorUserId: userId,
+    })
+    if (done.outcome === "resumed")
+      return c.json({ ok: true, stillBlocked: done.stillBlocked })
+    if (done.outcome === "not_suspended")
+      return c.json(notFound("That mailbox is not suspended."), 404)
+    return c.json(validation(RESUME_REFUSALS[done.outcome]), 422)
   })
 
   app.put("/identity/mail/leavers", requireFreshAuth, async (c) => {

@@ -15,8 +15,9 @@ import {
   daysInRange,
   deletionDate,
   nextSummary,
+  resumeNote,
 } from "@/lib/mailbox"
-import { mailboxes, saveLeaverDefault } from "@/lib/sso-policy-actions"
+import { mailboxes, resumeMailbox, saveLeaverDefault } from "@/lib/sso-policy-actions"
 import { toastDone } from "@/lib/toast"
 import type { LeaverAction, MailboxRow, Mailboxes, SsoAbilities } from "@/lib/sso-types"
 import { NextDialog } from "./mailbox-dialog"
@@ -31,8 +32,10 @@ export function MailboxesPanel({
   clerkEnabled: boolean
 }) {
   const { data, setData, failed } = useRemote(mailboxes)
+  const call = useSsoCall()
   const [members, setMembers] = React.useState<Member[] | null>(null)
   const [deciding, setDeciding] = React.useState<MailboxRow | null>(null)
+  const [resuming, setResuming] = React.useState<MailboxRow | null>(null)
 
   if (!data)
     return (
@@ -56,7 +59,7 @@ export function MailboxesPanel({
       />
       <Block
         title="Suspended mailboxes"
-        description="People a directory switched off. Pick what happens to each mailbox."
+        description="People a directory switched off and members who were removed. Resume a mailbox to give back its sign-in, or pick what happens to it."
       >
         {suspended.length === 0 ? (
           <p className="text-sm text-muted-foreground">No suspended mailboxes.</p>
@@ -88,6 +91,9 @@ export function MailboxesPanel({
                 <Badge tone="warning" size="sm">
                   Suspended
                 </Badge>
+                <Button variant="secondary" size="sm" onClick={() => setResuming(row)}>
+                  Resume
+                </Button>
                 <Button variant="secondary" size="sm" onClick={() => setDeciding(row)}>
                   Decide
                 </Button>
@@ -118,6 +124,32 @@ export function MailboxesPanel({
           </ul>
         )}
       </Block>
+      <ConfirmDialog
+        open={resuming !== null}
+        onOpenChange={(o) => {
+          if (!o) setResuming(null)
+        }}
+        title="Resume this mailbox?"
+        description={
+          resuming
+            ? `${resuming.address} will be able to sign in again. Forwarding, shared access or a scheduled deletion you set for it is cancelled. A payment hold or a ban is not lifted.`
+            : ""
+        }
+        confirmLabel="Resume mailbox"
+        doneLabel="Resumed"
+        destructive={false}
+        onConfirm={async () => {
+          if (!resuming) return false
+          const done = await call(() => resumeMailbox(resuming.userId), {
+            title: "Could not resume the mailbox",
+          })
+          if (!done) return false
+          toastDone("Mailbox resumed", resumeNote(resuming.address, done.stillBlocked))
+          const fresh = await mailboxes()
+          if (fresh.ok) setData(fresh.data)
+          return true
+        }}
+      />
       <NextDialog
         row={deciding}
         data={data}

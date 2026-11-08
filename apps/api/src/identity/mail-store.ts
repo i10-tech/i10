@@ -20,11 +20,13 @@ import {
   events,
   workspaceSettings,
 } from "../db/identity.js"
+import { workspaceRoles } from "../db/core.js"
 import { aliases, groupMembers, groups } from "../db/schema.js"
 import { directoryMail } from "../mailboxes/store.js"
 import type {
   DirectoryMailStore,
   LeaverAction,
+  LoginBlock,
   MailboxNext,
   MailboxNote,
   MailboxRow,
@@ -213,9 +215,12 @@ export function directoryMailStore(db: Database): DirectoryMailStore & GroupMail
       const row = await withTenant(db, tenantId, (tx) =>
         directoryMail.account(tx, tenantId, clerkUserId),
       )
-      return row?.active
-        ? { address: row.email, suspended: row.suspendedAt !== null }
-        : null
+      if (!row?.active) return null
+      const blocks: LoginBlock[] = []
+      if (row.paymentHoldAt !== null) blocks.push("payment_hold")
+      if (row.banned) blocks.push("banned")
+      if (row.locked) blocks.push("locked")
+      return { address: row.email, suspended: row.suspendedAt !== null, blocks }
     },
 
     async recordActive(tenantId, clerkUserId, address) {
@@ -273,7 +278,7 @@ export function directoryMailStore(db: Database): DirectoryMailStore & GroupMail
       })
     },
 
-    async resume(tenantId, clerkUserId, audit) {
+    async resume(tenantId, clerkUserId, audit, options) {
       return withTenant(db, tenantId, async (tx) => {
         const [row] = await tx
           .select({ state: directoryMailboxes.state })
@@ -285,6 +290,26 @@ export function directoryMailStore(db: Database): DirectoryMailStore & GroupMail
             ),
           )
           .for("update")
+        if (options?.memberOnly) {
+          /*
+           * ⚠ SHARE-LOCKED UNTIL THIS COMMITS. A removal deletes this row, so it
+           * waits for the resume and its suspension (the membership webhook's
+           * `memberLeft`) then lands after it; one that committed first leaves no
+           * row here and the resume is refused. Either way a removed person is not
+           * left with a login this transaction opened.
+           */
+          const [member] = await tx
+            .select({ role: workspaceRoles.role })
+            .from(workspaceRoles)
+            .where(
+              and(
+                eq(workspaceRoles.tenantId, tenantId),
+                eq(workspaceRoles.clerkUserId, clerkUserId),
+              ),
+            )
+            .for("share")
+          if (!member) return "not_member" as const
+        }
         const account = await directoryMail.account(tx, tenantId, clerkUserId)
         if (!account) return "none" as const
         if (row?.state !== "suspended" && account.suspendedAt === null)
