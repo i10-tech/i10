@@ -198,11 +198,19 @@ spec:
             # systemd-resolved's stub - so the node's own lookups landed here and
             # got REFUSED, and while this pod was down the node had no DNS and
             # could not pull images. Pinned, the stub is resolved's again (see
-            # "The node's own DNS" in README.md). The four addresses are the ones
-            # anything should ask: ns1/ns2 on both families (README section 2)
-            # and the tailnet address on both families, for the argo.i10.tech
-            # view (infra/k8s/argo-ui.md). A NEW NODE ADDRESS IS A NEW PAIR HERE;
-            # until it is added, port 53 on that address is not answered.
+            # "The node's own DNS" in README.md). Four addresses answer: ns1/ns2
+            # on both families (README section 2) and the tailnet address on
+            # both families, for the argo.i10.tech view (infra/k8s/argo-ui.md).
+            #
+            # ⚠ ONE ADDRESS PER CONTAINER, AND ONLY THIS ONE IS HERE. The other
+            # three are declared by the `ports-*` containers below. Server-side
+            # apply keys a container's ports by containerPort + protocol, so two
+            # `53/UDP` entries in one list are rejected ("duplicate entries for
+            # key"), and Argo's diff silently merges them and reports Synced
+            # while applying nothing. That is exactly what #417 did. The key is
+            # per container, the pod has one network namespace, and portmap
+            # sends every pinned address to the pod IP's :53, which is this
+            # process. A NEW NODE ADDRESS IS A NEW `ports-*` CONTAINER.
             - name: dns-udp-pub4
               containerPort: 53
               hostPort: 53
@@ -212,36 +220,6 @@ spec:
               containerPort: 53
               hostPort: 53
               hostIP: "178.105.164.132"
-              protocol: TCP
-            - name: dns-udp-pub6
-              containerPort: 53
-              hostPort: 53
-              hostIP: "2a01:4f8:1c18:45fb::1"
-              protocol: UDP
-            - name: dns-tcp-pub6
-              containerPort: 53
-              hostPort: 53
-              hostIP: "2a01:4f8:1c18:45fb::1"
-              protocol: TCP
-            - name: dns-udp-ts4
-              containerPort: 53
-              hostPort: 53
-              hostIP: "100.127.102.63"
-              protocol: UDP
-            - name: dns-tcp-ts4
-              containerPort: 53
-              hostPort: 53
-              hostIP: "100.127.102.63"
-              protocol: TCP
-            - name: dns-udp-ts6
-              containerPort: 53
-              hostPort: 53
-              hostIP: "fd7a:115c:a1e0::9932:663f"
-              protocol: UDP
-            - name: dns-tcp-ts6
-              containerPort: 53
-              hostPort: 53
-              hostIP: "fd7a:115c:a1e0::9932:663f"
               protocol: TCP
             - { name: http, containerPort: 8081, protocol: TCP }
           readinessProbe:
@@ -280,6 +258,82 @@ spec:
             # survive a restart.
             - { name: run, mountPath: /var/run/pdns }
             - { name: views, mountPath: /var/lib/powerdns/views }
+        # ⚠ THESE CONTAINERS DO NOTHING BUT HOLD A PORT DECLARATION. Each one
+        # pins :53 on one more node address (see the note on `pdns` ports for
+        # why they cannot all live in one list). They run the pdns image, which
+        # is already on the node, so they add no image to pull. The shell traps
+        # TERM because a bare `sleep` as PID 1 ignores it, and with `Recreate`
+        # every second spent waiting out the grace period is a second with no
+        # nameserver.
+        - name: ports-pub6
+          image: powerdns/pdns-auth-51:5.1.5@sha256:77ff4efdbb9ec30e9309c8a1cbed6121a67fa3be25c848bbbfa756fc75bf9a27
+          imagePullPolicy: IfNotPresent
+          command:
+            ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 3600 & wait $!; done"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: dns-udp-pub6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "2a01:4f8:1c18:45fb::1"
+              protocol: UDP
+            - name: dns-tcp-pub6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "2a01:4f8:1c18:45fb::1"
+              protocol: TCP
+          resources:
+            requests: { cpu: 1m, memory: 4Mi }
+            limits: { memory: 16Mi }
+        - name: ports-ts4
+          image: powerdns/pdns-auth-51:5.1.5@sha256:77ff4efdbb9ec30e9309c8a1cbed6121a67fa3be25c848bbbfa756fc75bf9a27
+          imagePullPolicy: IfNotPresent
+          command:
+            ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 3600 & wait $!; done"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: dns-udp-ts4
+              containerPort: 53
+              hostPort: 53
+              hostIP: "100.127.102.63"
+              protocol: UDP
+            - name: dns-tcp-ts4
+              containerPort: 53
+              hostPort: 53
+              hostIP: "100.127.102.63"
+              protocol: TCP
+          resources:
+            requests: { cpu: 1m, memory: 4Mi }
+            limits: { memory: 16Mi }
+        - name: ports-ts6
+          image: powerdns/pdns-auth-51:5.1.5@sha256:77ff4efdbb9ec30e9309c8a1cbed6121a67fa3be25c848bbbfa756fc75bf9a27
+          imagePullPolicy: IfNotPresent
+          command:
+            ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 3600 & wait $!; done"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: dns-udp-ts6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "fd7a:115c:a1e0::9932:663f"
+              protocol: UDP
+            - name: dns-tcp-ts6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "fd7a:115c:a1e0::9932:663f"
+              protocol: TCP
+          resources:
+            requests: { cpu: 1m, memory: 4Mi }
+            limits: { memory: 16Mi }
       volumes:
         - name: config
           configMap:

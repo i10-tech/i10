@@ -144,6 +144,18 @@ With the `hostIP`s set, the rules match only the addresses listed in
 proved it: a probe pinned the same way answered on its pinned addresses and not
 on `127.0.0.1` or `::1`.
 
+> ⚠ ONE ADDRESS PER CONTAINER. The `pdns` container declares only the public
+> IPv4 address. The other three are declared by the `ports-*` containers, which
+> only sleep. Server-side apply (Argo's `ServerSideApply=true`) keys a
+> container's ports by `containerPort` and `protocol`, so two `53/UDP` entries in
+> one list are rejected with "duplicate entries for key". Argo's diff merges
+> them instead and reports Synced while applying nothing. #417 put all four in
+> one list and never reached the cluster; the fix after it split them. The key is per
+> container and the pod shares one network namespace, so every pinned address
+> still reaches PowerDNS on `:53`. Check a change here with
+> `kubectl apply --server-side --dry-run=server`, not a plain `--dry-run=server`,
+> which uses client-side apply and accepts the duplicates.
+
 ### How the node resolves
 
 Three settings, all on the host, none in a manifest. **Anything that provisions
