@@ -192,8 +192,57 @@ spec:
             # or a longer DKIM answer is involved. A UDP-only nameserver fails
             # intermittently and only for the larger answers, which is the
             # hardest shape of DNS bug to see.
-            - { name: dns-udp, containerPort: 53, hostPort: 53, protocol: UDP }
-            - { name: dns-tcp, containerPort: 53, hostPort: 53, protocol: TCP }
+            #
+            # ⚠ EVERY hostPort NAMES ITS hostIP. Without one, the CNI portmap
+            # plugin DNATs :53 on EVERY local address - including 127.0.0.53,
+            # systemd-resolved's stub - so the node's own lookups landed here and
+            # got REFUSED, and while this pod was down the node had no DNS and
+            # could not pull images. Pinned, the stub is resolved's again (see
+            # "The node's own DNS" in README.md). The four addresses are the ones
+            # anything should ask: ns1/ns2 on both families (README section 2)
+            # and the tailnet address on both families, for the argo.i10.tech
+            # view (infra/k8s/argo-ui.md). A NEW NODE ADDRESS IS A NEW PAIR HERE;
+            # until it is added, port 53 on that address is not answered.
+            - name: dns-udp-pub4
+              containerPort: 53
+              hostPort: 53
+              hostIP: "178.105.164.132"
+              protocol: UDP
+            - name: dns-tcp-pub4
+              containerPort: 53
+              hostPort: 53
+              hostIP: "178.105.164.132"
+              protocol: TCP
+            - name: dns-udp-pub6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "2a01:4f8:1c18:45fb::1"
+              protocol: UDP
+            - name: dns-tcp-pub6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "2a01:4f8:1c18:45fb::1"
+              protocol: TCP
+            - name: dns-udp-ts4
+              containerPort: 53
+              hostPort: 53
+              hostIP: "100.127.102.63"
+              protocol: UDP
+            - name: dns-tcp-ts4
+              containerPort: 53
+              hostPort: 53
+              hostIP: "100.127.102.63"
+              protocol: TCP
+            - name: dns-udp-ts6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "fd7a:115c:a1e0::9932:663f"
+              protocol: UDP
+            - name: dns-tcp-ts6
+              containerPort: 53
+              hostPort: 53
+              hostIP: "fd7a:115c:a1e0::9932:663f"
+              protocol: TCP
             - { name: http, containerPort: 8081, protocol: TCP }
           readinessProbe:
             httpGet: { path: /, port: http }

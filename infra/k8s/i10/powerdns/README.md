@@ -76,8 +76,10 @@ truncated bit and the resolver retries over TCP. A UDP-only rule produces a
 nameserver that works until an answer gets slightly larger, which is the hardest
 shape of DNS fault to see.
 
-`systemd-resolved` on this host binds only `127.0.0.53` and `127.0.0.54`, so it
-does not conflict with a bind on the public interface. Confirmed 2026-09-18.
+Each `hostPort` names its `hostIP`: the public address and the tailnet address,
+each on both families. Port 53 on any other address, loopback included, is not
+this pod's. `systemd-resolved` keeps `127.0.0.53` and `127.0.0.54` to itself,
+which is what lets the node use its stub (see "The node's own DNS" below).
 
 ## Checking it
 
@@ -107,45 +109,71 @@ now shows a diagnosis from `/console/domains/:id/delegation`, and
   a second write path through PowerDNS's REST API would be a second source of
   truth for the same zone.
 
-## The node must not resolve through `127.0.0.53`
+## The node's own DNS
 
-`hostPort: 53` is not just a port reservation. The CNI portmap plugin installs
+### Why every hostPort names a hostIP
+
+A `hostPort` without a `hostIP` is not just a port reservation. The CNI portmap
+plugin installs
 
 ```
 -A OUTPUT -m addrtype --dst-type LOCAL -j CNI-HOSTPORT-DNAT
 -A CNI-DN-… -p udp -m udp --dport 53 -j DNAT --to-destination <pod-ip>:53
 ```
 
-and that last rule carries **no source restriction**. `127.0.0.53` is a LOCAL
-address, so every DNS query the NODE makes through systemd-resolved's stub is
-redirected into this pod.
+and with no `hostIP` that last rule matches **every** local address.
+`127.0.0.53` is local, so every query the NODE sent to systemd-resolved's stub
+went to this pod instead. That broke the node in both states:
 
-That is fatal twice over:
+1. **Pod down: the node had no DNS at all.** `127.0.0.53:53` answered
+   `connection refused`, so containerd could not pull the PowerDNS image. No
+   DNS, so no image, so no pod, so no DNS. Seen on 2026-09-18, one minute after
+   this deployment first rolled out.
+2. **Pod up: lookups failed instead of resolving.** PowerDNS is authoritative
+   and does not recurse, so the node's query for `ghcr.io` got `REFUSED`.
 
-1. **While the pod is down, the node has no DNS at all.** The DNAT target is
-   dead, so `127.0.0.53:53` answers `connection refused`. Everything using
-   `/etc/resolv.conf` breaks - including containerd, which then cannot pull the
-   PowerDNS image. It is a deadlock: no DNS → no image → no pod → no DNS.
-   Observed on 2026-09-18, one minute after this deployment first rolled out.
-2. **While the pod is UP it is worse in a quieter way.** PowerDNS is
-   authoritative, not recursive. The node's queries for `ghcr.io` would reach a
-   server that has no answer and no upstream, so they fail rather than resolve.
+The workaround was to keep the node off the stub, which handed `/etc/resolv.conf`
+to Tailscale. On 2026-11-08 Tailscale 1.104.5 failed to detect the DNS setup
+correctly: it took `/usr/sbin/resolvconf` (systemd's shim) for openresolv, ran
+`resolvconf -i`, got exit 1, and was left with no upstreams. It answered
+`SERVFAIL` for every public name. A reboot then made every pod pull its image
+again, and every pull failed until DNS was moved off Tailscale.
 
-So the node must resolve through the real upstreams, not the stub:
+With the `hostIP`s set, the rules match only the addresses listed in
+`deployment.yaml`. The stub belongs to resolved again, and the 2026-11-08 test
+proved it: a probe pinned the same way answered on its pinned addresses and not
+on `127.0.0.1` or `::1`.
+
+### How the node resolves
+
+Three settings, all on the host, none in a manifest. **Anything that provisions
+this host has to set them.**
+
+| What       | Setting                                                                                                                               | Why                                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| The node   | `/etc/resolv.conf` → `/run/systemd/resolve/stub-resolv.conf` (Ubuntu's default)                                                       | resolved asks Tailscale and Hetzner and uses whichever answers, so one failing does not stop lookups                    |
+| Tailscale  | `accept-dns=true`, which on a stub node puts it in `systemd-resolved` mode                                                            | it registers its servers with resolved over D-Bus and never touches `/etc/resolv.conf` or runs `resolvconf`             |
+| Pods (k3s) | `resolv-conf: /etc/rancher/k3s/resolv.conf` in `/etc/rancher/k3s/config.yaml`, that file listing only `185.12.64.1` and `185.12.64.2` | CoreDNS forwards to Hetzner directly, so neither Tailscale nor the node's resolver can take pod DNS or image pulls down |
+
+> ⚠ RESTART CoreDNS AFTER CHANGING WHAT THE KUBELET HANDS IT. The kubelet copies
+> the resolver file into a pod when it starts, so a running CoreDNS keeps the old
+> upstreams until `kubectl -n kube-system rollout restart deploy/coredns`. k3s
+> reads `resolv-conf` only when k3s starts.
+
+### Checking it
 
 ```bash
-sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+getent hosts ghcr.io              # public names, through resolved
+getent hosts argo.i10.tech        # the tailnet answer, through Tailscale's route
+resolvectl status | grep 'resolv.conf mode'   # stub
+tailscale status --json | jq .Health          # []
 ```
 
-`/run/systemd/resolve/resolv.conf` lists the uplink nameservers directly; only
-`stub-resolv.conf` points at `127.0.0.53`. The symlink is on disk, so it
-survives a reboot - but it is NOT in any manifest, and a rebuilt node would
-deadlock on first sync. **Anything that provisions this host has to set it.**
-
-`resolvectl` keeps working either way: it queries resolved over D-Bus and never
-touches port 53, which is why `resolvectl query ghcr.io` succeeds on a node
-where `getent hosts ghcr.io` fails. That asymmetry is the fastest way to
-recognise this failure.
+If `resolvectl query ghcr.io` succeeds but `getent hosts ghcr.io` fails, port
+53 on the stub is answered by something other than resolved. `resolvectl` asks
+resolved over D-Bus and never uses port 53, so that difference is the fastest
+way to spot it. The first thing to check is a `hostPort: 53` without a
+`hostIP`.
 
 ## The tailnet view
 
