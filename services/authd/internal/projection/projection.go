@@ -53,6 +53,20 @@ type Account struct {
 	Banned bool
 	Locked bool
 
+	// DomainNotHosted is true when the workspace no longer hosts mailboxes on the
+	// account's domain: hosting was switched off, the workspace lost the name to
+	// another that proved it, or its proof lapsed (#406). Read as
+	// `core.mailbox_domain_refused(tenant_id, domain)` in the SAME query as the
+	// account, so it is never older than the row the bind holds.
+	//
+	// ⚠ A DOMAIN-LEVEL GATE, NOT A STAMP ON THE MAILBOX. Nothing is written to
+	// `authd.accounts` when hosting goes off, so `suspended_at` stays what an admin
+	// set and switching hosting back on reopens every login that was not
+	// suspended by hand. Like Suspended the mailbox still resolves as a recipient
+	// (Stalwart's own Domain object decides whether mail is accepted); only the
+	// BIND is refused, ahead of the credential cache.
+	DomainNotHosted bool
+
 	// SSORequired is true when the account's address is on a domain an active
 	// connection REQUIRES SSO for (`authd.required_domains`). A managed account
 	// is answered by its company's directory whatever this says; an account that

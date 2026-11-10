@@ -117,6 +117,9 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	//     again clears the column and the next bind works.
 	//   - Clerk's ban or lock: neither moves `clerk_updated_at` the way a password
 	//     change does, and verify_password may still say yes for the user.
+	//   - the domain no longer hosts mail (#406): switched off, lost to another
+	//     workspace's proof, or its proof lapsed. A domain-level gate, so it needs no
+	//     write to the mailbox and a suspension an admin set by hand is untouched.
 	//
 	// Same answer as a wrong password, by design.
 	if reason := refusedByRow(account); reason != "" {
@@ -206,6 +209,8 @@ func refusedByRow(a *projection.Account) string {
 	switch {
 	case a.PaymentHold:
 		return "payment_hold"
+	case a.DomainNotHosted:
+		return "domain_not_hosted"
 	case a.Banned:
 		return "account_banned"
 	case a.Locked:

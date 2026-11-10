@@ -54,6 +54,21 @@ const norm = (name: string) => name.trim().toLowerCase()
 
 const isManaged = (d: StalwartDomain) => d.description === MANAGED_MARKER
 
+/** Whether Stalwart already holds `wanted` as the catch-all, case aside. */
+const sameCatchAll = (d: StalwartDomain, wanted: string | null) =>
+  (d.catchAllAddress?.toLowerCase() ?? null) === wanted
+
+/** The catch-all part of an update, empty when it is already right or not wanted. */
+function catchAllPatch(
+  domain: StalwartDomain,
+  wanted: ReadonlyMap<string, string | null>,
+  name: string,
+): { catchAllAddress?: string | null } {
+  if (!wanted.has(name)) return {}
+  const address = wanted.get(name) ?? null
+  return sameCatchAll(domain, address) ? {} : { catchAllAddress: address }
+}
+
 function toDomain(raw: Record<string, unknown>): StalwartDomain {
   // ⚠ A MISSING `id` OR `name` MEANS THE SHAPE IS NOT WHAT WE EXPECT, and every
   // way of reading that as "no such domain" ends in the reconcile creating one
@@ -213,6 +228,11 @@ export interface DomainPlan {
   create: string[]
   /** Ours, wanted and disabled. */
   enable: string[]
+  /**
+   * Ours, wanted and enabled, whose catch-all differs from `desired` (#406).
+   * Only ever filled when `desired` is a Map: a Set says nothing about catch-alls.
+   */
+  catchAll: string[]
   /** Ours, enabled and no longer wanted. */
   disable: string[]
   /** Wanted and present without our marker; written only with `adopt`. */
@@ -239,19 +259,37 @@ export interface ReconcileResult extends DomainPlan {
 }
 
 /**
+ * What the reconcile is told to hold: the names alone (no opinion about
+ * catch-alls), or each name with its catch-all address, `null` meaning none.
+ */
+export type DesiredDomains = ReadonlySet<string> | ReadonlyMap<string, string | null>
+
+/**
  * Brings Stalwart's marked domains in line with `desired`, or reports what it
  * would do.
  *
  * ⚠ IT ONLY EVER TOUCHES MARKED DOMAINS, and removes access by disabling. A
  * domain nobody wants any more keeps its mail; it just stops being accepted.
  * Idempotent: once the plan has been applied the next run finds nothing to do.
+ *
+ * ⚠ A MAP CARRIES CATCH-ALLS, AND DRIFT IN THEM IS CORRECTED THE SAME WAY (#406).
+ * The comparison is exact and lowercased: Stalwart holds the address as we
+ * wrote it, and a differing case would otherwise be rewritten every run.
+ * Protected and unmarked domains never get one written, for the reasons above.
  */
 export async function reconcileDomains(
   call: StalwartCaller,
-  desired: ReadonlySet<string>,
+  desired: DesiredDomains,
   opts: ReconcileOptions = {},
 ): Promise<ReconcileResult> {
-  const want = new Set([...desired].map(norm))
+  const catchAlls = new Map<string, string | null>()
+  if (desired instanceof Map) {
+    for (const [name, address] of desired) {
+      catchAlls.set(norm(name), address === null ? null : address.trim().toLowerCase())
+    }
+  }
+  const wantsCatchAll = (name: string) => catchAlls.has(name)
+  const want = new Set([...desired.keys()].map(norm))
   const protectedNames = new Set(
     [...PROTECTED_DOMAINS, ...(opts.protect ?? [])].map(norm),
   )
@@ -261,6 +299,7 @@ export async function reconcileDomains(
   const plan: DomainPlan = {
     create: [],
     enable: [],
+    catchAll: [],
     disable: [],
     adopt: [],
     untouched: [],
@@ -272,6 +311,8 @@ export async function reconcileDomains(
     if (!domain) plan.create.push(name)
     else if (!isManaged(domain)) plan.adopt.push(name)
     else if (!domain.enable) plan.enable.push(name)
+    else if (wantsCatchAll(name) && !sameCatchAll(domain, catchAlls.get(name) ?? null))
+      plan.catchAll.push(name)
     else plan.untouched.push(name)
   }
 
@@ -303,10 +344,23 @@ export async function reconcileDomains(
     }
   }
 
-  for (const name of plan.create) await attempt(name, () => createDomain(call, name))
+  for (const name of plan.create) {
+    await attempt(name, () => createDomain(call, name, catchAlls.get(name)))
+  }
   for (const name of plan.enable) {
     await attempt(name, () =>
-      updateDomain(call, byName.get(name)!.id, { enable: true }),
+      updateDomain(call, byName.get(name)!.id, {
+        enable: true,
+        // ⚠ A re-enabled domain also gets its catch-all right, in the same write.
+        ...catchAllPatch(byName.get(name)!, catchAlls, name),
+      }),
+    )
+  }
+  for (const name of plan.catchAll) {
+    await attempt(name, () =>
+      updateDomain(call, byName.get(name)!.id, {
+        catchAllAddress: catchAlls.get(name) ?? null,
+      }),
     )
   }
   for (const name of plan.disable) {

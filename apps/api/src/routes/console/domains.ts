@@ -1,6 +1,7 @@
-import type { Context, Hono } from "hono"
+import type { Context, Hono, MiddlewareHandler } from "hono"
 import { updateDomainSchema } from "@repo/contracts"
 import { cacheKeyFor } from "../../auth/api-key.js"
+import { can } from "../../console/roles.js"
 import { requireFreshAuth } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
@@ -78,10 +79,11 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   app.get("/domains", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
-    const [list, displaced, onboardingEmails] = await Promise.all([
+    const [list, displaced, onboardingEmails, hosting] = await Promise.all([
       d.domains.list(tenantId),
       d.domains.displaced(tenantId),
       d.domains.onboardingEmails(tenantId),
+      d.mailboxHosting?.forTenant(tenantId),
     ])
     return c.json({
       data: list.map((domain) => ({
@@ -89,6 +91,8 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
         displaced_at: displaced[domain.id] ?? null,
         // Console only: set-up's one send from this domain, if it has had it.
         onboarding_email: onboardingEmails[domain.id] ?? null,
+        // Console only (#406): the mailbox hosting switch and what sits beside it.
+        ...(hosting?.[domain.id] ? { mailboxes: hosting[domain.id] } : {}),
       })),
     })
   })
@@ -158,11 +162,12 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
   app.get("/domains/:id", async (c) => {
     if (!d.domains) return c.json(notWired("Domains"), 501)
     const { tenantId } = c.get("auth")
-    const [domain, displaced, checks] = await Promise.all([
+    const [domain, displaced, checks, mailboxes] = await Promise.all([
       d.domains.get(tenantId, c.req.param("id")),
       d.domains.displaced(tenantId),
       // ⚠ CONSOLE ONLY, like `displaced_at`: the events strip's timestamps.
       d.domains.checks(tenantId, c.req.param("id")),
+      d.mailboxHosting?.forDomain(tenantId, c.req.param("id")),
     ])
     return domain
       ? c.json({
@@ -171,6 +176,7 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
           verified_at: checks?.verified_at ?? null,
           dns_checked_at: checks?.dns_checked_at ?? null,
           records_added_at: checks?.records_added_at ?? null,
+          ...(mailboxes ? { mailboxes } : {}),
         })
       : c.json(notFound("No domain with that id."), 404)
   })
@@ -470,6 +476,129 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
       ? c.json({ object: "domain", id: c.req.param("id"), deleted: true })
       : c.json(notFound("No domain with that id."), 404)
   })
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Mailbox hosting - switching it on for a domain, and its catch-all (#406)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * ⚠ OWNERS AND ADMINS, THROUGH `workspace:manage`. Nothing else on this page is
+   * gated on a role, but turning a name into a local recipient is a decision
+   * about whose mail Stalwart accepts, and a member has no business making it.
+   * `workspace:manage` is the permission an owner and an admin hold and a member
+   * does not; it is checked BEFORE the step-up so a member is told "no" rather
+   * than being asked to re-authenticate for something they may not do.
+   */
+  const requireHostingAdmin: MiddlewareHandler = async (c, next) => {
+    const { tenantId } = c.get("auth")
+    const allowed = Boolean(
+      d.roles &&
+      (await can(d.roles.store, tenantId, c.get("user").userId, "workspace:manage")),
+    )
+    if (!allowed) {
+      return c.json(
+        {
+          statusCode: 403,
+          name: "forbidden" as const,
+          message: "Only an owner or an admin can change mailbox hosting.",
+        },
+        403,
+      )
+    }
+    await next()
+  }
+
+  /*
+   * ⚠ STEP-UP, LIKE DELETE. Switching hosting on makes the domain a local
+   * recipient and off closes every login on it; a stolen session could do either
+   * to a customer's whole mailbox estate.
+   *
+   * ⚠ `stalwart` IN THE ANSWER IS "setting up" FOR THE CONSOLE. `pending` means
+   * the row is right and Stalwart is not yet (unreachable, or it refused): the
+   * reconcile catches up within fifteen minutes, so it is not an error.
+   */
+  app.put(
+    "/domains/:id/mailboxes",
+    requireHostingAdmin,
+    requireFreshAuth,
+    async (c) => {
+      if (!d.mailboxHosting) return c.json(notWired("Mailbox hosting"), 501)
+      const { tenantId } = c.get("auth")
+      const body = await readJson(c)
+      if (typeof body?.enabled !== "boolean") {
+        return c.json(validation("`enabled` must be true or false."), 422)
+      }
+
+      const outcome = await d.mailboxHosting.setEnabled(
+        tenantId,
+        c.req.param("id"),
+        body.enabled,
+      )
+      switch (outcome.status) {
+        case "ok":
+          return c.json({ mailboxes: outcome.mailboxes, stalwart: outcome.stalwart })
+        case "missing":
+          return c.json(notFound("No domain with that id."), 404)
+        case "not_held":
+          // ⚠ 409 AND A MACHINE-READABLE REASON: the console words "another
+          // workspace proved this name" and "verify this domain first" differently.
+          return c.json(
+            {
+              statusCode: 409,
+              name: "domain_not_held" as const,
+              reason: outcome.reason,
+              message:
+                outcome.reason === "displaced"
+                  ? "Another workspace proved this domain and now holds it, so it cannot host mailboxes here."
+                  : "Prove you own this domain before hosting mailboxes on it.",
+            },
+            409,
+          )
+        default:
+          // ⚠ 403 AND A NAME, like `POST /domains`: the console turns it into an upgrade prompt.
+          return c.json(
+            {
+              statusCode: 403,
+              name: "plan_limit_exceeded" as const,
+              message: "You have used every mailbox domain your plan includes.",
+            },
+            403,
+          )
+      }
+    },
+  )
+
+  app.put(
+    "/domains/:id/catch-all",
+    requireHostingAdmin,
+    requireFreshAuth,
+    async (c) => {
+      if (!d.mailboxHosting) return c.json(notWired("Mailbox hosting"), 501)
+      const { tenantId } = c.get("auth")
+      const body = await readJson(c)
+      if (!body || !("address" in body)) {
+        return c.json(validation("`address` is required, or null to clear it."), 422)
+      }
+      const address = body.address
+      if (address !== null && typeof address !== "string") {
+        return c.json(validation("`address` must be an address or null."), 422)
+      }
+
+      const outcome = await d.mailboxHosting.setCatchAll(
+        tenantId,
+        c.req.param("id"),
+        address,
+      )
+      switch (outcome.status) {
+        case "ok":
+          return c.json({ mailboxes: outcome.mailboxes, stalwart: outcome.stalwart })
+        case "missing":
+          return c.json(notFound("No domain with that id."), 404)
+        default:
+          return c.json(validation(outcome.reason), 422)
+      }
+    },
+  )
 
   // ───────────────────────────────────────────────────────────────────────────
   // Transfers - offering a domain to an email address, and answering one

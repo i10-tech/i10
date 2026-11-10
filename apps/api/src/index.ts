@@ -164,6 +164,7 @@ import {
 } from "./mailboxes/provision.js"
 import { createStalwartCaller } from "./mail/stalwart.js"
 import { disableDomain } from "./mail/stalwart-domains.js"
+import { mailboxHosting } from "./domains/mailbox-hosting.js"
 import { planAssignmentStore } from "./metering/postgres.js"
 import { mailboxDirectory, paymentHold } from "./mailboxes/store.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
@@ -2770,6 +2771,20 @@ const app = createApp({
           domains,
         }
       : {}),
+    /*
+     * ⚠ THE HOSTING SWITCH SHARES THE STALWART CALLER, THE REVOCATION HUB AND THE
+     * METER WITH THE REST OF THIS FILE rather than building its own: the same
+     * Domain objects, the same logins and the same allowance are what the
+     * reconcile, the domain delete and the sending-domain limit already act on.
+     */
+    mailboxHosting: mailboxHosting({
+      db,
+      capacity: postgresMeter(db),
+      stalwart: stalwartCall,
+      revocation: mailAccessRevocation,
+      log,
+      report: (error, context) => captureError(error, context),
+    }),
     keys: { store: apiKeyStore, cache: redisKeyCache(cache) },
     ...(secrets
       ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
