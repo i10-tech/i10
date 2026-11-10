@@ -130,22 +130,23 @@ export function createStalwartCaller(opts: StalwartOptions): StalwartCaller {
 }
 
 /**
- * Every account the registry holds, paged.
+ * Every object of one registry type, paged (`Account`, `Domain`).
  *
- * ⚠ ONE SNAPSHOT, SHARED. The storage sample and the quota reconcile both need
- * the whole directory, and each paging loop was one more place to get the
- * termination condition wrong.
+ * ⚠ ONE LOOP, SHARED. The storage sample, the quota reconcile and the domain
+ * reconcile all need a whole registry type, and each paging loop was one more
+ * place to get the termination condition wrong.
  */
-export async function listRegistryAccounts(
+export async function listRegistryObjects<T extends object = Record<string, unknown>>(
   call: StalwartCaller,
-): Promise<RegistryAccount[]> {
-  // ── every account id, paged ────────────────────────────────────────────
+  type: string,
+): Promise<T[]> {
+  // ── every id, paged ────────────────────────────────────────────────────
   const ids: string[] = []
   const seen = new Set<string>()
 
   for (let position = 0; ; position += QUERY_PAGE) {
     const [, result] = (await call([
-      ["x:Account/query", { position, limit: QUERY_PAGE }, "q"],
+      [`x:${type}/query`, { position, limit: QUERY_PAGE }, "q"],
     ])) as [string, { ids?: unknown }]
 
     const page = Array.isArray(result.ids) ? result.ids : []
@@ -165,20 +166,24 @@ export async function listRegistryAccounts(
   }
 
   // ── their objects, chunked ─────────────────────────────────────────────
-  const accounts: RegistryAccount[] = []
+  const objects: T[] = []
 
   for (let i = 0; i < ids.length; i += GET_CHUNK) {
     const chunk = ids.slice(i, i + GET_CHUNK)
-    const [, result] = (await call([["x:Account/get", { ids: chunk }, "g"]])) as [
+    const [, result] = (await call([[`x:${type}/get`, { ids: chunk }, "g"]])) as [
       string,
       { list?: unknown },
     ]
 
-    if (Array.isArray(result.list)) accounts.push(...(result.list as RegistryAccount[]))
+    if (Array.isArray(result.list)) objects.push(...(result.list as T[]))
   }
 
-  return accounts
+  return objects
 }
+
+/** Every account the registry holds. */
+export const listRegistryAccounts = (call: StalwartCaller) =>
+  listRegistryObjects<RegistryAccount>(call, "Account")
 
 export function stalwartStorage(opts: StalwartOptions): MailboxStorage {
   const call = createStalwartCaller(opts)

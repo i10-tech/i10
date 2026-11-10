@@ -163,6 +163,7 @@ import {
   type ProvisionDeps,
 } from "./mailboxes/provision.js"
 import { createStalwartCaller } from "./mail/stalwart.js"
+import { disableDomain } from "./mail/stalwart-domains.js"
 import { planAssignmentStore } from "./metering/postgres.js"
 import { mailboxDirectory, paymentHold } from "./mailboxes/store.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
@@ -567,6 +568,42 @@ const mailAccessRevocation = mailRevocation({
   log,
 })
 
+// The Stalwart registry, when this deployment can reach it. Without a URL and
+// token nothing here writes to it, and the mail-domains reconcile catches up.
+const stalwartCall =
+  env.STALWART_URL && env.STALWART_API_TOKEN
+    ? createStalwartCaller({ baseUrl: env.STALWART_URL, token: env.STALWART_API_TOKEN })
+    : null
+
+/**
+ * A removed domain stops being accepted by Stalwart at once, not at the next
+ * reconcile slot.
+ *
+ * ⚠ A FAILURE HERE MUST NOT BLOCK THE DELETE, unlike the revocation beside it.
+ * The mailboxes are already suspended by then, so mail access is closed whether
+ * or not Stalwart answers; refusing to delete a domain because the mail server
+ * is down would trap the customer, and the reconcile disables it on its next run.
+ *
+ * ⚠ ONLY A NAME NOBODY ELSE HOSTS, for the reason `domainGone` spells out:
+ * deleting one workspace's pending row says nothing about the workspace that
+ * actually hosts the name.
+ */
+const disableStalwartDomain = stalwartCall
+  ? async (tenantId: string, name: string) => {
+      try {
+        const host = await mailStore.hostedBy(name)
+        if (host !== null && host !== tenantId) return
+        await disableDomain(stalwartCall, name)
+      } catch (error) {
+        log.warn(
+          { err: error, tenantId, domain: name },
+          "could not disable the Stalwart domain; the reconcile will",
+        )
+        captureError(error, { phase: "stalwart-domain-disable", tenantId })
+      }
+    }
+  : null
+
 /**
  * ⚠ THE ONLY OBJECT IN THIS PROCESS THAT CAN MOVE A CUSTOMER BETWEEN PLANS, and
  * it reaches exactly two places: `subscriptionGrants`, which acts on verified
@@ -682,7 +719,11 @@ const domains = secrets
       zones: powerDnsZones(db),
       log,
       // ⚠ A REMOVED DOMAIN'S MAILBOXES STOP SIGNING IN, BEFORE ITS ROW GOES.
-      onRemoving: (tenantId, name) => mailAccessRevocation.domainGone(tenantId, name),
+      onRemoving: async (tenantId, name) => {
+        const revoked = await mailAccessRevocation.domainGone(tenantId, name)
+        await disableStalwartDomain?.(tenantId, name)
+        return revoked
+      },
       // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is nowhere
       // safe to keep a DKIM private key, so the routes answer 501 rather than
       // storing one in the clear - the same rule webhooks already follow.
@@ -1329,14 +1370,7 @@ const mailboxDownloadSecret = createHmac(
 const mailboxStorage = storageAllocations({
   store: allocationStore(db),
   assignments: planAssignmentStore(db),
-  ...(env.STALWART_URL && env.STALWART_API_TOKEN
-    ? {
-        stalwart: createStalwartCaller({
-          baseUrl: env.STALWART_URL,
-          token: env.STALWART_API_TOKEN,
-        }),
-      }
-    : {}),
+  ...(stalwartCall ? { stalwart: stalwartCall } : {}),
   log,
 })
 
