@@ -80,6 +80,19 @@ export interface MailRevocation {
     tenantId: string,
     domain: string,
   ): Promise<{ suspended: number; aliases: number }>
+  /**
+   * The workspace stopped hosting mail on a domain it still holds (#406). The
+   * login is refused by authd's domain gate, not by a stamp on each mailbox, so
+   * nothing is suspended, no alias goes and an admin's own suspension is left as
+   * it was; what this does is raise each mailbox's credential epoch so no cached
+   * password outlives the switch. Returns how many it reached.
+   *
+   * ⚠ ONLY A NAME NOBODY ELSE HOSTS, for the reason `domainGone` spells out.
+   * Called AFTER the flag is off, so the domain has already left
+   * `core.mailbox_domains()` and the gate is closed; a failure here leaves the
+   * logins refused and the call repeatable.
+   */
+  domainOff(tenantId: string, domain: string): Promise<{ invalidated: number }>
 }
 
 export function mailRevocation(d: MailRevocationDeps): MailRevocation {
@@ -159,6 +172,26 @@ export function mailRevocation(d: MailRevocationDeps): MailRevocation {
           },
         })
       return { suspended: done.suspended.length, aliases: done.aliases.length }
+    },
+
+    async domainOff(tenantId, domain) {
+      const host = await d.mail.hostedBy(domain)
+      if (host !== null && host !== tenantId) return { invalidated: 0 }
+      const ids = await mailAccess.invalidateDomain(
+        d.db,
+        tenantId,
+        domain,
+        // Nobody hosts the name now (this workspace just switched it off), so the
+        // mailboxes whose `tenant_id` was never filled in are this workspace's.
+        host === null,
+      )
+      if (ids.length > 0)
+        await audit(tenantId, {
+          type: "mailbox.domain_hosting_off",
+          reason: "hosting_off",
+          data: { domain: domain.toLowerCase(), invalidated: ids.length },
+        })
+      return { invalidated: ids.length }
     },
   }
 }

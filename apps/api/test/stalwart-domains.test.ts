@@ -411,3 +411,85 @@ describe("disableDomain and destroyDomain", () => {
     expect((await listDomains(registry.call)).map((d) => d.name)).toEqual(["i10.tech"])
   })
 })
+
+describe("reconcileDomains and catch-alls (#406)", () => {
+  const wantMap = (entries: [string, string | null][]) => new Map(entries)
+
+  it("creates a domain with its catch-all", async () => {
+    const registry = fakeRegistry([I10])
+
+    await reconcileDomains(registry.call, wantMap([["acme.com", "ada@acme.com"]]), {
+      apply: true,
+    })
+
+    expect(registry.byName("acme.com")).toMatchObject({
+      catchAllAddress: "ada@acme.com",
+    })
+  })
+
+  it("corrects a catch-all that drifted, and clears one that should be gone", async () => {
+    const registry = fakeRegistry([
+      ours("a.com", { catchAllAddress: "old@a.com" }),
+      ours("b.com", { catchAllAddress: "stale@b.com" }),
+      ours("c.com", { catchAllAddress: "same@c.com" }),
+    ])
+
+    const plan = await reconcileDomains(
+      registry.call,
+      wantMap([
+        ["a.com", "new@a.com"],
+        ["b.com", null],
+        ["c.com", "SAME@c.com"],
+      ]),
+      { apply: true },
+    )
+
+    expect(plan.catchAll).toEqual(["a.com", "b.com"])
+    expect(plan.untouched).toEqual(["c.com"])
+    expect(registry.byName("a.com")).toMatchObject({ catchAllAddress: "new@a.com" })
+    expect(registry.byName("b.com")).toMatchObject({ catchAllAddress: null })
+    expect(registry.byName("c.com")).toMatchObject({ catchAllAddress: "same@c.com" })
+  })
+
+  it("sets the catch-all in the same write that re-enables a domain", async () => {
+    const registry = fakeRegistry([ours("a.com", { enable: false })])
+
+    await reconcileDomains(registry.call, wantMap([["a.com", "ada@a.com"]]), {
+      apply: true,
+    })
+
+    expect(registry.writes()).toHaveLength(1)
+    expect(registry.byName("a.com")).toMatchObject({
+      enable: true,
+      catchAllAddress: "ada@a.com",
+    })
+  })
+
+  it("says nothing about catch-alls when it is only given names", async () => {
+    const registry = fakeRegistry([ours("a.com", { catchAllAddress: "keep@a.com" })])
+
+    const plan = await reconcileDomains(registry.call, want("a.com"), { apply: true })
+
+    expect(plan.catchAll).toEqual([])
+    expect(registry.writes()).toHaveLength(0)
+  })
+
+  it("never writes a catch-all to a domain it does not own", async () => {
+    const registry = fakeRegistry([
+      I10,
+      { id: "h1", name: "hand.example", description: null },
+    ])
+
+    const plan = await reconcileDomains(
+      registry.call,
+      wantMap([
+        ["i10.tech", "x@i10.tech"],
+        ["hand.example", "x@hand.example"],
+      ]),
+      { apply: true },
+    )
+
+    expect(plan.catchAll).toEqual([])
+    expect(registry.writes()).toHaveLength(0)
+  })
+})

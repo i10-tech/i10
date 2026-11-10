@@ -358,6 +358,19 @@ export const domains = core.table(
     hostsMailboxes: boolean("hosts_mailboxes").notNull().default(false),
 
     /**
+     * Where mail to an address on this domain that is nobody's goes (#406), or
+     * null for "refuse it". Meaningful only while the domain hosts mailboxes.
+     *
+     * ⚠ AN ADDRESS, NOT A MAILBOX ID. It is what Stalwart's `Domain.catchAllAddress`
+     * holds, so the reconcile can compare the two without a lookup. The route
+     * that writes it checks that the address is a mailbox or a team inbox of
+     * THIS workspace on one of its hosted domains; nothing below the route
+     * re-checks, and a mailbox deleted afterwards leaves it pointing at nothing
+     * (Stalwart then bounces the mail, which is the same as no catch-all).
+     */
+    catchAllAddress: text("catch_all_address"),
+
+    /**
      * The return path's subdomain, stored as the label only ("send"), not the
      * FQDN - derive the name with `returnPathDomain` rather than by hand.
      *

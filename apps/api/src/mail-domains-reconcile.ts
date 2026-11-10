@@ -75,10 +75,15 @@ await withMonitor(
       // ⚠ THROUGH THE FUNCTION, NEVER THE TABLE: `i10_api` is subject to row
       // level security and would see no tenant's domains. This is the same list
       // the mailbox routes and the projection treat as "may receive mail".
+      // ⚠ THE SETTINGS FUNCTION, NOT `mailbox_domains()`, SO THE CATCH-ALL COMES
+      // WITH THE NAME (#406). Both are one predicate, so the set of names is the
+      // same list the mailbox routes and the projection use.
       const rows = (await db.execute(
-        query`select name from core.mailbox_domains()`,
-      )) as unknown as { name: string }[]
-      const desired = new Set(rows.map((r) => String(r.name).toLowerCase()))
+        query`select name, catch_all_address from core.mailbox_domain_settings()`,
+      )) as unknown as { name: string; catch_all_address: string | null }[]
+      const desired = new Map(
+        rows.map((r) => [String(r.name).toLowerCase(), r.catch_all_address] as const),
+      )
 
       const result = await reconcileDomains(
         createStalwartCaller({

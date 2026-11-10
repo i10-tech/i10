@@ -234,6 +234,41 @@ export const mailAccess = {
   },
 
   /**
+   * Kills every cached password verification for the mailboxes on a domain that
+   * stopped hosting mail, by raising their `credential_epoch` (#406).
+   *
+   * ⚠ IT SUSPENDS NOTHING. The login is refused by authd's DOMAIN gate
+   * (`core.mailbox_domain_refused`, read in the same query as the account), not
+   * by a per-mailbox stamp, so `suspended_at` stays exactly as an admin left it
+   * and switching hosting back on needs no per-mailbox step. The epoch bump is
+   * what makes the return honest: a password cached before the domain went off
+   * is not honoured on the way back without asking the identity provider again.
+   *
+   * ⚠ THE SAME MEMBERSHIP RULE AS `suspendDomain`, and the caller has made the
+   * same check that no other workspace hosts the name. Returns who it reached.
+   */
+  async invalidateDomain(
+    db: Writer,
+    tenantId: string,
+    domain: string,
+    holdsName: boolean,
+  ): Promise<string[]> {
+    const name = domain.toLowerCase()
+    const mine = holdsName
+      ? or(eq(accounts.tenantId, tenantId), isNull(accounts.tenantId))
+      : eq(accounts.tenantId, tenantId)
+    const done = await db
+      .update(accounts)
+      .set({
+        credentialEpoch: sql`${accounts.credentialEpoch} + 1`,
+        updatedAt: sql`now()`,
+      })
+      .where(and(mine, sql`${domainOfEmail} = ${name}`))
+      .returning({ id: accounts.clerkUserId })
+    return done.map((r) => r.id)
+  },
+
+  /**
    * The workspace's paid plan has lapsed: no login, mail keeps arriving. Idempotent.
    * Returns how many mailboxes it newly held.
    */

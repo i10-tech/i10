@@ -19,6 +19,7 @@ import type { GithubSyncer } from "../../github/sync.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
 import type { UsageStore } from "../../console/usage.js"
 import type { DomainStore } from "../../domains/store.js"
+import type { MailboxHosting } from "../../domains/mailbox-hosting.js"
 import type { DomainTransfers } from "../../domains/transfers.js"
 import type { KeyCache } from "../../auth/api-key.js"
 import type { KeyStore } from "../../auth/store.js"
@@ -274,6 +275,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
   }
   /** Optional for the same reason `AppDeps.domains` is - see createApp. */
   domains?: DomainStore
+  /**
+   * Switching mailbox hosting on and off for a domain, and its catch-all (#406).
+   * Optional like `domains`; without it the routes answer 501 and the domain
+   * reads carry no `mailboxes`.
+   */
+  mailboxHosting?: MailboxHosting
   /**
    * ⚠ THE CACHE IS NOT OPTIONAL IN PRACTICE, EVEN THOUGH THE TYPE ALLOWS IT.
    * Revoking a key is two acts - the row and the Redis entry - and without the

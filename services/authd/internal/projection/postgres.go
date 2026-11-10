@@ -57,6 +57,13 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 // account they belong to, and so a new one cannot be added to the search path
 // and forgotten on the bind path.
 //
+// ⚠ AND SO IS WHETHER THE ACCOUNT'S DOMAIN STILL HOSTS MAIL (#406):
+// `core.mailbox_domain_refused` is a SECURITY DEFINER function the `authd` role may
+// execute and nothing else in `core`. It is true only for a name that has a
+// `core.domains` row and is not in `core.mailbox_domains()` for this account's
+// workspace, so i10's own domains (no row) and unattributed accounts on them are
+// never refused by it.
+//
 // ⚠ A REQUIRED DOMAIN BINDS ONLY ITS OWN WORKSPACE'S ACCOUNTS (`tenant_id`). The
 // mirror is recomputed on the changes that move it, but a row left behind for a
 // name that has since changed hands must not lock out the new owner's people.
@@ -83,7 +90,8 @@ const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	          ON ex.connection_id = rd.connection_id AND ex.tenant_id = rd.tenant_id
 	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
 	          AND rd.tenant_id = a.tenant_id
-	          AND ex.clerk_user_id = a.clerk_user_id)`
+	          AND ex.clerk_user_id = a.clerk_user_id),
+		core.mailbox_domain_refused(a.tenant_id, lower(split_part(a.email, '@', 2)))`
 
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
@@ -187,7 +195,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
 			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
 			&a.Managed, &a.ManagedConnection, &a.Suspended, &a.PaymentHold,
-			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt); err != nil {
+			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt, &a.DomainNotHosted); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

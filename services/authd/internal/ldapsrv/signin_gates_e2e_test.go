@@ -26,6 +26,9 @@ func TestEveryRowGateBeatsAWarmCache(t *testing.T) {
 		"payment hold": func(a *projection.Account, on bool) { a.PaymentHold = on },
 		"clerk ban":    func(a *projection.Account, on bool) { a.Banned = on },
 		"clerk lock":   func(a *projection.Account, on bool) { a.Locked = on },
+		// #406: the workspace stopped hosting mail on the domain. Nothing is
+		// written to the mailbox for it, so this is the only thing that closes it.
+		"domain not hosted": func(a *projection.Account, on bool) { a.DomainNotHosted = on },
 	}
 	for name, set := range gates {
 		t.Run(name, func(t *testing.T) {
