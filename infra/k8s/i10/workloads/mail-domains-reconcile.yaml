@@ -1,0 +1,88 @@
+# Keeps Stalwart's Domain objects in step with core.mailbox_domains(), every 15 minutes.
+#
+# ⚠ THE SAME IMAGE AND ANOTHER COMMAND. `bun dist/mail-domains-reconcile.js` runs
+# one pass and exits.
+#
+# ⚠ WHY THIS EXISTS: STALWART 1.0 ONLY ACCEPTS MAIL AND LOGINS FOR DOMAINS IT
+# HOLDS AS Domain OBJECTS, and plan.ndjson declares just i10.tech. A customer
+# domain that starts hosting mailboxes got `550 5.7.1 Relay not allowed` and
+# failed IMAP logins until somebody added it by hand (#405). This creates the
+# missing ones; removal also disables immediately from the API (`onRemoving`),
+# and this is what catches a removal that failed.
+#
+# ⚠ IT ONLY TOUCHES DOMAINS CARRYING ITS MARKER (description `i10-managed`) AND
+# ONLY EVER DISABLES, never destroys. i10.tech and anything added by hand are
+# left alone; a hand-added domain we want is reported as "adopt".
+#
+# ⚠ AND IT REPORTS BEFORE IT WRITES. `MAIL_DOMAINS_RECONCILE_APPLY` is absent here
+# on purpose, so the first runs log the plan and change nothing. Read a few runs
+# of that log, then add
+#
+#   - name: MAIL_DOMAINS_RECONCILE_APPLY
+#     value: "true"
+#
+# ⚠ THE STALWART KEY MUST HOLD THE Domain PERMISSIONS before that is turned on:
+# `sysDomainGet`, `sysDomainQuery`, `sysDomainCreate` and `sysDomainUpdate`.
+# `STALWART_API_TOKEN` was created with three account-read permissions only
+# (docs/decisions/metering.md), so without them every write is refused and the
+# run fails loudly.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-mail-domains-reconcile
+  namespace: i10-prod
+spec:
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/mail-domains-reconcile.ts, AND THEY MUST
+  # AGREE. Sentry decides a run is MISSING by comparing the clock against the
+  # schedule the job declares in its check-in.
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Kept longer than the successful ones: while it is reporting only, the log of
+  # what it would have done is the artefact.
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      # One attempt per slot. Every write is idempotent and the next slot is
+      # fifteen minutes away.
+      backoffLimit: 0
+      # ⚠ UNDER THE INTERVAL, so a hung pass is killed before the next is due and
+      # `Forbid` cannot turn one stuck pod into a reconcile that never runs again.
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: reconcile
+              image: ghcr.io/i10-tech/i10-api:prod-46c034947fa8281c0067376a0cd8ab5dc6b8a794@sha256:b87d268c885f9076a7cc8001783e201b70a536aada47d8842ce473cba6896153
+              imagePullPolicy: Always
+              command: ["bun", "dist/mail-domains-reconcile.js"]
+              envFrom:
+                # STALWART_URL and STALWART_API_TOKEN come from here, the same
+                # Doppler `prod_api` config billing-reconcile reads.
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # ⚠ `i10_api`, NOT THE OWNER. The desired set is read through the
+                # SECURITY DEFINER `core.mailbox_domains()`, which this role may
+                # execute; a role that could see every tenant's rows is not needed.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }
+---

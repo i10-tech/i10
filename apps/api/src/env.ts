@@ -369,6 +369,28 @@ const schema = z.object({
     .optional()
     .transform((v) => v === "true" || v === "1" || v === "yes" || v === "on"),
 
+  /**
+   * Whether the mail-domain reconcile may write to Stalwart. Off, it logs the
+   * plan and changes nothing.
+   *
+   * ⚠ READ ONLY BY THAT JOB, like `DOMAIN_ORPHANS_REMOVE`. The reconcile can
+   * only disable a domain, and only one carrying our marker, but a wrong desired
+   * set still stops a customer's mail, so the first runs report before they act.
+   */
+  MAIL_DOMAINS_RECONCILE_APPLY: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1" || v === "yes" || v === "on"),
+
+  /**
+   * Whether that reconcile may take over a domain somebody added to Stalwart by
+   * hand (sets the marker, enables it). Off, it only reports them.
+   */
+  MAIL_DOMAINS_RECONCILE_ADOPT: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1" || v === "yes" || v === "on"),
+
   SES_ENABLED: z
     .string()
     .optional()
