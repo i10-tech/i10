@@ -97,6 +97,16 @@ mailboxes.openapi(
           409,
         )
 
+      case "mail_signin_off":
+        return c.json(
+          {
+            statusCode: 409,
+            name: "mail_signin_off" as const,
+            message: outcome.reason,
+          },
+          409,
+        )
+
       case "conflict":
         return c.json(
           {

@@ -2,9 +2,49 @@ import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm"
 import { union } from "drizzle-orm/pg-core"
 import type { Mailbox } from "@repo/contracts"
 import type { Database } from "../db/client.js"
-import { accounts, aliases, groupMembers, groups } from "../db/schema.js"
+import {
+  accounts,
+  aliases,
+  authdManagedAccounts,
+  groupMembers,
+  groups,
+} from "../db/schema.js"
 import { directoryGroups } from "../db/identity.js"
-import type { MailboxDirectory } from "./provision.js"
+import { passthroughFor } from "../identity/ldap.js"
+import type { IdentityStore } from "../identity/ports.js"
+import type { MailboxDirectory, ManagedMailLaneCheck } from "./provision.js"
+
+/**
+ * Whether `userId` is a managed SSO account and whether its connection has a
+ * working mail sign-in lane on (#407).
+ *
+ * ⚠ READS THE SAME TABLES authd READS AT BIND TIME. `authd.managed_accounts`
+ * is what `services/authd/internal/passthrough` queries to decide whether an
+ * account is managed (refusing to ask Clerk if so, and refusing outright when
+ * `connection_id` is null), and `passthroughFor` is the exact function
+ * `POST /internal/authd/passthrough` calls to answer authd with the connection's
+ * live LDAP or OIDC mail lane. Using both here guarantees provisioning and bind
+ * agree on whether the person can sign in to mail.
+ */
+export function managedMailLane(
+  db: Database,
+  store: Pick<
+    IdentityStore,
+    "connectionForStart" | "connectionSecrets" | "liveDomains"
+  >,
+): ManagedMailLaneCheck {
+  return async (userId) => {
+    const [managed] = await db
+      .select({ connectionId: authdManagedAccounts.connectionId })
+      .from(authdManagedAccounts)
+      .where(eq(authdManagedAccounts.clerkUserId, userId))
+      .limit(1)
+    if (!managed) return "unmanaged"
+    if (!managed.connectionId) return "off"
+    const answer = await passthroughFor(store, managed.connectionId)
+    return answer.enabled ? answer.lane : "off"
+  }
+}
 
 /**
  * The projection's rows, read and gated for provisioning.
@@ -87,10 +127,15 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
      * no delivery - until this runs. It is deliberately not part of the
      * projection's upsert, which must never touch it.
      */
-    async activate(userId) {
+    async activate(userId, displayName) {
+      const name = displayName?.trim() || undefined
       const [row] = await db
         .update(accounts)
-        .set({ active: true, updatedAt: sql`now()` })
+        .set({
+          active: true,
+          ...(name !== undefined ? { displayName: name } : {}),
+          updatedAt: sql`now()`,
+        })
         .where(eq(accounts.clerkUserId, userId))
         .returning()
 

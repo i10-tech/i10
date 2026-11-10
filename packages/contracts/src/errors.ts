@@ -77,6 +77,14 @@ export const errorNames = [
    */
   "password_required",
   /**
+   * ⚠ A MANAGED SSO ACCOUNT WHOSE CONNECTION HAS NO MAIL LANE ON (#407). Like
+   * `password_required`, a 409 rather than a 403 because the caller has the
+   * permission and the state stands in the way - but the remedy is not setting
+   * a Clerk password (authd never asks Clerk for a managed account's password),
+   * it is an admin turning on mail sign-in on the SSO connection.
+   */
+  "mail_signin_off",
+  /**
    * ⚠ SAYS "TAKEN", NEVER BY WHOM - the same rule as `domain_already_exists`.
    * It covers both the caller already having a mailbox and the address
    * belonging to somebody else, because distinguishing them would turn this
