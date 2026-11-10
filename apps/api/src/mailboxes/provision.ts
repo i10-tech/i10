@@ -73,8 +73,11 @@ export interface MailboxDirectory {
    * switch every suspended mailbox back on the next time its owner changed
    * their name. Provisioning may write it because it just checked the
    * entitlement that `active` represents.
+   *
+   * When `displayName` is given, it is stored on the account row in the same
+   * write so authd serves it as the mailbox's display name (#407).
    */
-  activate(userId: string): Promise<Mailbox | null>
+  activate(userId: string, displayName?: string): Promise<Mailbox | null>
 }
 
 /**
@@ -96,6 +99,21 @@ export interface Capacity {
 /** Writes the row from a Clerk user. `projectClerkUser`, injected. */
 export type Projector = (user: ClerkUser) => Promise<{ email?: string }>
 
+/**
+ * Whether a person's account is managed by an SSO connection and whether that
+ * connection has a working mail sign-in lane on (#407).
+ *
+ *   - `unmanaged`: not in `authd.managed_accounts`; authd checks their Clerk password.
+ *   - `off`: in `authd.managed_accounts`, and the connection is missing, inactive,
+ *     has no live domain proof, or has neither OIDC mail nor complete LDAP
+ *     pass-through enabled. authd refuses their mail bind.
+ *   - `oidc` | `ldap`: in `authd.managed_accounts`, and the connection's mail
+ *     lane is live; authd verifies their mail password against the IdP.
+ */
+export type ManagedMailLane = "unmanaged" | "off" | "oidc" | "ldap"
+
+export type ManagedMailLaneCheck = (userId: string) => Promise<ManagedMailLane>
+
 export interface ProvisionDeps {
   identity: MailboxIdentity
   directory: MailboxDirectory
@@ -104,6 +122,11 @@ export interface ProvisionDeps {
   /** `mailboxes`. Passed in so the core owes nothing to the metering package. */
   featureId: string
   now?: () => Date
+  /**
+   * Whether the caller is a managed SSO account and whether their connection's
+   * mail sign-in lane is on (#407). Defaults to `"unmanaged"` when omitted.
+   */
+  mailLane?: ManagedMailLaneCheck
   /**
    * Allocation and the pool (B3). Without it a mailbox is created as before and
    * a request for storage is refused, since saving one with nothing to check it
@@ -123,8 +146,10 @@ export interface ProvisionDeps {
 
 export type ProvisionOutcome =
   | { status: "created"; mailbox: Mailbox }
-  /** They signed up passwordless. See `create`. */
+  /** They signed up passwordless and are not managed by SSO. See `create`. */
   | { status: "password_required"; reason: string }
+  /** Their account is managed by SSO, and the connection's mail sign-in lane is off. */
+  | { status: "mail_signin_off"; reason: string }
   /** The address cannot be a mailbox here - wrong domain, or not ours. */
   | { status: "rejected"; reason: string }
   /** Taken, or they already have one. */
@@ -152,20 +177,19 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
     },
 
     /**
-     * ⚠ THE PASSWORD CHECK COMES FIRST, BEFORE THE DOMAIN AND BEFORE THE
-     * ADDRESS. Not for tidiness: a passwordless user cannot hold a mailbox at
-     * all, so every later check is a question about an address they were never
-     * going to get. Answering "that address is taken" first would tell somebody
-     * who cannot provision anything which addresses exist.
+     * ⚠ THE SIGN-IN CHECK COMES FIRST, BEFORE THE DOMAIN AND BEFORE THE
+     * ADDRESS. Not for tidiness: a user who cannot sign in to mail cannot hold
+     * a mailbox at all, so every later check is a question about an address they
+     * were never going to get. Answering "that address is taken" first would
+     * tell somebody who cannot provision anything which addresses exist.
      *
-     * ⚠ AND THE REASON IT IS A HARD REFUSAL RATHER THAN A PROMPT IS authd. An
-     * IMAP or SMTP login is an LDAP bind, and authd answers that bind by
-     * delegating the password to Clerk - that is the whole design, and it is
-     * why no password material is stored anywhere in our database. A user who
-     * signed up with Google or a magic link has no password for Clerk to
-     * verify, so a mailbox created for them would be one nobody could ever log
-     * in to: it would accept mail and then refuse its owner. Setting a password
-     * is not a formality here, it is the credential the mail server runs on.
+     * ⚠ AND THE RULE MATCHES authd'S BIND PATH (#407). An IMAP or SMTP login is
+     * an LDAP bind: for an unmanaged account authd delegates the password to
+     * Clerk (`passwordEnabled`), and for a managed SSO account (`authd.managed_accounts`)
+     * authd never asks Clerk - it checks the company IdP through the connection's
+     * OIDC mail lane or LDAP pass-through. A managed account whose connection has
+     * no working mail lane on cannot sign in even if a Clerk password existed, and
+     * one whose lane IS on needs no Clerk password.
      */
     async create(userId, input) {
       const person = await deps.identity.get(userId)
@@ -173,7 +197,17 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
         return { status: "rejected", reason: "No such user." }
       }
 
-      if (!person.passwordEnabled) {
+      const lane = await (deps.mailLane?.(userId) ?? "unmanaged")
+      if (lane === "off") {
+        return {
+          status: "mail_signin_off",
+          reason:
+            "Your account signs in with single sign-on, and mail sign-in is not " +
+            "turned on for your connection yet. Ask your admin to turn on mail " +
+            'sign-in on the SSO connection page (Settings, Single sign-on, the connection, "Mail sign-in").',
+        }
+      }
+      if (lane === "unmanaged" && !person.passwordEnabled) {
         return {
           status: "password_required",
           reason:
@@ -299,6 +333,8 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
         }
       }
 
+      const displayName = input.display_name?.trim() || undefined
+
       // ⚠ WITH AN ALLOCATION, ACTIVATING AND ALLOCATING ARE ONE WRITE under the
       // pool lock, so the inbox is never live outside the pool and two creations
       // cannot both take the last of it. Without one there is nothing to
@@ -310,6 +346,7 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
           address,
           bytes: requested,
           activate: true,
+          ...(displayName !== undefined ? { displayName } : {}),
         })
         if (saved.status === "over_pool") {
           return {
@@ -328,7 +365,7 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
       const mailbox =
         requested !== undefined
           ? await deps.directory.current(userId)
-          : await deps.directory.activate(userId)
+          : await deps.directory.activate(userId, displayName)
       if (!mailbox) {
         return {
           status: "rejected",

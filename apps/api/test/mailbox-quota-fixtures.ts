@@ -123,7 +123,7 @@ export function memoryStore(
   used: Record<string, number> = {},
 ): AllocationStore {
   return {
-    async allocate({ tenantId, address, bytes, model, activate }) {
+    async allocate({ tenantId, address, bytes, model, activate, displayName }) {
       const rows = tenants[tenantId] ?? []
       const outcome = decideAllocation({
         model,
@@ -135,6 +135,8 @@ export function memoryStore(
         const row = rows.find((r) => r.address === address)!
         row.allocation = bytes
         if (activate) (row as { active?: boolean }).active = true
+        const name = displayName?.trim() || undefined
+        if (name !== undefined) row.display_name = name
       }
       return outcome
     },
