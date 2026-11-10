@@ -14,18 +14,11 @@
 # ONLY EVER DISABLES, never destroys. i10.tech and anything added by hand are
 # left alone; a hand-added domain we want is reported as "adopt".
 #
-# ⚠ AND IT REPORTS BEFORE IT WRITES. `MAIL_DOMAINS_RECONCILE_APPLY` is absent here
-# on purpose, so the first runs log the plan and change nothing. Read a few runs
-# of that log, then add
-#
-#   - name: MAIL_DOMAINS_RECONCILE_APPLY
-#     value: "true"
-#
-# ⚠ THE STALWART KEY MUST HOLD THE Domain PERMISSIONS before that is turned on:
-# `sysDomainGet`, `sysDomainQuery`, `sysDomainCreate` and `sysDomainUpdate`.
-# `STALWART_API_TOKEN` was created with three account-read permissions only
-# (docs/decisions/metering.md), so without them every write is refused and the
-# run fails loudly.
+# ⚠ IT WRITES SINCE 2026-11-11. The first runs reported only; their plans were
+# empty (prod held just i10.tech, which it never touches), and the Stalwart key
+# was granted `sysDomainGet`, `sysDomainQuery`, `sysDomainCreate` and
+# `sysDomainUpdate` the same day (docs/decisions/metering.md). Remove the
+# MAIL_DOMAINS_RECONCILE_APPLY entry below to go back to reporting only.
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -65,6 +58,8 @@ spec:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }
               env:
+                - name: MAIL_DOMAINS_RECONCILE_APPLY
+                  value: "true"
                 # ⚠ `i10_api`, NOT THE OWNER. The desired set is read through the
                 # SECURITY DEFINER `core.mailbox_domains()`, which this role may
                 # execute; a role that could see every tenant's rows is not needed.
