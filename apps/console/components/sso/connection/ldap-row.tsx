@@ -15,8 +15,8 @@ import type {
   SsoAbilities,
   SsoConnection,
 } from "@/lib/sso-types"
-import { Advanced, SettingsGroup, SettingsRow } from "../settings-card"
-import { isLocked, Loading, OwnerNote, useRemote, useSsoCall } from "../shared"
+import { SettingsGroup, SettingsRow } from "../settings-card"
+import { isLocked, OwnerNote, useSsoCall } from "../shared"
 import { LdapServiceAccount } from "./ldap-service-account"
 
 const TEST_RESULT: Record<LdapTestOutcome["result"], string> = {
@@ -29,37 +29,12 @@ const TEST_RESULT: Record<LdapTestOutcome["result"], string> = {
   user_bind_failed: "The person was found, but their password was refused.",
 }
 
-export function LdapRow({
-  connection,
-  abilities,
-}: {
-  connection: SsoConnection
-  abilities: SsoAbilities
-}) {
-  const { data, setData, failed } = useRemote(() => ldapSetup(connection.id))
-
-  return (
-    <Advanced
-      label="Mail access (LDAP pass-through)"
-      summary={
-        data?.enabled ? "Pass-through active" : "Check mail passwords against LDAP"
-      }
-    >
-      {!data ? (
-        <Loading failed={failed} />
-      ) : (
-        <LdapContent
-          connection={connection}
-          abilities={abilities}
-          data={data}
-          setData={setData}
-        />
-      )}
-    </Advanced>
-  )
-}
-
-function LdapContent({
+/**
+ * The body of the LDAP lane of "Mail sign-in" (mail-sign-in.tsx), which owns
+ * the data and the choice of lane. It was the body of an Advanced row; nothing
+ * about what it does changed when it moved.
+ */
+export function LdapContent({
   connection,
   abilities,
   data,

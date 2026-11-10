@@ -16,5 +16,36 @@
       { "do": "click", "name": "Remove hello.com", "window": 1500 },
       { "do": "click", "name": "Change", "window": 2000 }
     ]
+  },
+  {
+    "name": "sso-mail-lane-switch",
+    "steps": [
+      { "do": "goto", "url": "/settings/sso/conn_okta_oidc", "window": false },
+      { "do": "wait", "ms": 2000 },
+      {
+        "do": "click",
+        "role": "radio",
+        "name": "Password check at Okta",
+        "exact": false,
+        "window": 1500
+      },
+      {
+        "do": "click",
+        "role": "radio",
+        "name": "Directory password check",
+        "exact": false,
+        "window": 1500
+      },
+      { "do": "click", "role": "radio", "name": "Off", "exact": false, "window": 1200 }
+    ]
+  },
+  {
+    "name": "sso-mail-hook-secret",
+    "steps": [
+      { "do": "goto", "url": "/settings/sso/conn_okta_oidc", "window": false },
+      { "do": "wait", "ms": 2000 },
+      { "do": "click", "name": "Create secret", "window": 1500 },
+      { "do": "click", "name": "I have stored it", "window": 1500 }
+    ]
   }
 ]

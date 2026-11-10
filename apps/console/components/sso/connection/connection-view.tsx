@@ -9,7 +9,7 @@ import { DomainsRow } from "./domains-row"
 import { Enforcement } from "./enforcement"
 import { GroupRulesGroup } from "./group-rules-group"
 import { Header } from "./header"
-import { LdapRow } from "./ldap-row"
+import { MailSignIn, type MailSignInInitial } from "./mail-sign-in"
 import { NewPeopleGroup } from "./new-people-group"
 import { ProviderSettings } from "./provider-settings"
 import { SessionsGroup } from "./sessions-group"
@@ -19,11 +19,13 @@ import { UniversalLogoutRow } from "./universal-logout-row"
 
 export function ConnectionView({
   initial,
+  mail,
   abilities,
   authOrigin,
   clerkEnabled,
 }: {
   initial: SsoConnection
+  mail: MailSignInInitial
   abilities: SsoAbilities
   authOrigin: string | null
   clerkEnabled: boolean
@@ -81,6 +83,11 @@ export function ConnectionView({
       </div>
 
       <div className="space-y-2">
+        <h3 className="text-sm font-medium">Mail sign-in</h3>
+        <MailSignIn connection={connection} abilities={abilities} initial={mail} />
+      </div>
+
+      <div className="space-y-2">
         <h3 className="text-sm font-medium">Roles from groups</h3>
         <GroupRulesGroup connection={connection} abilities={abilities} />
       </div>
@@ -94,7 +101,6 @@ export function ConnectionView({
         <h3 className="text-sm font-medium text-muted-foreground">Advanced settings</h3>
         <ProviderSettings connection={connection} abilities={abilities} />
         <SetupLinksRow connection={connection} authOrigin={authOrigin} />
-        <LdapRow connection={connection} abilities={abilities} />
         {connection.provider === "okta" && (
           <UniversalLogoutRow connection={connection} />
         )}

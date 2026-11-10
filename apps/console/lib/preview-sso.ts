@@ -14,7 +14,11 @@ import type {
   LdapTestOutcome,
   LeaverDefault,
   Mailboxes,
+  OidcMailPresetInfo,
+  OidcMailSetup,
   OidcSetup,
+  OktaHookMade,
+  OktaHookSetup,
   OwnerExemption,
   RelinkRequest,
   RotatedDeprovisionedKey,
@@ -163,6 +167,35 @@ export const PREVIEW_CONNECTIONS: SsoConnection[] = [
       mfaSetting: null,
       freshAuthSetting: null,
       mfaUnprovableReason: "Google does not include an AMR claim on standard tokens.",
+    },
+  },
+  {
+    // An Okta connection with nothing set up for mail: the lanes are both off and
+    // there is no event hook secret yet.
+    id: "conn_okta_oidc",
+    name: "Okta (OIDC)",
+    protocol: "oidc",
+    provider: "okta",
+    status: "active",
+    enforcement: "optional",
+    jitEnabled: false,
+    mfaRequired: false,
+    relink: "ask",
+    upnAsEmail: false,
+    maxSessionSeconds: null,
+    idleTimeoutSeconds: null,
+    attributeMapping: { email: "email" },
+    domains: [{ joinDomainId: "dom_acme_dev_01", name: "acme.dev", live: true }],
+    directoryState: "none",
+    health: null,
+    universalLogoutUrl: null,
+    capabilities: {
+      label: "Okta",
+      canProveMfa: "with_setting",
+      canProveFreshAuth: "yes",
+      mfaSetting: "mfa",
+      freshAuthSetting: "pwd",
+      mfaUnprovableReason: null,
     },
   },
   {
@@ -651,6 +684,27 @@ const SETUP_LINKS: Record<string, SetupLink[]> = {
 }
 
 const OIDC_SETUPS: Record<string, OidcSetup> = {
+  conn_okta_oidc: {
+    provider: "okta",
+    label: "Okta",
+    redirectUri: "https://auth.example.com/sso/oidc/conn_okta_oidc/callback",
+    jwksUrl: "https://auth.example.com/sso/oidc/conn_okta_oidc/jwks",
+    issuerHint: "https://your-org.okta.com",
+    requires: ["issuer", "clientId", "clientSecret"],
+    clientAuthMethods: ["client_secret_basic", "client_secret_post"],
+    defaults: { scopes: ["openid", "email", "profile"] },
+    issuer: "https://acme.okta.com",
+    discoveryUrl: "https://acme.okta.com/.well-known/openid-configuration",
+    clientId: "0oa4preview0000000001",
+    clientAuth: "client_secret_basic",
+    scopes: ["openid", "email", "profile"],
+    acrValues: [],
+    mfaAcrValues: [],
+    clientSecretSet: true,
+    secretExpiresAt: null,
+    keys: [],
+    ready: true,
+  },
   conn_google_oidc: {
     provider: "google",
     label: "Google Workspace",
@@ -823,7 +877,50 @@ const SAML_SETUPS: Record<string, SamlSetup> = {
   },
 }
 
+const LDAP_PORTS_AND_MODES = {
+  ports: [389, 636],
+  tlsModes: ["ldaps", "starttls"],
+  filterPlaceholder: "(uid={input})",
+  results: [
+    "ok",
+    "unreachable",
+    "tls_failed",
+    "service_bind_failed",
+    "user_not_found",
+    "user_bind_failed",
+  ],
+}
+
+const LDAP_BLANK: LdapSetup = {
+  host: null,
+  port: null,
+  tlsMode: null,
+  caPem: null,
+  searchBase: null,
+  userFilter: null,
+  enabled: false,
+  serviceSet: false,
+  tested: false,
+  testedAt: null,
+  testValidSeconds: 300,
+  ...LDAP_PORTS_AND_MODES,
+}
+
 const LDAP_SETUPS: Record<string, LdapSetup> = {
+  // LDAP pass-through ON: a connection whose people's mail passwords are checked
+  // against the company directory.
+  conn_custom_oidc: {
+    ...LDAP_BLANK,
+    host: "ldap.internal.acme.dev",
+    port: 636,
+    tlsMode: "ldaps",
+    searchBase: "ou=people,dc=acme,dc=dev",
+    userFilter: "(uid={input})",
+    enabled: true,
+    serviceSet: true,
+    tested: true,
+    testedAt: ago(0, 2),
+  },
   conn_okta_saml: {
     host: "ldap.internal.acme.dev",
     port: 636,
@@ -1104,7 +1201,186 @@ const IDENTITY_EVENTS: IdentityEvent[] = [
   },
 ]
 
+// ── Mail sign-in: OIDC password check and the Okta event hook ───────────────
+
+/** Mirrors OIDC_MAIL_CATALOG in apps/api/src/identity/oidc-mail.ts. */
+const SCOPE_FIELD = { key: "scope", label: "Scope (default: openid)" }
+const OIDC_MAIL_PRESETS: OidcMailPresetInfo[] = [
+  {
+    id: "okta",
+    label: "Okta",
+    issuerHint: "https://your-org.okta.com/oauth2/default",
+    clientIdHint: "0oa1b2c3d4e5f6g7h8i9",
+    extras: [SCOPE_FIELD],
+  },
+  {
+    id: "keycloak",
+    label: "Keycloak",
+    issuerHint: "https://sso.example.com/realms/your-realm",
+    clientIdHint: "mail-client",
+    extras: [SCOPE_FIELD],
+  },
+  {
+    id: "auth0",
+    label: "Auth0",
+    issuerHint: "https://your-tenant.auth0.com",
+    clientIdHint: "Zk3q9XvYw0aB5cD7eF1gH2iJ4kL6mN8o",
+    extras: [
+      { key: "audience", label: "Audience (API identifier)" },
+      { key: "realm", label: "Realm (connection name)" },
+      SCOPE_FIELD,
+    ],
+  },
+  {
+    id: "ping",
+    label: "PingFederate",
+    issuerHint: "https://auth.example.com",
+    clientIdHint: "mail-client",
+    extras: [
+      { key: "validator_id", label: "Password credential validator id" },
+      SCOPE_FIELD,
+    ],
+  },
+  {
+    id: "fusionauth",
+    label: "FusionAuth",
+    issuerHint: "https://auth.example.com",
+    clientIdHint: "85a03867-dccf-4882-adde-1a79aeec50df",
+    extras: [SCOPE_FIELD],
+  },
+  {
+    id: "generic",
+    label: "Other OpenID Connect provider",
+    issuerHint: "https://idp.example.com",
+    clientIdHint: "mail-client",
+    extras: [
+      { key: "audience", label: "Audience" },
+      { key: "resource", label: "Resource" },
+      SCOPE_FIELD,
+    ],
+  },
+]
+
+/** Mirrors DEFAULT_PRESET there: null is a provider with no OIDC mail lane. */
+const OIDC_MAIL_DEFAULT: Record<string, string | null> = {
+  okta: "okta",
+  ping: "ping",
+  jumpcloud: "generic",
+  generic: "generic",
+  entra: null,
+  google: null,
+  onelogin: null,
+}
+
+const OIDC_MAIL_BLANK: Omit<OidcMailSetup, "defaultPreset" | "available"> = {
+  preset: null,
+  presets: OIDC_MAIL_PRESETS,
+  issuer: null,
+  clientId: null,
+  tokenEndpoint: null,
+  extra: {},
+  enabled: false,
+  ldapEnabled: false,
+}
+
+/** OIDC mail ON, on the Okta SAML connection. The others start with nothing saved. */
+const OIDC_MAIL_SEEDS: Record<string, Partial<OidcMailSetup>> = {
+  conn_okta_saml: {
+    preset: "okta",
+    issuer: "https://acme.okta.com/oauth2/default",
+    clientId: "0oa1b2c3d4e5f6g7h8i9",
+    tokenEndpoint: "https://acme.okta.com/oauth2/default/v1/token",
+    enabled: true,
+  },
+}
+
+/** The Okta SAML connection has a secret; the Okta OIDC one has none yet. */
+const HOOK_EVENTS = [
+  "user.account.update_password",
+  "user.account.reset_password",
+  "user.lifecycle.suspend",
+  "user.lifecycle.deactivate",
+  "user.lifecycle.delete.initiated",
+  "user.account.lock",
+  "user.session.clear",
+  "application.user_membership.remove",
+  "policy.rule.add",
+  "policy.rule.update",
+]
+
+function hookFor(id: string): OktaHookSetup {
+  const held = walk.hooks.get(id)
+  if (held) return held
+  const withSecret = id === "conn_okta_saml"
+  const made: OktaHookSetup = {
+    url: `https://api.example.com/webhooks/okta/${id}`,
+    header: "Authorization",
+    secretSet: withSecret,
+    hint: withSecret ? "i10_okh_9f3c" : null,
+    issuedAt: withSecret ? ago(6) : null,
+    events: HOOK_EVENTS,
+  }
+  walk.hooks.set(id, made)
+  return made
+}
+
+function ldapFor(id: string): LdapSetup {
+  const held = walk.ldap.get(id)
+  if (held) return held
+  const made = { ...(LDAP_SETUPS[id] ?? LDAP_BLANK) }
+  walk.ldap.set(id, made)
+  return made
+}
+
+function oidcMailFor(id: string, provider: string): OidcMailSetup {
+  let held = walk.mail.get(id)
+  if (!held) {
+    const fallback = OIDC_MAIL_DEFAULT[provider] ?? null
+    held = {
+      ...OIDC_MAIL_BLANK,
+      ...OIDC_MAIL_SEEDS[id],
+      defaultPreset: fallback,
+      available: fallback !== null,
+    }
+    walk.mail.set(id, held)
+  }
+  return { ...held, ldapEnabled: ldapFor(id).enabled }
+}
+
+/**
+ * What the API does with a PUT: a change to any setting turns the lane off and
+ * reads the token endpoint from the issuer; `enabled` is its own move.
+ */
+function saveOidcMailWalk(id: string, provider: string, body: Partial<OidcMailSetup>) {
+  const held = oidcMailFor(id, provider)
+  const next: OidcMailSetup = { ...held }
+  let changed = false
+  for (const key of ["preset", "issuer", "clientId"] as const) {
+    if (body[key] !== undefined && body[key] !== held[key]) {
+      next[key] = body[key]
+      changed = true
+    }
+  }
+  if (
+    body.extra !== undefined &&
+    JSON.stringify(body.extra) !== JSON.stringify(held.extra)
+  ) {
+    next.extra = body.extra
+    changed = true
+  }
+  if (changed) {
+    next.enabled = false
+    next.tokenEndpoint = next.issuer ? `${next.issuer}/v1/token` : null
+  }
+  if (body.enabled !== undefined) next.enabled = body.enabled
+  walk.mail.set(id, next)
+  return oidcMailFor(id, provider)
+}
+
 type WalkThrough = {
+  mail: Map<string, OidcMailSetup>
+  hooks: Map<string, OktaHookSetup>
+  ldap: Map<string, LdapSetup>
   created: Map<string, SsoConnection>
   oidc: Map<string, OidcSetup>
   saml: Map<string, SamlSetup>
@@ -1138,6 +1414,9 @@ function accessDomain(name: string, source: AccessDomain["source"]): AccessDomai
  */
 const scope = globalThis as unknown as { __ssoPreviewWalk?: WalkThrough }
 const walk = (scope.__ssoPreviewWalk ??= {
+  mail: new Map(),
+  hooks: new Map(),
+  ldap: new Map(),
   created: new Map(),
   oidc: new Map(),
   saml: new Map(),
@@ -1725,32 +2004,20 @@ export function ssoRoutes(notFound: unknown): Route[] {
       /^\/console\/identity\/connections\/([^/]+)\/ldap$/,
       (m, _query, method, body) => {
         if (findConn(m[1]!) === notFound) return notFound
-        const current = LDAP_SETUPS[m[1]!] ?? {
-          host: null,
-          port: null,
-          tlsMode: null,
-          caPem: null,
-          searchBase: null,
-          userFilter: null,
-          enabled: false,
-          serviceSet: false,
-          tested: false,
-          testedAt: null,
-          testValidSeconds: 300,
-          ports: [389, 636],
-          tlsModes: ["ldaps", "starttls"],
-          filterPlaceholder: "(uid={input})",
-          results: [
-            "ok",
-            "unreachable",
-            "tls_failed",
-            "service_bind_failed",
-            "user_not_found",
-            "user_bind_failed",
-          ],
-        }
+        const current = ldapFor(m[1]!)
         if (method === "PUT") {
-          return { ...current, ...(body as object) }
+          const change = (body ?? {}) as Partial<LdapSetup>
+          // A change to a setting turns pass-through off and clears the test, as the API does.
+          const { enabled, ...settings } = change
+          const moved = Object.keys(settings).length > 0
+          const next: LdapSetup = {
+            ...current,
+            ...settings,
+            ...(moved ? { enabled: false, tested: false, testedAt: null } : {}),
+            ...(enabled !== undefined ? { enabled } : {}),
+          }
+          walk.ldap.set(m[1]!, next)
+          return next
         }
         return current
       },
@@ -1759,17 +2026,76 @@ export function ssoRoutes(notFound: unknown): Route[] {
       /^\/console\/identity\/connections\/([^/]+)\/ldap\/service$/,
       (m) => {
         if (findConn(m[1]!) === notFound) return notFound
-        const current = LDAP_SETUPS[m[1]!]
-        if (!current) return notFound
-        return { ...current, serviceSet: true }
+        const next: LdapSetup = {
+          ...ldapFor(m[1]!),
+          serviceSet: true,
+          enabled: false,
+          tested: false,
+          testedAt: null,
+        }
+        walk.ldap.set(m[1]!, next)
+        return next
       },
     ],
     [
       /^\/console\/identity\/connections\/([^/]+)\/ldap\/test$/,
       (m) => {
         if (findConn(m[1]!) === notFound) return notFound
+        walk.ldap.set(m[1]!, {
+          ...ldapFor(m[1]!),
+          tested: true,
+          testedAt: new Date().toISOString(),
+        })
         const result: LdapTestOutcome = { result: "ok", recorded: true }
         return result
+      },
+    ],
+    [
+      /^\/console\/identity\/connections\/([^/]+)\/oidc-mail$/,
+      (m, _query, method, body) => {
+        const conn = findConn(m[1]!)
+        if (conn === notFound) return notFound
+        const { provider } = conn as SsoConnection
+        return method === "PUT"
+          ? saveOidcMailWalk(m[1]!, provider, (body ?? {}) as Partial<OidcMailSetup>)
+          : oidcMailFor(m[1]!, provider)
+      },
+    ],
+    [
+      /^\/console\/identity\/connections\/([^/]+)\/okta-event-hook$/,
+      (m) => {
+        const conn = findConn(m[1]!)
+        if (conn === notFound || (conn as SsoConnection).provider !== "okta")
+          return notFound
+        return hookFor(m[1]!)
+      },
+    ],
+    [
+      /^\/console\/identity\/connections\/([^/]+)\/okta-event-hook\/secret$/,
+      (m, _query, method) => {
+        const conn = findConn(m[1]!)
+        if (conn === notFound || (conn as SsoConnection).provider !== "okta")
+          return notFound
+        if (method === "DELETE") {
+          const next: OktaHookSetup = {
+            ...hookFor(m[1]!),
+            secretSet: false,
+            hint: null,
+            issuedAt: null,
+          }
+          walk.hooks.set(m[1]!, next)
+          return next
+        }
+        const secret = `i10_okh_${"b7e2".repeat(15)}`
+        const next: OktaHookSetup = {
+          ...hookFor(m[1]!),
+          secretSet: true,
+          hint: secret.slice(0, 12),
+          issuedAt: new Date().toISOString(),
+        }
+        walk.hooks.set(m[1]!, next)
+        const made: OktaHookMade = { ...next, secret }
+        return made
       },
     ],
     [/^\/console\/identity\/owner-exemption$/, () => OWNER_EXEMPTION],
