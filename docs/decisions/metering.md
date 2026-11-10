@@ -564,11 +564,17 @@ WHICH IS WHY THERE IS A SERVICE ACCOUNT AT ALL.** It sits in an account's
 and hanging a cron job's credential off it would entangle revoking the job with
 their mailbox.
 
-⚠ **THREE PERMISSIONS OUT OF 660.** `authenticate`, `sysAccountGet`,
+⚠ **THREE PERMISSIONS OUT OF 660 (at creation; see below).** `authenticate`, `sysAccountGet`,
 `sysAccountQuery` - exactly what the two method calls need, and nothing else:
 no mail access, no writes, no configuration. The account carries them as
 `permissions: {"@type": "Replace", …}` and the key inherits, so the grant has
 one home rather than two that can drift.
+
+**2026-11-11:** the same key now also runs the mail domain reconcile (#405), so
+the account gained `sysDomainGet`, `sysDomainQuery`, `sysDomainCreate` and
+`sysDomainUpdate` (not `sysDomainDestroy`). It also already held three
+`sysOAuthGrant*` permissions that this note did not list. Still no mail access
+and no other configuration writes.
 
 ⚠ **AND NO `expiresAt`.** A cron job that stops silently on a date nobody
 remembers is worse than a long-lived key whose blast radius is three read
