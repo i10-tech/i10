@@ -10,6 +10,7 @@ import type {
   ContactRow,
   CreatedApiKey,
   Domain,
+  DomainMailboxes,
   PropertyRow,
   SegmentRow,
   TemplateDetail,
@@ -290,6 +291,40 @@ export async function updateDomainTracking(
       api(`/console/domains/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: change,
+      }),
+    [`/domains/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
+ * Turns mailbox hosting on or off for one domain (#406).
+ */
+export async function setDomainMailboxes(id: string, enabled: boolean) {
+  return run(
+    () =>
+      api<{
+        mailboxes: DomainMailboxes
+        stalwart: "synced" | "pending" | "unmanaged"
+      }>(`/console/domains/${encodeURIComponent(id)}/mailboxes`, {
+        method: "PUT",
+        body: { enabled },
+      }),
+    [`/domains/${encodeURIComponent(id)}`, "/domains"],
+  )
+}
+
+/**
+ * Sets or clears the catch-all address for one domain (#406).
+ */
+export async function setDomainCatchAll(id: string, address: string | null) {
+  return run(
+    () =>
+      api<{
+        mailboxes: DomainMailboxes
+        stalwart: "synced" | "pending" | "unmanaged"
+      }>(`/console/domains/${encodeURIComponent(id)}/catch-all`, {
+        method: "PUT",
+        body: { address },
       }),
     [`/domains/${encodeURIComponent(id)}`],
   )

@@ -1,4 +1,4 @@
-import { normaliseError, type ApiError } from "./api-error"
+import { normaliseError, type ApiError, ApiRequestError } from "./api-error"
 import "server-only"
 import { auth } from "@clerk/nextjs/server"
 import { safeFailure } from "@/lib/failure"
@@ -79,16 +79,7 @@ function baseUrl(): string {
 // that guarantees its shape - see ./api-error - and a dozen files import it
 // from here.
 export type { ApiError }
-
-export class ApiRequestError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: ApiError,
-  ) {
-    super(body.message)
-    this.name = "ApiRequestError"
-  }
-}
+export { ApiRequestError } from "./api-error"
 
 interface RequestOptions {
   method?: string

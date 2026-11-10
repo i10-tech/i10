@@ -33,8 +33,10 @@
  * protection is that turning it on is deliberate.
  */
 
+import { ApiRequestError } from "@/lib/api-error"
 import { ssoRoutes } from "@/lib/preview-sso"
 import { webhookRoutes } from "@/lib/preview-webhooks"
+import type { DomainMailboxes } from "@/lib/types"
 
 export const PREVIEW =
   process.env.NODE_ENV !== "production" && process.env.CONSOLE_PREVIEW === "1"
@@ -157,6 +159,13 @@ const DOMAINS = [
     // both states side by side.
     open_tracking: true,
     click_tracking: false,
+    mailboxes: {
+      enabled: true,
+      owned: true,
+      sending: true,
+      catch_all: "help@acme.com",
+      count: 2,
+    },
   },
   {
     object: "domain" as const,
@@ -168,6 +177,14 @@ const DOMAINS = [
     delegated: false,
     open_tracking: false,
     click_tracking: false,
+    mailboxes: {
+      enabled: true,
+      owned: true,
+      sending: false,
+      catch_all: null,
+      count: 1,
+    },
+    stalwart: "pending" as const,
   },
   {
     object: "domain" as const,
@@ -179,6 +196,50 @@ const DOMAINS = [
     delegated: false,
     open_tracking: false,
     click_tracking: false,
+    displaced_at: ago(12),
+    mailboxes: {
+      enabled: false,
+      owned: false,
+      sending: false,
+      catch_all: null,
+      count: 0,
+    },
+  },
+  {
+    object: "domain" as const,
+    id: "1f7a1c00-0000-4000-8000-000000000004",
+    name: "off.acme.dev",
+    status: "verified",
+    created_at: ago(45),
+    region: "us-east-1",
+    delegated: true,
+    open_tracking: false,
+    click_tracking: false,
+    mailboxes: {
+      enabled: false,
+      owned: true,
+      sending: true,
+      catch_all: null,
+      count: 0,
+    },
+  },
+  {
+    object: "domain" as const,
+    id: "1f7a1c00-0000-4000-8000-000000000005",
+    name: "sending.acme.io",
+    status: "verified",
+    created_at: ago(30),
+    region: "us-east-1",
+    delegated: true,
+    open_tracking: false,
+    click_tracking: false,
+    mailboxes: {
+      enabled: true,
+      owned: true,
+      sending: true,
+      catch_all: null,
+      count: 3,
+    },
   },
 ]
 
@@ -188,6 +249,13 @@ const NEW_DOMAIN_PREVIEW = {
   name: "mytest.com",
   status: "not_started" as const,
   delegated: false,
+  mailboxes: {
+    enabled: false,
+    owned: false,
+    sending: false,
+    catch_all: null,
+    count: 0,
+  },
 }
 
 function findDomain(id: string | undefined) {
@@ -1120,6 +1188,116 @@ const ROUTES: [
             ? `You have already added ${name}, and it ${held.status === "verified" ? "is verified" : held.status === "failed" ? "failed verification - open it to fix the records" : "is waiting for verification"}.`
             : null
       return { name, refusal }
+    },
+  ],
+
+  [
+    /^\/console\/team-inboxes$/,
+    () => ({
+      data: [
+        {
+          object: "team_inbox",
+          address: "support@acme.com",
+          display_name: "Support Team",
+          members: [{ address: "alex@acme.com" }],
+          created_at: ago(100),
+        },
+        {
+          object: "team_inbox",
+          address: "billing@acme.com",
+          display_name: "Billing",
+          members: [{ address: "alex@acme.com" }],
+          created_at: ago(50),
+        },
+      ],
+    }),
+  ],
+
+  [
+    /^\/console\/mailboxes\/storage$/,
+    () => ({
+      pool: { total_bytes: 53687091200, allocated_bytes: 10737418240 },
+      data: [
+        {
+          address: "alex@acme.com",
+          display_name: "Alex Smith",
+          storage_allocated: 5368709120,
+        },
+        {
+          address: "help@acme.com",
+          display_name: "Help Desk",
+          storage_allocated: 5368709120,
+        },
+      ],
+    }),
+  ],
+
+  [
+    /^\/console\/domains\/([^/]+)\/mailboxes$/,
+    (m, _q, _method, body) => {
+      const domain = findDomain(m[1])
+      if (!domain) return PREVIEW_NOT_FOUND
+      const payload = (body ?? {}) as { enabled?: boolean }
+      if (domain.displaced_at) {
+        throw new ApiRequestError(409, {
+          statusCode: 409,
+          name: "domain_not_held",
+          reason: "displaced",
+          message:
+            "Another workspace proved this domain, so it can't host mailboxes here.",
+        } as unknown as { statusCode: number; name: string; message: string })
+      }
+      if (domain.mailboxes && !domain.mailboxes.owned) {
+        throw new ApiRequestError(409, {
+          statusCode: 409,
+          name: "domain_not_held",
+          reason: "unowned",
+          message: "Prove you own this domain first.",
+        } as unknown as { statusCode: number; name: string; message: string })
+      }
+      if (typeof payload.enabled === "boolean") {
+        const current = (domain as { mailboxes?: DomainMailboxes }).mailboxes ?? {
+          enabled: false,
+          owned: true,
+          sending: true,
+          catch_all: null,
+          count: 0,
+        }
+        current.enabled = payload.enabled
+        ;(domain as { mailboxes?: DomainMailboxes }).mailboxes = current
+      }
+      return {
+        mailboxes: (domain as { mailboxes?: DomainMailboxes }).mailboxes,
+        stalwart:
+          (domain as { stalwart?: "synced" | "pending" | "unmanaged" }).stalwart ??
+          "synced",
+      }
+    },
+  ],
+
+  [
+    /^\/console\/domains\/([^/]+)\/catch-all$/,
+    (m, _q, _method, body) => {
+      const domain = findDomain(m[1])
+      if (!domain) return PREVIEW_NOT_FOUND
+      const payload = (body ?? {}) as { address?: string | null }
+      if ("address" in payload) {
+        const current = (domain as { mailboxes?: DomainMailboxes }).mailboxes ?? {
+          enabled: true,
+          owned: true,
+          sending: true,
+          catch_all: null,
+          count: 0,
+        }
+        current.catch_all = payload.address ?? null
+        ;(domain as { mailboxes?: DomainMailboxes }).mailboxes = current
+      }
+      return {
+        mailboxes: (domain as { mailboxes?: DomainMailboxes }).mailboxes,
+        stalwart:
+          (domain as { stalwart?: "synced" | "pending" | "unmanaged" }).stalwart ??
+          "synced",
+      }
     },
   ],
 
