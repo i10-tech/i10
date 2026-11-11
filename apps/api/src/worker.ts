@@ -16,6 +16,7 @@ import { postgresMetering } from "./metering/service.js"
 import { resilient } from "./send/metering.js"
 import { SmtpTransport } from "@upyo/smtp"
 import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
+import { feedbackTokens } from "./send/feedback-id.js"
 import { sesTransport } from "./send/ses.js"
 import { systemTenancy, withSystemTenant } from "./send/system-tenant.js"
 import { sesIdentity } from "./domains/identity.js"
@@ -129,6 +130,19 @@ queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailabl
 
 const sesClient = new SESv2Client({ region: env.AWS_REGION })
 
+// ⚠ ONE DERIVATION FOR BOTH ROUTES, KEYED WITH THE SAME SECRET THAT SEALS THE
+// DKIM KEYS. Without it mail still sends, only without a workspace token in its
+// Feedback-ID - see send/feedback-id.ts. A warning rather than a refusal, since
+// the loss is Gmail complaint detail, not mail.
+const feedbackToken = env.WEBHOOK_SECRET_KEY
+  ? feedbackTokens(env.WEBHOOK_SECRET_KEY)
+  : undefined
+if (!feedbackToken) {
+  log.warn(
+    "WEBHOOK_SECRET_KEY unset - mail sends without a per-workspace Feedback-ID, so Gmail complaints cannot be attributed to a workspace",
+  )
+}
+
 /*
  * ⚠ OUR OWN MAIL NAMES ITS TENANT HERE, NOT IN THE CLAIM (#206). Customer mail
  * takes its tenant from its domain row; ours has none by design - its sender
@@ -139,6 +153,7 @@ const ses = withSystemTenant(
   sesTransport({
     client: sesClient,
     configurationSetName: env.SES_CONFIGURATION_SET,
+    feedbackToken,
   }),
   systemTenancy({
     from: env.AUTH_EMAIL_FROM,
@@ -208,6 +223,7 @@ function directTransport(): Transport {
 
   return stalwartTransport({
     mailer: relayPool,
+    feedbackToken,
     // ⚠ SMTP CAN TAKE A MESSAGE AND STILL REFUSE SOME OF ITS RECIPIENTS, and
     // before upyo we could not see it happen. `warn` rather than `error`: the
     // message was delivered to everyone else, so this is not a failed send - it

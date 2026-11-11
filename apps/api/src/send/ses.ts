@@ -4,6 +4,7 @@ import {
   type SendEmailCommandInput,
 } from "@aws-sdk/client-sesv2"
 import { configurationSetFor, NO_TRACKING } from "./configuration-sets.js"
+import { SES_FEEDBACK_TAG, type FeedbackTokens } from "./feedback-id.js"
 import { buildRawMessage } from "./mime.js"
 import { type OutboundMessage, type SendOutcome, type Transport } from "./transport.js"
 
@@ -42,6 +43,14 @@ export interface SesTransportOptions {
    * safety net.
    */
   configurationSetName?: string
+  /**
+   * The workspace's Feedback-ID token (send/feedback-id.ts), or unset for none.
+   *
+   * ⚠ UNSET SENDS WITHOUT ONE RATHER THAN FAILING. SES still writes its own
+   * `Feedback-ID`, so Gmail complaints are then reported per AWS account and not
+   * per workspace - a visible loss of detail, not a lost message.
+   */
+  feedbackToken?: FeedbackTokens
 }
 
 export function sesTransport(opts: SesTransportOptions): Transport {
@@ -49,7 +58,13 @@ export function sesTransport(opts: SesTransportOptions): Transport {
     async send(message: OutboundMessage): Promise<SendOutcome> {
       try {
         const result = await opts.client.send(
-          new SendEmailCommand(toSesInput(message, opts.configurationSetName)),
+          new SendEmailCommand(
+            toSesInput(
+              message,
+              opts.configurationSetName,
+              opts.feedbackToken?.(message.tenantId),
+            ),
+          ),
         )
 
         // A 200 with no MessageId is not something SES documents, but treating
@@ -70,6 +85,7 @@ export function sesTransport(opts: SesTransportOptions): Transport {
 function toSesInput(
   m: OutboundMessage,
   configurationSetName?: string,
+  feedbackToken?: string,
 ): SendEmailCommandInput {
   return {
     FromEmailAddress: m.from,
@@ -96,7 +112,7 @@ function toSesInput(
     // ⚠ AND ITS VALUE IS CONSTRAINED. SES allows only letters, digits, hyphens
     // and underscores in a tag value, so a raw UUID with its dashes is fine and
     // anything prefixed like `msg_…` would be rejected at send time.
-    EmailTags: buildTags(m),
+    EmailTags: buildTags(m, feedbackToken),
 
     Content: content(m),
   }
@@ -139,10 +155,21 @@ function content(m: OutboundMessage): SendEmailCommandInput["Content"] {
  * they describe - and suppression, which is built from those events, would stop
  * working for exactly the sends that need it. The contract already refuses an
  * `i10_` prefix; this is the second lock on the same door.
+ *
+ * ⚠ SO IS THE FEEDBACK-ID TAG, WHICH SES FOLDS INTO THE `Feedback-ID` HEADER IT
+ * WRITES (`a:b:<region.account>:AmazonSES`; AWS fixes the last two fields).
+ * It is reserved even when we have no token to set, so a caller's tag of that
+ * name never reaches SES. The contract's tag charset has no colon and cannot
+ * produce it anyway; mime.ts closes the other way in, the `X-SES-MESSAGE-TAGS`
+ * header.
  */
-function buildTags(m: OutboundMessage): { Name: string; Value: string }[] {
+function buildTags(
+  m: OutboundMessage,
+  feedbackToken?: string,
+): { Name: string; Value: string }[] {
   const tags = [{ Name: "i10_message_id", Value: m.id }]
-  const seen = new Set(["i10_message_id"])
+  const seen = new Set(["i10_message_id", SES_FEEDBACK_TAG, "ses:feedback-id-b"])
+  if (feedbackToken) tags.push({ Name: SES_FEEDBACK_TAG, Value: feedbackToken })
 
   for (const tag of m.tags ?? []) {
     if (seen.has(tag.name)) continue
