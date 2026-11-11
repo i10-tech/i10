@@ -1,0 +1,288 @@
+# Datasets for the risk evaluation set
+
+Research done on 2026-11-11, from the primary source of each dataset (its own
+page, README, LICENSE file or API record), not from a mirror or a paper's
+summary of it. Where a primary page could not be read the entry says so and the
+terms are "no terms found"; nothing here is inferred.
+
+i10 is a commercial product, so "non-commercial" licences are treated as
+**not usable**. The verdict vocabulary:
+
+- **training ok**: the terms permit commercial use of the data, including to train.
+- **internal evaluation**: the source says the data is for testing or research
+  use, with no licence that clearly extends to training or redistribution.
+- **unclear**: no terms found, or terms that do not settle the question.
+- **not usable**: the terms forbid our use.
+
+`fetch` enforces this: it only fetches datasets whose verdict is "training ok"
+or "internal evaluation", an "unclear" one needs `--accept-unclear <id>` on that
+run, and a "not usable" one cannot be fetched at all.
+
+## Summary
+
+| Dataset                                                      | Contents                                                                                   | Years                       | Languages                   | Size                                                         | Obtained                                | Verdict                                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | --------------------------- | --------------------------- | ------------------------------------------------------------ | --------------------------------------- | --------------------------------------------------------------------------- |
+| [Nazario phishing corpus][nazario]                           | Real phishing from one inbox, hand classified                                              | 2005-2007, 2015-2025        | Mostly English, some others | 8,026 parsed (6,468 after dedup), about 140 MB               | Scripted, `nazario`                     | **training ok** (CC-BY-4.0)                                                 |
+| [SpamAssassin public corpus][sa]                             | Real spam and non-spam ("easy" and "hard" ham)                                             | 2002-2003, one fix 2005     | English                     | 6,047 per its README; 6,046 parsed; 7 MB                     | Scripted, `spamassassin`                | **internal evaluation**                                                     |
+| [Untroubled.org spam archive][untroubled]                    | Spam caught by bait addresses, one message per file                                        | 1998-2026 (2019-2026 used)  | Many                        | 10,200 sampled (9,670 after dedup) of the 2019-2026 archives | Scripted, `untroubled`                  | **training ok** ("without restriction")                                     |
+| [Phishing Emails Multilingual (ID/EN)][hf-synth]             | 600 synthetic phishing and benign mails                                                    | none (synthetic)            | Indonesian, English         | 600 (391 after dedup), 191 KB                                | Scripted, `hf-multilingual-synth`       | **training ok** (MIT, per its card)                                         |
+| [Phishing Email Curated Datasets][zenodo]                    | 11 CSVs merging Enron, Ling, CEAS-08, TREC-05/06/07, SpamAssassin, Nazario, Nigerian fraud | 1995-2022                   | English                     | 449 MB                                                       | Scripted but gated, `zenodo-curated`    | **unclear** (CC-BY-4.0 compilation, sources keep their own terms)           |
+| [Kaggle "Phishing Email Dataset"][kaggle82]                  | About 82,500 mails (42,891 spam, 39,595 legitimate) merged from six corpora                | 1995-2022                   | English                     | about 82,500 rows                                            | Manual (Kaggle account)                 | **unclear** (CC BY-SA 4.0 page, sources unclear)                            |
+| [Enron email dataset (CMU)][enron]                           | About 0.5M legitimate corporate mails of about 150 users                                   | not stated on the page      | English                     | 1.7 GB tarball                                               | Direct download, not fetched            | **unclear** (no licence stated)                                             |
+| [Enron-Spam (Metsis et al.)][enron-spam]                     | Enron ham plus spam, six datasets, raw and preprocessed                                    | not read                    | English                     | not measured                                                 | Direct download, not fetched            | **unclear** (no terms found)                                                |
+| Ling-Spam                                                    | Linguist-list mails, spam and legitimate                                                   | not read                    | English                     | not read                                                     | Primary page returned 403               | **unclear** (no terms found)                                                |
+| TREC 2005, 2006, 2007 spam corpora                           | Spam track corpora                                                                         | 2005-2007                   | English                     | not read                                                     | The primary URL tried returned 404      | **unclear** (no terms found)                                                |
+| [PhishFuzzer][phishfuzzer]                                   | Three-class (phishing, spam, valid) benchmark: 3,300 real seeds, 19,800 synthetic variants | 2026 (generated)            | English                     | 23,100 mails                                                 | GitHub                                  | **not usable** (CC BY-NC 4.0, commercial benchmarking excluded)             |
+| [Phishing Pot][phishingpot]                                  | Real phishing `.eml` files from honeypots                                                  | ongoing (pushed 2026-11-05) | Not read                    | repository about 1 GB                                        | GitHub                                  | **not usable** (CC BY-NC 4.0)                                               |
+| [Human-LLM generated phishing and legitimate emails][greco]  | 4,000 mails: 2,000 human (recent Nazario and Nigerian fraud), 2,000 ChatGPT and WormGPT    | 2024                        | English                     | 4,000                                                        | Kaggle                                  | **not usable** (CC BY-NC-SA 4.0)                                            |
+| [PhishLLM][phishllm]                                         | LLM-generated Japanese phishing and legitimate mail                                        | 2026                        | Japanese                    | 9,159 (5,570 phishing, 3,589 legitimate)                     | No download location found in the paper | **unclear** (no terms found)                                                |
+| [Arabic Phishing and Legitimate emails - Samples][ar-kaggle] | Arabic phishing and legitimate mail                                                        | not read                    | Arabic                      | not read                                                     | Kaggle                                  | **unclear** (licence "Unknown")                                             |
+| [Korean phishing sample][ko]                                 | 30 Korean phishing mails plus 84 English mails derived from Enron                          | not read                    | Korean, English             | 114 (a preview of a planned 20,000)                          | Hugging Face                            | **unclear** (Apache-2.0 on the card, sources are Enron, Nazario, PhishTank) |
+
+[nazario]: https://monkey.org/~jose/phishing/
+[sa]: https://spamassassin.apache.org/old/publiccorpus/
+[untroubled]: https://untroubled.org/spam/
+[hf-synth]: https://huggingface.co/datasets/Febriyansyah/phishing-emails-multilingual
+[zenodo]: https://zenodo.org/records/8339691
+[kaggle82]: https://www.kaggle.com/datasets/naserabdullahalam/phishing-email-dataset
+[enron]: https://www.cs.cmu.edu/~enron/
+[enron-spam]: https://www2.aueb.gr/users/ion/data/enron-spam/
+[phishfuzzer]: https://github.com/DataPhish/PhishFuzzer
+[phishingpot]: https://github.com/rf-peixoto/phishing_pot
+[greco]: https://www.kaggle.com/datasets/francescogreco97/human-llm-generated-phishing-legitimate-emails
+[phishllm]: https://ceur-ws.org/Vol-4178/paper4.pdf
+[ar-kaggle]: https://www.kaggle.com/datasets/rianshalyozbaky/arabic-phishing-and-legitimate-emails-samples
+[ko]: https://huggingface.co/datasets/joohans/korean-phishing-email
+
+## What was fetched, and the numbers after deduplication
+
+Fetched and normalised on 2026-11-11: `nazario`, `spamassassin`, `untroubled`,
+`hf-multilingual-synth`. Nothing "unclear" or "not usable" was downloaded.
+Checksums are pinned in `manifest.json`; `counts.json` holds the full counts.
+
+24,872 mails parsed, 22,441 kept: 2,261 exact duplicates, 98 equal after
+whitespace and case normalisation, 72 too short to judge, 0 duplicates whose
+label disagreed.
+
+| By label | Mails  | By year bucket | Mails | By language | Mails   |
+| -------- | ------ | -------------- | ----- | ----------- | ------- |
+| spam     | 11,474 | 2023+          | 8,501 | en          | 19,478  |
+| phishing | 6,767  | 2020-2022      | 2,207 | und         | 1,617   |
+| legit    | 4,200  | 2010-2019      | 2,043 | ja          | 424     |
+|          |        | below 2010     | 9,093 | id          | 189     |
+|          |        | unknown        | 597   | zh          | 183     |
+|          |        |                |       | pt          | 119     |
+|          |        |                |       | fr          | 94      |
+|          |        |                |       | de          | 90      |
+|          |        |                |       | nl          | 79      |
+|          |        |                |       | es          | 52      |
+|          |        |                |       | ru          | 43      |
+|          |        |                |       | it          | 31      |
+|          |        |                |       | ar          | 28      |
+|          |        |                |       | ko, he, el  | 9, 3, 2 |
+
+391 of the 22,441 are synthetic. By dataset and label: Nazario 6,468 phishing;
+SpamAssassin 4,108 legit and 1,804 spam; Untroubled 9,670 spam; the synthetic
+set 299 phishing and 92 legit.
+
+⚠ **Label and era are confounded, and a judge can exploit it.** Of the 4,200
+legit mails, 4,107 are from 2002-2003 and 92 are synthetic; one is from 2020.
+Every mail from 2023 onward is phishing or spam. A judge that learns "modern
+looking means bad" scores well here and would fail on real traffic. The year
+and dataset breakdowns in the report exist to show this; see "Gaps" below.
+
+## Label mapping
+
+Our labels are `phishing`, `spam` and `legit`. Most sources are coarser, so the
+source's own label is kept in `original_label`.
+
+| Dataset               | Source label                                       | Our label                                                                                      |
+| --------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| nazario               | none, every message is phishing (hand classified)  | `phishing`, original `phishing`                                                                |
+| spamassassin          | archive name: `easy_ham`, `easy_ham_2`, `hard_ham` | `legit`, original is the kind                                                                  |
+| spamassassin          | `spam`, `spam_2`                                   | `spam`, original is the kind                                                                   |
+| untroubled            | none, every message came to a bait address         | `spam`, original `spam`                                                                        |
+| hf-multilingual-synth | `0` benign, `1` phishing                           | `legit`, `phishing`; original is the cell                                                      |
+| zenodo-curated        | `1` in `Nazario*.csv` and `Nigerian*.csv`          | `phishing` (advance-fee fraud is closest to phishing of our three labels), original `<file>:1` |
+| zenodo-curated        | `1` in every other file                            | `spam`, original `<file>:1` (the authors merge phishing, fraud and spam under 1)               |
+| zenodo-curated        | `0`                                                | `legit`, original `<file>:0`                                                                   |
+
+Untroubled's spam includes advance-fee scams and phishing that cannot be told
+apart from bulk spam without annotation, so its label is `spam` and no more.
+
+## How fields are derived
+
+- **Language**: no model. If one non-Latin script holds at least 30% of the
+  letters it names the language (Arabic script is `ar`, but may be Persian or
+  Urdu; Cyrillic is `ru`; kana means `ja`; ideographs without kana mean `zh`).
+  Otherwise Latin text votes by a short stopword list for `en es fr de pt it nl
+id`, needing at least 3 hits and 1.5 times the runner-up, else `und`.
+  Approximate: it is a stratification key. The synthetic set carries its own
+  language column, which is used instead.
+- **Year**: the first plausible 4-digit year (1995-2035) in the `Date` header, or
+  the year of the archive for Untroubled when the header has none; empty
+  otherwise ("unknown").
+- **Deduplication**: first exact, then equal after lower-casing and collapsing
+  whitespace, across all datasets in registry order, so a primary source beats a
+  compilation. Near-duplicates are kept but clustered (MinHash, Jaccard about
+  0.7) so the split keeps a cluster on one side.
+
+## Per dataset
+
+**Nazario phishing corpus.** The maintainer's personal inbox of phishing,
+published as mbox files: `phishing0-3.mbox` (2005-2007) and one file per year
+from 2015 to 2025. Hand classified; his README says "it's not meant to be
+exhaustive but rather representative (since it's only my personal inbox). It's
+all hand classified, so it could contain errors", that earlier mailboxes were
+anonymised and later ones are not, and that it should contain no malware. Terms,
+verbatim: "The license for these files is CC-BY-4.0, enabling derivative works
+and commercial use but does require attribution." Attribution is required if we
+ever publish anything derived from it. The directory also lists
+`private-phishing4.mbox` and `20051114.mbox`; neither is used. Some files begin
+with the mail system's "DON'T DELETE THIS MESSAGE" bookkeeping record, which is
+dropped. Some mails are in Arabic, Chinese and other languages.
+
+**SpamAssassin public corpus.** 500 spam, 2,500 easy ham, 250 hard ham (ham
+that looks like spam: HTML, colour, spammy phrasing), 1,400 easy_ham_2 and
+1,397 spam_2, about 31% spam, collected 2002-2003. All headers are kept. We use
+the `20030228` archives and the `20050311` version of spam_2, which removes one
+misclassified message. Terms, verbatim: "This is a selection of mail messages,
+suitable for use in testing spam filtering systems." and "Copyright for the text
+in the messages remains with the original senders." That supports evaluation;
+it does not clearly support training or redistribution, hence "internal
+evaluation". Its warning applies to us: never send these into a live mail
+system. This is the only source of legitimate mail in the fetched set.
+
+**Untroubled.org spam archive.** All spam received by the maintainer since
+1998 through bait addresses, one message per file in 7z archives per year (and
+per month for the current year). Terms, verbatim: "Permission is hereby granted
+to use this archive without restriction. If you publish any research or software
+based on this archive, I would apreciate a reference to this archive". Headers
+are mostly forged. We pin the 2019-2025 yearly archives and 2026-01 to 2026-10
+and keep 600 messages per archive, chosen by hash of the path. The listing shows the
+2023, 2024 and 2025 yearly archives last modified on 2026-06-22, which is the
+kind of change the manifest checksums exist to notice. Extraction needs a `tar` that
+reads 7z (bsdtar, the macOS default; GNU tar cannot).
+
+**Phishing Emails Multilingual (ID/EN).** 600 synthetic mails (300 phishing,
+300 benign; 321 English, 279 Indonesian) produced by a script, so the language
+and label are by construction. Very templated: 209 of the 600 are duplicates of
+another. Card: "Lisensi: MIT." and "sintetis & edukatif", "validasi di data real
+sebelum produksi" is its own advice. Its benign mails (maintenance notices,
+automated notifications) are the nearest thing to transactional mail we have, but
+they are synthetic. The URL is pinned to a commit.
+
+**Phishing Email Curated Datasets (Champa et al.).** Eleven CSVs (`CEAS_08`,
+`Enron`, `Ling`, `Nazario`, `Nazario_5`, `Nigerian_5`, `Nigerian_Fraud`,
+`SpamAssasin`, `TREC_05`, `TREC_06`, `TREC_07`), "spanning from 1995 to 2022",
+columns `sender, receiver, date, subject, body, urls, label`. Zenodo metadata:
+license CC-BY-4.0, open access; the same data is on Figshare 25432108 as "Seven
+Phishing Email Datasets" (CC BY 4.0, seven of the files plus vectorised copies)
+and mirrored on Hugging Face. The compilation's licence does not relicense the
+corpora inside it: the Hugging Face copy says "No single license is asserted for
+the combined dataset here; please consult the original sources", and the TREC
+corpora and Enron carry their own terms, which we could not read. Its `1` label
+merges phishing and spam. The normaliser exists and is tested on a fixture
+written from the published column list (and checked against the real header of
+`Nazario.csv`), but it was not run against the full files. To use it: review the
+terms, then `fetch --dataset zenodo-curated --accept-unclear zenodo-curated
+--update-manifest` and `normalise --dataset zenodo-curated`. It would add the
+only large source of legitimate mail (Enron, TREC, CEAS), all English and all
+2007 or older.
+
+**Kaggle "Phishing Email Dataset".** "Approximately 82,500 emails", 42,891 spam
+and 39,595 legitimate, "Phish No More: The Enron, Ling, CEAS, Nazario, Nigerian
+& SpamAssassin Datasets"; the page shows CC BY-SA 4.0 and asks for citation of
+Al-Subaiey et al. (arXiv 2405.11619). Needs a Kaggle account, so it is manual: sign in, download the archive from the
+page in a browser, unzip the CSVs into `<cache>/zenodo-curated/` (the page lists
+`CEAS_08.csv` and the other files of the Curated Datasets, so the names and
+columns match), then `bun src/cli.ts pin --dataset zenodo-curated
+--accept-unclear zenodo-curated` to hash them into the manifest and `normalise
+--dataset zenodo-curated`. The same files are on Zenodo without an account, which
+is the scripted route. The share-alike licence and the unclear rights in its
+sources are why it is "unclear". Not downloaded.
+
+**Enron email dataset (CMU).** About 0.5M messages from about 150 users, "made
+public ... by the Federal Energy Regulatory Commission during its
+investigation", prepared by the CALO project; May 7, 2015 version, 1.7 GB.
+Terms: none beyond "I am distributing this dataset as a resource for
+researchers who are interested in improving current email tools, or
+understanding how email is currently used", and a request to respect the
+privacy of the people in it. No licence text. Legitimate workplace mail, not
+transactional. Over our size comfort and unclear, so not fetched.
+
+**Enron-Spam (Metsis, Androutsopoulos, Paliouras, CEAS 2006).** Enron ham from
+six mailboxes plus three spam sources, raw and preprocessed. The readme gives
+the citation and nothing about terms, so "no terms found". Not fetched.
+
+**Ling-Spam and the TREC corpora.** The Ling-Spam directory returned HTTP 403
+and the TREC 2007 URL tried returned 404 on 2026-11-11. No terms found, not
+fetched. Both appear inside the Curated Datasets.
+
+**PhishFuzzer.** "3,300 real seeds and 19,800 synthetic variants", labelled
+phishing, spam, valid, with attacker-motivation labels; seeds drawn from the
+Kaggle phishing dataset and SpamAssassin. LICENSE: CC BY-NC 4.0, and the
+authors state "The authors consider this to include using the code or data to
+train, evaluate, or benchmark models or products that are offered commercially.
+... Commercial use requires a separate license from the authors." That names
+exactly our use. Not usable unless the authors grant a licence; the
+three-class labelling and URL and attachment metadata make it worth asking.
+Not downloaded.
+
+**Phishing Pot.** Real phishing samples from honeypots in `.eml` form,
+actively updated. The repository's LICENSE is CC BY-NC 4.0 ("Attribution-
+NonCommercial 4.0 International"); GitHub's detector reports "other". Not
+usable without the maintainer's agreement. Not downloaded.
+
+**Human-LLM generated phishing and legitimate emails (Kaggle).** The page says
+"4000 Human-generated and LLM-generated emails of both phishing and genuine
+nature" (human: the most recent Nazario and Nigerian fraud mails; LLM: ChatGPT
+and WormGPT, 1,000 phishing and 1,000 legitimate each), and its Label column is
+origin ("human-generated (Label=0), or LLM-generated (Label=1)"), not
+phishing versus legitimate. Licence CC BY-NC-SA 4.0: not usable. The brief's
+"about 103,000 mails" does not match this page, and no dataset of that size
+and title was found; the 2025 paper "Constructing and Benchmarking: a Labeled
+Email Dataset for Text-Based Phishing and Spam Detection Framework" (arXiv
+2511.21448, by the PhishFuzzer authors) points at
+`github.com/DataPhish/PhishingSpamDataSet`, which returned 404 on 2026-11-11.
+
+**PhishLLM.** Meléndez, Ptaszynski and Masui, CEUR-WS Vol-4178. Japanese
+phishing and legitimate mail generated with fine-tuned Mistral and LLaMA from
+20 authentic Japanese phishing mails: 9,159 mails, 5,570 phishing and 3,589
+legitimate. The paper text we read states no download location or licence, so
+"no terms found". It would be synthetic Japanese with a legitimate class.
+
+**Arabic.** One Arabic dataset was reachable: the Kaggle "Arabic Phishing and
+Legitimate emails - Samples", licence field "Unknown". Papers on Arabic phishing
+detection describe corpora produced by machine translating English phishing and
+Enron mail (the AFP dataset, an English/Arabic parallel corpus from IWSPA-AP
+2018, a GitHub repository "Arabic phishing emails translated from English
+phishing datasets"); we did not read their terms. So there is no native Arabic
+legitimate mail with known terms, and translated mail has translation artefacts
+a judge would learn.
+
+**Transactional mail.** No public dataset of legitimate transactional mail
+(receipts, password resets, notifications) was found. Searches of Hugging Face
+for "transactional email", "order confirmation email" and "notification email"
+returned nothing; the email classification datasets that exist are spam versus
+not spam (for example `diegovelilla/email-classification-dataset`, Apache-2.0
+on its card, derived from a source with no card) or are gated
+(`jason23322/high-accuracy-email-classifier`, 12,000 mails in six categories,
+restricted when we tried).
+
+**Seen and skipped.** `locuoco/the-biggest-spam-ham-phish-email-dataset-300000`
+(MIT on its card, an aggregation of undisclosed public sets, so the sources'
+terms are unknown); Hugging Face re-uploads of the Curated Datasets, whose
+licence fields disagree with each other (lgpl-3.0, cc-by-4.0, other).
+
+## Gaps and ideas
+
+| Gap                                                            | Why it matters                                                                            | Idea                                                                                                                                                                                                         |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Legitimate mail after 2003                                     | Label and era are confounded, so era is a free feature                                    | Donated, redacted mail from the team and friendly customers; i10's own React Email templates rendered with varied data, marked `synthetic`                                                                   |
+| Legitimate transactional mail                                  | The mail honest customers send and the judge must not flag                                | Render `packages/emails` and `packages/templates` fixtures (receipts, resets, magic links, invoices) in every language we support; add real samples that people agree to donate                              |
+| Native Arabic                                                  | None with known terms; 28 Arabic-script mails exist, 25 spam and 3 phishing, some Persian | Author Arabic transactional and phishing templates with a native reviewer, mark synthetic; raise the Arabic share of the Untroubled sample by sampling per language; ask for Arabic mail from beta customers |
+| Non-English legitimate mail in general                         | Legit is almost all English                                                               | The same generated-and-reviewed route in Japanese, Portuguese, Spanish, Chinese, Indonesian                                                                                                                  |
+| Labels for brand impersonation, credential requests, marketing | Three of the five judge questions cannot be scored                                        | Annotate a sample: LLM pre-label then human audit, starting from Nazario (brands, credential forms) and Untroubled (marketing)                                                                               |
+| Modern attack styles                                           | BEC, QR-code phishing, thread hijacking, AI-written phishing are thin or absent           | Ask PhishFuzzer's authors for a commercial licence; collect from i10's own abuse reports once there is traffic                                                                                               |
+| Attachment and HTML-only mail                                  | `has_attachments` is set but the judge input has no attachment content                    | Out of scope for the text judge; revisit with the content judge                                                                                                                                              |

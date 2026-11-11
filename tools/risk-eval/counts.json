@@ -1,0 +1,577 @@
+{
+  "normalise": {
+    "datasets": {
+      "nazario": {
+        "parsed": 8026,
+        "skipped": 8
+      },
+      "spamassassin": {
+        "parsed": 6046,
+        "skipped": 0
+      },
+      "untroubled": {
+        "parsed": 10200,
+        "skipped": 0
+      },
+      "hf-multilingual-synth": {
+        "parsed": 600,
+        "skipped": 0
+      }
+    },
+    "dedup": {
+      "input": 24872,
+      "kept": 22441,
+      "tooShort": 72,
+      "exact": 2261,
+      "whitespaceNormalised": 98,
+      "labelConflicts": 0,
+      "perDataset": {
+        "nazario": {
+          "input": 8026,
+          "kept": 6468
+        },
+        "spamassassin": {
+          "input": 6046,
+          "kept": 5912
+        },
+        "untroubled": {
+          "input": 10200,
+          "kept": 9670
+        },
+        "hf-multilingual-synth": {
+          "input": 600,
+          "kept": 391
+        }
+      }
+    }
+  },
+  "deduplicated": {
+    "total": 22441,
+    "byLabel": {
+      "legit": 4200,
+      "phishing": 6767,
+      "spam": 11474
+    },
+    "byLang": {
+      "ar": 28,
+      "de": 90,
+      "el": 2,
+      "en": 19478,
+      "es": 52,
+      "fr": 94,
+      "he": 3,
+      "id": 189,
+      "it": 31,
+      "ja": 424,
+      "ko": 9,
+      "nl": 79,
+      "pt": 119,
+      "ru": 43,
+      "und": 1617,
+      "zh": 183
+    },
+    "byYearBucket": {
+      "2010-2019": 2043,
+      "2020-2022": 2207,
+      "2023+": 8501,
+      "<2010": 9093,
+      "unknown": 597
+    },
+    "byDataset": {
+      "hf-multilingual-synth": 391,
+      "nazario": 6468,
+      "spamassassin": 5912,
+      "untroubled": 9670
+    },
+    "synthetic": 391
+  },
+  "split": {
+    "seed": "i10-risk-eval-1",
+    "devFraction": 0.15,
+    "mails": {
+      "dev": 3418,
+      "test": 19023
+    },
+    "clusters": 17732,
+    "strata": [
+      {
+        "label": "legit",
+        "dataset": "hf-multilingual-synth",
+        "lang": "en",
+        "clusters": 17,
+        "dev": 12,
+        "test": 34
+      },
+      {
+        "label": "legit",
+        "dataset": "hf-multilingual-synth",
+        "lang": "id",
+        "clusters": 19,
+        "dev": 9,
+        "test": 37
+      },
+      {
+        "label": "legit",
+        "dataset": "spamassassin",
+        "lang": "de",
+        "clusters": 4,
+        "dev": 1,
+        "test": 3
+      },
+      {
+        "label": "legit",
+        "dataset": "spamassassin",
+        "lang": "en",
+        "clusters": 3558,
+        "dev": 572,
+        "test": 3191
+      },
+      {
+        "label": "legit",
+        "dataset": "spamassassin",
+        "lang": "fr",
+        "clusters": 1,
+        "dev": 0,
+        "test": 1
+      },
+      {
+        "label": "legit",
+        "dataset": "spamassassin",
+        "lang": "ja",
+        "clusters": 2,
+        "dev": 0,
+        "test": 2
+      },
+      {
+        "label": "legit",
+        "dataset": "spamassassin",
+        "lang": "pt",
+        "clusters": 22,
+        "dev": 3,
+        "test": 19
+      },
+      {
+        "label": "legit",
+        "dataset": "spamassassin",
+        "lang": "und",
+        "clusters": 315,
+        "dev": 47,
+        "test": 269
+      },
+      {
+        "label": "phishing",
+        "dataset": "hf-multilingual-synth",
+        "lang": "en",
+        "clusters": 96,
+        "dev": 23,
+        "test": 137
+      },
+      {
+        "label": "phishing",
+        "dataset": "hf-multilingual-synth",
+        "lang": "id",
+        "clusters": 101,
+        "dev": 16,
+        "test": 123
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "ar",
+        "clusters": 3,
+        "dev": 0,
+        "test": 3
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "de",
+        "clusters": 36,
+        "dev": 6,
+        "test": 44
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "en",
+        "clusters": 3776,
+        "dev": 762,
+        "test": 4891
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "es",
+        "clusters": 32,
+        "dev": 8,
+        "test": 30
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "fr",
+        "clusters": 8,
+        "dev": 1,
+        "test": 8
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "he",
+        "clusters": 1,
+        "dev": 0,
+        "test": 2
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "it",
+        "clusters": 14,
+        "dev": 2,
+        "test": 14
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "ja",
+        "clusters": 11,
+        "dev": 2,
+        "test": 10
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "ko",
+        "clusters": 3,
+        "dev": 0,
+        "test": 3
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "nl",
+        "clusters": 22,
+        "dev": 4,
+        "test": 24
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "pt",
+        "clusters": 22,
+        "dev": 3,
+        "test": 23
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "ru",
+        "clusters": 5,
+        "dev": 1,
+        "test": 4
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "und",
+        "clusters": 532,
+        "dev": 106,
+        "test": 490
+      },
+      {
+        "label": "phishing",
+        "dataset": "nazario",
+        "lang": "zh",
+        "clusters": 26,
+        "dev": 4,
+        "test": 23
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "de",
+        "clusters": 4,
+        "dev": 1,
+        "test": 3
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "en",
+        "clusters": 1090,
+        "dev": 273,
+        "test": 1391
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "fr",
+        "clusters": 5,
+        "dev": 1,
+        "test": 5
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "it",
+        "clusters": 1,
+        "dev": 0,
+        "test": 2
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "ja",
+        "clusters": 1,
+        "dev": 0,
+        "test": 1
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "ko",
+        "clusters": 5,
+        "dev": 1,
+        "test": 4
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "nl",
+        "clusters": 6,
+        "dev": 1,
+        "test": 6
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "pt",
+        "clusters": 13,
+        "dev": 2,
+        "test": 11
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "und",
+        "clusters": 72,
+        "dev": 16,
+        "test": 65
+      },
+      {
+        "label": "spam",
+        "dataset": "spamassassin",
+        "lang": "zh",
+        "clusters": 16,
+        "dev": 3,
+        "test": 18
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "ar",
+        "clusters": 24,
+        "dev": 4,
+        "test": 21
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "de",
+        "clusters": 26,
+        "dev": 7,
+        "test": 25
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "el",
+        "clusters": 2,
+        "dev": 0,
+        "test": 2
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "en",
+        "clusters": 6839,
+        "dev": 1240,
+        "test": 6952
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "es",
+        "clusters": 13,
+        "dev": 2,
+        "test": 12
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "fr",
+        "clusters": 68,
+        "dev": 10,
+        "test": 68
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "he",
+        "clusters": 1,
+        "dev": 0,
+        "test": 1
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "id",
+        "clusters": 4,
+        "dev": 1,
+        "test": 3
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "it",
+        "clusters": 10,
+        "dev": 2,
+        "test": 11
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "ja",
+        "clusters": 217,
+        "dev": 73,
+        "test": 336
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "ko",
+        "clusters": 1,
+        "dev": 0,
+        "test": 1
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "nl",
+        "clusters": 37,
+        "dev": 10,
+        "test": 34
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "pt",
+        "clusters": 33,
+        "dev": 5,
+        "test": 53
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "ru",
+        "clusters": 32,
+        "dev": 7,
+        "test": 31
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "und",
+        "clusters": 465,
+        "dev": 158,
+        "test": 466
+      },
+      {
+        "label": "spam",
+        "dataset": "untroubled",
+        "lang": "zh",
+        "clusters": 121,
+        "dev": 19,
+        "test": 116
+      }
+    ],
+    "devCounts": {
+      "total": 3418,
+      "byLabel": {
+        "legit": 644,
+        "phishing": 938,
+        "spam": 1836
+      },
+      "byLang": {
+        "ar": 4,
+        "de": 15,
+        "en": 2882,
+        "es": 10,
+        "fr": 12,
+        "id": 26,
+        "it": 4,
+        "ja": 75,
+        "ko": 1,
+        "nl": 15,
+        "pt": 13,
+        "ru": 8,
+        "und": 327,
+        "zh": 26
+      },
+      "byYearBucket": {
+        "2010-2019": 336,
+        "2020-2022": 341,
+        "2023+": 1335,
+        "<2010": 1318,
+        "unknown": 88
+      },
+      "byDataset": {
+        "hf-multilingual-synth": 60,
+        "nazario": 899,
+        "spamassassin": 921,
+        "untroubled": 1538
+      },
+      "synthetic": 60
+    },
+    "testCounts": {
+      "total": 19023,
+      "byLabel": {
+        "legit": 3556,
+        "phishing": 5829,
+        "spam": 9638
+      },
+      "byLang": {
+        "ar": 24,
+        "de": 75,
+        "el": 2,
+        "en": 16596,
+        "es": 42,
+        "fr": 82,
+        "he": 3,
+        "id": 163,
+        "it": 27,
+        "ja": 349,
+        "ko": 8,
+        "nl": 64,
+        "pt": 106,
+        "ru": 35,
+        "und": 1290,
+        "zh": 157
+      },
+      "byYearBucket": {
+        "2010-2019": 1707,
+        "2020-2022": 1866,
+        "2023+": 7166,
+        "<2010": 7775,
+        "unknown": 509
+      },
+      "byDataset": {
+        "hf-multilingual-synth": 331,
+        "nazario": 5569,
+        "spamassassin": 4991,
+        "untroubled": 8132
+      },
+      "synthetic": 331
+    }
+  }
+}
