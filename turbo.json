@@ -113,6 +113,7 @@
     "RISK_ENABLED",
     "RISK_FARM_TRIPWIRE",
     "RISK_MODEL_DIR",
+    "RISK_SHADOW_RULES",
     "RISK_TEST_API_DATABASE_URL",
     // ⚠ ADDED 2026-10-04, THE SAME DRIFT AGAIN: these were declared by the
     // API's schema but stripped here, so locally the Cloudflare "Connect"

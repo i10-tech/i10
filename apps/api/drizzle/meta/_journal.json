@@ -1065,6 +1065,20 @@
       "when": 1794370685596,
       "tag": "0151_domain_receiving",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1794371883885,
+      "tag": "0152_risk_fact_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1794371901634,
+      "tag": "0153_risk_fact_snapshot_definers",
+      "breakpoints": true
     }
   ]
 }

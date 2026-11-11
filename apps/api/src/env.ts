@@ -2,6 +2,7 @@ import { z } from "zod"
 import { parseKeyring } from "./content/seal.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
 import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
+import { RULES } from "./risk/rules.js"
 import { SYSTEM_FROM } from "./system-mail.js"
 import { parseAllowList } from "./webhooks/egress.js"
 
@@ -1022,6 +1023,38 @@ const schema = z.object({
   RISK_ACT_HOLDS: switchOn(),
   RISK_ACT_SES_POLICY: switchOn(),
   RISK_ACT_TAKEOVER: switchOn(),
+
+  /**
+   * Live rule ids forced into shadow, comma separated: the emergency brake for
+   * a rule misfiring in production. A braked rule is still evaluated and
+   * recorded, and moves no score, band or action.
+   * ⚠ AN ID WE DO NOT KNOW REFUSES TO BOOT, so a typo cannot leave the rule it
+   * meant to stop running live. ⚠ THERE IS NO SETTING THE OTHER WAY: making a
+   * shadow rule live is a code change and a `RULESET_VERSION` bump.
+   */
+  RISK_SHADOW_RULES: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      const ids = [
+        ...new Set(
+          (v ?? "")
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean),
+        ),
+      ]
+      const live = new Set(RULES.filter((r) => r.mode !== "shadow").map((r) => r.id))
+      const unknown = ids.filter((id) => !live.has(id))
+      if (unknown.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `not a live rule: ${unknown.join(", ")}`,
+        })
+        return z.NEVER
+      }
+      return ids
+    }),
 
   /**
    * How many distinct workspaces may send the same fingerprint in 48 hours

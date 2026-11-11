@@ -62,9 +62,10 @@ identity anomaly), and **at accept** only for the cheap real-time pieces
   need a denominator and a count before they speak.
 - **Earned trust is negative points**, so a workspace can recover and a
   long-standing customer is not one bad day from a hold.
-- **No shadow mode.** The user chose protection from day 1. That is safe
-  because the automatic actions stop at tier moves and holds, and termination
-  is never automatic.
+- **No engine-wide shadow mode.** The user chose protection from day 1. That
+  is safe because the automatic actions stop at tier moves and holds, and
+  termination is never automatic. A single new rule can run in shadow first
+  (see "Snapshots, replay and shadow rules").
 - **A rule that throws is reported, not dropped.** `evaluate` stays pure: it
   scores every other rule and returns the failures (rule id and error) beside
   the assessment. The runner logs each at error level with the rule and
@@ -595,6 +596,47 @@ lookup for five minutes; a 4xx about one host parks that host for an hour. A
 host nobody could answer for stays unchecked and is asked next run; it is never
 recorded clean. Verdicts stay cached for a day and shared across workspaces.
 
+## Snapshots, replay and shadow rules
+
+A rule change used to be testable only on the synthetic scenarios, or by
+letting it act on customers. Three pieces fix that; none changes scoring, so
+`RULESET_VERSION` stays where it was.
+
+- **Fact snapshots** (`core.risk_fact_snapshots`, `risk/snapshot.ts`). The
+  `Facts` a score was computed from, with the ruleset version, trigger, score,
+  band, contributions and shadow contributions. Written whenever the event log
+  writes an event (first assessment, band change, a swing of 10+ points, an
+  action), and otherwise for the first score of each UTC day, so a quiet
+  workspace costs one row a day. Taken after the content classifier, so replay
+  sees the verdict the score saw. Dates are stored as `{"$date": iso}` and
+  revived by `reviveFacts`. **Deny-all**, reached only through the definers in
+  migration 0153: a workspace can never read its own snapshot.
+- **Retention: 180 days**, purged by the hourly run beside the identity purge.
+  It covers the longest window any rule reads (SES pauses and holds, 180 days)
+  and two quarters of history to replay a change against.
+- **Replay** (`risk/replay.ts`, `bun run risk-admin replay [--since]
+[--until] [--tenant] [--json]`). Re-scores the kept snapshots with the rules
+  in the checkout (and the current `RISK_SHADOW_RULES`) and prints a band
+  transition table, the workspaces whose band would change with old and new
+  score, per rule the snapshots where its contribution differs or where it
+  could not run, and per shadow rule where it fired and where it would have
+  moved the band. Pure: it writes nothing and calls no outside service.
+  **Old snapshots are replayed as they are**: a rule that reads a field an
+  older shape lacks throws, is counted as a rule failure, and the rest score.
+- **Shadow rules.** A rule with `mode: "shadow"` is evaluated and recorded
+  (`shadow` on the assessment, its events and its snapshots, and in `risk-admin
+explain`) and moves no score, band, floor or action. A shadow contribution
+  has `wouldAdd` and `wouldFloor` instead of `points` and `floor`, and sits
+  beside the assessment rather than in it, so `decide` cannot be handed one.
+  New rules can start in shadow; making one live is a code change and a
+  ruleset bump.
+- **The brake**, `RISK_SHADOW_RULES`: live rule ids forced into shadow without
+  a deploy, for a rule misfiring in production. An unknown id refuses to
+  boot, and every process logs the list when it starts. There is no setting
+  the other way.
+
+---
+
 ## Account takeover is a separate response
 
 Impossible travel usually means stolen credentials, not a spammer. When it
@@ -634,6 +676,14 @@ day emails the owner as a possible leak.
   days (the hourly run does it); derived country, network and device id stay
   for the life of the account. Content fingerprints and link hosts: 30 days.
   `api_requests` (now with client IP and country) keeps its 30-day window.
+- Fact snapshots: 180 days, staff only. They hold no mail body, no address
+  and no secret, but they are personal data: the owner's Clerk user id, the
+  owner's first-seen time and first country, other workspaces' ids (farm
+  peers), the registrable parents of its verified sending domains and the
+  unsafe link hosts it sent, SES
+  pause origins, and the name of the nearest boilerplate entry. The first
+  country outlives the 90-day `identity_events` window it was derived from;
+  it is kept so a replay scores the identity rules as they ran.
 
 ---
 
@@ -647,6 +697,7 @@ day emails the owner as a possible leak.
 | `RISK_ACT_SES_POLICY`      | `true`  | SES Strict policy for high-band paid                             |
 | `RISK_ACT_TAKEOVER`        | `true`  | revoking sessions on impossible travel                           |
 | `RISK_FARM_TRIPWIRE`       | `5`     | distinct workspaces per fingerprint before an immediate re-score |
+| `RISK_SHADOW_RULES`        | empty   | live rule ids forced into shadow (the brake); unknown ids refuse |
 | `CLIENT_CONTEXT_SECRET`    | unset   | shared with the console; unset means no forwarded identity       |
 | `IPINFO_TOKEN`             | unset   | network enrichment                                               |
 | `RISK_LINK_PROVIDERS`      | `dns`   | link checkers: `dns` and/or `webrisk` (empty runs none)          |

@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { riskAssessmentEvents, riskAssessments } from "../db/core.js"
 import type { PreviousState } from "./decide.js"
-import type { Assessment, Band } from "./types.js"
+import type { Assessment, Band, ShadowContribution } from "./types.js"
 
 /**
  * Where assessments live (#170): the current one per workspace, and the
@@ -17,6 +17,8 @@ export const EVENT_SWING = 10
 export interface StoredAssessment extends PreviousState {
   score: number
   contributions: Assessment["contributions"]
+  /** What shadow rules would have added; never read by `decide`. */
+  shadow: ShadowContribution[]
   rulesetVersion: number
   sesPolicySetAt: Date | null
   alertedAt: Date | null
@@ -28,6 +30,8 @@ export interface AssessmentStore {
   save(input: {
     tenantId: string
     assessment: Assessment
+    /** Recorded beside the assessment, with no effect on it. */
+    shadow: ShadowContribution[]
     bandSince: Date
     previous: { band: Band; score: number } | null
     actions: string[]
@@ -70,6 +74,7 @@ export function assessmentStore(db: Database): AssessmentStore {
         sesPolicy: row.sesPolicy,
         score: row.score,
         contributions: row.contributions as Assessment["contributions"],
+        shadow: row.shadow as ShadowContribution[],
         rulesetVersion: row.rulesetVersion,
         sesPolicySetAt: row.sesPolicySetAt,
         alertedAt: row.alertedAt,
@@ -80,6 +85,7 @@ export function assessmentStore(db: Database): AssessmentStore {
     async save({
       tenantId,
       assessment,
+      shadow,
       bandSince,
       previous,
       actions,
@@ -99,6 +105,7 @@ export function assessmentStore(db: Database): AssessmentStore {
           band: assessment.band,
           rulesetVersion: assessment.rulesetVersion,
           contributions: assessment.contributions,
+          shadow,
           bandSince,
           computedAt: at,
         }
@@ -114,6 +121,7 @@ export function assessmentStore(db: Database): AssessmentStore {
             fromBand: previous?.band ?? null,
             rulesetVersion: assessment.rulesetVersion,
             contributions: assessment.contributions,
+            shadow,
             actions,
             trigger,
             occurredAt: at,
@@ -154,6 +162,7 @@ export function assessmentStore(db: Database): AssessmentStore {
             fromBand: row.band,
             rulesetVersion: row.rulesetVersion,
             contributions: row.contributions,
+            shadow: row.shadow,
             actions: [
               `pin:until=${until.toISOString()}`,
               `by:${audit.by}`,
