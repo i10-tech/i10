@@ -106,6 +106,15 @@ export function splitMails(
   return { assignment, summary }
 }
 
+/** The generated legitimate mail (src/generate), counted on its own. */
+export interface GeneratedCounts {
+  total: number
+  hardNegatives: number
+  byMailType: Record<string, number>
+  byLang: Record<string, number>
+  byStyle: Record<string, number>
+}
+
 export interface CountTable {
   total: number
   byLabel: Record<string, number>
@@ -113,6 +122,7 @@ export interface CountTable {
   byYearBucket: Record<string, number>
   byDataset: Record<string, number>
   synthetic: number
+  generated: GeneratedCounts
 }
 
 function bump(record: Record<string, number>, key: string): void {
@@ -133,6 +143,7 @@ export function countMails(mails: Iterable<Mail>): CountTable {
     byYearBucket: {},
     byDataset: {},
     synthetic: 0,
+    generated: { total: 0, hardNegatives: 0, byMailType: {}, byLang: {}, byStyle: {} },
   }
   for (const m of mails) {
     t.total++
@@ -141,6 +152,13 @@ export function countMails(mails: Iterable<Mail>): CountTable {
     bump(t.byYearBucket, yearBucket(m.year))
     bump(t.byDataset, m.dataset)
     if (m.synthetic) t.synthetic++
+    if (m.mail_type !== undefined) {
+      t.generated.total++
+      if (m.hard_negative === true) t.generated.hardNegatives++
+      bump(t.generated.byMailType, m.mail_type)
+      bump(t.generated.byLang, m.lang)
+      bump(t.generated.byStyle, m.style ?? "unknown")
+    }
   }
   return {
     ...t,
@@ -148,5 +166,11 @@ export function countMails(mails: Iterable<Mail>): CountTable {
     byLang: sortedKeys(t.byLang),
     byYearBucket: sortedKeys(t.byYearBucket),
     byDataset: sortedKeys(t.byDataset),
+    generated: {
+      ...t.generated,
+      byMailType: sortedKeys(t.generated.byMailType),
+      byLang: sortedKeys(t.generated.byLang),
+      byStyle: sortedKeys(t.generated.byStyle),
+    },
   }
 }

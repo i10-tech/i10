@@ -16,11 +16,15 @@
       "hf-multilingual-synth": {
         "parsed": 600,
         "skipped": 0
+      },
+      "synthetic-legit-modern": {
+        "parsed": 4498,
+        "skipped": 0
       }
     },
     "dedup": {
-      "input": 24872,
-      "kept": 22441,
+      "input": 29370,
+      "kept": 26939,
       "tooShort": 72,
       "exact": 2261,
       "whitespaceNormalised": 98,
@@ -41,39 +45,43 @@
         "hf-multilingual-synth": {
           "input": 600,
           "kept": 391
+        },
+        "synthetic-legit-modern": {
+          "input": 4498,
+          "kept": 4498
         }
       }
     }
   },
   "deduplicated": {
-    "total": 22441,
+    "total": 26939,
     "byLabel": {
-      "legit": 4200,
+      "legit": 8698,
       "phishing": 6767,
       "spam": 11474
     },
     "byLang": {
-      "ar": 28,
-      "de": 90,
+      "ar": 268,
+      "de": 330,
       "el": 2,
-      "en": 19478,
-      "es": 52,
-      "fr": 94,
+      "en": 22056,
+      "es": 292,
+      "fr": 334,
       "he": 3,
-      "id": 189,
+      "id": 429,
       "it": 31,
-      "ja": 424,
+      "ja": 664,
       "ko": 9,
       "nl": 79,
-      "pt": 119,
+      "pt": 359,
       "ru": 43,
       "und": 1617,
-      "zh": 183
+      "zh": 423
     },
     "byYearBucket": {
       "2010-2019": 2043,
       "2020-2022": 2207,
-      "2023+": 8501,
+      "2023+": 12999,
       "<2010": 9093,
       "unknown": 597
     },
@@ -81,18 +89,74 @@
       "hf-multilingual-synth": 391,
       "nazario": 6468,
       "spamassassin": 5912,
+      "synthetic-legit-modern": 4498,
       "untroubled": 9670
     },
-    "synthetic": 391
+    "synthetic": 4889,
+    "generated": {
+      "total": 4498,
+      "hardNegatives": 548,
+      "byMailType": {
+        "account-deletion": 72,
+        "account-suspension": 72,
+        "api-key-created": 72,
+        "bank-transaction-review": 72,
+        "booking-confirmation": 72,
+        "changelog": 69,
+        "comment-mention": 72,
+        "delivery-update": 72,
+        "email-verification": 288,
+        "export-ready": 72,
+        "magic-link": 288,
+        "new-device-alert": 288,
+        "newsletter": 83,
+        "order-confirmation": 72,
+        "otp-code": 288,
+        "password-changed": 288,
+        "password-reset": 288,
+        "payment-failed": 71,
+        "payment-failed-final": 72,
+        "receipt": 288,
+        "refund-issued": 86,
+        "renewal-reminder": 72,
+        "shipping-notice": 72,
+        "support-reply": 65,
+        "team-invitation": 288,
+        "trial-ending": 72,
+        "two-factor-changed": 144,
+        "urgent-security-alert": 260,
+        "usage-limit-warning": 48,
+        "verify-deadline": 72,
+        "weekly-digest": 72,
+        "welcome": 288
+      },
+      "byLang": {
+        "ar": 240,
+        "de": 240,
+        "en": 2578,
+        "es": 240,
+        "fr": 240,
+        "id": 240,
+        "ja": 240,
+        "pt": 240,
+        "zh": 240
+      },
+      "byStyle": {
+        "consumer-friendly": 1556,
+        "dev-terse": 930,
+        "formal-bank": 1320,
+        "small-shop": 692
+      }
+    }
   },
   "split": {
     "seed": "i10-risk-eval-1",
     "devFraction": 0.15,
     "mails": {
-      "dev": 3418,
-      "test": 19023
+      "dev": 4100,
+      "test": 22839
     },
-    "clusters": 17732,
+    "clusters": 21526,
     "strata": [
       {
         "label": "legit",
@@ -157,6 +221,78 @@
         "clusters": 315,
         "dev": 47,
         "test": 269
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "ar",
+        "clusters": 213,
+        "dev": 35,
+        "test": 205
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "de",
+        "clusters": 210,
+        "dev": 35,
+        "test": 205
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "en",
+        "clusters": 2080,
+        "dev": 405,
+        "test": 2173
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "es",
+        "clusters": 215,
+        "dev": 34,
+        "test": 206
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "fr",
+        "clusters": 192,
+        "dev": 37,
+        "test": 203
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "id",
+        "clusters": 216,
+        "dev": 33,
+        "test": 207
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "ja",
+        "clusters": 237,
+        "dev": 36,
+        "test": 204
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "pt",
+        "clusters": 197,
+        "dev": 32,
+        "test": 208
+      },
+      {
+        "label": "legit",
+        "dataset": "synthetic-legit-modern",
+        "lang": "zh",
+        "clusters": 234,
+        "dev": 35,
+        "test": 205
       },
       {
         "label": "phishing",
@@ -496,32 +632,32 @@
       }
     ],
     "devCounts": {
-      "total": 3418,
+      "total": 4100,
       "byLabel": {
-        "legit": 644,
+        "legit": 1326,
         "phishing": 938,
         "spam": 1836
       },
       "byLang": {
-        "ar": 4,
-        "de": 15,
-        "en": 2882,
-        "es": 10,
-        "fr": 12,
-        "id": 26,
+        "ar": 39,
+        "de": 50,
+        "en": 3287,
+        "es": 44,
+        "fr": 49,
+        "id": 59,
         "it": 4,
-        "ja": 75,
+        "ja": 111,
         "ko": 1,
         "nl": 15,
-        "pt": 13,
+        "pt": 45,
         "ru": 8,
         "und": 327,
-        "zh": 26
+        "zh": 61
       },
       "byYearBucket": {
         "2010-2019": 336,
         "2020-2022": 341,
-        "2023+": 1335,
+        "2023+": 2017,
         "<2010": 1318,
         "unknown": 88
       },
@@ -529,39 +665,95 @@
         "hf-multilingual-synth": 60,
         "nazario": 899,
         "spamassassin": 921,
+        "synthetic-legit-modern": 682,
         "untroubled": 1538
       },
-      "synthetic": 60
+      "synthetic": 742,
+      "generated": {
+        "total": 682,
+        "hardNegatives": 84,
+        "byMailType": {
+          "account-deletion": 7,
+          "account-suspension": 9,
+          "api-key-created": 11,
+          "bank-transaction-review": 11,
+          "booking-confirmation": 12,
+          "changelog": 15,
+          "comment-mention": 15,
+          "delivery-update": 22,
+          "email-verification": 37,
+          "export-ready": 9,
+          "magic-link": 50,
+          "new-device-alert": 39,
+          "newsletter": 5,
+          "order-confirmation": 14,
+          "otp-code": 33,
+          "password-changed": 44,
+          "password-reset": 53,
+          "payment-failed": 11,
+          "payment-failed-final": 12,
+          "receipt": 50,
+          "refund-issued": 12,
+          "renewal-reminder": 7,
+          "shipping-notice": 12,
+          "support-reply": 11,
+          "team-invitation": 33,
+          "trial-ending": 11,
+          "two-factor-changed": 21,
+          "urgent-security-alert": 28,
+          "usage-limit-warning": 14,
+          "verify-deadline": 24,
+          "weekly-digest": 11,
+          "welcome": 39
+        },
+        "byLang": {
+          "ar": 35,
+          "de": 35,
+          "en": 405,
+          "es": 34,
+          "fr": 37,
+          "id": 33,
+          "ja": 36,
+          "pt": 32,
+          "zh": 35
+        },
+        "byStyle": {
+          "consumer-friendly": 245,
+          "dev-terse": 137,
+          "formal-bank": 196,
+          "small-shop": 104
+        }
+      }
     },
     "testCounts": {
-      "total": 19023,
+      "total": 22839,
       "byLabel": {
-        "legit": 3556,
+        "legit": 7372,
         "phishing": 5829,
         "spam": 9638
       },
       "byLang": {
-        "ar": 24,
-        "de": 75,
+        "ar": 229,
+        "de": 280,
         "el": 2,
-        "en": 16596,
-        "es": 42,
-        "fr": 82,
+        "en": 18769,
+        "es": 248,
+        "fr": 285,
         "he": 3,
-        "id": 163,
+        "id": 370,
         "it": 27,
-        "ja": 349,
+        "ja": 553,
         "ko": 8,
         "nl": 64,
-        "pt": 106,
+        "pt": 314,
         "ru": 35,
         "und": 1290,
-        "zh": 157
+        "zh": 362
       },
       "byYearBucket": {
         "2010-2019": 1707,
         "2020-2022": 1866,
-        "2023+": 7166,
+        "2023+": 10982,
         "<2010": 7775,
         "unknown": 509
       },
@@ -569,9 +761,65 @@
         "hf-multilingual-synth": 331,
         "nazario": 5569,
         "spamassassin": 4991,
+        "synthetic-legit-modern": 3816,
         "untroubled": 8132
       },
-      "synthetic": 331
+      "synthetic": 4147,
+      "generated": {
+        "total": 3816,
+        "hardNegatives": 464,
+        "byMailType": {
+          "account-deletion": 65,
+          "account-suspension": 63,
+          "api-key-created": 61,
+          "bank-transaction-review": 61,
+          "booking-confirmation": 60,
+          "changelog": 54,
+          "comment-mention": 57,
+          "delivery-update": 50,
+          "email-verification": 251,
+          "export-ready": 63,
+          "magic-link": 238,
+          "new-device-alert": 249,
+          "newsletter": 78,
+          "order-confirmation": 58,
+          "otp-code": 255,
+          "password-changed": 244,
+          "password-reset": 235,
+          "payment-failed": 60,
+          "payment-failed-final": 60,
+          "receipt": 238,
+          "refund-issued": 74,
+          "renewal-reminder": 65,
+          "shipping-notice": 60,
+          "support-reply": 54,
+          "team-invitation": 255,
+          "trial-ending": 61,
+          "two-factor-changed": 123,
+          "urgent-security-alert": 232,
+          "usage-limit-warning": 34,
+          "verify-deadline": 48,
+          "weekly-digest": 61,
+          "welcome": 249
+        },
+        "byLang": {
+          "ar": 205,
+          "de": 205,
+          "en": 2173,
+          "es": 206,
+          "fr": 203,
+          "id": 207,
+          "ja": 204,
+          "pt": 208,
+          "zh": 205
+        },
+        "byStyle": {
+          "consumer-friendly": 1311,
+          "dev-terse": 793,
+          "formal-bank": 1124,
+          "small-shop": 588
+        }
+      }
     }
   }
 }

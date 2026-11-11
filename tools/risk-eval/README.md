@@ -24,7 +24,7 @@ or fetch a link found in the data, and never feed the mail to a live mail system
 ```sh
 cd tools/risk-eval
 bun src/cli.ts fetch                 # download datasets whose terms allow it, check pins
-bun src/cli.ts normalise             # one JSONL schema, deduplicated across datasets
+bun src/cli.ts normalise             # one JSONL schema, deduplicated across datasets; also generates the synthetic legit set
 bun src/cli.ts split                 # dev and test, stratified, near-duplicate safe
 bun src/cli.ts run --judge keyword-v1 --split dev --dry-run
 bun src/cli.ts run --judge keyword-v1 --split dev --cap 500
@@ -43,6 +43,11 @@ text, html?, lang, year?, from_domain?, has_attachments?, synthetic }`, drops
   exact and whitespace-normalised duplicates across datasets, and writes
   `normalised/all.jsonl`. Every parser is bounded (see `src/limits.ts`) and
   tolerates broken encodings; archives are validated before extraction.
+- `normalise` also generates `synthetic-legit-modern`, 4,498 modern legitimate
+  mails (receipts, password resets, sign-in codes, invitations, shipping notices,
+  newsletters and more, in nine languages) from the authored templates in
+  `src/generate/`. It needs no download and no manifest entry, and it is
+  deterministic from a seed. See "Generated legitimate mail" below.
 - `split` is deterministic (seeded, by hash), stratified by label, dataset and
   language, and moves whole near-duplicate clusters together. It writes
   `splits/dev.jsonl`, `splits/test.jsonl`, the per-stratum summary in the cache
@@ -53,6 +58,31 @@ text, html?, lang, year?, from_domain?, has_attachments?, synthetic }`, drops
   answer. A bigger cap reuses everything a smaller one answered. A judge that
   fails 20 times in a row stops the run.
 - `report` prints markdown from the cached answers.
+
+## Generated legitimate mail
+
+No public dataset of modern legitimate mail exists, and without it the real
+legitimate mail is two decades old (see `DATASETS.md`). `src/generate/` writes
+some: authored templates (`templates/`, one file per area or language), fictional
+fill data (`fill.ts`, `packs.ts`), reserved-domain hosts only (`hosts.ts`), and a
+renderer that turns the same blocks into plain text and HTML (`render.ts`).
+`generateMails()` renders each template 24 times, drops exact duplicates, then
+clusters with the split's own near-duplicate method and keeps at most 6 mails per
+cluster. Every mail is `synthetic: true`, `label: "legit"`, `year: 2026`, has an
+exact `lang`, a `mail_type` and a `style`, and the hard negatives (legitimate mail
+that looks like phishing: urgent alerts, final payment notices, suspensions) also
+carry `hard_negative: true`.
+
+**This mail is synthetic and authored by the people building the judge.** It
+tests false positives on plausible modern mail. It is not a substitute for real
+customer mail, and a judge can still learn that generated mail looks generated
+(for one, every link is on a reserved domain such as `.example`).
+
+To add a wording, add a template next to the others and run `bun test`: the tests
+check that every host is reserved, no placeholder is left unfilled, languages are
+exact, and the output is deterministic. A template change changes the set, so clear
+a judge's cached answers for this dataset before rerunning it (answers are cached
+by mail id).
 
 ## Writing a judge
 
@@ -71,6 +101,11 @@ since no dataset labels them. Per scored question the report gives confusion
 counts, precision, recall and F1 at 0.5, a threshold sweep, ROC AUC, a ten-bin
 calibration table with expected calibration error, and the same broken down by
 dataset, language, year bucket and real or synthetic.
+
+The report also breaks the results out by `slice`: `generated-legit` (the
+modern legitimate mail above), `hard-negative` (the part of it built to look like
+phishing) and `other`, with the headline's legitimate-mail table repeated per
+slice, and by generated `mailType`.
 
 The headline is the false-positive rate on legitimate mail at the threshold
 that catches 90% of phishing. That threshold is chosen once on all phishing

@@ -236,6 +236,8 @@ export async function fetchDatasets(opts: {
     datasets: structuredClone(opts.manifest.datasets),
   }
   for (const dataset of opts.datasets) {
+    // A generated dataset has no files, so it gets no manifest entry either.
+    if (dataset.files.length === 0) continue
     const pins = (next.datasets[dataset.id] ??= {})
     for (const file of dataset.files) {
       const { status, entry } = await fetchFile({
