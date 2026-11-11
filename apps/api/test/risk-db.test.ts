@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import * as schema from "../src/db/schema.js"
-import { assertRlsSubject, type Database } from "../src/db/client.js"
+import { assertRlsSubject, withTenant, type Database } from "../src/db/client.js"
+import { riskFactSnapshots } from "../src/db/core.js"
 import { sendingTierStore } from "../src/metering/tiers.js"
 import { recordContent } from "../src/risk/content.js"
 import { loadFacts } from "../src/risk/facts.js"
@@ -10,6 +11,10 @@ import { holdStore } from "../src/risk/holds.js"
 import { identityStore, recordSighting } from "../src/risk/identity.js"
 import { labelStore } from "../src/risk/labels.js"
 import { runAll, scoreTenant, type RiskDeps } from "../src/risk/runner.js"
+import { evaluate } from "../src/risk/engine.js"
+import { RULES } from "../src/risk/rules.js"
+import { reviveFacts, snapshotStore } from "../src/risk/snapshot.js"
+import type { Rule } from "../src/risk/types.js"
 import { assessmentStore } from "../src/risk/store.js"
 import type { ResolvedEmail } from "../src/send/accept.js"
 
@@ -123,6 +128,7 @@ function riskDeps(
       alert: (m) => alerts.push(m),
     },
     labels: labelStore(db),
+    snapshots: snapshotStore(db),
     switches: { enabled: true, tiers: true, holds: true, sesPolicy: true },
     redis: redis as never,
     alerts,
@@ -254,6 +260,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     await assessmentStore(db).save({
       tenantId: ids.e,
       assessment: { score: 90, band: "critical", contributions: [], rulesetVersion: 1 },
+      shadow: [],
       bandSince: new Date(),
       previous: null,
       actions: [],
@@ -395,6 +402,191 @@ suite("the risk engine against Postgres, as i10_api", () => {
     const summary = await runAll({ ...riskDeps(redis) }, { concurrency: 2 })
     expect(summary.failed).toBe(0)
     expect(summary.scored).toBeGreaterThan(0)
+  })
+
+  // ⚠ FACT SNAPSHOTS: every event's facts, otherwise the first score of a UTC
+  // day, and never readable by a workspace (risk/snapshot.ts).
+  it("snapshots the facts on every event, and otherwise once per workspace per UTC day", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    const count = async () =>
+      (
+        await owner`select count(*)::int as n from core.risk_fact_snapshots where tenant_id = ${id}`
+      )[0]!.n as number
+    const events = async () =>
+      (
+        await owner`select count(*)::int as n from core.risk_assessment_events where tenant_id = ${id}`
+      )[0]!.n as number
+    const day = new Date()
+    day.setUTCHours(1, 0, 0, 0)
+    const at = (hours: number) => new Date(day.getTime() + hours * 3_600_000)
+    const deps = (hours: number) => riskDeps(new FakeRedis(), { now: () => at(hours) })
+
+    // The first assessment is an event: its facts are kept.
+    await scoreTenant(id, "test", deps(0))
+    expect(await events()).toBe(1)
+    expect(await count()).toBe(1)
+    // Nothing moved an hour later: no event, and today already has one.
+    await scoreTenant(id, "hourly", deps(1))
+    await scoreTenant(id, "hourly", deps(2))
+    expect(await events()).toBe(1)
+    expect(await count()).toBe(1)
+    // The next UTC day keeps its first quiet score, and only its first.
+    await scoreTenant(id, "hourly", deps(23.5))
+    await scoreTenant(id, "hourly", deps(24.5))
+    expect(await count()).toBe(2)
+    // An event is kept whatever the day already has.
+    const store = snapshotStore(db)
+    const facts = await loadFacts(id, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+    })
+    const e = evaluate(facts)
+    expect(
+      await store.record({
+        tenantId: id,
+        at: at(25),
+        trigger: "t",
+        evaluated: e,
+        facts,
+        force: false,
+      }),
+    ).toBe(false)
+    expect(
+      await store.record({
+        tenantId: id,
+        at: at(25),
+        trigger: "t",
+        evaluated: e,
+        facts,
+        force: true,
+      }),
+    ).toBe(true)
+    expect(await count()).toBe(3)
+
+    // What was kept replays to what was stored, through real jsonb.
+    const kept = await store.list({
+      since: at(-1),
+      until: at(48),
+      tenantId: id,
+      limit: 10,
+    })
+    expect(kept.map((k) => k.trigger)).toEqual(["test", "hourly", "t"])
+    for (const k of kept) {
+      const back = reviveFacts(k.facts)
+      expect(back.now).toBeInstanceOf(Date)
+      expect(evaluate(back).band).toBe(k.band)
+      expect(evaluate(back).score).toBe(k.score)
+    }
+    // Keyset paging walks the same rows one at a time.
+    const first = await store.list({
+      since: at(-1),
+      until: at(48),
+      tenantId: id,
+      limit: 1,
+    })
+    const second = await store.list({
+      since: at(-1),
+      until: at(48),
+      tenantId: id,
+      after: first[0]!,
+      limit: 1,
+    })
+    expect(second[0]!.id).toBe(kept[1]!.id)
+  })
+
+  it("keeps fact snapshots deny-all: a workspace cannot read even its own", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    await scoreTenant(id, "test", riskDeps())
+    const [kept] =
+      await owner`select count(*)::int as n from core.risk_fact_snapshots where tenant_id = ${id}`
+    expect(kept!.n).toBe(1)
+    const own = await withTenant(db, id, (tx) => tx.select().from(riskFactSnapshots))
+    expect(own).toHaveLength(0)
+    expect(await app`select * from core.risk_fact_snapshots`).toHaveLength(0)
+    await expect(
+      withTenant(db, id, (tx) =>
+        tx.insert(riskFactSnapshots).values({
+          tenantId: id,
+          takenAt: new Date(),
+          rulesetVersion: 1,
+          trigger: "forged",
+          score: 0,
+          band: "low",
+          contributions: [],
+          shadow: [],
+          facts: {},
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it("purges fact snapshots past the retention window in the hourly run", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    const store = snapshotStore(db)
+    const facts = await loadFacts(id, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+    })
+    const e = evaluate(facts)
+    const old = new Date(Date.now() - 181 * 86_400_000)
+    const recent = new Date(Date.now() - 179 * 86_400_000)
+    for (const at of [old, recent])
+      await store.record({
+        tenantId: id,
+        at,
+        trigger: "t",
+        evaluated: e,
+        facts,
+        force: true,
+      })
+
+    const summary = await runAll(riskDeps(), { concurrency: 2 })
+    expect(summary.snapshotsPurged).toBeGreaterThanOrEqual(1)
+    const left =
+      await owner`select taken_at from core.risk_fact_snapshots where tenant_id = ${id} and trigger = 't'`
+    expect(left.map((r) => new Date(r.taken_at).getTime())).toEqual([recent.getTime()])
+  })
+
+  it("records shadow contributions with the assessment and its event, and lets them move nothing", async () => {
+    const loud: Rule = {
+      id: "test.shadow_critical",
+      category: "content",
+      summary: "Test-only: always fires at critical, in shadow",
+      mode: "shadow",
+      evaluate: () => ({ points: 100, evidence: { test: true }, floor: "critical" }),
+    }
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    const r = await scoreTenant(
+      id,
+      "test",
+      riskDeps(new FakeRedis(), { rules: [...RULES, loud] }),
+    )
+    expect(r.band).toBe("low")
+    expect(r.actions).toEqual([])
+    expect(await holdStore(db).current(id)).toBeNull()
+
+    const current = await assessmentStore(db).current(id)
+    expect(current!.shadow.map((c) => c.rule)).toEqual([loud.id])
+    expect(current!.contributions.map((c) => c.rule)).not.toContain(loud.id)
+    const [event] = await assessmentStore(db).history(id, 1)
+    expect((event!.shadow as { rule: string }[]).map((c) => c.rule)).toEqual([loud.id])
+    const [snap] = await snapshotStore(db).list({
+      since: new Date(Date.now() - 3_600_000),
+      until: new Date(Date.now() + 3_600_000),
+      tenantId: id,
+      limit: 1,
+    })
+    expect(snap!.shadow.map((c) => c.rule)).toEqual([loud.id])
   })
 
   // ⚠ THE LINK PROVIDERS' WIRING: what each says is stored once, an answer that

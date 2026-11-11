@@ -9,6 +9,11 @@
  *   bun run risk-admin tier     <tenant> strict|normal --by <you> --reason "<why>"
  *   bun run risk-admin label    <tenant> abuse|legit --by <you> [--note "<text>"]
  *   bun run risk-admin linked   <clerk user id>
+ *   bun run risk-admin replay   [--since <iso date>] [--until <iso date>] [--tenant <id>] [--json]
+ *
+ * `replay` re-scores the kept fact snapshots (default: the last 30 days) with
+ * the rules in this checkout and the current RISK_SHADOW_RULES, and prints what
+ * would change. It writes nothing and calls no outside service.
  *
  * Trusted content (#222):
  *
@@ -44,9 +49,10 @@ import { loadEnv } from "./env.js"
 import { createCacheClient } from "./cache/redis.js"
 import { evaluate } from "./risk/engine.js"
 import { loadFacts } from "./risk/facts.js"
-import { RULES } from "./risk/rules.js"
+import { formatReport, replaySnapshot, summarise } from "./risk/replay.js"
 import { scoreTenant } from "./risk/runner.js"
-import { CATEGORY_TEXT, type Category } from "./risk/types.js"
+import { RULESET_VERSION } from "./risk/rules.js"
+import { CATEGORY_TEXT, type Category, type ShadowContribution } from "./risk/types.js"
 import { riskSystem, systemTenantIds } from "./risk/wire.js"
 import { systemSenderFor } from "./auth-email/system.js"
 import { createQueueClient } from "./cache/redis.js"
@@ -62,9 +68,12 @@ import type { TrustedTemplate } from "./risk/trusted.js"
 const [command, ...rest] = process.argv.slice(2)
 const flags = new Map<string, string>()
 const positional: string[] = []
+/** Flags that take no value, so `--json --tenant x` does not read `--tenant` as one. */
+const SWITCHES = new Set(["json"])
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i]!
-  if (a.startsWith("--")) flags.set(a.slice(2), rest[++i] ?? "")
+  if (a.startsWith("--") && SWITCHES.has(a.slice(2))) flags.set(a.slice(2), "")
+  else if (a.startsWith("--")) flags.set(a.slice(2), rest[++i] ?? "")
   else positional.push(a)
 }
 const need = (name: string) => {
@@ -92,6 +101,8 @@ const risk = riskSystem({
   log: { warn: (o, m) => console.warn(m, o), error: (o, m) => console.error(m, o) },
 })
 const tenant = () => positional[0] ?? fail("a workspace id is required")
+/** The rules the engine runs with here, RISK_SHADOW_RULES applied. */
+const rules = risk.rules
 const quiet = { warn: () => {}, error: () => {}, info: () => {} }
 
 /*
@@ -192,7 +203,7 @@ try {
         freePlanId: env.METERING_FREE_PLAN_ID,
         ownerInfo: risk.deps.ownerInfo,
       })
-      const a = evaluate(facts)
+      const a = evaluate(facts, rules)
       const [current, hold, history] = await Promise.all([
         risk.assessments.current(id),
         risk.holds.current(id),
@@ -218,7 +229,7 @@ try {
       )
       console.log("\ncontributions:")
       for (const c of a.contributions) {
-        const r = RULES.find((x) => x.id === c.rule)
+        const r = rules.find((x) => x.id === c.rule)
         console.log(
           `  ${String(c.points).padStart(4)}  ${c.rule.padEnd(28)} ${r?.summary ?? ""}`,
         )
@@ -228,6 +239,25 @@ try {
         // ⚠ WHAT A SIMILARITY FINDING WAS BASED ON (#222): counts and
         // distances, never who the neighbours are.
         if (c.detail) console.log(`        based on: ${JSON.stringify(c.detail)}`)
+      }
+      // ⚠ SHADOW RULES ARE SHOWN, AND SHOWN AS DOING NOTHING: none of these
+      // points is in the score above, and none of them can act.
+      const braked = env.RISK_SHADOW_RULES
+      if (braked.length > 0)
+        console.log(`\nforced into shadow by RISK_SHADOW_RULES: ${braked.join(", ")}`)
+      console.log(
+        a.shadow.length > 0
+          ? "\nshadow (NO EFFECT on the score, band or any action):"
+          : "\nshadow: nothing fired",
+      )
+      for (const c of a.shadow) {
+        const r = rules.find((x) => x.id === c.rule)
+        console.log(
+          `  (${String(c.wouldAdd).padStart(4)}) ${c.rule.padEnd(28)} ${r?.summary ?? ""}`,
+        )
+        console.log(
+          `        ${JSON.stringify(c.evidence)}${c.wouldFloor ? `  would floor=${c.wouldFloor}` : ""}`,
+        )
       }
       console.log(
         `\ntrusted content, last 7 days: ${facts.farm.trusted.template} approved-template, ${facts.farm.trusted.boilerplate} boilerplate`,
@@ -242,6 +272,11 @@ try {
         console.log(
           `  ${e.occurredAt.toISOString()}  ${e.fromBand ?? "-"} -> ${e.band} (${e.score}) [${e.trigger}] ${e.actions.join(" ")}`,
         )
+        const shadow = e.shadow as ShadowContribution[]
+        if (shadow.length > 0)
+          console.log(
+            `        shadow, no effect: ${shadow.map((c) => `${c.rule}:${c.wouldAdd}`).join(" ")}`,
+          )
       }
       break
     }
@@ -475,6 +510,45 @@ try {
       }
       break
     }
+    case "replay": {
+      const date = (name: string, fallback: Date) => {
+        const v = flags.get(name)
+        if (v === undefined) return fallback
+        const d = new Date(v)
+        if (Number.isNaN(d.getTime())) fail(`--${name} is not a date: ${v}`)
+        return d
+      }
+      const until = date("until", new Date())
+      const since = date("since", new Date(until.getTime() - 30 * 86_400_000))
+      const only = flags.get("tenant")?.trim() || undefined
+      // Paged, so only one page of facts is ever held at once.
+      const results = []
+      let after: { takenAt: Date; id: string } | undefined
+      for (;;) {
+        const page = await risk.snapshots.list({
+          since,
+          until,
+          ...(only ? { tenantId: only } : {}),
+          ...(after ? { after } : {}),
+          limit: 500,
+        })
+        for (const s of page) results.push(replaySnapshot(s, rules))
+        if (page.length < 500) break
+        after = page[page.length - 1]!
+      }
+      const report = summarise(results, rules)
+      if (flags.has("json"))
+        console.log(
+          JSON.stringify({ since, until, report, snapshots: results }, null, 2),
+        )
+      else {
+        console.log(
+          `\nreplay of ${since.toISOString()} to ${until.toISOString()}${only ? ` for ${only}` : ""}, ruleset v${RULESET_VERSION} from this checkout\n`,
+        )
+        console.log(formatReport(report))
+      }
+      break
+    }
     case "linked": {
       const user = positional[0] ?? fail("a Clerk user id is required")
       const rows = await db.execute(sql`
@@ -485,7 +559,7 @@ try {
     }
     default:
       fail(
-        "commands: explain, score, hold, release, pin, tier, label, linked, boilerplate, templates - see the header of src/risk-admin.ts",
+        "commands: explain, score, hold, release, pin, tier, label, linked, replay, boilerplate, templates - see the header of src/risk-admin.ts",
       )
   }
 } finally {

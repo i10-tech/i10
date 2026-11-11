@@ -4075,6 +4075,10 @@ export const riskAssessments = core.table(
     /** Which rules produced it. See `RULESET_VERSION` in risk/rules.ts. */
     rulesetVersion: integer("ruleset_version").notNull(),
     contributions: jsonb("contributions").notNull(),
+    /** What shadow rules would have added: recorded, with no effect. */
+    shadow: jsonb("shadow")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** When the band last changed. Hysteresis reads it. */
     bandSince: timestamp("band_since", { withTimezone: true }).notNull().defaultNow(),
     /**
@@ -4114,6 +4118,9 @@ export const riskAssessmentEvents = core.table(
     fromBand: riskBand("from_band"),
     rulesetVersion: integer("ruleset_version").notNull(),
     contributions: jsonb("contributions").notNull(),
+    shadow: jsonb("shadow")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** What the run did: `tier:strict`, `hold`, `ses:strict`, `alert`, ... */
     actions: text("actions")
       .array()
@@ -4126,6 +4133,50 @@ export const riskAssessmentEvents = core.table(
   (t) => [
     index("risk_assessment_events_tenant_idx").on(t.tenantId, t.occurredAt),
     tenantPolicy("risk_assessment_events_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * The facts an assessment was computed from, so a rule change can be replayed
+ * against them (risk/snapshot.ts, risk/replay.ts).
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, BEHIND DEFINERS. The facts carry other workspaces'
+ * ids (farm peers), the owner's Clerk id and first country, domain names and
+ * link hosts: a workspace must never read its own row, let alone another's.
+ *
+ * ⚠ NOT ONE ROW PER RUN. Written when the event log writes an event, and
+ * otherwise at most once per workspace per UTC day; deleted after
+ * `SNAPSHOT_RETENTION_DAYS`.
+ */
+export const riskFactSnapshots = core.table(
+  "risk_fact_snapshots",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    takenAt: timestamp("taken_at", { withTimezone: true }).notNull(),
+    /** The ruleset the facts were scored under, and so the shape they had. */
+    rulesetVersion: integer("ruleset_version").notNull(),
+    trigger: text("trigger").notNull(),
+    score: integer("score").notNull(),
+    band: riskBand("band").notNull(),
+    contributions: jsonb("contributions").notNull(),
+    shadow: jsonb("shadow").notNull(),
+    /** `Facts`, through `serialiseFacts`. */
+    facts: jsonb("facts").notNull(),
+  },
+  (t) => [
+    index("risk_fact_snapshots_tenant_idx").on(t.tenantId, t.takenAt),
+    // The purge and a replay over every workspace read by time alone.
+    index("risk_fact_snapshots_time_idx").on(t.takenAt, t.id),
+    pgPolicy("risk_fact_snapshots_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
   ],
 )
 

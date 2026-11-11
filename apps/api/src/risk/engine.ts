@@ -6,6 +6,7 @@ import {
   type Contribution,
   type Facts,
   type Rule,
+  type ShadowContribution,
 } from "./types.js"
 
 /**
@@ -34,13 +35,28 @@ export interface RuleFailure {
   error: unknown
 }
 
-/** An assessment, and the rules that could not take part in it. */
+/**
+ * An assessment, the rules that could not take part in it, and what the
+ * shadow rules would have added.
+ *
+ * ⚠ `shadow` IS BESIDE THE ASSESSMENT, NOT IN IT. `decide` takes an
+ * `Assessment`, which has no such field, and the runner strips it off before
+ * deciding; a `ShadowContribution` is not a `Contribution` either.
+ */
 export interface Evaluated extends Assessment {
   failures: RuleFailure[]
+  shadow: ShadowContribution[]
+}
+
+/** The rules with the listed ids forced into shadow: `RISK_SHADOW_RULES`. */
+export function forceShadow(rules: readonly Rule[], ids: readonly string[]): Rule[] {
+  const braked = new Set(ids)
+  return rules.map((r) => (braked.has(r.id) ? { ...r, mode: "shadow" as const } : r))
 }
 
 export function evaluate(facts: Facts, rules: readonly Rule[] = RULES): Evaluated {
   const contributions: Contribution[] = []
+  const shadow: ShadowContribution[] = []
   const failures: RuleFailure[] = []
   for (const r of rules) {
     let result
@@ -55,6 +71,17 @@ export function evaluate(facts: Facts, rules: readonly Rule[] = RULES): Evaluate
       continue
     }
     if (!result || result.points === 0) continue
+    if (r.mode === "shadow") {
+      shadow.push({
+        rule: r.id,
+        category: r.category,
+        wouldAdd: result.points,
+        evidence: result.evidence,
+        ...(result.detail ? { detail: result.detail } : {}),
+        ...(result.floor ? { wouldFloor: result.floor } : {}),
+      })
+      continue
+    }
     contributions.push({
       rule: r.id,
       category: r.category,
@@ -74,7 +101,15 @@ export function evaluate(facts: Facts, rules: readonly Rule[] = RULES): Evaluate
   )
   // Worst first, which is the order staff and the console read them in.
   contributions.sort((a, b) => b.points - a.points)
-  return { score, band, contributions, rulesetVersion: RULESET_VERSION, failures }
+  shadow.sort((a, b) => b.wouldAdd - a.wouldAdd)
+  return {
+    score,
+    band,
+    contributions,
+    rulesetVersion: RULESET_VERSION,
+    failures,
+    shadow,
+  }
 }
 
 /**

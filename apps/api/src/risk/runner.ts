@@ -14,8 +14,9 @@ import {
   type Fetch,
 } from "./intel.js"
 import type { LabelStore } from "./labels.js"
-import { registrable } from "./rules.js"
-import { bandRank, type Band } from "./types.js"
+import { registrable, RULES } from "./rules.js"
+import { SNAPSHOT_RETENTION_DAYS, type SnapshotStore } from "./snapshot.js"
+import { bandRank, type Band, type Rule } from "./types.js"
 import type { Embedder } from "../content/embed.js"
 import { analyseContent } from "../content/job.js"
 import type { ContentStore } from "../content/object-store.js"
@@ -78,6 +79,10 @@ export interface RiskDeps {
   ownerInfo: (clerkUserId: string) => Promise<OwnerInfo | null>
   act: ActDeps
   labels: LabelStore
+  /** Where the facts behind each score are kept for replay (snapshot.ts). */
+  snapshots: SnapshotStore
+  /** The rules to score with: `RULES` with `RISK_SHADOW_RULES` applied (wire.ts). */
+  rules?: readonly Rule[]
   switches: RiskSwitches
   redis?: RiskLockRedis
   /**
@@ -193,7 +198,9 @@ async function scoreLocked(
     })
   }
 
-  const { failures, ...assessment } = evaluate(facts)
+  // ⚠ `shadow` IS TAKEN OFF HERE, so the assessment `decide` receives does not
+  // carry it even at run time.
+  const { failures, shadow, ...assessment } = evaluate(facts, deps.rules ?? RULES)
   for (const f of failures) {
     deps.log?.error?.({ err: f.error, tenantId, rule: f.rule }, "risk rule threw")
     deps.report?.(f.error, { phase: "risk-rule", tenantId, rule: f.rule })
@@ -220,6 +227,7 @@ async function scoreLocked(
   await deps.act.assessments.save({
     tenantId,
     assessment,
+    shadow,
     bandSince,
     previous: moveFrom,
     actions: [],
@@ -236,15 +244,31 @@ async function scoreLocked(
       .map((c) => `${c.rule}:${c.points}`)
       .join(" "),
   })
-  await deps.act.assessments.save({
+  const { event } = await deps.act.assessments.save({
     tenantId,
     assessment,
+    shadow,
     bandSince,
     previous: moveFrom,
     actions: done,
     trigger,
     at: now,
   })
+  // After the classifier, so a replay sees the content verdict this score saw.
+  // A lost snapshot costs replay one row, never the score.
+  await deps.snapshots
+    .record({
+      tenantId,
+      at: now,
+      trigger,
+      evaluated: { ...assessment, shadow },
+      facts,
+      force: event,
+    })
+    .catch((error: unknown) => {
+      deps.log?.error?.({ err: error, tenantId }, "could not record a fact snapshot")
+      deps.report?.(error, { phase: "risk-snapshot", tenantId })
+    })
 
   await autoLabels(tenantId, facts, assessment.band, previous, deps, now)
   deps.log?.info?.(
@@ -411,6 +435,8 @@ export interface RunSummary {
   tor: number | null
   enriched: number
   purged: number
+  /** Fact snapshots older than SNAPSHOT_RETENTION_DAYS, deleted this run. */
+  snapshotsPurged: number
   rdap: number
   linksChecked: number
   /** Answers each link provider gave this run. */
@@ -486,6 +512,7 @@ export async function runAll(
     tor: null,
     enriched: 0,
     purged: 0,
+    snapshotsPurged: 0,
     rdap: 0,
     linksChecked: 0,
     links: {},
@@ -512,6 +539,13 @@ export async function runAll(
   if (deps.ipinfoToken)
     summary.enriched = await enrichIdentities(deps, deps.ipinfoToken)
   summary.purged = await purgeIdentities(deps, now)
+  summary.snapshotsPurged = await deps.snapshots
+    .purge(new Date(now.getTime() - SNAPSHOT_RETENTION_DAYS * 86_400_000))
+    .catch((error: unknown) => {
+      deps.log?.error?.({ err: error }, "could not purge fact snapshots")
+      deps.report?.(error, { phase: "risk-snapshot-purge" })
+      return 0
+    })
 
   const ids = await candidates(deps, now)
   summary.candidates = ids.length

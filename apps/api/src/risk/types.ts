@@ -3,9 +3,9 @@
  *
  * ⚠ `Facts` IS EVERYTHING A RULE MAY READ, AND RULES READ NOTHING ELSE. Rules
  * are pure functions of it, which is what makes them testable against the
- * synthetic scenarios and what makes a score reproducible from the facts an
- * assessment recorded. A rule that queried the database itself would be a
- * rule nobody could replay.
+ * synthetic scenarios and what makes a score reproducible from the facts a
+ * snapshot recorded (snapshot.ts). A rule that queried the database itself
+ * would be a rule nobody could replay.
  */
 export type Band = "low" | "elevated" | "high" | "critical"
 export type Plan = "free" | "paid"
@@ -252,6 +252,12 @@ export interface Hit {
   freshAt?: Date
 }
 
+/**
+ * `live` rules score and act. A `shadow` rule is evaluated and recorded, and
+ * moves nothing: not the score, the band, a floor or any action.
+ */
+export type RuleMode = "live" | "shadow"
+
 export interface Rule {
   id: string
   category: Category
@@ -259,6 +265,8 @@ export interface Rule {
   summary: string
   /** May this rule's evidence re-hold a workspace after a staff release? */
   fresh?: boolean
+  /** Live when absent. Promoting a shadow rule is a code change and a `RULESET_VERSION` bump. */
+  mode?: RuleMode
   evaluate(facts: Facts): Hit | null
 }
 
@@ -270,6 +278,23 @@ export interface Contribution {
   detail?: SimilarityEvidence
   floor?: Band
   freshAt?: string
+}
+
+/**
+ * What a shadow rule would have added had it been live.
+ *
+ * ⚠ NO `points` AND NO `floor`, SO IT IS NOT A `Contribution`. Nothing that
+ * sums points, lifts a band or decides an action can be handed one by mistake:
+ * the compiler refuses it. It never has `freshAt` either, since it may never
+ * re-hold anybody.
+ */
+export interface ShadowContribution {
+  rule: string
+  category: Category
+  wouldAdd: number
+  wouldFloor?: Band
+  evidence: Hit["evidence"]
+  detail?: SimilarityEvidence
 }
 
 export interface Assessment {

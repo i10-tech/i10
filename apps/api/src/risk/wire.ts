@@ -14,6 +14,9 @@ import { riskNotices } from "./notice.js"
 import type { RiskDeps } from "./runner.js"
 import { embedderModelName } from "../content/embed.js"
 import { objectStoreFrom } from "../content/object-store.js"
+import { forceShadow } from "./engine.js"
+import { RULES } from "./rules.js"
+import { snapshotStore } from "./snapshot.js"
 import { assessmentStore } from "./store.js"
 import { boilerplateStore, trustSource, trustedTemplateStore } from "./trusted.js"
 import { asVerdict } from "./link-check.js"
@@ -55,6 +58,7 @@ export interface RiskSystemInput {
     | "RISK_ACT_HOLDS"
     | "RISK_ACT_SES_POLICY"
     | "RISK_ACT_TAKEOVER"
+    | "RISK_SHADOW_RULES"
     | "METERING_FREE_PLAN_ID"
     | "SES_ENABLED"
     | "AWS_REGION"
@@ -129,6 +133,15 @@ export function riskSystem(input: RiskSystemInput) {
   const assessments = assessmentStore(db)
   const labels = labelStore(db)
   const identity = identityStore(db)
+  const snapshots = snapshotStore(db)
+  const rules = forceShadow(RULES, env.RISK_SHADOW_RULES)
+  // Logged by every process that builds the engine, so a braked rule is never
+  // a surprise in any of them.
+  if (env.RISK_SHADOW_RULES.length > 0)
+    log?.warn?.(
+      { rules: env.RISK_SHADOW_RULES },
+      "RISK_SHADOW_RULES: these rules run in shadow and have no effect",
+    )
   const notices =
     input.sender && input.consoleUrl
       ? riskNotices({ db, clerk, sender: input.sender, consoleUrl: input.consoleUrl })
@@ -188,6 +201,8 @@ export function riskSystem(input: RiskSystemInput) {
       ...(log ? { log } : {}),
     },
     labels,
+    snapshots,
+    rules,
     links,
     ...(webRisk ? { webRisk } : {}),
     health,
@@ -244,6 +259,8 @@ export function riskSystem(input: RiskSystemInput) {
     holds,
     assessments,
     labels,
+    snapshots,
+    rules,
     identity,
     takeover,
     notices,
