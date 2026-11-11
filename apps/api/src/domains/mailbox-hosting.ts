@@ -48,6 +48,8 @@ export interface MailboxesView {
   owned: boolean
   /** SES verified the sending identity, so mail can leave. Separate from hosting. */
   sending: boolean
+  /** The last DNS check saw an apex MX pointing at our mail host. */
+  receiving: boolean
   /** Where mail to nobody's address goes, or null. */
   catch_all: string | null
   /** Mailboxes on the domain. */
@@ -97,6 +99,7 @@ interface ViewRow {
   enabled: boolean
   owned: boolean
   sending: boolean
+  receiving: boolean
   catch_all_address: string | null
   count: number | string
 }
@@ -105,6 +108,7 @@ const asView = (row: ViewRow): MailboxesView => ({
   enabled: row.enabled,
   owned: row.owned,
   sending: row.sending,
+  receiving: row.receiving,
   catch_all: row.catch_all_address,
   count: Number(row.count),
 })
@@ -132,6 +136,7 @@ export function mailboxHosting(deps: MailboxHostingDeps): MailboxHosting {
                (d.displaced_at is null
                  and core.holds_name(d.tenant_id, d.name)) as owned,
                (d.status = 'verified' and d.displaced_at is null) as sending,
+               (d.receiving and d.displaced_at is null) as receiving,
                d.catch_all_address,
                (select count(*) from authd.accounts a
                  where lower(split_part(a.email, '@', 2)) = lower(d.name)
@@ -166,7 +171,14 @@ export function mailboxHosting(deps: MailboxHostingDeps): MailboxHosting {
     // The row was there a moment ago; a vanished one reads as switched off.
     return found
       ? asView(found)
-      : { enabled: false, owned: false, sending: false, catch_all: null, count: 0 }
+      : {
+          enabled: false,
+          owned: false,
+          sending: false,
+          receiving: false,
+          catch_all: null,
+          count: 0,
+        }
   }
 
   /** Whether this workspace hosts the name now, by the function the list is built on. */

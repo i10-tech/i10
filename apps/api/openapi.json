@@ -4203,7 +4203,8 @@
                     "MX",
                     "TXT",
                     "CNAME",
-                    "NS"
+                    "NS",
+                    "SRV"
                   ]
                 },
                 "ttl": {
@@ -4223,6 +4224,12 @@
                   "type": "string"
                 },
                 "priority": {
+                  "type": "integer"
+                },
+                "weight": {
+                  "type": "integer"
+                },
+                "port": {
                   "type": "integer"
                 }
               },

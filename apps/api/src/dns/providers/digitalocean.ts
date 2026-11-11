@@ -101,6 +101,8 @@ interface DoRecord {
   data: string
   ttl: number
   priority: number | null
+  port?: number | null
+  weight?: number | null
 }
 
 export function digitalOceanWriter(): ZoneWriter {
@@ -183,7 +185,11 @@ export function digitalOceanWriter(): ZoneWriter {
           (r) =>
             r.type === record.type &&
             r.name.toLowerCase() === relative.toLowerCase() &&
-            sameValue(r.type, r.data, record.value),
+            sameValue(r.type, r.data, record.value) &&
+            (record.type !== "SRV" ||
+              ((r.priority == null || r.priority === record.priority) &&
+                (r.weight == null || r.weight === record.weight) &&
+                (r.port == null || r.port === record.port))),
         )
         if (already) {
           outcome.unchanged.push(record)
@@ -197,14 +203,16 @@ export function digitalOceanWriter(): ZoneWriter {
             name: relative,
             /*
              * ⚠ A TRAILING DOT ON EVERY HOSTNAME VALUE, AND IT IS NOT OPTIONAL
-             * HERE. DigitalOcean treats an unqualified NS, MX or CNAME target as
-             * relative to the zone, so `ns1.i10.tech` becomes
+             * HERE. DigitalOcean treats an unqualified NS, MX, SRV or CNAME
+             * target as relative to the zone, so `ns1.i10.tech` becomes
              * `ns1.i10.tech.example.com.` - a delegation to a nameserver that
              * does not exist, published successfully, with no error anywhere.
              */
             data: needsTrailingDot(record.type) ? `${record.value}.` : record.value,
             ttl: record.ttl,
             ...(record.priority === undefined ? {} : { priority: record.priority }),
+            ...(record.port === undefined ? {} : { port: record.port }),
+            ...(record.weight === undefined ? {} : { weight: record.weight }),
           }),
         })
         outcome.created.push(record)
@@ -216,7 +224,7 @@ export function digitalOceanWriter(): ZoneWriter {
 }
 
 const needsTrailingDot = (type: DesiredRecord["type"]) =>
-  type === "NS" || type === "MX" || type === "CNAME"
+  type === "NS" || type === "MX" || type === "CNAME" || type === "SRV"
 
 async function listRecords(
   credential: Credential,

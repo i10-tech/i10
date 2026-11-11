@@ -15,6 +15,7 @@ const VIEW: MailboxesView = {
   enabled: true,
   owned: true,
   sending: false,
+  receiving: false,
   catch_all: null,
   count: 2,
 }

@@ -18,6 +18,72 @@ import { dkimRecordValue } from "./dkim.js"
 /** SES's feedback host, per region. The MX for the custom MAIL FROM domain. */
 const feedbackHost = (region: string) => `feedback-smtp.${region}.amazonses.com`
 
+/**
+ * The default public hostname of our mail servers (`env.MAIL_HOSTNAME`).
+ *
+ * ⚠ ONE FALLBACK IN ONE PLACE, SO EVERY CALLER THAT CONSTRUCTS RECEIVING
+ * RECORDS NAMES THE SAME HOST. The environment variable is passed through
+ * `DnsSettings.mailHost` in production; tests and callers that omit it get the
+ * same default `env.ts` uses rather than repeating the literal.
+ */
+export const DEFAULT_MAIL_HOST = "mail.i10.tech"
+
+/**
+ * The records that point a domain's INBOUND mail and client discovery at us.
+ *
+ * ⚠ ONLY FOR DOMAINS THAT HOST MAILBOXES (`core.domains.hosts_mailboxes`). A
+ * sending-only domain's apex MX belongs to whatever mailbox provider the
+ * customer already reads mail at - Google Workspace, Microsoft 365, Fastmail -
+ * and asking them to point it at us would take their inbox down.
+ *
+ * ⚠ PORT 587 IS NOT EXPOSED (`infra/tofu/stacks/dns/main.tf`). Only implicit-TLS
+ * ports are advertised: 993 (`_imaps._tcp`) and 465 (`_submissions._tcp`, RFC
+ * 8314). Do not add `_submission._tcp`.
+ *
+ * ⚠ NEVER DELEGATED TO POWERDNS. Our authoritative zones (`domains/zone.ts`)
+ * cover only `send.`, `_domainkey.` and `_dmarc.`; the apex and `_tcp` labels
+ * live in the customer's parent zone whether the domain is delegated or manual.
+ */
+export function receivingRecordsFor(
+  domain: string,
+  mailHost: string = DEFAULT_MAIL_HOST,
+  status: DomainStatus,
+): DnsRecord[] {
+  return [
+    {
+      record: "Receiving",
+      name: domain,
+      type: "MX",
+      ttl: String(RECORD_TTL),
+      status,
+      value: mailHost,
+      priority: 10,
+    },
+    {
+      record: "Receiving",
+      name: `_imaps._tcp.${domain}`,
+      type: "SRV",
+      ttl: String(RECORD_TTL),
+      status,
+      value: mailHost,
+      priority: 0,
+      weight: 1,
+      port: 993,
+    },
+    {
+      record: "Receiving",
+      name: `_submissions._tcp.${domain}`,
+      type: "SRV",
+      ttl: String(RECORD_TTL),
+      status,
+      value: mailHost,
+      priority: 0,
+      weight: 1,
+      port: 465,
+    },
+  ]
+}
+
 export interface RecordInput {
   domain: string
   /** The return path's label for both routes, e.g. `send`. Not the FQDN. */
@@ -39,6 +105,10 @@ export interface RecordInput {
   spfInclude: string
   /** What we currently believe about the domain, stamped on every record. */
   status: DomainStatus
+  /** Whether the domain hosts mailboxes (`core.domains.hosts_mailboxes`). */
+  hostsMailboxes?: boolean
+  /** The public hostname of our mail servers (`env.MAIL_HOSTNAME`). */
+  mailHost?: string
 }
 
 /**
@@ -55,6 +125,8 @@ export function dnsRecordsFor({
   dkimPublicKey,
   spfInclude,
   status,
+  hostsMailboxes = false,
+  mailHost = DEFAULT_MAIL_HOST,
 }: RecordInput): DnsRecord[] {
   const returnPath = returnPathDomain(domain, mailFromSubdomain)
 
@@ -121,5 +193,6 @@ export function dnsRecordsFor({
       status,
       value: "v=DMARC1; p=none;",
     },
+    ...(hostsMailboxes ? receivingRecordsFor(domain, mailHost, status) : []),
   ]
 }

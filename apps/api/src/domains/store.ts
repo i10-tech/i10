@@ -8,7 +8,7 @@ import type {
 } from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
 import { delegations, domains } from "../db/core.js"
-import { dnsRecordsFor } from "./records.js"
+import { DEFAULT_MAIL_HOST, dnsRecordsFor } from "./records.js"
 import { generateDkimKeypair } from "./dkim.js"
 import {
   delegatedNameservers,
@@ -20,10 +20,13 @@ import {
 import type { DnsZones } from "./zone.js"
 import {
   dkimName,
+  hasInboundMx,
+  nodeMxLookup,
   nodeTxtLookup,
   proveDomain,
   type DelegationProbe,
   type DnsProbes,
+  type MxLookup,
   type Provable,
   type TxtLookup,
 } from "./ownership.js"
@@ -344,6 +347,12 @@ export interface DomainStoreDeps {
    */
   delegation?: DelegationProbe
   /**
+   * ⚠ READS THE CUSTOMER'S APEX MX, to report whether inbound mail will reach
+   * `dns.mailHost`. Defaults to a real resolver unless `txt` or `delegation`
+   * was stubbed for a unit test.
+   */
+  mx?: MxLookup
+  /**
    * ⚠ SEALS THE DKIM PRIVATE KEY BEFORE IT REACHES A ROW. Anyone holding it can
    * sign mail as the customer's domain, so it never lands in the database in a
    * form a backup or a replica could use.
@@ -408,6 +417,8 @@ interface Row {
   name: string
   mailFromSubdomain: string
   delegated: boolean
+  hostsMailboxes?: boolean
+  receiving?: boolean
   dkimSelector: string | null
   dkimPublicKey: string | null
   status: DomainStatus
@@ -439,6 +450,8 @@ const COLUMNS = {
   name: domains.name,
   mailFromSubdomain: domains.mailFromSubdomain,
   delegated: domains.delegated,
+  hostsMailboxes: domains.hostsMailboxes,
+  receiving: domains.receiving,
   dkimSelector: domains.dkimSelector,
   dkimPublicKey: domains.dkimPublicKey,
   status: domains.status,
@@ -481,6 +494,10 @@ const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
         dns.nameservers,
         row.status,
         row.delegationToken,
+        {
+          hostsMailboxes: Boolean(row.hostsMailboxes),
+          ...(dns.mailHost ? { mailHost: dns.mailHost } : {}),
+        },
       )
     : dnsRecordsFor({
         domain: row.name,
@@ -490,6 +507,8 @@ const present = (row: Row, region: string, dns: DnsSettings): Domain => ({
         dkimPublicKey: row.dkimPublicKey,
         spfInclude: dns.spfInclude,
         status: row.status,
+        hostsMailboxes: Boolean(row.hostsMailboxes),
+        ...(dns.mailHost ? { mailHost: dns.mailHost } : {}),
       }),
 })
 
@@ -499,6 +518,8 @@ export interface DnsSettings {
   spfInclude: string
   /** Our authoritative nameservers, for delegated domains. */
   nameservers: readonly string[]
+  /** Our inbound mail and client-discovery hostname (`env.MAIL_HOSTNAME`). */
+  mailHost?: string
 }
 
 /** Postgres's unique violation. Which constraint fired decides what it means. */
@@ -514,12 +535,18 @@ export function domainStore({
   dns,
   secrets,
   zones,
-  txt = nodeTxtLookup(),
-  delegation = readDelegation,
+  txt: customTxt,
+  delegation: customDelegation,
+  mx: customMx,
   log,
   onRemoving,
   now = () => new Date(),
 }: DomainStoreDeps): DomainStore {
+  const txt = customTxt ?? nodeTxtLookup()
+  const delegation = customDelegation ?? readDelegation
+  const mx =
+    customMx ?? (customTxt || customDelegation ? async () => [] : nodeMxLookup())
+  const mailHost = dns.mailHost ?? DEFAULT_MAIL_HOST
   const probes: DnsProbes = { txt, delegation }
 
   /**
@@ -1465,7 +1492,12 @@ export function domainStore({
         return { status: "ok", domain: present(existing, region, dns) }
       }
 
-      const seen = await identity.status(existing.name)
+      const [seen, receiving] = await Promise.all([
+        identity.status(existing.name),
+        existing.hostsMailboxes
+          ? hasInboundMx(existing.name, mailHost, mx)
+          : Promise.resolve(false),
+      ])
 
       // ⚠ THE SAME RULE `verify` FOLLOWS: the stamp is the moment the domain
       // first became usable and never moves backwards. A poll that happens to
@@ -1479,6 +1511,7 @@ export function domainStore({
             .update(domains)
             .set({
               status,
+              receiving,
               dnsCheckedAt: now(),
               updatedAt: now(),
               ...(stamp ? { verifiedAt: stamp } : {}),
@@ -1523,6 +1556,12 @@ export function domainStore({
       })
       if (!existing) return { status: "missing" }
 
+      // ⚠ CHECKED ALONGSIDE OWNERSHIP, SO EVERY DNS CHECK RECORDS WHETHER THE
+      // APEX MX POINTS AT US. Even if sending proof has not settled yet, a
+      // domain that already proved ownership and turned on mailboxes gets an
+      // up-to-date `receiving` answer whenever its DNS is checked.
+      const receiving = await hasInboundMx(existing.name, mailHost, mx)
+
       /**
        * Write down that we looked, without claiming anything about what we saw.
        *
@@ -1534,14 +1573,15 @@ export function domainStore({
        * rows behind it were never reached. Stamping it is simply true: we did
        * ask, and the answer was "not yet".
        *
-       * ⚠ AND IT MOVES NOTHING ELSE. Not the status, not `verified_at`. The
-       * only thing it asserts is the time of the question.
+       * ⚠ AND IT MOVES NOTHING ELSE ABOUT SENDING. Not the status, not
+       * `verified_at`. It records the check time and whether the apex MX
+       * currently points at `mailHost`.
        */
       const noteChecked = () =>
         withTenant(db, tenantId, async (tx) =>
           tx
             .update(domains)
-            .set({ dnsCheckedAt: now(), updatedAt: now() })
+            .set({ receiving, dnsCheckedAt: now(), updatedAt: now() })
             .where(and(eq(domains.tenantId, tenantId), eq(domains.id, id))),
         )
 
@@ -1643,6 +1683,7 @@ export function domainStore({
             .update(domains)
             .set({
               status,
+              receiving,
               displacedAt: null,
               dnsCheckedAt: now(),
               updatedAt: now(),

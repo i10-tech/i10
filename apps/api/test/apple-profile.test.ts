@@ -179,4 +179,34 @@ describe("GET /autoconfig/apple.mobileconfig", () => {
     }
     expect(Object.keys(doc.paths)).not.toContain("/autoconfig/apple.mobileconfig")
   })
+
+  it("serves customer domains from core.mailbox_domains() alongside MAIL_DOMAINS", async () => {
+    const dynamicHosted = new Set(["acme.com"])
+    const withDynamic = createApp({
+      autoconfig: {
+        hostedDomains: ["i10.tech"],
+        isHostedDomain: async (domain) => dynamicHosted.has(domain),
+        mailHost: "mail.i10.tech",
+        imapPort: 993,
+        smtpPort: 465,
+        organization: "i10",
+      },
+    })
+
+    const hostedRes = await withDynamic.request(
+      "/autoconfig/apple.mobileconfig?email=ada@acme.com",
+    )
+    expect(hostedRes.status).toBe(200)
+    expect(await hostedRes.text()).toContain("<string>ada@acme.com</string>")
+
+    const staticRes = await withDynamic.request(
+      "/autoconfig/apple.mobileconfig?email=mohamed@i10.tech",
+    )
+    expect(staticRes.status).toBe(200)
+
+    const unhostedRes = await withDynamic.request(
+      "/autoconfig/apple.mobileconfig?email=ada@other.com",
+    )
+    expect(unhostedRes.status).toBe(404)
+  })
 })

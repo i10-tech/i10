@@ -355,6 +355,15 @@ export const domains = core.table(
     /** What the domain is used for. A domain may do both, or only one. */
     sends: boolean("sends").notNull().default(true),
     hostsMailboxes: boolean("hosts_mailboxes").notNull().default(false),
+    /**
+     * Whether the last DNS check saw an apex MX pointing at our mail host.
+     *
+     * ⚠ A CHECK RESULT, NOT A GATE. Stalwart accepts mail for any domain in
+     * `core.mailbox_domains()` whether or not this is true; this is what the
+     * console's mailbox checklist reads to show whether inbound mail will reach
+     * us yet.
+     */
+    receiving: boolean("receiving").notNull().default(false),
 
     /**
      * Where mail to an address on this domain that is nobody's goes (#406), or

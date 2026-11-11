@@ -32,7 +32,7 @@ export const domainStatus = z.enum([
  * the table, the export and the record in the provider all agree.
  */
 export const dnsRecordSchema = z.object({
-  /** `SPF`, `DKIM`, `DMARC` or `NS`. What the record is for, not its DNS type. */
+  /** `SPF`, `DKIM`, `DMARC`, `Receiving` or `NS`. What the record is for, not its DNS type. */
   record: z.string(),
   name: z.string(),
   /**
@@ -40,12 +40,16 @@ export const dnsRecordSchema = z.object({
    * NS record sets instead of six ordinary records, and the API deliberately
    * does not fork for it: a client renders `records` either way.
    */
-  type: z.enum(["MX", "TXT", "CNAME", "NS"]),
+  type: z.enum(["MX", "TXT", "CNAME", "NS", "SRV"]),
   ttl: z.string(),
   status: domainStatus,
   value: z.string(),
-  /** MX only. */
+  /** MX and SRV. */
   priority: z.number().int().optional(),
+  /** SRV only. */
+  weight: z.number().int().optional(),
+  /** SRV only. */
+  port: z.number().int().optional(),
 })
 
 export const createDomainSchema = z.object({

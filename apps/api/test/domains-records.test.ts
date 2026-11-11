@@ -181,3 +181,70 @@ describe("what the customer publishes, in total", () => {
     expect(amazon.map((r) => `${r.type}:${r.name}`)).toEqual(["MX:send.example.com"])
   })
 })
+
+describe("receiving records when the domain hosts mailboxes", () => {
+  const hosted = (mailHost?: string) =>
+    dnsRecordsFor({
+      domain: "example.com",
+      mailFromSubdomain: "send",
+      region: "eu-central-1",
+      dkimSelector: "i10abc123",
+      dkimPublicKey: PUBLIC_KEY,
+      spfInclude: "_spf.i10.tech",
+      status: "verified",
+      hostsMailboxes: true,
+      ...(mailHost ? { mailHost } : {}),
+    })
+
+  it("emits no receiving records when the domain does not host mailboxes", () => {
+    expect(records().filter((r) => r.record === "Receiving")).toEqual([])
+  })
+
+  it("emits apex MX and implicit-TLS SRV records when the domain hosts mailboxes", () => {
+    const receiving = hosted().filter((r) => r.record === "Receiving")
+    expect(receiving).toEqual([
+      {
+        record: "Receiving",
+        name: "example.com",
+        type: "MX",
+        ttl: "60",
+        status: "verified",
+        value: "mail.i10.tech",
+        priority: 10,
+      },
+      {
+        record: "Receiving",
+        name: "_imaps._tcp.example.com",
+        type: "SRV",
+        ttl: "60",
+        status: "verified",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 993,
+      },
+      {
+        record: "Receiving",
+        name: "_submissions._tcp.example.com",
+        type: "SRV",
+        ttl: "60",
+        status: "verified",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 465,
+      },
+    ])
+  })
+
+  it("does not advertise port 587 (_submission._tcp)", () => {
+    expect(hosted().some((r) => r.name.startsWith("_submission._tcp."))).toBe(false)
+    expect(hosted().some((r) => r.port === 587)).toBe(false)
+  })
+
+  it("uses the configured mailHost for all three receiving records", () => {
+    const custom = hosted("mx.custom.i10.tech").filter((r) => r.record === "Receiving")
+    expect(custom).toHaveLength(3)
+    expect(custom.every((r) => r.value === "mx.custom.i10.tech")).toBe(true)
+  })
+})

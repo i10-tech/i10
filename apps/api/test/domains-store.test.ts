@@ -429,6 +429,60 @@ describe("verifying", () => {
     expect(written).not.toHaveProperty("status")
     expect(written).not.toHaveProperty("verifiedAt")
   })
+
+  it("checks the apex MX against mailHost and stores receiving on verify and refresh", async () => {
+    let written: Record<string, unknown> | undefined
+    const db = {
+      execute: async () => [],
+      transaction: async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          execute: async () => [],
+          select: () => ({
+            from: () => ({
+              where: () => ({
+                limit: async () => [row({ status: "verified", hostsMailboxes: true })],
+              }),
+            }),
+          }),
+          update: () => ({
+            set: (v: Record<string, unknown>) => {
+              written = v
+              return {
+                where: () => ({
+                  returning: async () => [
+                    row({ status: "verified", hostsMailboxes: true, receiving: true }),
+                  ],
+                }),
+              }
+            },
+          }),
+        }),
+    } as unknown as Database
+
+    const store = domainStore({
+      db,
+      identity: identity({
+        status: async () => ({ dkimTokens: ["aaa"], status: "verified" }),
+      }),
+      capacity: roomFor("allowed"),
+      ...deps,
+      dns: { ...deps.dns, mailHost: "mail.i10.tech" },
+      mx: async () => [{ exchange: "MAIL.I10.TECH.", priority: 10 }],
+      now: () => NOW,
+    })
+
+    const v = await store.verify(TENANT, row().id)
+    expect(v.status).toBe("ok")
+    expect(written).toMatchObject({ receiving: true })
+    if (v.status === "ok") {
+      expect(v.domain.records.filter((r) => r.record === "Receiving")).toHaveLength(3)
+    }
+
+    written = undefined
+    const r = await store.refresh(TENANT, row().id)
+    expect(r.status).toBe("ok")
+    expect(written).toMatchObject({ receiving: true })
+  })
 })
 
 /**
