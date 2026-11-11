@@ -7,11 +7,12 @@ import type { Env } from "../env.js"
 import { sendingTierStore } from "../metering/tiers.js"
 import { sesReputationPolicy } from "./act.js"
 import type { OwnerInfo } from "./facts.js"
+import { decisionStore, type StaffDecisionDeps } from "./decisions.js"
 import { holdStore } from "./holds.js"
 import { identityStore, takeoverResponder } from "./identity.js"
 import { labelStore } from "./labels.js"
 import { riskNotices } from "./notice.js"
-import type { RiskDeps } from "./runner.js"
+import { cachedContent, type RiskDeps } from "./runner.js"
 import { embedderModelName } from "../content/embed.js"
 import { objectStoreFrom } from "../content/object-store.js"
 import { forceShadow } from "./engine.js"
@@ -134,6 +135,7 @@ export function riskSystem(input: RiskSystemInput) {
   const labels = labelStore(db)
   const identity = identityStore(db)
   const snapshots = snapshotStore(db)
+  const decisions = decisionStore(db)
   const rules = forceShadow(RULES, env.RISK_SHADOW_RULES)
   // Logged by every process that builds the engine, so a braked rule is never
   // a surprise in any of them.
@@ -242,6 +244,20 @@ export function riskSystem(input: RiskSystemInput) {
     ...(log ? { log } : {}),
   }
 
+  /** What a staff decision reads and writes: the facts the score would see right now. */
+  const staff: StaffDecisionDeps = {
+    db,
+    freePlanId: deps.freePlanId,
+    ownerInfo: deps.ownerInfo,
+    rules,
+    holds,
+    assessments,
+    snapshots,
+    decisions,
+    ...(deps.contentModel ? { contentModel: deps.contentModel } : {}),
+    content: (tenantId) => cachedContent(redis, tenantId),
+  }
+
   const takeover = redis
     ? takeoverResponder({
         clerk,
@@ -260,6 +276,8 @@ export function riskSystem(input: RiskSystemInput) {
     assessments,
     labels,
     snapshots,
+    decisions,
+    staff,
     rules,
     identity,
     takeover,

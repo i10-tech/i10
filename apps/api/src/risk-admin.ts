@@ -3,9 +3,12 @@
  *
  *   bun run risk-admin explain  <tenant>
  *   bun run risk-admin score    <tenant>
- *   bun run risk-admin hold     <tenant> --by <you> --reason "<why>" [--scope all]
- *   bun run risk-admin release  <tenant> --by <you> --reason "<why>" --outcome false_positive|upheld [--pause-days 14]
- *   bun run risk-admin pin      <tenant> --by <you> --reason "<why>" [--days 30]
+ *   bun run risk-admin hold     <tenant> --by <you> --reason "<why>" [--scope all] [--category <c>]
+ *   bun run risk-admin release  <tenant> --by <you> --reason "<why>" --outcome false_positive|upheld [--pause-days 14] [--rules a,b]
+ *   bun run risk-admin pin      <tenant> --by <you> --reason "<why>" [--days 30] [--rules a,b]
+ *   bun run risk-admin decisions <tenant>
+ *   bun run risk-admin revoke-decision <decision id> --by <you> --reason "<why>"
+ *   bun run risk-admin cases    [--tenant <id>]
  *   bun run risk-admin tier     <tenant> strict|normal --by <you> --reason "<why>"
  *   bun run risk-admin label    <tenant> abuse|legit --by <you> [--note "<text>"]
  *   bun run risk-admin linked   <clerk user id>
@@ -40,6 +43,13 @@
  *
  * ⚠ A RELEASE IS ALSO A LABEL. `false_positive` records the workspace as
  * legitimate; `upheld` as abuse.
+ *
+ * ⚠ A RELEASE OR A PIN CLEARS WHAT WAS IN VIEW (risk/decisions.ts): every live
+ * concern, or only those `--rules` names. The same evidence then stays cleared
+ * for DECISION_MEMORY_DAYS; new evidence counts in full. `--reason` is the
+ * decision's note. `revoke-decision` undoes the clearing and is recorded.
+ * `cases` prints every decision as a JSON line, disagreements with the engine
+ * first, for measuring the engine against people.
  */
 import { readFile } from "node:fs/promises"
 import { createClerkClient } from "@clerk/backend"
@@ -47,12 +57,22 @@ import { sql } from "drizzle-orm"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { createCacheClient } from "./cache/redis.js"
+import {
+  decisionCases,
+  staffDecision,
+  type StaffDecisionResult,
+} from "./risk/decisions.js"
 import { evaluate } from "./risk/engine.js"
 import { loadFacts } from "./risk/facts.js"
 import { formatReport, replaySnapshot, summarise } from "./risk/replay.js"
-import { scoreTenant } from "./risk/runner.js"
+import { cachedContent, scoreTenant } from "./risk/runner.js"
 import { RULESET_VERSION } from "./risk/rules.js"
-import { CATEGORY_TEXT, type Category, type ShadowContribution } from "./risk/types.js"
+import {
+  CATEGORY_TEXT,
+  type Category,
+  type ClearedContribution,
+  type ShadowContribution,
+} from "./risk/types.js"
 import { riskSystem, systemTenantIds } from "./risk/wire.js"
 import { systemSenderFor } from "./auth-email/system.js"
 import { createQueueClient } from "./cache/redis.js"
@@ -183,6 +203,33 @@ async function templateById(id: string) {
   return t
 }
 
+/** `--rules a,b`: the concerns a release or pin clears; all live ones when absent. */
+const ruleList = () => {
+  const v = flags.get("rules")?.trim()
+  return v
+    ? v
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean)
+    : undefined
+}
+
+/** Prints what a decision recorded and cleared. */
+function report(r: StaffDecisionResult) {
+  if (r.status !== "recorded") return
+  console.log(
+    `decision ${r.id} recorded (engine: score ${r.evaluated.score}, ${r.evaluated.band})`,
+  )
+  for (const c of r.covers)
+    console.log(
+      `  clears ${c.rule} at ${c.points}${c.keys ? ` for ${c.keys.join(", ")}` : ""}`,
+    )
+  const left = r.evaluated.contributions.filter(
+    (c) => c.points > 0 && !r.covers.some((x) => x.rule === c.rule),
+  )
+  for (const c of left) console.log(`  not cleared: ${c.rule} (${c.points})`)
+}
+
 function parseHoles(spec: string | undefined): Record<string, number> {
   const out: Record<string, number> = {}
   for (const part of (spec ?? "").split(",").filter(Boolean)) {
@@ -202,7 +249,9 @@ try {
         db,
         freePlanId: env.METERING_FREE_PLAN_ID,
         ownerInfo: risk.deps.ownerInfo,
+        ...(risk.deps.contentModel ? { contentModel: risk.deps.contentModel } : {}),
       })
+      facts.content = await cachedContent(cache, id)
       const a = evaluate(facts, rules)
       const [current, hold, history] = await Promise.all([
         risk.assessments.current(id),
@@ -259,6 +308,21 @@ try {
           `        ${JSON.stringify(c.evidence)}${c.wouldFloor ? `  would floor=${c.wouldFloor}` : ""}`,
         )
       }
+      // ⚠ CLEARED CONCERNS ARE SHOWN, AND SHOWN AS WORTH ZERO: a person already
+      // weighed this same evidence, and which decision says so.
+      console.log(
+        a.cleared.length > 0
+          ? "\ncleared by a staff decision (NO EFFECT; new evidence would count):"
+          : "\ncleared: nothing",
+      )
+      for (const c of a.cleared) {
+        console.log(
+          `  (${String(c.wouldAdd).padStart(4)}) ${c.rule.padEnd(28)} by decision ${c.clearedBy} of ${c.decidedAt}, until ${c.expiresAt}`,
+        )
+        console.log(
+          `        ${JSON.stringify(c.evidence)}${c.wouldFloor ? `  would floor=${c.wouldFloor}` : ""}`,
+        )
+      }
       console.log(
         `\ntrusted content, last 7 days: ${facts.farm.trusted.template} approved-template, ${facts.farm.trusted.boilerplate} boilerplate`,
       )
@@ -277,6 +341,11 @@ try {
           console.log(
             `        shadow, no effect: ${shadow.map((c) => `${c.rule}:${c.wouldAdd}`).join(" ")}`,
           )
+        const cleared = e.cleared as ClearedContribution[]
+        if (cleared.length > 0)
+          console.log(
+            `        cleared, no effect: ${cleared.map((c) => `${c.rule}:${c.wouldAdd} by ${c.clearedBy}`).join(" ")}`,
+          )
       }
       break
     }
@@ -288,15 +357,20 @@ try {
       const scope = flags.get("scope") === "all" ? "all" : "api"
       const category = (flags.get("category") ?? "sending_pattern") as Category
       if (!(category in CATEGORY_TEXT)) fail(`unknown category ${category}`)
-      const r = await risk.holds.hold({
+      const r = await staffDecision(risk.staff, {
         tenantId: tenant(),
-        source: "staff",
-        setBy: need("by"),
-        reason: need("reason"),
-        category,
-        scope,
+        kind: "hold",
+        by: need("by"),
+        note: need("reason"),
+        hold: { category, scope },
       })
-      console.log(r ? `held; ${r.canceled} queued message(s) canceled` : "already held")
+      if (r.status !== "recorded") console.log("already held")
+      else {
+        const current = await risk.holds.current(tenant())
+        console.log(
+          `held; ${current?.canceledMessages ?? 0} queued message(s) canceled; decision ${r.id} recorded`,
+        )
+      }
       break
     }
     case "release": {
@@ -306,14 +380,19 @@ try {
         fail("--outcome is false_positive or upheld")
       const by = need("by")
       const reason = need("reason")
-      const released = await risk.holds.release({
+      const rulesNamed = ruleList()
+      if (outcome === "upheld" && rulesNamed)
+        fail("an upheld hold clears nothing; drop --rules")
+      const r = await staffDecision(risk.staff, {
         tenantId: id,
-        setBy: by,
-        reason,
-        outcome,
+        kind: outcome === "false_positive" ? "release" : "uphold",
+        by,
+        note: reason,
         pauseDays: Number(flags.get("pause-days") ?? 14),
+        ...(rulesNamed ? { rules: rulesNamed } : {}),
       })
-      if (!released) fail("not held")
+      if (r.status === "not_held") fail("not held")
+      report(r)
       await risk.labels.add({
         tenantId: id,
         label: outcome === "false_positive" ? "legit" : "abuse",
@@ -327,21 +406,66 @@ try {
     }
     case "pin": {
       const days = Number(flags.get("days") ?? 30)
+      const rulesNamed = ruleList()
+      const r = await staffDecision(risk.staff, {
+        tenantId: tenant(),
+        kind: "pin",
+        by: need("by"),
+        note: need("reason"),
+        pauseUntil: new Date(Date.now() + days * 86_400_000),
+        ...(rulesNamed ? { rules: rulesNamed } : {}),
+      })
+      if (r.status === "no_assessment") fail("no assessment yet; run score first")
+      console.log(`automatic actions paused for ${days} days`)
+      report(r)
+      break
+    }
+    case "decisions": {
       const now = new Date()
-      const ok = await risk.assessments.pause(
-        tenant(),
-        new Date(now.getTime() + days * 86_400_000),
-        now,
-        {
-          by: need("by"),
-          reason: need("reason"),
-        },
-      )
+      for (const d of await risk.decisions.list(tenant())) {
+        const state = d.revokedAt
+          ? `revoked ${d.revokedAt.toISOString()} by ${d.revokedBy}: ${d.revokeNote}`
+          : d.covers.length === 0
+            ? "clears nothing"
+            : d.expiresAt > now
+              ? `clears until ${d.expiresAt.toISOString()}`
+              : `expired ${d.expiresAt.toISOString()}`
+        console.log(
+          `\n${d.id}  ${d.kind} by ${d.decidedBy} at ${d.decidedAt.toISOString()}  [${state}]`,
+        )
+        console.log(
+          `  engine then: score ${d.score}, ${d.band}${d.held ? ", held" : ""}; snapshot ${d.snapshotId ?? "gone"}`,
+        )
+        console.log(`  note: ${d.note}`)
+        for (const c of d.covers)
+          console.log(
+            `  clears ${c.rule} at ${c.points}${c.keys ? ` for ${c.keys.join(", ")}` : ""}`,
+          )
+        for (const c of d.inView.filter(
+          (x) => !d.covers.some((y) => y.rule === x.rule),
+        ))
+          console.log(`  in view, not cleared: ${c.rule} (${c.points})`)
+      }
+      break
+    }
+    case "revoke-decision": {
+      const id = positional[0] ?? fail("a decision id is required")
+      const tenantId = await risk.decisions.revoke({
+        id,
+        by: need("by"),
+        note: need("reason"),
+        at: new Date(),
+      })
+      if (!tenantId) fail("no such decision, or already revoked")
       console.log(
-        ok
-          ? `automatic actions paused for ${days} days`
-          : "no assessment yet; run score first",
+        `revoked; what it cleared counts again from the next score of ${tenantId}`,
       )
+      break
+    }
+    case "cases": {
+      const only = flags.get("tenant")?.trim() || undefined
+      for (const c of decisionCases(await risk.decisions.list(only)))
+        console.log(JSON.stringify(c))
       break
     }
     case "tier": {
@@ -559,9 +683,15 @@ try {
     }
     default:
       fail(
-        "commands: explain, score, hold, release, pin, tier, label, linked, replay, boilerplate, templates - see the header of src/risk-admin.ts",
+        "commands: explain, score, hold, release, pin, decisions, revoke-decision, cases, tier, label, linked, replay, boilerplate, templates - see the header of src/risk-admin.ts",
       )
   }
+} catch (error) {
+  // A refused input (a missing note, a rule that is not a live concern) is a
+  // message for staff, not a stack trace.
+  if (!(error instanceof RangeError)) throw error
+  console.error(error.message)
+  process.exitCode = 2
 } finally {
   await cache.quit().catch(() => {})
   await (queueRedis as ReturnType<typeof createQueueClient> | null)

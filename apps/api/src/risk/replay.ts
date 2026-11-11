@@ -23,33 +23,59 @@ export interface ReplayedSnapshot {
   rulesetVersion: number
   stored: Outcome
   replayed: Outcome
-  /** Rules whose contribution (live or shadow, points, floor) is not the stored one. */
+  /** Rules whose contribution (live, shadow or cleared, points, floor) is not the stored one. */
   differs: string[]
   /** Rules that threw on these facts: usually an older shape than they expect. */
   failed: string[]
+  /** Rules a staff decision in the snapshot's facts cleared, under `rules`. */
+  cleared: string[]
   /** Shadow rules in `rules` that fired. */
   shadowFired: string[]
   /** Of those, the ones that would have moved the band had they been live. */
   shadowWouldChangeBand: string[]
 }
 
+/** A cleared contribution is its own mode: cleared then and counting now is a difference. */
 interface Effect {
-  mode: RuleMode
+  mode: RuleMode | "cleared"
   points: number
   floor: Band | null
+  clearedBy: string | null
 }
 
-function effects(e: Pick<Evaluated, "contributions" | "shadow">): Map<string, Effect> {
+function effects(
+  e: Pick<Evaluated, "contributions" | "shadow"> & Partial<Pick<Evaluated, "cleared">>,
+): Map<string, Effect> {
   const out = new Map<string, Effect>()
   for (const c of e.contributions ?? [])
-    out.set(c.rule, { mode: "live", points: c.points, floor: c.floor ?? null })
+    out.set(c.rule, {
+      mode: "live",
+      points: c.points,
+      floor: c.floor ?? null,
+      clearedBy: null,
+    })
   for (const c of e.shadow ?? [])
-    out.set(c.rule, { mode: "shadow", points: c.wouldAdd, floor: c.wouldFloor ?? null })
+    out.set(c.rule, {
+      mode: "shadow",
+      points: c.wouldAdd,
+      floor: c.wouldFloor ?? null,
+      clearedBy: null,
+    })
+  for (const c of e.cleared ?? [])
+    out.set(c.rule, {
+      mode: "cleared",
+      points: c.wouldAdd,
+      floor: c.wouldFloor ?? null,
+      clearedBy: c.clearedBy,
+    })
   return out
 }
 
 const same = (a: Effect | undefined, b: Effect | undefined) =>
-  a?.mode === b?.mode && a?.points === b?.points && a?.floor === b?.floor
+  a?.mode === b?.mode &&
+  a?.points === b?.points &&
+  a?.floor === b?.floor &&
+  a?.clearedBy === b?.clearedBy
 
 export function replaySnapshot(
   snapshot: FactSnapshot,
@@ -79,6 +105,7 @@ export function replaySnapshot(
     replayed: { score: now.score, band: now.band },
     differs,
     failed: now.failures.map((f) => f.rule),
+    cleared: now.cleared.map((c) => c.rule),
     shadowFired,
     shadowWouldChangeBand,
   }

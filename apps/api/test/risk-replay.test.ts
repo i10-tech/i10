@@ -6,6 +6,7 @@ import { formatReport, replay, replaySnapshot } from "../src/risk/replay.js"
 import { RULES } from "../src/risk/rules.js"
 import { reviveFacts, serialiseFacts, type FactSnapshot } from "../src/risk/snapshot.js"
 import type {
+  ClearedContribution,
   Contribution,
   Facts,
   Rule,
@@ -39,6 +40,7 @@ function snapshotOf(facts: Facts, rules: readonly Rule[] = RULES, n = 0): FactSn
     band: e.band,
     contributions: JSON.parse(JSON.stringify(e.contributions)) as Contribution[],
     shadow: JSON.parse(JSON.stringify(e.shadow)) as ShadowContribution[],
+    cleared: JSON.parse(JSON.stringify(e.cleared)) as ClearedContribution[],
     facts: throughJsonb(facts),
   }
 }

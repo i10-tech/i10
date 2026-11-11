@@ -16,7 +16,7 @@ import {
 import type { LabelStore } from "./labels.js"
 import { registrable, RULES } from "./rules.js"
 import { SNAPSHOT_RETENTION_DAYS, type SnapshotStore } from "./snapshot.js"
-import { bandRank, type Band, type Rule } from "./types.js"
+import { bandRank, type Band, type Facts, type Rule } from "./types.js"
 import type { Embedder } from "../content/embed.js"
 import { analyseContent } from "../content/job.js"
 import type { ContentStore } from "../content/object-store.js"
@@ -198,9 +198,12 @@ async function scoreLocked(
     })
   }
 
-  // ⚠ `shadow` IS TAKEN OFF HERE, so the assessment `decide` receives does not
-  // carry it even at run time.
-  const { failures, shadow, ...assessment } = evaluate(facts, deps.rules ?? RULES)
+  // ⚠ `shadow` AND `cleared` ARE TAKEN OFF HERE, so the assessment `decide`
+  // receives carries neither even at run time.
+  const { failures, shadow, cleared, ...assessment } = evaluate(
+    facts,
+    deps.rules ?? RULES,
+  )
   for (const f of failures) {
     deps.log?.error?.({ err: f.error, tenantId, rule: f.rule }, "risk rule threw")
     deps.report?.(f.error, { phase: "risk-rule", tenantId, rule: f.rule })
@@ -228,6 +231,7 @@ async function scoreLocked(
     tenantId,
     assessment,
     shadow,
+    cleared,
     bandSince,
     previous: moveFrom,
     actions: [],
@@ -248,6 +252,7 @@ async function scoreLocked(
     tenantId,
     assessment,
     shadow,
+    cleared,
     bandSince,
     previous: moveFrom,
     actions: done,
@@ -261,7 +266,7 @@ async function scoreLocked(
       tenantId,
       at: now,
       trigger,
-      evaluated: { ...assessment, shadow },
+      evaluated: { ...assessment, shadow, cleared },
       facts,
       force: event,
     })
@@ -351,14 +356,25 @@ async function autoLabels(
   }
 }
 
+/**
+ * The classifier's answer the last score cached, without asking it again: what
+ * a staff decision sees of the content (decisions.ts).
+ */
+export async function cachedContent(
+  redis: Pick<RiskLockRedis, "get"> | undefined,
+  tenantId: string,
+): Promise<Facts["content"]> {
+  const cached = await redis?.get(`risk:content:${tenantId}`).catch(() => null)
+  if (!cached) return null
+  const c = JSON.parse(cached) as { probability: number; at: string }
+  return { probability: c.probability, at: new Date(c.at) }
+}
+
 /** One recent message, classified, cached for six hours. */
 async function classifyContent(tenantId: string, deps: RiskDeps) {
   const cacheKey = `risk:content:${tenantId}`
-  const cached = await deps.redis?.get(cacheKey).catch(() => null)
-  if (cached) {
-    const c = JSON.parse(cached) as { probability: number; at: string }
-    return { probability: c.probability, at: new Date(c.at) }
-  }
+  const cached = await cachedContent(deps.redis, tenantId)
+  if (cached) return cached
   const rows = await withTenant(deps.db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
       select m.id as message_id, m.subject, b.text, b.html, b.template_id, b.template_values,

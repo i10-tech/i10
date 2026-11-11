@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import * as schema from "../src/db/schema.js"
 import { assertRlsSubject, withTenant, type Database } from "../src/db/client.js"
-import { riskFactSnapshots } from "../src/db/core.js"
+import { riskFactSnapshots, riskStaffDecisions } from "../src/db/core.js"
 import { sendingTierStore } from "../src/metering/tiers.js"
 import { recordContent } from "../src/risk/content.js"
 import { loadFacts } from "../src/risk/facts.js"
@@ -11,8 +11,13 @@ import { holdStore } from "../src/risk/holds.js"
 import { identityStore, recordSighting } from "../src/risk/identity.js"
 import { labelStore } from "../src/risk/labels.js"
 import { runAll, scoreTenant, type RiskDeps } from "../src/risk/runner.js"
-import { evaluate } from "../src/risk/engine.js"
-import { RULES } from "../src/risk/rules.js"
+import {
+  decisionStore,
+  staffDecision,
+  type StaffDecisionDeps,
+} from "../src/risk/decisions.js"
+import { DECISION_MEMORY_DAYS, evaluate } from "../src/risk/engine.js"
+import { digest, RULES } from "../src/risk/rules.js"
 import { reviveFacts, snapshotStore } from "../src/risk/snapshot.js"
 import type { Rule } from "../src/risk/types.js"
 import { assessmentStore } from "../src/risk/store.js"
@@ -261,6 +266,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
       tenantId: ids.e,
       assessment: { score: 90, band: "critical", contributions: [], rulesetVersion: 1 },
       shadow: [],
+      cleared: [],
       bandSince: new Date(),
       previous: null,
       actions: [],
@@ -331,6 +337,13 @@ suite("the risk engine against Postgres, as i10_api", () => {
     }
     expect(facts.identity?.devicePeers).toBe(3)
     expect(facts.identity?.subnetSignupPeers).toBe(3)
+    // ⚠ The definer names the peers by the same digest rules.ts uses, never by id.
+    const peers =
+      await owner`select owner_clerk_user_id as u from core.tenants where id in ${owner([ids.b, ids.c, ids.d])}`
+    const expected = peers.map((p) => `user:${digest(String(p.u))}`).sort()
+    expect(facts.identity?.devicePeerKeys).toEqual(expected)
+    expect(facts.identity?.subnetSignupPeerKeys).toEqual(expected)
+    expect(JSON.stringify(facts.identity)).not.toContain(String(peers[0]!.u))
   })
 
   it("scores and acts end to end, and is idempotent run after run", async () => {
@@ -453,7 +466,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
         facts,
         force: false,
       }),
-    ).toBe(false)
+    ).toBeNull()
     expect(
       await store.record({
         tenantId: id,
@@ -463,7 +476,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
         facts,
         force: true,
       }),
-    ).toBe(true)
+    ).toEqual(expect.any(String))
     expect(await count()).toBe(3)
 
     // What was kept replays to what was stored, through real jsonb.
@@ -495,6 +508,244 @@ suite("the risk engine against Postgres, as i10_api", () => {
       limit: 1,
     })
     expect(second[0]!.id).toBe(kept[1]!.id)
+  })
+
+  // ─── Decision memory (docs/decisions/risk.md, "Decision memory") ──────────
+
+  const staffDeps = (now?: () => Date): StaffDecisionDeps => ({
+    db,
+    freePlanId: FREE,
+    ownerInfo: async () => null,
+    rules: RULES,
+    holds: holdStore(db),
+    assessments: assessmentStore(db),
+    snapshots: snapshotStore(db),
+    decisions: decisionStore(db),
+    ...(now ? { now } : {}),
+  })
+  const unsafeLink = (tenant: string, host: string) =>
+    owner`insert into core.link_hosts (tenant_id, day, host, messages, verdict, checked_at)
+          values (${tenant}, current_date, ${host}, 1, 'webrisk=SOCIAL_ENGINEERING', now())`
+  /** Whether a promise rejected, without `.rejects` (which hangs on postgres.js under bun). */
+  const rejected = (p: Promise<unknown>) =>
+    p.then(
+      () => false,
+      () => true,
+    )
+  const inDays = (n: number) => () => new Date(Date.now() + n * 86_400_000)
+
+  it("records a staff decision with a forced snapshot of the facts it was made on", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    const host = `phish-${RUN}.example.top`
+    await unsafeLink(id, host)
+    expect((await scoreTenant(id, "test", riskDeps())).band).toBe("critical")
+    expect(await holdStore(db).current(id)).not.toBeNull()
+
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "release",
+      by: "mo",
+      note: "the host is the customer's own staging site",
+    })
+    expect(r.status).toBe("recorded")
+    expect(await holdStore(db).current(id)).toBeNull()
+
+    const [d] = await decisionStore(db).list(id)
+    expect(d).toMatchObject({
+      kind: "release",
+      decidedBy: "mo",
+      note: "the host is the customer's own staging site",
+      band: "critical",
+      held: true,
+      revokedAt: null,
+    })
+    expect(d!.covers).toEqual([
+      { rule: "links.unsafe", points: 90, keys: [`host:${host}`] },
+    ])
+    expect(d!.inView.map((c) => c.rule)).toEqual(["links.unsafe"])
+    expect(d!.expiresAt.getTime() - d!.decidedAt.getTime()).toBe(
+      DECISION_MEMORY_DAYS * 86_400_000,
+    )
+
+    const snaps = await snapshotStore(db).list({
+      since: new Date(Date.now() - 3_600_000),
+      until: new Date(Date.now() + 3_600_000),
+      tenantId: id,
+      limit: 10,
+    })
+    const snap = snaps.find((s) => s.id === d!.snapshotId)!
+    expect(snap.trigger).toBe("staff:release")
+    expect(snap.contributions.map((c) => c.rule)).toContain("links.unsafe")
+    // The decision is replayable: its facts reproduce the engine's answer then.
+    expect(evaluate(reviveFacts(snap.facts)).band).toBe("critical")
+  })
+
+  it("keeps staff decisions deny-all: a workspace cannot read or forge its own", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    await scoreTenant(id, "test", riskDeps())
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "pin",
+      by: "mo",
+      note: "known sender",
+    })
+    expect(r.status).toBe("recorded")
+    const [kept] =
+      await owner`select count(*)::int as n from core.risk_staff_decisions where tenant_id = ${id}`
+    expect(kept!.n).toBe(1)
+    expect(
+      await withTenant(db, id, (tx) => tx.select().from(riskStaffDecisions)),
+    ).toHaveLength(0)
+    expect(await app`select * from core.risk_staff_decisions`).toHaveLength(0)
+    expect(
+      await rejected(
+        withTenant(db, id, (tx) =>
+          tx.insert(riskStaffDecisions).values({
+            tenantId: id,
+            kind: "release",
+            decidedBy: "forged",
+            note: "forged",
+            decidedAt: new Date(),
+            score: 0,
+            band: "low",
+            rulesetVersion: 1,
+            held: false,
+            inView: [],
+            covers: [],
+            expiresAt: new Date(Date.now() + 86_400_000),
+          }),
+        ),
+      ),
+    ).toBe(true)
+    // ⚠ The door itself refuses an uphold that claims to clear something.
+    expect(
+      await rejected(
+        decisionStore(db).save(db, {
+          tenantId: id,
+          kind: "uphold",
+          decidedBy: "mo",
+          note: "n",
+          decidedAt: new Date(),
+          score: 0,
+          band: "low",
+          rulesetVersion: 1,
+          held: true,
+          inView: [],
+          covers: [{ rule: "links.unsafe", points: 90 }],
+          expiresAt: new Date(),
+          snapshotId: null,
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it("holds, is released, stays released on the same evidence after the pause, and holds again on new", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    await unsafeLink(id, `one-${RUN}.example.top`)
+    expect((await scoreTenant(id, "test", riskDeps())).band).toBe("critical")
+    expect(await holdStore(db).current(id)).not.toBeNull()
+
+    const released = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "release",
+      by: "mo",
+      note: "false positive",
+      pauseDays: 1,
+    })
+    expect(released.status).toBe("recorded")
+
+    // Two days on, the pause is over and the evidence is the same: no hold.
+    const after = await scoreTenant(
+      id,
+      "hourly",
+      riskDeps(new FakeRedis(), { now: inDays(2) }),
+    )
+    expect(after.band).not.toBe("critical")
+    expect(await holdStore(db).current(id)).toBeNull()
+    const current = await assessmentStore(db).current(id)
+    expect(current!.autoActionsPausedUntil!.getTime()).toBeLessThan(
+      inDays(2)().getTime(),
+    )
+    expect(current!.cleared.map((c) => c.rule)).toEqual(["links.unsafe"])
+    expect(current!.cleared[0]!.clearedBy).toBe(
+      released.status === "recorded" ? released.id : "",
+    )
+    expect(current!.contributions.map((c) => c.rule)).not.toContain("links.unsafe")
+
+    // A new host is new evidence: held again.
+    await unsafeLink(id, `two-${RUN}.example.top`)
+    const again = await scoreTenant(
+      id,
+      "hourly",
+      riskDeps(new FakeRedis(), { now: inDays(2) }),
+    )
+    expect(again.band).toBe("critical")
+    expect(await holdStore(db).current(id)).not.toBeNull()
+  })
+
+  it("counts a cleared concern again once the decision is revoked, and records the revocation", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    await unsafeLink(id, `rev-${RUN}.example.top`)
+    await scoreTenant(id, "test", riskDeps())
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "release",
+      by: "mo",
+      note: "looked fine",
+      pauseDays: 1,
+    })
+    if (r.status !== "recorded") throw new Error(r.status)
+    const store = decisionStore(db)
+    expect(
+      await store.revoke({ id: r.id, by: "lead", note: "it was not", at: new Date() }),
+    ).toBe(id)
+    expect(
+      await store.revoke({ id: r.id, by: "lead", note: "again", at: new Date() }),
+    ).toBeNull()
+    const [d] = await store.list(id)
+    expect(d).toMatchObject({ revokedBy: "lead", revokeNote: "it was not" })
+    expect(d!.revokedAt).toBeInstanceOf(Date)
+
+    const back = await scoreTenant(
+      id,
+      "hourly",
+      riskDeps(new FakeRedis(), { now: inDays(2) }),
+    )
+    expect(back.band).toBe("critical")
+  })
+
+  it("records an upheld hold and clears nothing with it", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    await unsafeLink(id, `upheld-${RUN}.example.top`)
+    await scoreTenant(id, "test", riskDeps())
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "uphold",
+      by: "mo",
+      note: "phishing, confirmed",
+      pauseDays: 1,
+    })
+    expect(r.status).toBe("recorded")
+    const [d] = await decisionStore(db).list(id)
+    expect(d!.covers).toEqual([])
+    expect(d!.inView.map((c) => c.rule)).toEqual(["links.unsafe"])
+    const facts = await loadFacts(id, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+    })
+    expect(facts.decisions).toEqual([])
+    expect(evaluate(facts).band).toBe("critical")
   })
 
   it("keeps fact snapshots deny-all: a workspace cannot read even its own", async () => {
@@ -905,6 +1156,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     // c is held by staff (earlier test) = confirmed. b's mail reads like c's.
     const near = await contentNeighbours(db, ids.b, e.model, FREE, new Date())
     expect(near.taintedSimilar).toBe(1)
+    expect(near.taintedPeerKeys).toEqual([`peer:${digest(ids.c)}`])
     expect(near.bestTaintedSimilarity!).toBeGreaterThan(0.8)
     const far = await contentNeighbours(db, ids.clean, e.model, FREE, new Date())
     expect(far.taintedSimilar).toBe(0)

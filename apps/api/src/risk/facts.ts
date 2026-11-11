@@ -4,8 +4,16 @@ import { reputationStore } from "../ses-status/reputation-store.js"
 import { looksRandomLabel, registrable, subdomainOf } from "./rules.js"
 import { BAND_COUNT } from "./fingerprint.js"
 import { boilerplateStore } from "./trusted.js"
-import type { Facts, FarmPeer, IdentityFacts, TrustedCounts } from "./types.js"
-import { actorVelocity, contentNeighbours } from "../content/vectors.js"
+import type {
+  Concern,
+  DecisionKind,
+  Facts,
+  FarmPeer,
+  IdentityFacts,
+  StaffDecision,
+  TrustedCounts,
+} from "./types.js"
+import { actorVelocity, contentNeighbours, peerKeys } from "../content/vectors.js"
 
 /**
  * Everything a rule may read about one workspace (#170).
@@ -199,6 +207,7 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     templates,
     trusted,
     boilerplateNear,
+    decisions,
   ] = await Promise.all([
     identityFacts(db, owner, now),
     ownerWorkspaces(db, owner),
@@ -220,6 +229,7 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
           ),
         )
       : Promise.resolve(null),
+    decisionsInEffect(db, tenantId, now),
   ])
   const trustedNow: TrustedCounts = trusted ?? { template: 0, boilerplate: 0 }
 
@@ -279,6 +289,13 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
       youngestRegisteredAt: registered.length
         ? new Date(Math.max(...registered.map((d) => d.getTime())))
         : null,
+      young: verified
+        .filter((d) => {
+          const at = date(d.registered_at)
+          return at !== null && now.getTime() - at.getTime() <= 30 * DAY
+        })
+        .map((d) => String(d.name))
+        .sort(),
       randomSubdomain: verified.some((d) => {
         const sub = subdomainOf(String(d.name))
         return sub ? looksRandomLabel(sub.split(".")[0]!) : false
@@ -317,7 +334,31 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
       ? { ...similarity, trusted: trustedNow, boilerplateNear: boilerplateNear ?? null }
       : null,
     templates,
+    decisions,
   }
+}
+
+/**
+ * The staff decisions that may still clear a concern: releases and pins not
+ * yet expired at `now`. Revoked ones come too, with their revocation, so the
+ * rule that skips them is in evaluation and replays with the snapshot.
+ */
+export async function decisionsInEffect(
+  db: Database,
+  tenantId: string,
+  now: Date,
+): Promise<StaffDecision[]> {
+  const rows = (await db.execute(sql`
+    select * from core.risk_decisions_in_effect(${tenantId}::uuid, ${now.toISOString()}::timestamptz)
+  `)) as unknown as Row[]
+  return rows.map((r) => ({
+    id: String(r.id),
+    kind: r.kind as DecisionKind,
+    decidedAt: date(r.decided_at)!,
+    expiresAt: date(r.expires_at)!,
+    revokedAt: date(r.revoked_at),
+    covers: r.covers as Concern[],
+  }))
 }
 
 async function identityFacts(
@@ -341,6 +382,9 @@ async function identityFacts(
     heldDevicePeers: num(r.held_device_peers),
     subnetSignupPeers: num(r.subnet_signup_peers),
     heldSubnetPeers: num(r.held_subnet_peers),
+    devicePeerKeys: peerKeys(r.device_peer_keys, "user"),
+    subnetSignupPeerKeys: peerKeys(r.subnet_peer_keys, "user"),
+    heldPeerKeys: peerKeys(r.held_peer_keys, "user"),
   }
 }
 

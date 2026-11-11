@@ -149,6 +149,8 @@ beside it - the same shape as tiers.
   that workspace again until `auto_actions_paused_until` (default 14 days)
   unless a rule marked `fresh` fires on evidence newer than the release.
   Staff can also pin a trusted customer the same way without a hold.
+  After the pause, what the release cleared stays cleared for the same
+  evidence (see "Decision memory").
 
 ### SES policy for high-band paid workspaces
 
@@ -635,6 +637,67 @@ explain`) and moves no score, band, floor or action. A shadow contribution
   boot, and every process logs the list when it starts. There is no setting
   the other way.
 
+## Decision memory (ruleset 6)
+
+Section 10 of the acceptable use policy promises: "A decision made by a person
+stays made. Once a reviewer has cleared a concern, we do not raise the same
+concern again without new evidence." The release pause alone does not keep
+that promise: when it ends, every concern the person already cleared counts in
+full again, and the same workspace is flagged again for the same reason.
+Decision memory keeps it. The pause is unchanged; it stops the engine acting
+for a while, and the memory stops it re-raising what was cleared afterwards.
+
+- **Every staff decision is recorded** (`core.risk_staff_decisions`,
+  `risk/decisions.ts`): `release`, `pin`, `uphold` and a staff `hold`, with
+  who, when, the note, the engine's score and band at that moment, whether
+  the workspace was held, every live concern in view, the concerns it covers,
+  and a **forced fact snapshot** of the facts it was made on, all in the
+  transaction of the release, pin or hold itself. **Deny-all**, reached only
+  through the definers in migration 0155. A decision is never deleted; a
+  revocation (`risk-admin revoke-decision`) is recorded on its row.
+- **Evidence keys.** A rule's hit names the specific things it flagged
+  (`host:<host>`, `peer:<digest>`, `user:<digest>`, `domain:<name>`,
+  `finding:<type>:<opened>`, `pause:<at>`). Another workspace or person is
+  only ever a digest (`core.risk_digest`, and `digest` in `risk/rules.ts`),
+  because contributions are stored where the workspace itself can read them.
+  Rules with nothing identifiable (rates, counts of API calls, a boolean such
+  as Tor) have no keys.
+- **The rule, per live contribution.** It is **cleared** when a release or pin
+  in effect covered the same rule, its points are no higher than they were
+  then, and either every key it flags was among the keys cleared or, for a
+  keyless rule, it carries no `freshAt` newer than the decision. Otherwise it
+  counts **in full**: one new host, one new peer, a higher grade of the same
+  rule. There is no partial credit: a cleared concern plus new evidence is a
+  concern a person has not weighed, and only the whole of it says how bad it
+  is. A keyed rule is judged by its keys, not `freshAt`, because
+  `links.unsafe` dates its evidence to the end of the day the link was sent,
+  and the same host sent again is the host staff judged.
+- **Cleared is structurally separate**, like shadow: a `ClearedContribution`
+  has `wouldAdd` and `wouldFloor`, names the decision that cleared it, sits
+  beside the assessment (`cleared` on the assessment, its events and its
+  snapshots) and is shown in `risk-admin explain` as worth zero. `decide`
+  cannot be handed one, so a cleared critical floor moves nothing.
+- **Never cleared:** a rule that was not firing when the decision was made; a
+  key that was not in view; a stronger hit of a cleared rule; anything after
+  an `uphold` or a staff `hold`, which cover nothing (the definer refuses one
+  that claims to); earned trust (negative points); and anything once the
+  decision is revoked or expired. Clearing is per concern: a workspace cleared
+  for one reason is held as before for an unrelated one. Staff may clear a
+  subset with `--rules`.
+- **Expiry: 180 days** (`DECISION_MEMORY_DAYS`), the longest window any rule
+  reads, so a years-old release never excuses today's behaviour.
+- **Replay stays exact.** The decisions in effect are part of `Facts`
+  (`facts.decisions`, loaded by `risk_decisions_in_effect`, revoked ones with
+  their revocation), so evaluation stays a pure function of the facts and a
+  snapshot replays its cleared contributions. Snapshots taken before ruleset 6
+  have no decisions and replay as "none".
+- **Decision cases** (`risk-admin cases`): every decision as a JSON line, with
+  its snapshot, the engine's score and band, the staff decision and note, and
+  whether they disagree (the engine held or scored high and staff released or
+  pinned; the engine scored low and staff held or upheld), disagreements
+  first. It is the ground truth the engine is measured against; nothing reads
+  it yet.
+
 ---
 
 ## Account takeover is a separate response
@@ -658,8 +721,9 @@ day emails the owner as a possible leak.
   flagged group of workspaces"), so the rules cannot be gamed.
 - **Appeals before #217 exist:** the hold email says to reply. Staff use
   `bun run risk-admin` (explain, hold, release, pin, label, clusters,
-  and since #222 boilerplate and templates), which goes through the same doors
-  as the score and requires `--by` and `--reason`.
+  since #222 boilerplate and templates, and since ruleset 6 decisions,
+  revoke-decision and cases), which goes through the same doors as the score
+  and requires `--by` and `--reason`.
 
 ---
 
