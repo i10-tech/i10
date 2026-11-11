@@ -3,6 +3,7 @@ import type { SmtpReceipt, SmtpRejectedRecipient } from "@upyo/smtp"
 import { describeError } from "../errors.js"
 import { addressOf, domainOf } from "./address.js"
 import { signMessage } from "./dkim.js"
+import { feedbackIdHeaderValue, type FeedbackTokens } from "./feedback-id.js"
 import { buildRawMessage } from "./mime.js"
 import type { DomainSending } from "./signing-key.js"
 import {
@@ -68,6 +69,14 @@ export interface StalwartTransportOptions {
    */
   domainSending: (domain: string, tenantId: string) => Promise<DomainSending | null>
   /**
+   * The workspace's Feedback-ID token (send/feedback-id.ts), or unset for none.
+   *
+   * ⚠ WRITTEN HERE, NOT BY THE RELAY, AND SIGNED BY `signMessage`. Unlike SES
+   * nobody adds the header for us, and Google only trusts it when the DKIM
+   * signature was made after it was added and covers it.
+   */
+  feedbackToken?: FeedbackTokens
+  /**
    * Called when the server took the message but refused some of its recipients.
    *
    * ⚠ THIS INFORMATION DID NOT EXIST BEFORE upyo AND DISCARDING IT WOULD BE THE
@@ -125,7 +134,13 @@ export function stalwartTransport(opts: StalwartTransportOptions): Transport {
 
       let raw: string
       try {
-        const unsigned = buildRawMessage(message, message.attachments ?? [])
+        const token = opts.feedbackToken?.(message.tenantId)
+        const unsigned = buildRawMessage(
+          message,
+          message.attachments ?? [],
+          new Date(),
+          token ? feedbackIdHeaderValue(token) : undefined,
+        )
         raw = await signMessage(unsigned, domain, sending.dkim)
       } catch (err) {
         // Building or signing failing is ours, not the network's, and retrying
