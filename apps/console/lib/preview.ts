@@ -35,6 +35,7 @@
 
 import { ApiRequestError } from "@/lib/api-error"
 import { ssoRoutes } from "@/lib/preview-sso"
+import { mailboxRoutes } from "@/lib/preview-mailboxes"
 import { webhookRoutes } from "@/lib/preview-webhooks"
 import type { DomainMailboxes } from "@/lib/types"
 
@@ -1505,6 +1506,7 @@ const ROUTES: [
   // ⚠ THE WEBHOOK SCREENS' FIXTURES LIVE IN THEIR OWN MODULE (#286).
   ...webhookRoutes(PREVIEW_NOT_FOUND),
   ...ssoRoutes(PREVIEW_NOT_FOUND),
+  ...mailboxRoutes(PREVIEW_NOT_FOUND),
 
   [
     // ⚠ AT RISK IN PREVIEW, so the amber banner, the rail pill and the
