@@ -243,10 +243,29 @@ function sliceMetrics(
   }
 }
 
-export const BREAKDOWNS = ["dataset", "lang", "yearBucket", "origin"] as const
+export const BREAKDOWNS = [
+  "dataset",
+  "lang",
+  "yearBucket",
+  "origin",
+  "slice",
+  "mailType",
+] as const
 export type Breakdown = (typeof BREAKDOWNS)[number]
 
-export function sliceKey(breakdown: Breakdown, mail: Mail): string {
+/** The slice names of the `slice` breakdown. */
+export const GENERATED_LEGIT_SLICE = "generated-legit"
+export const HARD_NEGATIVE_SLICE = "hard-negative"
+
+/**
+ * Which group of mail this is, or undefined when the breakdown does not apply
+ * to it (only generated mail has a `mailType`).
+ *
+ * `slice` splits out what the generator adds: modern legitimate mail
+ * ("generated-legit") and, apart from it, the hard negatives ("hard-negative").
+ * Everything else, real or synthetic, is "other".
+ */
+export function sliceKey(breakdown: Breakdown, mail: Mail): string | undefined {
   switch (breakdown) {
     case "dataset":
       return mail.dataset
@@ -256,6 +275,11 @@ export function sliceKey(breakdown: Breakdown, mail: Mail): string {
       return yearBucket(mail.year)
     case "origin":
       return mail.synthetic ? "synthetic" : "real"
+    case "slice":
+      if (mail.hard_negative === true) return HARD_NEGATIVE_SLICE
+      return mail.mail_type === undefined ? "other" : GENERATED_LEGIT_SLICE
+    case "mailType":
+      return mail.mail_type
   }
 }
 
@@ -288,6 +312,7 @@ export function evaluateQuestion(
     const groups = new Map<string, EvalRow[]>()
     for (const row of rows) {
       const key = sliceKey(breakdown, row.mail)
+      if (key === undefined) continue
       const list = groups.get(key) ?? []
       list.push(row)
       groups.set(key, list)

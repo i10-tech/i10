@@ -20,6 +20,15 @@ export interface Mail {
   has_attachments?: boolean
   /** True when a model or a script wrote the mail rather than a mailbox. */
   synthetic: boolean
+  /** Generated legit mail only: its type, e.g. "password-reset" (src/generate). */
+  mail_type?: string
+  /** Generated legit mail only: the house style it is written in. */
+  style?: string
+  /**
+   * Generated legit mail only: true for the hard-negative group, honest mail
+   * built to look like phishing (urgent, a deadline, a link). Reported apart.
+   */
+  hard_negative?: boolean
 }
 
 export const YEAR_BUCKETS = [
@@ -59,6 +68,14 @@ export function parseMail(line: string): Mail {
   }
   if (typeof lang !== "string" || typeof synthetic !== "boolean") {
     throw new Error(`mail ${id} lacks lang or synthetic`)
+  }
+  const { mail_type, style, hard_negative } = value
+  if (
+    (mail_type !== undefined && typeof mail_type !== "string") ||
+    (style !== undefined && typeof style !== "string") ||
+    (hard_negative !== undefined && typeof hard_negative !== "boolean")
+  ) {
+    throw new Error(`mail ${id} has a malformed mail_type, style or hard_negative`)
   }
   return value as unknown as Mail
 }

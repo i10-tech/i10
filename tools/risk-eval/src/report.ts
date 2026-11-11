@@ -67,6 +67,8 @@ const BREAKDOWN_TITLES: Record<Breakdown, string> = {
   lang: "By language",
   yearBucket: "By year",
   origin: "Real or synthetic",
+  slice: "By slice (generated modern legit, hard negatives, other)",
+  mailType: "By generated mail type",
 }
 
 function sliceRow(name: string, m: SliceMetrics): string[] {
@@ -156,6 +158,32 @@ function renderQuestion(report: QuestionReport): string {
   return out.join("\n\n")
 }
 
+/**
+ * The headline split by where the legitimate mail comes from, at the one
+ * threshold. "other" is the legit mail that is not generated, in practice the
+ * 2002-2003 corpus: the number the headline used to be made of. The generated
+ * rows are synthetic and authored by the team that builds the judge, so they
+ * show false positives on plausible modern mail, not on real customer mail.
+ */
+function legitSliceTable(slices: Record<string, SliceMetrics> | undefined): string {
+  const rows = Object.entries(slices ?? {}).filter(
+    ([, m]) => (m.headline?.legit ?? 0) > 0,
+  )
+  if (rows.length === 0) return ""
+  return [
+    "### Legitimate mail by slice, at the same threshold",
+    table(
+      ["slice", "legit", "flagged", "FPR"],
+      rows.map(([name, m]) => [
+        name === "other" ? "other (not generated)" : name,
+        String(m.headline?.legit ?? 0),
+        String(m.headline?.falsePositives ?? 0),
+        fmt(m.headline?.falsePositiveRate ?? null),
+      ]),
+    ),
+  ].join("\n\n")
+}
+
 export function renderReport(data: ReportData): string {
   const out: string[] = [`# Risk eval: ${data.judge} on ${data.split}`]
   out.push(
@@ -193,6 +221,8 @@ export function renderReport(data: ReportData): string {
           "the sweep below shows the recall it can reach.",
       )
     }
+    const slices = legitSliceTable(phishing?.breakdowns.slice)
+    if (slices !== "") out.push(slices)
   }
   for (const q of data.questions) out.push(renderQuestion(q))
   return `${out.join("\n\n")}\n`
