@@ -21,7 +21,6 @@ export interface StoredAssessment extends PreviousState {
   sesPolicySetAt: Date | null
   alertedAt: Date | null
   computedAt: Date
-  modelScore: number | null
 }
 
 export interface AssessmentStore {
@@ -30,7 +29,6 @@ export interface AssessmentStore {
     tenantId: string
     assessment: Assessment
     bandSince: Date
-    modelScore: number | null
     previous: { band: Band; score: number } | null
     actions: string[]
     trigger: string
@@ -76,7 +74,6 @@ export function assessmentStore(db: Database): AssessmentStore {
         sesPolicySetAt: row.sesPolicySetAt,
         alertedAt: row.alertedAt,
         computedAt: row.computedAt,
-        modelScore: row.modelScore,
       }
     },
 
@@ -84,7 +81,6 @@ export function assessmentStore(db: Database): AssessmentStore {
       tenantId,
       assessment,
       bandSince,
-      modelScore,
       previous,
       actions,
       trigger,
@@ -103,7 +99,6 @@ export function assessmentStore(db: Database): AssessmentStore {
           band: assessment.band,
           rulesetVersion: assessment.rulesetVersion,
           contributions: assessment.contributions,
-          modelScore,
           bandSince,
           computedAt: at,
         }

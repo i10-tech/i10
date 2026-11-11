@@ -7,9 +7,9 @@ export const NO_TRUST = { template: 0, boilerplate: 0 }
  * Facts for the risk engine's tests (#170): a quiet, legitimate baseline, and
  * the synthetic scenarios every rule change is held to.
  *
- * ⚠ THE SCENARIOS ARE THE RULES' TEST SUITE, NEVER THE MODEL'S TRAINING DATA.
- * See docs/decisions/risk.md: a model trained on what we imagine abuse looks
- * like learns our imagination.
+ * ⚠ THE SCENARIOS ARE THE RULES' TEST SUITE, NEVER EVALUATION DATA. See
+ * docs/decisions/risk.md: anything measured on what we imagine abuse looks
+ * like measures our imagination.
  */
 export const NOW = new Date("2026-09-28T12:00:00Z")
 const DAY = 86_400_000
@@ -69,7 +69,7 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
       tier: "normal",
       tierSource: "default",
       tierChangedAt: null,
-      tierDemotions90d: 0,
+      staffDemotions90d: 0,
       holds180d: 0,
       upheldHolds: 0,
     },
@@ -84,10 +84,8 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
     parents: { sharedWith: 0, sharedWithHeldOrDead: 0 },
     links: { unsafe: [] },
     content: null,
-    model: null,
     actor: null,
     similarity: null,
-    behaviour: null,
     templates: null,
     ...over,
   }
@@ -97,8 +95,6 @@ export function identity(over: Partial<IdentityFacts> = {}): IdentityFacts {
   return {
     firstSeen: daysAgo(10),
     firstCountry: "DE",
-    latestCountry: "DE",
-    latestTimezone: "Europe/Berlin",
     countries: 1,
     torSeen: false,
     hostingSeen: false,

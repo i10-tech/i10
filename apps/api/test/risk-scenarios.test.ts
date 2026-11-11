@@ -6,7 +6,6 @@ import {
   RULES,
   RULESET_VERSION,
   subdomainOf,
-  timezoneGapHours,
 } from "../src/risk/rules.js"
 import { bandRank, CATEGORY_TEXT } from "../src/risk/types.js"
 import {
@@ -14,7 +13,6 @@ import {
   baseFacts,
   counts,
   daysAgo,
-  identity,
   LEGIT,
   NO_TRUST,
   NOW,
@@ -88,6 +86,14 @@ describe("the ruleset", () => {
     ]
     const a = evaluate(ABUSE["phishing: a link Web Risk lists"]!.facts(), broken)
     expect(a.band).toBe("critical")
+    expect(a.failures).toHaveLength(1)
+    expect(a.failures[0]!.rule).toBe("x")
+    expect(String(a.failures[0]!.error)).toContain("boom")
+    expect(a.contributions.map((c) => c.rule)).toContain("links.unsafe")
+  })
+
+  it("reports no failures when every rule answers", () => {
+    expect(evaluate(baseFacts()).failures).toEqual([])
   })
 })
 
@@ -238,25 +244,9 @@ describe("helpers", () => {
     expect(subdomainOf("x7.mailer.acme.com")).toBe("x7.mailer")
     expect(subdomainOf("acme.com")).toBeNull()
   })
-
-  it("measures how far a timezone is from a country", () => {
-    expect(timezoneGapHours("Europe/Berlin", "DE", NOW)).toBeLessThanOrEqual(2)
-    expect(timezoneGapHours("Asia/Tokyo", "BR", NOW)).toBeGreaterThanOrEqual(6)
-    expect(timezoneGapHours("Not/AZone", "DE", NOW)).toBeNull()
-  })
-
-  it("flags a timezone on the far side of the world, weakly", () => {
-    const a = evaluate(
-      baseFacts({
-        identity: identity({ latestTimezone: "Asia/Tokyo", latestCountry: "BR" }),
-      }),
-    )
-    const c = a.contributions.find((x) => x.rule === "identity.timezone_mismatch")
-    expect(c?.points).toBe(3)
-  })
 })
 
-describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
+describe("ruleset 2: velocity, similarity and templates", () => {
   const actor = (
     over: Partial<NonNullable<ReturnType<typeof baseFacts>["actor"]>> = {},
   ) => ({
@@ -328,48 +318,9 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
           youngFreeSimilar: 9,
           bestTaintedSimilarity: 0.99,
         }),
-        behaviour: {
-          labelled: 10,
-          abuse: 10,
-          legit: 0,
-          meanAbuseDistance: 0.1,
-          nearestDistance: 0.1,
-          medianDistance: 0.1,
-        },
       }),
     )
     expect(a.band).not.toBe("critical")
-  })
-
-  it("needs five labelled neighbours before behaviour speaks", () => {
-    const few = evaluate(
-      baseFacts({
-        behaviour: {
-          labelled: 3,
-          abuse: 3,
-          legit: 0,
-          meanAbuseDistance: 0.2,
-          nearestDistance: 0.2,
-          medianDistance: 0.2,
-        },
-      }),
-    )
-    expect(few.contributions.map((c) => c.rule)).not.toContain("behaviour.like_abuse")
-    const many = evaluate(
-      baseFacts({
-        behaviour: {
-          labelled: 10,
-          abuse: 8,
-          legit: 2,
-          meanAbuseDistance: 0.3,
-          nearestDistance: 0.2,
-          medianDistance: 0.2,
-        },
-      }),
-    )
-    expect(
-      many.contributions.find((c) => c.rule === "behaviour.like_abuse")?.points,
-    ).toBe(20)
   })
 
   it("earns trust for mail that fits the workspace's own established templates", () => {
@@ -385,8 +336,8 @@ describe("ruleset 2: velocity, similarity, behaviour and templates", () => {
     expect(b.contributions.map((c) => c.rule)).not.toContain("trust.known_templates")
   })
 
-  it("is ruleset version 3 (#222: trusted content left out of similarity)", () => {
-    expect(RULESET_VERSION).toBe(3)
+  it("is ruleset version 4 (model, behaviour and timezone rules removed; staff-only demotions)", () => {
+    expect(RULESET_VERSION).toBe(4)
   })
 })
 
@@ -450,30 +401,6 @@ describe("similarity evidence (#222)", () => {
     })
     const text = JSON.stringify(a.contributions)
     for (const p of peers) expect(text).not.toContain(p.peer)
-  })
-
-  it("records behaviour evidence as distances", () => {
-    const a = evaluate(
-      baseFacts({
-        behaviour: {
-          labelled: 10,
-          abuse: 8,
-          legit: 2,
-          meanAbuseDistance: 0.3,
-          nearestDistance: 0.21,
-          medianDistance: 0.456,
-        },
-      }),
-    )
-    expect(
-      a.contributions.find((c) => c.rule === "behaviour.like_abuse")?.detail,
-    ).toMatchObject({
-      model: "behaviour-v1",
-      neighbours: 10,
-      confirmed_abuse_neighbours: 8,
-      median_distance: 0.46,
-      nearest_distance: 0.21,
-    })
   })
 
   it("leaves rules that are not about similarity without it", () => {

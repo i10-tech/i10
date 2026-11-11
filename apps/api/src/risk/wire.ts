@@ -76,6 +76,7 @@ export interface RiskSystemInput {
     level: "warning" | "error",
     context: Record<string, unknown>,
   ) => void
+  report?: RiskDeps["report"]
   log?: RiskDeps["log"]
 }
 
@@ -208,6 +209,7 @@ export function riskSystem(input: RiskSystemInput) {
           },
         }
       : {}),
+    ...(input.report ? { report: input.report } : {}),
     ...(log ? { log } : {}),
   }
 

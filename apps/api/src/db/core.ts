@@ -18,7 +18,6 @@ import {
   unique,
   uniqueIndex,
   uuid,
-  vector,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 import type { JoinRole } from "../console/roles.js"
@@ -4067,8 +4066,6 @@ export const riskAssessments = core.table(
     /** Which rules produced it. See `RULESET_VERSION` in risk/rules.ts. */
     rulesetVersion: integer("ruleset_version").notNull(),
     contributions: jsonb("contributions").notNull(),
-    /** The model's probability when a model was consulted; null otherwise. */
-    modelScore: real("model_score"),
     /** When the band last changed. Hysteresis reads it. */
     bandSince: timestamp("band_since", { withTimezone: true }).notNull().defaultNow(),
     /**
@@ -4362,12 +4359,9 @@ export const mailboxAuthFailures = core.table(
 )
 
 /**
- * What a workspace turned out to be, for training the model (#170).
- *
- * ⚠ THE FEATURES ARE STORED WITH THE LABEL, AS THEY WERE WHEN IT WAS GIVEN.
- * Training then never reconstructs history, and a label cannot quietly start
- * describing a workspace that has since changed. `weight` lets a staff verdict
- * count for more than an inference like "an AWS-managed pause".
+ * What a workspace turned out to be (#170): the ground truth the rules are
+ * measured against. `weight` lets a staff verdict count for more than an
+ * inference like "an AWS-managed pause".
  */
 export const riskLabels = core.table(
   "risk_labels",
@@ -4383,7 +4377,6 @@ export const riskLabels = core.table(
     /** `staff`, `hold_upheld`, `hold_released`, `ses_aws_pause`, `tenure`. */
     source: text("source").notNull(),
     weight: real("weight").notNull().default(1),
-    features: jsonb("features").notNull(),
     setBy: text("set_by").notNull(),
     note: text("note"),
     labeledAt: timestamp("labeled_at", { withTimezone: true }).notNull().defaultNow(),
@@ -4394,42 +4387,10 @@ export const riskLabels = core.table(
   ],
 )
 
-/**
- * Trained models (#170). Global rather than per workspace, so, like
- * `identity_events`, readable only through definer functions.
- *
- * ⚠ `active` IS THE EVALUATION GATE, NOT A PREFERENCE. A model is only
- * consulted when its held-out evaluation on real labels passed; every other
- * version is kept for comparison and contributes nothing.
- */
-export const riskModels = core.table(
-  "risk_models",
-  {
-    id: uuid("id")
-      .primaryKey()
-      .default(sql`uuidv7()`),
-    version: integer("version").notNull(),
-    /** Feature names in order, weights, bias, and normalisation. */
-    weights: jsonb("weights").notNull(),
-    /** Label counts, AUC, precision and recall on the held-out set. */
-    evaluation: jsonb("evaluation").notNull(),
-    active: boolean("active").notNull().default(false),
-    trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("risk_models_version_unique").on(t.version),
-    pgPolicy("risk_models_deny", {
-      for: "all",
-      using: sql`false`,
-      withCheck: sql`false`,
-    }),
-  ],
-)
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Content intelligence (#169, #170, #171): templates discovered from what a
-// workspace sends, and the vectors that let similar mail and similar
-// workspaces be found. See docs/decisions/risk.md, "Templates and vectors".
+// workspace sends, and the vectors that let similar mail be found. See
+// docs/decisions/risk.md, "Templates and vectors".
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Dimensions of every content embedding, whichever embedder produced it. */
@@ -4655,33 +4616,6 @@ export const contentVectors = core.table(
   ],
 )
 
-/** Dimensions of the behaviour vector: `FEATURE_NAMES` in risk/model.ts. */
-export const BEHAVIOUR_DIMENSIONS = 39
-
-/**
- * Each workspace's behaviour as a point in space: its model features,
- * standardised (#170).
- *
- * ⚠ THIS IS HOW "A NEW WORKSPACE THAT LOOKS LIKE A BAD ONE" IS ASKED. Its
- * nearest neighbours among LABELLED workspaces are a fact the rules read -
- * observations, never another workspace's score, so no score can feed
- * another (the feedback-loop rule in docs/decisions/risk.md).
- */
-export const behaviourVectors = core.table(
-  "behaviour_vectors",
-  {
-    tenantId: uuid("tenant_id")
-      .primaryKey()
-      .references(() => tenants.id, { onDelete: "cascade" }),
-    embedding: vector("embedding", { dimensions: BEHAVIOUR_DIMENSIONS }).notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    index("behaviour_vectors_hnsw_idx").using("hnsw", t.embedding.op("vector_l2_ops")),
-    tenantPolicy("behaviour_vectors_tenant", t.tenantId),
-  ],
-)
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Trusted content (#222): known public boilerplate, and templates a workspace
 // submitted and staff approved. See docs/decisions/risk.md, "Trusted templates".
@@ -4692,7 +4626,7 @@ export const behaviourVectors = core.table(
  * emails, React Email starters - mail many unrelated workspaces send because
  * they all started from the same place.
  *
- * ⚠ GLOBAL, SO DENY-ALL LIKE `risk_models`. It is not any workspace's data, so
+ * ⚠ GLOBAL, SO DENY-ALL LIKE `identity_events`. It is not any workspace's data, so
  * a tenant policy cannot describe it; it is read and written only through
  * definer functions (the risk migrations), and a direct query returns nothing.
  *

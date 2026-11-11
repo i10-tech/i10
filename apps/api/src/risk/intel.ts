@@ -169,21 +169,9 @@ export async function layaClassify(
     }),
   })
   if (!res.ok) return null
-  const body = (await res.json()) as {
-    answers?: {
-      abusive?: {
-        confidence?: number
-        probabilities?: Record<string, number>
-        choice?: string
-      }
-    }
-  }
-  const a = body.answers?.abusive
-  if (!a) return null
-  const yes = a.probabilities?.yes ?? a.probabilities?.true
-  if (typeof yes === "number") return yes
-  if (typeof a.confidence === "number") {
-    return a.choice === "no" || a.choice === "false" ? 1 - a.confidence : a.confidence
-  }
-  return null
+  // A `noul` answer is `{ type: "noul", noul: P(yes) }`: the probability is the
+  // answer itself, not a `probabilities` map (that is `choice` and `score`).
+  const body = (await res.json()) as { answers?: { abusive?: { noul?: unknown } } }
+  const p = body.answers?.abusive?.noul
+  return typeof p === "number" && p >= 0 && p <= 1 ? p : null
 }

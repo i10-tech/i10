@@ -1037,6 +1037,20 @@
       "when": 1794348947467,
       "tag": "0147_mailbox_hosting_by_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1794352613072,
+      "tag": "0148_drop_risk_model_definers",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1794352614122,
+      "tag": "0149_drop_risk_model",
+      "breakpoints": true
     }
   ]
 }

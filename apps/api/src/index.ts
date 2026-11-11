@@ -1170,6 +1170,7 @@ const risk = riskSystem({
   ...(consoleUrl ? { consoleUrl } : {}),
   exempt: riskExempt,
   alert: (message, level, context) => captureMessage(message, level, context),
+  report: captureError,
   log,
 })
 const rescore = riskTrigger(risk.deps)

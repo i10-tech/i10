@@ -28,16 +28,30 @@ export function bandFor(score: number): Band {
   return "low"
 }
 
-export function evaluate(facts: Facts, rules: readonly Rule[] = RULES): Assessment {
+/** A rule that threw instead of answering, and what it threw. */
+export interface RuleFailure {
+  rule: string
+  error: unknown
+}
+
+/** An assessment, and the rules that could not take part in it. */
+export interface Evaluated extends Assessment {
+  failures: RuleFailure[]
+}
+
+export function evaluate(facts: Facts, rules: readonly Rule[] = RULES): Evaluated {
   const contributions: Contribution[] = []
+  const failures: RuleFailure[] = []
   for (const r of rules) {
     let result
     try {
       result = r.evaluate(facts)
-    } catch {
-      // ⚠ ONE BROKEN RULE MUST NOT SILENCE THE OTHERS. A rule that throws on
-      // an unexpected shape is a bug to fix, not a reason to score nothing -
-      // which would read as "this workspace is fine".
+    } catch (error) {
+      // ⚠ ONE BROKEN RULE MUST NOT SILENCE THE OTHERS, AND MUST NOT VANISH. A
+      // rule that throws is a bug to fix, not a reason to score nothing - which
+      // would read as "this workspace is fine" - so the others still score and
+      // the failure goes back to the caller, who reports it.
+      failures.push({ rule: r.id, error })
       continue
     }
     if (!result || result.points === 0) continue
@@ -60,7 +74,7 @@ export function evaluate(facts: Facts, rules: readonly Rule[] = RULES): Assessme
   )
   // Worst first, which is the order staff and the console read them in.
   contributions.sort((a, b) => b.points - a.points)
-  return { score, band, contributions, rulesetVersion: RULESET_VERSION }
+  return { score, band, contributions, rulesetVersion: RULESET_VERSION, failures }
 }
 
 /**
