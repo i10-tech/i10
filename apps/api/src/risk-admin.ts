@@ -9,7 +9,6 @@
  *   bun run risk-admin tier     <tenant> strict|normal --by <you> --reason "<why>"
  *   bun run risk-admin label    <tenant> abuse|legit --by <you> [--note "<text>"]
  *   bun run risk-admin linked   <clerk user id>
- *   bun run risk-admin train
  *
  * Trusted content (#222):
  *
@@ -34,9 +33,8 @@
  * `--reason`, so what staff do here is audited exactly like what the score
  * does. It connects as `i10_api`, like everything else - no bypass role.
  *
- * ⚠ A RELEASE IS ALSO A LABEL. `false_positive` teaches the model the
- * workspace was legitimate; `upheld` that it was abuse. The features are
- * frozen as they are now, which is what the score saw.
+ * ⚠ A RELEASE IS ALSO A LABEL. `false_positive` records the workspace as
+ * legitimate; `upheld` as abuse.
  */
 import { readFile } from "node:fs/promises"
 import { createClerkClient } from "@clerk/backend"
@@ -46,7 +44,6 @@ import { loadEnv } from "./env.js"
 import { createCacheClient } from "./cache/redis.js"
 import { evaluate } from "./risk/engine.js"
 import { loadFacts } from "./risk/facts.js"
-import { explainPrediction, features, predict } from "./risk/model.js"
 import { RULES } from "./risk/rules.js"
 import { scoreTenant } from "./risk/runner.js"
 import { CATEGORY_TEXT, type Category } from "./risk/types.js"
@@ -186,15 +183,6 @@ function parseHoles(spec: string | undefined): Record<string, number> {
   return out
 }
 
-async function frozenFeatures(tenantId: string) {
-  const facts = await loadFacts(tenantId, {
-    db,
-    freePlanId: env.METERING_FREE_PLAN_ID,
-    ownerInfo: risk.deps.ownerInfo,
-  })
-  return features(facts) as unknown as Record<string, number>
-}
-
 try {
   switch (command) {
     case "explain": {
@@ -204,13 +192,6 @@ try {
         freePlanId: env.METERING_FREE_PLAN_ID,
         ownerInfo: risk.deps.ownerInfo,
       })
-      const model = await risk.labels.model(true)
-      const feats = features(facts)
-      if (model)
-        facts.model = {
-          probability: predict(model.weights, feats),
-          version: model.version,
-        }
       const a = evaluate(facts)
       const [current, hold, history] = await Promise.all([
         risk.assessments.current(id),
@@ -251,12 +232,8 @@ try {
       console.log(
         `\ntrusted content, last 7 days: ${facts.farm.trusted.template} approved-template, ${facts.farm.trusted.boilerplate} boilerplate`,
       )
-      if (model && facts.model) {
-        console.log(`\nmodel v${model.version}: ${facts.model.probability.toFixed(3)}`)
-        for (const p of explainPrediction(model.weights, feats).slice(0, 6)) {
-          console.log(`  ${p.pull >= 0 ? "+" : ""}${p.pull.toFixed(2)}  ${p.feature}`)
-        }
-      }
+      for (const f of a.failures)
+        console.log(`\nrule ${f.rule} threw: ${String(f.error)}`)
       console.log(
         `\nfarm peers: ${facts.farm.peers.length}, parents shared with: ${facts.parents.sharedWith}`,
       )
@@ -269,8 +246,7 @@ try {
       break
     }
     case "score": {
-      const model = await risk.labels.model(true)
-      console.log(await scoreTenant(tenant(), "staff", { ...risk.deps, model }))
+      console.log(await scoreTenant(tenant(), "staff", risk.deps))
       break
     }
     case "hold": {
@@ -295,7 +271,6 @@ try {
         fail("--outcome is false_positive or upheld")
       const by = need("by")
       const reason = need("reason")
-      const feats = await frozenFeatures(id)
       const released = await risk.holds.release({
         tenantId: id,
         setBy: by,
@@ -308,7 +283,6 @@ try {
         tenantId: id,
         label: outcome === "false_positive" ? "legit" : "abuse",
         source: outcome === "false_positive" ? "hold_released" : "hold_upheld",
-        features: feats,
         setBy: by,
         note: reason,
       })
@@ -359,7 +333,6 @@ try {
         tenantId: id,
         label,
         source: "staff",
-        features: await frozenFeatures(id),
         setBy: by,
         ...(flags.get("note") ? { note: flags.get("note")! } : {}),
       })
@@ -447,9 +420,9 @@ try {
         console.log(`matched ${t.matched} message(s)`)
         console.log("\nholes:")
         for (const h of t.holes) console.log(`  {{${h.name}}}  max ${h.max}`)
-        console.log("\nlinks in the fixed part, with Web Risk:")
+        console.log("\nlinks in the fixed part, as the link checkers see them:")
         for (const host of t.staticHosts)
-          console.log(`  ${host}  ${(await risk.webRisk.lookup(host)) ?? "unknown"}`)
+          console.log(`  ${host}  ${(await risk.links.lookup(host)) ?? "unknown"}`)
         const shown = describeSkeleton({ segments: t.segments }, t.holes)
         if (shown.html !== null) console.log(`\n--- html ---\n${shown.html}`)
         if (shown.text !== null) console.log(`\n--- text ---\n${shown.text}`)
@@ -460,11 +433,11 @@ try {
           )
       } else if (sub === "approve") {
         // ⚠ EVERY LINK IN THE FIXED PART MUST BE CHECKED CLEAN FIRST. Unknown
-        // (budget spent, Web Risk down) is not clean: try again later.
+        // (budget spent, a provider down) is not clean: try again later.
         for (const host of t.staticHosts) {
-          const v = await risk.webRisk.lookup(host)
+          const v = await risk.links.lookup(host)
           if (v !== "clean")
-            fail(`Web Risk says ${v ?? "nothing yet"} for ${host}; not approved`)
+            fail(`The link check says ${v ?? "nothing yet"} for ${host}; not approved`)
         }
         const r = await risk.trustedTemplates.decide(
           t.tenantId,
@@ -510,17 +483,9 @@ try {
       console.table(rows)
       break
     }
-    case "train": {
-      const r = await risk.labels.retrain()
-      console.log(
-        `model v${r.version} ${r.active ? "ACTIVE" : "inactive"}`,
-        r.evaluation,
-      )
-      break
-    }
     default:
       fail(
-        "commands: explain, score, hold, release, pin, tier, label, linked, train, boilerplate, templates - see the header of src/risk-admin.ts",
+        "commands: explain, score, hold, release, pin, tier, label, linked, boilerplate, templates - see the header of src/risk-admin.ts",
       )
   }
 } finally {

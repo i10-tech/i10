@@ -184,7 +184,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(who?.current_user).toBe("i10_api")
   })
 
-  it("cannot read identity events or models directly: they are deny-all", async () => {
+  it("cannot read identity events directly: they are deny-all", async () => {
     await identityStore(db).record({
       userId: "risk-test-direct",
       tenantId: null,
@@ -255,7 +255,6 @@ suite("the risk engine against Postgres, as i10_api", () => {
       tenantId: ids.e,
       assessment: { score: 90, band: "critical", contributions: [], rulesetVersion: 1 },
       bandSince: new Date(),
-      modelScore: null,
       previous: null,
       actions: [],
       trigger: "test",
@@ -398,6 +397,76 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(summary.scored).toBeGreaterThan(0)
   })
 
+  // ⚠ THE LINK PROVIDERS' WIRING: what each says is stored once, an answer that
+  // is not yet enough stays unchecked for the next run, and the score reads the
+  // providers back out of the stored verdict (#222).
+  it("stores each link host's verdict from the providers, leaves an unsure one unchecked, and scores by who flagged it", async () => {
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t)
+    const link = (host: string) => `<a href="https://${host}/x">${host}</a>`
+    await recordContent(
+      t,
+      [
+        {
+          from: "a@x.top",
+          to: "r@example.com",
+          subject: "Exclusive offer just for you",
+          html:
+            "<p>Claim your reward today, friend. Limited stock, act now before the offer ends. " +
+            ["one-list", "two-lists", "unsure", "fine"]
+              .map((h) => link(`${h}-${RUN}.example.top`))
+              .join(" ") +
+            "</p>",
+        } as ResolvedEmail,
+      ],
+      { db, threshold: 99 },
+    )
+    const verdicts: Record<string, string | null> = {
+      [`one-list-${RUN}.example.top`]: "cloudflare=blocked",
+      [`two-lists-${RUN}.example.top`]: "cloudflare=blocked;quad9=blocked",
+      [`unsure-${RUN}.example.top`]: null,
+    }
+    const links = {
+      cached: async () => null,
+      lookup: async (host: string) => (host in verdicts ? verdicts[host]! : "clean"),
+      stats: () => ({
+        cloudflare: { clean: 1, unsafe: 2, unknown: 1, skipped: 0 },
+      }),
+    }
+    const redis = new FakeRedis()
+    await redis.sadd("risk:dirty", t)
+    const summary = await runAll(riskDeps(redis, { links }), { concurrency: 2 })
+
+    const rows =
+      await owner`select host, verdict, checked_at from core.link_hosts where tenant_id = ${t}`
+    const byHost = new Map(rows.map((r) => [r.host as string, r]))
+    expect(byHost.get(`one-list-${RUN}.example.top`)?.verdict).toBe(
+      "cloudflare=blocked",
+    )
+    expect(byHost.get(`two-lists-${RUN}.example.top`)?.verdict).toBe(
+      "cloudflare=blocked;quad9=blocked",
+    )
+    expect(byHost.get(`fine-${RUN}.example.top`)?.verdict).toBe("clean")
+    // not enough to store: asked again next run, never recorded clean
+    expect(byHost.get(`unsure-${RUN}.example.top`)?.checked_at).toBeNull()
+    expect(summary.linksChecked).toBeGreaterThanOrEqual(3)
+    expect(summary.unsafe).toBeGreaterThanOrEqual(2)
+    expect(summary.links).toEqual({
+      cloudflare: { clean: 1, unsafe: 2, unknown: 1, skipped: 0 },
+    })
+
+    const rule = (await assessmentStore(db).current(t))?.contributions.find(
+      (c) => c.rule === "links.unsafe",
+    )
+    expect(rule?.points).toBe(90)
+    expect(rule?.floor).toBe("critical")
+    expect(String(rule?.evidence.hosts)).toContain(
+      "cloudflare: blocked, quad9: blocked",
+    )
+    expect(String(rule?.evidence.hosts)).toContain("cloudflare: blocked)")
+  })
+
   it("records a sighting, spots impossible travel, and responds", async () => {
     const redis = new FakeRedis()
     const store = identityStore(db)
@@ -440,20 +509,84 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(responded).toEqual([`risk-test-${RUN}-traveller`])
   })
 
-  it("stores labels and models through the definers, and keeps a failed model inactive", async () => {
+  it("stores labels under the workspace's own policy", async () => {
     const labels = labelStore(db)
-    await labels.add({
-      tenantId: ids.a,
-      label: "abuse",
-      source: "staff",
-      features: { farm_linked: 1 },
-      setBy: "mo",
+    const since = new Date(Date.now() - 60_000)
+    expect(await labels.has(ids.a, "staff", since)).toBe(false)
+    await labels.add({ tenantId: ids.a, label: "abuse", source: "staff", setBy: "mo" })
+    expect(await labels.has(ids.a, "staff", since)).toBe(true)
+    expect(await labels.has(ids.b, "staff", since)).toBe(false)
+  })
+
+  it("counts only staff demotions toward the demotion rule, never the score's own", async () => {
+    const { evaluate } = await import("../src/risk/engine.js")
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    const tiers = sendingTierStore(db)
+    const move = (tier: "strict" | "normal", source: "score" | "staff") =>
+      tiers.set({ tenantId: id, tier, source, reason: "test", setBy: source })
+    const facts = () =>
+      loadFacts(id, { db, freePlanId: FREE, ownerInfo: async () => null })
+    const demotionRule = async () =>
+      evaluate(await facts()).contributions.find((c) => c.rule === "history.demotions")
+
+    // The score demoting twice is the score's own verdict: no new evidence.
+    for (const tier of ["strict", "normal", "strict", "normal"] as const)
+      await move(tier, "score")
+    expect((await facts()).history.staffDemotions90d).toBe(0)
+    expect(await demotionRule()).toBeUndefined()
+
+    // A person demoting twice still counts.
+    for (const tier of ["strict", "normal", "strict"] as const)
+      await move(tier, "staff")
+    expect((await facts()).history.staffDemotions90d).toBe(2)
+    expect((await demotionRule())?.points).toBe(8)
+  })
+
+  it("scores past a rule that throws, and logs and reports it with the rule and workspace", async () => {
+    const { spyOn } = await import("bun:test")
+    const { RULES } = await import("../src/risk/rules.js")
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    // The owner's address is on the workspace's own domain, so trust.owner_domain
+    // has something to say while trust.mfa throws.
+    const domain = `throws-${RUN}.com`
+    await owner`insert into core.domains (tenant_id, name, status, verified_at)
+                values (${id}, ${domain}, 'verified', now())`
+    const broken = RULES.find((r) => r.id === "trust.mfa")!
+    const spy = spyOn(broken, "evaluate").mockImplementation(() => {
+      throw new Error("boom")
     })
-    expect(await labels.count()).toBeGreaterThan(0)
-    const r = await labels.retrain()
-    expect(r.active).toBe(false)
-    expect((await labels.model(true))?.active ?? false).toBe(false)
-    expect((await labels.model(false))?.version).toBe(r.version)
+    const logged: object[] = []
+    const reported: Record<string, unknown>[] = []
+    try {
+      const r = await scoreTenant(
+        id,
+        "test",
+        riskDeps(new FakeRedis(), {
+          ownerInfo: async () => ({ mfa: true, email: `owner@${domain}` }),
+          log: { error: (o, m) => m === "risk rule threw" && logged.push(o) },
+          report: (_error, context) => reported.push(context),
+        }),
+      )
+      expect(r.status).toBe("scored")
+      expect(r.ruleFailures).toBe(1)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(logged).toEqual([
+      expect.objectContaining({ rule: "trust.mfa", tenantId: id }),
+    ])
+    expect(reported).toEqual([
+      expect.objectContaining({ rule: "trust.mfa", tenantId: id }),
+    ])
+    // The other rules still scored: the stored assessment lists them.
+    const stored = await assessmentStore(db).current(id)
+    const rules = stored?.contributions.map((c) => c.rule) ?? []
+    expect(rules).toContain("trust.owner_domain")
+    expect(rules).not.toContain("trust.mfa")
   })
 
   // ─── Templates, compaction and the vector layer (#169, #170, #171) ───
@@ -645,7 +778,6 @@ suite("the risk engine against Postgres, as i10_api", () => {
       tenantId: suspect,
       label: "abuse",
       source: "staff",
-      features: {},
       setBy: "mo",
     })
     expect(
@@ -654,40 +786,8 @@ suite("the risk engine against Postgres, as i10_api", () => {
     ).toBe(1)
   })
 
-  it("finds labelled behavioural neighbours and counts an actor's velocity", async () => {
-    const { storeBehaviour, behaviourNeighbours, actorVelocity } =
-      await import("../src/content/vectors.js")
-    const { features } = await import("../src/risk/model.js")
-    const { loadFacts } = await import("../src/risk/facts.js")
-    for (const id of [ids.a, ids.b, ids.c, ids.d, ids.clean]) {
-      const f = await loadFacts(id, {
-        db,
-        freePlanId: FREE,
-        ownerInfo: async () => null,
-      })
-      await storeBehaviour(db, id, features(f))
-    }
-    const labels = labelStore(db)
-    for (const id of [ids.a, ids.c, ids.d]) {
-      await labels.add({
-        tenantId: id,
-        label: "abuse",
-        source: "staff",
-        features: {},
-        setBy: "mo",
-      })
-    }
-    await labels.add({
-      tenantId: ids.clean,
-      label: "legit",
-      source: "staff",
-      features: {},
-      setBy: "mo",
-    })
-    const n = await behaviourNeighbours(db, ids.b, 10)
-    expect(n.labelled).toBe(4)
-    expect(n.abuse).toBe(3)
-
+  it("counts an actor's velocity", async () => {
+    const { actorVelocity } = await import("../src/content/vectors.js")
     const [t] =
       await owner`select owner_clerk_user_id from core.tenants where id = ${ids.a}`
     const v = await actorVelocity(db, t!.owner_clerk_user_id)
@@ -937,7 +1037,6 @@ suite("the risk engine against Postgres, as i10_api", () => {
       tenantId: t,
       label: "abuse",
       source: "staff",
-      features: {},
       setBy: "staff@i10",
     })
     const revoked = await reviewTrusted(db, store, t, new Date())
@@ -945,7 +1044,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
   })
 
   it("leaves trusted vectors out of content neighbours and reports the evidence", async () => {
-    const { storeContentVectors, contentNeighbours, behaviourNeighbours } =
+    const { storeContentVectors, contentNeighbours } =
       await import("../src/content/vectors.js")
     const { hashEmbedder } = await import("../src/content/embed.js")
     const { boilerplateStore } = await import("../src/risk/trusted.js")
@@ -999,8 +1098,5 @@ suite("the risk engine against Postgres, as i10_api", () => {
     const nearest = await boilerplateStore(db).nearest(x!, e.model, day)
     expect(nearest?.name).toBe(`test/near-${RUN}`)
     expect(nearest!.similarity).toBeGreaterThan(0.99)
-
-    const b = await behaviourNeighbours(db, ids.a)
-    if (b.labelled > 0) expect(b.medianDistance).not.toBeNull()
   })
 })

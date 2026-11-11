@@ -1,7 +1,16 @@
 import { webRiskLookup, WebRiskError, type Fetch } from "./intel.js"
+import {
+  CLEAN_ANSWER,
+  UNKNOWN,
+  type LinkAnswer,
+  type LinkProvider,
+} from "./link-check.js"
+import type { ProviderHealth } from "./provider-health.js"
 
 /**
- * Web Risk, with a daily budget and a failure cache (#222).
+ * Web Risk, with a daily budget and a failure cache (#222). One provider
+ * behind the link-check port (`webRiskProvider` below); it joins only when
+ * `RISK_LINK_PROVIDERS` lists it and a key is set.
  *
  * ⚠ GOOGLE'S QUOTAS ARE PER MINUTE ONLY. Nothing on their side stops a burst
  * of new hosts - a farm linking a thousand fresh domains, or a bug looping -
@@ -21,6 +30,11 @@ import { webRiskLookup, WebRiskError, type Fetch } from "./intel.js"
  *
  * ⚠ AN UNKNOWN VERDICT IS `null`, NEVER "clean". Every caller treats null as
  * "not checked": a link that could not be checked earns no trust.
+ *
+ * ⚠ A REFUSAL OF THE KEY IS A FAILURE TO REPORT, NOT A HOST'S PROBLEM. A 403
+ * (billing off on the Google project) went unnoticed for a month because it
+ * was parked per host and every verdict stayed null. Every call that was made
+ * is reported to `health`; only a 400 or 404, which are about one host, are not.
  */
 export interface WebRiskRedis {
   get(key: string): Promise<string | null>
@@ -35,6 +49,7 @@ export interface WebRiskOptions {
   dailyLimit: number
   redis?: WebRiskRedis
   fetch?: Fetch
+  health?: ProviderHealth
   now?: () => Date
   log?: { warn?: (o: object, m: string) => void }
 }
@@ -96,9 +111,12 @@ export function webRiskChecker(opts: WebRiskOptions): WebRiskChecker {
         const threats = await webRiskLookup(host, opts.key, opts.fetch)
         const verdict = threats.length ? threats.join(",") : "clean"
         await redis.setex(verdictKey(host), VERDICT_SECONDS, verdict).catch(() => {})
+        await opts.health?.success("webrisk")
         return verdict
       } catch (error) {
         const status = error instanceof WebRiskError ? error.status : null
+        if (status !== 400 && status !== 404)
+          await opts.health?.failure("webrisk", String(error))
         if (status === null || status === 429 || status >= 500) {
           await redis
             .setex(DOWN_KEY, DOWN_SECONDS, String(status ?? "unreachable"))
@@ -119,6 +137,17 @@ export function webRiskChecker(opts: WebRiskOptions): WebRiskChecker {
   }
 }
 
-/** A verdict as the trust matcher reads it. */
-export const asVerdict = (v: string | null): "clean" | "unsafe" | "unknown" =>
-  v === null ? "unknown" : v === "clean" ? "clean" : "unsafe"
+/** Web Risk as a provider: its own budget and caches, answers in the port's terms. */
+export function webRiskProvider(checker: WebRiskChecker): LinkProvider {
+  const answer = (verdict: string | null): LinkAnswer =>
+    verdict === null
+      ? UNKNOWN
+      : verdict === "clean"
+        ? CLEAN_ANSWER
+        : { kind: "unsafe", labels: verdict.split(",") }
+  return {
+    name: "webrisk",
+    cached: async (host) => answer(await checker.cached(host)),
+    lookup: async (host) => answer(await checker.lookup(host)),
+  }
+}

@@ -1,5 +1,5 @@
 import { parse } from "tldts"
-import { countryLongitude } from "./geo.js"
+import { describeFlags, isDecisive, parseVerdict } from "./link-verdict.js"
 import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./types.js"
 
 /**
@@ -9,7 +9,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * ⚠ BUMP `RULESET_VERSION` WITH ANY CHANGE TO A NUMBER OR A RULE. Assessments
  * record it, and "the score moved because we changed the rules" has to be
  * distinguishable from "the customer changed behaviour" - in an appeal, and in
- * the model's training data.
+ * any later evaluation against labels.
  *
  * ⚠ EVERY RATE HAS A MINIMUM VOLUME. On 100 sends one complaint is 1%, which
  * would read as three times Gmail's limit. A rate that has not seen enough
@@ -23,7 +23,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 3
+export const RULESET_VERSION = 5
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -295,10 +295,10 @@ const behaviourRules: Rule[] = [
   rule(
     "history.demotions",
     "sending_pattern",
-    "Demoted to the strict tier twice or more in 90 days",
+    "Demoted to the strict tier by staff twice or more in 90 days",
     (f) =>
-      f.history.tierDemotions90d >= 2
-        ? hit(8, { demotions: f.history.tierDemotions90d })
+      f.history.staffDemotions90d >= 2
+        ? hit(8, { demotions: f.history.staffDemotions90d })
         : null,
   ),
   rule(
@@ -423,29 +423,6 @@ export function farmEvidence(
   }
 }
 
-export function behaviourEvidence(
-  signal: string,
-  f: Facts,
-): SimilarityEvidence | undefined {
-  const b = f.behaviour
-  if (!b) return undefined
-  return {
-    signal,
-    model: "behaviour-v1",
-    neighbours: b.labelled,
-    distinct_workspaces: b.labelled,
-    median_similarity: null,
-    best_similarity: null,
-    median_distance: round2(b.medianDistance),
-    nearest_distance: round2(b.nearestDistance),
-    confirmed_abuse_neighbours: b.abuse,
-    known_template_matches: f.similarity?.trusted.template ?? f.farm.trusted.template,
-    boilerplate_matches:
-      f.similarity?.trusted.boilerplate ?? f.farm.trusted.boilerplate,
-    boilerplate_match: null,
-  }
-}
-
 const withDetail = (h: Hit, detail: SimilarityEvidence | undefined): Hit =>
   detail ? { ...h, detail } : h
 
@@ -565,17 +542,6 @@ const identityRules: Rule[] = [
       return n >= 4 ? hit(8, { countries: n }) : null
     },
   ),
-  rule(
-    "identity.timezone_mismatch",
-    "account_security",
-    "The browser's timezone is far from the IP's country",
-    (f) => {
-      const id = f.identity
-      if (!id?.latestTimezone || !id.latestCountry) return null
-      const gap = timezoneGapHours(id.latestTimezone, id.latestCountry, f.now)
-      return gap !== null && gap >= 6 ? hit(3, { gapHours: gap }) : null
-    },
-  ),
 ]
 
 // ─── Content and links ───────────────────────────────────────────────────────
@@ -584,29 +550,35 @@ const contentRules: Rule[] = [
   rule(
     "links.unsafe",
     "unsafe_links",
-    "Mail linked to a host Google Web Risk lists as malware or phishing",
-    (f) =>
-      f.links.unsafe.length > 0
-        ? hit(
-            90,
-            {
-              hosts: f.links.unsafe
-                .slice(0, 5)
-                .map((l) => `${l.host} (${l.verdict})`)
-                .join(", "),
-            },
-            {
-              floor: "critical",
-              // ⚠ THE DAY THE LINK WAS SENT, NOT NOW: only mail sent after a
-              // staff release is evidence the person releasing never saw.
-              freshAt: new Date(
-                Math.max(
-                  ...f.links.unsafe.map((l) => Date.parse(`${l.day}T23:59:59Z`)),
-                ),
-              ),
-            },
-          )
-        : null,
+    "Mail linked to a host that Web Risk, or both DNS security resolvers, list as malware or phishing",
+    (f) => {
+      if (f.links.unsafe.length === 0) return null
+      const flagged = f.links.unsafe.map((l) => ({
+        ...l,
+        flags: parseVerdict(l.verdict),
+      }))
+      // ⚠ ONE LIST'S OPINION IS 45 POINTS AND NO FLOOR. Web Risk, or two
+      // independent lists agreeing, is 90 and critical; one resolver's false
+      // positive must not hold a customer's mail on its own.
+      const decisive = flagged.some((l) => isDecisive(l.flags))
+      return hit(
+        decisive ? 90 : 45,
+        {
+          hosts: flagged
+            .slice(0, 5)
+            .map((l) => `${l.host} (${describeFlags(l.flags)})`)
+            .join(", "),
+        },
+        {
+          ...(decisive ? { floor: "critical" as const } : {}),
+          // ⚠ THE DAY THE LINK WAS SENT, NOT NOW: only mail sent after a
+          // staff release is evidence the person releasing never saw.
+          freshAt: new Date(
+            Math.max(...f.links.unsafe.map((l) => Date.parse(`${l.day}T23:59:59Z`))),
+          ),
+        },
+      )
+    },
     true,
   ),
   rule(
@@ -622,24 +594,6 @@ const contentRules: Rule[] = [
       return points === null
         ? null
         : hit(points, { probability: Math.round(p * 100) / 100 })
-    },
-  ),
-  rule(
-    "model",
-    "sending_pattern",
-    "The trained model's estimate that this workspace is abusive",
-    (f) => {
-      const p = f.model?.probability ?? 0
-      const points = graded([
-        [p >= 0.9, 20],
-        [p >= 0.7, 10],
-      ] as const)
-      return points === null
-        ? null
-        : hit(points, {
-            probability: Math.round(p * 100) / 100,
-            version: f.model!.version,
-          })
     },
   ),
 ]
@@ -690,7 +644,7 @@ const actorRules: Rule[] = [
  * ⚠ MODEST POINTS ON PURPOSE. Embedding similarity is new here and has not
  * been calibrated on real traffic; it is evidence that adds up with other
  * evidence, never enough alone to hold anybody. The weights rise once labels
- * show how it performs - which is also when the model starts to weigh it.
+ * show how it performs.
  */
 const similarityRules: Rule[] = [
   rule(
@@ -722,26 +676,6 @@ const similarityRules: Rule[] = [
             contentEvidence("content.semantic_crowd", f),
           )
         : null
-    },
-  ),
-  rule(
-    "behaviour.like_abuse",
-    "sending_pattern",
-    "Behaves like workspaces that turned out to be abusive",
-    (f) => {
-      const b = f.behaviour
-      if (!b || b.labelled < 5) return null
-      const share = b.abuse / b.labelled
-      const points = graded([
-        [share >= 0.7, 20],
-        [share >= 0.5, 8],
-      ] as const)
-      return points === null
-        ? null
-        : withDetail(
-            hit(points, { abuseNeighbours: b.abuse, labelledNeighbours: b.labelled }),
-            behaviourEvidence("behaviour.like_abuse", f),
-          )
     },
   ),
 ]
@@ -851,44 +785,4 @@ export function registrable(host: string): string | null {
 /** The subdomain labels in front of the registrable domain, if any. */
 export function subdomainOf(host: string): string | null {
   return parse(host).subdomain || null
-}
-
-/**
- * How far the browser's timezone is from where the IP's country is, in hours.
- *
- * ⚠ WEAK ON PURPOSE. It compares the zone's current UTC offset with the
- * country centre's solar offset, which is off by hours for wide countries -
- * hence the six-hour threshold and three points. It only matters in company.
- */
-export function timezoneGapHours(
-  tz: string,
-  country: string,
-  now: Date,
-): number | null {
-  const offset = zoneOffsetHours(tz, now)
-  const lon = countryLongitude(country)
-  if (offset === null || lon === null) return null
-  const solar = lon / 15
-  let gap = Math.abs(offset - solar)
-  if (gap > 12) gap = 24 - gap
-  return Math.round(gap)
-}
-
-function zoneOffsetHours(tz: string, now: Date): number | null {
-  try {
-    const name = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "shortOffset",
-    })
-      .formatToParts(now)
-      .find((p) => p.type === "timeZoneName")?.value
-    if (!name) return null
-    const m = /GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?/.exec(name)
-    if (!m) return null
-    if (!m[1]) return 0
-    const sign = m[1] === "-" ? -1 : 1
-    return sign * (Number(m[2]) + Number(m[3] ?? 0) / 60)
-  } catch {
-    return null
-  }
 }

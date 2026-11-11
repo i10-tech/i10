@@ -38,7 +38,7 @@ rules ──► score 0-100 + band + contributions (every point explained)
 decide ──► actions through ONE door each (tier, hold, SES policy, alert)
    │
    ▼
-record ──► assessment + event history (staff review, appeals, training labels)
+record ──► assessment + event history (staff review, appeals, labels)
 ```
 
 It runs **hourly** as its own CronJob, **immediately** for one workspace when
@@ -65,8 +65,13 @@ identity anomaly), and **at accept** only for the cheap real-time pieces
 - **No shadow mode.** The user chose protection from day 1. That is safe
   because the automatic actions stop at tier moves and holds, and termination
   is never automatic.
+- **A rule that throws is reported, not dropped.** `evaluate` stays pure: it
+  scores every other rule and returns the failures (rule id and error) beside
+  the assessment. The runner logs each at error level with the rule and
+  workspace, sends it to Sentry, and the hourly "risk run complete" line counts
+  them (`ruleFailures`). It used to vanish from the score without a trace.
 
-### The model comes later, and only as one more rule
+### No trained model
 
 A model trained only on scenarios we write learns our generator, not
 attackers - it would be confident and wrong on the first farm that does not
@@ -77,15 +82,18 @@ exposed under GDPR Article 22. So:
   startup ramping up, a legitimate newsletter) are the **rule test suite**: a
   rule change must catch every abuse scenario and leave every legitimate one
   alone.
-- **Labels are collected from day 1**: staff holds upheld or released, staff
-  labels, SES AWS-managed pauses, long clean tenure. Each label stores the
-  feature vector as it was at labelling time, so training never has to
-  reconstruct history.
-- The **model** (logistic regression, so each feature's contribution is
-  explainable) is trained by `risk-admin train` and retrained by the hourly
-  run when new labels exist. It is **only activated** when a held-out
-  evaluation on real labels passes (minimum label counts per class and AUC);
-  until then it records predictions and contributes nothing.
+- **Labels are collected from day 1** in `core.risk_labels`: staff holds
+  upheld or released, staff labels, SES AWS-managed pauses, long clean tenure.
+  They are the ground truth the rules are evaluated against. A label records
+  the outcome, its source and weight, and who set it; it carries no features.
+- **The logistic-regression model was removed in ruleset 4**, with its
+  training (`risk-admin train` and the hourly retrain), its `model` rule, its
+  `core.risk_models` table and `risk_assessments.model_score`. Its features
+  included `ses_paused_now`, `ses_pauses`, `tier_demotions` and
+  `upheld_holds`, the same events that produce its abuse labels, so it would
+  have learned its own labels back (target leakage). With no labels it could
+  never activate anyway. Any later model starts from features that are not
+  the label sources.
 - **Laya** (a 421M-parameter text classifier) is a content classifier behind
   `LAYA_URL`, run off the send path on sampled mail from already-elevated
   workspaces. It needs a GPU host we do not have on the CX33, so it is off
@@ -180,7 +188,7 @@ and manual churn are the parts that carry new information.
 **Behaviour:** quota hammering (429s on several days), hitting the daily cap
 within 48h of sign-up, volume spikes against a workspace's own trailing
 average, API error ratios, key churn, domain churn and failed or displaced
-domains, tier demotions and prior holds.
+domains, demotions to the strict tier by staff, and prior holds.
 
 **Domains:** registration age from RDAP (looked up once per domain by the
 hourly run, stored on the row; ccTLDs without RDAP score neutral),
@@ -228,8 +236,10 @@ cross-workspace comparison (see "Trusted content and similarity evidence").
 
 Detections: many accounts from one IP, subnet or device; one device behind
 several users (and behind a held workspace: ban evasion); impossible travel;
-sign-ups from hosting networks or Tor; a timezone that disagrees with the IP's
-country; an API key used from several countries.
+sign-ups from hosting networks or Tor; an API key used from several countries.
+The timezone check (a browser timezone far from the IP's country, 3 points)
+was removed in ruleset 4: a zone's offset against a country centre's solar
+offset is off by hours for wide countries, so it was noise.
 
 ⚠ **The console calls the API in-cluster**, so the API never sees a person's
 IP on its own. The console forwards it as `x-i10-client`, signed with
@@ -245,9 +255,11 @@ only through narrow `SECURITY DEFINER` functions that return counts and ids,
 never another user's raw IP.
 
 **Content and links:** link hostnames extracted at accept (never full URLs,
-which carry tokens) and checked hourly against Google Web Risk
-(`WEBRISK_API_KEY`; the free Safe Browsing API and Spamhaus's free mirrors are
-non-commercial only). A match is critical. Laya, when configured.
+which carry tokens) and checked hourly by the link providers (section 4 below):
+the public security DNS resolvers by default, Google Web Risk when listed and
+keyed (the free Safe Browsing API and Spamhaus's free mirrors are
+non-commercial only). Web Risk, or both resolvers agreeing, is critical; one
+resolver alone is 45 points and no floor. Laya, when configured.
 
 **Payment and trust:** paid tenure, MFA or passkey on the owner, the owner's
 email on one of the workspace's own verified domains, long clean volume.
@@ -295,12 +307,13 @@ consistent. Neither buys anything at our scale.
 
 - `core.content_vectors`: one embedding per distinct content per day,
   `halfvec(384)` with an HNSW cosine index, 30-day retention, tenant RLS.
-- `core.behaviour_vectors`: each workspace's 39 behaviour features,
-  standardised with fixed scales, `vector(39)` with an HNSW L2 index.
 - Cross-workspace questions go through definers (migration 0072) that return
   counts and distances only: `content_neighbors` (iterative HNSW scan, so a
-  filter cannot empty the top-k), `behaviour_neighbors` (labelled workspaces
-  only), `actor_velocity`.
+  filter cannot empty the top-k) and `actor_velocity`.
+- Behaviour similarity (`core.behaviour_vectors`, `behaviour_neighbors` and the
+  `behaviour.like_abuse` rule, a vote among a workspace's nearest labelled
+  neighbours) was removed in ruleset 4: with no labels it had nothing to vote
+  with, and its vector was the removed model's features.
 
 ### The embedder: MiniLM, locally, on WebAssembly
 
@@ -331,7 +344,6 @@ onnxruntime-web's WASM backend. Measured before choosing:
 | ------------------------------ | -------------------------- | --------------------------------------------------------------------------------------- |
 | `content.like_confirmed_abuse` | 20, or 30 at 2+ workspaces | mail reads like a confirmed abuser's                                                    |
 | `content.semantic_crowd`       | 12                         | the same message, reworded, from 4+ new free workspaces                                 |
-| `behaviour.like_abuse`         | 8 or 20                    | 50% / 70% of the 10 nearest labelled neighbours were abuse (5+ labelled needed)         |
 | `actor.velocity`               | 15 or 30                   | the actor (owner plus anyone on their device or network) made 3 / 6 workspaces in a day |
 | `actor.domain_velocity`        | 10                         | 10+ domains across the actor's workspaces in a day                                      |
 | `actor.cluster_size`           | 10                         | the actor reaches 10+ live workspaces                                                   |
@@ -339,8 +351,7 @@ onnxruntime-web's WASM backend. Measured before choosing:
 
 ⚠ **Similarity is evidence, not a verdict.** Its weights are modest until real
 labels show how it performs, and a test proves no amount of similarity alone
-can reach critical. The model also learns from it (five new features beyond
-the 39 behaviour features).
+can reach critical.
 
 ### The feedback-loop rule
 
@@ -350,9 +361,14 @@ still awaiting review: A held by the score, B critical by association, B held,
 then C - a cascade built from the engine agreeing with itself. Linkage now
 counts only CONFIRMED abuse (`core.risk_tainted_tenants`): a hold staff
 placed, a hold staff upheld, or a staff abuse label. Observations and human
-verdicts go in; scores never do. Behaviour neighbours are labelled by outcomes
-for the same reason. The integration test proves a score hold taints nobody
-until a person confirms it.
+verdicts go in; scores never do. The integration test proves a score hold
+taints nobody until a person confirms it.
+
+The same rule applies to a workspace's own history. `history.demotions` once
+counted every demotion to the strict tier, including the ones the score made
+from its own band, so a high score raised the score with no new evidence.
+Since ruleset 4 it counts only demotions staff made (`sending_tier_events`
+rows with `source = 'staff'`).
 
 ### Deploying the vector layer
 
@@ -397,12 +413,12 @@ Both lists are skeletons for the existing matcher (`content/templates.ts`), and
   contain `<` or `>`; two placeholders need fixed text between them. A value
   that is a link target must be an `http(s)` address, and every host a value
   carries - a URL, a hostname in plain text, the host after a fixed `https://` -
-  must be on the SENDING workspace's own verified domains and clean in Web
-  Risk. An unknown verdict is a no. So the holes cannot carry a new message:
+  must be on the SENDING workspace's own verified domains and clean in the link
+  checkers. An unknown verdict is a no. So the holes cannot carry a new message:
   submit-clean-send-something-else does not work.
 - **Where it runs.** At accept (`recordContent`, off the request path, reading
-  cached Web Risk verdicts only) and in the hourly content job (which may spend
-  the Web Risk budget). A matching fingerprint is stored with
+  cached link verdicts only) and in the hourly content job (which may spend the
+  link-check budgets). A matching fingerprint is stored with
   `trusted_by = boilerplate:<id>` or `template:<id>`, and kept out of the Redis
   tripwire; the job marks the vector the same way and records
   `message_bodies.trusted_template_id` for approved templates.
@@ -423,7 +439,7 @@ Both lists are skeletons for the existing matcher (`content/templates.ts`), and
 ### 1. Known public boilerplate (staff-kept, global)
 
 `core.risk_boilerplate` and `core.risk_boilerplate_events`, both deny-all like
-`risk_models`, read and written only through definers
+`identity_events`, read and written only through definers
 (`risk_boilerplate_list/add/remove/history/nearest`). Every add and remove
 requires who and why, and writes its event in the same statement. Until the
 admin app (#217):
@@ -466,8 +482,8 @@ workspace, one live submission per skeleton.
 
 ### 3. Evidence for every similarity finding
 
-`content.semantic_crowd`, `content.like_confirmed_abuse`,
-`behaviour.like_abuse`, `farm.cluster` and `farm.with_held` attach a `detail`
+`content.semantic_crowd`, `content.like_confirmed_abuse`, `farm.cluster` and
+`farm.with_held` attach a `detail`
 to their contribution, stored in `risk_assessments.contributions` and every
 `risk_assessment_events` row, and printed by `risk-admin explain`:
 
@@ -488,23 +504,96 @@ to their contribution, stored in `risk_assessments.contributions` and every
 
 ⚠ Counts and distances only, never another workspace's id, content or
 domains. For farm rules the model is `minhash-8x4` and similarity is 1 for an
-identical fingerprint, else shared bands over 8; for behaviour it is
-`behaviour-v1` with `median_distance` and `nearest_distance` (L2) instead of
-similarities. `content_neighbors` now also returns every neighbour hit and
-their median and best similarity; `behaviour_neighbors` the median distance;
+identical fingerprint, else shared bands over 8. `content_neighbors` now also
+returns every neighbour hit and their median and best similarity;
 `fingerprint_peers` the best near-duplicate band count. The ruleset is version
 3: no weight changed, but what the similarity rules see did.
 
-### 4. Web Risk under a daily budget
+### 4. Link checking behind one port, with providers and health
 
-Web Risk's quotas are per minute only, so the budget is ours
-(`risk/webrisk.ts`): a Redis counter per UTC day, `WEBRISK_DAILY_LIMIT`
-(default 3,000, about 90k a month, inside the free 100k), counted before each
-call, failed calls included. ⚠ No Redis means no lookups: a budget that cannot
-be counted is spent. A 429, a 5xx or no answer stops every lookup for five
-minutes; a 4xx about one host parks that host for an hour. A host nobody could
-answer for stays unchecked and is asked next run; it is never recorded clean.
-Verdicts stay cached for a day and shared across workspaces, as before.
+Added 2026-11-11. The engine asks a `LinkChecker` (`risk/link-check.ts`); behind
+it sit providers, each answering one hostname as **unsafe** (with labels),
+**clean** or **unknown**. Unknown is never clean: an unchecked link earns no
+trust and its host is asked again next run. A provider may also **skip** a name
+it can never speak about (an IP literal, a single label, a private suffix);
+a host every provider skips is recorded clean, so a workspace cannot fill the
+hourly batch of 100 with names that never resolve.
+
+⚠ **Web Risk was dead for at least a month and nothing said so.** Measured in
+production on 2026-11-10: it answered 403 because billing was not enabled on
+the Google project, every verdict was unknown, `links.unsafe` could never fire,
+and each provider failing soft meant no alert. So Google is no longer the
+default: `RISK_LINK_PROVIDERS` (default `dns`) lists the providers, and Web Risk
+joins only when it is listed and `WEBRISK_API_KEY` is set. It is otherwise
+unchanged (below) and works again the moment a working key is configured.
+
+**Which providers.** `dns` is two providers, Cloudflare's malware-blocking
+resolver (`security.cloudflare-dns.com`) and Quad9 (`dns.quad9.net`), over DNS
+over HTTPS (RFC 8484, HTTP/2 because Quad9 refuses HTTP/1.1 and Bun's `fetch`
+speaks only that). Neither needs an account. ⚠ **The hostname only, never the
+URL:** opening a customer's link would consume a magic link or an unsubscribe,
+and fetching an address an attacker chose is SSRF. The name is validated first
+(ASCII labels, at most 253 characters, under an ICANN suffix; no IP literal,
+single label, `.local`, `.internal`, reverse-DNS or `.onion`).
+
+**Telling a block from a name that does not exist.** Quad9 blocks by answering
+NXDOMAIN, which is also what a nonexistent name gets; the only documented
+difference is the authority section, empty for a block and carrying the zone's
+SOA for a real NXDOMAIN (docs.quad9.net/FAQs). Cloudflare answers `0.0.0.0`,
+which a zone can publish itself. So a block-shaped answer is never believed
+alone: the same operator's unfiltered resolver (`cloudflare-dns.com`,
+`dns10.quad9.net`) is asked, and only a name that resolves there for real is
+blocked. A genuine NXDOMAIN, or a zone that really publishes `0.0.0.0`, is
+clean; what the pair cannot settle is unknown. A nonexistent name is never
+blocked.
+
+**Points.** `links.unsafe` is still one rule. Web Risk is 90 with the critical
+floor, as before. Both resolvers blocking the same host is the same. Exactly one
+resolver is 45 points and no floor: one list's false positive must not hold a
+customer's mail on its own. The evidence names the providers that flagged each
+host. The verdict stored in `core.link_hosts.verdict` is `clean` or
+`provider=labels` segments (`cloudflare=blocked;quad9=blocked`); a segment-less
+value is an old Web Risk row and reads as Web Risk's, so nothing migrates. The
+ruleset is version 5. ⚠ A verdict is stored once, so it is stored complete: an
+unsafe answer is written at once only when it is already decisive (Web Risk, or
+two providers); otherwise every provider must have answered, so one resolver
+being down cannot freeze a half-answer.
+
+**Budgets, so a farm cannot make us a nuisance.** Each resolver has a Redis
+counter per UTC day, `RISK_DNS_DAILY_LIMIT` (default 5,000 queries), counted
+before each query is sent. No Redis means no queries. An outage (any non-200, a
+timeout, an unreadable answer) parks that resolver for five minutes; one name
+that will not resolve (SERVFAIL, or a case the pair cannot settle) parks that
+name for an hour. Calls time out at three seconds, with at most four in flight.
+Clean answers are cached six hours, blocked ones a day, per resolver, under
+`risk:link:<resolver>:<host>` (which is also how the cache records the
+provider).
+
+**Terms.** Cloudflare's resolver is covered by its Website and Online Services
+Terms of Use, which forbid overburdening its servers and exceeding documented
+limits but say nothing specific about automated or commercial lookups. Quad9
+publishes no terms of service; its FAQ says it is free for everyone and asks
+ISPs, service providers and other large organisations to contact them before
+sending large-scale traffic. Our caps keep us far below large-scale.
+
+**Health.** `risk/provider-health.ts` records every outbound call per provider
+in Redis. A provider that has failed five times in a row, the first at least 30
+minutes ago, raises one alert through the engine's `alert` (Sentry), then at most
+one a day while it stays down, and logs when it recovers; one success resets the
+count. A 403 from Web Risk counts, which is the case that went unnoticed. A
+provider that is not configured, has no key, has spent its budget or is parked
+made no call and is never "failing". The Laya classifier call is reported the
+same way. The run summary carries each provider's clean, unsafe, unknown and
+skipped counts.
+
+**Web Risk, unchanged.** A budget is ours, because Google's quotas are per
+minute only (`risk/webrisk.ts`): a Redis counter per UTC day,
+`WEBRISK_DAILY_LIMIT` (default 3,000, about 90k a month, inside the free 100k),
+counted before each call, failed calls included. ⚠ No Redis means no lookups: a
+budget that cannot be counted is spent. A 429, a 5xx or no answer stops every
+lookup for five minutes; a 4xx about one host parks that host for an hour. A
+host nobody could answer for stays unchecked and is asked next run; it is never
+recorded clean. Verdicts stay cached for a day and shared across workspaces.
 
 ## Account takeover is a separate response
 
@@ -526,7 +615,7 @@ day emails the owner as a possible leak.
 - **Customers see categories, not thresholds** ("bounce rate", "linked to a
   flagged group of workspaces"), so the rules cannot be gamed.
 - **Appeals before #217 exist:** the hold email says to reply. Staff use
-  `bun run risk-admin` (explain, hold, release, pin, label, train, clusters,
+  `bun run risk-admin` (explain, hold, release, pin, label, clusters,
   and since #222 boilerplate and templates), which goes through the same doors
   as the score and requires `--by` and `--reason`.
 
@@ -560,7 +649,9 @@ day emails the owner as a possible leak.
 | `RISK_FARM_TRIPWIRE`       | `5`     | distinct workspaces per fingerprint before an immediate re-score |
 | `CLIENT_CONTEXT_SECRET`    | unset   | shared with the console; unset means no forwarded identity       |
 | `IPINFO_TOKEN`             | unset   | network enrichment                                               |
-| `WEBRISK_API_KEY`          | unset   | link reputation                                                  |
+| `RISK_LINK_PROVIDERS`      | `dns`   | link checkers: `dns` and/or `webrisk` (empty runs none)          |
+| `RISK_DNS_DAILY_LIMIT`     | `5000`  | DNS queries per resolver per UTC day, counted in Redis           |
+| `WEBRISK_API_KEY`          | unset   | Web Risk key; used only if `webrisk` is a listed provider        |
 | `WEBRISK_DAILY_LIMIT`      | `3000`  | Web Risk lookups per UTC day, counted in Redis (#222)            |
 | `LAYA_URL`, `LAYA_API_KEY` | unset   | content classifier                                               |
 
