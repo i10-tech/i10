@@ -102,7 +102,7 @@ export type PassthroughIdentityStore = Pick<
  * - `"password"` for unmanaged (Clerk) accounts
  * - `"oidc"` / `"ldap"` / `"off"` for managed accounts via `passthroughFor`
  */
-export async function managedMailLane(
+export async function laneForConnection(
   identity: PassthroughIdentityStore | undefined,
   connectionId: string | null | undefined,
   managed = true,
@@ -491,7 +491,7 @@ export interface ConsoleMailboxDeps {
   isAdmin?: ((tenantId: string, userId: string) => Promise<boolean>) | undefined
   /** RoleStore for `can(roles, tenantId, userId, "members:manage")`. */
   roles?: Pick<RoleStore, "roleOf"> | undefined
-  /** Connection reader for `managedMailLane` (`passthroughFor`). */
+  /** Connection reader for `laneForConnection` (`passthroughFor`). */
   identity?: PassthroughIdentityStore | undefined
 }
 
@@ -520,7 +520,7 @@ export function consoleMailboxes(deps: ConsoleMailboxDeps): ConsoleMailboxes {
     } else {
       let pending = laneCache.get(row.connectionId)
       if (!pending) {
-        pending = managedMailLane(deps.identity, row.connectionId, true)
+        pending = laneForConnection(deps.identity, row.connectionId, true)
         laneCache.set(row.connectionId, pending)
       }
       signIn = await pending

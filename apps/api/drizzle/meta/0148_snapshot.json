@@ -1,5 +1,5 @@
 {
-  "id": "aa55fadb-1aff-43ca-b468-d6f95a07b25f",
+  "id": "4ba77b97-a414-40eb-a0d0-5390d9ba1aca",
   "prevId": "09ded982-37f6-4410-a344-014b313ff190",
   "version": "7",
   "dialect": "postgresql",
@@ -4787,7 +4787,7 @@
         "address": {
           "name": "address",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "tenant_id": {
@@ -4810,23 +4810,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "mailbox_usage_tenant_idx": {
-          "name": "mailbox_usage_tenant_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "mailbox_usage_tenant_id_tenants_id_fk": {
           "name": "mailbox_usage_tenant_id_tenants_id_fk",
@@ -4843,7 +4827,15 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "mailbox_usage_tenant_id_address_pk": {
+          "name": "mailbox_usage_tenant_id_address_pk",
+          "columns": [
+            "tenant_id",
+            "address"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {
         "mailbox_usage_workspace": {

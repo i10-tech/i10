@@ -58,3 +58,13 @@ export function normaliseError(
     message: json.message,
   }
 }
+
+export class ApiRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: ApiError,
+  ) {
+    super(body.message)
+    this.name = "ApiRequestError"
+  }
+}

@@ -262,6 +262,11 @@ export function DomainsList({
                         >
                           {d.name}
                         </Link>
+                        {d.mailboxes?.enabled && (
+                          <Badge size="sm" tone="neutral">
+                            Mailboxes
+                          </Badge>
+                        )}
                       </div>
                     </ListCell>
                     <ListCell>

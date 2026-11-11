@@ -83,9 +83,8 @@ export const recordMailboxUsageStatement = (
   return sql`
     insert into core.mailbox_usage (address, tenant_id, used_bytes, sampled_at)
     values ${values}
-    on conflict (address) do update
-       set tenant_id = excluded.tenant_id,
-           used_bytes = excluded.used_bytes,
+    on conflict (tenant_id, address) do update
+       set used_bytes = excluded.used_bytes,
            sampled_at = now()
   `
 }

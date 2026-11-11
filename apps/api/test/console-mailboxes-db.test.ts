@@ -308,4 +308,36 @@ suite("console mailboxes and per-mailbox usage against Postgres as i10_api", () 
     expect(acmeUsageRows.some((r) => r.address === `rival@${rivalDomain}`)).toBe(false)
     expect(acmeUsageRows.some((r) => r.address === `owner@${hostedDomain}`)).toBe(true)
   })
+
+  it("still samples an address whose domain used to belong to another workspace", async () => {
+    // Rival held the name before Acme and left a row behind, which Acme cannot see.
+    const address = `moved@${hostedDomain}`
+    await owner`
+      insert into authd.accounts (clerk_user_id, email, active, tenant_id)
+      values (${`user_moved_${crypto.randomUUID()}`}, ${address}, true, ${acme})
+    `
+    await withTenant(db, rival, (tx) =>
+      tx.insert(schema.mailboxUsage).values({ address, tenantId: rival, usedBytes: 1 }),
+    )
+
+    await sampleStorage({
+      db,
+      // Every Acme mailbox, or the sampler keeps the old figures for the workspace.
+      mail: {
+        snapshot: async () =>
+          new Map([
+            [`owner@${hostedDomain}`, 1],
+            [`sam@${hostedDomain}`, 1],
+            [`off@${offDomain}`, 1],
+            [`managed@${hostedDomain}`, 1],
+            [address, 42_000],
+          ]),
+      },
+    })
+
+    const acmeRows = await withTenant(db, acme, (tx) =>
+      tx.select().from(schema.mailboxUsage),
+    )
+    expect(acmeRows.find((r) => r.address === address)?.usedBytes).toBe(42_000)
+  })
 })

@@ -5007,7 +5007,7 @@ export const mailboxJobs = core.table(
 export const mailboxUsage = core.table(
   "mailbox_usage",
   {
-    address: text("address").primaryKey(),
+    address: text("address").notNull(),
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
@@ -5015,7 +5015,14 @@ export const mailboxUsage = core.table(
     sampledAt: timestamp("sampled_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("mailbox_usage_tenant_idx").on(t.tenantId),
+    /*
+     * ⚠ KEYED BY WORKSPACE AND ADDRESS, NOT ADDRESS ALONE. A domain can change
+     * hands; with `address` as the key, the new holder's upsert would hit the old
+     * holder's row, which row level security hides, and Postgres refuses the
+     * whole statement - taking that workspace's `tenant_storage` sample (its
+     * bill) down with it. The old holder's row is simply left behind.
+     */
+    primaryKey({ columns: [t.tenantId, t.address] }),
     pgPolicy("mailbox_usage_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

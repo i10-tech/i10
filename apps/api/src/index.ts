@@ -166,12 +166,8 @@ import { createStalwartCaller } from "./mail/stalwart.js"
 import { disableDomain } from "./mail/stalwart-domains.js"
 import { mailboxHosting } from "./domains/mailbox-hosting.js"
 import { planAssignmentStore } from "./metering/postgres.js"
-import {
-  consoleMailboxStore,
-  consoleMailboxes,
-  mailboxDirectory,
-  paymentHold,
-} from "./mailboxes/store.js"
+import { mailboxDirectory, managedMailLane, paymentHold } from "./mailboxes/store.js"
+import { consoleMailboxStore, consoleMailboxes } from "./mailboxes/console.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
 import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
 import { onTeamInboxEvent } from "./team-inboxes/sync.js"
@@ -1642,6 +1638,7 @@ const mailboxProvisionDeps: ProvisionDeps = {
   capacity: postgresMeter(db),
   project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
   featureId: MAILBOXES,
+  mailLane: managedMailLane(db, identity),
   storage: mailboxStorage,
   canAllocate: canAllocateStorage,
 }

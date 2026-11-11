@@ -67,7 +67,7 @@ describe("what gets asked", () => {
       recordMailboxUsageStatement(A, [{ address: "Ada@Acme.com", bytes: 42 }]),
     )
     expect(statement).toContain("insert into core.mailbox_usage")
-    expect(statement).toContain("on conflict (address) do update")
+    expect(statement).toContain("on conflict (tenant_id, address) do update")
     expect(statement).toContain("used_bytes = excluded.used_bytes")
     expect(params).toContain("ada@acme.com")
     expect(params).toContain(42)

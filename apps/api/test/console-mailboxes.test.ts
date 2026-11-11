@@ -7,7 +7,7 @@ import {
   MAILBOX_STATUSES,
   consoleMailboxes,
   deriveMailboxStatus,
-  managedMailLane,
+  laneForConnection,
   type ConsoleMailboxStore,
   type MailboxStatusInput,
   type PassthroughIdentityStore,
@@ -194,7 +194,7 @@ describe("deriveMailboxStatus (one test per branch, first match wins)", () => {
   })
 })
 
-describe("managedMailLane", () => {
+describe("laneForConnection", () => {
   const fakeConnection = (
     over: Partial<Connection>,
     secrets: Record<string, unknown> = {},
@@ -232,11 +232,11 @@ describe("managedMailLane", () => {
   })
 
   it("returns password for an unmanaged (Clerk) account", async () => {
-    expect(await managedMailLane(undefined, null, false)).toBe("password")
+    expect(await laneForConnection(undefined, null, false)).toBe("password")
   })
 
   it("returns oidc for a managed account whose active OIDC connection enables mail pass-through", async () => {
-    expect(await managedMailLane(fakeConnection({}), "conn_oidc", true)).toBe("oidc")
+    expect(await laneForConnection(fakeConnection({}), "conn_oidc", true)).toBe("oidc")
   })
 
   it("returns ldap for a managed account whose active connection enables LDAP pass-through", async () => {
@@ -262,14 +262,14 @@ describe("managedMailLane", () => {
         },
       },
     )
-    expect(await managedMailLane(store, "conn_ldap", true)).toBe("ldap")
+    expect(await laneForConnection(store, "conn_ldap", true)).toBe("ldap")
   })
 
   it("returns off for a managed account when pass-through is off or the connection is missing", async () => {
     const disabled = fakeConnection({ status: "disabled" })
-    expect(await managedMailLane(disabled, "conn_disabled", true)).toBe("off")
-    expect(await managedMailLane(undefined, "conn_any", true)).toBe("off")
-    expect(await managedMailLane(fakeConnection({}), null, true)).toBe("off")
+    expect(await laneForConnection(disabled, "conn_disabled", true)).toBe("off")
+    expect(await laneForConnection(undefined, "conn_any", true)).toBe("off")
+    expect(await laneForConnection(fakeConnection({}), null, true)).toBe("off")
   })
 })
 
