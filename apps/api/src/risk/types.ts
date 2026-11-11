@@ -94,6 +94,11 @@ export interface IdentityFacts {
   heldDevicePeers: number
   subnetSignupPeers: number
   heldSubnetPeers: number
+  /** Opaque digests of the people counted above (`user:<digest>`), never their ids. */
+  devicePeerKeys: string[]
+  subnetSignupPeerKeys: string[]
+  /** The device and sign-up network peers who own a workspace confirmed abusive. */
+  heldPeerKeys: string[]
 }
 
 export interface Facts {
@@ -140,6 +145,8 @@ export interface Facts {
     failedOrDisplaced: number
     /** The newest registration among verified sending domains; null if unknown. */
     youngestRegisteredAt: Date | null
+    /** Verified sending domains registered in the last 30 days. */
+    young: string[]
     randomSubdomain: boolean
     parents: string[]
   }
@@ -193,6 +200,9 @@ export interface Facts {
     youngFreeSimilar: number
     taintedSimilar: number
     bestTaintedSimilarity: number | null
+    /** Opaque digests of the workspaces counted above (`peer:<digest>`), never their ids. */
+    youngFreePeerKeys: string[]
+    taintedPeerKeys: string[]
     /** Every neighbour hit at or above the threshold, across recent content. */
     neighbours: number
     medianSimilarity: number | null
@@ -204,6 +214,39 @@ export interface Facts {
 
   /** The workspace's own discovered templates: its normal mail. */
   templates: { established: number; recentMatchedShare: number | null } | null
+
+  /**
+   * Staff decisions that may still clear a concern (decisions.ts).
+   *
+   * ⚠ IN THE FACTS, NOT QUERIED BY EVALUATION, so a snapshot replays its
+   * cleared contributions exactly. Absent from snapshots taken before decision
+   * memory existed, which replay as "no decisions".
+   */
+  decisions?: StaffDecision[]
+}
+
+/**
+ * How a person decided about a workspace: released a hold, pinned its band,
+ * upheld a hold, or held it themselves. Only the first two clear anything.
+ */
+export type DecisionKind = "release" | "pin" | "uphold" | "hold"
+
+/** What a decision recorded of a contribution, enough to tell whether the same evidence is back. */
+export interface Concern {
+  rule: string
+  points: number
+  keys?: string[]
+}
+
+/** A staff decision, as evaluation sees it. */
+export interface StaffDecision {
+  id: string
+  kind: DecisionKind
+  decidedAt: Date
+  expiresAt: Date
+  revokedAt: Date | null
+  /** The concerns staff cleared. Empty unless a release or a pin. */
+  covers: Concern[]
 }
 
 /** Recent content left out of the cross-workspace rules as trusted (#222). */
@@ -250,6 +293,12 @@ export interface Hit {
    * the release may hold the workspace again.
    */
   freshAt?: Date
+  /**
+   * The specific things this hit flagged (`host:evil.example`, `peer:<digest>`),
+   * so a cleared concern returns for a new one and not for the same one.
+   * Absent for a rule with nothing identifiable, such as a rate. Sorted.
+   */
+  keys?: string[]
 }
 
 /**
@@ -278,6 +327,30 @@ export interface Contribution {
   detail?: SimilarityEvidence
   floor?: Band
   freshAt?: string
+  keys?: string[]
+}
+
+/**
+ * A contribution a staff decision cleared: the same evidence a person already
+ * weighed (engine.ts, `clearedBy`).
+ *
+ * ⚠ NO `points` AND NO `floor`, LIKE `ShadowContribution`. It is recorded and
+ * shown, and worth zero: nothing that sums points, lifts a band or decides an
+ * action can be handed one.
+ */
+export interface ClearedContribution {
+  rule: string
+  category: Category
+  wouldAdd: number
+  wouldFloor?: Band
+  evidence: Hit["evidence"]
+  detail?: SimilarityEvidence
+  keys?: string[]
+  freshAt?: string
+  /** The decision that cleared it, when, and until when. */
+  clearedBy: string
+  decidedAt: string
+  expiresAt: string
 }
 
 /**

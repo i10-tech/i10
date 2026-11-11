@@ -267,6 +267,8 @@ describe("ruleset 2: velocity, similarity and templates", () => {
     youngFreeSimilar: 0,
     taintedSimilar: 0,
     bestTaintedSimilarity: null,
+    youngFreePeerKeys: [],
+    taintedPeerKeys: [],
     neighbours: 0,
     medianSimilarity: null,
     bestSimilarity: null,
@@ -336,8 +338,8 @@ describe("ruleset 2: velocity, similarity and templates", () => {
     expect(b.contributions.map((c) => c.rule)).not.toContain("trust.known_templates")
   })
 
-  it("is ruleset version 5 (#222: one link list is 45 points, two are 90)", () => {
-    expect(RULESET_VERSION).toBe(5)
+  it("is ruleset version 6 (decision memory: evidence keys and cleared concerns)", () => {
+    expect(RULESET_VERSION).toBe(6)
   })
 })
 
@@ -350,6 +352,8 @@ describe("similarity evidence (#222)", () => {
     youngFreeSimilar: 6,
     taintedSimilar: 5,
     bestTaintedSimilarity: 0.95,
+    youngFreePeerKeys: [],
+    taintedPeerKeys: [],
     neighbours: 17,
     medianSimilarity: 0.912,
     bestSimilarity: 0.974,

@@ -1,7 +1,13 @@
 import { sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import type { Evaluated } from "./engine.js"
-import type { Band, Contribution, Facts, ShadowContribution } from "./types.js"
+import type {
+  Band,
+  ClearedContribution,
+  Contribution,
+  Facts,
+  ShadowContribution,
+} from "./types.js"
 
 /**
  * The facts a score was computed from, kept so a rule change can be replayed
@@ -71,23 +77,32 @@ export interface FactSnapshot {
   band: Band
   contributions: Contribution[]
   shadow: ShadowContribution[]
+  cleared: ClearedContribution[]
   /** Serialised: pass through `reviveFacts`. */
   facts: unknown
 }
 
+/** What can run a statement: the database, or a transaction already open on it. */
+type Executor = Pick<Database, "execute">
+
 export interface SnapshotStore {
-  /** Writes one unless `force` is false and the workspace has one today (UTC). */
+  /**
+   * Writes one unless `force` is false and the workspace has one today (UTC).
+   * Returns its id, or null when it declined. `through` runs it inside a
+   * caller's transaction.
+   */
   record(input: {
     tenantId: string
     at: Date
     trigger: string
     evaluated: Pick<
       Evaluated,
-      "score" | "band" | "rulesetVersion" | "contributions" | "shadow"
+      "score" | "band" | "rulesetVersion" | "contributions" | "shadow" | "cleared"
     >
     facts: Facts
     force: boolean
-  }): Promise<boolean>
+    through?: Executor
+  }): Promise<string | null>
   /** One page, oldest first; pass the last row back as `after` for the next. */
   list(input: {
     since: Date
@@ -102,16 +117,17 @@ export interface SnapshotStore {
 
 export function snapshotStore(db: Database): SnapshotStore {
   return {
-    async record({ tenantId, at, trigger, evaluated: e, facts, force }) {
-      const rows = (await db.execute(sql`
+    async record({ tenantId, at, trigger, evaluated: e, facts, force, through = db }) {
+      const rows = (await through.execute(sql`
         select core.risk_fact_snapshot_save(
           ${tenantId}::uuid, ${at.toISOString()}::timestamptz, ${e.rulesetVersion},
           ${trigger}, ${e.score}, ${e.band}::core.risk_band,
           ${JSON.stringify(e.contributions)}::jsonb, ${JSON.stringify(e.shadow)}::jsonb,
+          ${JSON.stringify(e.cleared)}::jsonb,
           ${JSON.stringify(serialiseFacts(facts))}::jsonb, ${force}
-        ) as saved
-      `)) as unknown as { saved: boolean }[]
-      return rows[0]?.saved === true
+        ) as id
+      `)) as unknown as { id: string | null }[]
+      return rows[0]?.id ? String(rows[0].id) : null
     },
 
     async list({ since, until, tenantId, after, limit }) {
@@ -132,6 +148,7 @@ export function snapshotStore(db: Database): SnapshotStore {
         band: r.band as Band,
         contributions: r.contributions as Contribution[],
         shadow: r.shadow as ShadowContribution[],
+        cleared: r.cleared as ClearedContribution[],
         facts: r.facts,
       }))
     },

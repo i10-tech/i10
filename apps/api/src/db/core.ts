@@ -4079,6 +4079,10 @@ export const riskAssessments = core.table(
     shadow: jsonb("shadow")
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /** What staff decisions cleared: recorded, worth zero. See risk/engine.ts. */
+    cleared: jsonb("cleared")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** When the band last changed. Hysteresis reads it. */
     bandSince: timestamp("band_since", { withTimezone: true }).notNull().defaultNow(),
     /**
@@ -4119,6 +4123,9 @@ export const riskAssessmentEvents = core.table(
     rulesetVersion: integer("ruleset_version").notNull(),
     contributions: jsonb("contributions").notNull(),
     shadow: jsonb("shadow")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    cleared: jsonb("cleared")
       .notNull()
       .default(sql`'[]'::jsonb`),
     /** What the run did: `tier:strict`, `hold`, `ses:strict`, `alert`, ... */
@@ -4165,6 +4172,9 @@ export const riskFactSnapshots = core.table(
     band: riskBand("band").notNull(),
     contributions: jsonb("contributions").notNull(),
     shadow: jsonb("shadow").notNull(),
+    cleared: jsonb("cleared")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** `Facts`, through `serialiseFacts`. */
     facts: jsonb("facts").notNull(),
   },
@@ -4173,6 +4183,70 @@ export const riskFactSnapshots = core.table(
     // The purge and a replay over every workspace read by time alone.
     index("risk_fact_snapshots_time_idx").on(t.takenAt, t.id),
     pgPolicy("risk_fact_snapshots_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/** What a person decided: released a hold, pinned the band, upheld a hold, or held. */
+export const riskDecisionKind = core.enum("risk_decision_kind", [
+  "release",
+  "pin",
+  "uphold",
+  "hold",
+])
+
+/**
+ * Staff decisions about a workspace and the concerns they covered (risk/decisions.ts).
+ *
+ * ⚠ THE ENGINE'S MEMORY OF WHAT A PERSON ALREADY CLEARED. A release or a pin
+ * clears the concerns it `covers` until `expires_at`: the same evidence is then
+ * recorded and worth zero, and new evidence counts in full. See
+ * docs/decisions/risk.md, "Decision memory".
+ *
+ * ⚠ NEVER DELETED. A revocation is recorded on the row; the row stays, because
+ * staff decisions are the ground truth the engine is measured against.
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, BEHIND DEFINERS, like the fact snapshots: the note is
+ * staff's, and the concerns carry other workspaces' digests.
+ */
+export const riskStaffDecisions = core.table(
+  "risk_staff_decisions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    kind: riskDecisionKind("kind").notNull(),
+    decidedBy: text("decided_by").notNull(),
+    note: text("note").notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    /** The engine's view at that moment, and whether the workspace was held. */
+    score: integer("score").notNull(),
+    band: riskBand("band").notNull(),
+    rulesetVersion: integer("ruleset_version").notNull(),
+    held: boolean("held").notNull(),
+    /** Every live contribution at that moment. */
+    inView: jsonb("in_view").notNull(),
+    /** The concerns it clears (`Concern[]`); empty unless a release or a pin. */
+    covers: jsonb("covers").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** The facts it was made on. Null once the snapshot ages out. */
+    snapshotId: uuid("snapshot_id").references(() => riskFactSnapshots.id, {
+      onDelete: "set null",
+    }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by"),
+    revokeNote: text("revoke_note"),
+  },
+  (t) => [
+    index("risk_staff_decisions_tenant_idx").on(t.tenantId, t.decidedAt),
+    index("risk_staff_decisions_snapshot_idx").on(t.snapshotId),
+    pgPolicy("risk_staff_decisions_deny", {
       for: "all",
       using: sql`false`,
       withCheck: sql`false`,

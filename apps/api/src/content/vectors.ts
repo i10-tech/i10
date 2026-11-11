@@ -71,7 +71,14 @@ export interface ContentNeighbours {
   neighbours: number
   medianSimilarity: number | null
   bestSimilarity: number | null
+  /** Opaque digests (`peer:<digest>`) of the young free and the tainted neighbours. */
+  youngFreePeerKeys: string[]
+  taintedPeerKeys: string[]
 }
+
+/** A text[] of digests from a definer, as evidence keys. */
+export const peerKeys = (v: unknown, kind: "peer" | "user"): string[] =>
+  Array.isArray(v) ? v.map((d) => `${kind}:${String(d)}`).sort() : []
 
 const numOrNull = (v: unknown) => (v == null ? null : Number(v))
 
@@ -96,6 +103,8 @@ export async function contentNeighbours(
     neighbours: Number(r.neighbours ?? 0),
     medianSimilarity: numOrNull(r.median_similarity),
     bestSimilarity: numOrNull(r.best_similarity),
+    youngFreePeerKeys: peerKeys(r.young_free_keys, "peer"),
+    taintedPeerKeys: peerKeys(r.tainted_keys, "peer"),
   }
 }
 

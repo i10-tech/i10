@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { parse } from "tldts"
 import { describeFlags, isDecisive, parseVerdict } from "./link-verdict.js"
 import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./types.js"
@@ -23,7 +24,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 5
+export const RULESET_VERSION = 6
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -47,8 +48,25 @@ function rule(
 const hit = (
   points: number,
   evidence: Hit["evidence"],
-  extra: { floor?: Band; freshAt?: Date } = {},
-): Hit => ({ points, evidence, ...extra })
+  extra: { floor?: Band; freshAt?: Date; keys?: readonly string[] } = {},
+): Hit => {
+  const { keys, ...rest } = extra
+  return {
+    points,
+    evidence,
+    ...rest,
+    ...(keys ? { keys: [...new Set(keys)].sort() } : {}),
+  }
+}
+
+/**
+ * An opaque, stable key for another workspace or person. The definers write
+ * the same digest (migration 0155), so no raw id of anybody else reaches a
+ * contribution: contributions are stored where the workspace itself can read
+ * them.
+ */
+export const digest = (id: string): string =>
+  createHash("sha256").update(id).digest("hex").slice(0, 16)
 
 /** The highest tier of a graded rule that applies, or null. */
 function graded<T>(tiers: readonly (readonly [boolean, T])[]): T | null {
@@ -57,6 +75,10 @@ function graded<T>(tiers: readonly (readonly [boolean, T])[]): T | null {
 }
 
 // ─── SES: the strongest signals there are ────────────────────────────────────
+
+/** One reputation finding: its type and when it opened, which a new episode never shares. */
+const findingKey = (x: { type: string; openedAt: Date }) =>
+  `finding:${x.type}:${x.openedAt.toISOString()}`
 
 const sesRules: Rule[] = [
   rule(
@@ -71,7 +93,11 @@ const sesRules: Rule[] = [
         ? hit(
             60,
             { pausedAt: pause.at.toISOString() },
-            { floor: "high", freshAt: pause.at },
+            {
+              floor: "high",
+              freshAt: pause.at,
+              keys: [`pause:${pause.at.toISOString()}`],
+            },
           )
         : null
     },
@@ -83,12 +109,27 @@ const sesRules: Rule[] = [
     "The workspace's SES tenant is paused right now",
     (f) =>
       f.ses.current === "disabled"
-        ? hit(40, { origin: f.ses.currentOrigin }, { floor: "elevated" })
+        ? hit(
+            40,
+            { origin: f.ses.currentOrigin },
+            {
+              floor: "elevated",
+              ...(f.ses.changedAt
+                ? { keys: [`disabled:${f.ses.changedAt.toISOString()}`] }
+                : {}),
+            },
+          )
         : null,
   ),
   rule("ses.paused.history", "provider_flag", "Paused by SES 31-180 days ago", (f) => {
     const old = f.ses.pauses.filter((p) => !within(p.at, 30, f.now))
-    return old.length > 0 ? hit(15, { pauses: old.length }) : null
+    return old.length > 0
+      ? hit(
+          15,
+          { pauses: old.length },
+          { keys: old.map((p) => `pause:${p.at.toISOString()}`) },
+        )
+      : null
   }),
   rule(
     "ses.finding.high.open",
@@ -97,7 +138,11 @@ const sesRules: Rule[] = [
     (f) => {
       const open = f.ses.findings.filter((x) => x.impact === "high" && !x.resolvedAt)
       return open.length > 0
-        ? hit(35, { types: open.map((x) => x.type).join(","), open: open.length })
+        ? hit(
+            35,
+            { types: open.map((x) => x.type).join(","), open: open.length },
+            { keys: open.map(findingKey) },
+          )
         : null
     },
   ),
@@ -109,7 +154,9 @@ const sesRules: Rule[] = [
       const recent = f.ses.findings.filter(
         (x) => x.impact === "high" && x.resolvedAt && within(x.openedAt, 30, f.now),
       )
-      return recent.length > 0 ? hit(15, { episodes: recent.length }) : null
+      return recent.length > 0
+        ? hit(15, { episodes: recent.length }, { keys: recent.map(findingKey) })
+        : null
     },
   ),
   rule(
@@ -119,7 +166,11 @@ const sesRules: Rule[] = [
     (f) => {
       const open = f.ses.findings.filter((x) => x.impact === "low" && !x.resolvedAt)
       return open.length > 0
-        ? hit(12, { types: open.map((x) => x.type).join(",") })
+        ? hit(
+            12,
+            { types: open.map((x) => x.type).join(",") },
+            { keys: open.map(findingKey) },
+          )
         : null
     },
   ),
@@ -127,7 +178,16 @@ const sesRules: Rule[] = [
     "ses.reinstated",
     "provider_flag",
     "Reinstated after a pause and still on SES's probation",
-    (f) => (f.ses.current === "reinstated" ? hit(10, {}) : null),
+    (f) =>
+      f.ses.current === "reinstated"
+        ? hit(
+            10,
+            {},
+            f.ses.changedAt
+              ? { keys: [`reinstated:${f.ses.changedAt.toISOString()}`] }
+              : {},
+          )
+        : null,
   ),
 ]
 
@@ -331,7 +391,13 @@ const domainRules: Rule[] = [
         [age <= 7, 25],
         [age <= 30, 12],
       ] as const)
-      return points === null ? null : hit(points, { domainAgeDays: Math.floor(age) })
+      return points === null
+        ? null
+        : hit(
+            points,
+            { domainAgeDays: Math.floor(age) },
+            { keys: f.domains.young.map((d) => `domain:${d}`) },
+          )
     },
   ),
   rule(
@@ -439,6 +505,8 @@ export const linkingFeatures = (p: Facts["farm"]["peers"][number]): number =>
     p.free && p.young,
   ].filter(Boolean).length
 
+const peerKey = (p: FarmPeer) => `peer:${digest(p.peer)}`
+
 const farmRules: Rule[] = [
   rule(
     "farm.cluster",
@@ -449,12 +517,13 @@ const farmRules: Rule[] = [
       const loose = f.farm.peers.filter((p) => linkingFeatures(p) === 1)
       const detail = farmEvidence("farm.cluster", f, [...linked, ...loose])
       const evidence = { linkedPeers: linked.length, loosePeers: loose.length }
+      const keys = [...linked, ...loose].map(peerKey)
       if (linked.length >= 4) {
-        return withDetail(hit(55, evidence, { floor: "high" }), detail)
+        return withDetail(hit(55, evidence, { floor: "high", keys }), detail)
       }
-      if (linked.length >= 2) return withDetail(hit(30, evidence), detail)
+      if (linked.length >= 2) return withDetail(hit(30, evidence, { keys }), detail)
       if (linked.length + loose.length >= 4)
-        return withDetail(hit(15, evidence), detail)
+        return withDetail(hit(15, evidence, { keys }), detail)
       return null
     },
   ),
@@ -466,7 +535,7 @@ const farmRules: Rule[] = [
       const held = f.farm.peers.filter((p) => p.held)
       return held.length > 0
         ? withDetail(
-            hit(35, { heldPeers: held.length }),
+            hit(35, { heldPeers: held.length }, { keys: held.map(peerKey) }),
             farmEvidence("farm.with_held", f, f.farm.peers),
           )
         : null
@@ -486,10 +555,14 @@ const identityRules: Rule[] = [
       if (!id) return null
       const held = id.heldDevicePeers + id.heldSubnetPeers
       return held > 0
-        ? hit(40, {
-            heldDevicePeers: id.heldDevicePeers,
-            heldSubnetPeers: id.heldSubnetPeers,
-          })
+        ? hit(
+            40,
+            {
+              heldDevicePeers: id.heldDevicePeers,
+              heldSubnetPeers: id.heldSubnetPeers,
+            },
+            { keys: id.heldPeerKeys },
+          )
         : null
     },
   ),
@@ -503,7 +576,13 @@ const identityRules: Rule[] = [
         [peers >= 3, 25],
         [peers >= 1, 8],
       ] as const)
-      return points === null ? null : hit(points, { devicePeers: peers })
+      return points === null
+        ? null
+        : hit(
+            points,
+            { devicePeers: peers },
+            { keys: f.identity?.devicePeerKeys ?? [] },
+          )
     },
   ),
   rule(
@@ -512,7 +591,13 @@ const identityRules: Rule[] = [
     "Many accounts signed up from the owner's network within a day",
     (f) => {
       const peers = f.identity?.subnetSignupPeers ?? 0
-      return peers >= 4 ? hit(15, { subnetSignupPeers: peers }) : null
+      return peers >= 4
+        ? hit(
+            15,
+            { subnetSignupPeers: peers },
+            { keys: f.identity?.subnetSignupPeerKeys ?? [] },
+          )
+        : null
     },
   ),
   rule("identity.tor", "account_security", "The owner used Tor", (f) =>
@@ -571,6 +656,7 @@ const contentRules: Rule[] = [
         },
         {
           ...(decisive ? { floor: "critical" as const } : {}),
+          keys: f.links.unsafe.map((l) => `host:${l.host}`),
           // ⚠ THE DAY THE LINK WAS SENT, NOT NOW: only mail sent after a
           // staff release is evidence the person releasing never saw.
           freshAt: new Date(
@@ -655,11 +741,15 @@ const similarityRules: Rule[] = [
       const s = f.similarity
       if (!s || s.taintedSimilar === 0) return null
       return withDetail(
-        hit(s.taintedSimilar >= 2 ? 30 : 20, {
-          confirmedWorkspaces: s.taintedSimilar,
-          similarity: round2(s.bestTaintedSimilarity),
-          model: s.model,
-        }),
+        hit(
+          s.taintedSimilar >= 2 ? 30 : 20,
+          {
+            confirmedWorkspaces: s.taintedSimilar,
+            similarity: round2(s.bestTaintedSimilarity),
+            model: s.model,
+          },
+          { keys: s.taintedPeerKeys },
+        ),
         contentEvidence("content.like_confirmed_abuse", f),
       )
     },
@@ -672,7 +762,11 @@ const similarityRules: Rule[] = [
       const n = f.similarity?.youngFreeSimilar ?? 0
       return n >= 4
         ? withDetail(
-            hit(12, { youngFreeWorkspaces: n, model: f.similarity!.model }),
+            hit(
+              12,
+              { youngFreeWorkspaces: n, model: f.similarity!.model },
+              { keys: f.similarity!.youngFreePeerKeys },
+            ),
             contentEvidence("content.semantic_crowd", f),
           )
         : null
