@@ -68,7 +68,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: recheck
-              image: ghcr.io/i10-tech/i10-api:prod-cc556fda435fa4076d18f4d6871ada951714e92d@sha256:af9f210787e0c8206f51bbca091d4c489d59ff559faa94298bae3784bd269918
+              image: ghcr.io/i10-tech/i10-api:prod-04af9ef211e96afc80ae8485e62ed21bb0390fcb@sha256:b377ba93c5ee62341719323ebd77c068408e2333fd6d6cc3fc86910f90d7cdd8
               imagePullPolicy: Always
               command: ["bun", "dist/recheck.js"]
               envFrom:
