@@ -42,6 +42,7 @@ import type { AccountDeps } from "../../console/account-deletion.js"
 import type { IdentityConsoleDeps } from "./identity.js"
 import type { TeamInboxes } from "../../team-inboxes/service.js"
 import type { StorageAllocations } from "../../mailboxes/allocation.js"
+import type { ConsoleMailboxes } from "../../mailboxes/console.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -250,6 +251,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * admins. Optional; without it the routes answer 501.
    */
   mailboxStorage?: StorageAllocations
+  /**
+   * Workspace mailbox list and detail (B5). Owners and admins see every
+   * mailbox in the workspace; members see only their own. Optional; without it
+   * the routes answer 501.
+   */
+  mailboxes?: ConsoleMailboxes
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

@@ -3,6 +3,7 @@ import type { SQL } from "drizzle-orm"
 import { describe, expect, it, mock } from "bun:test"
 import {
   mailboxesStatement,
+  recordMailboxUsageStatement,
   recordStorageStatement,
   sampleStorage,
 } from "../src/mail/storage.js"
@@ -41,6 +42,9 @@ const snapshotOf = (usage: Record<string, number>) => ({
 const writes = (seen: { sql: string; params: unknown[] }[]) =>
   seen.filter((s) => s.sql.includes("insert into core.tenant_storage"))
 
+const mailboxWrites = (seen: { sql: string; params: unknown[] }[]) =>
+  seen.filter((s) => s.sql.includes("insert into core.mailbox_usage"))
+
 describe("what gets asked", () => {
   // Cross-tenant: the job holds no tenant context, so it goes through the
   // definer function rather than reading `authd.accounts` directly.
@@ -57,10 +61,21 @@ describe("what gets asked", () => {
     expect(statement).toContain("on conflict (tenant_id) do update")
     expect(statement).toContain("bytes = excluded.bytes")
   })
+
+  it("upserts per-mailbox usage rows keyed by lowercased address", () => {
+    const { sql: statement, params } = dialect.sqlToQuery(
+      recordMailboxUsageStatement(A, [{ address: "Ada@Acme.com", bytes: 42 }]),
+    )
+    expect(statement).toContain("insert into core.mailbox_usage")
+    expect(statement).toContain("on conflict (address) do update")
+    expect(statement).toContain("used_bytes = excluded.used_bytes")
+    expect(params).toContain("ada@acme.com")
+    expect(params).toContain(42)
+  })
 })
 
 describe("sampling", () => {
-  it("sums a tenant's mailboxes into one figure", async () => {
+  it("sums a tenant's mailboxes into one figure and writes per-mailbox usage", async () => {
     const { db, seen } = fakeDb([
       { tenant_id: A, email: "a@acme.com" },
       { tenant_id: A, email: "b@acme.com" },
@@ -68,12 +83,21 @@ describe("sampling", () => {
 
     const report = await sampleStorage({
       db,
-      mail: snapshotOf({ "a@acme.com": 1_000, "b@acme.com": 1_000 }),
+      mail: snapshotOf({ "a@acme.com": 1_000, "b@acme.com": 1_500 }),
       log,
     })
 
     expect(report).toMatchObject({ tenants: 1, mailboxes: 2, failed: 0 })
-    expect(writes(seen)[0]?.params).toContain(2_000)
+    expect(writes(seen)[0]?.params).toContain(2_500)
+    expect(mailboxWrites(seen)).toHaveLength(1)
+    expect(mailboxWrites(seen)[0]?.params).toEqual([
+      "a@acme.com",
+      A,
+      1_000,
+      "b@acme.com",
+      A,
+      1_500,
+    ])
   })
 
   /**
@@ -96,6 +120,7 @@ describe("sampling", () => {
 
     expect(report.failed).toBe(1)
     expect(writes(seen)).toHaveLength(0)
+    expect(mailboxWrites(seen)).toHaveLength(0)
   })
 
   // ⚠ And one tenant's failure is not another's. A shared mail server having a
@@ -115,6 +140,8 @@ describe("sampling", () => {
     const written = writes(seen)
     expect(written).toHaveLength(1)
     expect(written[0]?.params).toContain(B)
+    expect(mailboxWrites(seen)).toHaveLength(1)
+    expect(mailboxWrites(seen)[0]?.params).toEqual(["ok@other.com", B, 7])
   })
 
   it("scopes each write to its own tenant", async () => {

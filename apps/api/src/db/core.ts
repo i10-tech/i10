@@ -4994,3 +4994,32 @@ export const mailboxJobs = core.table(
     }),
   ],
 )
+
+/**
+ * Per-mailbox disk usage, written by the Stalwart storage sampler alongside
+ * `core.tenant_storage` (Step B5).
+ *
+ * ⚠ KEYED BY LOWERCASED ADDRESS, ONE ROW PER MAILBOX, OVERWRITTEN ON EACH
+ * SAMPLE. A mailbox that has never been sampled has no row here, which the
+ * console mailbox routes return as `usedBytes: null, usedAt: null` rather than
+ * pretending zero bytes were measured.
+ */
+export const mailboxUsage = core.table(
+  "mailbox_usage",
+  {
+    address: text("address").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    usedBytes: bigint("used_bytes", { mode: "number" }).notNull(),
+    sampledAt: timestamp("sampled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("mailbox_usage_tenant_idx").on(t.tenantId),
+    pgPolicy("mailbox_usage_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)

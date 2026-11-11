@@ -166,7 +166,12 @@ import { createStalwartCaller } from "./mail/stalwart.js"
 import { disableDomain } from "./mail/stalwart-domains.js"
 import { mailboxHosting } from "./domains/mailbox-hosting.js"
 import { planAssignmentStore } from "./metering/postgres.js"
-import { mailboxDirectory, paymentHold } from "./mailboxes/store.js"
+import {
+  consoleMailboxStore,
+  consoleMailboxes,
+  mailboxDirectory,
+  paymentHold,
+} from "./mailboxes/store.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
 import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
 import { onTeamInboxEvent } from "./team-inboxes/sync.js"
@@ -2594,6 +2599,12 @@ const app = createApp({
     members,
     teamInboxes: teamInboxService,
     mailboxStorage,
+    mailboxes: consoleMailboxes({
+      store: consoleMailboxStore(db),
+      roles: roleRows,
+      pool: async (tenantId) => (await mailboxStorage.overview(tenantId)).pool,
+      identity,
+    }),
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {

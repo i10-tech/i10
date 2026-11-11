@@ -60,6 +60,36 @@ export const recordStorageStatement = (tenantId: string, bytes: number): SQL => 
          sampled_at = now()
 `
 
+export interface SampledMailboxUsage {
+  address: string
+  bytes: number
+}
+
+/**
+ * ⚠ ONE ROW PER MAILBOX, OVERWRITTEN. Keyed by lowercased address under the
+ * workspace's tenant context so the console can read per-inbox usage alongside
+ * the tenant total.
+ */
+export const recordMailboxUsageStatement = (
+  tenantId: string,
+  mailboxes: readonly SampledMailboxUsage[],
+): SQL => {
+  const values = sql.join(
+    mailboxes.map(
+      (m) => sql`(${m.address.toLowerCase()}, ${tenantId}::uuid, ${m.bytes}, now())`,
+    ),
+    sql`, `,
+  )
+  return sql`
+    insert into core.mailbox_usage (address, tenant_id, used_bytes, sampled_at)
+    values ${values}
+    on conflict (address) do update
+       set tenant_id = excluded.tenant_id,
+           used_bytes = excluded.used_bytes,
+           sampled_at = now()
+  `
+}
+
 export interface SampleDeps {
   db: Database
   mail: MailboxStorage
@@ -102,9 +132,11 @@ export async function sampleStorage({
   for (const [tenantId, emails] of byTenant) {
     let bytes = 0
     let complete = true
+    const perMailbox = new Map<string, number>()
 
     for (const email of emails) {
-      const used = usage.get(email.toLowerCase())
+      const normalized = email.toLowerCase()
+      const used = usage.get(normalized)
 
       if (used === undefined) {
         // ⚠ ONE UNREADABLE MAILBOX POISONS THE TENANT'S TOTAL, so the total is
@@ -123,13 +155,22 @@ export async function sampleStorage({
 
       bytes += used
       mailboxes += 1
+      perMailbox.set(normalized, used)
     }
 
     if (!complete) continue
 
-    await withTenant(db, tenantId, async (tx) =>
-      tx.execute(recordStorageStatement(tenantId, bytes)),
-    )
+    const entries = Array.from(perMailbox, ([address, usedBytes]) => ({
+      address,
+      bytes: usedBytes,
+    }))
+
+    await withTenant(db, tenantId, async (tx) => {
+      await tx.execute(recordStorageStatement(tenantId, bytes))
+      if (entries.length > 0) {
+        await tx.execute(recordMailboxUsageStatement(tenantId, entries))
+      }
+    })
   }
 
   log?.info({ tenants: byTenant.size, mailboxes, failed }, "storage sampled")

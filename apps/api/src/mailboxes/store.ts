@@ -554,3 +554,30 @@ export const directoryMail = {
       .onConflictDoNothing()
   },
 }
+
+export {
+  MAILBOX_STATUSES,
+  clampMailboxLimit,
+  consoleMailboxStore,
+  consoleMailboxes,
+  decodeMailboxCursor,
+  deriveMailboxStatus,
+  encodeMailboxCursor,
+  managedMailLane,
+  workspaceMailboxPredicate,
+  type ConsoleMailbox,
+  type ConsoleMailboxAlias,
+  type ConsoleMailboxDeps,
+  type ConsoleMailboxListOptions,
+  type ConsoleMailboxListResult,
+  type ConsoleMailboxOwner,
+  type ConsoleMailboxStorage,
+  type ConsoleMailboxStore,
+  type ConsoleMailboxViewer,
+  type ConsoleMailboxes,
+  type MailboxPageCursor,
+  type MailboxSignInLane,
+  type MailboxStatus,
+  type MailboxStatusInput,
+  type StoredConsoleMailboxRow,
+} from "./console.js"
