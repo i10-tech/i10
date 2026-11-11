@@ -1,15 +1,13 @@
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
-import { BEHAVIOUR_FEATURES, type Features } from "../risk/model.js"
 
 /**
- * The vectors (#170): content embeddings and behaviour points, and the
- * questions asked of them.
+ * The vectors (#170): content embeddings, and the questions asked of them.
  *
  * ⚠ OBSERVATIONS IN, NUMBERS OUT. Every cross-workspace question returns
  * counts and distances through a definer function (migration 0072); no
  * workspace ever reads another's vectors, and no answer depends on another
- * workspace's SCORE - only on its content, its behaviour and human verdicts.
+ * workspace's SCORE - only on its content and human verdicts.
  */
 
 /** How close two contents must be to count as "the same mail", per embedder. */
@@ -64,50 +62,6 @@ export async function embeddedAlready(
   return new Set(rows.map((r) => r.exact))
 }
 
-/**
- * How each behaviour feature is scaled before distances are taken.
- *
- * ⚠ FIXED SCALES, NOT FITTED ONES. Rates live around 0.01 and log-counts
- * around 5; unscaled, distance would be decided by whichever feature happens
- * to be largest. A scale is roughly "the size of a difference that matters".
- * Fixed, so a vector stored today is comparable with one stored next month.
- */
-const SCALE: Partial<Record<(typeof BEHAVIOUR_FEATURES)[number], number>> = {
-  age_days_log: 2,
-  hard_bounce_7d: 0.05,
-  complaint_7d: 0.1,
-  soft_bounce_7d: 0.1,
-  hard_bounce_24h: 0.05,
-  sends_7d_log: 3,
-  early_bounce: 0.05,
-  unsubscribe_7d: 0.02,
-  quota_days_7d: 2,
-  api_error_rate: 0.3,
-  key_countries: 2,
-  domain_age_log: 3,
-}
-
-export function behaviourVector(features: Features): number[] {
-  return BEHAVIOUR_FEATURES.map((name) => {
-    const v = features[name] / (SCALE[name] ?? 1)
-    return Math.max(-5, Math.min(5, Number.isFinite(v) ? v : 0))
-  })
-}
-
-export async function storeBehaviour(
-  db: Database,
-  tenantId: string,
-  features: Features,
-) {
-  await withTenant(db, tenantId, (tx) =>
-    tx.execute(sql`
-      insert into core.behaviour_vectors (tenant_id, embedding, updated_at)
-      values (${tenantId}::uuid, ${literal(behaviourVector(features))}::vector, now())
-      on conflict (tenant_id) do update set embedding = excluded.embedding, updated_at = now()
-    `),
-  )
-}
-
 export interface ContentNeighbours {
   model: string
   similarPeers: number
@@ -142,35 +96,6 @@ export async function contentNeighbours(
     neighbours: Number(r.neighbours ?? 0),
     medianSimilarity: numOrNull(r.median_similarity),
     bestSimilarity: numOrNull(r.best_similarity),
-  }
-}
-
-export interface BehaviourNeighbours {
-  labelled: number
-  abuse: number
-  legit: number
-  meanAbuseDistance: number | null
-  nearestDistance: number | null
-  medianDistance: number | null
-}
-
-export async function behaviourNeighbours(
-  db: Database,
-  tenantId: string,
-  k = 10,
-): Promise<BehaviourNeighbours> {
-  const rows = (await db.execute(
-    sql`select * from core.behaviour_neighbors(${tenantId}::uuid, ${k})`,
-  )) as unknown as Record<string, unknown>[]
-  const r = rows[0] ?? {}
-  const num = (v: unknown) => (v == null ? null : Number(v))
-  return {
-    labelled: Number(r.labelled ?? 0),
-    abuse: Number(r.abuse ?? 0),
-    legit: Number(r.legit ?? 0),
-    meanAbuseDistance: num(r.mean_abuse_distance),
-    nearestDistance: num(r.nearest_distance),
-    medianDistance: num(r.median_distance),
   }
 }
 

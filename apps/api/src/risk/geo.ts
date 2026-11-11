@@ -273,10 +273,5 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
   return 2 * 6371 * Math.asin(Math.sqrt(h))
 }
 
-/** A country centre's longitude, for the solar-offset comparison in rules.ts. */
-export function countryLongitude(code: string): number | null {
-  return CENTROIDS[code.toUpperCase()]?.[1] ?? null
-}
-
 export const knownCountry = (code: string | null | undefined): boolean =>
   Boolean(code && CENTROIDS[code.toUpperCase()])
