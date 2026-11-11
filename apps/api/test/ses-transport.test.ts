@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test"
+import { feedbackTokens } from "../src/send/feedback-id.js"
 import { classifySesError, sesTransport } from "../src/send/ses.js"
 import type { OutboundMessage } from "../src/send/transport.js"
 
@@ -174,6 +175,93 @@ describe("tags", () => {
       tags: [{ name: "campaign", value: "spring" }],
     })
     expect(inputOf(c).EmailTags).toContainEqual({ Name: "campaign", Value: "spring" })
+  })
+})
+
+describe("the Feedback-ID", () => {
+  const SECRET = "a-test-secret-that-is-at-least-32-bytes-long"
+  const feedbackToken = feedbackTokens(SECRET)
+  const tagsOf = (c: Parameters<typeof inputOf>[0]) =>
+    inputOf(c).EmailTags as unknown as { Name: string; Value: string }[]
+
+  // SES folds `ses:feedback-id-a` into field `a` of the header it writes.
+  it("sets the workspace token as SES's feedback-id-a tag", async () => {
+    const c = client()
+    await sesTransport({ client: c, feedbackToken }).send(message)
+    expect(tagsOf(c)).toContainEqual({
+      Name: "ses:feedback-id-a",
+      Value: feedbackToken(message.tenantId),
+    })
+  })
+
+  // ⚠ SES WRITES ITS OWN HEADER AND GOOGLE WANTS ONE PER MESSAGE. A second one
+  // in the raw bytes would be refused or leave two.
+  it("writes no Feedback-ID header into the raw message", async () => {
+    const c = client()
+    await sesTransport({ client: c, feedbackToken }).send(message)
+    expect(rawOf(c).toLowerCase()).not.toContain("feedback-id")
+  })
+
+  it("gives different tenants different tokens", async () => {
+    const one = client()
+    const two = client()
+    await sesTransport({ client: one, feedbackToken }).send(message)
+    await sesTransport({ client: two, feedbackToken }).send({
+      ...message,
+      tenantId: "ten-2",
+    })
+    const value = (c: Parameters<typeof inputOf>[0]) =>
+      tagsOf(c).find((t) => t.Name === "ses:feedback-id-a")?.Value
+    expect(value(one)).toBeDefined()
+    expect(value(two)).toBeDefined()
+    expect(value(one)).not.toBe(value(two))
+  })
+
+  // ⚠ I10'S OWN MAIL TAKES THE SAME PATH: its tenant is a real one, and any
+  // tenant id at all still yields a token rather than failing the send.
+  it("still sends, with a token, for i10's own system mail", async () => {
+    const c = client()
+    const outcome = await sesTransport({ client: c, feedbackToken }).send({
+      ...message,
+      tenantId: "",
+      from: "i10 <no-reply@notifications.i10.tech>",
+    })
+    expect(outcome.status).toBe("sent")
+    expect(tagsOf(c).map((t) => t.Name)).toContain("ses:feedback-id-a")
+  })
+
+  it("sets no tag when no token is configured", async () => {
+    const c = client()
+    await sesTransport({ client: c }).send(message)
+    expect(tagsOf(c).map((t) => t.Name)).toEqual(["i10_message_id"])
+  })
+
+  // ⚠ NO CALLER CAN SET IT, BY TAG OR BY HEADER. Both are checked with a token
+  // configured, and without, since the reservation must not depend on us having
+  // one to set.
+  it.each([
+    ["with a token", { feedbackToken }],
+    ["without a token", {}],
+  ])("refuses a caller's tag or header, %s", async (_label, opts) => {
+    const c = client()
+    await sesTransport({ client: c, ...opts }).send({
+      ...message,
+      tags: [
+        { name: "ses:feedback-id-a", value: "victim" },
+        { name: "ses:feedback-id-b", value: "victim" },
+      ],
+      headers: {
+        "Feedback-ID": "victim:::i10mail",
+        "X-SES-MESSAGE-TAGS": "ses:feedback-id-a=victim",
+      },
+    })
+
+    const forged = tagsOf(c).filter((t) => t.Value === "victim")
+    expect(forged).toEqual([])
+    expect(tagsOf(c).filter((t) => t.Name === "ses:feedback-id-a")).toHaveLength(
+      "feedbackToken" in opts ? 1 : 0,
+    )
+    expect(rawOf(c)).not.toContain("victim")
   })
 })
 

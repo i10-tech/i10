@@ -3,6 +3,7 @@ import type { SmtpReceipt } from "@upyo/smtp"
 import { describe, expect, it, mock } from "bun:test"
 import { generateDkimKeypair } from "../src/domains/dkim.js"
 import { signMessage } from "../src/send/dkim.js"
+import { feedbackIdHeaderValue, feedbackTokens } from "../src/send/feedback-id.js"
 import { stalwartTransport } from "../src/send/stalwart.js"
 import type { OutboundMessage } from "../src/send/transport.js"
 
@@ -150,7 +151,7 @@ describe("signing", () => {
 
     const h = /h=([^;]+);/.exec(signed)?.[1]
     expect(h).toBe(
-      "from:to:cc:reply-to:subject:date:message-id:mime-version:content-type:content-transfer-encoding",
+      "from:to:cc:reply-to:subject:date:message-id:mime-version:content-type:content-transfer-encoding:feedback-id",
     )
   })
 
@@ -599,5 +600,99 @@ describe("classifying a relay failure", () => {
     })
 
     expect((await t.send(message())).status).toBe("deferred")
+  })
+})
+
+describe("the Feedback-ID on the direct route", () => {
+  const SECRET = "a-test-secret-that-is-at-least-32-bytes-long"
+  const feedbackToken = feedbackTokens(SECRET)
+
+  /** The unfolded header block, signature first. */
+  const headersOf = (m: RawMessage) => rawOf(m).split("\r\n\r\n")[0]!
+
+  /** The `Feedback-ID` lines in the block, as written. */
+  const feedbackLines = (m: RawMessage) =>
+    headersOf(m)
+      .split("\r\n")
+      .filter((line) => /^feedback-id:/i.test(line))
+
+  it("writes the workspace token and our SenderId, once", async () => {
+    const { t, mailer: m } = transport({ feedbackToken })
+    const msg = message()
+
+    await t.send(msg)
+
+    expect(feedbackLines(m.calls[0]!)).toEqual([
+      `Feedback-ID: ${feedbackIdHeaderValue(feedbackToken(msg.tenantId))}`,
+    ])
+  })
+
+  /**
+   * ⚠ GOOGLE ONLY TRUSTS THE HEADER WHEN THE DKIM SIGNATURE, MADE AFTER IT WAS
+   * ADDED, COVERS IT. The signature is built from the bytes that carry the
+   * header, and its `h=` names it.
+   */
+  it("is covered by the DKIM signature", async () => {
+    const { t, mailer: m } = transport({ feedbackToken })
+
+    await t.send(message())
+
+    const raw = rawOf(m.calls[0]!)
+    expect(raw).toMatch(/^DKIM-Signature:/)
+    expect(/h=([^;]+);/.exec(raw)?.[1]?.split(":")).toContain("feedback-id")
+    expect(feedbackLines(m.calls[0]!)).toHaveLength(1)
+  })
+
+  it("uses a different token for a different tenant", async () => {
+    const { t, mailer: m } = transport({ feedbackToken })
+
+    await t.send(message({ tenantId: "ten-1" }))
+    await t.send(message({ tenantId: "ten-2" }))
+
+    const [one, two] = m.calls.map((c) => feedbackLines(c)[0])
+    expect(one).toBeDefined()
+    expect(two).toBeDefined()
+    expect(one).not.toBe(two)
+  })
+
+  // ⚠ A CALLER MUST NOT BE ABLE TO CHOOSE IT, so the only value on the wire is
+  // the one derived from the tenant that is actually sending.
+  it("ignores a caller-supplied Feedback-ID", async () => {
+    const { t, mailer: m } = transport({ feedbackToken })
+    const msg = message({
+      headers: { "Feedback-ID": "victim:::i10mail", "feedback-id": "other:::i10mail" },
+    })
+
+    await t.send(msg)
+
+    expect(rawOf(m.calls[0]!)).not.toContain("victim")
+    expect(rawOf(m.calls[0]!)).not.toContain("other:::")
+    expect(feedbackLines(m.calls[0]!)).toEqual([
+      `Feedback-ID: ${feedbackIdHeaderValue(feedbackToken(msg.tenantId))}`,
+    ])
+  })
+
+  // ⚠ I10'S OWN MAIL: a real tenant normally, but a missing or odd tenant id
+  // must neither crash the send nor leave it without a header.
+  it("gives i10's own system mail a value, even with no workspace id", async () => {
+    const { t, mailer: m } = transport({ feedbackToken })
+
+    const outcome = await t.send(
+      message({ tenantId: "", from: "i10 <no-reply@notifications.i10.tech>" }),
+    )
+
+    expect(outcome.status).toBe("sent")
+    expect(feedbackLines(m.calls[0]!)).toEqual([
+      `Feedback-ID: ${feedbackIdHeaderValue(feedbackToken(""))}`,
+    ])
+  })
+
+  it("writes none when no token is configured, and still drops a caller's", async () => {
+    const { t, mailer: m } = transport()
+
+    await t.send(message({ headers: { "Feedback-ID": "victim:::i10mail" } }))
+
+    expect(feedbackLines(m.calls[0]!)).toEqual([])
+    expect(rawOf(m.calls[0]!)).not.toContain("victim")
   })
 })

@@ -100,6 +100,65 @@ describe("the envelope", () => {
   })
 })
 
+describe("the Feedback-ID header", () => {
+  const FEEDBACK = "0123456789abcdef:::i10mail"
+  const headerBlock = (raw: string) => raw.split("\r\n\r\n")[0]!
+
+  it("is written once, in the header block, when the route supplies one", () => {
+    const raw = buildRawMessage(message(), [], AT, FEEDBACK)
+    expect(headerBlock(raw).match(/^Feedback-ID:/gim) ?? []).toHaveLength(1)
+    expect(headerBlock(raw)).toContain(`Feedback-ID: ${FEEDBACK}`)
+  })
+
+  // ⚠ THE SES ROUTE BUILDS WITHOUT ONE. SES writes its own, and Google wants
+  // exactly one such header per message.
+  it("is absent when none is supplied", () => {
+    expect(buildRawMessage(message(), [], AT).toLowerCase()).not.toContain(
+      "feedback-id",
+    )
+  })
+
+  // ⚠ A CALLER MUST NOT FILE THEIR COMPLAINTS UNDER ANOTHER WORKSPACE'S NAME.
+  // Dropped whatever the case, and with or without ours present.
+  it("drops a caller's, so ours is the only one", () => {
+    const headers = { "feedback-id": "victim:::i10mail", "FEEDBACK-ID": "x:y:z:wwwww" }
+    const raw = buildRawMessage(message({ headers }), [], AT, FEEDBACK)
+
+    expect(headerBlock(raw).match(/^Feedback-ID:/gim) ?? []).toHaveLength(1)
+    expect(raw).toContain(`Feedback-ID: ${FEEDBACK}`)
+    expect(raw).not.toContain("victim")
+  })
+
+  it("drops a caller's even when ours is absent, as on the SES route", () => {
+    const raw = buildRawMessage(
+      message({ headers: { "Feedback-ID": "victim:::i10mail" } }),
+      [],
+      AT,
+    )
+    expect(raw.toLowerCase()).not.toContain("feedback-id")
+  })
+
+  // ⚠ RAW CONTENT LETS SES READ ITS OWN INSTRUCTIONS FROM HEADERS, including the
+  // tags that become Feedback-ID and the `i10_message_id` join key. They are not
+  // the caller's to give.
+  it("drops every caller X-SES- header", () => {
+    const raw = buildRawMessage(
+      message({
+        headers: {
+          "X-SES-MESSAGE-TAGS": "ses:feedback-id-a=victim, i10_message_id=other",
+          "x-ses-configuration-set": "someone-elses",
+          "X-Campaign": "spring",
+        },
+      }),
+      [],
+      AT,
+    )
+    expect(raw.toLowerCase()).not.toContain("x-ses-")
+    expect(raw).not.toContain("victim")
+    expect(raw).toContain("X-Campaign: spring")
+  })
+})
+
 describe("structure", () => {
   it("nests alternative inside mixed when there are both bodies", () => {
     const raw = buildRawMessage(
