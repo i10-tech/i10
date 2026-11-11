@@ -1,0 +1,11 @@
+{
+  // One program for src and test: this is a Bun CLI, not a library that has to
+  // stay portable, so there is no reason to keep the runtime types out of src.
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules"]
+}
