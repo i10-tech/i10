@@ -599,4 +599,3 @@ export const directoryMail = {
       .onConflictDoNothing()
   },
 }
-
