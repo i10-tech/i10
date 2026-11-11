@@ -1,4 +1,5 @@
 import { parse } from "tldts"
+import { describeFlags, isDecisive, parseVerdict } from "./link-verdict.js"
 import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./types.js"
 
 /**
@@ -22,7 +23,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 4
+export const RULESET_VERSION = 5
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -549,29 +550,35 @@ const contentRules: Rule[] = [
   rule(
     "links.unsafe",
     "unsafe_links",
-    "Mail linked to a host Google Web Risk lists as malware or phishing",
-    (f) =>
-      f.links.unsafe.length > 0
-        ? hit(
-            90,
-            {
-              hosts: f.links.unsafe
-                .slice(0, 5)
-                .map((l) => `${l.host} (${l.verdict})`)
-                .join(", "),
-            },
-            {
-              floor: "critical",
-              // ⚠ THE DAY THE LINK WAS SENT, NOT NOW: only mail sent after a
-              // staff release is evidence the person releasing never saw.
-              freshAt: new Date(
-                Math.max(
-                  ...f.links.unsafe.map((l) => Date.parse(`${l.day}T23:59:59Z`)),
-                ),
-              ),
-            },
-          )
-        : null,
+    "Mail linked to a host that Web Risk, or both DNS security resolvers, list as malware or phishing",
+    (f) => {
+      if (f.links.unsafe.length === 0) return null
+      const flagged = f.links.unsafe.map((l) => ({
+        ...l,
+        flags: parseVerdict(l.verdict),
+      }))
+      // ⚠ ONE LIST'S OPINION IS 45 POINTS AND NO FLOOR. Web Risk, or two
+      // independent lists agreeing, is 90 and critical; one resolver's false
+      // positive must not hold a customer's mail on its own.
+      const decisive = flagged.some((l) => isDecisive(l.flags))
+      return hit(
+        decisive ? 90 : 45,
+        {
+          hosts: flagged
+            .slice(0, 5)
+            .map((l) => `${l.host} (${describeFlags(l.flags)})`)
+            .join(", "),
+        },
+        {
+          ...(decisive ? { floor: "critical" as const } : {}),
+          // ⚠ THE DAY THE LINK WAS SENT, NOT NOW: only mail sent after a
+          // staff release is evidence the person releasing never saw.
+          freshAt: new Date(
+            Math.max(...f.links.unsafe.map((l) => Date.parse(`${l.day}T23:59:59Z`))),
+          ),
+        },
+      )
+    },
     true,
   ),
   rule(

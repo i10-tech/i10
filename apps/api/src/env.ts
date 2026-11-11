@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { parseKeyring } from "./content/seal.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
+import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
 import { SYSTEM_FROM } from "./system-mail.js"
 import { parseAllowList } from "./webhooks/egress.js"
 
@@ -1178,7 +1179,42 @@ const schema = z.object({
   /** Messages retention deletes per statement. */
   RETENTION_BATCH: z.coerce.number().int().min(1).max(10_000).default(1000),
 
-  /** Google Web Risk, for link reputation. Unset: no unsafe-link signal. */
+  /**
+   * The link checkers that run, comma separated (#222): `dns` (Cloudflare's and
+   * Quad9's malware-blocking resolvers, no account) and `webrisk` (Google, which
+   * also needs WEBRISK_API_KEY). Default `dns`; an empty value runs none.
+   * ⚠ A NAME WE DO NOT KNOW REFUSES TO BOOT, so a typo cannot quietly turn the
+   * unsafe-link signal off.
+   */
+  RISK_LINK_PROVIDERS: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      const names = (v ?? "dns")
+        .split(",")
+        .map((n) => n.trim().toLowerCase())
+        .filter(Boolean)
+      const unknown = names.filter(
+        (n) => !(LINK_PROVIDER_CHOICES as readonly string[]).includes(n),
+      )
+      if (unknown.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `unknown link provider ${unknown.join(", ")}; expected ${LINK_PROVIDER_CHOICES.join(", ")}`,
+        })
+        return z.NEVER
+      }
+      return [...new Set(names)] as LinkProviderChoice[]
+    }),
+
+  /**
+   * Queries per resolver per UTC day for the `dns` provider, counted in Redis
+   * before each is sent. ⚠ THE RESOLVERS ARE FREE AND PUBLIC: this is what stops
+   * a farm linking thousands of fresh domains from making us a nuisance to them.
+   */
+  RISK_DNS_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(5000),
+
+  /** Google Web Risk, for link reputation. Needs `webrisk` in RISK_LINK_PROVIDERS. */
   WEBRISK_API_KEY: z.string().min(1).optional(),
 
   /**

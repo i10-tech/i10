@@ -420,9 +420,9 @@ try {
         console.log(`matched ${t.matched} message(s)`)
         console.log("\nholes:")
         for (const h of t.holes) console.log(`  {{${h.name}}}  max ${h.max}`)
-        console.log("\nlinks in the fixed part, with Web Risk:")
+        console.log("\nlinks in the fixed part, as the link checkers see them:")
         for (const host of t.staticHosts)
-          console.log(`  ${host}  ${(await risk.webRisk.lookup(host)) ?? "unknown"}`)
+          console.log(`  ${host}  ${(await risk.links.lookup(host)) ?? "unknown"}`)
         const shown = describeSkeleton({ segments: t.segments }, t.holes)
         if (shown.html !== null) console.log(`\n--- html ---\n${shown.html}`)
         if (shown.text !== null) console.log(`\n--- text ---\n${shown.text}`)
@@ -433,11 +433,11 @@ try {
           )
       } else if (sub === "approve") {
         // ⚠ EVERY LINK IN THE FIXED PART MUST BE CHECKED CLEAN FIRST. Unknown
-        // (budget spent, Web Risk down) is not clean: try again later.
+        // (budget spent, a provider down) is not clean: try again later.
         for (const host of t.staticHosts) {
-          const v = await risk.webRisk.lookup(host)
+          const v = await risk.links.lookup(host)
           if (v !== "clean")
-            fail(`Web Risk says ${v ?? "nothing yet"} for ${host}; not approved`)
+            fail(`The link check says ${v ?? "nothing yet"} for ${host}; not approved`)
         }
         const r = await risk.trustedTemplates.decide(
           t.tenantId,

@@ -397,6 +397,76 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(summary.scored).toBeGreaterThan(0)
   })
 
+  // ⚠ THE LINK PROVIDERS' WIRING: what each says is stored once, an answer that
+  // is not yet enough stays unchecked for the next run, and the score reads the
+  // providers back out of the stored verdict (#222).
+  it("stores each link host's verdict from the providers, leaves an unsure one unchecked, and scores by who flagged it", async () => {
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t)
+    const link = (host: string) => `<a href="https://${host}/x">${host}</a>`
+    await recordContent(
+      t,
+      [
+        {
+          from: "a@x.top",
+          to: "r@example.com",
+          subject: "Exclusive offer just for you",
+          html:
+            "<p>Claim your reward today, friend. Limited stock, act now before the offer ends. " +
+            ["one-list", "two-lists", "unsure", "fine"]
+              .map((h) => link(`${h}-${RUN}.example.top`))
+              .join(" ") +
+            "</p>",
+        } as ResolvedEmail,
+      ],
+      { db, threshold: 99 },
+    )
+    const verdicts: Record<string, string | null> = {
+      [`one-list-${RUN}.example.top`]: "cloudflare=blocked",
+      [`two-lists-${RUN}.example.top`]: "cloudflare=blocked;quad9=blocked",
+      [`unsure-${RUN}.example.top`]: null,
+    }
+    const links = {
+      cached: async () => null,
+      lookup: async (host: string) => (host in verdicts ? verdicts[host]! : "clean"),
+      stats: () => ({
+        cloudflare: { clean: 1, unsafe: 2, unknown: 1, skipped: 0 },
+      }),
+    }
+    const redis = new FakeRedis()
+    await redis.sadd("risk:dirty", t)
+    const summary = await runAll(riskDeps(redis, { links }), { concurrency: 2 })
+
+    const rows =
+      await owner`select host, verdict, checked_at from core.link_hosts where tenant_id = ${t}`
+    const byHost = new Map(rows.map((r) => [r.host as string, r]))
+    expect(byHost.get(`one-list-${RUN}.example.top`)?.verdict).toBe(
+      "cloudflare=blocked",
+    )
+    expect(byHost.get(`two-lists-${RUN}.example.top`)?.verdict).toBe(
+      "cloudflare=blocked;quad9=blocked",
+    )
+    expect(byHost.get(`fine-${RUN}.example.top`)?.verdict).toBe("clean")
+    // not enough to store: asked again next run, never recorded clean
+    expect(byHost.get(`unsure-${RUN}.example.top`)?.checked_at).toBeNull()
+    expect(summary.linksChecked).toBeGreaterThanOrEqual(3)
+    expect(summary.unsafe).toBeGreaterThanOrEqual(2)
+    expect(summary.links).toEqual({
+      cloudflare: { clean: 1, unsafe: 2, unknown: 1, skipped: 0 },
+    })
+
+    const rule = (await assessmentStore(db).current(t))?.contributions.find(
+      (c) => c.rule === "links.unsafe",
+    )
+    expect(rule?.points).toBe(90)
+    expect(rule?.floor).toBe("critical")
+    expect(String(rule?.evidence.hosts)).toContain(
+      "cloudflare: blocked, quad9: blocked",
+    )
+    expect(String(rule?.evidence.hosts)).toContain("cloudflare: blocked)")
+  })
+
   it("records a sighting, spots impossible travel, and responds", async () => {
     const redis = new FakeRedis()
     const store = identityStore(db)
