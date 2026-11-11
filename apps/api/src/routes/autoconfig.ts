@@ -1,14 +1,31 @@
+import { sql } from "drizzle-orm"
 import { Hono } from "hono"
 import { buildMobileConfig, profileFilename } from "../autoconfig/apple-profile.js"
+import type { Database } from "../db/client.js"
 
 export interface AutoconfigDeps {
-  /** The domains i10 hosts mail for - `env.MAIL_DOMAINS`. */
+  /** The static domains i10 hosts mail for - `env.MAIL_DOMAINS`. */
   hostedDomains: readonly string[]
+  /**
+   * Database connection for checking customer-hosted mailbox domains via
+   * `core.mailbox_domains()`. Optional so unit tests can pass `isHostedDomain`
+   * or static `hostedDomains` alone.
+   */
+  db?: Database
+  /** Override for unit tests; defaults to querying `core.mailbox_domains()` when `db` is set. */
+  isHostedDomain?: (domain: string) => Promise<boolean>
   /** The public name of the mail server, e.g. `mail.i10.tech`. */
   mailHost: string
   imapPort: number
   smtpPort: number
   organization: string
+}
+
+async function inMailboxDomains(db: Database, domain: string): Promise<boolean> {
+  const rows = (await db.execute(
+    sql`select 1 as ok from core.mailbox_domains() where lower(name) = ${domain} limit 1`,
+  )) as unknown as unknown[]
+  return rows.length > 0
 }
 
 /**
@@ -41,7 +58,14 @@ export interface AutoconfigDeps {
 export function createAutoconfig(deps?: AutoconfigDeps) {
   const app = new Hono()
 
-  app.get("/apple.mobileconfig", (c) => {
+  const staticHosted = new Set(
+    (deps?.hostedDomains ?? []).map((d) => d.trim().toLowerCase()),
+  )
+  const checkDynamic =
+    deps?.isHostedDomain ??
+    (deps?.db ? (domain: string) => inMailboxDomains(deps.db!, domain) : undefined)
+
+  app.get("/apple.mobileconfig", async (c) => {
     if (!deps) {
       return c.json(
         {
@@ -71,7 +95,9 @@ export function createAutoconfig(deps?: AutoconfigDeps) {
     }
 
     const domain = email.slice(email.lastIndexOf("@") + 1)
-    if (!deps.hostedDomains.includes(domain)) {
+    const isHosted =
+      staticHosted.has(domain) || (checkDynamic ? await checkDynamic(domain) : false)
+    if (!isHosted) {
       // 404, not 403: there is no profile for this address because there is no
       // mail service behind it. 403 would imply one exists and is withheld.
       return c.json(

@@ -463,8 +463,42 @@ suite("mailbox hosting by ownership", () => {
   it("lists every domain's mailboxes view in one call, counting the mailboxes on it", async () => {
     const all = await hosting().forTenant(acme)
     const on = all[await domainId(name("on"))]
-    expect(on).toMatchObject({ enabled: true, owned: true, sending: false })
+    expect(on).toMatchObject({
+      enabled: true,
+      owned: true,
+      sending: false,
+      receiving: false,
+    })
     expect(on!.count).toBe(1)
+
+    await owner`update core.domains set receiving = true where name = ${name("on")} and tenant_id = ${acme}`
+    const updated = await hosting().forDomain(acme, await domainId(name("on")))
+    expect(updated).toMatchObject({ receiving: true })
+  })
+
+  it("serves /autoconfig/apple.mobileconfig for a domain in core.mailbox_domains()", async () => {
+    const { createApp } = await import("../src/app.js")
+    const app = createApp({
+      autoconfig: {
+        hostedDomains: ["i10.tech"],
+        db,
+        mailHost: "mail.i10.tech",
+        imapPort: 993,
+        smtpPort: 465,
+        organization: "i10",
+      },
+    })
+
+    const hosted = await app.request(
+      `/autoconfig/apple.mobileconfig?email=${encodeURIComponent(`ada@${name("on")}`)}`,
+    )
+    expect(hosted.status).toBe(200)
+    expect(await hosted.text()).toContain(`<string>ada@${name("on")}</string>`)
+
+    const unhosted = await app.request(
+      `/autoconfig/apple.mobileconfig?email=${encodeURIComponent(`ada@${name("nothing")}`)}`,
+    )
+    expect(unhosted.status).toBe(404)
   })
 })
 

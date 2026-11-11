@@ -211,9 +211,9 @@ export function hetznerWriter(): ZoneWriter {
 }
 
 /**
- * ⚠ HETZNER HAS NO `priority` FIELD; AN MX PRIORITY GOES IN THE VALUE. Sending
- * it as a separate key is silently dropped and produces an MX record with
- * priority 0 - which is valid, deliverable, and not what was asked for.
+ * ⚠ HETZNER HAS NO `priority`, `weight` OR `port` FIELDS; THEY GO IN THE VALUE.
+ * Sending them as separate keys is silently dropped and produces a malformed or
+ * priority-0 record - valid enough to accept, and not what was asked for.
  *
  * ⚠ AND A HOSTNAME TARGET GETS A TRAILING DOT, for the same reason it does at
  * DigitalOcean: an unqualified target is relative to the zone.
@@ -221,6 +221,9 @@ export function hetznerWriter(): ZoneWriter {
 function valueFor(record: DesiredRecord): string {
   if (record.type === "MX") {
     return `${record.priority ?? 10} ${record.value}.`
+  }
+  if (record.type === "SRV") {
+    return `${record.priority ?? 0} ${record.weight ?? 0} ${record.port ?? 0} ${record.value}.`
   }
   if (record.type === "NS" || record.type === "CNAME") return `${record.value}.`
   return record.value
@@ -243,6 +246,13 @@ const sameValue = (type: string, stored: string, wanted: string) => {
       .replace(/^"(.*)"$/s, "$1")
       .replace(/\.$/, "")
   if (type === "TXT") return norm(stored) === norm(wanted)
+  if ((type === "MX" || type === "SRV") && !/^\d+\s+/.test(wanted.trim())) {
+    return (
+      norm(stored)
+        .replace(/^(?:\d+\s+)+/, "")
+        .toLowerCase() === norm(wanted).toLowerCase()
+    )
+  }
   return norm(stored).toLowerCase() === norm(wanted).toLowerCase()
 }
 

@@ -1,0 +1,1 @@
+ALTER TABLE "core"."domains" ADD COLUMN "receiving" boolean DEFAULT false NOT NULL;

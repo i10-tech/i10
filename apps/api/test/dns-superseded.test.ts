@@ -243,4 +243,100 @@ describe("the other record types", () => {
       stale([want()], [{ name: "send.example.com", type: "A", value: "1.2.3.4" }]),
     ).toEqual([])
   })
+
+  it("finds an SRV record pointing at an older host of ours, whether or not priority/weight/port are folded in", () => {
+    expect(
+      stale(
+        [
+          want({
+            name: "_imaps._tcp.example.com",
+            type: "SRV",
+            value: "mail2.i10.tech",
+            priority: 0,
+            weight: 1,
+            port: 993,
+          }),
+        ],
+        [
+          {
+            name: "_imaps._tcp.example.com",
+            type: "SRV",
+            value: "mail.i10.tech",
+          },
+          {
+            name: "_imaps._tcp.example.com",
+            type: "SRV",
+            value: "0 1 993 old-mail.i10.tech.",
+          },
+        ],
+      ),
+    ).toEqual(["mail.i10.tech", "0 1 993 old-mail.i10.tech."])
+  })
+})
+
+describe("when mailbox hosting is switched off", () => {
+  const sendingOnly: DesiredRecord[] = [
+    want({
+      name: "send.example.com",
+      type: "MX",
+      value: "feedback-smtp.eu-central-1.amazonses.com",
+      priority: 10,
+    }),
+    want({
+      name: "send.example.com",
+      type: "TXT",
+      value: "v=spf1 include:_spf.i10.tech ~all",
+    }),
+    want({
+      name: "_dmarc.example.com",
+      type: "TXT",
+      value: "v=DMARC1; p=none;",
+    }),
+  ]
+
+  it("removes our previously published apex MX and SRV receiving records", () => {
+    expect(
+      stale(sendingOnly, [
+        { name: "example.com", type: "MX", value: "mail.i10.tech" },
+        { name: "_imaps._tcp.example.com", type: "SRV", value: "mail.i10.tech" },
+        {
+          name: "_submissions._tcp.example.com",
+          type: "SRV",
+          value: "0 1 465 mail.i10.tech.",
+        },
+      ]),
+    ).toEqual(["mail.i10.tech", "mail.i10.tech", "0 1 465 mail.i10.tech."])
+  })
+
+  it("never removes a customer's own apex MX or SRV records", () => {
+    expect(
+      stale(sendingOnly, [
+        { name: "example.com", type: "MX", value: "aspmx.l.google.com" },
+        { name: "_imaps._tcp.example.com", type: "SRV", value: "imap.fastmail.com" },
+        {
+          name: "_submissions._tcp.example.com",
+          type: "SRV",
+          value: "0 1 465 smtp.fastmail.com.",
+        },
+      ]),
+    ).toEqual([])
+  })
+
+  it("never removes an MX on a host that only shares a parent with one of our includes", () => {
+    // `include:amazonses.com` walks up to `com`; `10 example.com` must not read as ours.
+    const withAmazonInclude = [
+      ...sendingOnly,
+      want({
+        name: "send.example.com",
+        type: "TXT",
+        value: "v=spf1 include:amazonses.com ~all",
+      }),
+    ]
+    expect(
+      stale(withAmazonInclude, [
+        { name: "example.com", type: "MX", value: "10 example.com" },
+        { name: "example.com", type: "MX", value: "10 mx.i10.tech" },
+      ]),
+    ).toEqual([])
+  })
 })

@@ -712,6 +712,7 @@ const domains = secrets
       dns: {
         spfInclude: env.MAIL_SPF_INCLUDE,
         nameservers: env.MAIL_NAMESERVERS,
+        mailHost: env.MAIL_HOSTNAME,
       },
       // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write in
       // the same transaction as everything else rather than a call to a
@@ -2084,6 +2085,7 @@ const app = createApp({
   },
   autoconfig: {
     hostedDomains: env.MAIL_DOMAINS,
+    db,
     mailHost: env.MAIL_HOSTNAME,
     // ⚠ NOT CONFIGURABLE, BECAUSE THEY ARE NOT OURS TO CHOOSE. These are the
     // two ports claimed with `hostPort` in the Stalwart StatefulSet and named

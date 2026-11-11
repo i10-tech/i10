@@ -269,5 +269,7 @@ function desiredFor(domain: Domain): DesiredRecord[] {
     // `Number("Auto")` - NaN, falling to a TTL of zero at the provider.
     ttl: record.ttl === "Auto" ? RECORD_TTL : Number(record.ttl) || RECORD_TTL,
     ...(record.priority === undefined ? {} : { priority: record.priority }),
+    ...(record.weight === undefined ? {} : { weight: record.weight }),
+    ...(record.port === undefined ? {} : { port: record.port }),
   }))
 }
