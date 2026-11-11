@@ -16,7 +16,9 @@ import { embedderModelName } from "../content/embed.js"
 import { objectStoreFrom } from "../content/object-store.js"
 import { assessmentStore } from "./store.js"
 import { boilerplateStore, trustSource, trustedTemplateStore } from "./trusted.js"
-import { asVerdict, webRiskChecker } from "./webrisk.js"
+import { asVerdict } from "./link-check.js"
+import { buildLinks } from "./link-config.js"
+import { providerHealth } from "./provider-health.js"
 
 /**
  * Building the risk engine (#170), once, the same way in every process that
@@ -59,6 +61,8 @@ export interface RiskSystemInput {
     | "LAYA_URL"
     | "LAYA_API_KEY"
     | "RISK_EMBEDDER"
+    | "RISK_LINK_PROVIDERS"
+    | "RISK_DNS_DAILY_LIMIT"
     | "WEBRISK_API_KEY"
     | "WEBRISK_DAILY_LIMIT"
     | "CONTENT_STORE_ENDPOINT"
@@ -76,6 +80,7 @@ export interface RiskSystemInput {
     level: "warning" | "error",
     context: Record<string, unknown>,
   ) => void
+  report?: RiskDeps["report"]
   log?: RiskDeps["log"]
 }
 
@@ -128,16 +133,24 @@ export function riskSystem(input: RiskSystemInput) {
     input.sender && input.consoleUrl
       ? riskNotices({ db, clerk, sender: input.sender, consoleUrl: input.consoleUrl })
       : undefined
-  const webRisk = webRiskChecker({
-    ...(env.WEBRISK_API_KEY ? { key: env.WEBRISK_API_KEY } : {}),
-    dailyLimit: env.WEBRISK_DAILY_LIMIT,
+  const health = providerHealth({
     ...(redis ? { redis } : {}),
+    ...(input.alert ? { alert: input.alert } : {}),
+    ...(log ? { log } : {}),
+  })
+  const { checker: links, webRisk } = buildLinks({
+    providers: env.RISK_LINK_PROVIDERS,
+    ...(env.WEBRISK_API_KEY ? { webRiskKey: env.WEBRISK_API_KEY } : {}),
+    webRiskDailyLimit: env.WEBRISK_DAILY_LIMIT,
+    dnsDailyLimit: env.RISK_DNS_DAILY_LIMIT,
+    ...(redis ? { redis } : {}),
+    health,
     ...(log ? { log } : {}),
   })
   const trustedTemplates = trustedTemplateStore(db)
   const boilerplate = boilerplateStore(db)
   /*
-   * ⚠ TWO SOURCES, ONE DIFFERENCE: WHO MAY SPEND THE WEB RISK BUDGET. The
+   * ⚠ TWO SOURCES, ONE DIFFERENCE: WHO MAY SPEND THE LINK-CHECK BUDGETS. The
    * five-minute fingerprint pass (content-store job) reads cached verdicts
    * only - it runs twelve times an hour over every workspace, and a hole's link
    * it cannot vouch for yet simply earns no credit until the hourly job, which
@@ -146,12 +159,12 @@ export function riskSystem(input: RiskSystemInput) {
   const cachedTrust = trustSource(db, {
     templates: trustedTemplates,
     boilerplate,
-    verdict: async (host) => asVerdict(await webRisk.cached(host)),
+    verdict: async (host) => asVerdict(await links.cached(host)),
   })
   const jobTrust = trustSource(db, {
     templates: trustedTemplates,
     boilerplate,
-    verdict: async (host) => asVerdict(await webRisk.lookup(host)),
+    verdict: async (host) => asVerdict(await links.lookup(host)),
   })
 
   const deps: RiskDeps = {
@@ -175,7 +188,9 @@ export function riskSystem(input: RiskSystemInput) {
       ...(log ? { log } : {}),
     },
     labels,
-    webRisk,
+    links,
+    ...(webRisk ? { webRisk } : {}),
+    health,
     trust: jobTrust,
     trustedTemplates,
     ...(notices
@@ -208,6 +223,7 @@ export function riskSystem(input: RiskSystemInput) {
           },
         }
       : {}),
+    ...(input.report ? { report: input.report } : {}),
     ...(log ? { log } : {}),
   }
 
@@ -231,6 +247,7 @@ export function riskSystem(input: RiskSystemInput) {
     identity,
     takeover,
     notices,
+    links,
     webRisk,
     trustedTemplates,
     boilerplate,

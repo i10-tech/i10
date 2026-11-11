@@ -1465,6 +1465,7 @@
               "domain_already_claimed",
               "plan_limit_exceeded",
               "password_required",
+              "mail_signin_off",
               "mailbox_already_exists",
               "restricted_api_key",
               "confirmation_required",

@@ -86,8 +86,6 @@ export interface FarmPeer {
 export interface IdentityFacts {
   firstSeen: Date | null
   firstCountry: string | null
-  latestCountry: string | null
-  latestTimezone: string | null
   countries: number
   torSeen: boolean
   hostingSeen: boolean
@@ -150,7 +148,8 @@ export interface Facts {
     tier: "strict" | "normal"
     tierSource: "default" | "score" | "staff"
     tierChangedAt: Date | null
-    tierDemotions90d: number
+    /** Demotions to strict by staff in 90 days; the score's own never count. */
+    staffDemotions90d: number
     holds180d: number
     upheldHolds: number
   }
@@ -203,20 +202,8 @@ export interface Facts {
     boilerplateNear: { name: string; similarity: number } | null
   } | null
 
-  /** Its nearest LABELLED neighbours by behaviour (pgvector). */
-  behaviour: {
-    labelled: number
-    abuse: number
-    legit: number
-    meanAbuseDistance: number | null
-    nearestDistance: number | null
-    medianDistance: number | null
-  } | null
-
   /** The workspace's own discovered templates: its normal mail. */
   templates: { established: number; recentMatchedShare: number | null } | null
-
-  model: { probability: number; version: number } | null
 }
 
 /** Recent content left out of the cross-workspace rules as trusted (#222). */
@@ -237,15 +224,12 @@ export interface TrustedCounts {
  */
 export interface SimilarityEvidence {
   signal: string
-  /** The embedder, `minhash-8x4` for fingerprints, `behaviour-v1` for behaviour. */
+  /** The embedder, or `minhash-8x4` for fingerprints. */
   model: string
   neighbours: number
   distinct_workspaces: number
   median_similarity: number | null
   best_similarity: number | null
-  /** Behaviour only: L2 distances between standardised feature vectors. */
-  median_distance?: number | null
-  nearest_distance?: number | null
   confirmed_abuse_neighbours: number
   known_template_matches: number
   boilerplate_matches: number

@@ -166,7 +166,8 @@ import { createStalwartCaller } from "./mail/stalwart.js"
 import { disableDomain } from "./mail/stalwart-domains.js"
 import { mailboxHosting } from "./domains/mailbox-hosting.js"
 import { planAssignmentStore } from "./metering/postgres.js"
-import { mailboxDirectory, paymentHold } from "./mailboxes/store.js"
+import { mailboxDirectory, managedMailLane, paymentHold } from "./mailboxes/store.js"
+import { consoleMailboxStore, consoleMailboxes } from "./mailboxes/console.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
 import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
 import { onTeamInboxEvent } from "./team-inboxes/sync.js"
@@ -1171,6 +1172,7 @@ const risk = riskSystem({
   ...(consoleUrl ? { consoleUrl } : {}),
   exempt: riskExempt,
   alert: (message, level, context) => captureMessage(message, level, context),
+  report: captureError,
   log,
 })
 const rescore = riskTrigger(risk.deps)
@@ -1638,6 +1640,7 @@ const mailboxProvisionDeps: ProvisionDeps = {
   capacity: postgresMeter(db),
   project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
   featureId: MAILBOXES,
+  mailLane: managedMailLane(db, identity),
   storage: mailboxStorage,
   canAllocate: canAllocateStorage,
 }
@@ -2596,6 +2599,12 @@ const app = createApp({
     members,
     teamInboxes: teamInboxService,
     mailboxStorage,
+    mailboxes: consoleMailboxes({
+      store: consoleMailboxStore(db),
+      roles: roleRows,
+      pool: async (tenantId) => (await mailboxStorage.overview(tenantId)).pool,
+      identity,
+    }),
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
