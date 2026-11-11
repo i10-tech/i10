@@ -28,6 +28,8 @@ import {
   type TrustSource,
   type TrustedTemplateStore,
 } from "./trusted.js"
+import type { LinkChecker, LinkCounts } from "./link-check.js"
+import { watched, type ProviderHealth } from "./provider-health.js"
 import type { WebRiskChecker } from "./webrisk.js"
 
 /**
@@ -93,8 +95,12 @@ export interface RiskDeps {
   /** Workspaces the score never touches: our own system tenant. */
   exempt?: ReadonlySet<string>
   laya?: { url: string; apiKey?: string }
-  /** Web Risk behind the daily budget (#222). Absent: links are never checked. */
+  /** The link checkers the deployment runs (#222). Absent: links are never checked. */
+  links?: LinkChecker
+  /** Web Risk's own checker, only for its budget in the run summary. */
   webRisk?: WebRiskChecker
+  /** Where outside sources report whether they answer; absent: nothing is recorded. */
+  health?: ProviderHealth
   /** Boilerplate and approved templates, for the content job (#222). */
   trust?: TrustSource
   /** Approvals, judged by their results every run (#222). */
@@ -377,7 +383,9 @@ async function classifyContent(tenantId: string, deps: RiskDeps) {
   )
   if (!m || !deps.laya) return null
   const text = `${m.subject}\n\n${m.text ?? (m.html ? htmlToText(m.html) : "")}`
-  const probability = await layaClassify(deps.laya, text, deps.fetch)
+  const probability = await watched(deps.health, "laya", () =>
+    layaClassify(deps.laya!, text, deps.fetch),
+  )
   if (probability === null) return null
   const at = new Date()
   await deps.redis
@@ -404,7 +412,9 @@ export interface RunSummary {
   enriched: number
   purged: number
   rdap: number
-  webRisk: number
+  linksChecked: number
+  /** Answers each link provider gave this run. */
+  links: Record<string, LinkCounts>
   /** Web Risk lookups counted against today's budget, after the run. */
   webRiskSpent: number | null
   unsafe: number
@@ -477,7 +487,8 @@ export async function runAll(
     enriched: 0,
     purged: 0,
     rdap: 0,
-    webRisk: 0,
+    linksChecked: 0,
+    links: {},
     webRiskSpent: null,
     unsafe: 0,
     ruleFailures: 0,
@@ -513,10 +524,11 @@ export async function runAll(
         const id = ids[cursor++]!
         try {
           summary.rdap += await refreshRdap(deps, id)
-          if (deps.webRisk) {
-            const r = await checkLinks(deps, id, deps.webRisk)
-            summary.webRisk += r.checked
+          if (deps.links) {
+            const r = await checkLinks(deps, id, deps.links)
+            summary.linksChecked += r.checked
             summary.unsafe += r.unsafe
+            summary.links = deps.links.stats()
           }
           await purgeContent(deps, id, now)
           // ⚠ CONTENT BEFORE THE SCORE, so this hour's vectors are the ones it
@@ -678,13 +690,13 @@ async function refreshRdap(deps: RiskDeps, tenantId: string): Promise<number> {
 }
 
 /**
- * Web Risk verdicts for this workspace's unchecked link hosts (last 7 days).
+ * Link verdicts for this workspace's unchecked link hosts (last 7 days).
  *
- * ⚠ THROUGH THE BUDGETED CHECKER (risk/webrisk.ts). A host it cannot answer
+ * ⚠ THROUGH THE BUDGETED CHECKER (risk/link-check.ts). A host it cannot answer
  * for - budget spent, quota refused, outage - stays unchecked and is asked
  * again next run; it is never recorded as clean.
  */
-async function checkLinks(deps: RiskDeps, tenantId: string, webRisk: WebRiskChecker) {
+async function checkLinks(deps: RiskDeps, tenantId: string, links: LinkChecker) {
   const rows = (await withTenant(deps.db, tenantId, (tx) =>
     tx.execute(sql`
       select distinct host from core.link_hosts
@@ -699,7 +711,7 @@ async function checkLinks(deps: RiskDeps, tenantId: string, webRisk: WebRiskChec
     // ⚠ A HOST'S VERDICT IS SHARED ACROSS WORKSPACES FOR A DAY, so a link
     // every customer sends (a CDN, a social network) costs one lookup, not one
     // per workspace, against the budget.
-    const verdict = await webRisk.lookup(host)
+    const verdict = await links.lookup(host)
     if (!verdict) continue
     await withTenant(deps.db, tenantId, (tx) =>
       tx.execute(sql`

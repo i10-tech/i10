@@ -336,8 +336,8 @@ describe("ruleset 2: velocity, similarity and templates", () => {
     expect(b.contributions.map((c) => c.rule)).not.toContain("trust.known_templates")
   })
 
-  it("is ruleset version 4 (model, behaviour and timezone rules removed; staff-only demotions)", () => {
-    expect(RULESET_VERSION).toBe(4)
+  it("is ruleset version 5 (#222: one link list is 45 points, two are 90)", () => {
+    expect(RULESET_VERSION).toBe(5)
   })
 })
 
