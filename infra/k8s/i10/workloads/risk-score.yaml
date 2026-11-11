@@ -42,7 +42,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: risk-score
-              image: ghcr.io/i10-tech/i10-api:prod-3692b056424a990b64c830a9113498ac8c91ee78@sha256:8f204583f2d6b6753219dff2982145f565113adbfd4da08721d4692216d5b725
+              image: ghcr.io/i10-tech/i10-api:prod-cc556fda435fa4076d18f4d6871ada951714e92d@sha256:af9f210787e0c8206f51bbca091d4c489d59ff559faa94298bae3784bd269918
               imagePullPolicy: Always
               command: ["bun", "dist/risk-score.js"]
               envFrom:
