@@ -12,7 +12,7 @@ import { holdStore } from "./holds.js"
 import { identityStore, takeoverResponder } from "./identity.js"
 import { labelStore } from "./labels.js"
 import { riskNotices } from "./notice.js"
-import { cachedContent, type RiskDeps } from "./runner.js"
+import type { RiskDeps } from "./runner.js"
 import { embedderModelName } from "../content/embed.js"
 import { objectStoreFrom } from "../content/object-store.js"
 import { forceShadow } from "./engine.js"
@@ -23,6 +23,7 @@ import { boilerplateStore, trustSource, trustedTemplateStore } from "./trusted.j
 import { asVerdict } from "./link-check.js"
 import { buildLinks } from "./link-config.js"
 import { providerHealth } from "./provider-health.js"
+import { buildJudge } from "./judge/config.js"
 
 /**
  * Building the risk engine (#170), once, the same way in every process that
@@ -63,8 +64,16 @@ export interface RiskSystemInput {
     | "METERING_FREE_PLAN_ID"
     | "SES_ENABLED"
     | "AWS_REGION"
-    | "LAYA_URL"
-    | "LAYA_API_KEY"
+    | "RISK_JUDGE_PROVIDER"
+    | "RISK_JUDGE_MODEL"
+    | "RISK_JUDGE_SECOND_MODEL"
+    | "RISK_JUDGE_CF_ACCOUNT_ID"
+    | "RISK_JUDGE_CF_API_TOKEN"
+    | "RISK_JUDGE_URL"
+    | "RISK_JUDGE_API_KEY"
+    | "RISK_JUDGE_DAILY_LIMIT"
+    | "RISK_JUDGE_TENANT_DAILY_LIMIT"
+    | "RISK_JUDGE_SECOND_DAILY_LIMIT"
     | "RISK_EMBEDDER"
     | "RISK_LINK_PROVIDERS"
     | "RISK_DNS_DAILY_LIMIT"
@@ -162,6 +171,11 @@ export function riskSystem(input: RiskSystemInput) {
     health,
     ...(log ? { log } : {}),
   })
+  const judge = buildJudge(env, {
+    ...(redis ? { redis } : {}),
+    health,
+    ...(log ? { log } : {}),
+  })
   const trustedTemplates = trustedTemplateStore(db)
   const boilerplate = boilerplateStore(db)
   /*
@@ -232,14 +246,7 @@ export function riskSystem(input: RiskSystemInput) {
     },
     ...(redis ? { redis } : {}),
     ...(input.exempt ? { exempt: input.exempt } : {}),
-    ...(env.LAYA_URL
-      ? {
-          laya: {
-            url: env.LAYA_URL,
-            ...(env.LAYA_API_KEY ? { apiKey: env.LAYA_API_KEY } : {}),
-          },
-        }
-      : {}),
+    ...(judge ? { judge } : {}),
     ...(input.report ? { report: input.report } : {}),
     ...(log ? { log } : {}),
   }
@@ -255,7 +262,7 @@ export function riskSystem(input: RiskSystemInput) {
     snapshots,
     decisions,
     ...(deps.contentModel ? { contentModel: deps.contentModel } : {}),
-    content: (tenantId) => cachedContent(redis, tenantId),
+    ...(judge ? { judgeModel: judge.model } : {}),
   }
 
   const takeover = redis

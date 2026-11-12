@@ -1,3 +1,5 @@
+import type { Answers } from "../src/risk/judge/providers.js"
+import { summariseJudged, type JudgedRow } from "../src/risk/judge/verdict.js"
 import type { Counts, Facts, FarmPeer, IdentityFacts } from "../src/risk/types.js"
 
 /** Nothing left out as trusted (#222). */
@@ -91,6 +93,33 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
     ...over,
   }
 }
+
+/** Every question answered `p`, or as given. */
+export const answers = (p: number, over: Partial<Answers> = {}): Answers => ({
+  phishing: p,
+  spam: p,
+  impersonates_brand: p,
+  asks_for_credentials: p,
+  is_marketing: p,
+  ...over,
+})
+
+/** A judged content, as the facts loader reads it. */
+export const judgedRow = (exact: string, over: Partial<JudgedRow> = {}): JudgedRow => ({
+  exact,
+  answers: answers(0.02),
+  secondAnswers: null,
+  truncated: false,
+  messages: 10,
+  ...over,
+})
+
+/** The judged-content facts for these rows, as loadFacts would build them. */
+export const judged = (
+  rows: readonly JudgedRow[],
+  days = { seen: rows.length, judged: rows.length, capped: 0 },
+): NonNullable<Facts["content"]> =>
+  summariseJudged("@cf/cloudflare/clef-flash", rows, days)
 
 export function identity(over: Partial<IdentityFacts> = {}): IdentityFacts {
   return {

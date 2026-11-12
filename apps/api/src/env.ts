@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { parseKeyring } from "./content/seal.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
+import { JUDGE_PROVIDERS, judgeSettingsProblems } from "./risk/judge/config.js"
 import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
 import { RULES } from "./risk/rules.js"
 import { SYSTEM_FROM } from "./system-mail.js"
@@ -1258,10 +1259,43 @@ const schema = z.object({
   WEBRISK_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(3000),
 
   /**
-   * Laya, the content classifier (docs/decisions/risk.md). It needs a GPU host
-   * we do not run on the CX33, so it is off until this points somewhere.
+   * The content judge (docs/decisions/risk.md, "The content judge"): a
+   * decision model asked typed questions about each distinct content once.
+   * `workers-ai` is Cloudflare's hosted Clef (needs RISK_JUDGE_CF_ACCOUNT_ID
+   * and RISK_JUDGE_CF_API_TOKEN); `systemone` is a self-hosted Laya or Jev at
+   * RISK_JUDGE_URL. Unset: nothing is judged, and the judge rules score nothing.
+   *
+   * ⚠ A HOSTED PROVIDER RECEIVES MAIL SUBJECTS AND TEXT. It is a processor and
+   * must be on the subprocessor list before this is set in production.
    */
-  LAYA_URL: z.url().optional(),
+  RISK_JUDGE_PROVIDER: z.enum(JUDGE_PROVIDERS).optional(),
+  /** Default `@cf/cloudflare/clef-flash` (workers-ai) or `jev-1` (systemone). */
+  RISK_JUDGE_MODEL: z.string().trim().min(1).optional(),
+  /** Asked when the first model is unsure. Default `@cf/cloudflare/clef` on workers-ai; `none` turns it off. */
+  RISK_JUDGE_SECOND_MODEL: z.string().trim().min(1).optional(),
+  RISK_JUDGE_CF_ACCOUNT_ID: z.string().trim().min(1).optional(),
+  /** A Cloudflare API token with Workers AI read permission. */
+  RISK_JUDGE_CF_API_TOKEN: z.string().min(1).optional(),
+  RISK_JUDGE_URL: z.url().optional(),
+  RISK_JUDGE_API_KEY: z.string().min(1).optional(),
+  /**
+   * Judgements per UTC day: every workspace together, each workspace, and
+   * second opinions, counted in Redis before each call. ⚠ THE PROVIDER BILLS
+   * PER TOKEN AND LIMITS NOTHING FOR US; these are the bill's ceiling.
+   */
+  RISK_JUDGE_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(5000),
+  RISK_JUDGE_TENANT_DAILY_LIMIT: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .default(200),
+  RISK_JUDGE_SECOND_DAILY_LIMIT: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(1_000_000)
+    .default(500),
 
   /**
    * Which embedder turns content into vectors (content/embed.ts): `minilm`,
@@ -1270,7 +1304,6 @@ const schema = z.object({
    * files are missing - vectors are tagged with their model and never mixed.
    */
   RISK_EMBEDDER: z.enum(["minilm", "hash"]).default("minilm"),
-  LAYA_API_KEY: z.string().min(1).optional(),
 })
 
 /**
@@ -1380,6 +1413,9 @@ const validated = schema.superRefine((env, ctx) => {
         `with some set it looks configured and stores nothing.`,
     })
   }
+
+  for (const problem of judgeSettingsProblems(env))
+    ctx.addIssue({ code: "custom", path: [problem.path], message: problem.message })
 
   const github = [
     "GITHUB_APP_ID",

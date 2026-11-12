@@ -1,27 +1,20 @@
 import { randomUUID } from "node:crypto"
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
-import { htmlToText } from "./fingerprint.js"
 import { act, type ActDeps } from "./act.js"
 import { decide } from "./decide.js"
 import { evaluate } from "./engine.js"
 import { loadFacts, type OwnerInfo } from "./facts.js"
-import {
-  ipinfoLookup,
-  layaClassify,
-  rdapRegistered,
-  refreshTorExits,
-  type Fetch,
-} from "./intel.js"
+import { ipinfoLookup, rdapRegistered, refreshTorExits, type Fetch } from "./intel.js"
 import type { LabelStore } from "./labels.js"
+import type { ContentJudge } from "./judge/judge.js"
+import { judgementStore } from "./judge/store.js"
 import { registrable, RULES } from "./rules.js"
 import { SNAPSHOT_RETENTION_DAYS, type SnapshotStore } from "./snapshot.js"
-import { bandRank, type Band, type Facts, type Rule } from "./types.js"
+import { bandRank, type Band, type Rule } from "./types.js"
 import type { Embedder } from "../content/embed.js"
 import { analyseContent } from "../content/job.js"
 import type { ContentStore } from "../content/object-store.js"
-import { restoreContent } from "../content/packs.js"
-import { restoreBodies } from "../content/restore.js"
 import { purgeVectors } from "../content/vectors.js"
 import {
   reviewTrusted,
@@ -30,7 +23,7 @@ import {
   type TrustedTemplateStore,
 } from "./trusted.js"
 import type { LinkChecker, LinkCounts } from "./link-check.js"
-import { watched, type ProviderHealth } from "./provider-health.js"
+import type { ProviderHealth } from "./provider-health.js"
 import type { WebRiskChecker } from "./webrisk.js"
 
 /**
@@ -61,6 +54,8 @@ export interface RiskLockRedis {
   ): Promise<unknown>
   eval(script: string, keys: number, ...args: string[]): Promise<unknown>
   sadd(key: string, ...members: string[]): Promise<number>
+  incr(key: string): Promise<number>
+  expire(key: string, seconds: number): Promise<unknown>
   spop(key: string, count: number): Promise<string[]>
   get(key: string): Promise<string | null>
   setex(key: string, seconds: number, value: string): Promise<unknown>
@@ -93,13 +88,14 @@ export interface RiskDeps {
   /** The model name to compare vectors under, where no embedder is loaded (the API). */
   contentModel?: string
   /**
-   * Where data-URI images moved to (#168). The content passes and the sample
-   * the classifier reads restore them; null until any have moved.
+   * Where data-URI images moved to (#168). The content passes restore them;
+   * null until any have moved.
    */
   objects?: ContentStore | null
   /** Workspaces the score never touches: our own system tenant. */
   exempt?: ReadonlySet<string>
-  laya?: { url: string; apiKey?: string }
+  /** The content judge (risk/judge). Absent: nothing is judged and `content` is null. */
+  judge?: ContentJudge
   /** The link checkers the deployment runs (#222). Absent: links are never checked. */
   links?: LinkChecker
   /** Web Risk's own checker, only for its budget in the run summary. */
@@ -134,6 +130,7 @@ export interface ScoreResult {
 }
 
 const LOCK_SECONDS = 120
+export const JUDGEMENT_RETENTION_DAYS = 30
 const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
 export const DIRTY_KEY = "risk:dirty"
 
@@ -185,18 +182,8 @@ async function scoreLocked(
     ...(deps.embedder || deps.contentModel
       ? { contentModel: deps.embedder?.model ?? deps.contentModel! }
       : {}),
+    ...(deps.judge ? { judgeModel: deps.judge.model } : {}),
   })
-
-  // ── Content classifier: only where there is already reason to look ──
-  if (
-    deps.laya &&
-    (bandRank(previous?.band ?? "low") >= 1 || facts.farm.peers.length > 0)
-  ) {
-    facts.content = await classifyContent(tenantId, deps).catch((error: unknown) => {
-      deps.log?.warn?.({ err: error, tenantId }, "content classifier unavailable")
-      return null
-    })
-  }
 
   // ⚠ `shadow` AND `cleared` ARE TAKEN OFF HERE, so the assessment `decide`
   // receives carries neither even at run time.
@@ -259,7 +246,6 @@ async function scoreLocked(
     trigger,
     at: now,
   })
-  // After the classifier, so a replay sees the content verdict this score saw.
   // A lost snapshot costs replay one row, never the score.
   await deps.snapshots
     .record({
@@ -356,84 +342,6 @@ async function autoLabels(
   }
 }
 
-/**
- * The classifier's answer the last score cached, without asking it again: what
- * a staff decision sees of the content (decisions.ts).
- */
-export async function cachedContent(
-  redis: Pick<RiskLockRedis, "get"> | undefined,
-  tenantId: string,
-): Promise<Facts["content"]> {
-  const cached = await redis?.get(`risk:content:${tenantId}`).catch(() => null)
-  if (!cached) return null
-  const c = JSON.parse(cached) as { probability: number; at: string }
-  return { probability: c.probability, at: new Date(c.at) }
-}
-
-/** One recent message, classified, cached for six hours. */
-async function classifyContent(tenantId: string, deps: RiskDeps) {
-  const cacheKey = `risk:content:${tenantId}`
-  const cached = await cachedContent(deps.redis, tenantId)
-  if (cached) return cached
-  const rows = await withTenant(deps.db, tenantId, async (tx) => {
-    const raw = (await tx.execute(sql`
-      select m.id as message_id, m.subject, b.text, b.html, b.template_id, b.template_values,
-             b.inline_objects, b.pack_id, b.pack_offset, b.pack_length, b.body_key
-        from core.messages m join core.message_bodies b on b.message_id = m.id
-       where m.tenant_id = ${tenantId}::uuid
-         and m.created_at > now() - interval '24 hours'
-       order by m.created_at desc
-       limit 1
-    `)) as unknown as {
-      subject: string
-      text: string | null
-      html: string | null
-      template_id: string | null
-      template_values: unknown
-      message_id: string
-      inline_objects: string[] | null
-      pack_id: string | null
-      pack_offset: string | number | null
-      pack_length: number | null
-      body_key: string | null
-    }[]
-    // A compacted body reads like a full one (#171).
-    return restoreBodies(
-      tx,
-      raw.map((r) => ({
-        ...r,
-        templateId: r.template_id,
-        templateValues: r.template_values,
-      })),
-    )
-  })
-  // And a packed body (#188) and its images (#168) are back in place.
-  const [m] = await restoreContent(
-    deps.objects ?? null,
-    tenantId,
-    rows.slice(0, 1).map((r) => ({
-      ...r,
-      messageId: r.message_id,
-      inlineObjects: r.inline_objects,
-      packId: r.pack_id,
-      packOffset: r.pack_offset,
-      packLength: r.pack_length,
-      bodyKey: r.body_key,
-    })),
-  )
-  if (!m || !deps.laya) return null
-  const text = `${m.subject}\n\n${m.text ?? (m.html ? htmlToText(m.html) : "")}`
-  const probability = await watched(deps.health, "laya", () =>
-    layaClassify(deps.laya!, text, deps.fetch),
-  )
-  if (probability === null) return null
-  const at = new Date()
-  await deps.redis
-    ?.setex(cacheKey, 6 * 3600, JSON.stringify({ probability, at }))
-    .catch(() => {})
-  return { probability, at }
-}
-
 // ─── The hourly run ──────────────────────────────────────────────────────────
 
 export interface HousekeepingDeps {
@@ -453,6 +361,8 @@ export interface RunSummary {
   purged: number
   /** Fact snapshots older than SNAPSHOT_RETENTION_DAYS, deleted this run. */
   snapshotsPurged: number
+  /** Content judgements older than JUDGEMENT_RETENTION_DAYS, deleted this run. */
+  judgementsPurged: number
   rdap: number
   linksChecked: number
   /** Answers each link provider gave this run. */
@@ -468,6 +378,8 @@ export interface RunSummary {
     embedded: number
     /** Messages newly credited to an approved template (#222). */
     trusted: number
+    /** Distinct contents the content judge answered for. */
+    judged: number
   }
   /** Approvals taken away this run, for bounces, complaints or abuse (#222). */
   revoked: number
@@ -529,6 +441,7 @@ export async function runAll(
     enriched: 0,
     purged: 0,
     snapshotsPurged: 0,
+    judgementsPurged: 0,
     rdap: 0,
     linksChecked: 0,
     links: {},
@@ -539,6 +452,7 @@ export async function runAll(
       scanned: 0,
       embedded: 0,
       trusted: 0,
+      judged: 0,
     },
     revoked: 0,
   }
@@ -560,6 +474,13 @@ export async function runAll(
     .catch((error: unknown) => {
       deps.log?.error?.({ err: error }, "could not purge fact snapshots")
       deps.report?.(error, { phase: "risk-snapshot-purge" })
+      return 0
+    })
+  // A judgement is redone once it is a month old, if the content is still sent.
+  summary.judgementsPurged = await judgementStore(deps.db)
+    .purge(new Date(now.getTime() - JUDGEMENT_RETENTION_DAYS * 86_400_000))
+    .catch((error: unknown) => {
+      deps.log?.error?.({ err: error }, "could not purge content judgements")
       return 0
     })
 
@@ -598,12 +519,22 @@ export async function runAll(
                       store.credit(id, counts),
                   }
                 : {}),
+              ...(deps.judge
+                ? {
+                    judge: {
+                      judge: deps.judge,
+                      judgements: judgementStore(deps.db),
+                      ...(deps.redis ? { seenRedis: deps.redis } : {}),
+                    },
+                  }
+                : {}),
               now,
               ...(deps.log ? { log: deps.log } : {}),
             })
             summary.content.scanned += c.scanned
             summary.content.embedded += c.embedded
             summary.content.trusted += c.trusted
+            summary.content.judged += c.judged
             await purgeVectors(deps.db, id, now)
           } catch (error) {
             deps.log?.warn?.({ err: error, tenantId: id }, "content pass failed")

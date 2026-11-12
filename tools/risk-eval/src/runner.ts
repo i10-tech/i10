@@ -110,6 +110,7 @@ export async function runJudge(
           subject: mail.subject,
           text: mail.text,
           ...(mail.html !== undefined ? { html: mail.html } : {}),
+          ...(mail.from_domain !== undefined ? { fromDomain: mail.from_domain } : {}),
         }
         const result = validateAnswers(await opts.judge.judge(input))
         await appendFile(path, `${JSON.stringify({ id: mail.id, answers: result })}\n`)

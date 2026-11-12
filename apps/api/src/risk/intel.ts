@@ -139,39 +139,3 @@ export async function webRiskLookup(
   const body = (await res.json()) as { threat?: { threatTypes?: string[] } }
   return body.threat?.threatTypes ?? []
 }
-
-/**
- * Laya's judgement of one email: the probability it is phishing, a scam or
- * unsolicited bulk mail. See docs/decisions/risk.md for why this is optional.
- */
-export async function layaClassify(
-  { url, apiKey }: { url: string; apiKey?: string },
-  text: string,
-  fetchImpl: Fetch = fetch,
-): Promise<number | null> {
-  const res = await fetchImpl(`${url.replace(/\/$/, "")}/v1/systemone`, {
-    method: "POST",
-    signal: timed(15_000),
-    headers: {
-      "content-type": "application/json",
-      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      state: { body: text.slice(0, 4_000) },
-      questions: {
-        abusive: {
-          type: "noul",
-          instructions:
-            "Is this email phishing, a scam, malware delivery, or unsolicited bulk mail " +
-            "sent to people who did not ask for it?",
-        },
-      },
-    }),
-  })
-  if (!res.ok) return null
-  // A `noul` answer is `{ type: "noul", noul: P(yes) }`: the probability is the
-  // answer itself, not a `probabilities` map (that is `choice` and `score`).
-  const body = (await res.json()) as { answers?: { abusive?: { noul?: unknown } } }
-  const p = body.answers?.abusive?.noul
-  return typeof p === "number" && p >= 0 && p <= 1 ? p : null
-}

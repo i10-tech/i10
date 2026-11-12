@@ -12,7 +12,17 @@ import type {
   Rule,
   ShadowContribution,
 } from "../src/risk/types.js"
-import { ABUSE, baseFacts, daysAgo, LEGIT, NOW, peer } from "./risk-fixtures.js"
+import {
+  ABUSE,
+  answers,
+  baseFacts,
+  daysAgo,
+  judged,
+  judgedRow,
+  LEGIT,
+  NOW,
+  peer,
+} from "./risk-fixtures.js"
 
 /**
  * Fact snapshots, replay and shadow rules (#170). See docs/decisions/risk.md,
@@ -82,13 +92,13 @@ describe("serialising facts", () => {
           { type: "x", impact: "high", openedAt: daysAgo(3), resolvedAt: null },
         ],
       },
-      content: { probability: 0.8, at: daysAgo(0.1) },
+      content: judged([judgedRow("a1", { answers: answers(0.9) })]),
     })
     const back = reviveFacts(throughJsonb(f))
     expect(back.now).toBeInstanceOf(Date)
     expect(back.ses.pauses[0]!.at).toBeInstanceOf(Date)
     expect(back.ses.findings[0]!.openedAt.getTime()).toBe(daysAgo(3).getTime())
-    expect(back.content!.at).toBeInstanceOf(Date)
+    expect(back.content).toEqual(f.content)
     expect(back.links.unsafe).toEqual([])
   })
 })
@@ -179,7 +189,15 @@ describe("replay", () => {
       differs: snapshots.length,
     })
     const alreadyCritical = snapshots.filter((s) => s.band === "critical").length
-    expect(report.shadow).toEqual([
+    // The shipped judge rules are listed too; nothing in these fixtures is judged.
+    expect(report.shadow.filter((s) => s.rule.startsWith("content.judge."))).toEqual(
+      RULES.filter((r) => r.mode === "shadow").map((r) => ({
+        rule: r.id,
+        fired: 0,
+        wouldChangeBand: 0,
+      })),
+    )
+    expect(report.shadow.filter((s) => s.rule === LOUD_SHADOW.id)).toEqual([
       {
         rule: LOUD_SHADOW.id,
         fired: snapshots.length,
@@ -299,7 +317,12 @@ describe("shadow rules", () => {
     )
   })
 
-  it("no rule in the shipped ruleset is in shadow", () => {
-    expect(RULES.filter((r) => r.mode === "shadow")).toEqual([])
+  it("ships only the content judge's rules in shadow", () => {
+    expect(RULES.filter((r) => r.mode === "shadow").map((r) => r.id)).toEqual([
+      "content.judge.phishing",
+      "content.judge.impersonates_brand",
+      "content.judge.asks_for_credentials",
+      "content.judge.spam",
+    ])
   })
 })

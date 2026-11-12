@@ -92,6 +92,20 @@ html? })` returning probabilities for any subset of the questions) and add it to
 changes (`my-judge-v2`). `keyword-v1` is a crude baseline and `random-v1` is
 seeded noise that a correct harness must score at chance.
 
+`cf-clef-flash-v1` and `cf-clef-v1` ask Cloudflare's Clef models exactly what
+the API's content judge asks: `src/judges/contract.ts` is a byte-identical copy
+of `apps/api/src/risk/judge/contract.ts`, and an API test fails when they
+differ. They call a paid service, so measure a small cap first:
+
+```sh
+export I10_RISK_EVAL_CF_ACCOUNT_ID=<account id>
+export I10_RISK_EVAL_CF_API_TOKEN=<token with Workers AI read>
+bun src/cli.ts run --judge cf-clef-flash-v1 --split dev --cap 200 --concurrency 4
+```
+
+Changing the question text means renaming both judges (`-v2`), or the cache
+serves answers to the old questions.
+
 ## What is scored
 
 Only `phishing` and `spam` have ground truth. `phishing` is true for phishing

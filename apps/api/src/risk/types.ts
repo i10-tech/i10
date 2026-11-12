@@ -1,3 +1,5 @@
+import type { JudgeQuestion } from "./judge/contract.js"
+
 /**
  * The shapes the risk engine passes around (#170). See docs/decisions/risk.md.
  *
@@ -180,7 +182,8 @@ export interface Facts {
 
   links: { unsafe: { host: string; verdict: string; day: string }[] }
 
-  content: { probability: number; at: Date } | null
+  /** What the content judge made of the workspace's recent content (risk/judge). */
+  content: JudgedContent | null
 
   /** How fast the person behind this workspace, and people sharing their device or network, create things. */
   actor: {
@@ -247,6 +250,38 @@ export interface StaffDecision {
   revokedAt: Date | null
   /** The concerns staff cleared. Empty unless a release or a pin. */
   covers: Concern[]
+}
+
+/** One question across the workspace's judged content (risk/judge/verdict.ts). */
+export interface JudgedQuestion {
+  /** Distinct contents the judge found unsafe on this question. */
+  contents: number
+  /** Their messages over the window. */
+  messages: number
+  /** Of those contents, the ones a second opinion was needed for and not had. */
+  unconfirmed: number
+  /** The highest probability among all judged contents, or null with none. */
+  highest: number | null
+  /** The unsafe contents' exact fingerprints, sorted: the rules' `content:` keys. */
+  exacts: string[]
+}
+
+/**
+ * The workspace's content sent in the last 7 days that the judge has answered
+ * for, under one model.
+ *
+ * ⚠ CONTENT, NOT MESSAGES: each distinct content was judged once, however many
+ * times it went out. Approved templates and boilerplate are never judged.
+ */
+export interface JudgedContent {
+  model: string
+  judged: number
+  messages: number
+  /** Judged contents whose text was cut to fit. */
+  truncated: number
+  /** Distinct contents the judge pass saw, judged, and left for a workspace's spent daily cap. */
+  days: { seen: number; judged: number; capped: number }
+  questions: Record<JudgeQuestion, JudgedQuestion>
 }
 
 /** Recent content left out of the cross-workspace rules as trusted (#222). */
