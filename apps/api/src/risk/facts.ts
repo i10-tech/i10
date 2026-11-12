@@ -3,6 +3,7 @@ import { withTenant, type Database } from "../db/client.js"
 import { reputationStore } from "../ses-status/reputation-store.js"
 import { looksRandomLabel, registrable, subdomainOf } from "./rules.js"
 import { BAND_COUNT } from "./fingerprint.js"
+import { judgementStore } from "./judge/store.js"
 import { boilerplateStore } from "./trusted.js"
 import type {
   Concern,
@@ -39,6 +40,11 @@ export interface FactsDeps {
    * similarity layer is not consulted and `similarity` is null.
    */
   contentModel?: string
+  /**
+   * The content judge's first model (risk/judge). Absent: no judge is
+   * configured and `content` is null.
+   */
+  judgeModel?: string
 }
 
 type Row = Record<string, unknown>
@@ -208,6 +214,7 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     trusted,
     boilerplateNear,
     decisions,
+    content,
   ] = await Promise.all([
     identityFacts(db, owner, now),
     ownerWorkspaces(db, owner),
@@ -230,6 +237,9 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
         )
       : Promise.resolve(null),
     decisionsInEffect(db, tenantId, now),
+    deps.judgeModel
+      ? soft(judgementStore(db).facts(tenantId, deps.judgeModel, now))
+      : Promise.resolve(null),
   ])
   const trustedNow: TrustedCounts = trusted ?? { template: 0, boilerplate: 0 }
 
@@ -328,7 +338,7 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
         day: String(u.day),
       })),
     },
-    content: null,
+    content,
     actor,
     similarity: similarity
       ? { ...similarity, trusted: trustedNow, boilerplateNear: boilerplateNear ?? null }

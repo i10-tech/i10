@@ -565,7 +565,7 @@ describe("provider health", () => {
     expect(alerts).toHaveLength(1)
     await health.success("cloudflare")
     expect(infos).toEqual([
-      { o: { provider: "cloudflare" }, m: "link check provider recovered" },
+      { o: { provider: "cloudflare" }, m: "risk provider recovered" },
     ])
     for (let i = 0; i < 5; i++) {
       await health.failure("cloudflare", "timeout")

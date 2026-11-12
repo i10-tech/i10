@@ -1688,6 +1688,13 @@ export const messageBodies = core.table(
      * rule is that nothing beyond a hash runs on the send path.
      */
     fingerprintedAt: timestamp("fingerprinted_at", { withTimezone: true }),
+    /**
+     * When the hourly risk run's content judge resolved this body: judged its
+     * content, found it judged already, trusted, or too short to fingerprint
+     * (content/judging.ts). Any status, like `fingerprinted_at`: mail queued
+     * for tonight is judged before it goes.
+     */
+    judgedAt: timestamp("judged_at", { withTimezone: true }),
 
     /**
      * Where this body went when it left Postgres (#188): a pack in R2 at
@@ -1734,6 +1741,10 @@ export const messageBodies = core.table(
     index("message_bodies_unfingerprinted_idx")
       .on(t.tenantId, t.createdAt)
       .where(sql`${t.fingerprintedAt} is null`),
+    // What the content judge has not resolved yet.
+    index("message_bodies_unjudged_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(sql`${t.judgedAt} is null`),
     // Retention deletes by tenant and age; the content-store job finds work
     // the same way.
     index("message_bodies_tenant_created_idx").on(t.tenantId, t.createdAt),
@@ -4247,6 +4258,92 @@ export const riskStaffDecisions = core.table(
     index("risk_staff_decisions_tenant_idx").on(t.tenantId, t.decidedAt),
     index("risk_staff_decisions_snapshot_idx").on(t.snapshotId),
     pgPolicy("risk_staff_decisions_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/** Why a judgement has, or has not, a second model's answer (risk/judge/verdict.ts). */
+export const riskJudgeSecond = core.enum("risk_judge_second", [
+  "not_needed",
+  "answered",
+  "unavailable",
+  "over_budget",
+  "not_configured",
+])
+
+/**
+ * The content judge's answers, once per distinct content a workspace sent
+ * (risk/judge, content/judging.ts).
+ *
+ * ⚠ KEYED BY THE EXACT FINGERPRINT AND THE MODEL, NOT BY MESSAGE: a template
+ * sent ten thousand times is one row and cost one call. Deleted 30 days after
+ * it was judged, and judged again if the content is still being sent.
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, BEHIND DEFINERS. The answers describe the
+ * workspace's own mail, but exact probabilities shown to a sender are a
+ * gradient to tune against: send, read the number, reword, repeat. What a
+ * workspace may see is the category of a hold, never these.
+ */
+export const riskContentJudgements = core.table(
+  "risk_content_judgements",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    exact: text("exact").notNull(),
+    /** The first model, which answered `answers`. */
+    model: text("model").notNull(),
+    /** `{ <question>: P(yes) }` for every question in risk/judge/contract.ts. */
+    answers: jsonb("answers").notNull(),
+    /** Whether the state was cut to fit, by us or by the service. */
+    truncated: boolean("truncated").notNull(),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    secondStatus: riskJudgeSecond("second_status").notNull(),
+    secondModel: text("second_model"),
+    secondAnswers: jsonb("second_answers"),
+    secondTruncated: boolean("second_truncated"),
+    secondInputTokens: integer("second_input_tokens"),
+    secondOutputTokens: integer("second_output_tokens"),
+    judgedAt: timestamp("judged_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.exact, t.model] }),
+    index("risk_content_judgements_judged_idx").on(t.judgedAt),
+    pgPolicy("risk_content_judgements_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/**
+ * What the content judge pass met per workspace per UTC day: distinct
+ * contents seen, judged, and left unjudged because the workspace's own daily
+ * budget was spent. A workspace whose content is mostly unique is itself a
+ * signal, and this is where a later rule reads it.
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, like the judgements.
+ */
+export const riskContentJudgeDays = core.table(
+  "risk_content_judge_days",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    seen: integer("seen").notNull().default(0),
+    judged: integer("judged").notNull().default(0),
+    capped: integer("capped").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day] }),
+    index("risk_content_judge_days_day_idx").on(t.day),
+    pgPolicy("risk_content_judge_days_deny", {
       for: "all",
       using: sql`false`,
       withCheck: sql`false`,

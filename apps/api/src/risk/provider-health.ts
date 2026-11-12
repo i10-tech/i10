@@ -101,13 +101,13 @@ export function providerHealth(opts: HealthOptions): ProviderHealth {
           "NX",
         )
         if (!first) return
-        alert?.(`Link check provider "${provider}" has been failing`, "error", {
+        alert?.(`Risk provider "${provider}" has been failing`, "error", {
           provider,
           failures,
           since: new Date(since).toISOString(),
           reason,
         })
-        log?.warn?.({ provider, failures, reason }, "link check provider is down")
+        log?.warn?.({ provider, failures, reason }, "risk provider is down")
       } catch (error) {
         log?.warn?.({ err: error, provider }, "could not record a provider failure")
       }
@@ -124,7 +124,7 @@ export function providerHealth(opts: HealthOptions): ProviderHealth {
         if (!(await redis.get(k.fails))) return
         const alerted = await redis.get(k.alerted)
         await redis.del(k.fails, k.since, k.alerted)
-        if (alerted) log?.info?.({ provider }, "link check provider recovered")
+        if (alerted) log?.info?.({ provider }, "risk provider recovered")
       } catch (error) {
         log?.warn?.({ err: error, provider }, "could not record a provider recovery")
       }

@@ -12,11 +12,16 @@
  *   bun run risk-admin tier     <tenant> strict|normal --by <you> --reason "<why>"
  *   bun run risk-admin label    <tenant> abuse|legit --by <you> [--note "<text>"]
  *   bun run risk-admin linked   <clerk user id>
+ *   bun run risk-admin judge    <tenant> [--limit 50]
  *   bun run risk-admin replay   [--since <iso date>] [--until <iso date>] [--tenant <id>] [--json]
  *
  * `replay` re-scores the kept fact snapshots (default: the last 30 days) with
  * the rules in this checkout and the current RISK_SHADOW_RULES, and prints what
  * would change. It writes nothing and calls no outside service.
+ *
+ * `judge` lists the content judge's recent judgements for a workspace: the
+ * fingerprint, the model, every answer, the second opinion and whether the
+ * text was cut. ⚠ STAFF ONLY: never paste these numbers to a customer.
  *
  * Trusted content (#222):
  *
@@ -65,11 +70,15 @@ import {
 import { evaluate } from "./risk/engine.js"
 import { loadFacts } from "./risk/facts.js"
 import { formatReport, replaySnapshot, summarise } from "./risk/replay.js"
-import { cachedContent, scoreTenant } from "./risk/runner.js"
+import { scoreTenant } from "./risk/runner.js"
+import { JUDGE_QUESTION_IDS } from "./risk/judge/contract.js"
+import { judgementStore } from "./risk/judge/store.js"
+import { JUDGE_THRESHOLD, UNSURE_BAND } from "./risk/judge/verdict.js"
 import { RULESET_VERSION } from "./risk/rules.js"
 import {
   CATEGORY_TEXT,
   type Category,
+  type Facts,
   type ClearedContribution,
   type ShadowContribution,
 } from "./risk/types.js"
@@ -230,6 +239,27 @@ function report(r: StaffDecisionResult) {
   for (const c of left) console.log(`  not cleared: ${c.rule} (${c.points})`)
 }
 
+/** The judged-content summary `explain` prints: what the judge rules read. */
+function printJudged(content: Facts["content"]) {
+  if (!content) {
+    console.log("\ncontent judge: no judge configured, or nothing judged")
+    return
+  }
+  const d = content.days
+  console.log(
+    `\ncontent judge (${content.model}), last 7 days: ${content.judged} contents judged in ${content.messages} messages, ${content.truncated} cut to fit; pass saw ${d.seen}, judged ${d.judged}, capped ${d.capped}`,
+  )
+  for (const q of JUDGE_QUESTION_IDS) {
+    const s = content.questions[q]
+    console.log(
+      `  ${q.padEnd(22)} unsafe ${s.contents} (${s.messages} messages, ${s.unconfirmed} unconfirmed), highest ${s.highest ?? "-"}` +
+        (s.exacts.length
+          ? `\n        ${s.exacts.map((e) => `content:${e}`).join(" ")}`
+          : ""),
+    )
+  }
+}
+
 function parseHoles(spec: string | undefined): Record<string, number> {
   const out: Record<string, number> = {}
   for (const part of (spec ?? "").split(",").filter(Boolean)) {
@@ -250,8 +280,8 @@ try {
         freePlanId: env.METERING_FREE_PLAN_ID,
         ownerInfo: risk.deps.ownerInfo,
         ...(risk.deps.contentModel ? { contentModel: risk.deps.contentModel } : {}),
+        ...(risk.deps.judge ? { judgeModel: risk.deps.judge.model } : {}),
       })
-      facts.content = await cachedContent(cache, id)
       const a = evaluate(facts, rules)
       const [current, hold, history] = await Promise.all([
         risk.assessments.current(id),
@@ -326,6 +356,7 @@ try {
       console.log(
         `\ntrusted content, last 7 days: ${facts.farm.trusted.template} approved-template, ${facts.farm.trusted.boilerplate} boilerplate`,
       )
+      printJudged(facts.content)
       for (const f of a.failures)
         console.log(`\nrule ${f.rule} threw: ${String(f.error)}`)
       console.log(
@@ -346,6 +377,35 @@ try {
           console.log(
             `        cleared, no effect: ${cleared.map((c) => `${c.rule}:${c.wouldAdd} by ${c.clearedBy}`).join(" ")}`,
           )
+      }
+      break
+    }
+    case "judge": {
+      const id = tenant()
+      const limit = Number(flags.get("limit") ?? 50)
+      if (!Number.isInteger(limit) || limit < 1)
+        fail("--limit must be a positive whole number")
+      const rows = await judgementStore(db).list(id, limit)
+      console.log(
+        `\n${rows.length} judgement(s), newest first (threshold ${JUDGE_THRESHOLD}, second opinion between ${UNSURE_BAND.from} and ${UNSURE_BAND.to}):`,
+      )
+      const fmt = (a: Record<string, number> | null) =>
+        a
+          ? JUDGE_QUESTION_IDS.map((q) => `${q}=${a[q]?.toFixed(2) ?? "?"}`).join(" ")
+          : "-"
+      for (const r of rows) {
+        console.log(
+          `\n  ${r.judgedAt.toISOString()}  content:${r.exact}  ${r.model}${r.truncated ? "  TRUNCATED" : ""}` +
+            (r.inputTokens !== null
+              ? `  ${r.inputTokens}+${r.outputTokens} tokens`
+              : ""),
+        )
+        console.log(`        ${fmt(r.answers)}`)
+        console.log(
+          `        second opinion: ${r.secondStatus}${r.secondModel ? ` (${r.secondModel})` : ""}` +
+            (r.secondAnswers ? `  ${fmt(r.secondAnswers)}` : "") +
+            (r.secondTruncated ? "  TRUNCATED" : ""),
+        )
       }
       break
     }

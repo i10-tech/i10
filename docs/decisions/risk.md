@@ -95,10 +95,12 @@ exposed under GDPR Article 22. So:
   have learned its own labels back (target leakage). With no labels it could
   never activate anyway. Any later model starts from features that are not
   the label sources.
-- **Laya** (a 421M-parameter text classifier) is a content classifier behind
-  `LAYA_URL`, run off the send path on sampled mail from already-elevated
-  workspaces. It needs a GPU host we do not have on the CX33, so it is off
-  until that URL exists.
+- **The content judge** (ruleset 7) asks a hosted or self-hosted decision
+  model typed questions about each distinct content a workspace sends, once
+  per content, off the send path. Its rules run in shadow until replay has
+  measured them. It replaced a Laya classifier that read one sampled message
+  from already-elevated workspaces and was never deployed. See "The content
+  judge" below.
 
 ---
 
@@ -262,7 +264,8 @@ which carry tokens) and checked hourly by the link providers (section 4 below):
 the public security DNS resolvers by default, Google Web Risk when listed and
 keyed (the free Safe Browsing API and Spamhaus's free mirrors are
 non-commercial only). Web Risk, or both resolvers agreeing, is critical; one
-resolver alone is 45 points and no floor. Laya, when configured.
+resolver alone is 45 points and no floor. The content judge's answers, in
+shadow (see "The content judge").
 
 **Payment and trust:** paid tenure, MFA or passkey on the owner, the owner's
 email on one of the workspace's own verified domains, long clean volume.
@@ -585,8 +588,8 @@ minutes ago, raises one alert through the engine's `alert` (Sentry), then at mos
 one a day while it stays down, and logs when it recovers; one success resets the
 count. A 403 from Web Risk counts, which is the case that went unnoticed. A
 provider that is not configured, has no key, has spent its budget or is parked
-made no call and is never "failing". The Laya classifier call is reported the
-same way. The run summary carries each provider's clean, unsafe, unknown and
+made no call and is never "failing". The content judge's calls are reported the
+same way, per model (`judge:<model>`). The run summary carries each provider's clean, unsafe, unknown and
 skipped counts.
 
 **Web Risk, unchanged.** A budget is ours, because Google's quotas are per
@@ -609,8 +612,8 @@ letting it act on customers. Three pieces fix that; none changes scoring, so
   band, contributions and shadow contributions. Written whenever the event log
   writes an event (first assessment, band change, a swing of 10+ points, an
   action), and otherwise for the first score of each UTC day, so a quiet
-  workspace costs one row a day. Taken after the content classifier, so replay
-  sees the verdict the score saw. Dates are stored as `{"$date": iso}` and
+  workspace costs one row a day. The judged-content summary is part of the
+  facts, so replay sees the judgements the score saw. Dates are stored as `{"$date": iso}` and
   revived by `reviveFacts`. **Deny-all**, reached only through the definers in
   migration 0153: a workspace can never read its own snapshot.
 - **Retention: 180 days**, purged by the hourly run beside the identity purge.
@@ -700,6 +703,89 @@ for a while, and the memory stops it re-raising what was cleared afterwards.
 
 ---
 
+## The content judge (ruleset 7)
+
+The content signal used to be a Laya classifier asked one yes/no question
+about one sampled message, only for workspaces already elevated or in a farm,
+cached for six hours. Laya was never deployed, so it never ran, and it would
+have read almost none of the mail. It is gone, with `LAYA_URL`.
+
+**A decision model, behind a port.** `risk/judge`: a judge takes one email
+(subject, text, sender display name and domain, a differing Reply-To domain,
+linked hosts) and answers five typed `noul` questions with a probability
+each, and writes no text: `phishing`, `spam`, `impersonates_brand`,
+`asks_for_credentials`, `is_marketing`. Two providers speak the same System
+One shape:
+
+- `workers-ai`: Cloudflare's REST API, `POST /client/v4/accounts/{id}/ai/run/{model}`,
+  for `@cf/cloudflare/clef-flash` (9B, 24,576-token context) and
+  `@cf/cloudflare/clef` (27B, 65,536). The body names the model
+  (`clef-flash` or `clef`); the answer comes wrapped in
+  `{ result, success, errors }`.
+- `systemone`: a self-hosted Laya, or TypeSafe's Jev, at `POST {url}/v1/systemone`.
+
+The question text lives in `risk/judge/contract.ts`, with a byte-identical copy
+in `tools/risk-eval/src/judges/contract.ts` so the evaluation harness measures
+exactly what runs; an API test fails when they differ.
+
+**The email is hostile data.** It travels only in `state.email`, a JSON field
+of its own, never inside a question's instructions, and every instruction
+tells the model to treat the email as evidence and disregard anything in it
+about how it should be judged. Each field is capped (text at 12,000
+characters, which stays under 24K tokens in any script; 25 link hosts), and a
+cut is recorded as `truncated`, on the state and on the judgement.
+
+**Once per content.** The content half of the hourly job (`content/job.ts`,
+`content/judging.ts`) reads bodies of any status, newest first, groups them by
+exact fingerprint, and judges only content with no judgement under the
+current model: a template sent ten thousand times costs one call. Mail queued
+for tonight is judged before it goes. Content that is known boilerplate or a
+staff-approved template (the same trust matcher as the other passes, failing
+closed) is never judged. A body is stamped `judged_at` once its content is
+resolved; content a budget or an outage refused stays unstamped and is tried
+next hour, within the 7-day window.
+
+**Budgets, before each call, in Redis.** Per workspace per UTC day (200), for
+everybody together (5,000) and, separately, for second opinions (500); failed
+calls count. No Redis, no calls. A failing model is parked for five minutes,
+and every call is reported to provider health. A workspace that spends its
+budget is itself a signal: `core.risk_content_judge_days` records per day the
+distinct contents seen, judged and capped, and the facts carry their 7-day
+sums for a later rule.
+
+**The second opinion.** When the first model's `phishing` or
+`impersonates_brand` probability is in the unsure band (0.35 to 0.75), the
+second model is asked too and both answers are stored. A question is unsafe
+only when both are above 0.5. If the second model is not configured,
+unavailable or over its budget, the first answer stands and is counted as
+unconfirmed. The second opinion can only take suspicion away.
+
+**Facts and rules, in shadow.** `Facts.content` summarises the judged content
+the workspace sent in the last 7 days: per question, the distinct contents
+and messages found unsafe, how many were unconfirmed, the highest probability,
+and the fingerprints concerned, which become `content:<exact>` evidence keys
+so decision memory clears a content once and counts new content in full. Four
+rules read it, all in **shadow**, with proposed points that replay will
+measure: `content.judge.phishing` 30 (floor `high` once any phishing content
+is confirmed), `content.judge.impersonates_brand` 20,
+`content.judge.asks_for_credentials` 10, `content.judge.spam` 12.
+`is_marketing` has no rule yet. Their evidence is counts only, because
+contributions are stored where the workspace can read them.
+
+**Never negative.** Mail text is attacker-controlled, so a judge answer may
+add suspicion and never remove it: the rules clamp at zero, and a property
+test over random judgements and every scenario proves no judged content lowers
+a score or a band, even with the rules promoted, and that in shadow nothing
+judged moves the score, the band, a floor or an action.
+
+**Staff only.** `core.risk_content_judgements` and the day counts are deny-all,
+behind the definers in migration 0157: exact probabilities shown to a sender
+would be a gradient to tune against. `risk-admin explain` shows the summary
+and the shadow results; `risk-admin judge <workspace>` lists recent
+judgements with both models' answers.
+
+---
+
 ## Account takeover is a separate response
 
 Impossible travel usually means stolen credentials, not a spammer. When it
@@ -721,9 +807,9 @@ day emails the owner as a possible leak.
   flagged group of workspaces"), so the rules cannot be gamed.
 - **Appeals before #217 exist:** the hold email says to reply. Staff use
   `bun run risk-admin` (explain, hold, release, pin, label, clusters,
-  since #222 boilerplate and templates, and since ruleset 6 decisions,
-  revoke-decision and cases), which goes through the same doors as the score
-  and requires `--by` and `--reason`.
+  since #222 boilerplate and templates, since ruleset 6 decisions,
+  revoke-decision and cases, and since ruleset 7 `judge`), which goes through
+  the same doors as the score and requires `--by` and `--reason`.
 
 ---
 
@@ -748,27 +834,47 @@ day emails the owner as a possible leak.
   pause origins, and the name of the nearest boilerplate entry. The first
   country outlives the 90-day `identity_events` window it was derived from;
   it is kept so a replay scores the identity rules as they ran.
+- **Content judge (ruleset 7): mail leaves i10 when a hosted provider is set.**
+  Until now content analysis ran entirely inside our own processes: the
+  embedder is local (MiniLM on WebAssembly) and fingerprints, templates and
+  vectors stay in our database. With `RISK_JUDGE_PROVIDER=workers-ai` the
+  subject, the body text (up to 12,000 characters), the sender's display name
+  and domain, the Reply-To domain and the linked hosts of each distinct
+  content are sent to Cloudflare Workers AI for judging. Cloudflare lists the
+  Clef models as zero data retention, but it is still a **processor**:
+  Cloudflare (Workers AI) must be added to the subprocessor list, and the
+  privacy policy updated, **before** this is enabled in production. A
+  self-hosted `systemone` (Laya) on our own hosts keeps mail inside i10; Jev
+  is a third-party processor like Cloudflare. Judgements are kept 30 days,
+  staff only, and carry probabilities, never mail text.
 
 ---
 
 ## Configuration
 
-| Variable                   | Default | What it does                                                     |
-| -------------------------- | ------- | ---------------------------------------------------------------- |
-| `RISK_ENABLED`             | `true`  | the whole engine; off means nothing scores or acts               |
-| `RISK_ACT_TIERS`           | `true`  | free tier moves                                                  |
-| `RISK_ACT_HOLDS`           | `true`  | automatic holds                                                  |
-| `RISK_ACT_SES_POLICY`      | `true`  | SES Strict policy for high-band paid                             |
-| `RISK_ACT_TAKEOVER`        | `true`  | revoking sessions on impossible travel                           |
-| `RISK_FARM_TRIPWIRE`       | `5`     | distinct workspaces per fingerprint before an immediate re-score |
-| `RISK_SHADOW_RULES`        | empty   | live rule ids forced into shadow (the brake); unknown ids refuse |
-| `CLIENT_CONTEXT_SECRET`    | unset   | shared with the console; unset means no forwarded identity       |
-| `IPINFO_TOKEN`             | unset   | network enrichment                                               |
-| `RISK_LINK_PROVIDERS`      | `dns`   | link checkers: `dns` and/or `webrisk` (empty runs none)          |
-| `RISK_DNS_DAILY_LIMIT`     | `5000`  | DNS queries per resolver per UTC day, counted in Redis           |
-| `WEBRISK_API_KEY`          | unset   | Web Risk key; used only if `webrisk` is a listed provider        |
-| `WEBRISK_DAILY_LIMIT`      | `3000`  | Web Risk lookups per UTC day, counted in Redis (#222)            |
-| `LAYA_URL`, `LAYA_API_KEY` | unset   | content classifier                                               |
+| Variable                                              | Default      | What it does                                                              |
+| ----------------------------------------------------- | ------------ | ------------------------------------------------------------------------- |
+| `RISK_ENABLED`                                        | `true`       | the whole engine; off means nothing scores or acts                        |
+| `RISK_ACT_TIERS`                                      | `true`       | free tier moves                                                           |
+| `RISK_ACT_HOLDS`                                      | `true`       | automatic holds                                                           |
+| `RISK_ACT_SES_POLICY`                                 | `true`       | SES Strict policy for high-band paid                                      |
+| `RISK_ACT_TAKEOVER`                                   | `true`       | revoking sessions on impossible travel                                    |
+| `RISK_FARM_TRIPWIRE`                                  | `5`          | distinct workspaces per fingerprint before an immediate re-score          |
+| `RISK_SHADOW_RULES`                                   | empty        | live rule ids forced into shadow (the brake); unknown ids refuse          |
+| `CLIENT_CONTEXT_SECRET`                               | unset        | shared with the console; unset means no forwarded identity                |
+| `IPINFO_TOKEN`                                        | unset        | network enrichment                                                        |
+| `RISK_LINK_PROVIDERS`                                 | `dns`        | link checkers: `dns` and/or `webrisk` (empty runs none)                   |
+| `RISK_DNS_DAILY_LIMIT`                                | `5000`       | DNS queries per resolver per UTC day, counted in Redis                    |
+| `WEBRISK_API_KEY`                                     | unset        | Web Risk key; used only if `webrisk` is a listed provider                 |
+| `WEBRISK_DAILY_LIMIT`                                 | `3000`       | Web Risk lookups per UTC day, counted in Redis (#222)                     |
+| `RISK_JUDGE_PROVIDER`                                 | unset        | content judge: `workers-ai` or `systemone`; unset judges nothing          |
+| `RISK_JUDGE_MODEL`                                    | per provider | `@cf/cloudflare/clef-flash` (workers-ai), `jev-1` (systemone)             |
+| `RISK_JUDGE_SECOND_MODEL`                             | per provider | `@cf/cloudflare/clef` (workers-ai), none (systemone); `none` turns it off |
+| `RISK_JUDGE_CF_ACCOUNT_ID`, `RISK_JUDGE_CF_API_TOKEN` | unset        | Workers AI account and token (workers-ai only)                            |
+| `RISK_JUDGE_URL`, `RISK_JUDGE_API_KEY`                | unset        | Laya or Jev base URL and optional key (systemone only)                    |
+| `RISK_JUDGE_DAILY_LIMIT`                              | `5000`       | judgements per UTC day, every workspace together                          |
+| `RISK_JUDGE_TENANT_DAILY_LIMIT`                       | `200`        | judgements per workspace per UTC day                                      |
+| `RISK_JUDGE_SECOND_DAILY_LIMIT`                       | `500`        | second opinions per UTC day                                               |
 
 Every action has its own switch so a bad rule can be turned off without a
 revert.

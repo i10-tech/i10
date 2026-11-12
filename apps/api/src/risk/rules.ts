@@ -24,7 +24,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 6
+export const RULESET_VERSION = 7
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -629,6 +629,75 @@ const identityRules: Rule[] = [
   ),
 ]
 
+// ─── The content judge (risk/judge): shadow until replay has measured it ─────
+
+/**
+ * Proposed points per judge rule, and the floor for confirmed phishing.
+ *
+ * ⚠ PROPOSALS, ALL IN SHADOW. They are recorded with every score and move
+ * nothing; each is promoted on its own, by a code change and a
+ * `RULESET_VERSION` bump, once replay over the snapshots has shown what it
+ * would have done. `is_marketing` has no rule: it is stored for later.
+ *
+ * ⚠ NEVER NEGATIVE. The judge reads mail the sender wrote, so its answers may
+ * add suspicion and must never take any away; `judgeRule` clamps at zero and
+ * the scenario tests prove no judged content lowers a score.
+ */
+export const JUDGE_POINTS = {
+  phishing: 30,
+  impersonates_brand: 20,
+  asks_for_credentials: 10,
+  spam: 12,
+} as const
+export const CONFIRMED_PHISHING_FLOOR: Band = "high"
+
+function judgeRule(
+  question: keyof typeof JUDGE_POINTS,
+  summary: string,
+  floor?: Band,
+): Rule {
+  return {
+    ...rule(`content.judge.${question}`, "content", summary, (f) => {
+      const q = f.content?.questions[question]
+      if (!q || q.contents === 0) return null
+      const confirmed = q.contents - q.unconfirmed
+      // ⚠ COUNTS ONLY IN THE EVIDENCE: it is stored where the workspace can
+      // read it, and a probability there is a score to tune against.
+      return hit(
+        Math.max(0, JUDGE_POINTS[question]),
+        { contents: q.contents, messages: q.messages, unconfirmed: q.unconfirmed },
+        {
+          keys: q.exacts.map((e) => `content:${e}`),
+          ...(floor && confirmed > 0 ? { floor } : {}),
+        },
+      )
+    }),
+    mode: "shadow",
+  }
+}
+
+function judgeRules(): Rule[] {
+  return [
+    judgeRule(
+      "phishing",
+      "The content judge found recent mail to be phishing",
+      CONFIRMED_PHISHING_FLOOR,
+    ),
+    judgeRule(
+      "impersonates_brand",
+      "The content judge found recent mail posing as a well-known organisation it is not sent from",
+    ),
+    judgeRule(
+      "asks_for_credentials",
+      "The content judge found recent mail asking recipients for credentials or payment details",
+    ),
+    judgeRule(
+      "spam",
+      "The content judge found recent mail to be unsolicited bulk mail",
+    ),
+  ]
+}
+
 // ─── Content and links ───────────────────────────────────────────────────────
 
 const contentRules: Rule[] = [
@@ -667,21 +736,7 @@ const contentRules: Rule[] = [
     },
     true,
   ),
-  rule(
-    "content.classifier",
-    "content",
-    "A content classifier judged recent mail phishing or unsolicited bulk",
-    (f) => {
-      const p = f.content?.probability ?? 0
-      const points = graded([
-        [p >= 0.9, 30],
-        [p >= 0.75, 12],
-      ] as const)
-      return points === null
-        ? null
-        : hit(points, { probability: Math.round(p * 100) / 100 })
-    },
-  ),
+  ...judgeRules(),
 ]
 
 // ─── Earned trust: negative points ───────────────────────────────────────────

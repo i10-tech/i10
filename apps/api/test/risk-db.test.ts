@@ -3,7 +3,11 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import * as schema from "../src/db/schema.js"
 import { assertRlsSubject, withTenant, type Database } from "../src/db/client.js"
-import { riskFactSnapshots, riskStaffDecisions } from "../src/db/core.js"
+import {
+  riskContentJudgements,
+  riskFactSnapshots,
+  riskStaffDecisions,
+} from "../src/db/core.js"
 import { sendingTierStore } from "../src/metering/tiers.js"
 import { recordContent } from "../src/risk/content.js"
 import { loadFacts } from "../src/risk/facts.js"
@@ -22,6 +26,13 @@ import { reviveFacts, snapshotStore } from "../src/risk/snapshot.js"
 import type { Rule } from "../src/risk/types.js"
 import { assessmentStore } from "../src/risk/store.js"
 import type { ResolvedEmail } from "../src/send/accept.js"
+import type { JudgeEmail } from "../src/risk/judge/contract.js"
+import type {
+  ContentJudge,
+  JudgeOutcome,
+  StoredJudgement,
+} from "../src/risk/judge/judge.js"
+import { judgementStore } from "../src/risk/judge/store.js"
 
 /**
  * The risk engine against a real Postgres, as the role the API runs as (#170).
@@ -86,9 +97,13 @@ class FakeRedis {
   }
   async sadd(k: string, ...m: string[]) {
     const s = this.sets.get(k) ?? new Set()
+    const before = s.size
     m.forEach((x) => s.add(x))
     this.sets.set(k, s)
-    return m.length
+    return s.size - before
+  }
+  async expire() {
+    return 1
   }
   async spop(k: string, count: number) {
     const s = [...(this.sets.get(k) ?? [])].slice(0, count)
@@ -1543,4 +1558,242 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(nearest?.name).toBe(`test/near-${RUN}`)
     expect(nearest!.similarity).toBeGreaterThan(0.99)
   })
+
+  // ── The content judge (risk/judge, content/judging.ts) ──
+
+  /** What a judge stores: phishing, brand and credentials at `p`. */
+  const storedJudgement = (p: number): StoredJudgement => ({
+    model: "test/judge",
+    answers: {
+      phishing: p,
+      spam: 0.03,
+      impersonates_brand: p,
+      asks_for_credentials: p,
+      is_marketing: 0.4,
+    },
+    truncated: false,
+    usage: { inputTokens: 100, outputTokens: 5 },
+    second: {
+      status: "not_needed",
+      model: null,
+      answers: null,
+      truncated: null,
+      usage: null,
+    },
+  })
+
+  /** A judge that answers from the subject, or with `outcome`, and records what it was asked. */
+  function fakeJudge(phishy: (subject: string) => boolean, outcome?: JudgeOutcome) {
+    const asked: { tenantId: string; email: JudgeEmail }[] = []
+    const judge: ContentJudge = {
+      model: "test/judge",
+      secondModel: null,
+      async judge(tenantId, email) {
+        asked.push({ tenantId, email })
+        return (
+          outcome ?? {
+            status: "judged",
+            judgement: storedJudgement(phishy(email.subject) ? 0.95 : 0.03),
+          }
+        )
+      },
+    }
+    return { judge, asked }
+  }
+
+  async function seedMail(
+    tenantId: string,
+    subject: string,
+    html: string,
+    status: "queued" | "sent",
+  ) {
+    await owner`
+      with m as (
+        insert into core.messages (tenant_id, from_address, to_addresses, reply_to, subject, status, queue, sent_at)
+        values (${tenantId}, ${"Billing Team <billing@judge.example>"}, '{a@example.com}',
+                '{help@elsewhere.example}', ${subject}, ${status}, 'transactional',
+                ${status === "sent" ? new Date() : null})
+        returning id, created_at, tenant_id
+      )
+      insert into core.message_bodies (message_id, created_at, tenant_id, html)
+      select id, created_at, tenant_id, ${html} from m`
+  }
+
+  it("keeps content judgements and their day counts deny-all: a workspace cannot read or forge its own", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    expect(
+      await judgementStore(db).save(id, "e1", storedJudgement(0.9), new Date()),
+    ).toBe(true)
+    const own = await withTenant(db, id, (tx) =>
+      tx.select().from(riskContentJudgements),
+    )
+    expect(own).toHaveLength(0)
+    expect(await app`select * from core.risk_content_judgements`).toHaveLength(0)
+    expect(await app`select * from core.risk_content_judge_days`).toHaveLength(0)
+    let refused = false
+    try {
+      await withTenant(db, id, (tx) =>
+        tx.insert(riskContentJudgements).values({
+          tenantId: id,
+          exact: "forged",
+          model: "test/judge",
+          answers: {},
+          truncated: false,
+          secondStatus: "not_needed",
+        }),
+      )
+    } catch {
+      refused = true
+    }
+    expect(refused).toBe(true)
+    // The first judgement wins; a second save of the same content writes nothing.
+    expect(
+      await judgementStore(db).save(id, "e1", storedJudgement(0.1), new Date()),
+    ).toBe(false)
+  })
+
+  it("judges each distinct content once, of any status, skips boilerplate, and scores it only in shadow", async () => {
+    const { boilerplateStore, trustSource } = await import("../src/risk/trusted.js")
+    const { parseSubmission } = await import("../src/content/trust.js")
+    const { analyseContent } = await import("../src/content/job.js")
+    const { fingerprintStored } = await import("../src/risk/content.js")
+    const skeleton = parseSubmission({
+      html: BOILER("{{name}}"),
+      text: null,
+      holes: { name: 40 },
+    })
+    if ("error" in skeleton) throw new Error(skeleton.error)
+    await boilerplateStore(db).add({
+      name: `test/judge-${RUN}`,
+      skeleton,
+      model: null,
+      embedding: null,
+      reason: "integration test",
+      by: "risk-db",
+    })
+    const t = await trustTenant(`judge-${RUN}.com`)
+    const promo =
+      "<p>Our spring collection is here: linen shirts, light jackets and canvas shoes, all made in small batches by the same workshop as last year.</p>"
+    const phish =
+      "<p>Your mailbox will be closed today. Confirm your password at https://login-verify.example/m to keep receiving mail.</p>"
+    // ⚠ QUEUED, NOT SENT: the judge does not wait for delivery.
+    for (let i = 0; i < 3; i++) await seedMail(t, "Spring collection", promo, "queued")
+    await seedMail(t, "Mailbox closing", phish, "sent")
+    await seedMail(t, "Reset your password", BOILER("Ada"), "sent")
+    const trust = trustSource(db, { verdict: async () => "clean", ttlMs: 0 })
+    await fingerprintStored(t, { db, threshold: 99, trust })
+
+    const redis = new FakeRedis()
+    const fake = fakeJudge((s) => s === "Mailbox closing")
+    const judgements = judgementStore(db)
+    const deps = {
+      db,
+      trust,
+      judge: { judge: fake.judge, judgements, seenRedis: redis },
+    }
+    expect((await analyseContent(t, deps)).judged).toBe(2)
+    expect(fake.asked.map((a) => a.email.subject).sort()).toEqual([
+      "Mailbox closing",
+      "Spring collection",
+    ])
+    const sent = fake.asked.find((a) => a.email.subject === "Mailbox closing")!.email
+    expect(sent).toMatchObject({
+      senderName: "Billing Team",
+      senderDomain: "judge.example",
+      replyToDomain: "elsewhere.example",
+      linkHosts: ["login-verify.example"],
+    })
+    const [left] =
+      await owner`select count(*)::int as n from core.message_bodies where tenant_id = ${t} and judged_at is null`
+    expect(left!.n).toBe(0)
+
+    // Once per content: nothing new, nothing asked.
+    await seedMail(t, "Spring collection", promo, "queued")
+    expect((await analyseContent(t, deps)).judged).toBe(0)
+    expect(fake.asked).toHaveLength(2)
+
+    await fingerprintStored(t, { db, threshold: 99, trust })
+    const facts = await loadFacts(t, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+      judgeModel: "test/judge",
+    })
+    expect(facts.content!.judged).toBe(2)
+    expect(facts.content!.messages).toBe(5)
+    expect(facts.content!.days).toEqual({ seen: 2, judged: 2, capped: 0 })
+    expect(facts.content!.questions.phishing.contents).toBe(1)
+    expect(facts.content!.questions.phishing.messages).toBe(1)
+    expect(facts.content!.questions.spam.contents).toBe(0)
+
+    // The hourly score sees it, in shadow only.
+    const withJudge = await scoreTenant(
+      t,
+      "test",
+      riskDeps(redis, { judge: fake.judge }),
+    )
+    const current = await assessmentStore(db).current(t)
+    const without = evaluate({ ...facts, content: null }, RULES)
+    expect(withJudge.score).toBe(without.score)
+    expect(
+      current!.contributions.some((c) => c.rule.startsWith("content.judge.")),
+    ).toBe(false)
+    expect((current!.shadow as { rule: string }[]).map((s) => s.rule)).toContain(
+      "content.judge.phishing",
+    )
+
+    const listed = await judgements.list(t, 10)
+    expect(listed).toHaveLength(2)
+    expect(
+      listed.every((r) => r.secondStatus === "not_needed" && r.inputTokens === 100),
+    ).toBe(true)
+  })
+
+  it("leaves content a spent budget refused for later, and counts it once a day", async () => {
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t)
+    await seedMail(
+      t,
+      "Weekly notes",
+      "<p>Notes from the allotment society: compost turning on Saturday, seed swap the week after, and the shed key moves to plot nine.</p>",
+      "sent",
+    )
+    const redis = new FakeRedis()
+    const capped = fakeJudge(() => false, { status: "capped" })
+    const { analyseContent } = await import("../src/content/job.js")
+    const deps = {
+      db,
+      judge: { judge: capped.judge, judgements: judgementStore(db), seenRedis: redis },
+    }
+    await analyseContent(t, deps)
+    await analyseContent(t, deps)
+    expect(capped.asked).toHaveLength(2)
+    const [left] =
+      await owner`select count(*)::int as n from core.message_bodies where tenant_id = ${t} and judged_at is null`
+    expect(left!.n).toBe(1)
+    const [day] =
+      await owner`select seen, judged, capped from core.risk_content_judge_days where tenant_id = ${t}`
+    expect(day).toEqual({ seen: 1, judged: 0, capped: 1 })
+  })
+
+  it("purges judgements in the hourly run once they are a month old", async () => {
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t)
+    const j = { judgement: storedJudgement(0.9) }
+    await judgementStore(db).save(
+      t,
+      "old",
+      j.judgement,
+      new Date(Date.now() - 31 * 86_400_000),
+    )
+    await judgementStore(db).save(t, "new", j.judgement, new Date())
+    const summary = await runAll(riskDeps())
+    expect(summary.judgementsPurged).toBeGreaterThanOrEqual(1)
+    expect((await judgementStore(db).list(t, 10)).map((r) => r.exact)).toEqual(["new"])
+    // ⚠ THE HOURLY RUN SCORES EVERY WORKSPACE THIS SUITE MADE, which outlasts the default.
+  }, 60_000)
 })

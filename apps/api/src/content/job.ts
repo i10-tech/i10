@@ -6,6 +6,7 @@ import type { Embedder } from "./embed.js"
 import type { ContentStore } from "./object-store.js"
 import { restoreContent } from "./packs.js"
 import { restoreBodies } from "./restore.js"
+import { judgeContent, type JudgeDeps } from "./judging.js"
 import { classify, trustMark } from "./trust.js"
 import { embeddedAlready, storeContentVectors } from "./vectors.js"
 
@@ -19,6 +20,8 @@ import { embeddedAlready, storeContentVectors } from "./vectors.js"
  *      known boilerplate (#222), and marks their vectors so the similarity
  *      definers leave them out;
  *   2. embeds content it has not embedded yet, into pgvector.
+ * Then, when a content judge is configured, it judges content of any status
+ * that has no judgement yet (content/judging.ts), with the same trust.
  *
  * ⚠ TEMPLATE COMPACTION IS NOT HERE ANY MORE (#171). It moved to the
  * content-store job (content/compact.ts), which runs every five minutes, for
@@ -51,6 +54,8 @@ export interface ContentJobDeps {
   trust?: TrustSource
   /** Adds credited messages to each approved template's count. */
   creditTemplates?: (counts: ReadonlyMap<string, number>) => Promise<void>
+  /** The content judge and where its answers go. Absent: nothing is judged. */
+  judge?: Pick<JudgeDeps, "judge" | "judgements" | "seenRedis">
   log?: { warn?: (o: object, m: string) => void }
 }
 
@@ -59,6 +64,8 @@ export interface ContentJobResult {
   embedded: number
   /** Bodies newly credited to an approved template. */
   trusted: number
+  /** Distinct contents the judge answered for this pass. */
+  judged: number
 }
 
 interface Body {
@@ -80,7 +87,7 @@ export async function analyseContent(
 ): Promise<ContentJobResult> {
   const { db } = deps
   const now = deps.now ?? new Date()
-  const result: ContentJobResult = { scanned: 0, embedded: 0, trusted: 0 }
+  const result: ContentJobResult = { scanned: 0, embedded: 0, trusted: 0, judged: 0 }
 
   const stored = await withTenant(db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
@@ -146,19 +153,20 @@ export async function analyseContent(
     trustedBy: null,
   }))
   result.scanned = bodies.length
-  if (bodies.length === 0) return result
 
   // ── 1. Trusted content (#222) ──
   //
   // ⚠ THE SAME MATCHER AS THE FINGERPRINT PASS, ON THE STORED BODY. Here the
   // verdict callback may spend the Web Risk budget, so a hole's link the
   // five-minute pass could not vouch for yet gets its answer.
-  const trust = deps.trust
-    ? await deps.trust.forTenant(tenantId).catch((error: unknown) => {
-        deps.log?.warn?.({ err: error, tenantId }, "could not load trusted content")
-        return null
-      })
-    : null
+  const trust =
+    deps.trust && (bodies.length > 0 || deps.judge)
+      ? await deps.trust.forTenant(tenantId).catch((error: unknown) => {
+          deps.log?.warn?.({ err: error, tenantId }, "could not load trusted content")
+          return null
+        })
+      : null
+  if (bodies.length === 0) return { ...result, judged: await judge() }
   const credits = new Map<string, number>()
   const toCredit: Body[] = []
   if (trust && trust.entries.length > 0) {
@@ -246,5 +254,25 @@ export async function analyseContent(
   })
   result.trusted = toCredit.length
   if (credits.size > 0 && deps.creditTemplates) await deps.creditTemplates(credits)
+  result.judged = await judge()
   return result
+
+  /** ── 4. Judge what has no judgement yet. Its failure costs the judging, not the pass. ── */
+  async function judge(): Promise<number> {
+    if (!deps.judge) return 0
+    try {
+      const r = await judgeContent(tenantId, {
+        db,
+        ...deps.judge,
+        store: deps.store ?? null,
+        trust,
+        now,
+        ...(deps.log ? { log: deps.log } : {}),
+      })
+      return r.judged
+    } catch (error) {
+      deps.log?.warn?.({ err: error, tenantId }, "content judge pass failed")
+      return 0
+    }
+  }
 }

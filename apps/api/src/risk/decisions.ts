@@ -11,7 +11,6 @@ import {
   type Concern,
   type Contribution,
   type DecisionKind,
-  type Facts,
   type Rule,
 } from "./types.js"
 
@@ -151,8 +150,8 @@ export interface StaffDecisionDeps {
   snapshots: SnapshotStore
   decisions: DecisionStore
   contentModel?: string
-  /** The content classifier's latest answer, which only the scoring run asks for. */
-  content?: (tenantId: string) => Promise<Facts["content"]>
+  /** The content judge's first model, when one is configured. */
+  judgeModel?: string
   now?: () => Date
 }
 
@@ -199,8 +198,8 @@ export async function staffDecision(
     ownerInfo: deps.ownerInfo,
     now: at,
     ...(deps.contentModel ? { contentModel: deps.contentModel } : {}),
+    ...(deps.judgeModel ? { judgeModel: deps.judgeModel } : {}),
   })
-  facts.content = (await deps.content?.(tenantId).catch(() => null)) ?? null
   const evaluated = evaluate(facts, deps.rules)
   const covers = clears ? concernsFor(evaluated.contributions, input.rules) : []
   const held = (await deps.holds.current(tenantId)) !== null

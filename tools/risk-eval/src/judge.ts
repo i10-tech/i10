@@ -5,6 +5,7 @@
  * answer a subset: a question it leaves out is not scored for that judge.
  */
 
+/** The same questions, in the same order, as `JUDGE_QUESTION_IDS` in judges/contract.ts. */
 export const QUESTIONS = [
   "phishing",
   "spam",
@@ -22,6 +23,8 @@ export interface JudgeInput {
   subject: string
   text: string
   html?: string
+  /** The From address's domain, when the dataset recorded it. */
+  fromDomain?: string
 }
 
 export interface Judge {
