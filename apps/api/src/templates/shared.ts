@@ -72,7 +72,31 @@ export interface SharedTemplate {
  * (600 KB down to 215 KB). Replacing it means a new file name AND a new
  * version id below, so emails already sent keep the image they were sent with.
  */
-const WELCOME_HTML = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+/**
+ * ⚠ THE FONTS ARE SERVED FROM i10.tech TOO, NOT FROM GOOGLE. A mail client
+ * that loads a web font tells the font's host who opened the mail, and that
+ * host was fonts.gstatic.com: a third party in every customer's welcome email
+ * that no customer chose. The files are apps/web/public/email/fonts/ (Inter
+ * and IBM Plex Sans Condensed, both SIL Open Font License, which allows
+ * self-hosting). Clients that ignore web fonts fall back to Arial as before.
+ */
+const SELF_HOSTED_FONTS = `@font-face{font-family:'IBM Plex Sans Condensed';font-style:normal;font-weight:500;mso-font-alt:'Arial';src:url(https://i10.tech/email/fonts/ibm-plex-sans-condensed-500.ttf) format('truetype')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:300;mso-font-alt:'Arial';src:url(https://i10.tech/email/fonts/inter-300.ttf) format('truetype')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;mso-font-alt:'Arial';src:url(https://i10.tech/email/fonts/inter-400.ttf) format('truetype')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;mso-font-alt:'Arial';src:url(https://i10.tech/email/fonts/inter-500.ttf) format('truetype')}`
+
+/**
+ * The font block of the retired version, kept only so a past send still shows
+ * the email it was sent as. Never used for a new send.
+ */
+const GOOGLE_FONTS = `@font-face{font-family:'IBM Plex Sans Condensed';font-style:normal;font-weight:500;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/ibmplexsanscondensed/v15/Gg8gN4UfRSqiPg7Jn2ZI12V4DCEwkj1E4LVeHY5a64vr.ttf) format('truetype')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:300;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuOKfMZg.ttf) format('truetype')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuI6fMZg.ttf) format('truetype')}`
+
+const welcomeHtml = (
+  fonts: string,
+): string => `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html dir="ltr" lang="en">
 <head>
 <meta content="text/html; charset=UTF-8" http-equiv="Content-Type"/>
@@ -80,10 +104,7 @@ const WELCOME_HTML = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional/
 <title>Welcome</title>
 <style>
 @media (max-width:600px){.m-full{max-width:100%!important}.m-px{padding-right:1rem!important;padding-left:1rem!important}.m-py-8{padding-top:2rem!important;padding-bottom:2rem!important}.m-py-12{padding-top:3rem!important;padding-bottom:3rem!important}.m-pt-10{padding-top:2.5rem!important}.m-pb-8{padding-bottom:2rem!important}.m-pb-10{padding-bottom:2.5rem!important}.m-h1{font-size:40px!important;letter-spacing:-1.2px!important}.m-h2{font-size:24px!important;line-height:1.5!important}}
-@font-face{font-family:'IBM Plex Sans Condensed';font-style:normal;font-weight:500;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/ibmplexsanscondensed/v15/Gg8gN4UfRSqiPg7Jn2ZI12V4DCEwkj1E4LVeHY5a64vr.ttf) format('truetype')}
-@font-face{font-family:'Inter';font-style:normal;font-weight:300;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuOKfMZg.ttf) format('truetype')}
-@font-face{font-family:'Inter';font-style:normal;font-weight:400;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2) format('woff2')}
-@font-face{font-family:'Inter';font-style:normal;font-weight:500;mso-font-alt:'Arial';src:url(https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuI6fMZg.ttf) format('truetype')}
+${fonts}
 </style>
 </head>
 <body dir="ltr" lang="en" style="background-color:#212121;margin:0;padding:0">
@@ -130,6 +151,8 @@ const WELCOME_HTML = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional/
 </td></tr></tbody></table>
 </body>
 </html>`
+
+const WELCOME_HTML = welcomeHtml(SELF_HOSTED_FONTS)
 
 const WELCOME_TEXT = `{{ company }}
 
@@ -215,17 +238,37 @@ function made(input: {
   }
 }
 
+const WELCOME = {
+  templateId: "00000000-0000-4000-a000-000000000001",
+  name: "welcome",
+  title: "Welcome",
+  subject: "Welcome to {{ company }}",
+  previewText: "Welcome to {{ company }}",
+  text: WELCOME_TEXT,
+  variables: WELCOME_VARIABLES,
+}
+
 export const SHARED_TEMPLATES: readonly SharedTemplate[] = [
   made({
-    templateId: "00000000-0000-4000-a000-000000000001",
-    versionId: "00000000-0000-4000-a000-000000000102",
-    name: "welcome",
-    title: "Welcome",
-    subject: "Welcome to {{ company }}",
-    previewText: "Welcome to {{ company }}",
+    ...WELCOME,
+    versionId: "00000000-0000-4000-a000-000000000103",
     html: WELCOME_HTML,
-    text: WELCOME_TEXT,
-    variables: WELCOME_VARIABLES,
+    createdAt: "2026-11-13T00:00:00Z",
+  }),
+]
+
+/**
+ * Versions that went out and were then replaced. A past send records the
+ * version it rendered and its body is rebuilt from that version, so a retired
+ * one has to stay resolvable for as long as any message that used it is kept.
+ * Nothing new is ever sent with these: no alias or template id leads here,
+ * only `sharedVersion` by the recorded version id.
+ */
+const RETIRED_VERSIONS: readonly SharedTemplate[] = [
+  made({
+    ...WELCOME,
+    versionId: "00000000-0000-4000-a000-000000000102",
+    html: welcomeHtml(GOOGLE_FONTS),
     createdAt: "2026-10-04T00:00:00Z",
   }),
 ]
@@ -237,5 +280,8 @@ export function sharedTemplate(ref: string): SharedTemplate | undefined {
 
 /** The shared template whose version this is, if it is one. */
 export function sharedVersion(versionId: string): SharedTemplate | undefined {
-  return SHARED_TEMPLATES.find((t) => t.versionId === versionId)
+  return (
+    SHARED_TEMPLATES.find((t) => t.versionId === versionId) ??
+    RETIRED_VERSIONS.find((t) => t.versionId === versionId)
+  )
 }
