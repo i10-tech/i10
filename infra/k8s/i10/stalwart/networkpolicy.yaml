@@ -51,3 +51,43 @@ spec:
         - { protocol: TCP, port: 25 }
         - { protocol: TCP, port: 465 }
         - { protocol: TCP, port: 993 }
+---
+# Stalwart Keep: reachable from the two Stalwart nodes on 7000, and no egress.
+#
+# ⚠ THE INGRESS HALF DOES NOT RESTRICT ANYTHING TODAY, AND SAYING IT DOES WOULD
+# BE WRONG. NetworkPolicies add up, and `allow-same-namespace` (psl repo) already
+# admits every pod in i10-prod to every other pod on every port, Keep included.
+# So any pod in the namespace can open a connection to 7000, and what stops it is
+# Keep's own mutual TLS: a client needs a private key whose public half is in
+# clients.pem, and Keep drops everything else after a handshake (about 82 us of
+# CPU each). This rule states who should be there and starts to bind the moment
+# `allow-same-namespace` is narrowed. Closing the namespace is a change in the
+# psl repo, not here.
+#
+# ⚠ THE EGRESS HALF IS REAL. A single server has no peers and resolves nothing,
+# so a Keep that is somehow made to dial out has nowhere to go. `egress: []`
+# with `Egress` in policyTypes is the same shape as template-renderer-no-egress.
+# Replies to an accepted connection are not egress and still work, and the
+# kubelet's probes do not pass through pod policy.
+#
+# ⚠ THE SELECTOR IS `part-of`, NOT `name`, TO TAKE BOTH NODES. The internal node
+# is labelled `name: i10-stalwart-internal`, so `name: i10-stalwart` would admit
+# the edge node and leave the node that does most of the JMAP work outside it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stalwart-keep
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-stalwart-keep
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-stalwart
+      ports:
+        - { protocol: TCP, port: 7000 }
+  egress: []

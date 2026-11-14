@@ -674,10 +674,11 @@ To switch, in this order:
 
 Stalwart runs as a two-node cluster on psl-vps: `i10-stalwart-0` (edge) and
 `i10-stalwart-internal-0` (internal), both built from `node/statefulset.yaml`.
-They share Postgres (data, search), R2 (blobs) and `i10-stalwart-redis`
-(in-memory store and coordinator, `redis.yaml`). Neither holds data of its own,
-and the pod hostname is the node id, so each StatefulSet's `-0` keeps its id
-across restarts.
+They share Postgres (data, search), R2 (blobs) and Stalwart Keep
+(`i10-stalwart-keep`, the in-memory store and coordinator, `keep.yaml`; see
+[Keep](#keep-in-place-of-redis) for the move off `i10-stalwart-redis`). Neither
+holds data of its own, and the pod hostname is the node id, so each
+StatefulSet's `-0` keeps its id across restarts.
 
 | Node     | Listeners                    | Tasks                              | Reached through                                            |
 | -------- | ---------------------------- | ---------------------------------- | ---------------------------------------------------------- |
@@ -709,16 +710,268 @@ startup; the coordinator carries cache invalidations and setting reloads, not
 these. `bootstrap.sh` restarts every pod labelled
 `app.kubernetes.io/part-of=i10-stalwart`, edge first.
 
-To bring it up, in this order:
+To bring it up from nothing, in this order:
 
-1. Merge with the internal StatefulSet at `replicas: 0` (as shipped). Argo
-   starts `i10-stalwart-redis` and rolls the edge pod for its new label.
-2. `./bootstrap.sh` on psl-vps: it applies `InMemoryStore` (Redis), then
+1. Create the Keep keys in Doppler ([Keep](#keep-in-place-of-redis), step 1).
+   Merge with the internal StatefulSet at `replicas: 0`. Argo starts
+   `i10-stalwart-keep` first and rolls the edge pod for its new label.
+2. Wait until Keep has been up for eleven minutes, so the first restart does not
+   meet its lock quarantine.
+3. `./bootstrap.sh` on psl-vps: it applies `InMemoryStore` (Keep), then
    `Coordinator` (which Stalwart refuses while the in-memory store is local),
    creates the `internal` role, and restarts.
-3. Raise `replicas` to 1 in `internal/kustomization.yaml` and merge.
-4. Check both nodes are `active` in `x:ClusterNode/get`, and that JMAP answers
+4. Raise `replicas` to 1 in `internal/kustomization.yaml` and merge.
+5. Check both nodes are `active` in `x:ClusterNode/get`, and that JMAP answers
    with either pod deleted.
+
+## Keep, in place of Redis
+
+Both nodes keep their locks, counters and cluster events in
+[Stalwart Keep](https://stalw.art/docs/cluster/keep/), one `i10-stalwart-keep`
+pod (`../keep.yaml`), which replaces `i10-stalwart-redis`. Redis keeps running
+until the move below is verified, so it can be undone; removing it is "Unit 2"
+at the end of this section.
+
+⚠ **A SINGLE KEEP SERVER, BECAUSE THERE IS ONE KUBERNETES NODE.** Keep supports
+one server or a cluster of members. Three members on psl-vps would all die with
+the node, and would cost a fixed member list of IP literals, `hostNetwork` and a
+peer port that Kubernetes cannot firewall. The Stalwart side is the `Keep`
+variant of `InMemoryStore` in `plan.ndjson`, with `Coordinator` left at
+`Default`, which reuses the same client.
+
+⚠ **EVERY RESTART OF THE KEEP POD STALLS LOCKS FOR ABOUT TEN MINUTES.** A server
+that starts in the default `rejoin` mode refuses new locks for the lock
+quarantine, 604 s for a single server (`max-lock-ttl` 600 s, which Stalwart
+needs, plus 3 s and a small term). Outbound delivery, scheduled tasks and search
+indexing take locks and wait it out. Nothing is lost, and mail is still
+received and served. What restarts the pod: a new Keep image, any edit to
+`keep.toml` (the ConfigMap name carries a hash, which is why the file has no
+comments), a changed CPU limit, and the node rebooting. The Stalwart nodes
+reconnect to it by themselves, and do not need a restart. `--start bootstrap`
+would skip the wait and is deliberately not in the pod template; it is right
+only when no client can hold a lock, which is never true of a restart that is
+not a whole-cluster restart.
+
+### 1. Create the secrets (once, before the merge)
+
+Five values go in Doppler, in a config of their own, `prod_stalwart_keep`, so
+they never become environment variables of the Stalwart pods (`keep.yaml`
+explains). Run this on a machine that has `doppler` and `kubectl`; the keys live
+in a temporary directory that is removed on exit and never in the repository.
+The project and config names (`i10`, `prod_stalwart_keep`) are assumed, and
+these commands were not run when this was written, so check them first. The
+`>/dev/null` keeps `doppler` from printing the values it stores:
+
+```sh
+set -eu
+umask 077
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+
+# One key pair for Keep, and one for the two Stalwart nodes together.
+openssl genpkey -algorithm ed25519 -out keep.key
+openssl pkey -in keep.key -pubout -out keep.pub
+openssl genpkey -algorithm ed25519 -out node.key
+openssl pkey -in node.key -pubout -out node.pub
+# The cluster secret: 32 hexadecimal digits, shared by Keep and the nodes.
+openssl rand -hex 16 | tr -d '\n' >cluster.secret
+
+doppler configs create prod_stalwart_keep -p i10 -e prod
+doppler secrets set KEEP_CLUSTER_SECRET -p i10 -c prod_stalwart_keep <cluster.secret >/dev/null
+doppler secrets set KEEP_MEMBER_KEY -p i10 -c prod_stalwart_keep <keep.key >/dev/null
+doppler secrets set KEEP_CLIENTS_PEM -p i10 -c prod_stalwart_keep <node.pub >/dev/null
+doppler secrets set KEEP_NODE_KEY -p i10 -c prod_stalwart_keep <node.key >/dev/null
+doppler secrets set KEEP_SERVERS_PEM -p i10 -c prod_stalwart_keep <keep.pub >/dev/null
+
+kubectl -n i10-prod create secret generic doppler-token-i10-stalwart-keep \
+  --from-literal=serviceToken="$(doppler configs tokens create stalwart-keep-k8s \
+    -p i10 -c prod_stalwart_keep --plain)"
+```
+
+| Doppler key           | Holds                  | Read by                           |
+| --------------------- | ---------------------- | --------------------------------- |
+| `KEEP_CLUSTER_SECRET` | the 32 hex digits      | Keep (file), both nodes (env)     |
+| `KEEP_MEMBER_KEY`     | Keep's private key     | Keep only                         |
+| `KEEP_CLIENTS_PEM`    | the nodes' public key  | Keep: the clients it accepts      |
+| `KEEP_NODE_KEY`       | the nodes' private key | both nodes (one key, shared)      |
+| `KEEP_SERVERS_PEM`    | Keep's public key      | both nodes: the server they trust |
+
+One node key serves both nodes. The store's `keyPath` is shared configuration,
+so both nodes read the same path; a key each would need a Secret per
+StatefulSet, and both pods already have the same trust, the same Secrets and the
+same image. Keep then lists one client key. Split it the day one node must be
+revoked alone.
+
+The Doppler operator copies the values into the `i10-stalwart-keep` Secret.
+Before merging, and again after, check its key list, because a DopplerSecret
+that names a key Doppler lacks does not fail:
+
+```sh
+kubectl -n i10-prod get secret i10-stalwart-keep -o json | jq -r '.data | keys[]'
+```
+
+Expect the five `KEEP_*` keys plus Doppler's own `DOPPLER_*` ones. A trailing
+newline on any value is harmless: Keep and Stalwart both accept it.
+
+### 2. Cutover, in this order
+
+Take a backup first: `kubectl -n i10-prod get backup` and confirm the last
+`i10-platform-nightly` completed. Stalwart 1.1.0 is a minor release, and the
+upgrade guide says a newer release can write data that an older one cannot read,
+so the backup is the only way back for the image.
+
+1. **Merge.** Argo syncs `i10-doppler-secrets` (the DopplerSecret) and
+   `i10-stalwart`. In `i10-stalwart` Keep is sync wave -1: Argo waits for it to
+   be Ready before it touches the nodes. Then both StatefulSets roll to 1.1.0,
+   each with the new ConfigMap name and the two new mounts, and the PostSync hook
+   applies `plan.ndjson`. Expect both nodes to restart together, about a minute
+   of JMAP and mail-port downtime.
+
+   What the cluster is in after that, and for as long as nobody restarts a node:
+   Stalwart 1.1.0 on Redis, with Keep running and idle, and the plan in Postgres
+   already saying Keep. This is safe. 1.1.0 supports Redis, the Redis changes in
+   it are fixes to the pub/sub subscriber, and the live nodes read the in-memory
+   store only when they start (a `Reload` copies the running one, checked in
+   `crates/common/src/cache/reload.rs`), so they keep using Redis. The hook logs
+   `Restart needed for: InMemoryStore`; that is this runbook, not a fault.
+
+   ⚠ **UNTIL STEP 3, DO NOT LET ONE NODE RESTART ALONE.** A node that starts now
+   reads Keep from the plan while the other still uses Redis, and nodes on
+   different stores do not see each other's locks. Both take outbound queue
+   locks, so one message could be delivered twice. If a node does crash in this
+   window, restart the other one at once, as in step 3.
+
+2. **Wait for the quarantine.** Keep must have been running for eleven minutes
+   (604 s plus margin) so the nodes' first locks are granted at once and no
+   `bootstrap` flag is ever needed:
+
+   ```sh
+   kubectl -n i10-prod get pod -l app.kubernetes.io/name=i10-stalwart-keep \
+     -o jsonpath='{.items[0].status.containerStatuses[0].state.running.startedAt}{"\n"}'
+   ```
+
+   Check Keep is settled: `kubectl -n i10-prod logs deploy/i10-stalwart-keep`
+   ends in `keep: single server, start Rejoin`, and the pod is Ready.
+
+3. **Restart every Stalwart node together, edge first.** One command, so neither
+   is ever up on a store the other is not on:
+
+   ```sh
+   kubectl -n i10-prod delete pod i10-stalwart-0 i10-stalwart-internal-0 --wait=false
+   kubectl -n i10-prod wait --for=condition=Ready pod/i10-stalwart-0 \
+     pod/i10-stalwart-internal-0 --timeout=300s
+   ```
+
+   Not `./bootstrap.sh`: its restart goes one pod at a time, which is right for
+   a certificate or a role and wrong for a store change, because the first pod
+   would be on Keep while the second is still on Redis for as long as the first
+   takes to come back. Scaling to 0 and back is not an option either, since
+   `selfHeal` reverts a hand-edited `replicas` within seconds.
+
+4. **Verify.**
+   - Neither node says `Failed to connect to Stalwart Keep`, and neither logs a
+     `store.keep-error` event:
+     `kubectl -n i10-prod logs i10-stalwart-0 -c stalwart | grep -E 'Stalwart Keep|keep-error'`,
+     then the same for `i10-stalwart-internal-0`. Both print nothing when it
+     worked. A node that failed to open the store runs without an in-memory
+     store until it restarts, so a hit here means delete that pod once Keep is
+     fixed.
+   - Keep sees them: its last `keep: stats` line (one a minute) shows `conns`
+     above 0, about 3 per node, and `busy` 0.
+   - Both nodes are `active` in `x:ClusterNode/get`:
+
+     ```sh
+     kubectl -n i10-prod port-forward svc/i10-stalwart 18080:8080 &
+     ADMIN=$(kubectl -n i10-prod get secret i10-stalwart \
+       -o jsonpath='{.data.STALWART_RECOVERY_ADMIN}' | base64 -d)
+     curl -s -K - -H 'Content-Type: application/json' http://127.0.0.1:18080/jmap/ \
+       -d '{"using":["urn:ietf:params:jmap:core","urn:stalwart:jmap"],"methodCalls":[["x:ClusterNode/get",{"ids":null},"c1"]]}' \
+       <<<"user = \"$ADMIN\""
+     ```
+
+   - A send and a receive: send a message from the product to an address you
+     read and confirm it arrives; send one in from outside to a mailbox and
+     confirm it appears over JMAP. A send is the one that proves the queue lock
+     works through Keep.
+   - JMAP keeps answering with either pod deleted: delete
+     `i10-stalwart-internal-0`, call the API or open the webmail, wait for it to
+     return, then do the same with `i10-stalwart-0`.
+   - `./bootstrap.sh --verify`.
+
+### Rollback
+
+Redis is still running, so the move is undone by putting the plan back:
+
+1. Revert only the `InMemoryStore` line of `plan.ndjson` to
+   `{"@type": "Redis", "url": "redis://i10-stalwart-redis.i10-prod.svc.cluster.local:6379"}`
+   and merge. The ConfigMap name changes, so both nodes roll first and then the
+   hook applies Redis.
+2. Delete both pods together, as in step 3. They come up on Redis.
+
+If mail is failing now and a merge is too slow, set the store back through JMAP
+(`x:InMemoryStore/set` with the Redis variant) and delete both pods together.
+Follow it with the revert above, or the next sync's hook applies Keep again.
+
+The image cannot be rolled back that way: 1.1.0 may have written data 1.0.3
+cannot read. Restore from the backup if it comes to that.
+
+### What 1.0.3 to 1.1.0 changed for us
+
+Read from the 1.1.0 changelog and the two schemas, and checked by dry-running
+the whole of `plan.ndjson` against a 1.1.0 server (every object and field is
+accepted).
+
+- **Passkey permissions.** New `sysPasskey*` permissions are missing from the
+  default roles of an upgraded server, and the release suggests starting once
+  with `STALWART_UPDATE_ROLE_PERMISSIONS=true`. **We do not**: passkeys are for
+  accounts in the internal directory, ours are all in the authd LDAP directory,
+  and the recovery administrator holds every permission. The variable would
+  also edit the roles `Authentication` points at, which are ours.
+- **`/healthz/ready` now answers 503 while the data store does not answer.**
+  Both nodes go unready during a Postgres failover and the `i10-stalwart`
+  Service has no endpoint until it ends. That is the probe doing its job. The
+  mail ports are hostPorts and do not depend on it.
+- **PostgreSQL waits are bounded** (`responseTimeout`, default 2 minutes).
+  `config.json` does not set it, so the default applies.
+- **Shutdown drains outbound delivery and releases its queue locks** (up to 8
+  seconds), so a Stalwart restart no longer leaves a 10 minute lock behind. The
+  pods' default 30 second grace period covers it.
+- **Cache swap**: the Redis variant became `InMemory`, and a `FileSystem` blob
+  swap store went. `plan.ndjson` sets only the cache sizes, so neither applies.
+- **The relay on 2525, the LDAP directory and the roles** are untouched by the
+  changelog, and the dry run accepted them as written.
+
+Not verified: that two nodes on different 1.x versions share a queue correctly
+during the roll. The two StatefulSets restart within a minute of each other and
+the queue lock code shows no format change between the two, but a mixed-version
+pair was never run.
+
+### What is different from Redis
+
+From the [Keep docs](https://stalw.art/docs/cluster/keep/stalwart#move-from-redis):
+a counter's expiry is set only when it is created (Redis refreshes it on each
+increment), `key_get` returns a 64-bit integer and not decimal text, and keys
+written by expressions and Sieve are lost when Keep stops without a handoff.
+Nothing in `plan.ndjson` calls `key_get`, `key_set` or `key_incr`, and the one
+Sieve script (`ses-references`) uses `editheader` and `variables` only. What
+does use the store is the throttles (`iprate`, `rcptrate`, `rcptflood`,
+`submithour`, `submitday`, the outbound `backstop` and the queue quota), whose
+counters start from zero when Keep restarts, so a restart lets one window's worth
+through again. The fixed windows suit a counter that does not refresh. Keep has
+no persistence, and neither did our Redis.
+
+Under its 128 MiB cap Keep evicts counters first and never a lock. A counter that
+is evicted restarts from zero.
+
+### Unit 2 (not done here)
+
+Once the cutover has been verified for a few days: delete `redis.yaml`, its
+line in `kustomization.yaml`, and every mention of `i10-stalwart-redis` in this
+file. Argo prunes the Redis Deployment, Service and ConfigMap, which is
+irreversible, so do it only after the rollback above is no longer wanted. Then
+the Keep Secret's DopplerSecret, `networkpolicy.yaml` and this section stay as
+they are.
 
 ## The internal relay
 
