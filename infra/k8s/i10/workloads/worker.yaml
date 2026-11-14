@@ -61,6 +61,10 @@ spec:
           image: ghcr.io/i10-tech/i10-api:prod-ad073fee40dc5444aec4468f65c38b8932aa01db@sha256:16dbf82d146aeadb7076409be2f2bfc9104f3ce4c5c80ea9cd068c383eddc370
           imagePullPolicy: Always
           command: ["bun", "dist/worker.js"]
+          # ⚠ envFrom AND env ARE COPIED INTO THE `worker` CONTAINER OF
+          # check-env.yaml, which validates exactly this environment before a
+          # deploy. Change one, change the other: `bun run check-images` fails
+          # CI when they differ.
           envFrom:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }

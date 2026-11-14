@@ -1,0 +1,110 @@
+# Environment check, as an Argo PreSync hook that runs BEFORE the migration.
+#
+# ⚠ WHY IT EXISTS. loadEnv() refuses to start on a bad combination of settings,
+# and the environment only exists in this cluster (Secrets synced from Doppler),
+# so CI cannot see it. On 2026-11-14 a new image rejected production's
+# environment; the API pod crash-looped harmlessly behind the old one, but the
+# worker is `Recreate`, so the old worker had already been stopped and mail
+# stayed down until the setting was fixed by hand. A PreSync hook runs with the
+# NEW image and the REAL environment before anything is replaced, and a failed
+# hook stops the sync there.
+#
+# ⚠ ONE CONTAINER PER WORKLOAD, EACH WITH EXACTLY THAT WORKLOAD'S ENV. The API
+# and the worker are not guaranteed to get the same variables, and a check run
+# with a different environment than the one the pod gets proves nothing. This
+# directory is plain YAML with no kustomize, so the env cannot be shared and is
+# copied from api.yaml and worker.yaml instead. `bun run check-images`
+# (.github/scripts/check-env-hook.mjs) fails CI when a copy drifts. Every
+# CronJob uses the same two Secrets as these (i10-shared, i10-api), so they are
+# covered by the same check.
+#
+# ⚠ WAVE -1, BECAUSE THE MIGRATION HAS NONE. Argo runs hooks of one phase in
+# ascending `sync-wave` order and waits for each wave to finish, and a hook
+# with no annotation is wave 0. A bad environment therefore stops the deploy
+# before the schema changes.
+#
+# The hook policy and the Job settings are the same as i10-api-migrate's, for
+# the same reasons - see the comments in api.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: i10-api-check-env
+  namespace: i10-prod
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-api-check-env
+    spec:
+      restartPolicy: Never
+      containers:
+        # Mirrors the `api` container in api.yaml: keep envFrom and env identical.
+        - name: api
+          image: ghcr.io/i10-tech/i10-api:prod-ad073fee40dc5444aec4468f65c38b8932aa01db@sha256:16dbf82d146aeadb7076409be2f2bfc9104f3ce4c5c80ea9cd068c383eddc370
+          imagePullPolicy: Always
+          command: ["bun", "dist/check-env.js"]
+          envFrom:
+            - secretRef: { name: i10-shared }
+            - secretRef: { name: i10-api }
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-api-db-role, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-api-db-role, key: password }
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+            - name: TEMPLATE_RENDERER_URL
+              value: http://i10-template-renderer.i10-prod.svc.cluster.local
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            # Numeric, matching the Dockerfile's USER - see api.yaml.
+            runAsUser: 1001
+            runAsGroup: 1001
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+        # Mirrors the `worker` container in worker.yaml: keep envFrom and env identical.
+        - name: worker
+          image: ghcr.io/i10-tech/i10-api:prod-ad073fee40dc5444aec4468f65c38b8932aa01db@sha256:16dbf82d146aeadb7076409be2f2bfc9104f3ce4c5c80ea9cd068c383eddc370
+          imagePullPolicy: Always
+          command: ["bun", "dist/check-env.js"]
+          envFrom:
+            - secretRef: { name: i10-shared }
+            - secretRef: { name: i10-api }
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: i10-api-db-role, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-api-db-role, key: password }
+            - name: DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            - name: STALWART_RELAY_HOST
+              value: i10-stalwart-mail.i10-prod.svc.cluster.local
+            - name: TEMPLATE_RENDERER_URL
+              value: http://i10-template-renderer.i10-prod.svc.cluster.local
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
