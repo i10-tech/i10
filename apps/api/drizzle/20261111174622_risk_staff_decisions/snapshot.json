@@ -1,0 +1,677 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "56b08252-7cd5-49df-b548-a9ebcdffcca5",
+  "prevIds": [
+    "d35b1cd1-80e2-4d53-8d27-c2a517e2f29f"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "risk_decision_kind"
+      ],
+      "writes": [
+        "s|enum|core.risk_decision_kind",
+        "n|enum|core.risk_decision_kind",
+        "e|enum|core.risk_decision_kind",
+        "n|type|core.risk_decision_kind"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_staff_decisions"
+      ],
+      "writes": [
+        "s|tbl|core.risk_staff_decisions",
+        "n|tbl|core.risk_staff_decisions",
+        "e|tbl|core.risk_staff_decisions",
+        "n|rel|core.risk_staff_decisions",
+        "n|type|core.risk_staff_decisions",
+        "n|rel|core.risk_staff_decisions_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.risk_decision_kind",
+        "n|enum|core.risk_band"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_assessment_events",
+        "cleared"
+      ],
+      "writes": [
+        "s|col|core.risk_assessment_events.cleared",
+        "n|col|core.risk_assessment_events.cleared",
+        "e|col|core.risk_assessment_events.cleared"
+      ],
+      "reads": [
+        "n|tbl|core.risk_assessment_events",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_assessments",
+        "cleared"
+      ],
+      "writes": [
+        "s|col|core.risk_assessments.cleared",
+        "n|col|core.risk_assessments.cleared",
+        "e|col|core.risk_assessments.cleared"
+      ],
+      "reads": [
+        "n|tbl|core.risk_assessments",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_fact_snapshots",
+        "cleared"
+      ],
+      "writes": [
+        "s|col|core.risk_fact_snapshots.cleared",
+        "n|col|core.risk_fact_snapshots.cleared",
+        "e|col|core.risk_fact_snapshots.cleared"
+      ],
+      "reads": [
+        "n|tbl|core.risk_fact_snapshots",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "risk_staff_decisions",
+        "risk_staff_decisions_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.risk_staff_decisions_tenant_idx",
+        "n|idx|core.risk_staff_decisions_tenant_idx",
+        "e|idx|core.risk_staff_decisions_tenant_idx",
+        "n|rel|core.risk_staff_decisions_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.risk_staff_decisions",
+        "n|sch|core",
+        "n|col|core.risk_staff_decisions.tenant_id",
+        "n|col|core.risk_staff_decisions.decided_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "risk_staff_decisions",
+        "risk_staff_decisions_snapshot_idx"
+      ],
+      "writes": [
+        "s|idx|core.risk_staff_decisions_snapshot_idx",
+        "n|idx|core.risk_staff_decisions_snapshot_idx",
+        "e|idx|core.risk_staff_decisions_snapshot_idx",
+        "n|rel|core.risk_staff_decisions_snapshot_idx"
+      ],
+      "reads": [
+        "n|tbl|core.risk_staff_decisions",
+        "n|sch|core",
+        "n|col|core.risk_staff_decisions.snapshot_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_staff_decisions"
+      ],
+      "writes": [
+        "s|fk|core.risk_staff_decisions.risk_staff_decisions_tenant_id_tenants_id_fk",
+        "n|fk|core.risk_staff_decisions.risk_staff_decisions_tenant_id_tenants_id_fk",
+        "e|fk|core.risk_staff_decisions.risk_staff_decisions_tenant_id_tenants_id_fk",
+        "n|con|core.risk_staff_decisions.risk_staff_decisions_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.risk_staff_decisions",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.risk_staff_decisions.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_staff_decisions"
+      ],
+      "writes": [
+        "s|fk|core.risk_staff_decisions.risk_staff_decisions_snapshot_id_risk_fact_snapshots_id_fk",
+        "n|fk|core.risk_staff_decisions.risk_staff_decisions_snapshot_id_risk_fact_snapshots_id_fk",
+        "e|fk|core.risk_staff_decisions.risk_staff_decisions_snapshot_id_risk_fact_snapshots_id_fk",
+        "n|con|core.risk_staff_decisions.risk_staff_decisions_snapshot_id_risk_fact_snapshots_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.risk_staff_decisions",
+        "n|sch|core",
+        "n|tbl|core.risk_fact_snapshots",
+        "n|sch|core",
+        "n|col|core.risk_staff_decisions.snapshot_id",
+        "n|col|core.risk_fact_snapshots.id",
+        "e|uniqueness|core.risk_fact_snapshots.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_staff_decisions"
+      ],
+      "writes": [
+        "s|pol|core.risk_staff_decisions.risk_staff_decisions_deny",
+        "n|pol|core.risk_staff_decisions.risk_staff_decisions_deny",
+        "e|pol|core.risk_staff_decisions.risk_staff_decisions_deny"
+      ],
+      "reads": [
+        "n|tbl|core.risk_staff_decisions",
+        "n|sch|core",
+        "e|rls|core.risk_staff_decisions"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "risk_staff_decisions",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "risk_decision_kind",
+        "values": [
+          "release",
+          "pin",
+          "uphold",
+          "hold"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_assessment_events",
+        "name": "cleared",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_assessments",
+        "name": "cleared",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "cleared",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "kind",
+        "type": "risk_decision_kind",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "decided_by",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "note",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "decided_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "score",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "band",
+        "type": "risk_band",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "ruleset_version",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "held",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "in_view",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "covers",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "expires_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "snapshot_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "revoked_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "revoked_by",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "revoke_note",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "risk_staff_decisions_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "decided_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "risk_staff_decisions_snapshot_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "snapshot_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "risk_staff_decisions_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "risk_staff_decisions_snapshot_id_risk_fact_snapshots_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "snapshot_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "risk_fact_snapshots",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "risk_staff_decisions_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_staff_decisions",
+        "name": "risk_staff_decisions_deny",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "false",
+        "withCheck": "false",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

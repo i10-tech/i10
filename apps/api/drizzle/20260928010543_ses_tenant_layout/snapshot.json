@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "254e88ea-044c-4a53-bd1a-5ba0b7dad4b4",
+  "prevIds": [
+    "c6a28018-22ff-444d-8eb2-833a810318a9"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "ses_tenant_layout"
+      ],
+      "writes": [
+        "s|col|core.domains.ses_tenant_layout",
+        "n|col|core.domains.ses_tenant_layout",
+        "e|col|core.domains.ses_tenant_layout"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "ses_tenant_layout",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

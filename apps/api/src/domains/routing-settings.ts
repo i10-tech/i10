@@ -54,8 +54,8 @@ export async function publishRoutingSettings(
   settings: RoutingSettings,
 ): Promise<void> {
   // A JS array interpolation expands into a PostgreSQL ROW, not a text array.
-  // JSON keeps it one parameter, then Postgres reconstructs a proven `text[]`.
-  const mailDomains = JSON.stringify(settings.mailDomains)
+  // `sql.param` keeps it one jsonb parameter, then Postgres reconstructs a
+  // proven `text[]`.
   await db.execute(sql`
     insert into core.routing_settings
       (id, ses_enabled, ses_relay_enabled, mail_domains, updated_at)
@@ -66,7 +66,7 @@ export async function publishRoutingSettings(
         ${settings.sesRelayEnabled},
         (
           select coalesce(array_agg(domain), '{}'::text[])
-            from jsonb_array_elements_text(${mailDomains}::jsonb) as domains(domain)
+            from jsonb_array_elements_text(${sql.param(settings.mailDomains)}::jsonb) as domains(domain)
         ),
         now()
       )

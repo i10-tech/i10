@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { withTenant, type Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { roleStore } from "../src/console/roles-db.js"
 import { mirrorRequiredDomains } from "../src/identity/authd-mirror.js"
 import { ssoPolicyStore } from "../src/identity/policy-store.js"
@@ -49,7 +48,7 @@ suite("authd.required_exempt follows who SSO exempts", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     sqlApi = postgres(API_URL!, { max: 8, onnotice: () => {} })
-    db = drizzle(sqlApi, { schema }) as unknown as Database
+    db = drizzle({ client: sqlApi }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

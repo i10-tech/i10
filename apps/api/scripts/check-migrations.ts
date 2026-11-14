@@ -12,7 +12,7 @@
  * for: a migration that only works because an earlier one in the same session
  * left something behind (0155 needed pgvector's library loaded, and only got it
  * by luck), or only works as a superuser. So migration N is applied by a run
- * whose journal stops at N, on its own connection, N times over.
+ * whose folder stops at N, on its own connection, N times over.
  *
  * Setup mirrors infra/k8s/i10/platform-db/cluster.yaml: the managed login roles,
  * database `i10` owned by `i10` (0001 grants on it BY NAME), and pgvector
@@ -22,7 +22,7 @@
  * drops anything; if a database called `i10` already exists it refuses rather
  * than migrate something that may be real.
  */
-import { mkdtemp, readFile, rm, symlink, writeFile, mkdir } from "node:fs/promises"
+import { mkdtemp, readdir, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -45,9 +45,6 @@ const OWNER = "i10"
 const ROLES = [OWNER, "authd", "i10_api", "pdns", "stalwart"]
 
 const drizzleFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle")
-
-type JournalEntry = { tag: string }
-type Journal = { entries: JournalEntry[] }
 
 /** The admin url pointed at `i10`, as `as` (a role whose password is its name) or as the admin. */
 function i10Url(as?: string): string {
@@ -128,13 +125,13 @@ async function countApplied(): Promise<number> {
 }
 
 const started = performance.now()
-const journal = JSON.parse(
-  await readFile(join(drizzleFolder, "meta", "_journal.json"), "utf8"),
-) as Journal
-
-// drizzle's readMigrationFiles reads exactly two things: meta/_journal.json and
-// `<tag>.sql` for each journal entry. So one folder of symlinks serves every
-// step; only the journal is rewritten, one entry longer each time.
+// drizzle's readMigrationFiles takes every subfolder that holds a
+// `migration.sql`, in name order. So one folder of symlinks serves every step,
+// one link longer each time.
+const folders = (await readdir(drizzleFolder, { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort()
 const work = await mkdtemp(join(tmpdir(), "i10-check-migrations-"))
 let current = ""
 try {
@@ -142,28 +139,19 @@ try {
   const ownerUrl = i10Url(OWNER)
   await assertNotSuperuser(ownerUrl)
 
-  await mkdir(join(work, "meta"))
-  for (const { tag } of journal.entries) {
-    await symlink(join(drizzleFolder, `${tag}.sql`), join(work, `${tag}.sql`))
-  }
-
-  for (let i = 1; i <= journal.entries.length; i++) {
-    current = journal.entries[i - 1]!.tag
-    await writeFile(
-      join(work, "meta", "_journal.json"),
-      JSON.stringify({ ...journal, entries: journal.entries.slice(0, i) }),
-    )
+  for (const folder of folders) {
+    current = folder
+    await symlink(join(drizzleFolder, folder), join(work, folder))
     await applyMigrations(ownerUrl, work)
   }
   current = ""
 
-  // ⚠ drizzle SKIPS rather than fails a migration whose `when` is not later
-  // than the last one applied, so a passing run could still have applied fewer
-  // than it read. Counting the rows is what rules that out.
+  // A passing run could still have applied fewer than it read: a folder with
+  // no `migration.sql` is skipped silently. Counting the rows rules that out.
   const applied = await countApplied()
-  if (applied !== journal.entries.length) {
+  if (applied !== folders.length) {
     throw new Error(
-      `applied ${applied} migrations but the journal has ${journal.entries.length}`,
+      `applied ${applied} migrations but there are ${folders.length} folders`,
     )
   }
 

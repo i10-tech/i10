@@ -103,7 +103,7 @@ export function teamInboxStore(db: Database): TeamInboxStore {
           .from(aliases)
           .where(eq(aliases.address, address)),
         db
-          .select({ address: sql<string>`${groups.email}` })
+          .select({ address: sql<string>`${groups.email}`.as("address") })
           .from(groups)
           .where(eq(sql`lower(${groups.email})`, address)),
       ).limit(1)

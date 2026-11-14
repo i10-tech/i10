@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { reconcileQuotas, DEFAULT_MAILBOX_QUOTA_BYTES } from "../src/mail/quota.js"
 import { allocationStore, workspaceOwnership } from "../src/mailboxes/allocation.js"
 import { fakeRegistry, GIB } from "./mailbox-quota-fixtures.js"
@@ -43,7 +42,7 @@ const allocationOf = async (n: string) => {
 suite("mailbox storage allocation in Postgres", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 12, onnotice: () => {} })
-    db = drizzle(owner, { schema }) as unknown as Database
+    db = drizzle({ client: owner }) as unknown as Database
     store = allocationStore(db)
 
     for (const n of ["a", "b", "c", "d", "e"]) {

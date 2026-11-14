@@ -62,7 +62,7 @@ suite("Google Workspace directories in Postgres", () => {
   beforeAll(async () => {
     owner = postgres(URL_ENV!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

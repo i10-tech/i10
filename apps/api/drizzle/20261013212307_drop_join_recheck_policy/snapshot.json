@@ -1,0 +1,34 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "28a2448a-c4a6-4782-8021-b81db43909fb",
+  "prevIds": [
+    "0ff11018-6469-449a-af43-2e3baf0b252a"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_domains"
+      ],
+      "writes": [
+        "s|pol|core.join_domains.join_domains_recheck_read",
+        "n|pol|core.join_domains.join_domains_recheck_read",
+        "e|pol|core.join_domains.join_domains_recheck_read"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "policies\u0000[\"core\",\"join_domains\",\"join_domains_recheck_read\"]"
+    }
+  ]
+}

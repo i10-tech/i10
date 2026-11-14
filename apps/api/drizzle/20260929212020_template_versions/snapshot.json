@@ -1,0 +1,678 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "11792c0f-37f3-4218-afbe-6dfee49ead57",
+  "prevIds": [
+    "8fef8869-a0e6-4a8a-8e53-504d53238fb5"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "template_kind"
+      ],
+      "writes": [
+        "s|enum|core.template_kind",
+        "n|enum|core.template_kind",
+        "e|enum|core.template_kind",
+        "n|type|core.template_kind"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_versions"
+      ],
+      "writes": [
+        "s|tbl|core.template_versions",
+        "n|tbl|core.template_versions",
+        "e|tbl|core.template_versions",
+        "n|rel|core.template_versions",
+        "n|type|core.template_versions",
+        "n|rel|core.template_versions_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.template_kind"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "template_version_id"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.template_version_id",
+        "n|col|core.message_bodies.template_version_id",
+        "e|col|core.message_bodies.template_version_id"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "kind"
+      ],
+      "writes": [
+        "s|col|core.templates.kind",
+        "n|col|core.templates.kind",
+        "e|col|core.templates.kind"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|enum|core.template_kind"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "live_version_id"
+      ],
+      "writes": [
+        "s|col|core.templates.live_version_id",
+        "n|col|core.templates.live_version_id",
+        "e|col|core.templates.live_version_id"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "template_versions",
+        "template_versions_number_uq"
+      ],
+      "writes": [
+        "s|idx|core.template_versions_number_uq",
+        "n|idx|core.template_versions_number_uq",
+        "e|idx|core.template_versions_number_uq",
+        "n|rel|core.template_versions_number_uq"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core",
+        "n|col|core.template_versions.template_id",
+        "n|col|core.template_versions.number"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "template_versions",
+        "template_versions_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.template_versions_tenant_idx",
+        "n|idx|core.template_versions_tenant_idx",
+        "e|idx|core.template_versions_tenant_idx",
+        "n|rel|core.template_versions_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core",
+        "n|col|core.template_versions.tenant_id",
+        "n|col|core.template_versions.created_at"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_versions"
+      ],
+      "writes": [
+        "s|fk|core.template_versions.template_versions_tenant_id_tenants_id_fk",
+        "n|fk|core.template_versions.template_versions_tenant_id_tenants_id_fk",
+        "e|fk|core.template_versions.template_versions_tenant_id_tenants_id_fk",
+        "n|con|core.template_versions.template_versions_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.template_versions.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_versions"
+      ],
+      "writes": [
+        "s|fk|core.template_versions.template_versions_template_id_templates_id_fk",
+        "n|fk|core.template_versions.template_versions_template_id_templates_id_fk",
+        "e|fk|core.template_versions.template_versions_template_id_templates_id_fk",
+        "n|con|core.template_versions.template_versions_template_id_templates_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core",
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|col|core.template_versions.template_id",
+        "n|col|core.templates.id",
+        "e|uniqueness|core.templates.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "templates"
+      ],
+      "writes": [
+        "s|fk|core.templates.templates_live_version_id_template_versions_id_fk",
+        "n|fk|core.templates.templates_live_version_id_template_versions_id_fk",
+        "e|fk|core.templates.templates_live_version_id_template_versions_id_fk",
+        "n|con|core.templates.templates_live_version_id_template_versions_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|tbl|core.template_versions",
+        "n|sch|core",
+        "n|col|core.templates.live_version_id",
+        "n|col|core.template_versions.id",
+        "e|uniqueness|core.template_versions.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_versions"
+      ],
+      "writes": [
+        "s|pol|core.template_versions.template_versions_tenant",
+        "n|pol|core.template_versions.template_versions_tenant",
+        "e|pol|core.template_versions.template_versions_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core",
+        "e|rls|core.template_versions"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "template_versions",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "template_kind",
+        "values": [
+          "html",
+          "tsx"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "template_version_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "template_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "number",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "kind",
+        "type": "template_kind",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "subject",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "html",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "text",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "nonce",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "variables",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "source",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "source_sha256",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "runtime",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "kind",
+        "type": "template_kind",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'html'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "live_version_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "template_versions_number_uq",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "template_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "number",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "template_versions_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "template_versions_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "template_versions_template_id_templates_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "template_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "templates",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "templates_live_version_id_template_versions_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "live_version_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "template_versions",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "template_versions_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "template_versions_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"template_versions\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"template_versions\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "56b00ae1-2e74-4fa8-a6ba-1fb70569da1a",
+  "prevIds": [
+    "29d9fb50-d23e-43b9-84b0-cd171f555dab"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "folder"
+      ],
+      "writes": [
+        "s|col|core.templates.folder",
+        "n|col|core.templates.folder",
+        "e|col|core.templates.folder"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"templates\",\"folder\"]"
+    }
+  ]
+}

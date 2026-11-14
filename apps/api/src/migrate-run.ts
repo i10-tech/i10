@@ -110,7 +110,18 @@ export async function applyMigrations(
   try {
     await waitForDatabase(sql)
     await loadPgvector(sql)
-    await migrate(drizzle(sql), { migrationsFolder })
+    // ⚠ `drizzle({ client })`, NOT `drizzle(sql)`: v1 reads a lone argument as a
+    // config, finds neither `client` nor `connection` on a postgres.js client,
+    // and dials the driver's defaults (localhost, PG* variables) instead of ours.
+    //
+    // ⚠ THE FIRST RUN AFTER THE 0.x -> v1 UPGRADE ALSO UPGRADES
+    // `drizzle.__drizzle_migrations` IN PLACE, in its own transaction before any
+    // migration runs: it adds `name` and `applied_at` and names each old row by
+    // matching its timestamp to a migration folder, then by hash. A row that
+    // matches no folder throws here, which fails the hook with nothing changed.
+    // No separate `drizzle-kit up` against the database is needed or exists.
+    // scripts/prove-migrations.ts proves it against a 0.x table.
+    await migrate(drizzle({ client: sql }), { migrationsFolder })
   } finally {
     await sql.end({ timeout: 5 })
   }

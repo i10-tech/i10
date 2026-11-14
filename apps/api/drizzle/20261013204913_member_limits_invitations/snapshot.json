@@ -1,0 +1,813 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "3ce3e307-6efe-4ea2-a766-af589fe692e9",
+  "prevIds": [
+    "0608ecdc-4a82-4a02-b813-5a501d8f9a11"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_alerts"
+      ],
+      "writes": [
+        "s|tbl|core.member_alerts",
+        "n|tbl|core.member_alerts",
+        "e|tbl|core.member_alerts",
+        "n|rel|core.member_alerts",
+        "n|type|core.member_alerts",
+        "n|rel|core.member_alerts_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_invitations"
+      ],
+      "writes": [
+        "s|tbl|core.member_invitations",
+        "n|tbl|core.member_invitations",
+        "e|tbl|core.member_invitations",
+        "n|rel|core.member_invitations",
+        "n|type|core.member_invitations",
+        "n|rel|core.member_invitations_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "plans",
+        "member_limit"
+      ],
+      "writes": [
+        "s|col|core.plans.member_limit",
+        "n|col|core.plans.member_limit",
+        "e|col|core.plans.member_limit"
+      ],
+      "reads": [
+        "n|tbl|core.plans",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "member_invitations",
+        "member_invitations_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.member_invitations_tenant_idx",
+        "n|idx|core.member_invitations_tenant_idx",
+        "e|idx|core.member_invitations_tenant_idx",
+        "n|rel|core.member_invitations_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "n|col|core.member_invitations.tenant_id",
+        "n|col|core.member_invitations.status"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "member_invitations",
+        "member_invitations_email_idx"
+      ],
+      "writes": [
+        "s|idx|core.member_invitations_email_idx",
+        "n|idx|core.member_invitations_email_idx",
+        "e|idx|core.member_invitations_email_idx",
+        "n|rel|core.member_invitations_email_idx"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "n|col|core.member_invitations.email"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "member_invitations",
+        "member_invitations_clerk_unique"
+      ],
+      "writes": [
+        "s|idx|core.member_invitations_clerk_unique",
+        "n|idx|core.member_invitations_clerk_unique",
+        "e|idx|core.member_invitations_clerk_unique",
+        "n|rel|core.member_invitations_clerk_unique"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "n|col|core.member_invitations.clerk_invitation_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_alerts"
+      ],
+      "writes": [
+        "s|fk|core.member_alerts.member_alerts_tenant_id_tenants_id_fk",
+        "n|fk|core.member_alerts.member_alerts_tenant_id_tenants_id_fk",
+        "e|fk|core.member_alerts.member_alerts_tenant_id_tenants_id_fk",
+        "n|con|core.member_alerts.member_alerts_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.member_alerts",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.member_alerts.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_invitations"
+      ],
+      "writes": [
+        "s|fk|core.member_invitations.member_invitations_tenant_id_tenants_id_fk",
+        "n|fk|core.member_invitations.member_invitations_tenant_id_tenants_id_fk",
+        "e|fk|core.member_invitations.member_invitations_tenant_id_tenants_id_fk",
+        "n|con|core.member_invitations.member_invitations_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.member_invitations.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_alerts"
+      ],
+      "writes": [
+        "s|pol|core.member_alerts.member_alerts_workspace",
+        "n|pol|core.member_alerts.member_alerts_workspace",
+        "e|pol|core.member_alerts.member_alerts_workspace"
+      ],
+      "reads": [
+        "n|tbl|core.member_alerts",
+        "n|sch|core",
+        "e|rls|core.member_alerts"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_invitations"
+      ],
+      "writes": [
+        "s|pol|core.member_invitations.member_invitations_workspace",
+        "n|pol|core.member_invitations.member_invitations_workspace",
+        "e|pol|core.member_invitations.member_invitations_workspace"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "e|rls|core.member_invitations"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_invitations"
+      ],
+      "writes": [
+        "s|pol|core.member_invitations.member_invitations_invitee_read",
+        "n|pol|core.member_invitations.member_invitations_invitee_read",
+        "e|pol|core.member_invitations.member_invitations_invitee_read"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "e|rls|core.member_invitations"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_invitations"
+      ],
+      "writes": [
+        "s|pol|core.member_invitations.member_invitations_invitee_link",
+        "n|pol|core.member_invitations.member_invitations_invitee_link",
+        "e|pol|core.member_invitations.member_invitations_invitee_link"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "e|rls|core.member_invitations"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_invitations"
+      ],
+      "writes": [
+        "s|pol|core.member_invitations.member_invitations_link_read",
+        "n|pol|core.member_invitations.member_invitations_link_read",
+        "e|pol|core.member_invitations.member_invitations_link_read"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "e|rls|core.member_invitations"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "member_alerts",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "member_invitations",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_alerts",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_alerts",
+        "name": "level",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_alerts",
+        "name": "alerted_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_alerts",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "clerk_org_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "clerk_invitation_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "email",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "role",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "inviter_user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "expires_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "zone",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "country",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "action_url",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "status",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'pending'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "ended_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "member_limit",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "20",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "status",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_email_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "email",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_clerk_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "clerk_invitation_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_alerts",
+        "name": "member_alerts_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_alerts",
+        "name": "member_alerts_pkey",
+        "columns": [
+          "tenant_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_alerts",
+        "name": "member_alerts_workspace",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"member_alerts\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"member_alerts\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_workspace",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"member_invitations\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"member_invitations\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_invitee_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"member_invitations\".\"email\" = nullif(current_setting('app.invitee_email', true), '')",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_invitee_link",
+        "as": "PERMISSIVE",
+        "for": "UPDATE",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"member_invitations\".\"email\" = nullif(current_setting('app.invitee_email', true), '')",
+        "withCheck": "\"core\".\"member_invitations\".\"email\" = nullif(current_setting('app.invitee_email', true), '')",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_link_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"member_invitations\".\"id\"::text = nullif(current_setting('app.invitation_id', true), '')",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    }
+  ]
+}

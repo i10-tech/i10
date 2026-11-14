@@ -1,0 +1,180 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "d75b6402-a823-434f-ae6c-a328f55bc920",
+  "prevIds": [
+    "4498060e-a310-454e-bc5a-4a3c6cb28514"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "shared_template_dismissals"
+      ],
+      "writes": [
+        "s|tbl|core.shared_template_dismissals",
+        "n|tbl|core.shared_template_dismissals",
+        "e|tbl|core.shared_template_dismissals",
+        "n|rel|core.shared_template_dismissals",
+        "n|type|core.shared_template_dismissals",
+        "n|rel|core.shared_template_dismissals_tenant_id_name_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "shared_template_dismissals"
+      ],
+      "writes": [
+        "s|fk|core.shared_template_dismissals.shared_template_dismissals_tenant_id_tenants_id_fk",
+        "n|fk|core.shared_template_dismissals.shared_template_dismissals_tenant_id_tenants_id_fk",
+        "e|fk|core.shared_template_dismissals.shared_template_dismissals_tenant_id_tenants_id_fk",
+        "n|con|core.shared_template_dismissals.shared_template_dismissals_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.shared_template_dismissals",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.shared_template_dismissals.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "shared_template_dismissals"
+      ],
+      "writes": [
+        "s|pol|core.shared_template_dismissals.shared_template_dismissals_tenant",
+        "n|pol|core.shared_template_dismissals.shared_template_dismissals_tenant",
+        "e|pol|core.shared_template_dismissals.shared_template_dismissals_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.shared_template_dismissals",
+        "n|sch|core",
+        "e|rls|core.shared_template_dismissals"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "shared_template_dismissals",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "shared_template_dismissals",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "shared_template_dismissals",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "shared_template_dismissals",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "shared_template_dismissals",
+        "name": "shared_template_dismissals_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "shared_template_dismissals",
+        "name": "shared_template_dismissals_tenant_id_name_pk",
+        "columns": [
+          "tenant_id",
+          "name"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "shared_template_dismissals",
+        "name": "shared_template_dismissals_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"shared_template_dismissals\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"shared_template_dismissals\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

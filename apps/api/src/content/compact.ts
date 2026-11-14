@@ -314,7 +314,7 @@ export async function compactContent(
       const [row] = (await tx.execute(sql`
         insert into core.content_templates
           (tenant_id, skeleton_hash, segments, bands, static_bytes, holes, messages, last_seen_at)
-        values (${tenantId}::uuid, ${t.hash}, ${JSON.stringify(t.template.segments)}::jsonb,
+        values (${tenantId}::uuid, ${t.hash}, ${sql.param(t.template.segments)}::jsonb,
                 ${arrayLiteral(t.bands)}::text[], ${staticBytes(t.template)},
                 ${t.template.segments.length - 1}, ${added}, now())
         on conflict (tenant_id, skeleton_hash)
@@ -333,7 +333,7 @@ export async function compactContent(
       const linked = (await tx.execute(sql`
         update core.message_bodies
            set template_id = ${t.id}::uuid,
-               template_values = ${JSON.stringify(values)}::jsonb,
+               template_values = ${sql.param(values)}::jsonb,
                examined_at = coalesce(examined_at, now()),
                content_bands = null
          where message_id = ${body.messageId}::uuid

@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import { sql } from "drizzle-orm"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { joinStore, recheckAccessDomains } from "../src/console/join.js"
 import { NO_TENANT } from "../src/middleware/tenant.js"
 
@@ -32,7 +31,7 @@ suite("team access domains", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

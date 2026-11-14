@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { postgresMetering } from "../src/metering/service.js"
 
 /**
@@ -44,7 +43,7 @@ suite("first-send windows and plan changes, against Postgres as i10_api", () => 
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
     await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id)
                 values (${T}, ${`m-${T.slice(0, 8)}`}, 'T', ${`metering-test-${T}`})`
     // Anchored long ago, on free since then.

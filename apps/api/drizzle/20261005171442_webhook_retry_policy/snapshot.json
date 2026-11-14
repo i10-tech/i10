@@ -1,0 +1,147 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "2b85aaf6-b5c5-468d-a7b9-549789a1b340",
+  "prevIds": [
+    "668768e3-7c36-432b-9483-5a22206485b3"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_retry_policy"
+      ],
+      "writes": [
+        "s|enum|core.webhook_retry_policy",
+        "n|enum|core.webhook_retry_policy",
+        "e|enum|core.webhook_retry_policy",
+        "n|type|core.webhook_retry_policy"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_deliveries",
+        "retry_policy"
+      ],
+      "writes": [
+        "s|col|core.webhook_deliveries.retry_policy",
+        "n|col|core.webhook_deliveries.retry_policy",
+        "e|col|core.webhook_deliveries.retry_policy"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core",
+        "n|enum|core.webhook_retry_policy"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "failing_since"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.failing_since",
+        "n|col|core.webhook_endpoints.failing_since",
+        "e|col|core.webhook_endpoints.failing_since"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "disabled_reason"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.disabled_reason",
+        "n|col|core.webhook_endpoints.disabled_reason",
+        "e|col|core.webhook_endpoints.disabled_reason"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_retry_policy",
+        "values": [
+          "free",
+          "pro",
+          "scale",
+          "enterprise"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "retry_policy",
+        "type": "webhook_retry_policy",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'free'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "failing_since",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "disabled_reason",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

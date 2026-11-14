@@ -1,0 +1,539 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "cbaa04ce-13de-445b-a701-570ea7dbcbba",
+  "prevIds": [
+    "b88534a4-d5ab-4857-96f7-e9ae60a9cfba"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "domain_transfers"
+      ],
+      "writes": [
+        "s|tbl|core.domain_transfers",
+        "n|tbl|core.domain_transfers",
+        "e|tbl|core.domain_transfers",
+        "n|rel|core.domain_transfers",
+        "n|type|core.domain_transfers",
+        "n|rel|core.domain_transfers_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "domain_transfers",
+        "domain_transfers_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.domain_transfers_tenant_idx",
+        "n|idx|core.domain_transfers_tenant_idx",
+        "e|idx|core.domain_transfers_tenant_idx",
+        "n|rel|core.domain_transfers_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "n|col|core.domain_transfers.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "domain_transfers",
+        "domain_transfers_recipient_idx"
+      ],
+      "writes": [
+        "s|idx|core.domain_transfers_recipient_idx",
+        "n|idx|core.domain_transfers_recipient_idx",
+        "e|idx|core.domain_transfers_recipient_idx",
+        "n|rel|core.domain_transfers_recipient_idx"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "n|col|core.domain_transfers.recipient_email"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "domain_transfers",
+        "domain_transfers_open_unique"
+      ],
+      "writes": [
+        "s|idx|core.domain_transfers_open_unique",
+        "n|idx|core.domain_transfers_open_unique",
+        "e|idx|core.domain_transfers_open_unique",
+        "n|rel|core.domain_transfers_open_unique"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "n|col|core.domain_transfers.domain_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "domain_transfers"
+      ],
+      "writes": [
+        "s|fk|core.domain_transfers.domain_transfers_tenant_id_tenants_id_fk",
+        "n|fk|core.domain_transfers.domain_transfers_tenant_id_tenants_id_fk",
+        "e|fk|core.domain_transfers.domain_transfers_tenant_id_tenants_id_fk",
+        "n|con|core.domain_transfers.domain_transfers_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.domain_transfers.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "domain_transfers"
+      ],
+      "writes": [
+        "s|pol|core.domain_transfers.domain_transfers_sender",
+        "n|pol|core.domain_transfers.domain_transfers_sender",
+        "e|pol|core.domain_transfers.domain_transfers_sender"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "e|rls|core.domain_transfers"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "domain_transfers"
+      ],
+      "writes": [
+        "s|pol|core.domain_transfers.domain_transfers_recipient_read",
+        "n|pol|core.domain_transfers.domain_transfers_recipient_read",
+        "e|pol|core.domain_transfers.domain_transfers_recipient_read"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "e|rls|core.domain_transfers"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "domain_transfers"
+      ],
+      "writes": [
+        "s|pol|core.domain_transfers.domain_transfers_recipient_answer",
+        "n|pol|core.domain_transfers.domain_transfers_recipient_answer",
+        "e|pol|core.domain_transfers.domain_transfers_recipient_answer"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "e|rls|core.domain_transfers"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "domain_transfers",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "recipient_email",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "offered_by",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "from_workspace",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "expires_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "accepted_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "accepted_tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "declined_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "canceled_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_recipient_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "recipient_email",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_open_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "domain_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"core\".\"domain_transfers\".\"accepted_at\" is null and \"core\".\"domain_transfers\".\"declined_at\" is null and \"core\".\"domain_transfers\".\"canceled_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_sender",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"domain_transfers\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"domain_transfers\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_recipient_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"domain_transfers\".\"recipient_email\" = any(string_to_array(nullif(current_setting('app.recipient_emails', true), ''), ','))",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_recipient_answer",
+        "as": "PERMISSIVE",
+        "for": "UPDATE",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"domain_transfers\".\"recipient_email\" = any(string_to_array(nullif(current_setting('app.recipient_emails', true), ''), ','))",
+        "withCheck": "\"core\".\"domain_transfers\".\"recipient_email\" = any(string_to_array(nullif(current_setting('app.recipient_emails', true), ''), ','))",
+        "entityType": "policies"
+      }
+    }
+  ]
+}
