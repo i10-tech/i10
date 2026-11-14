@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "a954ff20-8bd9-45bc-9838-38d150988958",
+  "prevIds": [
+    "ff929029-d0df-4686-95c2-1d5465f1db62"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "plan_assignments",
+        "overage_enabled"
+      ],
+      "writes": [
+        "s|col|core.plan_assignments.overage_enabled",
+        "n|col|core.plan_assignments.overage_enabled",
+        "e|col|core.plan_assignments.overage_enabled"
+      ],
+      "reads": [
+        "n|tbl|core.plan_assignments",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "overage_enabled",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

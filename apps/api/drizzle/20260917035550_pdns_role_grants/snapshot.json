@@ -1,0 +1,120 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "cd923cb8-5dc6-45e2-bbcb-0ce87fcf98a4",
+  "prevIds": [
+    "b3e27604-b0c4-41b3-bb01-1f2c86f01342"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_unique",
+      "statementTarget": [
+        "table",
+        "core",
+        "domains"
+      ],
+      "writes": [
+        "s|uq|core.domains.domains_name_unique",
+        "n|uq|core.domains.domains_name_unique",
+        "e|uq|core.domains.domains_name_unique",
+        "n|con|core.domains.domains_name_unique",
+        "n|rel|core.domains_name_unique"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core",
+        "e|col|core.domains.name"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|core.domains.name"
+      ]
+    },
+    {
+      "statementType": "add_unique",
+      "statementTarget": [
+        "table",
+        "core",
+        "domains"
+      ],
+      "writes": [
+        "s|uq|core.domains.domains_tenant_name_unique",
+        "n|uq|core.domains.domains_tenant_name_unique",
+        "e|uq|core.domains.domains_tenant_name_unique",
+        "n|con|core.domains.domains_tenant_name_unique",
+        "n|rel|core.domains_tenant_name_unique"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core",
+        "n|col|core.domains.tenant_id",
+        "n|col|core.domains.name"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "domains",
+        "domains_verified_name_unique"
+      ],
+      "writes": [
+        "s|idx|core.domains_verified_name_unique",
+        "n|idx|core.domains_verified_name_unique",
+        "e|idx|core.domains_verified_name_unique",
+        "n|rel|core.domains_verified_name_unique"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core",
+        "n|col|core.domains.name"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "domains_verified_name_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"core\".\"domains\".\"status\" = 'verified'",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "domains_tenant_name_unique",
+        "nameExplicit": true,
+        "columns": [
+          "tenant_id",
+          "name"
+        ],
+        "nullsNotDistinct": false,
+        "entityType": "uniques"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "uniques\u0000[\"core\",\"domains\",\"domains_name_unique\"]"
+    }
+  ]
+}

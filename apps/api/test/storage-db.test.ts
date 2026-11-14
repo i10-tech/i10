@@ -10,7 +10,6 @@ import {
 import { memoryStore, objectKey } from "../src/content/object-store.js"
 import { sweepTemplates } from "../src/content/sweep.js"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { expireTenant } from "../src/retention/expire.js"
 import { webhookEventOps } from "../src/webhooks/db.js"
 import { ingestEvent, type NormalisedEvent } from "../src/webhooks/events.js"
@@ -64,7 +63,7 @@ suite("storage and retention against Postgres, as i10_api", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
     for (const id of [A, B]) {
       await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id)
                   values (${id}, ${`s-${id.slice(0, 8)}`}, 'T', ${`storage-test-${id}`})`

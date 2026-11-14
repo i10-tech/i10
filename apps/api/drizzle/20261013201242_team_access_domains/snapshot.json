@@ -1,0 +1,1253 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "0608ecdc-4a82-4a02-b813-5a501d8f9a11",
+  "prevIds": [
+    "333ec66e-93ac-485e-916a-593f1527a979"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_dismissals"
+      ],
+      "writes": [
+        "s|tbl|core.join_dismissals",
+        "n|tbl|core.join_dismissals",
+        "e|tbl|core.join_dismissals",
+        "n|rel|core.join_dismissals",
+        "n|type|core.join_dismissals",
+        "n|rel|core.join_dismissals_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_exclusions"
+      ],
+      "writes": [
+        "s|tbl|core.join_exclusions",
+        "n|tbl|core.join_exclusions",
+        "e|tbl|core.join_exclusions",
+        "n|rel|core.join_exclusions",
+        "n|type|core.join_exclusions",
+        "n|rel|core.join_exclusions_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_memberships"
+      ],
+      "writes": [
+        "s|tbl|core.join_memberships",
+        "n|tbl|core.join_memberships",
+        "e|tbl|core.join_memberships",
+        "n|rel|core.join_memberships",
+        "n|type|core.join_memberships",
+        "n|rel|core.join_memberships_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "source"
+      ],
+      "writes": [
+        "s|col|core.join_domains.source",
+        "n|col|core.join_domains.source",
+        "e|col|core.join_domains.source"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "token"
+      ],
+      "writes": [
+        "s|col|core.join_domains.token",
+        "n|col|core.join_domains.token",
+        "e|col|core.join_domains.token"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "rules"
+      ],
+      "writes": [
+        "s|col|core.join_domains.rules",
+        "n|col|core.join_domains.rules",
+        "e|col|core.join_domains.rules"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "verified_at"
+      ],
+      "writes": [
+        "s|col|core.join_domains.verified_at",
+        "n|col|core.join_domains.verified_at",
+        "e|col|core.join_domains.verified_at"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "checked_at"
+      ],
+      "writes": [
+        "s|col|core.join_domains.checked_at",
+        "n|col|core.join_domains.checked_at",
+        "e|col|core.join_domains.checked_at"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "lapsed_at"
+      ],
+      "writes": [
+        "s|col|core.join_domains.lapsed_at",
+        "n|col|core.join_domains.lapsed_at",
+        "e|col|core.join_domains.lapsed_at"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "displaced_at"
+      ],
+      "writes": [
+        "s|col|core.join_domains.displaced_at",
+        "n|col|core.join_domains.displaced_at",
+        "e|col|core.join_domains.displaced_at"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_requests",
+        "via"
+      ],
+      "writes": [
+        "s|col|core.join_requests.via",
+        "n|col|core.join_requests.via",
+        "e|col|core.join_requests.via"
+      ],
+      "reads": [
+        "n|tbl|core.join_requests",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_requests",
+        "full"
+      ],
+      "writes": [
+        "s|col|core.join_requests.full",
+        "n|col|core.join_requests.full",
+        "e|col|core.join_requests.full"
+      ],
+      "reads": [
+        "n|tbl|core.join_requests",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "join_domains",
+        "domain_id"
+      ],
+      "writes": [
+        "s|colprop|core.join_domains.domain_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core",
+        "n|col|core.join_domains.domain_id"
+      ],
+      "sqlHash": "b03223d53265243d"
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "join_dismissals",
+        "join_dismissals_tenant_name_unique"
+      ],
+      "writes": [
+        "s|idx|core.join_dismissals_tenant_name_unique",
+        "n|idx|core.join_dismissals_tenant_name_unique",
+        "e|idx|core.join_dismissals_tenant_name_unique",
+        "n|rel|core.join_dismissals_tenant_name_unique"
+      ],
+      "reads": [
+        "n|tbl|core.join_dismissals",
+        "n|sch|core",
+        "n|col|core.join_dismissals.tenant_id",
+        "n|col|core.join_dismissals.name"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "join_exclusions",
+        "join_exclusions_tenant_email_unique"
+      ],
+      "writes": [
+        "s|idx|core.join_exclusions_tenant_email_unique",
+        "n|idx|core.join_exclusions_tenant_email_unique",
+        "e|idx|core.join_exclusions_tenant_email_unique",
+        "n|rel|core.join_exclusions_tenant_email_unique"
+      ],
+      "reads": [
+        "n|tbl|core.join_exclusions",
+        "n|sch|core",
+        "n|col|core.join_exclusions.tenant_id",
+        "n|col|core.join_exclusions.email"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "join_memberships",
+        "join_memberships_tenant_user_unique"
+      ],
+      "writes": [
+        "s|idx|core.join_memberships_tenant_user_unique",
+        "n|idx|core.join_memberships_tenant_user_unique",
+        "e|idx|core.join_memberships_tenant_user_unique",
+        "n|rel|core.join_memberships_tenant_user_unique"
+      ],
+      "reads": [
+        "n|tbl|core.join_memberships",
+        "n|sch|core",
+        "n|col|core.join_memberships.tenant_id",
+        "n|col|core.join_memberships.user_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "join_memberships",
+        "join_memberships_user_idx"
+      ],
+      "writes": [
+        "s|idx|core.join_memberships_user_idx",
+        "n|idx|core.join_memberships_user_idx",
+        "e|idx|core.join_memberships_user_idx",
+        "n|rel|core.join_memberships_user_idx"
+      ],
+      "reads": [
+        "n|tbl|core.join_memberships",
+        "n|sch|core",
+        "n|col|core.join_memberships.user_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_dismissals"
+      ],
+      "writes": [
+        "s|fk|core.join_dismissals.join_dismissals_tenant_id_tenants_id_fk",
+        "n|fk|core.join_dismissals.join_dismissals_tenant_id_tenants_id_fk",
+        "e|fk|core.join_dismissals.join_dismissals_tenant_id_tenants_id_fk",
+        "n|con|core.join_dismissals.join_dismissals_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.join_dismissals",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.join_dismissals.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_exclusions"
+      ],
+      "writes": [
+        "s|fk|core.join_exclusions.join_exclusions_tenant_id_tenants_id_fk",
+        "n|fk|core.join_exclusions.join_exclusions_tenant_id_tenants_id_fk",
+        "e|fk|core.join_exclusions.join_exclusions_tenant_id_tenants_id_fk",
+        "n|con|core.join_exclusions.join_exclusions_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.join_exclusions",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.join_exclusions.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_memberships"
+      ],
+      "writes": [
+        "s|fk|core.join_memberships.join_memberships_tenant_id_tenants_id_fk",
+        "n|fk|core.join_memberships.join_memberships_tenant_id_tenants_id_fk",
+        "e|fk|core.join_memberships.join_memberships_tenant_id_tenants_id_fk",
+        "n|con|core.join_memberships.join_memberships_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.join_memberships",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.join_memberships.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "recreate_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_domains"
+      ],
+      "writes": [
+        "s|fk|core.join_domains.join_domains_domain_id_domains_id_fk",
+        "n|fk|core.join_domains.join_domains_domain_id_domains_id_fk",
+        "e|fk|core.join_domains.join_domains_domain_id_domains_id_fk",
+        "n|con|core.join_domains.join_domains_domain_id_domains_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core",
+        "n|tbl|core.domains",
+        "n|sch|core",
+        "n|col|core.join_domains.domain_id",
+        "n|col|core.domains.id",
+        "e|uniqueness|core.domains.id"
+      ],
+      "sqlHash": "8abd4e275002d31c"
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_dismissals"
+      ],
+      "writes": [
+        "s|pol|core.join_dismissals.join_dismissals_workspace",
+        "n|pol|core.join_dismissals.join_dismissals_workspace",
+        "e|pol|core.join_dismissals.join_dismissals_workspace"
+      ],
+      "reads": [
+        "n|tbl|core.join_dismissals",
+        "n|sch|core",
+        "e|rls|core.join_dismissals"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_domains"
+      ],
+      "writes": [
+        "s|pol|core.join_domains.join_domains_recheck_read",
+        "n|pol|core.join_domains.join_domains_recheck_read",
+        "e|pol|core.join_domains.join_domains_recheck_read"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core",
+        "e|rls|core.join_domains"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_exclusions"
+      ],
+      "writes": [
+        "s|pol|core.join_exclusions.join_exclusions_workspace",
+        "n|pol|core.join_exclusions.join_exclusions_workspace",
+        "e|pol|core.join_exclusions.join_exclusions_workspace"
+      ],
+      "reads": [
+        "n|tbl|core.join_exclusions",
+        "n|sch|core",
+        "e|rls|core.join_exclusions"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_memberships"
+      ],
+      "writes": [
+        "s|pol|core.join_memberships.join_memberships_workspace",
+        "n|pol|core.join_memberships.join_memberships_workspace",
+        "e|pol|core.join_memberships.join_memberships_workspace"
+      ],
+      "reads": [
+        "n|tbl|core.join_memberships",
+        "n|sch|core",
+        "e|rls|core.join_memberships"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_memberships"
+      ],
+      "writes": [
+        "s|pol|core.join_memberships.join_memberships_member_read",
+        "n|pol|core.join_memberships.join_memberships_member_read",
+        "e|pol|core.join_memberships.join_memberships_member_read"
+      ],
+      "reads": [
+        "n|tbl|core.join_memberships",
+        "n|sch|core",
+        "e|rls|core.join_memberships"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "join_dismissals",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "join_exclusions",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "join_memberships",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "source",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'domains'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "token",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "replace(gen_random_uuid()::text, '-', '')",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "rules",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "verified_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "checked_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "lapsed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "displaced_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "email",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "kind",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "email",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "how",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "via",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_requests",
+        "name": "via",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_requests",
+        "name": "full",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "join_dismissals_tenant_name_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "join_exclusions_tenant_email_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "email",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "join_memberships_tenant_user_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "join_memberships_user_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "join_dismissals_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "join_exclusions_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "join_memberships_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "join_dismissals_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "join_exclusions_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "join_memberships_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_dismissals",
+        "name": "join_dismissals_workspace",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"join_dismissals\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"join_dismissals\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "join_domains_recheck_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "current_setting('app.join_recheck', true) = 'on'",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "join_exclusions_workspace",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"join_exclusions\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"join_exclusions\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "join_memberships_workspace",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"join_memberships\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"join_memberships\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_memberships",
+        "name": "join_memberships_member_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"join_memberships\".\"user_id\" = nullif(current_setting('app.user_id', true), '')",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"core\",\"join_domains\",\"domain_id\"]",
+      "set": {
+        "notNull": false
+      }
+    },
+    {
+      "op": "alter",
+      "key": "fks\u0000[\"core\",\"join_domains\",\"join_domains_domain_id_domains_id_fk\"]",
+      "set": {
+        "onDelete": "SET NULL"
+      }
+    }
+  ]
+}

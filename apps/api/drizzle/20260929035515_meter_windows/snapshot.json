@@ -1,0 +1,214 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "97f51916-a4a1-4dc5-b399-be722e676843",
+  "prevIds": [
+    "145df75e-417c-4549-b69e-60340c44cd75"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_windows"
+      ],
+      "writes": [
+        "s|tbl|core.meter_windows",
+        "n|tbl|core.meter_windows",
+        "e|tbl|core.meter_windows",
+        "n|rel|core.meter_windows",
+        "n|type|core.meter_windows",
+        "n|rel|core.meter_windows_tenant_id_feature_id_shard_window_id_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_windows"
+      ],
+      "writes": [
+        "s|fk|core.meter_windows.meter_windows_tenant_id_tenants_id_fk",
+        "n|fk|core.meter_windows.meter_windows_tenant_id_tenants_id_fk",
+        "e|fk|core.meter_windows.meter_windows_tenant_id_tenants_id_fk",
+        "n|con|core.meter_windows.meter_windows_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.meter_windows",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.meter_windows.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_windows"
+      ],
+      "writes": [
+        "s|pol|core.meter_windows.meter_windows_tenant",
+        "n|pol|core.meter_windows.meter_windows_tenant",
+        "e|pol|core.meter_windows.meter_windows_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.meter_windows",
+        "n|sch|core",
+        "e|rls|core.meter_windows"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "meter_windows",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "feature_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "shard",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "window_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "started_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "meter_windows_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "meter_windows_tenant_id_feature_id_shard_window_id_pk",
+        "columns": [
+          "tenant_id",
+          "feature_id",
+          "shard",
+          "window_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_windows",
+        "name": "meter_windows_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"meter_windows\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"meter_windows\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "20ebe768-6c92-47e1-9baf-3734bd18ca35",
+  "prevIds": [
+    "2059204d-a9b9-4e86-954d-695fea623f96"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "plan_assignments",
+        "plan_since"
+      ],
+      "writes": [
+        "s|col|core.plan_assignments.plan_since",
+        "n|col|core.plan_assignments.plan_since",
+        "e|col|core.plan_assignments.plan_since"
+      ],
+      "reads": [
+        "n|tbl|core.plan_assignments",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "plan_since",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

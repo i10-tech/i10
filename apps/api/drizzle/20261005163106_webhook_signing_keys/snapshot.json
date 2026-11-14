@@ -1,0 +1,145 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "83c8f075-6ae6-40d8-89eb-ead108a26885",
+  "prevIds": [
+    "679f1f55-5dd7-45bf-92c1-f08bcf1e6cd4"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_signature_scheme"
+      ],
+      "writes": [
+        "s|enum|core.webhook_signature_scheme",
+        "n|enum|core.webhook_signature_scheme",
+        "e|enum|core.webhook_signature_scheme",
+        "n|type|core.webhook_signature_scheme"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "signature_scheme"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.signature_scheme",
+        "n|col|core.webhook_endpoints.signature_scheme",
+        "e|col|core.webhook_endpoints.signature_scheme"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core",
+        "n|enum|core.webhook_signature_scheme"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "public_key"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.public_key",
+        "n|col|core.webhook_endpoints.public_key",
+        "e|col|core.webhook_endpoints.public_key"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "retiring_secrets"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.retiring_secrets",
+        "n|col|core.webhook_endpoints.retiring_secrets",
+        "e|col|core.webhook_endpoints.retiring_secrets"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_signature_scheme",
+        "values": [
+          "hmac_sha256",
+          "ed25519"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "signature_scheme",
+        "type": "webhook_signature_scheme",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'hmac_sha256'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "public_key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "retiring_secrets",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

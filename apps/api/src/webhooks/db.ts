@@ -198,7 +198,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
               // matches the sending domain; a tag filter needs every tag it
               // names, with the same value, on the message.
               sql`(${webhookEndpoints.filterDomains} is null or ${eventDomain}::text = any(${webhookEndpoints.filterDomains}))`,
-              sql`(${webhookEndpoints.filterTags} is null or ${JSON.stringify(eventTags)}::jsonb @> ${webhookEndpoints.filterTags})`,
+              sql`(${webhookEndpoints.filterTags} is null or ${sql.param(eventTags)}::jsonb @> ${webhookEndpoints.filterTags})`,
             ),
           )
           .returning({

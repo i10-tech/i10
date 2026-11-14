@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { webhookDeliveryOps } from "../src/webhooks/db.js"
 import { verifyEd25519 } from "../src/webhooks/keys.js"
 import { secretBox, verifySignature } from "../src/webhooks/signing.js"
@@ -58,7 +57,7 @@ suite("webhook signing keys in the database", () => {
   beforeAll(() => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
     store = webhookEndpointStore(db, secrets)
   })
   afterAll(async () => {

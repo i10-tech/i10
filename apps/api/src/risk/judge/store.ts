@@ -47,7 +47,7 @@ export interface JudgementStore {
 }
 
 const WINDOW_DAYS = 7
-const json = (v: unknown) => (v === null ? null : JSON.stringify(v))
+const json = (v: unknown) => (v === null ? null : sql.param(v))
 
 export function judgementStore(db: Database): JudgementStore {
   const rows = async (q: ReturnType<typeof sql>) =>
@@ -68,7 +68,7 @@ export function judgementStore(db: Database): JudgementStore {
       const s = j.second
       const [r] = await rows(sql`
         select core.risk_content_judgement_save(
-          ${tenantId}::uuid, ${exact}, ${j.model}, ${JSON.stringify(j.answers)}::jsonb,
+          ${tenantId}::uuid, ${exact}, ${j.model}, ${sql.param(j.answers)}::jsonb,
           ${j.truncated}, ${j.usage?.inputTokens ?? null}::int, ${j.usage?.outputTokens ?? null}::int,
           ${s.status}::core.risk_judge_second, ${s.model}, ${json(s.answers)}::jsonb,
           ${s.truncated}::boolean, ${s.usage?.inputTokens ?? null}::int,

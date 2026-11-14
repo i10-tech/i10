@@ -179,7 +179,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     // ⚠ LOGS IN AS i10_api ITSELF, the way the API does. On the CNPG image the
     // owner `i10` is not a superuser (as in production) and cannot SET ROLE.
     app = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
     const [plan] = await owner`select id from core.plans where id = ${FREE}`
     if (!plan) {
       await owner`insert into core.plans (id, name, source) values (${FREE}, 'Free', 'catalog') on conflict do nothing`.catch(

@@ -1,0 +1,756 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "d7cc3639-1e4a-4dd9-bab5-d84acf52c1f1",
+  "prevIds": [
+    "e6df7998-0119-4452-9a76-cc7e46c34c8a"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "plan_source"
+      ],
+      "writes": [
+        "s|enum|core.plan_source",
+        "n|enum|core.plan_source",
+        "e|enum|core.plan_source",
+        "n|type|core.plan_source"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_events"
+      ],
+      "writes": [
+        "s|tbl|core.meter_events",
+        "n|tbl|core.meter_events",
+        "e|tbl|core.meter_events",
+        "n|rel|core.meter_events",
+        "n|type|core.meter_events",
+        "n|rel|core.meter_events_tenant_id_feature_id_event_id_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "plan_assignments"
+      ],
+      "writes": [
+        "s|tbl|core.plan_assignments",
+        "n|tbl|core.plan_assignments",
+        "e|tbl|core.plan_assignments",
+        "n|rel|core.plan_assignments",
+        "n|type|core.plan_assignments",
+        "n|rel|core.plan_assignments_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "plans"
+      ],
+      "writes": [
+        "s|tbl|core.plans",
+        "n|tbl|core.plans",
+        "e|tbl|core.plans",
+        "n|rel|core.plans",
+        "n|type|core.plans",
+        "n|rel|core.plans_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.plan_source"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "meter_events",
+        "meter_events_window_idx"
+      ],
+      "writes": [
+        "s|idx|core.meter_events_window_idx",
+        "n|idx|core.meter_events_window_idx",
+        "e|idx|core.meter_events_window_idx",
+        "n|rel|core.meter_events_window_idx"
+      ],
+      "reads": [
+        "n|tbl|core.meter_events",
+        "n|sch|core",
+        "n|col|core.meter_events.tenant_id",
+        "n|col|core.meter_events.feature_id",
+        "n|col|core.meter_events.shard",
+        "n|col|core.meter_events.occurred_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "plans",
+        "plans_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.plans_tenant_idx",
+        "n|idx|core.plans_tenant_idx",
+        "e|idx|core.plans_tenant_idx",
+        "n|rel|core.plans_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.plans",
+        "n|sch|core",
+        "n|col|core.plans.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_events"
+      ],
+      "writes": [
+        "s|fk|core.meter_events.meter_events_tenant_id_tenants_id_fk",
+        "n|fk|core.meter_events.meter_events_tenant_id_tenants_id_fk",
+        "e|fk|core.meter_events.meter_events_tenant_id_tenants_id_fk",
+        "n|con|core.meter_events.meter_events_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.meter_events",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.meter_events.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "plan_assignments"
+      ],
+      "writes": [
+        "s|fk|core.plan_assignments.plan_assignments_tenant_id_tenants_id_fk",
+        "n|fk|core.plan_assignments.plan_assignments_tenant_id_tenants_id_fk",
+        "e|fk|core.plan_assignments.plan_assignments_tenant_id_tenants_id_fk",
+        "n|con|core.plan_assignments.plan_assignments_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.plan_assignments",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.plan_assignments.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "plan_assignments"
+      ],
+      "writes": [
+        "s|fk|core.plan_assignments.plan_assignments_plan_id_plans_id_fk",
+        "n|fk|core.plan_assignments.plan_assignments_plan_id_plans_id_fk",
+        "e|fk|core.plan_assignments.plan_assignments_plan_id_plans_id_fk",
+        "n|con|core.plan_assignments.plan_assignments_plan_id_plans_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.plan_assignments",
+        "n|sch|core",
+        "n|tbl|core.plans",
+        "n|sch|core",
+        "n|col|core.plan_assignments.plan_id",
+        "n|col|core.plans.id",
+        "e|uniqueness|core.plans.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "plans"
+      ],
+      "writes": [
+        "s|fk|core.plans.plans_tenant_id_tenants_id_fk",
+        "n|fk|core.plans.plans_tenant_id_tenants_id_fk",
+        "e|fk|core.plans.plans_tenant_id_tenants_id_fk",
+        "n|con|core.plans.plans_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.plans",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.plans.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "meter_events",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "plan_assignments",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "plans",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "plan_source",
+        "values": [
+          "catalog",
+          "custom"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "feature_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "event_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "shard",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "value",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "1",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "occurred_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "recorded_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "plan_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "anchor",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "assigned_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "source",
+        "type": "plan_source",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "entitlements",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "meter_events_window_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "feature_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "shard",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "occurred_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "plans_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "meter_events_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "plan_assignments_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "plan_assignments_plan_id_plans_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "plan_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "plans",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "NO ACTION",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "plans_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "meter_events_tenant_id_feature_id_event_id_pk",
+        "columns": [
+          "tenant_id",
+          "feature_id",
+          "event_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plan_assignments",
+        "name": "plan_assignments_pkey",
+        "columns": [
+          "tenant_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "plans_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

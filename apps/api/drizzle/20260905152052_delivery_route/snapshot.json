@@ -1,0 +1,112 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "9db987a2-19cf-4bd7-b417-f01a6c22f29e",
+  "prevIds": [
+    "f17c482d-9a4e-4c5f-af62-dbd0f44c5038"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "delivery_route"
+      ],
+      "writes": [
+        "s|enum|core.delivery_route",
+        "n|enum|core.delivery_route",
+        "e|enum|core.delivery_route",
+        "n|type|core.delivery_route"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "bounce_subdomain"
+      ],
+      "writes": [
+        "s|col|core.domains.bounce_subdomain",
+        "n|col|core.domains.bounce_subdomain",
+        "e|col|core.domains.bounce_subdomain"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "delivery_route"
+      ],
+      "writes": [
+        "s|col|core.domains.delivery_route",
+        "n|col|core.domains.delivery_route",
+        "e|col|core.domains.delivery_route"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core",
+        "n|enum|core.delivery_route"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "delivery_route",
+        "values": [
+          "auto",
+          "ses",
+          "direct"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "bounce_subdomain",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'bounce'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "delivery_route",
+        "type": "delivery_route",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'auto'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

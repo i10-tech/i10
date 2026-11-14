@@ -1,4 +1,4 @@
-import { relations, sql } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
@@ -487,27 +487,3 @@ export const bindFailureBudget = authd.table("bind_failure_budget", {
   windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
   count: integer("count").notNull(),
 })
-
-export const accountsRelations = relations(accounts, ({ many }) => ({
-  aliases: many(aliases),
-  memberships: many(groupMembers),
-}))
-
-export const aliasesRelations = relations(aliases, ({ one }) => ({
-  account: one(accounts, {
-    fields: [aliases.clerkUserId],
-    references: [accounts.clerkUserId],
-  }),
-}))
-
-export const groupsRelations = relations(groups, ({ many }) => ({
-  members: many(groupMembers),
-}))
-
-export const groupMembersRelations = relations(groupMembers, ({ one }) => ({
-  group: one(groups, { fields: [groupMembers.groupName], references: [groups.name] }),
-  account: one(accounts, {
-    fields: [groupMembers.clerkUserId],
-    references: [accounts.clerkUserId],
-  }),
-}))

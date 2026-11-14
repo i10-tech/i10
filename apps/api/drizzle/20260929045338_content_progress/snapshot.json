@@ -1,0 +1,393 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "a932ae2a-727c-4dd2-8c10-e40afa30fb6d",
+  "prevIds": [
+    "46fcdc9a-01a2-4084-ab70-f64e6ba7db99"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "examined_at"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.examined_at",
+        "n|col|core.message_bodies.examined_at",
+        "e|col|core.message_bodies.examined_at"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "content_bands"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.content_bands",
+        "n|col|core.message_bodies.content_bands",
+        "e|col|core.message_bodies.content_bands"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "analysed_at"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.analysed_at",
+        "n|col|core.message_bodies.analysed_at",
+        "e|col|core.message_bodies.analysed_at"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "fingerprinted_at"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.fingerprinted_at",
+        "n|col|core.message_bodies.fingerprinted_at",
+        "e|col|core.message_bodies.fingerprinted_at"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "message_bodies",
+        "message_bodies_unexamined_idx"
+      ],
+      "writes": [
+        "s|idx|core.message_bodies_unexamined_idx",
+        "n|idx|core.message_bodies_unexamined_idx",
+        "e|idx|core.message_bodies_unexamined_idx",
+        "n|rel|core.message_bodies_unexamined_idx"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core",
+        "n|col|core.message_bodies.tenant_id",
+        "n|col|core.message_bodies.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "message_bodies",
+        "message_bodies_candidates_idx"
+      ],
+      "writes": [
+        "s|idx|core.message_bodies_candidates_idx",
+        "n|idx|core.message_bodies_candidates_idx",
+        "e|idx|core.message_bodies_candidates_idx",
+        "n|rel|core.message_bodies_candidates_idx"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core",
+        "n|col|core.message_bodies.content_bands"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "message_bodies",
+        "message_bodies_linked_idx"
+      ],
+      "writes": [
+        "s|idx|core.message_bodies_linked_idx",
+        "n|idx|core.message_bodies_linked_idx",
+        "e|idx|core.message_bodies_linked_idx",
+        "n|rel|core.message_bodies_linked_idx"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core",
+        "n|col|core.message_bodies.template_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "message_bodies",
+        "message_bodies_unanalysed_idx"
+      ],
+      "writes": [
+        "s|idx|core.message_bodies_unanalysed_idx",
+        "n|idx|core.message_bodies_unanalysed_idx",
+        "e|idx|core.message_bodies_unanalysed_idx",
+        "n|rel|core.message_bodies_unanalysed_idx"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core",
+        "n|col|core.message_bodies.tenant_id",
+        "n|col|core.message_bodies.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "message_bodies",
+        "message_bodies_unfingerprinted_idx"
+      ],
+      "writes": [
+        "s|idx|core.message_bodies_unfingerprinted_idx",
+        "n|idx|core.message_bodies_unfingerprinted_idx",
+        "e|idx|core.message_bodies_unfingerprinted_idx",
+        "n|rel|core.message_bodies_unfingerprinted_idx"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core",
+        "n|col|core.message_bodies.tenant_id",
+        "n|col|core.message_bodies.created_at"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "examined_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "content_bands",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "analysed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "fingerprinted_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "message_bodies_unexamined_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"message_bodies\".\"examined_at\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "message_bodies_candidates_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "content_bands",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"message_bodies\".\"template_id\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null",
+        "with": "",
+        "method": "gin",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "message_bodies_linked_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "template_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"message_bodies\".\"template_id\" is not null and \"core\".\"message_bodies\".\"compacted_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "message_bodies_unanalysed_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"message_bodies\".\"analysed_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "message_bodies_unfingerprinted_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"message_bodies\".\"fingerprinted_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    }
+  ]
+}

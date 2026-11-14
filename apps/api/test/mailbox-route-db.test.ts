@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { publishRoutingSettings } from "../src/domains/routing-settings.js"
 
 /**
@@ -38,7 +37,7 @@ async function route(senderDomain: string) {
 suite("mailbox routing in Postgres", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
-    db = drizzle(owner, { schema }) as unknown as Database
+    db = drizzle({ client: owner }) as unknown as Database
 
     const [settings] = await owner`
       select ses_enabled, ses_relay_enabled, mail_domains

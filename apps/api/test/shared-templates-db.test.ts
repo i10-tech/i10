@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { resolveTemplateSend } from "@repo/templates"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { SHARED_TEMPLATES } from "../src/templates/shared.js"
 import { templateStore, type TemplateStore } from "../src/templates/store.js"
 
@@ -43,7 +42,7 @@ suite("shared templates", () => {
   beforeAll(() => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    store = templateStore(drizzle(app, { schema }) as unknown as Database)
+    store = templateStore(drizzle({ client: app }) as unknown as Database)
   })
   afterAll(async () => {
     if (tenants.length) await owner`delete from core.tenants where id = any(${tenants})`

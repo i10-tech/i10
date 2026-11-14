@@ -1,0 +1,185 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "eff63a29-6183-4fd2-ab35-8cdf237101e9",
+  "prevIds": [
+    "fcfe9761-8dc9-441e-8873-ac245c0ac64a"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_assets"
+      ],
+      "writes": [
+        "s|tbl|core.template_assets",
+        "n|tbl|core.template_assets",
+        "e|tbl|core.template_assets",
+        "n|rel|core.template_assets",
+        "n|type|core.template_assets",
+        "n|rel|core.template_assets_tenant_id_sha256_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_assets"
+      ],
+      "writes": [
+        "s|pol|core.template_assets.template_assets_tenant",
+        "n|pol|core.template_assets.template_assets_tenant",
+        "e|pol|core.template_assets.template_assets_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.template_assets",
+        "n|sch|core",
+        "e|rls|core.template_assets"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "template_assets",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "sha256",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "content_type",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "size",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "template_assets_tenant_id_sha256_pk",
+        "columns": [
+          "tenant_id",
+          "sha256"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_assets",
+        "name": "template_assets_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"template_assets\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"template_assets\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

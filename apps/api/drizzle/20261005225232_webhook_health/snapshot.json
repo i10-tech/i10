@@ -1,0 +1,679 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "f0083893-e04c-451d-af89-c4a1813d7186",
+  "prevIds": [
+    "3c5dae49-caae-47f6-be35-7fd512f3bcf2"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_endpoint_health"
+      ],
+      "writes": [
+        "s|enum|core.webhook_endpoint_health",
+        "n|enum|core.webhook_endpoint_health",
+        "e|enum|core.webhook_endpoint_health",
+        "n|type|core.webhook_endpoint_health"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_health_change"
+      ],
+      "writes": [
+        "s|enum|core.webhook_health_change",
+        "n|enum|core.webhook_health_change",
+        "e|enum|core.webhook_health_change",
+        "n|type|core.webhook_health_change"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "alter_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_event_type"
+      ],
+      "writes": [
+        "s|enum|core.webhook_event_type"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "webhook_health_events"
+      ],
+      "writes": [
+        "s|tbl|core.webhook_health_events",
+        "n|tbl|core.webhook_health_events",
+        "e|tbl|core.webhook_health_events",
+        "n|rel|core.webhook_health_events",
+        "n|type|core.webhook_health_events",
+        "n|rel|core.webhook_health_events_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.webhook_health_change"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "health"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.health",
+        "n|col|core.webhook_endpoints.health",
+        "e|col|core.webhook_endpoints.health"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core",
+        "n|enum|core.webhook_endpoint_health"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "health_changed_at"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.health_changed_at",
+        "n|col|core.webhook_endpoints.health_changed_at",
+        "e|col|core.webhook_endpoints.health_changed_at"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "webhook_health_events",
+        "webhook_health_events_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.webhook_health_events_tenant_idx",
+        "n|idx|core.webhook_health_events_tenant_idx",
+        "e|idx|core.webhook_health_events_tenant_idx",
+        "n|rel|core.webhook_health_events_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_health_events",
+        "n|sch|core",
+        "n|col|core.webhook_health_events.tenant_id",
+        "n|col|core.webhook_health_events.occurred_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "webhook_health_events",
+        "webhook_health_events_endpoint_idx"
+      ],
+      "writes": [
+        "s|idx|core.webhook_health_events_endpoint_idx",
+        "n|idx|core.webhook_health_events_endpoint_idx",
+        "e|idx|core.webhook_health_events_endpoint_idx",
+        "n|rel|core.webhook_health_events_endpoint_idx"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_health_events",
+        "n|sch|core",
+        "n|col|core.webhook_health_events.endpoint_id",
+        "n|col|core.webhook_health_events.occurred_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "webhook_health_events",
+        "webhook_health_events_unfanned_idx"
+      ],
+      "writes": [
+        "s|idx|core.webhook_health_events_unfanned_idx",
+        "n|idx|core.webhook_health_events_unfanned_idx",
+        "e|idx|core.webhook_health_events_unfanned_idx",
+        "n|rel|core.webhook_health_events_unfanned_idx"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_health_events",
+        "n|sch|core",
+        "n|col|core.webhook_health_events.occurred_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "webhook_health_events",
+        "webhook_health_events_unemailed_idx"
+      ],
+      "writes": [
+        "s|idx|core.webhook_health_events_unemailed_idx",
+        "n|idx|core.webhook_health_events_unemailed_idx",
+        "e|idx|core.webhook_health_events_unemailed_idx",
+        "n|rel|core.webhook_health_events_unemailed_idx"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_health_events",
+        "n|sch|core",
+        "n|col|core.webhook_health_events.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "webhook_health_events"
+      ],
+      "writes": [
+        "s|fk|core.webhook_health_events.webhook_health_events_endpoint_id_webhook_endpoints_id_fk",
+        "n|fk|core.webhook_health_events.webhook_health_events_endpoint_id_webhook_endpoints_id_fk",
+        "e|fk|core.webhook_health_events.webhook_health_events_endpoint_id_webhook_endpoints_id_fk",
+        "n|con|core.webhook_health_events.webhook_health_events_endpoint_id_webhook_endpoints_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_health_events",
+        "n|sch|core",
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core",
+        "n|col|core.webhook_health_events.endpoint_id",
+        "n|col|core.webhook_endpoints.id",
+        "e|uniqueness|core.webhook_endpoints.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "webhook_health_events"
+      ],
+      "writes": [
+        "s|pol|core.webhook_health_events.webhook_health_events_tenant",
+        "n|pol|core.webhook_health_events.webhook_health_events_tenant",
+        "e|pol|core.webhook_health_events.webhook_health_events_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_health_events",
+        "n|sch|core",
+        "e|rls|core.webhook_health_events"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_health_events",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_endpoint_health",
+        "values": [
+          "healthy",
+          "failing",
+          "disabled"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_health_change",
+        "values": [
+          "failing",
+          "disabled",
+          "recovered"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "health",
+        "type": "webhook_endpoint_health",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'healthy'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "health_changed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "endpoint_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "kind",
+        "type": "webhook_health_change",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "url",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "reason",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "failing_since",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "occurred_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "fanned_out_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "emailed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "email_suppressed",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "email_claimed_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "webhook_health_events_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "occurred_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "webhook_health_events_endpoint_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "endpoint_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "occurred_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "webhook_health_events_unfanned_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "occurred_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"webhook_health_events\".\"fanned_out_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "webhook_health_events_unemailed_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"webhook_health_events\".\"emailed_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "webhook_health_events_endpoint_id_webhook_endpoints_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "endpoint_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "webhook_endpoints",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "webhook_health_events_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_health_events",
+        "name": "webhook_health_events_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"webhook_health_events\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"webhook_health_events\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "enums\u0000[\"core\",\"webhook_event_type\"]",
+      "set": {
+        "values": [
+          "email.sent",
+          "email.delivered",
+          "email.delivery_delayed",
+          "email.bounced",
+          "email.complained",
+          "email.failed",
+          "email.opened",
+          "email.clicked",
+          "email.unsubscribed",
+          "webhook_endpoint.failing",
+          "webhook_endpoint.disabled",
+          "webhook_endpoint.recovered"
+        ]
+      }
+    }
+  ]
+}

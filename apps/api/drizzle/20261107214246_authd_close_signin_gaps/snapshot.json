@@ -1,0 +1,409 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "7833970b-6938-4205-a9ba-be4b83961663",
+  "prevIds": [
+    "ea9d93c3-d02a-485b-a2c3-cc50b4650e0d"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "required_domains"
+      ],
+      "writes": [
+        "s|tbl|authd.required_domains",
+        "n|tbl|authd.required_domains",
+        "e|tbl|authd.required_domains",
+        "n|rel|authd.required_domains",
+        "n|type|authd.required_domains",
+        "n|rel|authd.required_domains_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "payment_hold_at"
+      ],
+      "writes": [
+        "s|col|authd.accounts.payment_hold_at",
+        "n|col|authd.accounts.payment_hold_at",
+        "e|col|authd.accounts.payment_hold_at"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "banned"
+      ],
+      "writes": [
+        "s|col|authd.accounts.banned",
+        "n|col|authd.accounts.banned",
+        "e|col|authd.accounts.banned"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "locked"
+      ],
+      "writes": [
+        "s|col|authd.accounts.locked",
+        "n|col|authd.accounts.locked",
+        "e|col|authd.accounts.locked"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "locked_until"
+      ],
+      "writes": [
+        "s|col|authd.accounts.locked_until",
+        "n|col|authd.accounts.locked_until",
+        "e|col|authd.accounts.locked_until"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "credential_epoch"
+      ],
+      "writes": [
+        "s|colprop|authd.accounts.credential_epoch.default"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd",
+        "n|col|authd.accounts.credential_epoch"
+      ],
+      "sqlHash": "e777b0c818a40662"
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "required_domains",
+        "required_domains_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|authd.required_domains_tenant_idx",
+        "n|idx|authd.required_domains_tenant_idx",
+        "e|idx|authd.required_domains_tenant_idx",
+        "n|rel|authd.required_domains_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.required_domains",
+        "n|sch|authd",
+        "n|col|authd.required_domains.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "required_domains"
+      ],
+      "writes": [
+        "s|fk|authd.required_domains.required_domains_tenant_id_tenants_id_fk",
+        "n|fk|authd.required_domains.required_domains_tenant_id_tenants_id_fk",
+        "e|fk|authd.required_domains.required_domains_tenant_id_tenants_id_fk",
+        "n|con|authd.required_domains.required_domains_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.required_domains",
+        "n|sch|authd",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|authd.required_domains.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "required_domains"
+      ],
+      "writes": [
+        "s|fk|authd.required_domains.authd_required_connection_fk",
+        "n|fk|authd.required_domains.authd_required_connection_fk",
+        "e|fk|authd.required_domains.authd_required_connection_fk",
+        "n|con|authd.required_domains.authd_required_connection_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.required_domains",
+        "n|sch|authd",
+        "n|tbl|identity.connections",
+        "n|sch|identity",
+        "n|col|authd.required_domains.connection_id",
+        "n|col|identity.connections.id",
+        "e|uniqueness|identity.connections.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "required_domains",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "payment_hold_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "banned",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "locked",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "locked_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "domain",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "connection_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "required_domains_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "required_domains_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "authd_required_connection_fk",
+        "nameExplicit": true,
+        "columns": [
+          "connection_id"
+        ],
+        "schemaTo": "identity",
+        "tableTo": "connections",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "required_domains_pkey",
+        "columns": [
+          "domain"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"authd\",\"accounts\",\"credential_epoch\"]",
+      "set": {
+        "default": "(extract(epoch from clock_timestamp()) * 1000000)"
+      }
+    }
+  ]
+}

@@ -1,0 +1,3603 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "6f96852f-80f6-417b-956a-655ce6dbbf04",
+  "prevIds": [
+    "7c2881d3-7957-4bf0-b987-427766a74f87"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "broadcast_status"
+      ],
+      "writes": [
+        "s|enum|core.broadcast_status",
+        "n|enum|core.broadcast_status",
+        "e|enum|core.broadcast_status",
+        "n|type|core.broadcast_status"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "property_type"
+      ],
+      "writes": [
+        "s|enum|core.property_type",
+        "n|enum|core.property_type",
+        "e|enum|core.property_type",
+        "n|type|core.property_type"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "topic_default"
+      ],
+      "writes": [
+        "s|enum|core.topic_default",
+        "n|enum|core.topic_default",
+        "e|enum|core.topic_default",
+        "n|type|core.topic_default"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "topic_visibility"
+      ],
+      "writes": [
+        "s|enum|core.topic_visibility",
+        "n|enum|core.topic_visibility",
+        "e|enum|core.topic_visibility",
+        "n|type|core.topic_visibility"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "api_requests"
+      ],
+      "writes": [
+        "s|tbl|core.api_requests",
+        "n|tbl|core.api_requests",
+        "e|tbl|core.api_requests",
+        "n|rel|core.api_requests",
+        "n|type|core.api_requests",
+        "n|rel|core.api_requests_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "broadcasts"
+      ],
+      "writes": [
+        "s|tbl|core.broadcasts",
+        "n|tbl|core.broadcasts",
+        "e|tbl|core.broadcasts",
+        "n|rel|core.broadcasts",
+        "n|type|core.broadcasts",
+        "n|rel|core.broadcasts_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.broadcast_status"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "contact_properties"
+      ],
+      "writes": [
+        "s|tbl|core.contact_properties",
+        "n|tbl|core.contact_properties",
+        "e|tbl|core.contact_properties",
+        "n|rel|core.contact_properties",
+        "n|type|core.contact_properties",
+        "n|rel|core.contact_properties_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.property_type"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "contact_topics"
+      ],
+      "writes": [
+        "s|tbl|core.contact_topics",
+        "n|tbl|core.contact_topics",
+        "e|tbl|core.contact_topics",
+        "n|rel|core.contact_topics",
+        "n|type|core.contact_topics",
+        "n|rel|core.contact_topics_contact_id_topic_id_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "contacts"
+      ],
+      "writes": [
+        "s|tbl|core.contacts",
+        "n|tbl|core.contacts",
+        "e|tbl|core.contacts",
+        "n|rel|core.contacts",
+        "n|type|core.contacts",
+        "n|rel|core.contacts_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "dns_connections"
+      ],
+      "writes": [
+        "s|tbl|core.dns_connections",
+        "n|tbl|core.dns_connections",
+        "e|tbl|core.dns_connections",
+        "n|rel|core.dns_connections",
+        "n|type|core.dns_connections",
+        "n|rel|core.dns_connections_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "onboarding"
+      ],
+      "writes": [
+        "s|tbl|core.onboarding",
+        "n|tbl|core.onboarding",
+        "e|tbl|core.onboarding",
+        "n|rel|core.onboarding",
+        "n|type|core.onboarding",
+        "n|rel|core.onboarding_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "segment_contacts"
+      ],
+      "writes": [
+        "s|tbl|core.segment_contacts",
+        "n|tbl|core.segment_contacts",
+        "e|tbl|core.segment_contacts",
+        "n|rel|core.segment_contacts",
+        "n|type|core.segment_contacts",
+        "n|rel|core.segment_contacts_segment_id_contact_id_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "segments"
+      ],
+      "writes": [
+        "s|tbl|core.segments",
+        "n|tbl|core.segments",
+        "e|tbl|core.segments",
+        "n|rel|core.segments",
+        "n|type|core.segments",
+        "n|rel|core.segments_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "templates"
+      ],
+      "writes": [
+        "s|tbl|core.templates",
+        "n|tbl|core.templates",
+        "e|tbl|core.templates",
+        "n|rel|core.templates",
+        "n|type|core.templates",
+        "n|rel|core.templates_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "topics"
+      ],
+      "writes": [
+        "s|tbl|core.topics",
+        "n|tbl|core.topics",
+        "e|tbl|core.topics",
+        "n|rel|core.topics",
+        "n|type|core.topics",
+        "n|rel|core.topics_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.topic_default",
+        "n|enum|core.topic_visibility"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "messages",
+        "broadcast_id"
+      ],
+      "writes": [
+        "s|col|core.messages.broadcast_id",
+        "n|col|core.messages.broadcast_id",
+        "e|col|core.messages.broadcast_id"
+      ],
+      "reads": [
+        "n|tbl|core.messages",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "api_requests",
+        "api_requests_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.api_requests_tenant_idx",
+        "n|idx|core.api_requests_tenant_idx",
+        "e|idx|core.api_requests_tenant_idx",
+        "n|rel|core.api_requests_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.api_requests",
+        "n|sch|core",
+        "n|col|core.api_requests.tenant_id",
+        "n|col|core.api_requests.occurred_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "broadcasts",
+        "broadcasts_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.broadcasts_tenant_idx",
+        "n|idx|core.broadcasts_tenant_idx",
+        "e|idx|core.broadcasts_tenant_idx",
+        "n|rel|core.broadcasts_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.broadcasts",
+        "n|sch|core",
+        "n|col|core.broadcasts.tenant_id",
+        "n|col|core.broadcasts.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "contact_properties",
+        "contact_properties_tenant_key_uq"
+      ],
+      "writes": [
+        "s|idx|core.contact_properties_tenant_key_uq",
+        "n|idx|core.contact_properties_tenant_key_uq",
+        "e|idx|core.contact_properties_tenant_key_uq",
+        "n|rel|core.contact_properties_tenant_key_uq"
+      ],
+      "reads": [
+        "n|tbl|core.contact_properties",
+        "n|sch|core",
+        "n|col|core.contact_properties.tenant_id",
+        "n|col|core.contact_properties.key"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "contact_topics",
+        "contact_topics_topic_idx"
+      ],
+      "writes": [
+        "s|idx|core.contact_topics_topic_idx",
+        "n|idx|core.contact_topics_topic_idx",
+        "e|idx|core.contact_topics_topic_idx",
+        "n|rel|core.contact_topics_topic_idx"
+      ],
+      "reads": [
+        "n|tbl|core.contact_topics",
+        "n|sch|core",
+        "n|col|core.contact_topics.topic_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "contact_topics",
+        "contact_topics_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.contact_topics_tenant_idx",
+        "n|idx|core.contact_topics_tenant_idx",
+        "e|idx|core.contact_topics_tenant_idx",
+        "n|rel|core.contact_topics_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.contact_topics",
+        "n|sch|core",
+        "n|col|core.contact_topics.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "contacts",
+        "contacts_tenant_email_uq"
+      ],
+      "writes": [
+        "s|idx|core.contacts_tenant_email_uq",
+        "n|idx|core.contacts_tenant_email_uq",
+        "e|idx|core.contacts_tenant_email_uq",
+        "n|rel|core.contacts_tenant_email_uq"
+      ],
+      "reads": [
+        "n|tbl|core.contacts",
+        "n|sch|core",
+        "n|col|core.contacts.tenant_id",
+        "n|col|core.contacts.email"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "contacts",
+        "contacts_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.contacts_tenant_idx",
+        "n|idx|core.contacts_tenant_idx",
+        "e|idx|core.contacts_tenant_idx",
+        "n|rel|core.contacts_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.contacts",
+        "n|sch|core",
+        "n|col|core.contacts.tenant_id",
+        "n|col|core.contacts.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "dns_connections",
+        "dns_connections_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.dns_connections_tenant_idx",
+        "n|idx|core.dns_connections_tenant_idx",
+        "e|idx|core.dns_connections_tenant_idx",
+        "n|rel|core.dns_connections_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.dns_connections",
+        "n|sch|core",
+        "n|col|core.dns_connections.tenant_id",
+        "n|col|core.dns_connections.provider"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "segment_contacts",
+        "segment_contacts_contact_idx"
+      ],
+      "writes": [
+        "s|idx|core.segment_contacts_contact_idx",
+        "n|idx|core.segment_contacts_contact_idx",
+        "e|idx|core.segment_contacts_contact_idx",
+        "n|rel|core.segment_contacts_contact_idx"
+      ],
+      "reads": [
+        "n|tbl|core.segment_contacts",
+        "n|sch|core",
+        "n|col|core.segment_contacts.contact_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "segment_contacts",
+        "segment_contacts_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.segment_contacts_tenant_idx",
+        "n|idx|core.segment_contacts_tenant_idx",
+        "e|idx|core.segment_contacts_tenant_idx",
+        "n|rel|core.segment_contacts_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.segment_contacts",
+        "n|sch|core",
+        "n|col|core.segment_contacts.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "segments",
+        "segments_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.segments_tenant_idx",
+        "n|idx|core.segments_tenant_idx",
+        "e|idx|core.segments_tenant_idx",
+        "n|rel|core.segments_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.segments",
+        "n|sch|core",
+        "n|col|core.segments.tenant_id",
+        "n|col|core.segments.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "templates",
+        "templates_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.templates_tenant_idx",
+        "n|idx|core.templates_tenant_idx",
+        "e|idx|core.templates_tenant_idx",
+        "n|rel|core.templates_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|col|core.templates.tenant_id",
+        "n|col|core.templates.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "templates",
+        "templates_tenant_name_uq"
+      ],
+      "writes": [
+        "s|idx|core.templates_tenant_name_uq",
+        "n|idx|core.templates_tenant_name_uq",
+        "e|idx|core.templates_tenant_name_uq",
+        "n|rel|core.templates_tenant_name_uq"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|col|core.templates.tenant_id",
+        "n|col|core.templates.name"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "topics",
+        "topics_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.topics_tenant_idx",
+        "n|idx|core.topics_tenant_idx",
+        "e|idx|core.topics_tenant_idx",
+        "n|rel|core.topics_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.topics",
+        "n|sch|core",
+        "n|col|core.topics.tenant_id",
+        "n|col|core.topics.created_at"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "api_requests"
+      ],
+      "writes": [
+        "s|fk|core.api_requests.api_requests_tenant_id_tenants_id_fk",
+        "n|fk|core.api_requests.api_requests_tenant_id_tenants_id_fk",
+        "e|fk|core.api_requests.api_requests_tenant_id_tenants_id_fk",
+        "n|con|core.api_requests.api_requests_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.api_requests",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.api_requests.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "broadcasts"
+      ],
+      "writes": [
+        "s|fk|core.broadcasts.broadcasts_tenant_id_tenants_id_fk",
+        "n|fk|core.broadcasts.broadcasts_tenant_id_tenants_id_fk",
+        "e|fk|core.broadcasts.broadcasts_tenant_id_tenants_id_fk",
+        "n|con|core.broadcasts.broadcasts_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.broadcasts",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.broadcasts.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "broadcasts"
+      ],
+      "writes": [
+        "s|fk|core.broadcasts.broadcasts_segment_id_segments_id_fk",
+        "n|fk|core.broadcasts.broadcasts_segment_id_segments_id_fk",
+        "e|fk|core.broadcasts.broadcasts_segment_id_segments_id_fk",
+        "n|con|core.broadcasts.broadcasts_segment_id_segments_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.broadcasts",
+        "n|sch|core",
+        "n|tbl|core.segments",
+        "n|sch|core",
+        "n|col|core.broadcasts.segment_id",
+        "n|col|core.segments.id",
+        "e|uniqueness|core.segments.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "broadcasts"
+      ],
+      "writes": [
+        "s|fk|core.broadcasts.broadcasts_topic_id_topics_id_fk",
+        "n|fk|core.broadcasts.broadcasts_topic_id_topics_id_fk",
+        "e|fk|core.broadcasts.broadcasts_topic_id_topics_id_fk",
+        "n|con|core.broadcasts.broadcasts_topic_id_topics_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.broadcasts",
+        "n|sch|core",
+        "n|tbl|core.topics",
+        "n|sch|core",
+        "n|col|core.broadcasts.topic_id",
+        "n|col|core.topics.id",
+        "e|uniqueness|core.topics.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "contact_properties"
+      ],
+      "writes": [
+        "s|fk|core.contact_properties.contact_properties_tenant_id_tenants_id_fk",
+        "n|fk|core.contact_properties.contact_properties_tenant_id_tenants_id_fk",
+        "e|fk|core.contact_properties.contact_properties_tenant_id_tenants_id_fk",
+        "n|con|core.contact_properties.contact_properties_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.contact_properties",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.contact_properties.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "contact_topics"
+      ],
+      "writes": [
+        "s|fk|core.contact_topics.contact_topics_contact_id_contacts_id_fk",
+        "n|fk|core.contact_topics.contact_topics_contact_id_contacts_id_fk",
+        "e|fk|core.contact_topics.contact_topics_contact_id_contacts_id_fk",
+        "n|con|core.contact_topics.contact_topics_contact_id_contacts_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.contact_topics",
+        "n|sch|core",
+        "n|tbl|core.contacts",
+        "n|sch|core",
+        "n|col|core.contact_topics.contact_id",
+        "n|col|core.contacts.id",
+        "e|uniqueness|core.contacts.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "contact_topics"
+      ],
+      "writes": [
+        "s|fk|core.contact_topics.contact_topics_topic_id_topics_id_fk",
+        "n|fk|core.contact_topics.contact_topics_topic_id_topics_id_fk",
+        "e|fk|core.contact_topics.contact_topics_topic_id_topics_id_fk",
+        "n|con|core.contact_topics.contact_topics_topic_id_topics_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.contact_topics",
+        "n|sch|core",
+        "n|tbl|core.topics",
+        "n|sch|core",
+        "n|col|core.contact_topics.topic_id",
+        "n|col|core.topics.id",
+        "e|uniqueness|core.topics.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "contact_topics"
+      ],
+      "writes": [
+        "s|fk|core.contact_topics.contact_topics_tenant_id_tenants_id_fk",
+        "n|fk|core.contact_topics.contact_topics_tenant_id_tenants_id_fk",
+        "e|fk|core.contact_topics.contact_topics_tenant_id_tenants_id_fk",
+        "n|con|core.contact_topics.contact_topics_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.contact_topics",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.contact_topics.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "contacts"
+      ],
+      "writes": [
+        "s|fk|core.contacts.contacts_tenant_id_tenants_id_fk",
+        "n|fk|core.contacts.contacts_tenant_id_tenants_id_fk",
+        "e|fk|core.contacts.contacts_tenant_id_tenants_id_fk",
+        "n|con|core.contacts.contacts_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.contacts",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.contacts.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "dns_connections"
+      ],
+      "writes": [
+        "s|fk|core.dns_connections.dns_connections_tenant_id_tenants_id_fk",
+        "n|fk|core.dns_connections.dns_connections_tenant_id_tenants_id_fk",
+        "e|fk|core.dns_connections.dns_connections_tenant_id_tenants_id_fk",
+        "n|con|core.dns_connections.dns_connections_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.dns_connections",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.dns_connections.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "onboarding"
+      ],
+      "writes": [
+        "s|fk|core.onboarding.onboarding_tenant_id_tenants_id_fk",
+        "n|fk|core.onboarding.onboarding_tenant_id_tenants_id_fk",
+        "e|fk|core.onboarding.onboarding_tenant_id_tenants_id_fk",
+        "n|con|core.onboarding.onboarding_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.onboarding",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.onboarding.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "segment_contacts"
+      ],
+      "writes": [
+        "s|fk|core.segment_contacts.segment_contacts_segment_id_segments_id_fk",
+        "n|fk|core.segment_contacts.segment_contacts_segment_id_segments_id_fk",
+        "e|fk|core.segment_contacts.segment_contacts_segment_id_segments_id_fk",
+        "n|con|core.segment_contacts.segment_contacts_segment_id_segments_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.segment_contacts",
+        "n|sch|core",
+        "n|tbl|core.segments",
+        "n|sch|core",
+        "n|col|core.segment_contacts.segment_id",
+        "n|col|core.segments.id",
+        "e|uniqueness|core.segments.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "segment_contacts"
+      ],
+      "writes": [
+        "s|fk|core.segment_contacts.segment_contacts_contact_id_contacts_id_fk",
+        "n|fk|core.segment_contacts.segment_contacts_contact_id_contacts_id_fk",
+        "e|fk|core.segment_contacts.segment_contacts_contact_id_contacts_id_fk",
+        "n|con|core.segment_contacts.segment_contacts_contact_id_contacts_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.segment_contacts",
+        "n|sch|core",
+        "n|tbl|core.contacts",
+        "n|sch|core",
+        "n|col|core.segment_contacts.contact_id",
+        "n|col|core.contacts.id",
+        "e|uniqueness|core.contacts.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "segment_contacts"
+      ],
+      "writes": [
+        "s|fk|core.segment_contacts.segment_contacts_tenant_id_tenants_id_fk",
+        "n|fk|core.segment_contacts.segment_contacts_tenant_id_tenants_id_fk",
+        "e|fk|core.segment_contacts.segment_contacts_tenant_id_tenants_id_fk",
+        "n|con|core.segment_contacts.segment_contacts_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.segment_contacts",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.segment_contacts.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "segments"
+      ],
+      "writes": [
+        "s|fk|core.segments.segments_tenant_id_tenants_id_fk",
+        "n|fk|core.segments.segments_tenant_id_tenants_id_fk",
+        "e|fk|core.segments.segments_tenant_id_tenants_id_fk",
+        "n|con|core.segments.segments_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.segments",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.segments.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "templates"
+      ],
+      "writes": [
+        "s|fk|core.templates.templates_tenant_id_tenants_id_fk",
+        "n|fk|core.templates.templates_tenant_id_tenants_id_fk",
+        "e|fk|core.templates.templates_tenant_id_tenants_id_fk",
+        "n|con|core.templates.templates_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.templates.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "topics"
+      ],
+      "writes": [
+        "s|fk|core.topics.topics_tenant_id_tenants_id_fk",
+        "n|fk|core.topics.topics_tenant_id_tenants_id_fk",
+        "e|fk|core.topics.topics_tenant_id_tenants_id_fk",
+        "n|con|core.topics.topics_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.topics",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.topics.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "api_requests",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "broadcasts",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "contact_properties",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "contact_topics",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "contacts",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "dns_connections",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "onboarding",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "segment_contacts",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "segments",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "templates",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "topics",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "broadcast_status",
+        "values": [
+          "draft",
+          "scheduled",
+          "sending",
+          "sent",
+          "canceled"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "property_type",
+        "values": [
+          "string",
+          "number",
+          "boolean"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "topic_default",
+        "values": [
+          "opt_in",
+          "opt_out"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "topic_visibility",
+        "values": [
+          "private",
+          "public"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "api_key_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "method",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "path",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "status",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "duration_ms",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "error_name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "user_agent",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "occurred_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "segment_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "topic_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "from_address",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "reply_to",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 1,
+        "default": "'{}'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "subject",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "preview_text",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "html",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "text",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "status",
+        "type": "broadcast_status",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'draft'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "scheduled_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "sent_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "recipient_count",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "type",
+        "type": "property_type",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'string'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "fallback_value",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "contact_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "topic_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "subscribed",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "email",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "first_name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "last_name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "unsubscribed",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "unsubscribed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "properties",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "provider",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "label",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "credential_sealed",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "zones",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 1,
+        "default": "'{}'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "last_used_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "last_error",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "messages",
+        "name": "broadcast_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "step",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'workspace'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "completed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "last_onboarded_plan",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "use_case",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "segment_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "contact_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "added_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "description",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "folder",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "subject",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "html",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "text",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "published_html",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "published_text",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "published_subject",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "published_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "version",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "description",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "default_subscription",
+        "type": "topic_default",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'opt_in'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "visibility",
+        "type": "topic_visibility",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'public'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "api_requests_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "occurred_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "broadcasts_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "contact_properties_tenant_key_uq",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "key",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "contact_topics_topic_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "topic_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "contact_topics_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "contacts_tenant_email_uq",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "email",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "contacts_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "dns_connections_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "provider",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "segment_contacts_contact_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "contact_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "segment_contacts_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "segments_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "templates_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "templates_tenant_name_uq",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "topics_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "api_requests_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "broadcasts_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "broadcasts_segment_id_segments_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "segment_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "segments",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "broadcasts_topic_id_topics_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "topic_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "topics",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "contact_properties_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "contact_topics_contact_id_contacts_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "contact_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "contacts",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "contact_topics_topic_id_topics_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "topic_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "topics",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "contact_topics_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "contacts_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "dns_connections_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "onboarding_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "segment_contacts_segment_id_segments_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "segment_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "segments",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "segment_contacts_contact_id_contacts_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "contact_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "contacts",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "segment_contacts_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "segments_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "templates_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "topics_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "api_requests",
+        "name": "api_requests_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "broadcasts",
+        "name": "broadcasts_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_properties",
+        "name": "contact_properties_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contact_topics",
+        "name": "contact_topics_contact_id_topic_id_pk",
+        "columns": [
+          "contact_id",
+          "topic_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "contacts",
+        "name": "contacts_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "dns_connections",
+        "name": "dns_connections_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "onboarding",
+        "name": "onboarding_pkey",
+        "columns": [
+          "tenant_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segment_contacts",
+        "name": "segment_contacts_segment_id_contact_id_pk",
+        "columns": [
+          "segment_id",
+          "contact_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "segments",
+        "name": "segments_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "templates_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "topics",
+        "name": "topics_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

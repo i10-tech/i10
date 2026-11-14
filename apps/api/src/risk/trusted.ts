@@ -436,8 +436,8 @@ export function boilerplateStore(db: Database): BoilerplateStore {
     async add({ name, skeleton, model, embedding, reason, by }) {
       const rows = (await db.execute(sql`
         select core.risk_boilerplate_add(
-          ${name}, ${skeleton.skeletonHash}, ${JSON.stringify(skeleton.template.segments)}::jsonb,
-          ${JSON.stringify(skeleton.holes.map((h) => h.max))}::jsonb,
+          ${name}, ${skeleton.skeletonHash}, ${sql.param(skeleton.template.segments)}::jsonb,
+          ${sql.param(skeleton.holes.map((h) => h.max))}::jsonb,
           ${`{${skeleton.bands.join(",")}}`}::text[], ${skeleton.staticBytes},
           ${skeleton.holes.length}, ${model}, ${embedding ? vectorLiteral(embedding) : null},
           ${reason}, ${by}

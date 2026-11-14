@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "d5078122-9b94-4480-a071-cdb74f0e6041",
+  "prevIds": [
+    "62290d3d-b6f1-4af6-ba87-2685d9548386"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "idempotency_keys",
+        "message_ids"
+      ],
+      "writes": [
+        "s|col|core.idempotency_keys.message_ids",
+        "n|col|core.idempotency_keys.message_ids",
+        "e|col|core.idempotency_keys.message_ids"
+      ],
+      "reads": [
+        "n|tbl|core.idempotency_keys",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "idempotency_keys",
+        "name": "message_ids",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

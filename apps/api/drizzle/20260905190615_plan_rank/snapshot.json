@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "0ae0976a-6f96-4426-bd41-c13d8f4475ce",
+  "prevIds": [
+    "ec37d12b-0765-4b29-9f18-c8904eed921d"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "plans",
+        "rank"
+      ],
+      "writes": [
+        "s|col|core.plans.rank",
+        "n|col|core.plans.rank",
+        "e|col|core.plans.rank"
+      ],
+      "reads": [
+        "n|tbl|core.plans",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "plans",
+        "name": "rank",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

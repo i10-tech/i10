@@ -142,7 +142,10 @@ describe("what actually reaches postgres on a write", () => {
 
     expect(statement).not.toContain("::text[]")
     expect(statement).not.toMatch(/\(\$\d+, \$\d+\)::/)
-    // One placeholder for the whole array, and no bound value is a JS array.
-    for (const p of params) expect(Array.isArray(p)).toBe(false)
+    // One placeholder for the whole array: the driver binds it natively, so the
+    // array is a single bound value rather than one `$n` per element.
+    expect(params.filter((p) => Array.isArray(p))).toEqual([
+      ["emails:send", "domains:write"],
+    ])
   })
 })

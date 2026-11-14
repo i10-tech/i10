@@ -5,7 +5,6 @@ import { memoryStore, packKey, type ContentStore } from "../src/content/object-s
 import { packBodies, sweepPacks, type PackDeps } from "../src/content/packs.js"
 import { parseKeyring } from "../src/content/seal.js"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { expireTenant } from "../src/retention/expire.js"
 import { emailLookup } from "../src/send/lookup.js"
 
@@ -101,7 +100,7 @@ suite("bodies packed into R2, against Postgres as i10_api (#188)", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
   })
 
   afterAll(async () => {

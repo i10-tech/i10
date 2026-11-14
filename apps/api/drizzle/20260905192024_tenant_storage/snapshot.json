@@ -1,0 +1,145 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "7a9a6210-e4ac-4ae1-8b97-988ce9f236de",
+  "prevIds": [
+    "0ae0976a-6f96-4426-bd41-c13d8f4475ce"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "tenant_storage"
+      ],
+      "writes": [
+        "s|tbl|core.tenant_storage",
+        "n|tbl|core.tenant_storage",
+        "e|tbl|core.tenant_storage",
+        "n|rel|core.tenant_storage",
+        "n|type|core.tenant_storage",
+        "n|rel|core.tenant_storage_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "tenant_storage"
+      ],
+      "writes": [
+        "s|fk|core.tenant_storage.tenant_storage_tenant_id_tenants_id_fk",
+        "n|fk|core.tenant_storage.tenant_storage_tenant_id_tenants_id_fk",
+        "e|fk|core.tenant_storage.tenant_storage_tenant_id_tenants_id_fk",
+        "n|con|core.tenant_storage.tenant_storage_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.tenant_storage",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.tenant_storage.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "tenant_storage",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "tenant_storage",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "tenant_storage",
+        "name": "bytes",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "tenant_storage",
+        "name": "sampled_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "tenant_storage",
+        "name": "tenant_storage_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "tenant_storage",
+        "name": "tenant_storage_pkey",
+        "columns": [
+          "tenant_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

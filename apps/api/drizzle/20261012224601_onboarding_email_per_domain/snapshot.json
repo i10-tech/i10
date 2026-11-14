@@ -1,0 +1,115 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "09b238d3-2211-4570-96de-f865e1e178d6",
+  "prevIds": [
+    "542257d9-b404-4cf9-a3ce-4d770c6a2fef"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "onboarding_email_id"
+      ],
+      "writes": [
+        "s|col|core.domains.onboarding_email_id",
+        "n|col|core.domains.onboarding_email_id",
+        "e|col|core.domains.onboarding_email_id"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "onboarding_email_to"
+      ],
+      "writes": [
+        "s|col|core.domains.onboarding_email_to",
+        "n|col|core.domains.onboarding_email_to",
+        "e|col|core.domains.onboarding_email_to"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "onboarding_email_at"
+      ],
+      "writes": [
+        "s|col|core.domains.onboarding_email_at",
+        "n|col|core.domains.onboarding_email_at",
+        "e|col|core.domains.onboarding_email_at"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "onboarding_email_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "onboarding_email_to",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "onboarding_email_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

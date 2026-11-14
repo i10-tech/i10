@@ -66,7 +66,7 @@ suite("console mailboxes and per-mailbox usage against Postgres as i10_api", () 
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     sqlApi = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
-    db = drizzle(sqlApi, { schema }) as unknown as Database
+    db = drizzle({ client: sqlApi }) as unknown as Database
 
     for (const [id, name, ownerClerkId] of [
       [acme, "Acme", ownerUser],

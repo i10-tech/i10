@@ -1,0 +1,502 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "82987796-270a-47a6-a351-a1abe2f95004",
+  "prevIds": [
+    "af268787-528f-4de1-9f07-667a65890d99"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_packs"
+      ],
+      "writes": [
+        "s|tbl|core.content_packs",
+        "n|tbl|core.content_packs",
+        "e|tbl|core.content_packs",
+        "n|rel|core.content_packs",
+        "n|type|core.content_packs",
+        "n|rel|core.content_packs_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "pack_id"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.pack_id",
+        "n|col|core.message_bodies.pack_id",
+        "e|col|core.message_bodies.pack_id"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "pack_offset"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.pack_offset",
+        "n|col|core.message_bodies.pack_offset",
+        "e|col|core.message_bodies.pack_offset"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "pack_length"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.pack_length",
+        "n|col|core.message_bodies.pack_length",
+        "e|col|core.message_bodies.pack_length"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "body_key"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.body_key",
+        "n|col|core.message_bodies.body_key",
+        "e|col|core.message_bodies.body_key"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "packed_at"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.packed_at",
+        "n|col|core.message_bodies.packed_at",
+        "e|col|core.message_bodies.packed_at"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "content_packs",
+        "content_packs_tenant_created_idx"
+      ],
+      "writes": [
+        "s|idx|core.content_packs_tenant_created_idx",
+        "n|idx|core.content_packs_tenant_created_idx",
+        "e|idx|core.content_packs_tenant_created_idx",
+        "n|rel|core.content_packs_tenant_created_idx"
+      ],
+      "reads": [
+        "n|tbl|core.content_packs",
+        "n|sch|core",
+        "n|col|core.content_packs.tenant_id",
+        "n|col|core.content_packs.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "message_bodies",
+        "message_bodies_pack_idx"
+      ],
+      "writes": [
+        "s|idx|core.message_bodies_pack_idx",
+        "n|idx|core.message_bodies_pack_idx",
+        "e|idx|core.message_bodies_pack_idx",
+        "n|rel|core.message_bodies_pack_idx"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core",
+        "n|col|core.message_bodies.pack_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "message_bodies",
+        "message_bodies_unpacked_idx"
+      ],
+      "writes": [
+        "s|idx|core.message_bodies_unpacked_idx",
+        "n|idx|core.message_bodies_unpacked_idx",
+        "e|idx|core.message_bodies_unpacked_idx",
+        "n|rel|core.message_bodies_unpacked_idx"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core",
+        "n|col|core.message_bodies.tenant_id",
+        "n|col|core.message_bodies.created_at"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_packs"
+      ],
+      "writes": [
+        "s|pol|core.content_packs.content_packs_tenant",
+        "n|pol|core.content_packs.content_packs_tenant",
+        "e|pol|core.content_packs.content_packs_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.content_packs",
+        "n|sch|core",
+        "e|rls|core.content_packs"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "content_packs",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "size",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "bodies",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "raw_size",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "pack_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "pack_offset",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "pack_length",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "body_key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "packed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "content_packs_tenant_created_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "message_bodies_pack_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "pack_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"message_bodies\".\"pack_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "message_bodies_unpacked_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"message_bodies\".\"pack_id\" is null and \"core\".\"message_bodies\".\"compacted_at\" is null and (\"core\".\"message_bodies\".\"html\" is not null or \"core\".\"message_bodies\".\"text\" is not null)",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "content_packs_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_packs",
+        "name": "content_packs_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"content_packs\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"content_packs\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

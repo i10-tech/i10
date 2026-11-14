@@ -3,7 +3,6 @@ import postgres from "postgres"
 import type { Redis } from "ioredis"
 import { createQueueClient } from "../../src/cache/redis.js"
 import type { Database } from "../../src/db/client.js"
-import * as schema from "../../src/db/schema.js"
 import { webhookEventOps } from "../../src/webhooks/db.js"
 import { parseAllowList, type Lookup } from "../../src/webhooks/egress.js"
 import { startWebhookEngine, type WebhookEngine } from "../../src/webhooks/engine.js"
@@ -219,7 +218,7 @@ export async function startLab(): Promise<Lab> {
     max: 16,
     onnotice: () => {},
   })
-  const db = drizzle(app, { schema }) as unknown as Database
+  const db = drizzle({ client: app }) as unknown as Database
   const redis = createQueueClient(REDIS_URL!)
   // ⚠ A NAMESPACE OF ITS OWN PER RUN, so the lab never sees, or flushes, a
   // real queue's keys - and two runs never see each other's.

@@ -1,0 +1,199 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "cce198e4-23a7-449d-8add-a9167fa253e9",
+  "prevIds": [
+    "083af598-395d-4a7b-9875-f19cbda223dc"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_models"
+      ],
+      "writes": [
+        "s|pol|core.risk_models.risk_models_deny",
+        "n|pol|core.risk_models.risk_models_deny",
+        "e|pol|core.risk_models.risk_models_deny"
+      ],
+      "reads": [
+        "n|tbl|core.risk_models",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "behaviour_vectors"
+      ],
+      "writes": [
+        "s|pol|core.behaviour_vectors.behaviour_vectors_tenant",
+        "n|pol|core.behaviour_vectors.behaviour_vectors_tenant",
+        "e|pol|core.behaviour_vectors.behaviour_vectors_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.behaviour_vectors",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_models"
+      ],
+      "writes": [
+        "s|tbl|core.risk_models",
+        "n|tbl|core.risk_models",
+        "e|tbl|core.risk_models",
+        "n|rel|core.risk_models",
+        "n|type|core.risk_models"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "behaviour_vectors"
+      ],
+      "writes": [
+        "s|tbl|core.behaviour_vectors",
+        "n|tbl|core.behaviour_vectors",
+        "e|tbl|core.behaviour_vectors",
+        "n|rel|core.behaviour_vectors",
+        "n|type|core.behaviour_vectors"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_assessments",
+        "model_score"
+      ],
+      "writes": [
+        "s|col|core.risk_assessments.model_score",
+        "n|col|core.risk_assessments.model_score",
+        "e|col|core.risk_assessments.model_score"
+      ],
+      "reads": [
+        "n|tbl|core.risk_assessments",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_labels",
+        "features"
+      ],
+      "writes": [
+        "s|col|core.risk_labels.features",
+        "n|col|core.risk_labels.features",
+        "e|col|core.risk_labels.features"
+      ],
+      "reads": [
+        "n|tbl|core.risk_labels",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"core\",\"risk_models\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"core\",\"behaviour_vectors\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_assessments\",\"model_score\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_labels\",\"features\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_models\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_models\",\"version\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_models\",\"weights\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_models\",\"evaluation\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_models\",\"active\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"risk_models\",\"trained_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"behaviour_vectors\",\"tenant_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"behaviour_vectors\",\"embedding\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"behaviour_vectors\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"core\",\"risk_models_version_unique\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"core\",\"behaviour_vectors_hnsw_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"core\",\"behaviour_vectors\",\"behaviour_vectors_tenant_id_tenants_id_fk\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"core\",\"risk_models\",\"risk_models_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"core\",\"behaviour_vectors\",\"behaviour_vectors_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "policies\u0000[\"core\",\"risk_models\",\"risk_models_deny\"]"
+    },
+    {
+      "op": "drop",
+      "key": "policies\u0000[\"core\",\"behaviour_vectors\",\"behaviour_vectors_tenant\"]"
+    }
+  ]
+}

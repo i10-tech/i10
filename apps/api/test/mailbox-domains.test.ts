@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs"
 import { describe, expect, it } from "bun:test"
 import { PgDialect } from "drizzle-orm/pg-core"
 import {
@@ -6,6 +5,7 @@ import {
   mailboxesStatement,
   sendingDomainsStatement,
 } from "../src/metering/levels.js"
+import { migrationSql } from "./migration-sql.js"
 
 /**
  * Two questions about a domain, and they must never collapse into one.
@@ -24,10 +24,7 @@ import {
  * one in a statement - so they are asserted as text, the same way
  * reconcile.test.ts pins the snapshot functions.
  */
-const migration = readFileSync(
-  new URL("../drizzle/0016_mailbox_domain_owners.sql", import.meta.url),
-  "utf8",
-)
+const migration = migrationSql("mailbox_domain_owners")
 
 const functionBody = (name: string) => {
   const start = migration.indexOf(`CREATE FUNCTION "core"."${name}"`)
