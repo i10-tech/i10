@@ -12,6 +12,7 @@
     "test": "bun test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "check-migrations": "bun scripts/check-migrations.ts",
     "openapi": "bun scripts/generate-openapi.ts",
     "adopt-dkim": "bun scripts/adopt-dkim.ts",
     "workspace-roles": "bun scripts/workspace-roles.ts",
