@@ -103,6 +103,49 @@ jobs:
           bunx turbo run openapi --filter=@i10/api
           git diff --exit-code -- apps/api/openapi.json
 
+  migrations:
+    name: Migrations (each alone)
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    # ⚠ A REAL POSTGRES, BECAUSE NOTHING ELSE IN THIS FILE RUNS A MIGRATION. The
+    # unit tests never touch a database, so until this job existed the first
+    # place a migration met Postgres was the production PreSync hook.
+    #
+    # pgvector's image rather than plain postgres: the migrations create and use
+    # the `vector` extension, which production gets from the CNPG operand image.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bun-toolchain
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          # The check is a plain bun script, not a turbo task.
+          turbo-cache: "false"
+      # ⚠ ONE MIGRATION PER SESSION, AS THE NON-SUPERUSER OWNER. Migrating an
+      # empty database in a single run is the one way production never applies
+      # them, and it hides two kinds of failure: a migration that only works in
+      # the session of an earlier one, and one that only works as a superuser.
+      # 0155 was the first kind - it needed pgvector's library already loaded,
+      # passed everywhere it was tried, and failed every deploy for two days.
+      # See apps/api/scripts/check-migrations.ts.
+      - name: Apply every migration in its own session
+        working-directory: apps/api
+        env:
+          CHECK_MIGRATIONS_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun run check-migrations
+
   authd:
     name: authd (Go)
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
