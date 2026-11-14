@@ -118,7 +118,11 @@ jobs:
         image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          # ⚠ NO PASSWORD, ON PURPOSE. This server lives for one job, holds
+          # nothing, and is reachable only from the runner. A literal password
+          # here is a credential-shaped string that protects nothing and that
+          # secret scanning then has to be taught to ignore.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -143,7 +147,7 @@ jobs:
       - name: Apply every migration in its own session
         working-directory: apps/api
         env:
-          CHECK_MIGRATIONS_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          CHECK_MIGRATIONS_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
         run: bun run check-migrations
 
   authd:
