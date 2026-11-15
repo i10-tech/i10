@@ -1,6 +1,7 @@
 import { z } from "zod"
-import { parseKeyring } from "./content/seal.js"
+import { keyringFromEnv } from "./crypto/keyring.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
+import { feedbackIdKey } from "./send/feedback-id.js"
 import { JUDGE_PROVIDERS, judgeSettingsProblems } from "./risk/judge/config.js"
 import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
 import { RULES } from "./risk/rules.js"
@@ -57,6 +58,21 @@ const switchOn = () =>
       if (["false", "0", "no", "off"].includes(raw)) return false
       ctx.addIssue({ code: "custom", message: `expected true/false, got "${v}"` })
       return z.NEVER
+    })
+
+/** A keyring variable, checked the way the code that reads it will parse it. */
+const keyringVariable = (name: string) =>
+  z
+    .string()
+    .min(1)
+    .optional()
+    .superRefine((value, ctx) => {
+      if (value === undefined) return
+      try {
+        keyringFromEnv(name, value)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+      }
     })
 
 const schema = z.object({
@@ -678,7 +694,7 @@ const schema = z.object({
    * `relay` listener accepts without AUTH because only the cluster can reach
    * it; see infra/k8s/i10/stalwart/config/README.md, "The internal relay". So
    * this is set in worker.yaml rather than Doppler, and nothing about the
-   * direct route is a secret except the DKIM keys `WEBHOOK_SECRET_KEY` unseals.
+   * direct route is a secret except the DKIM keys `SEAL_KEYS` unseals.
    *
    * ⚠ OPTIONAL SO THE WORKER STARTS WITHOUT IT, AND THE DIRECT TRANSPORT
    * REFUSES TO SEND WHEN IT IS ABSENT. Requiring it would make every deployment
@@ -710,18 +726,56 @@ const schema = z.object({
   // ── webhooks ──────────────────────────────────────────────────────────────
 
   /**
-   * Encrypts customers' webhook signing secrets at rest. 32 bytes, hex or
-   * base64 - `openssl rand -hex 32`.
+   * The keyring that seals every secret we must read back: webhook signing
+   * secrets, DKIM private keys, DNS, SSO and SIEM credentials
+   * (`crypto/sealer.ts`). `kid:base64,kid:base64`, the current key first;
+   * `openssl rand -base64 32` per key.
    *
-   * ⚠ OPTIONAL, AND ITS ABSENCE DISABLES WEBHOOKS RATHER THAN WEAKENING THEM.
-   * Without a key the endpoint routes answer 501 and no delivery is attempted,
-   * which is a visible missing feature. The alternative - falling back to
-   * storing secrets in plaintext - would be a silent downgrade of the one thing
-   * that makes a webhook trustworthy.
+   * ⚠ OPTIONAL OUTSIDE PRODUCTION, AND ITS ABSENCE DISABLES THOSE FEATURES
+   * RATHER THAN WEAKENING THEM. Without it the webhook routes answer 501 and
+   * no delivery is attempted; the alternative, storing secrets in the clear,
+   * would be a silent downgrade. Production refuses to start without it.
    *
-   * ⚠ AND LOSING IT IS NOT RECOVERABLE. Every stored secret becomes
-   * undecryptable, so every customer has to rotate. It belongs in Doppler with
-   * the same care as CLERK_SECRET_KEY.
+   * ⚠ LOSING A KEY LOSES EVERY VALUE SEALED UNDER IT. Rotate by putting a new
+   * key first, running `scripts/reseal-secrets.ts --apply`, and removing the
+   * old key only once the job reports nothing left under it.
+   */
+  SEAL_KEYS: keyringVariable("SEAL_KEYS"),
+
+  /**
+   * HMAC keys for tokens we sign and check later: mailbox download links and
+   * the DNS OAuth state and PKCE verifier (`crypto/token-keys.ts`). Same
+   * format as `SEAL_KEYS`, and a different key. Unset outside production, those
+   * features answer 501. Keep an old key listed for 15 minutes after
+   * rotating, the longest a token lives.
+   */
+  TOKEN_KEYS: keyringVariable("TOKEN_KEYS"),
+
+  /**
+   * Keys the per-workspace Feedback-ID token (send/feedback-id.ts). 32 bytes,
+   * hex or base64.
+   *
+   * ⚠ NEVER ROTATED. A new key changes every workspace's token and orphans
+   * what Google Postmaster Tools recorded under the old ones. It is low
+   * sensitivity: it maps a tenant id to a token and nothing else.
+   */
+  FEEDBACK_ID_KEY: z
+    .string()
+    .optional()
+    .superRefine((value, ctx) => {
+      if (value === undefined) return
+      try {
+        feedbackIdKey(value)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+      }
+    }),
+
+  /**
+   * ⚠ LEGACY, READ ONLY. The one key that sealed everything before
+   * `SEAL_KEYS` (the `v1.` format). Nothing is sealed with it any more; it
+   * only opens old values until `scripts/reseal-secrets.ts` reports none
+   * left, and then it is removed.
    */
   WEBHOOK_SECRET_KEY: z.string().min(32).optional(),
 
@@ -1178,18 +1232,7 @@ const schema = z.object({
    * when rotating keep the old key listed until every body it wrapped has
    * expired.
    */
-  CONTENT_KEYS: z
-    .string()
-    .min(1)
-    .optional()
-    .superRefine((value, ctx) => {
-      if (value === undefined) return
-      try {
-        parseKeyring(value)
-      } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message })
-      }
-    }),
+  CONTENT_KEYS: keyringVariable("CONTENT_KEYS"),
 
   /**
    * Bytes of bodies waiting that make an R2 write worth it (#188). Below it, a
@@ -1483,6 +1526,24 @@ const validated = schema.superRefine((env, ctx) => {
         `it no Cloudflare header can be believed, and the IP allowlists would ` +
         `refuse every request.`,
     })
+  }
+
+  /**
+   * ⚠ THE SAME DOWNGRADE AS A MISSING `CONTENT_KEYS`, ONE LEVEL WORSE. Without
+   * these, webhooks, SSO, DNS connections and mailbox downloads quietly switch
+   * off, and the Feedback-ID loses its workspace token. A Doppler edit that
+   * drops one must fail the deploy, not the features.
+   */
+  if (env.NODE_ENV === "production") {
+    for (const name of ["SEAL_KEYS", "TOKEN_KEYS", "FEEDBACK_ID_KEY"] as const) {
+      if (env[name] === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: `is required when NODE_ENV is production. See docs/decisions/encryption.md.`,
+        })
+      }
+    }
   }
 
   if (env.NODE_ENV === "production" && env.WEBHOOK_EGRESS_ALLOW?.trim()) {

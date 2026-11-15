@@ -5,6 +5,7 @@ import {
   type MailboxJob,
 } from "@repo/contracts"
 import type { StreamingObjectStore } from "../content/object-store.js"
+import type { TokenKeys } from "../crypto/token-keys.js"
 import {
   signDownloadToken,
   verifyDownloadToken,
@@ -45,8 +46,8 @@ export interface MailboxMigrationDeps {
   enqueue: (data: MailboxJobData) => Promise<unknown>
   /** The decision of jobs.ts, bound to its database and admin check. */
   access: (userId: string, address: string) => Promise<MailboxAccessResult>
-  /** Verifies the session on the download route, which has no `requireUser`. */
-  tokenSecret: string
+  /** Signs the download link, since that route has no `requireUser`. */
+  tokens: TokenKeys
   now?: () => Date
 }
 
@@ -125,7 +126,7 @@ const downloadUrl = (deps: MailboxMigrationDeps, job: MailboxJobRow, now: Date) 
   const token = signDownloadToken(
     { tenantId: job.tenantId, jobId: job.id },
     now.getTime() + LINK_TTL_MS,
-    deps.tokenSecret,
+    deps.tokens,
   )
   return `/mailboxes/${encodeURIComponent(job.mailboxAddress)}/export/download?token=${token}`
 }
@@ -273,7 +274,7 @@ mailboxMigration.openapi(download, async (c) => {
 
   let job: MailboxJobRow | null
   if (token) {
-    const link = verifyDownloadToken(token, deps.tokenSecret, now.getTime())
+    const link = verifyDownloadToken(token, deps.tokens, now.getTime())
     if (!link) {
       return c.json(
         problem(401, "invalid_access", "That download link is invalid or has expired."),

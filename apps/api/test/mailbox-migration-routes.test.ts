@@ -13,11 +13,20 @@ import { exportKey, importKey } from "../src/mailboxes/migration.js"
 import type { SessionVerifier } from "../src/middleware/session.js"
 import type { MailboxMigrationDeps } from "../src/routes/mailbox-migration.js"
 import type { MailboxJobData } from "../src/queue/mailbox-queue.js"
+import { keyringFromEnv } from "../src/crypto/keyring.js"
+import { tokenKeys } from "../src/crypto/token-keys.js"
 import { memoryJobStore } from "./support/job-store.js"
 
 const TENANT = "00000000-0000-4000-8000-000000000001"
 const OTHER_TENANT = "00000000-0000-4000-8000-000000000002"
-const SECRET = "test-secret-at-least-32-chars-long-123456"
+const ring = (fill: number) =>
+  tokenKeys(
+    keyringFromEnv(
+      "TOKEN_KEYS",
+      `k${fill}:${Buffer.alloc(32, fill).toString("base64")}`,
+    ),
+  )
+const SECRET = ring(1)
 const ADDRESS = "alice@acme.test"
 
 const OWNER = "user_owner"
@@ -45,7 +54,7 @@ function build(over: Partial<MailboxMigrationDeps> = {}) {
     enqueue: async (data) => void queued.push(data),
     access: (userId, address) =>
       decideAccess(address === ADDRESS ? facts : null, userId, adminChecker),
-    tokenSecret: SECRET,
+    tokens: SECRET,
     ...over,
   }
   // The signed-in user is named by a header, which is all a session fake needs.
@@ -261,15 +270,7 @@ describe("the download link", () => {
       401,
     )
     expect(
-      (
-        await get(
-          signDownloadToken(
-            link,
-            Date.now() + 60_000,
-            "another-secret-that-is-long-enough!!",
-          ),
-        )
-      ).status,
+      (await get(signDownloadToken(link, Date.now() + 60_000, ring(2)))).status,
     ).toBe(401)
     const good = signDownloadToken(link, Date.now() + 60_000, SECRET)
     expect((await get(`${good.slice(0, -3)}AAA`)).status).toBe(401)

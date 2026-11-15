@@ -129,9 +129,11 @@ with every live key of that endpoint at the moment of the poll.
   already (`signing.ts` and `packages/next` now pin one vector from both sides
   to stop it). A third copy in a CLI is a third chance. The CLI posts bytes and
   headers it was given.
-- **The developer verifies with a real** `whsec_`**,** the listener's own, shown
-  once when the CLI creates it (decision 4 holds: never readable again, rotate
-  to replace). Ed25519 endpoints and rotation work exactly as in production.
+- **The developer verifies with a real** `i10_whsec_`**,** the listener's own,
+  shown once when the CLI creates it (decision 4 holds: never readable again,
+  rotate to replace). Ed25519 endpoints and rotation work exactly as in
+  production. A generic Standard Webhooks library needs the leading `i10_`
+  removed; `@i10/next` accepts the secret with or without it.
 - **The body is a string, never re-parsed JSON.** Re-serialising would change
   the bytes and break every signature.
 - `webhook-id` **is the delivery id,** stable across re-reads, so a receiver
@@ -196,13 +198,13 @@ standard envelope.
 
 `@i10/cli` (bin `i10`), runnable as `bunx i10` or `npx i10`:
 
-| command                                 | does                                                                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `i10 login`                             | stores a key                                                                                                              |
-| `i10 listen --forward-to <url>`         | creates or resumes this machine's listener, prints the `whsec_` on first creation only, then forwards and logs each event |
-| `i10 listen --events email.bounced,...` | narrows the subscription                                                                                                  |
-| `i10 listen --from <cursor>`            | reads again from an earlier point                                                                                         |
-| `i10 trigger <event type>`              | the existing `POST /webhook-endpoints/{id}/test` against the listener                                                     |
+| command                                 | does                                                                                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `i10 login`                             | stores a key                                                                                                                  |
+| `i10 listen --forward-to <url>`         | creates or resumes this machine's listener, prints the `i10_whsec_` on first creation only, then forwards and logs each event |
+| `i10 listen --events email.bounced,...` | narrows the subscription                                                                                                      |
+| `i10 listen --from <cursor>`            | reads again from an earlier point                                                                                             |
+| `i10 trigger <event type>`              | the existing `POST /webhook-endpoints/{id}/test` against the listener                                                         |
 
 The listener id is kept per workspace and project directory in the user's
 config, so each project on a machine has its own listener and its own secret.

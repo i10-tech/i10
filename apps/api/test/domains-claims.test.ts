@@ -4,6 +4,7 @@ import type { SQL } from "drizzle-orm"
 import { domainStore } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
+import { fakeSealer } from "./support/sealer.js"
 
 /**
  * Who may hold a domain name, and what happens when a delete half-fails.
@@ -173,7 +174,7 @@ const base = {
     spfInclude: "_spf.i10.tech",
     nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
   },
-  secrets: { seal: (v: string) => `sealed:${v}`, open: (v: string) => v },
+  secrets: fakeSealer,
   capacity: { check: async () => ({ status: "ok" }) },
   /**
    * ⚠ WITHOUT THIS THESE TESTS RESOLVE `example.com` ON THE REAL INTERNET.

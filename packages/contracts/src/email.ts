@@ -391,7 +391,7 @@ export const webhookEndpointHealth = z.enum(["healthy", "failing", "disabled"])
 
 /**
  * How webhooks to an endpoint are signed, both per Standard Webhooks:
- * `hmac_sha256` (`v1,`) with a shared `whsec_` secret, or `ed25519` (`v1a,`)
+ * `hmac_sha256` (`v1,`) with a shared `i10_whsec_` secret, or `ed25519` (`v1a,`)
  * verified with a `whpk_` public key, so nothing the receiver stores can forge
  * a webhook.
  */

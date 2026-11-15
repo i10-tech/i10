@@ -1,4 +1,5 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
+import type { TokenKeys } from "../crypto/token-keys.js"
 import { providerBySlug } from "@repo/dns-providers"
 import { DNS_USER_AGENT } from "./user-agent.js"
 
@@ -71,8 +72,8 @@ export interface OAuthConfig {
    * production.
    */
   redirectBase: string
-  /** Signs `state`. Not the same key as anything else; see `env.ts`. */
-  stateSecret: string
+  /** Signs `state` and derives the PKCE verifier, each under its own subkey. */
+  tokens: TokenKeys
   /**
    * Where to send a token exchange that our own egress is refused for.
    *
@@ -370,9 +371,6 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
   const redirectFor = (slug: string) =>
     `${config.redirectBase.replace(/\/$/, "")}/${encodeURIComponent(slug)}`
 
-  const sign = (payload: string) =>
-    createHmac("sha256", config.stateSecret).update(payload).digest("base64url")
-
   /**
    * The PKCE code verifier for a given authorisation, derived rather than
    * stored.
@@ -389,14 +387,17 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
    * anyone holding the URL. A verifier sitting beside the code it protects
    * protects nothing at all.
    *
-   * ⚠ SO IT IS AN HMAC OF THE NONCE UNDER THE STATE SECRET. The nonce is public
-   * and already in `state`; the secret is not, so the verifier can be
-   * recomputed at callback time and never has to be written down, stored, or
-   * sent anywhere. That keeps the "no server-side store" property this module
-   * was built around.
+   * ⚠ SO IT IS AN HMAC OF THE NONCE UNDER A SERVER KEY. The nonce is public
+   * and already in `state`; the key is not, so the verifier can be recomputed
+   * at callback time and never has to be written down, stored, or sent
+   * anywhere. That keeps the "no server-side store" property this module was
+   * built around.
+   *
+   * ⚠ UNDER THE KEY THAT SIGNED THE STATE, not simply the current one, so a
+   * flow started before a key rotation still finishes after it.
    */
-  const pkceVerifier = (nonce: string) =>
-    createHmac("sha256", config.stateSecret).update(`pkce|${nonce}`).digest("base64url")
+  const pkceVerifier = (nonce: string, kid?: string) =>
+    config.tokens.sign("dns-oauth-pkce", nonce, kid)
 
   /** RFC 7636 S256: BASE64URL(SHA256(ASCII(verifier))). */
   const pkceChallenge = (verifier: string) =>
@@ -447,7 +448,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
         String(now() + STATE_TTL_MS),
         safeReturnTo(returnTo) ?? "",
       ].join("|")
-      const state = `${Buffer.from(payload).toString("base64url")}.${sign(payload)}`
+      const state = `${Buffer.from(payload).toString("base64url")}.${config.tokens.sign("dns-oauth-state", payload)}`
 
       const url = new URL(oauth.authorizeUrl)
       url.searchParams.set("response_type", "code")
@@ -483,17 +484,8 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       }
 
       const payload = Buffer.from(encoded, "base64url").toString()
-      const expected = sign(payload)
-
-      /*
-       * ⚠ `timingSafeEqual`, AND THE LENGTH CHECK BEFORE IT. It throws on a
-       * length mismatch rather than returning false, so comparing directly
-       * turns a forged state of the wrong length into a 500 instead of a
-       * refusal - and the difference in response is itself an oracle.
-       */
-      const a = Buffer.from(signature)
-      const b = Buffer.from(expected)
-      if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      const kid = config.tokens.verify("dns-oauth-state", payload, signature)
+      if (!kid) {
         throw new OAuthError("bad_state", "That authorisation could not be verified.")
       }
 
@@ -511,7 +503,7 @@ export function dnsOAuth(config: OAuthConfig): DnsOAuth {
       return {
         slug,
         tenantId,
-        verifier: pkceVerifier(nonce),
+        verifier: pkceVerifier(nonce, kid),
         // ⚠ RE-CHECKED ON THE WAY BACK, not trusted because we signed it. The
         // signature proves we issued it; it does not prove the rules that
         // applied when we did are the rules that apply now.

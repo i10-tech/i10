@@ -51,9 +51,9 @@ export const identity = pgSchema("identity")
  * `disabled` connection's managed accounts are refused by the gate until it is
  * active again - break-glass is #340.
  *
- * ⚠ `secrets` IS SEALED WITH THE WEBHOOK SECRET BOX (`secretBox`, the box that
- * already keeps webhook signing secrets and DKIM keys), never stored plain. It
- * holds a JSON object the engine defines (#338: the OIDC client secret).
+ * ⚠ `secrets` IS SEALED (`crypto/sealer.ts`, like webhook signing secrets and
+ * DKIM keys), never stored plain. It holds a JSON object the engine defines
+ * (#338: the OIDC client secret).
  */
 export const connections = identity.table(
   "connections",
@@ -816,9 +816,9 @@ export const events = identity.table(
  * Where a workspace's identity audit log is exported to (#345): its own
  * S3-compatible bucket, hourly. One row per workspace.
  *
- * ⚠ THE SECRET ACCESS KEY IS SEALED WITH THE WEBHOOK SECRET BOX
- * (`secret_ciphertext`, the box that keeps webhook signing secrets and the
- * SQS endpoint keys), never stored plain and never returned by any read: the
+ * ⚠ THE SECRET ACCESS KEY IS SEALED (`secret_ciphertext`, `crypto/sealer.ts`,
+ * like webhook signing secrets and the SQS endpoint keys), never stored plain
+ * and never returned by any read: the
  * console sees `secret_hint` (its last four characters) and nothing else. The
  * key should belong to a user that can do nothing but `s3:PutObject` under the
  * prefix; the docs say so and we cannot check it.

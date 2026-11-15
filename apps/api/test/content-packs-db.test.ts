@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { memoryStore, packKey, type ContentStore } from "../src/content/object-store.js"
 import { packBodies, sweepPacks, type PackDeps } from "../src/content/packs.js"
-import { parseKeyring } from "../src/content/seal.js"
+import { keyringFromEnv } from "../src/crypto/keyring.js"
 import type { Database } from "../src/db/client.js"
 import { expireTenant } from "../src/retention/expire.js"
 import { emailLookup } from "../src/send/lookup.js"
@@ -29,7 +29,8 @@ let app: ReturnType<typeof postgres>
 let db: Database
 const tenants: string[] = []
 
-const keys = parseKeyring(
+const keys = keyringFromEnv(
+  "CONTENT_KEYS",
   `k1:${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64")}`,
 )
 const contentStore = () => Object.assign(memoryStore(), { keys })

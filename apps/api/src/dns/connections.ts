@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { dnsConnections } from "../db/core.js"
-import type { SecretBox } from "../webhooks/signing.js"
+import type { SealContext, Sealer } from "../crypto/sealer.js"
 import type { Credential } from "./port.js"
 
 /**
@@ -70,8 +70,15 @@ export interface DnsConnectionStore {
 
 export function dnsConnectionStore(
   db: Database,
-  secrets: SecretBox,
+  secrets: Sealer,
+  log: { error: (o: object, m: string) => void },
 ): DnsConnectionStore {
+  const credentialOf = (tenantId: string, provider: string): SealContext => ({
+    purpose: "core.dns_connections.credential_sealed",
+    tenantId,
+    rowId: provider,
+  })
+
   const summarise = (row: {
     id: string
     provider: string
@@ -128,16 +135,22 @@ export function dnsConnectionStore(
 
         /*
          * ⚠ A CREDENTIAL THAT WILL NOT OPEN IS TREATED AS ABSENT, NOT AS A
-         * CRASH. It means the sealing key has been rotated or replaced, which
-         * is our problem and not the customer's - and the correct outcome is
-         * "you are not connected, reconnect", which is exactly what `null`
-         * produces one layer up. Throwing would make every page that lists
-         * connections fail for a tenant whose row is merely stale.
+         * CRASH, AND IT IS LOGGED AS AN ERROR. The customer sees "you are not
+         * connected, reconnect", which is the right outcome for them, and
+         * throwing would fail every page that lists connections. But it means
+         * a key was dropped from `SEAL_KEYS` too early or the row was tampered
+         * with, which is ours to know about and never theirs to discover.
          */
         let credential: Credential
         try {
-          credential = JSON.parse(secrets.open(row.credentialSealed)) as Credential
-        } catch {
+          credential = JSON.parse(
+            secrets.open(credentialOf(tenantId, provider), row.credentialSealed),
+          ) as Credential
+        } catch (err) {
+          log.error(
+            { err, tenantId, provider },
+            "DNS credential does not open - the connection reads as disconnected",
+          )
           return null
         }
 
@@ -146,7 +159,10 @@ export function dnsConnectionStore(
     },
 
     async updateCredential({ tenantId, provider, credential }) {
-      const sealed = secrets.seal(JSON.stringify(credential))
+      const sealed = secrets.seal(
+        credentialOf(tenantId, provider),
+        JSON.stringify(credential),
+      )
       await withTenant(db, tenantId, async (tx) =>
         tx
           .update(dnsConnections)
@@ -161,7 +177,10 @@ export function dnsConnectionStore(
     },
 
     async save({ tenantId, provider, label, credential, zones }) {
-      const sealed = secrets.seal(JSON.stringify(credential))
+      const sealed = secrets.seal(
+        credentialOf(tenantId, provider),
+        JSON.stringify(credential),
+      )
 
       return withTenant(db, tenantId, async (tx) => {
         const [row] = await tx

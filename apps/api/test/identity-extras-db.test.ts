@@ -8,7 +8,7 @@ import { healthOf } from "../src/identity/health.js"
 import { siemStore } from "../src/identity/siem-store.js"
 import { identityStore } from "../src/identity/store.js"
 import { keyStore } from "../src/auth/store.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 import { identityWebhooks } from "../src/webhooks/identity-events.js"
 import { SECRET } from "./identity-siem-fakes.js"
 
@@ -30,7 +30,7 @@ let database: Database
 const acme = crypto.randomUUID()
 const rival = crypto.randomUUID()
 const conn = crypto.randomUUID()
-const box = secretBox("00".repeat(32))
+const box = testSealer()
 
 suite("#345 identity extras", () => {
   beforeAll(async () => {

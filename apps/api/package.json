@@ -16,6 +16,7 @@
     "prove-migrations": "bun scripts/prove-migrations.ts",
     "openapi": "bun scripts/generate-openapi.ts",
     "adopt-dkim": "bun scripts/adopt-dkim.ts",
+    "reseal-secrets": "bun scripts/reseal-secrets.ts",
     "workspace-roles": "bun scripts/workspace-roles.ts",
     "risk-admin": "bun src/risk-admin.ts"
   },

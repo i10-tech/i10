@@ -26,7 +26,7 @@ import {
   WorkspaceShare,
   type BreakerOptions,
 } from "./fairness.js"
-import type { SecretBox } from "./signing.js"
+import type { Sealer } from "../crypto/sealer.js"
 
 /**
  * The webhook delivery engine: the queue, the worker, the sweep and the
@@ -53,7 +53,7 @@ import type { SecretBox } from "./signing.js"
 export interface WebhookEngineOptions {
   db: Database
   redis: Redis
-  secrets: SecretBox
+  secrets: Sealer
   log: Logger
   /** Distinguishes this worker in groupmq's bookkeeping. */
   name: string

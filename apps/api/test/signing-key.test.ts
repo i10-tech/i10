@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test"
 import { domainSendingLookup } from "../src/send/signing-key.js"
-import type { SecretBox } from "../src/webhooks/signing.js"
+import type { SealContext, Sealer } from "../src/crypto/sealer.js"
 
 /**
  * ⚠ THIS FILE EXISTS BECAUSE ITS ABSENCE SHIPPED A BUG. `domainSendingLookup`
@@ -15,12 +15,18 @@ import type { SecretBox } from "../src/webhooks/signing.js"
  * as a non-owner role - noted in mail-routing.md, not faked here.
  */
 
-const secrets: SecretBox = {
-  seal: (p) => `sealed:${p}`,
-  open: (s) => s.replace(/^sealed:/, ""),
+const opened: SealContext[] = []
+const secrets: Sealer = {
+  currentKid: "fake",
+  seal: (_c, p) => `sealed:${p}`,
+  open: (c, s) => {
+    opened.push(c)
+    return s.replace(/^sealed:/, "")
+  },
 }
 
 const ROW = {
+  id: "dom-1",
   selector: "sel1",
   sealed: "sealed:PRIVATE",
   mailFromSubdomain: "send",
@@ -85,10 +91,18 @@ describe("the DKIM key lookup", () => {
       // transport to assemble. See the regression note in domains/zone.ts.
       returnPath: "send.example.com",
     })
+    // Opened as this domain row's DKIM key, in the sending tenant.
+    expect(opened.at(-1)).toEqual({
+      purpose: "core.domains.dkim_private_key_sealed",
+      tenantId: "ten-1",
+      rowId: "dom-1",
+    })
   })
 
   it("answers null for a domain with no key, without throwing", async () => {
-    const { db } = fakeDb([{ selector: null, sealed: null, mailFromSubdomain: "send" }])
+    const { db } = fakeDb([
+      { id: "dom-1", selector: null, sealed: null, mailFromSubdomain: "send" },
+    ])
     const lookup = domainSendingLookup({ db: db as never, secrets })
 
     expect(await lookup("example.com", "ten-1")).toBeNull()

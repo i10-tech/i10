@@ -4,7 +4,8 @@ import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
 import { webhookDeliveryOps } from "../src/webhooks/db.js"
 import { verifyEd25519 } from "../src/webhooks/keys.js"
-import { secretBox, verifySignature } from "../src/webhooks/signing.js"
+import { verifySignature } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 import {
   webhookEndpointStore,
   type WebhookEndpointStore,
@@ -22,7 +23,7 @@ const URL = process.env.WEBHOOKS_TEST_DATABASE_URL
 const API_URL = URL?.replace(/\/\/[^@]+@/, "//i10_api:i10_api@")
 const suite = URL ? describe : describe.skip
 
-const secrets = secretBox("ab".repeat(32))
+const secrets = testSealer()
 let owner: ReturnType<typeof postgres>
 let app: ReturnType<typeof postgres>
 let db: Database

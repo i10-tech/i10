@@ -6,6 +6,7 @@ import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
 import type { Zone } from "../src/domains/zone.js"
 import type { DelegationProbe } from "../src/domains/ownership.js"
+import { fakeSealer } from "./support/sealer.js"
 
 /**
  * Who is allowed to write the DNS we serve for a delegated domain.
@@ -159,7 +160,7 @@ const base = {
     spfInclude: "_spf.i10.tech",
     nameservers: ["ns1.i10.tech", "ns2.i10.tech"],
   },
-  secrets: { seal: (v: string) => `sealed:${v}`, open: (v: string) => v },
+  secrets: fakeSealer,
   capacity: { check: async () => ({ status: "ok" }) },
 }
 

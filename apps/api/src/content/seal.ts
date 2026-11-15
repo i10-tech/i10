@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
+import type { Keyring } from "../crypto/keyring.js"
 
 /**
  * Sealing a message body for R2 (#184, #188): compress, then encrypt with a key
@@ -23,42 +24,6 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
  * GCM are exact; `sealBody` opens what it sealed before returning it anyway,
  * and the pack job checks again from what R2 returns.
  */
-
-/** Master keys by id. The first is the one new bodies are wrapped with. */
-export interface Keyring {
-  current: string
-  keys: ReadonlyMap<string, Buffer>
-}
-
-const KID = /^[A-Za-z0-9_-]{1,32}$/
-
-/**
- * `CONTENT_KEYS`: `kid:base64,kid:base64`, the current key first. Rotating is
- * putting a new key at the front and keeping the old ones until every body
- * wrapped with them has expired.
- */
-export function parseKeyring(value: string): Keyring {
-  const keys = new Map<string, Buffer>()
-  let current: string | null = null
-  for (const part of value.split(",")) {
-    const entry = part.trim()
-    if (!entry) continue
-    const at = entry.indexOf(":")
-    const kid = entry.slice(0, at)
-    const key = Buffer.from(entry.slice(at + 1), "base64")
-    if (at < 1 || !KID.test(kid)) {
-      throw new Error("CONTENT_KEYS: each entry is kid:base64, kid of [A-Za-z0-9_-]")
-    }
-    if (key.byteLength !== 32) {
-      throw new Error(`CONTENT_KEYS: key ${kid} is not 32 bytes of base64`)
-    }
-    if (keys.has(kid)) throw new Error(`CONTENT_KEYS: key ${kid} appears twice`)
-    keys.set(kid, key)
-    current ??= kid
-  }
-  if (!current) throw new Error("CONTENT_KEYS: no key")
-  return { current, keys }
-}
 
 export interface BodyIds {
   tenantId: string

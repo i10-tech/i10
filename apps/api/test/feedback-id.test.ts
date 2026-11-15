@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import {
   FEEDBACK_SENDER_ID,
   feedbackIdHeaderValue,
+  feedbackIdKey,
   feedbackTokens,
 } from "../src/send/feedback-id.js"
 
@@ -13,7 +14,7 @@ import {
  * they do not merge, and that gives away nothing about the tenant behind it.
  */
 
-const SECRET = "a-test-secret-that-is-at-least-32-bytes-long"
+const SECRET = Buffer.alloc(32, 3)
 const TENANT_A = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
 const TENANT_B = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6072"
 
@@ -35,9 +36,15 @@ describe("the workspace token", () => {
   })
 
   it("is keyed: another secret gives another token", () => {
-    expect(
-      feedbackTokens("another-secret-that-is-also-32-bytes-long!")(TENANT_A),
-    ).not.toBe(token(TENANT_A))
+    expect(feedbackTokens(Buffer.alloc(32, 4))(TENANT_A)).not.toBe(token(TENANT_A))
+  })
+
+  it("reads the key as hex or base64, and only 32 bytes of it", () => {
+    expect(feedbackIdKey(SECRET.toString("hex"))).toEqual(SECRET)
+    expect(feedbackIdKey(SECRET.toString("base64"))).toEqual(SECRET)
+    expect(() => feedbackIdKey(Buffer.alloc(16, 3).toString("base64"))).toThrow(
+      "32 bytes",
+    )
   })
 
   // ⚠ HEADERS ARE PUBLIC. Nothing of the tenant id may be readable in the token.

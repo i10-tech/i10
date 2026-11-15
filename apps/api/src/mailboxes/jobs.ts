@@ -1,10 +1,10 @@
-import { createHmac, timingSafeEqual } from "node:crypto"
 import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { withTenant } from "../db/client.js"
 import { accounts } from "../db/schema.js"
 import { mailboxJobs, tenants } from "../db/core.js"
 import type { ObjectStore } from "../content/object-store.js"
+import type { TokenKeys } from "../crypto/token-keys.js"
 
 /**
  * Who may move a mailbox's mail, and where the jobs that do it are kept (#385).
@@ -97,27 +97,21 @@ export async function canAccessMailbox(
  *
  * ⚠ THE TENANT AND THE JOB ARE BOTH SIGNED, and the route looks the job up under
  * that tenant, so a token for one workspace's job cannot be pointed at another's
- * and a job id on its own opens nothing. The signature is keyed per purpose
- * (`mailbox-download.v1`) so the same secret cannot mint some other kind of
- * token that this would accept.
+ * and a job id on its own opens nothing. The MAC is under the `mailbox-download`
+ * subkey of `TOKEN_KEYS`, so no other kind of token we sign is accepted here.
  */
-const sign = (payload: string, secret: string) =>
-  createHmac("sha256", secret)
-    .update(`mailbox-download.v1.${payload}`)
-    .digest("base64url")
-
 export function signDownloadToken(
   link: { tenantId: string; jobId: string },
   expiresAtMs: number,
-  secret: string,
+  keys: TokenKeys,
 ): string {
   const payload = `${link.tenantId}.${link.jobId}.${expiresAtMs}`
-  return `${payload}.${sign(payload, secret)}`
+  return `${payload}.${keys.sign("mailbox-download", payload)}`
 }
 
 export function verifyDownloadToken(
   token: string,
-  secret: string,
+  keys: TokenKeys,
   nowMs = Date.now(),
 ): { tenantId: string; jobId: string } | null {
   const parts = token.split(".")
@@ -128,15 +122,9 @@ export function verifyDownloadToken(
     string,
     string,
   ]
-
-  const given = Buffer.from(signature, "base64url")
-  const expected = Buffer.from(
-    sign(`${tenantId}.${jobId}.${expires}`, secret),
-    "base64url",
-  )
-  // ⚠ CONSTANT TIME. The lengths are public (a SHA-256 digest), so comparing
-  // them first leaks nothing; the bytes are what must not be compared early.
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null
+  if (!keys.verify("mailbox-download", `${tenantId}.${jobId}.${expires}`, signature)) {
+    return null
+  }
 
   const expiresAt = Number(expires)
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= nowMs) return null

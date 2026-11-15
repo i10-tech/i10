@@ -1,13 +1,7 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHmac,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto"
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 
 /**
- * Signing what we send, and protecting the secret that signs it.
+ * Signing what we send. The secret at rest is sealed by `crypto/sealer.ts`.
  *
  * ⚠ A WEBHOOK IS AN UNAUTHENTICATED POST INTO A CUSTOMER'S INFRASTRUCTURE. The
  * receiver has no way to know it came from us unless we prove it, and the
@@ -42,8 +36,8 @@ import {
  * window lets a customer change their secret without dropping a delivery; a
  * receiver takes any one match as a pass.
  *
- * ⚠ THE HMAC KEY IS THE DECODED BYTES, NOT THE PRINTABLE SECRET. `whsec_…` is
- * a base64 payload behind a prefix. Keying with the string as typed produces a
+ * ⚠ THE HMAC KEY IS THE DECODED BYTES, NOT THE PRINTABLE SECRET. `i10_whsec_…`
+ * is a base64 payload behind a prefix. Keying with the string as typed produces a
  * different digest that verifies fine against our own code and fails against
  * every off-the-shelf Standard Webhooks library - which is the whole reason we
  * moved. `webhooks/svix.ts` decodes the same way for the inbound direction.
@@ -56,16 +50,18 @@ import {
 export const SIGNATURE_TOLERANCE_SECONDS = 300
 
 /**
- * ⚠ THE PREFIX IS PART OF WHAT MAKES A LEAK FINDABLE. `whsec_` in a paste, a
- * log line or a public repository is greppable by a secret scanner and obvious
- * to a human; 32 anonymous base64 characters are neither.
+ * ⚠ THE PREFIX IS PART OF WHAT MAKES A LEAK FINDABLE. `i10_whsec_` in a paste,
+ * a log line or a public repository is greppable by a secret scanner and
+ * obvious to a human; 32 anonymous base64 characters are neither. The `i10_`
+ * is what lets a scanner tell ours from every other `whsec_` (#427). Secrets
+ * issued before it are plain `whsec_` and still verify.
  *
  * Base64 rather than hex because the spec says the payload is base64 and every
  * conforming library decodes it that way. 24 bytes sits inside the spec's
  * 24–64 byte range.
  */
 export const generateSecret = (): string =>
-  `whsec_${randomBytes(24).toString("base64")}`
+  `i10_whsec_${randomBytes(24).toString("base64")}`
 
 /** Unix seconds, as the `webhook-timestamp` header carries them. */
 export const timestampFor = (at: Date): string =>
@@ -92,7 +88,8 @@ export function signPayload(
  * correct from inside this repository and fails everywhere else.
  */
 export function decodeSecret(secret: string): Buffer {
-  const raw = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret
+  const prefix = ["i10_whsec_", "whsec_"].find((p) => secret.startsWith(p)) ?? ""
+  const raw = secret.slice(prefix.length)
   const decoded = Buffer.from(raw, "base64")
   if (decoded.length === 0) throw new Error("empty secret")
   return decoded
@@ -176,85 +173,4 @@ export function equalSecrets(expected: string, given: string): boolean {
   const a = Buffer.from(expected, "utf8")
   const b = Buffer.from(given, "utf8")
   return a.length === b.length && timingSafeEqual(a, b)
-}
-
-/**
- * The secret at rest.
- *
- * ⚠ ENCRYPTED, NOT HASHED, BECAUSE A SIGNATURE IS COMPUTED RATHER THAN
- * COMPARED. The delivery worker needs the secret back to sign with it, so the
- * one-way storage a password gets is not available. What is available is
- * separating the two halves: the ciphertext lives in Postgres and the key lives
- * in the environment, so a stolen backup - the most likely way a database
- * leaves the building - carries nothing usable.
- *
- * ⚠ AES-256-GCM, SO THE CIPHERTEXT IS AUTHENTICATED. Without the tag, a row
- * edited by anyone with write access decrypts to a different secret and the
- * only symptom is every signature silently failing verification at the
- * customer's end.
- *
- * Format: `v1.<iv base64url>.<tag base64url>.<ciphertext base64url>` - versioned
- * so a future key rotation or algorithm change can be recognised rather than
- * guessed.
- */
-const KEY_BYTES = 32
-const IV_BYTES = 12
-
-export interface SecretBox {
-  seal: (plaintext: string) => string
-  open: (sealed: string) => string
-}
-
-/**
- * ⚠ THE KEY IS 32 BYTES, HEX OR BASE64, AND NOT A PASSPHRASE. Deriving one from
- * a human-typed string would need a KDF and a salt to store beside it; refusing
- * anything but a real key keeps that decision from being made badly later.
- * Generate with `openssl rand -hex 32`.
- */
-export function secretBox(key: string): SecretBox {
-  const bytes = decodeKey(key)
-  if (bytes.length !== KEY_BYTES) {
-    throw new Error(
-      `WEBHOOK_SECRET_KEY must be ${KEY_BYTES} bytes (64 hex characters); got ${bytes.length}`,
-    )
-  }
-
-  return {
-    seal(plaintext) {
-      const iv = randomBytes(IV_BYTES)
-      const cipher = createCipheriv("aes-256-gcm", bytes, iv)
-      const ciphertext = Buffer.concat([
-        cipher.update(plaintext, "utf8"),
-        cipher.final(),
-      ])
-      return [
-        "v1",
-        iv.toString("base64url"),
-        cipher.getAuthTag().toString("base64url"),
-        ciphertext.toString("base64url"),
-      ].join(".")
-    },
-
-    open(sealed) {
-      const [version, iv, tag, ciphertext] = sealed.split(".")
-      if (version !== "v1" || !iv || !tag || !ciphertext) {
-        throw new Error("Unrecognised sealed secret")
-      }
-      const decipher = createDecipheriv(
-        "aes-256-gcm",
-        bytes,
-        Buffer.from(iv, "base64url"),
-      )
-      decipher.setAuthTag(Buffer.from(tag, "base64url"))
-      return Buffer.concat([
-        decipher.update(Buffer.from(ciphertext, "base64url")),
-        decipher.final(),
-      ]).toString("utf8")
-    },
-  }
-}
-
-function decodeKey(key: string): Buffer {
-  if (/^[0-9a-fA-F]{64}$/.test(key)) return Buffer.from(key, "hex")
-  return Buffer.from(key, "base64")
 }

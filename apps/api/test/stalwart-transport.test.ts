@@ -604,7 +604,7 @@ describe("classifying a relay failure", () => {
 })
 
 describe("the Feedback-ID on the direct route", () => {
-  const SECRET = "a-test-secret-that-is-at-least-32-bytes-long"
+  const SECRET = Buffer.alloc(32, 3)
   const feedbackToken = feedbackTokens(SECRET)
 
   /** The unfolded header block, signature first. */

@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { events, siemExports } from "../db/identity.js"
-import type { SecretBox } from "../webhooks/signing.js"
+import type { SealContext, Sealer } from "../crypto/sealer.js"
 import type { SiemRow, SiemStore } from "./siem.js"
 
 type Row = Record<string, unknown>
@@ -29,7 +29,12 @@ const toRow = (r: typeof siemExports.$inferSelect): SiemRow => ({
  * the exporter alone calls. No other method selects the ciphertext into a
  * value that leaves this file.
  */
-export function siemStore(db: Database, secrets: SecretBox): SiemStore {
+export function siemStore(db: Database, secrets: Sealer): SiemStore {
+  const secretOf = (tenantId: string): SealContext => ({
+    purpose: "identity.siem_exports.secret_ciphertext",
+    tenantId,
+    rowId: tenantId,
+  })
   return {
     async get(tenantId) {
       const [row] = await withTenant(db, tenantId, (tx) =>
@@ -43,7 +48,10 @@ export function siemStore(db: Database, secrets: SecretBox): SiemStore {
         tx.select().from(siemExports).where(eq(siemExports.tenantId, tenantId)),
       )
       return row
-        ? { ...toRow(row), secretAccessKey: secrets.open(row.secretCiphertext) }
+        ? {
+            ...toRow(row),
+            secretAccessKey: secrets.open(secretOf(tenantId), row.secretCiphertext),
+          }
         : null
     },
 
@@ -54,7 +62,7 @@ export function siemStore(db: Database, secrets: SecretBox): SiemStore {
         region: settings.region,
         prefix: settings.prefix,
         accessKeyId: settings.accessKeyId,
-        secretCiphertext: secrets.seal(settings.secretAccessKey),
+        secretCiphertext: secrets.seal(secretOf(tenantId), settings.secretAccessKey),
         secretHint: settings.secretAccessKey.slice(-4),
         enabled: settings.enabled,
         updatedBy: by,

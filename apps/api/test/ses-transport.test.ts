@@ -179,7 +179,7 @@ describe("tags", () => {
 })
 
 describe("the Feedback-ID", () => {
-  const SECRET = "a-test-secret-that-is-at-least-32-bytes-long"
+  const SECRET = Buffer.alloc(32, 3)
   const feedbackToken = feedbackTokens(SECRET)
   const tagsOf = (c: Parameters<typeof inputOf>[0]) =>
     inputOf(c).EmailTags as unknown as { Name: string; Value: string }[]

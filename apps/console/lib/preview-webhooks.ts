@@ -18,6 +18,8 @@ type Route = [
 
 const HOUR = 3_600_000
 const at = (msAgo: number) => new Date(Date.now() - msAgo).toISOString()
+// The shape a real one has (#427); built so a scanner does not read it as leaked.
+const PREVIEW_SECRET = `i10_whsec_${btoa("preview-only-not-a-real-secret")}`
 const q = (query: Query, name: string) => {
   const v = query?.[name]
   return v === undefined || v === null || v === "" ? undefined : String(v)
@@ -680,7 +682,7 @@ export function webhookRoutes(notFound: symbol): Route[] {
                   },
                 ]
               : [],
-          secret: ed ? null : "whsec_cHJldmlldy1vbmx5LW5vdC1hLXJlYWwtc2VjcmV0",
+          secret: ed ? null : PREVIEW_SECRET,
         }
       },
     ],
@@ -830,10 +832,7 @@ export function webhookRoutes(notFound: symbol): Route[] {
             created_at: new Date().toISOString(),
             signature_scheme: ed ? "ed25519" : "hmac_sha256",
             public_key: ed ? "whpk_3vYpPreviewPublicKeyOnlyNotARealKey0000000=" : null,
-            secret:
-              kind === "polling" || ed
-                ? null
-                : "whsec_cHJldmlldy1vbmx5LW5vdC1hLXJlYWwtc2VjcmV0",
+            secret: kind === "polling" || ed ? null : PREVIEW_SECRET,
           }
         }
         return { data: endpoints() }

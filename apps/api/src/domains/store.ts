@@ -33,7 +33,7 @@ import {
 import { readDelegation } from "./referral.js"
 import type { DomainIdentity } from "./identity.js"
 import { ensureSesTenant } from "./ses-tenant.js"
-import type { SecretBox } from "../webhooks/signing.js"
+import type { Sealer } from "../crypto/sealer.js"
 
 /**
  * Domains a tenant has claimed, and what they may do.
@@ -357,7 +357,7 @@ export interface DomainStoreDeps {
    * sign mail as the customer's domain, so it never lands in the database in a
    * form a backup or a replica could use.
    */
-  secrets: SecretBox
+  secrets: Sealer
   /**
    * ⚠ OPTIONAL, AND IT EXISTS FOR `remove`'s CLEANUP. Deleting a domain is a
    * row delete followed by two best-effort tidies at other systems; those
@@ -701,7 +701,10 @@ export function domainStore({
       domain: row.name,
       mailFrom: mailFromFor(row),
       selector: row.dkimSelector,
-      privateKey: secrets.open(sealed),
+      privateKey: secrets.open(
+        { purpose: "core.domains.dkim_private_key_sealed", tenantId, rowId: id },
+        sealed,
+      ),
     })
 
     /*
@@ -974,18 +977,28 @@ export function domainStore({
        * It is the honest description of a domain that no provider has been
        * asked about yet, and the console already renders it.
        */
+      // ⚠ MADE HERE, NOT BY THE DATABASE: the DKIM key is sealed to it.
+      const id = Bun.randomUUIDv7()
       try {
         const [row] = await withTenant(db, tenantId, async (tx) => {
           const inserted = await tx
             .insert(domains)
             .values({
+              id,
               tenantId,
               name,
               mailFromSubdomain,
               delegated,
               dkimSelector: keypair.selector,
               dkimPublicKey: keypair.publicKey,
-              dkimPrivateKeySealed: secrets.seal(keypair.privateKey),
+              dkimPrivateKeySealed: secrets.seal(
+                {
+                  purpose: "core.domains.dkim_private_key_sealed",
+                  tenantId,
+                  rowId: id,
+                },
+                keypair.privateKey,
+              ),
               status: "not_started",
               sends: true,
               // ⚠ NOT A MAILBOX DOMAIN. This API is Resend's, and Resend has no

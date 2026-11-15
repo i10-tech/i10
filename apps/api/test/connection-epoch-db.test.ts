@@ -4,7 +4,7 @@ import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
 import { identityStore } from "../src/identity/store.js"
 import { raiseConnectionCredentialEpochs } from "../src/projection/connection-epoch.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 
 /**
  * Revoking a connection's cached mail passwords (#383), against a real database
@@ -25,7 +25,7 @@ const suffix = acme.slice(0, 8)
 const [ada, bob, carol, dan, eve] = ["ada", "bob", "carol", "dan", "eve"].map(
   (n) => `user_${n}_${suffix}`,
 ) as [string, string, string, string, string]
-const box = secretBox("ab".repeat(32))
+const box = testSealer()
 
 suite("raising a connection's credential epochs", () => {
   beforeAll(async () => {
