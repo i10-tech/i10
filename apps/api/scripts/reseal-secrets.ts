@@ -1,13 +1,13 @@
 /*
- * Re-seals every sealed column to v2 under the current `SEAL_KEYS` key. The
- * one-off move off `WEBHOOK_SECRET_KEY`, and the tool for every rotation after.
+ * Re-seals every sealed column under the current `SEAL_KEYS` key: the tool
+ * for a key rotation.
  *
  *   bun run --filter @i10/api reseal-secrets            (dry run: counts only)
  *   bun run --filter @i10/api reseal-secrets --apply
  *
  * It walks `SEALED_COLUMNS`, so a column cannot be sealed without being on this
- * job's list. A v1 value, or a v2 value under a key that is not the current
- * one, is opened and sealed again for its own row. It prints counts and the
+ * job's list. A value under a key that is not the current one is opened and
+ * sealed again for its own row. It prints counts and the
  * row ids of values that would not open; never a value.
  *
  * ⚠ SAFE TO STOP AND RUN AGAIN. Each write is guarded on the old ciphertext,
@@ -19,7 +19,7 @@
  * these tables would answer with no rows rather than an error, and a job that
  * sees nothing reports "nothing left to do". It checks the role before reading.
  *
- * Exits 1 when a value would not open, or when v1 values remain after --apply.
+ * Exits 1 when a value would not open.
  */
 import postgres from "postgres"
 import {
@@ -35,9 +35,8 @@ type Sql = ReturnType<typeof postgres>
 export interface ColumnReport {
   purpose: SealPurpose
   nulls: number
-  v1: number
-  /** v2 values by kid. */
-  v2: Record<string, number>
+  /** Values by the kid they are sealed under. */
+  kids: Record<string, number>
   /** Rows whose value would not open. Ids only, never content. */
   failed: { tenantId: string; rowId: string }[]
   resealed: number
@@ -83,8 +82,7 @@ export async function resealSecrets(
     const report: ColumnReport = {
       purpose,
       nulls: 0,
-      v1: 0,
-      v2: {},
+      kids: {},
       failed: [],
       resealed: 0,
       skipped: 0,
@@ -114,11 +112,9 @@ export async function resealSecrets(
       let stale = false
       const opened: string[] = []
       for (const value of values) {
-        const under = sealedUnder(value)
-        if (under?.version === "v1") report.v1++
-        else if (under) report.v2[under.kid] = (report.v2[under.kid] ?? 0) + 1
-        if (!under || under.version === "v1" || under.kid !== box.currentKid)
-          stale = true
+        const kid = sealedUnder(value)
+        if (kid) report.kids[kid] = (report.kids[kid] ?? 0) + 1
+        if (kid !== box.currentKid) stale = true
         try {
           opened.push(box.open(context, value))
         } catch {
@@ -161,11 +157,11 @@ export async function resealSecrets(
 function print(reports: ColumnReport[], heading: string) {
   console.log(`\n${heading}`)
   for (const r of reports) {
-    const kids = Object.entries(r.v2)
+    const kids = Object.entries(r.kids)
       .map(([kid, n]) => `${kid}=${n}`)
       .join(" ")
     console.log(
-      `  ${r.purpose}: v1=${r.v1} v2[${kids}] null=${r.nulls} failed=${r.failed.length}` +
+      `  ${r.purpose}: [${kids}] null=${r.nulls} failed=${r.failed.length}` +
         (r.resealed || r.skipped ? ` resealed=${r.resealed} skipped=${r.skipped}` : ""),
     )
     for (const f of r.failed)
@@ -176,10 +172,7 @@ function print(reports: ColumnReport[], heading: string) {
 if (import.meta.main) {
   const apply = process.argv.includes("--apply")
   const url = process.env.MIGRATE_DATABASE_URL
-  const box = sealerFromEnv({
-    SEAL_KEYS: process.env.SEAL_KEYS,
-    WEBHOOK_SECRET_KEY: process.env.WEBHOOK_SECRET_KEY,
-  })
+  const box = sealerFromEnv({ SEAL_KEYS: process.env.SEAL_KEYS })
   if (!url) {
     console.error(
       "MIGRATE_DATABASE_URL is required: the owner role, which sees every workspace",
@@ -203,10 +196,8 @@ if (import.meta.main) {
     const final = apply ? await resealSecrets(sql, box, { apply: false }) : first
     if (apply) print(final, "after")
     const failed = final.some((r) => r.failed.length > 0)
-    const v1Left = apply && final.some((r) => r.v1 > 0)
     if (failed) console.error("\nsome values do not open; see the row ids above")
-    if (v1Left) console.error("\nv1 values remain; WEBHOOK_SECRET_KEY must stay")
-    process.exitCode = failed || v1Left ? 1 : 0
+    process.exitCode = failed ? 1 : 0
   } finally {
     await sql.end({ timeout: 5 })
   }

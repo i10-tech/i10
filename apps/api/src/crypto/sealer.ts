@@ -129,16 +129,10 @@ export class SealError extends Error {
 const VERSION = "v2"
 const IV_BYTES = 12
 
-/** Which key a stored value is under, read from its header without opening it. */
-export function sealedUnder(
-  sealed: string,
-): { version: "v1" } | { version: "v2"; kid: string } | null {
+/** The kid a stored value is under, read from its header without opening it. */
+export function sealedUnder(sealed: string): string | null {
   const parts = sealed.split(".")
-  if (parts[0] === "v1" && parts.length === 4) return { version: "v1" }
-  if (parts[0] === VERSION && parts.length === 5 && parts[1]) {
-    return { version: "v2", kid: parts[1] }
-  }
-  return null
+  return parts[0] === VERSION && parts.length === 5 && parts[1] ? parts[1] : null
 }
 
 function part(name: string, value: string): string {
@@ -165,9 +159,7 @@ const workspaceKey = (master: Buffer, tenantId: string) =>
     ),
   )
 
-export function sealer(keys: Keyring, legacyKey?: string): Sealer {
-  const legacy = legacyKey ? legacyV1Key(legacyKey) : null
-
+export function sealer(keys: Keyring): Sealer {
   return {
     currentKid: keys.current,
 
@@ -193,21 +185,13 @@ export function sealer(keys: Keyring, legacyKey?: string): Sealer {
     },
 
     open(context, sealed) {
-      const under = sealedUnder(sealed)
-      if (!under) throw new SealError("unrecognised sealed value")
-      if (under.version === "v1") {
-        if (!legacy) {
-          throw new SealError(
-            "this value is sealed in the v1 format and WEBHOOK_SECRET_KEY, the legacy key that opens it, is not configured",
-          )
-        }
-        return openLegacyV1(legacy, sealed)
-      }
+      const kid = sealedUnder(sealed)
+      if (!kid) throw new SealError("unrecognised sealed value")
 
-      const master = keys.keys.get(under.kid)
+      const master = keys.keys.get(kid)
       if (!master) {
         throw new SealError(
-          `this value is sealed under key ${under.kid}, which is not in SEAL_KEYS`,
+          `this value is sealed under key ${kid}, which is not in SEAL_KEYS`,
         )
       }
       const [, , iv, tag, ciphertext] = sealed.split(".") as [
@@ -240,41 +224,8 @@ export function sealer(keys: Keyring, legacyKey?: string): Sealer {
   }
 }
 
-/** `SEAL_KEYS`, with the legacy key if one is set. Null: sealing is off. */
-export function sealerFromEnv(env: {
-  SEAL_KEYS?: string | undefined
-  WEBHOOK_SECRET_KEY?: string | undefined
-}): Sealer | null {
+/** `SEAL_KEYS`. Null: sealing is off. */
+export function sealerFromEnv(env: { SEAL_KEYS?: string | undefined }): Sealer | null {
   if (!env.SEAL_KEYS) return null
-  return sealer(keyringFromEnv("SEAL_KEYS", env.SEAL_KEYS), env.WEBHOOK_SECRET_KEY)
-}
-
-// ── Legacy v1 ───────────────────────────────────────────────────────────────
-//
-// ⚠ LEGACY, READ ONLY, AND DELETED WITH `WEBHOOK_SECRET_KEY`. The old format
-// had one key for everything, no key id and no associated data. It is opened
-// here only until `scripts/reseal-secrets.ts` reports no v1 value left.
-
-function legacyV1Key(key: string): Buffer {
-  const bytes = /^[0-9a-fA-F]{64}$/.test(key)
-    ? Buffer.from(key, "hex")
-    : Buffer.from(key, "base64")
-  if (bytes.length !== 32) {
-    throw new SealError(`WEBHOOK_SECRET_KEY must be 32 bytes, hex or base64`)
-  }
-  return bytes
-}
-
-function openLegacyV1(key: Buffer, sealed: string): string {
-  const [, iv, tag, ciphertext] = sealed.split(".") as [string, string, string, string]
-  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"))
-  decipher.setAuthTag(Buffer.from(tag, "base64url"))
-  try {
-    return Buffer.concat([
-      decipher.update(Buffer.from(ciphertext, "base64url")),
-      decipher.final(),
-    ]).toString("utf8")
-  } catch {
-    throw new SealError("this v1 value does not open under WEBHOOK_SECRET_KEY")
-  }
+  return sealer(keyringFromEnv("SEAL_KEYS", env.SEAL_KEYS))
 }
