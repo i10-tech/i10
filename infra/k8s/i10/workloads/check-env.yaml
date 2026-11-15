@@ -53,6 +53,14 @@ spec:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }
           env:
+            # Opens the wrapped keys in i10-api (apps/api/src/crypto/unlock.ts). A
+            # hand-made Secret, never in Doppler; optional, so plain keys still start.
+            - name: KEY_WRAP_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-key-wrap
+                  key: KEY_WRAP_KEYS
+                  optional: true
             - name: PGUSER
               valueFrom:
                 secretKeyRef: { name: i10-api-db-role, key: username }
@@ -83,6 +91,14 @@ spec:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }
           env:
+            # Opens the wrapped keys in i10-api (apps/api/src/crypto/unlock.ts). A
+            # hand-made Secret, never in Doppler; optional, so plain keys still start.
+            - name: KEY_WRAP_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-key-wrap
+                  key: KEY_WRAP_KEYS
+                  optional: true
             - name: PGUSER
               valueFrom:
                 secretKeyRef: { name: i10-api-db-role, key: username }

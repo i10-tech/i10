@@ -29,6 +29,7 @@ import {
   type SealPurpose,
   type Sealer,
 } from "../src/crypto/sealer.js"
+import { unlockEnv } from "../src/crypto/unlock.js"
 
 type Sql = ReturnType<typeof postgres>
 
@@ -172,7 +173,7 @@ function print(reports: ColumnReport[], heading: string) {
 if (import.meta.main) {
   const apply = process.argv.includes("--apply")
   const url = process.env.MIGRATE_DATABASE_URL
-  const box = sealerFromEnv({ SEAL_KEYS: process.env.SEAL_KEYS })
+  const box = sealerFromEnv({ SEAL_KEYS: (await unlockEnv(console)).SEAL_KEYS })
   if (!url) {
     console.error(
       "MIGRATE_DATABASE_URL is required: the owner role, which sees every workspace",

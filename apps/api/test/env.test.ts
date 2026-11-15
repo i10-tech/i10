@@ -208,6 +208,15 @@ describe("production must hold the sealing and token keys", () => {
     expect(message).not.toContain(short)
   })
 
+  it("says a wrapped value was never unlocked, rather than calling it malformed", () => {
+    const wrapped = "wrap1.local.w1.aaaa.bbbb.cccc"
+    for (const name of ["SEAL_KEYS", "FEEDBACK_ID_KEY"] as const) {
+      expect(() => loadEnv({ ...prod, [name]: wrapped })).toThrow(
+        `${name}: is still wrapped: unlockEnv() did not run`,
+      )
+    }
+  })
+
   it("accepts them, and leaves development without them alone", () => {
     expect(loadEnv(prod).SEAL_KEYS).toBe(prodKeys.SEAL_KEYS)
     expect(loadEnv(base).SEAL_KEYS).toBeUndefined()

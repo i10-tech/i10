@@ -1,7 +1,6 @@
 import { z } from "zod"
-import { keyringFromEnv } from "./crypto/keyring.js"
+import { isWrapped, KEY_VARIABLES, type Wrappable } from "./crypto/unlock.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
-import { feedbackIdKey } from "./send/feedback-id.js"
 import { JUDGE_PROVIDERS, judgeSettingsProblems } from "./risk/judge/config.js"
 import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
 import { RULES } from "./risk/rules.js"
@@ -60,16 +59,29 @@ const switchOn = () =>
       return z.NEVER
     })
 
-/** A keyring variable, checked the way the code that reads it will parse it. */
-const keyringVariable = (name: string) =>
+/**
+ * A key variable, checked the way the code that reads it will parse it.
+ *
+ * ⚠ A WRAPPED VALUE HERE MEANS THE ENTRY POINT SKIPPED `unlockEnv`. Said
+ * plainly, because the parser's own complaint ("not 32 bytes") would send the
+ * reader to check a key that is fine.
+ */
+const keyVariable = (name: Wrappable) =>
   z
     .string()
     .min(1)
     .optional()
     .superRefine((value, ctx) => {
       if (value === undefined) return
+      if (isWrapped(value)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "is still wrapped: unlockEnv() did not run before loadEnv()",
+        })
+        return
+      }
       try {
-        keyringFromEnv(name, value)
+        KEY_VARIABLES[name](value)
       } catch (error) {
         ctx.addIssue({ code: "custom", message: (error as Error).message })
       }
@@ -740,7 +752,7 @@ const schema = z.object({
    * key first, running `scripts/reseal-secrets.ts --apply`, and removing the
    * old key only once the job reports nothing left under it.
    */
-  SEAL_KEYS: keyringVariable("SEAL_KEYS"),
+  SEAL_KEYS: keyVariable("SEAL_KEYS"),
 
   /**
    * HMAC keys for tokens we sign and check later: mailbox download links and
@@ -749,7 +761,7 @@ const schema = z.object({
    * features answer 501. Keep an old key listed for 15 minutes after
    * rotating, the longest a token lives.
    */
-  TOKEN_KEYS: keyringVariable("TOKEN_KEYS"),
+  TOKEN_KEYS: keyVariable("TOKEN_KEYS"),
 
   /**
    * Keys the per-workspace Feedback-ID token (send/feedback-id.ts). 32 bytes,
@@ -759,17 +771,7 @@ const schema = z.object({
    * what Google Postmaster Tools recorded under the old ones. It is low
    * sensitivity: it maps a tenant id to a token and nothing else.
    */
-  FEEDBACK_ID_KEY: z
-    .string()
-    .optional()
-    .superRefine((value, ctx) => {
-      if (value === undefined) return
-      try {
-        feedbackIdKey(value)
-      } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message })
-      }
-    }),
+  FEEDBACK_ID_KEY: keyVariable("FEEDBACK_ID_KEY"),
 
   /**
    * Webhook endpoints being POSTed to at once on the ordered lane, per worker
@@ -1224,7 +1226,7 @@ const schema = z.object({
    * when rotating keep the old key listed until every body it wrapped has
    * expired.
    */
-  CONTENT_KEYS: keyringVariable("CONTENT_KEYS"),
+  CONTENT_KEYS: keyVariable("CONTENT_KEYS"),
 
   /**
    * Bytes of bodies waiting that make an R2 write worth it (#188). Below it, a

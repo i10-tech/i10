@@ -5,6 +5,7 @@ import pino from "pino"
 import { createQueueClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { captureError, flushObservability, initObservability } from "./observability.js"
 import {
   createSendQueue,
@@ -74,7 +75,7 @@ import { jmapAs } from "./mail/jmap-as.js"
  */
 
 const log = pino({ name: "i10-worker" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,

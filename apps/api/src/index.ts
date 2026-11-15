@@ -15,6 +15,7 @@ import { keyLookup, keyStore } from "./auth/store.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { publishRoutingSettings } from "./domains/routing-settings.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import {
   captureError,
   captureMessage,
@@ -242,7 +243,7 @@ import { clerkResume } from "./devices/resume.js"
 import { clerkAuthAppIdentity } from "./routes/devices.js"
 
 const log = pino({ name: "i10-api" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 // ⚠ BEFORE THE DATABASE, THE CLERK CLIENT AND EVERY OTHER DEPENDENCY, so that
 // the boot failures below are the first things it can report. A pod that dies

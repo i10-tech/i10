@@ -75,3 +75,95 @@ remove the old key. Tokens live 15 minutes at most.
   must hold the keys to use the secrets. No design changes that.
 - Losing a key loses every value sealed under it. Keep a copy of each key
   outside Doppler.
+
+## Wrapped keys
+
+Doppler holds `SEAL_KEYS`, `TOKEN_KEYS`, `CONTENT_KEYS` and `FEEDBACK_ID_KEY`
+in wrapped (encrypted) form. The key that unwraps them is `KEY_WRAP_KEYS`. It
+lives in the Kubernetes Secret `i10-key-wrap`, which is made by hand and is
+in neither Doppler nor git. Each process unwraps once, at start
+(`unlockEnv` in `apps/api/src/crypto/unlock.ts`). Nothing is unwrapped per
+message.
+
+What this protects:
+
+- A leaked Doppler config alone opens nothing. It holds only wrapped values.
+
+What it does not protect:
+
+- Someone who can read Secrets in the `i10-prod` namespace has both halves.
+  The cluster holds `i10-key-wrap` and also `i10-api`, the synced copy of the
+  wrapped values. Wrapping only helps when the leak is on the Doppler side.
+- Doppler keeps a history of old values. A key that was once stored there in
+  plain form stays in that history. Rotate each key once after it is first
+  wrapped. `FEEDBACK_ID_KEY` is never rotated, so its old plain value stays.
+- Someone who controls the running server reads the plain keys from memory.
+
+### The format
+
+```
+wrap1.<provider>.<kid>.<iv>.<tag>.<ciphertext>      base64url parts
+```
+
+- The only provider today is `local`: AES-256-GCM with a 12 byte random IV,
+  under the `KEY_WRAP_KEYS` key that `kid` names.
+- The plaintext is the variable's whole plain value.
+- The associated data is `i10/wrap/v1/<VARIABLE NAME>`. A wrapped `SEAL_KEYS`
+  pasted into `TOKEN_KEYS` does not unwrap.
+- `KEY_WRAP_KEYS` is a keyring in the same format as `SEAL_KEYS`. Wrapping
+  uses the first key. Unwrapping accepts any key in the ring.
+- A variable that does not start with `wrap1.` is used as it is.
+
+### How to wrap a value
+
+The tool reads the plain value from stdin and prints only the wrapped value.
+Pipe Doppler into Doppler, so that no key reaches the terminal. Run this from
+`apps/api`. Use the Doppler config that holds the variable (`prod_api` here):
+
+```sh
+export KEY_WRAP_KEYS="$(kubectl -n i10-prod get secret i10-key-wrap \
+  -o jsonpath='{.data.KEY_WRAP_KEYS}' | base64 -d)"
+name=SEAL_KEYS
+wrapped="$(doppler secrets get "$name" --plain -p i10 -c prod_api \
+  | bun run --silent wrap-keys "$name")" \
+  && printf '%s' "$wrapped" | doppler secrets set "$name" -p i10 -c prod_api >/dev/null
+unset KEY_WRAP_KEYS
+```
+
+The `&&` matters. When the tool fails, it prints nothing, and an empty pipe
+into `doppler secrets set` would erase the key in Doppler.
+
+Do the same for the other three variables. The tool checks the value the way
+the server does, wraps it, and unwraps it again before it prints. It refuses
+an unknown variable name, empty input and input that is already wrapped.
+Restart the workloads after each Doppler change (Doppler does not restart
+them).
+
+### How to rotate `KEY_WRAP_KEYS`
+
+1. Put a new key first in the `i10-key-wrap` Secret. Keep the old key after it.
+2. Restart the workloads. They still unwrap the old values.
+3. Re-wrap each variable under the new key. Use the commands above, with
+   `wrap-keys "$name" --rewrap`. The tool accepts a value wrapped under any
+   key in the ring, and wraps it under the first.
+4. Restart the workloads, and check that the PreSync `check-env` hook passes.
+5. Remove the old key from the Secret, update the paper copy, and restart.
+
+### Break-glass
+
+If the unwrap key is lost, or (later) KMS is down, paste the plain keyring
+from the paper copy into Doppler. A plain value always works. In production
+each process then logs one warning, `KEYS NOT WRAPPED`, with the variable
+names. When the unwrap key is back, wrap the values again.
+
+### Switching to AWS KMS at launch
+
+The providers sit behind one small interface (`WrapProvider` in
+`apps/api/src/crypto/unlock.ts`). The switch is:
+
+1. Add a `kms` provider next to `local`, and make it the provider new values
+   are wrapped with.
+2. Re-wrap the four values in Doppler with the wrap tool.
+3. Give the workloads their AWS credentials, and remove `i10-key-wrap`.
+
+Nothing else changes. The format already carries the provider name.

@@ -61,6 +61,7 @@ import { createClerkClient } from "@clerk/backend"
 import { sql } from "drizzle-orm"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { createCacheClient } from "./cache/redis.js"
 import {
   decisionCases,
@@ -115,7 +116,7 @@ function fail(message: string): never {
   process.exit(2)
 }
 
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(console))
 const { sql: pg, db } = createDb(env.DATABASE_URL)
 await assertRlsSubject(pg)
 const cache = createCacheClient(env.REDIS_URL)
