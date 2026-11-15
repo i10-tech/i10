@@ -39,10 +39,11 @@ import { domainStore } from "./domains/store.js"
 import { postgresMeter } from "./metering/service.js"
 import { sealerFromEnv } from "./crypto/sealer.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 
 const log = pino({ name: "i10-domain-prove" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,

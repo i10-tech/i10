@@ -10,11 +10,15 @@
  * ⚠ IT OPENS NO CONNECTION AND PRINTS NO VALUE. `loadEnv()` only parses, and its
  * error lists each invalid variable by NAME with the reason, which is all a
  * reader needs and nothing that belongs in a log.
+ *
+ * ⚠ IT UNWRAPS FIRST, the way every workload does. A missing or wrong
+ * `KEY_WRAP_KEYS` fails here, before the rollout, not in the new pods.
  */
+import { unlockEnv } from "./crypto/unlock.js"
 import { loadEnv } from "./env.js"
 
 try {
-  loadEnv()
+  loadEnv(await unlockEnv(console))
   console.log("environment valid")
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))

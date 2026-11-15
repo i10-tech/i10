@@ -45,6 +45,7 @@ import { createDb } from "../src/db/client.js"
 import { domains } from "../src/db/core.js"
 import { dkimRecordValue, generateDkimKeypair } from "../src/domains/dkim.js"
 import { sealerFromEnv } from "../src/crypto/sealer.js"
+import { unlockEnv } from "../src/crypto/unlock.js"
 
 const name = process.argv[2]?.trim().toLowerCase()
 const flip = process.argv.includes("--flip")
@@ -72,7 +73,7 @@ if (!name) {
  * up the entire environment.
  */
 const url = process.env.MIGRATE_DATABASE_URL ?? process.env.DATABASE_URL
-const secrets = sealerFromEnv({ SEAL_KEYS: process.env.SEAL_KEYS })
+const secrets = sealerFromEnv({ SEAL_KEYS: (await unlockEnv(console)).SEAL_KEYS })
 const region = process.env.AWS_REGION ?? "eu-central-1"
 
 if (!url) {

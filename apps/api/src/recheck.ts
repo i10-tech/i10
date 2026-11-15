@@ -35,6 +35,7 @@ import { ensureSesTenant } from "./domains/ses-tenant.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
 import { readDelegation } from "./domains/referral.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import {
   captureError,
   captureMessage,
@@ -75,7 +76,7 @@ import { guardedFetch } from "./identity/oidc-fetch.js"
 import { parseAllowList, vetHost } from "./webhooks/egress.js"
 
 const log = pino({ name: "i10-domain-recheck" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,

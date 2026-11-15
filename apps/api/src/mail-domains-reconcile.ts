@@ -20,12 +20,13 @@ import pino from "pino"
 import { sql as query } from "drizzle-orm"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { createStalwartCaller } from "./mail/stalwart.js"
 import { reconcileDomains } from "./mail/stalwart-domains.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 
 const log = pino({ name: "i10-mail-domains-reconcile" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,

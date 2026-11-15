@@ -19,6 +19,7 @@
 import pino from "pino"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 import { runAll } from "./risk/runner.js"
 import { embedderFor } from "./content/embed.js"
@@ -55,7 +56,7 @@ if (process.argv.includes("--check-embedder")) {
   )
 }
 
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,

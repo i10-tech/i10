@@ -11,8 +11,8 @@ export interface Keyring {
 const KID = /^[A-Za-z0-9_-]{1,32}$/
 
 /**
- * ⚠ THE ONE PLACE AN ENVIRONMENT VALUE BECOMES KEY MATERIAL. A key service
- * that wraps these rings would unwrap here, and nowhere else needs to change.
+ * ⚠ THE ONE PLACE AN ENVIRONMENT VALUE BECOMES KEY MATERIAL. A wrapped value
+ * never gets here: `unlockEnv` (unlock.ts) opens it first, at process start.
  */
 export function keyringFromEnv(name: string, value: string): Keyring {
   const keys = new Map<string, Buffer>()

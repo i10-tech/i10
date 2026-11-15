@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { wrapValue } from "../src/crypto/unlock.js"
 
 /** The minimum a process needs before the interesting checks are reachable. */
 const base = {
@@ -47,5 +48,20 @@ describe("check-env", () => {
 
     expect(code).toBe(0)
     expect(output).toContain("environment valid")
+  })
+
+  // A wrong or missing unwrap key must stop the PreSync hook, not the new pods.
+  it("unwraps first, and exits 1 when the wrap key cannot open a value", async () => {
+    const ring = `w1:${Buffer.alloc(32, 1).toString("base64")}`
+    const plain = `s1:${Buffer.alloc(32, 3).toString("base64")}`
+    const wrapped = await wrapValue("SEAL_KEYS", plain, { KEY_WRAP_KEYS: ring })
+
+    const ok = await checkEnv({ ...base, KEY_WRAP_KEYS: ring, SEAL_KEYS: wrapped })
+    expect(ok.code).toBe(0)
+
+    const missing = await checkEnv({ ...base, SEAL_KEYS: wrapped })
+    expect(missing.code).toBe(1)
+    expect(missing.output).toContain("SEAL_KEYS: KEY_WRAP_KEYS is not set")
+    expect(missing.output).not.toContain(wrapped)
   })
 })

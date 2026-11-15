@@ -69,6 +69,14 @@ spec:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }
           env:
+            # Opens the wrapped keys in i10-api (apps/api/src/crypto/unlock.ts). A
+            # hand-made Secret, never in Doppler; optional, so plain keys still start.
+            - name: KEY_WRAP_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-key-wrap
+                  key: KEY_WRAP_KEYS
+                  optional: true
             # ⚠ `i10_api`, NOT THE `i10` OWNER. Row level security does not
             # apply to a table's owner, and the worker reads and writes message
             # bodies for every tenant it serves - so it is the one process where

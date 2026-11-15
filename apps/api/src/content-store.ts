@@ -38,6 +38,7 @@ import { objectStoreFrom } from "./content/object-store.js"
 import { packBodies } from "./content/packs.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 import { fingerprintStored } from "./risk/content.js"
 import { markDirty } from "./risk/runner.js"
@@ -45,7 +46,7 @@ import { riskRuntime } from "./risk/runtime.js"
 import { riskTrigger } from "./risk/trigger.js"
 
 const log = pino({ name: "i10-content-store" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,
