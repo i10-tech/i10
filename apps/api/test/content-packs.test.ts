@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { memoryStore, packKey, type ContentStore } from "../src/content/object-store.js"
 import { BodyCache, restoreContent, restorePacked } from "../src/content/packs.js"
-import { openBody, parseKeyring, sealBody } from "../src/content/seal.js"
+import { openBody, sealBody } from "../src/content/seal.js"
+import { keyringFromEnv } from "../src/crypto/keyring.js"
 
 /**
  * Sealing bodies and reading them back out of packs (#188). The database half
@@ -11,24 +12,9 @@ const key = () =>
   Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64")
 const K1 = key()
 const K2 = key()
-const keys = parseKeyring(`k1:${K1}`)
+const ring = (value: string) => keyringFromEnv("CONTENT_KEYS", value)
+const keys = ring(`k1:${K1}`)
 const ids = { tenantId: crypto.randomUUID(), messageId: crypto.randomUUID() }
-
-describe("parseKeyring", () => {
-  it("takes the first key as current and keeps the rest for reading", () => {
-    const ring = parseKeyring(`k2:${K2}, k1:${K1}`)
-    expect(ring.current).toBe("k2")
-    expect([...ring.keys.keys()]).toEqual(["k2", "k1"])
-  })
-
-  it("refuses short keys, bad ids, duplicates and nothing", () => {
-    expect(() => parseKeyring("k1:c2hvcnQ=")).toThrow("32 bytes")
-    expect(() => parseKeyring(`k 1:${K1}`)).toThrow("kid:base64")
-    expect(() => parseKeyring(`:${K1}`)).toThrow("kid:base64")
-    expect(() => parseKeyring(`k1:${K1},k1:${K2}`)).toThrow("twice")
-    expect(() => parseKeyring(" , ")).toThrow("no key")
-  })
-})
 
 describe("sealBody", () => {
   it("opens to exactly what was sealed, including nulls and every kind of text", () => {
@@ -87,7 +73,7 @@ describe("sealBody", () => {
 
   it("reads bodies wrapped with an older key after a rotation, and says which key is missing", () => {
     const old = sealBody(keys, ids, { html: "before", text: null })
-    const rotated = parseKeyring(`k2:${K2},k1:${K1}`)
+    const rotated = ring(`k2:${K2},k1:${K1}`)
     expect(openBody(rotated, ids, old.record, old.wrappedKey).html).toBe("before")
     const fresh = sealBody(rotated, ids, { html: "after", text: null })
     expect(() => openBody(keys, ids, fresh.record, fresh.wrappedKey)).toThrow(

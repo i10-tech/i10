@@ -33,8 +33,8 @@ next person does not make the same trade.
 
 ⚠ **It carried a `dkim_private_key_ref` too, and that column was never written.**
 It pointed at an external secret store, on the reasoning that the private key
-must not be in the table at any price. Sealing with `WEBHOOK_SECRET_KEY` buys
-the same property with no second system to run, so the pointer was superseded
+must not be in the table at any price. Sealing (now `SEAL_KEYS`) buys the
+same property with no second system to run, so the pointer was superseded
 before anything used it; 0034 dropped it.
 
 With **Easy DKIM**, Amazon generates the keypair and holds the private half.
@@ -46,11 +46,11 @@ With **BYODKIM**, we generate one 2048-bit RSA pair, publish the public half as
 one TXT record, and hand the private half to both SES and Stalwart. One
 signature, both routes, one record.
 
-⚠ **The private key is sealed with `WEBHOOK_SECRET_KEY` before it reaches a
-row.** `core.domains` already said a backup, a replica or a read-only analytics
-grant must never be enough to sign as a customer's domain - sealing is what
-makes that true. It is never returned by the API, for the same reason a webhook
-signing secret is not.
+⚠ **The private key is sealed with `SEAL_KEYS` before it reaches a row**
+(see encryption.md). `core.domains` already said a backup, a replica or a
+read-only analytics grant must never be enough to sign as a customer's
+domain - sealing is what makes that true. It is never returned by the API,
+for the same reason a webhook signing secret is not.
 
 ⚠ **The selector is random, not `i10`.** A fixed selector means one name per
 domain, so rotating is a destructive edit of a live record with a window in

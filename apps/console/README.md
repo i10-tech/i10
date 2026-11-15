@@ -71,7 +71,7 @@ The console is a thin client: it renders, and every byte of data comes from
 ```bash
 # 1. The API, with a database it can reach.
 #    See apps/api - it needs DATABASE_URL, a Redis URL, Clerk keys and,
-#    for the domain routes, AWS credentials and WEBHOOK_SECRET_KEY.
+#    for the domain routes, AWS credentials and SEAL_KEYS.
 bun --filter @i10/api db:migrate
 bun --filter @i10/api dev        # listens on :3001
 

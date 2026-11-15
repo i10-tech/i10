@@ -27,7 +27,7 @@ export type SignatureScheme = "hmac_sha256" | "ed25519"
 
 export const SIGNATURE_SCHEMES = ["hmac_sha256", "ed25519"] as const
 
-/** A key as the signer needs it. `secret` is `whsec_...` or `whsk_...`. */
+/** A key as the signer needs it. `secret` is `i10_whsec_...` (or an older `whsec_...`) or `whsk_...`. */
 export interface SigningKey {
   scheme: SignatureScheme
   secret: string
@@ -135,7 +135,7 @@ export function verifyEd25519(
 
 /** A key that has been replaced and is still signing until `expiresAt`. */
 export interface RetiringSecret {
-  /** Sealed with the webhook secret box, like the current one. */
+  /** Sealed as `core.webhook_endpoints.retiring_secrets` of the endpoint's row. */
   ciphertext: string
   scheme: SignatureScheme
   expiresAt: string

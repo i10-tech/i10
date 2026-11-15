@@ -3,7 +3,6 @@ import { describe, expect, it } from "bun:test"
 import {
   decodeSecret,
   generateSecret,
-  secretBox,
   signPayload,
   SIGNATURE_TOLERANCE_SECONDS,
   timestampFor,
@@ -161,8 +160,17 @@ describe("signing", () => {
 describe("the generated secret", () => {
   // ⚠ Greppable by a secret scanner and obvious to a human in a paste; 32
   // anonymous base64 characters are neither.
-  it("is prefixed", () => {
-    expect(generateSecret().startsWith("whsec_")).toBe(true)
+  it("is prefixed as ours", () => {
+    expect(generateSecret().startsWith("i10_whsec_")).toBe(true)
+  })
+
+  // ⚠ SECRETS ISSUED BEFORE THE `i10_` PREFIX ARE STILL OUT THERE (#427).
+  it("signs the same with or without the i10_ prefix, so an older whsec_ still verifies", () => {
+    const issued = generateSecret()
+    const older = issued.slice("i10_".length)
+    const signature = signPayload(issued, ID, BODY, AT)
+    expect(verifySignature(older, ID, BODY, signature, timestampFor(AT), AT)).toBe(true)
+    expect(decodeSecret(issued)).toEqual(decodeSecret(older))
   })
 
   /**
@@ -181,50 +189,5 @@ describe("the generated secret", () => {
   it("does not repeat", () => {
     const many = new Set(Array.from({ length: 100 }, generateSecret))
     expect(many.size).toBe(100)
-  })
-})
-
-describe("the secret at rest", () => {
-  const key = "a".repeat(64)
-  const box = secretBox(key)
-
-  it("round-trips", () => {
-    const secret = generateSecret()
-    expect(box.open(box.seal(secret))).toBe(secret)
-  })
-
-  // ⚠ A DATABASE DUMP MUST NOT CARRY THE SECRET. If the ciphertext contained
-  // it, the whole point of encrypting at rest would be gone.
-  it("does not leak the plaintext into the ciphertext", () => {
-    const secret = generateSecret()
-    expect(box.seal(secret)).not.toContain(secret.slice(6))
-  })
-
-  it("is not deterministic, so two identical secrets do not look identical", () => {
-    expect(box.seal("same")).not.toBe(box.seal("same"))
-  })
-
-  // ⚠ AUTHENTICATED, WHICH IS WHY GCM RATHER THAN CBC. A row edited by anyone
-  // with write access would otherwise decrypt to a different secret, and the
-  // only symptom would be every signature failing at the customer's end.
-  it("refuses a tampered ciphertext", () => {
-    const sealed = box.seal("original")
-    const [v, iv, tag, ct] = sealed.split(".")
-    const flipped = `${v}.${iv}.${tag}.${ct!.slice(0, -2)}AA`
-    expect(() => box.open(flipped)).toThrow()
-  })
-
-  it("refuses another key's ciphertext", () => {
-    const other = secretBox("b".repeat(64))
-    expect(() => other.open(box.seal("secret"))).toThrow()
-  })
-
-  it("refuses a key of the wrong size rather than padding it", () => {
-    expect(() => secretBox("tooshort")).toThrow(/32 bytes/)
-  })
-
-  it("accepts base64 as well as hex", () => {
-    const b64 = Buffer.alloc(32, 7).toString("base64")
-    expect(() => secretBox(b64)).not.toThrow()
   })
 })

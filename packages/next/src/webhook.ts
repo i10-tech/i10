@@ -8,9 +8,10 @@ export interface WebhookEvent {
 
 export interface WebhookHandlerOptions {
   /**
-   * What the endpoint signs with: the `whsec_` secret shown once when an HMAC
-   * endpoint is created or rotated, or the `whpk_` public key of an Ed25519
-   * endpoint (shown on every endpoint response).
+   * What the endpoint signs with: the `i10_whsec_` secret shown once when an
+   * HMAC endpoint is created or rotated (older endpoints show `whsec_`; both
+   * work), or the `whpk_` public key of an Ed25519 endpoint (shown on every
+   * endpoint response).
    */
   secret: string
   onEvent: (event: WebhookEvent) => Promise<void> | void
@@ -56,10 +57,12 @@ export function verifySignature(
     return verifyEd25519(rawBody, id, signature, timestamp, secret)
   }
 
-  // The secret is `whsec_` followed by base64, and the DECODED BYTES are what
-  // key the HMAC. Keying with the printable string is the classic mistake here
-  // and produces a digest that disagrees with every conforming implementation.
-  const raw = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret
+  // The secret is `i10_whsec_` (or, issued before it, `whsec_`) followed by
+  // base64, and the DECODED BYTES are what key the HMAC. Keying with the
+  // printable string is the classic mistake here and produces a digest that
+  // disagrees with every conforming implementation.
+  const prefix = ["i10_whsec_", "whsec_"].find((p) => secret.startsWith(p)) ?? ""
+  const raw = secret.slice(prefix.length)
   const key = Buffer.from(raw, "base64")
   if (key.length === 0) return false
 

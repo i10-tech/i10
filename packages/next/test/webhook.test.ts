@@ -89,6 +89,15 @@ describe("verifySignature", () => {
     expect(verifySignature(body, ID, sign(body, ID, ts), ts, SECRET)).toBe(true)
   })
 
+  // ⚠ SECRETS ISSUED NOW START `i10_whsec_`; OLDER ONES ARE PLAIN `whsec_`.
+  // The payload behind either prefix is the same, and both must verify.
+  it("accepts the secret with the i10_ prefix and without it", () => {
+    const ts = now()
+    const signature = sign(body, ID, ts)
+    expect(verifySignature(body, ID, signature, ts, `i10_${SECRET}`)).toBe(true)
+    expect(verifySignature(body, ID, signature, ts, SECRET)).toBe(true)
+  })
+
   it("rejects a signature made with a different secret", () => {
     const ts = now()
     const other = `whsec_${Buffer.from("a-different-key-24bytes!").toString("base64")}`

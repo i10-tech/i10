@@ -29,7 +29,7 @@ import {
   type RetiringSecret,
   type SignatureScheme,
 } from "./keys.js"
-import type { SecretBox } from "./signing.js"
+import type { Sealer } from "../crypto/sealer.js"
 import type { EgressVerdict } from "./egress.js"
 
 /**
@@ -337,7 +337,7 @@ export async function tryTransformation(
 
 export function webhookEndpointStore(
   db: Database,
-  secrets: SecretBox,
+  secrets: Sealer,
   opts: WebhookEndpointStoreOptions = {},
 ): WebhookEndpointStore {
   /**
@@ -368,16 +368,25 @@ export function webhookEndpointStore(
     const options = checkOptions(input)
     if (!options.ok) return { status: "rejected" as const, reason: options.reason }
     const key = generateKey("hmac_sha256")
+    const id = Bun.randomUUIDv7()
     return withTenant(db, tenantId, async (tx) => {
       const [row] = await tx
         .insert(webhookEndpoints)
         .values({
+          id,
           tenantId,
           kind: "polling",
           url: null,
           description: input.description ?? null,
           events: input.events as never,
-          secretCiphertext: secrets.seal(key.secret),
+          secretCiphertext: secrets.seal(
+            {
+              purpose: "core.webhook_endpoints.secret_ciphertext",
+              tenantId,
+              rowId: id,
+            },
+            key.secret,
+          ),
           filterDomains: options.filterDomains ?? null,
           filterTags: options.filterTags ?? null,
         })
@@ -418,23 +427,39 @@ export function webhookEndpointStore(
     const options = checkOptions(input)
     if (!options.ok) return { status: "rejected" as const, reason: options.reason }
     const key = generateKey(input.signature_scheme ?? "hmac_sha256")
+    const id = Bun.randomUUIDv7()
     return withTenant(db, tenantId, async (tx) => {
       const [row] = await tx
         .insert(webhookEndpoints)
         .values({
+          id,
           tenantId,
           kind: "sqs",
           url: input.url!,
           description: input.description ?? null,
           events: input.events as never,
-          secretCiphertext: secrets.seal(key.secret),
+          secretCiphertext: secrets.seal(
+            {
+              purpose: "core.webhook_endpoints.secret_ciphertext",
+              tenantId,
+              rowId: id,
+            },
+            key.secret,
+          ),
           signatureScheme: key.scheme,
           publicKey: key.publicKey,
           rateLimit: input.rate_limit ?? null,
           filterDomains: options.filterDomains ?? null,
           filterTags: options.filterTags ?? null,
           awsAccessKeyId: creds.credentials.accessKeyId,
-          awsSecretCiphertext: secrets.seal(creds.credentials.secretAccessKey),
+          awsSecretCiphertext: secrets.seal(
+            {
+              purpose: "core.webhook_endpoints.aws_secret_ciphertext",
+              tenantId,
+              rowId: id,
+            },
+            creds.credentials.secretAccessKey,
+          ),
         })
         .returning(COLUMNS)
       return {
@@ -492,16 +517,25 @@ export function webhookEndpointStore(
       }
 
       const key = generateKey(input.signature_scheme ?? "hmac_sha256")
+      const id = Bun.randomUUIDv7()
 
       return withTenant(db, tenantId, async (tx) => {
         const [row] = await tx
           .insert(webhookEndpoints)
           .values({
+            id,
             tenantId,
             url: input.url,
             description: input.description ?? null,
             events: input.events as never,
-            secretCiphertext: secrets.seal(key.secret),
+            secretCiphertext: secrets.seal(
+              {
+                purpose: "core.webhook_endpoints.secret_ciphertext",
+                tenantId,
+                rowId: id,
+              },
+              key.secret,
+            ),
             signatureScheme: key.scheme,
             publicKey: key.publicKey,
             rateLimit: input.rate_limit ?? null,
@@ -564,7 +598,26 @@ export function webhookEndpointStore(
 
         const now = new Date()
         const plan = planRotation(
-          { ciphertext: current.secretCiphertext, scheme: current.signatureScheme },
+          {
+            // ⚠ RE-SEALED UNDER THE RETIRING PURPOSE, so it cannot be copied
+            // back into `secret_ciphertext` and become current again.
+            ciphertext: secrets.seal(
+              {
+                purpose: "core.webhook_endpoints.retiring_secrets",
+                tenantId,
+                rowId: id,
+              },
+              secrets.open(
+                {
+                  purpose: "core.webhook_endpoints.secret_ciphertext",
+                  tenantId,
+                  rowId: id,
+                },
+                current.secretCiphertext,
+              ),
+            ),
+            scheme: current.signatureScheme,
+          },
           current.retiringSecrets,
           previous,
           now,
@@ -575,7 +628,14 @@ export function webhookEndpointStore(
         const [row] = await tx
           .update(webhookEndpoints)
           .set({
-            secretCiphertext: secrets.seal(key.secret),
+            secretCiphertext: secrets.seal(
+              {
+                purpose: "core.webhook_endpoints.secret_ciphertext",
+                tenantId,
+                rowId: id,
+              },
+              key.secret,
+            ),
             signatureScheme: key.scheme,
             publicKey: key.publicKey,
             retiringSecrets: plan.retiring,
@@ -722,7 +782,14 @@ export function webhookEndpointStore(
             const creds = checkCredentials(patch.aws_credentials)
             if (!creds.ok) return { status: "rejected" as const, reason: creds.reason }
             set.awsAccessKeyId = creds.credentials.accessKeyId
-            set.awsSecretCiphertext = secrets.seal(creds.credentials.secretAccessKey)
+            set.awsSecretCiphertext = secrets.seal(
+              {
+                purpose: "core.webhook_endpoints.aws_secret_ciphertext",
+                tenantId,
+                rowId: id,
+              },
+              creds.credentials.secretAccessKey,
+            )
           }
         }
         const [row] = await tx

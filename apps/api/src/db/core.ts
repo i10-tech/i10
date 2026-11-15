@@ -494,7 +494,7 @@ export const domains = core.table(
     sesTenantLayout: integer("ses_tenant_layout"),
 
     /**
-     * The DKIM private key, sealed with `WEBHOOK_SECRET_KEY`.
+     * The DKIM private key, sealed with `SEAL_KEYS` (`crypto/sealer.ts`).
      *
      * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. A database
      * backup, a replica or a read-only analytics grant must never be enough to
@@ -3902,9 +3902,8 @@ export const onboarding = core.table("onboarding", {
 /**
  * A customer's credential for their own DNS provider.
  *
- * ⚠ THE SECRET IS SEALED WITH THE SAME KEY AND THE SAME ENVELOPE AS A WEBHOOK
- * SIGNING SECRET (`webhook_endpoints.secret_ciphertext`), and it is never
- * returned by any route. A DNS API token is the most dangerous credential this
+ * ⚠ THE SECRET IS SEALED THE SAME WAY AS A WEBHOOK SIGNING SECRET
+ * (`crypto/sealer.ts`), and it is never returned by any route. A DNS API token is the most dangerous credential this
  * product stores: it can rewrite a customer's MX records and take delivery of
  * their mail. It is written once, read only by the record writer, and the
  * console sees a label and a timestamp.

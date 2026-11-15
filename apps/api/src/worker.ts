@@ -16,19 +16,19 @@ import { postgresMetering } from "./metering/service.js"
 import { resilient } from "./send/metering.js"
 import { SmtpTransport } from "@upyo/smtp"
 import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
-import { feedbackTokens } from "./send/feedback-id.js"
+import { feedbackIdKey, feedbackTokens } from "./send/feedback-id.js"
 import { sesTransport } from "./send/ses.js"
 import { systemTenancy, withSystemTenant } from "./send/system-tenant.js"
 import { sesIdentity } from "./domains/identity.js"
 import { configurationSetsFor } from "./send/configuration-sets.js"
 import { domainSendingLookup } from "./send/signing-key.js"
+import { sealerFromEnv } from "./crypto/sealer.js"
 import { stalwartTransport } from "./send/stalwart.js"
 import { relayConfig } from "./send/relay.js"
 import type { Transport } from "./send/transport.js"
 import { startWebhookEngine } from "./webhooks/engine.js"
 import { transformer } from "./webhooks/transform.js"
 import { parseAllowList } from "./webhooks/egress.js"
-import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
 import { objectStoreFrom } from "./content/object-store.js"
 import { handleBatch } from "./worker/handle-batch.js"
@@ -130,18 +130,21 @@ queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailabl
 
 const sesClient = new SESv2Client({ region: env.AWS_REGION })
 
-// ⚠ ONE DERIVATION FOR BOTH ROUTES, KEYED WITH THE SAME SECRET THAT SEALS THE
-// DKIM KEYS. Without it mail still sends, only without a workspace token in its
-// Feedback-ID - see send/feedback-id.ts. A warning rather than a refusal, since
-// the loss is Gmail complaint detail, not mail.
-const feedbackToken = env.WEBHOOK_SECRET_KEY
-  ? feedbackTokens(env.WEBHOOK_SECRET_KEY)
+// ⚠ ONE DERIVATION FOR BOTH ROUTES. Without its key mail still sends, only
+// without a workspace token in its Feedback-ID - see send/feedback-id.ts. A
+// warning rather than a refusal, since the loss is Gmail complaint detail, not
+// mail; env.ts requires the key in production.
+const feedbackToken = env.FEEDBACK_ID_KEY
+  ? feedbackTokens(feedbackIdKey(env.FEEDBACK_ID_KEY))
   : undefined
 if (!feedbackToken) {
   log.warn(
-    "WEBHOOK_SECRET_KEY unset - mail sends without a per-workspace Feedback-ID, so Gmail complaints cannot be attributed to a workspace",
+    "FEEDBACK_ID_KEY unset - mail sends without a per-workspace Feedback-ID, so Gmail complaints cannot be attributed to a workspace",
   )
 }
+
+/** Null without `SEAL_KEYS`: no DKIM key or webhook secret can be opened. */
+const secrets = sealerFromEnv(env)
 
 /*
  * ⚠ OUR OWN MAIL NAMES ITS TENANT HERE, NOT IN THE CLAIM (#206). Customer mail
@@ -188,18 +191,17 @@ let relayPool: SmtpTransport | null = null
  * `deferred` keeps the message in the queue with its attempt counted, so
  * nothing is lost and the backlog is what raises the alarm.
  *
- * ⚠ AND IT NEEDS `WEBHOOK_SECRET_KEY` AS MUCH AS IT NEEDS AN SMTP HOST. That is
- * what seals the DKIM private keys; without it they cannot be opened, and a
- * message signed with nothing is one that fails DMARC at the recipient.
+ * ⚠ AND IT NEEDS `SEAL_KEYS` AS MUCH AS IT NEEDS AN SMTP HOST. That is what
+ * seals the DKIM private keys; without it they cannot be opened, and a message
+ * signed with nothing is one that fails DMARC at the recipient.
  */
 function directTransport(): Transport {
   const host = env.STALWART_RELAY_HOST
 
-  if (!host || !env.WEBHOOK_SECRET_KEY) {
-    const missing = [
-      !host && "STALWART_RELAY_HOST",
-      !env.WEBHOOK_SECRET_KEY && "WEBHOOK_SECRET_KEY",
-    ].filter(Boolean)
+  if (!host || !secrets) {
+    const missing = [!host && "STALWART_RELAY_HOST", !secrets && "SEAL_KEYS"].filter(
+      Boolean,
+    )
 
     log.warn({ missing }, "DIRECT ROUTE UNAVAILABLE - messages routed direct will wait")
     return {
@@ -237,10 +239,7 @@ function directTransport(): Transport {
     // label is per domain (`core.domains.mail_from_subdomain`, which SES uses
     // too). The transport builds the VERP envelope from it; see
     // docs/decisions/mail-routing.md, "One return path".
-    domainSending: domainSendingLookup({
-      db,
-      secrets: secretBox(env.WEBHOOK_SECRET_KEY),
-    }),
+    domainSending: domainSendingLookup({ db, secrets }),
   })
 }
 
@@ -366,20 +365,20 @@ function startWorker(cls: SendClass) {
  * shutdown, a Redis reconnect or a database pool problem has to be got right.
  *
  * ⚠ AND IT IS ABSENT RATHER THAN BROKEN WHEN THERE IS NO KEY. Without
- * `WEBHOOK_SECRET_KEY` the stored secrets cannot be decrypted, so there is
- * nothing to sign with - starting a worker that would fail every delivery
- * would fill the failure counters and disable every customer's endpoint.
+ * `SEAL_KEYS` the stored secrets cannot be decrypted, so there is nothing to
+ * sign with - starting a worker that would fail every delivery would fill the
+ * failure counters and disable every customer's endpoint.
  */
 function startWebhookWorker() {
-  if (!env.WEBHOOK_SECRET_KEY) {
-    log.warn({}, "WEBHOOK DELIVERY DISABLED - no WEBHOOK_SECRET_KEY")
+  if (!secrets) {
+    log.warn({}, "WEBHOOK DELIVERY DISABLED - no SEAL_KEYS")
     return null
   }
 
   const engine = startWebhookEngine({
     db,
     redis: queueRedis,
-    secrets: secretBox(env.WEBHOOK_SECRET_KEY),
+    secrets,
     log,
     name: `${workerId}:webhooks`,
     concurrency: env.WEBHOOK_CONCURRENCY,

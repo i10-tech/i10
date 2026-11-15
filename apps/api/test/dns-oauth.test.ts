@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { createHash } from "node:crypto"
+import { keyringFromEnv } from "../src/crypto/keyring.js"
+import { tokenKeys } from "../src/crypto/token-keys.js"
 import { dnsOAuth, OAuthError } from "../src/dns/oauth.js"
 
 /**
@@ -20,13 +22,16 @@ import { dnsOAuth, OAuthError } from "../src/dns/oauth.js"
  */
 
 const NOW = 1_800_000_000_000
-const SECRET = "state-signing-key-for-tests-only"
+const key = (kid: string, fill: number) =>
+  `${kid}:${Buffer.alloc(32, fill).toString("base64")}`
+const ring = (value: string) => tokenKeys(keyringFromEnv("TOKEN_KEYS", value))
+const SECRET = ring(key("k1", 1))
 
 const oauth = (over: Partial<Parameters<typeof dnsOAuth>[0]> = {}) =>
   dnsOAuth({
     apps: { cloudflare: { clientId: "cid-123", clientSecret: "csec-456" } },
     redirectBase: "https://dash.i10.tech/dns/callback",
-    stateSecret: SECRET,
+    tokens: SECRET,
     now: () => NOW,
     ...over,
   })
@@ -171,8 +176,17 @@ describe("the PKCE verifier", () => {
   /** ⚠ DERIVED FROM THE SIGNING SECRET, so holding the state is not enough. */
   it("cannot be recomputed without the signing secret", () => {
     const { state } = start()
-    const impostor = oauth({ stateSecret: "a-different-key-entirely" })
+    const impostor = oauth({ tokens: ring(key("k1", 2)) })
     expect(() => impostor.verifyState(state)).toThrow(OAuthError)
+  })
+
+  it("survives a key rotation between the start and the callback", () => {
+    const { url, state } = start()
+    const rotated = oauth({ tokens: ring(`${key("k2", 2)},${key("k1", 1)}`) })
+    const { verifier } = rotated.verifyState(state)
+    expect(new URL(url).searchParams.get("code_challenge")).toBe(
+      createHash("sha256").update(verifier).digest("base64url"),
+    )
   })
 
   it("is a valid RFC 7636 verifier", () => {

@@ -19,12 +19,12 @@ import { createHmac } from "node:crypto"
  * migration. Mapping a Postmaster row back to a workspace means computing the
  * token for each tenant and matching.
  *
- * ⚠ KEYED WITH `WEBHOOK_SECRET_KEY`, AND THAT KEY IS EFFECTIVELY PERMANENT. It
- * seals every webhook secret and DKIM private key, and `env.ts` already says
- * losing it is unrecoverable, so it is never rotated. Rotating it would still
- * orphan every Postmaster row recorded under the old tokens; if a rotation
- * scheme is ever built, this derivation has to be carried across it. The label
- * below keeps the HMAC input distinct from every other use of the key.
+ * ⚠ KEYED WITH `FEEDBACK_ID_KEY`, A KEY OF ITS OWN THAT IS NEVER ROTATED. A
+ * new key gives every workspace a new token and orphans every Postmaster row
+ * recorded under the old ones, so this cannot use a rotating keyring. It is
+ * low sensitivity: it only maps a tenant id to a token, and a leak lets
+ * somebody link a header to a tenant id they already know, nothing more. The
+ * label below keeps the HMAC input distinct from any other use of a key.
  *
  * ⚠ 16 HEX CHARACTERS, 64 BITS. Enough that two workspaces colliding is not a
  * real event, short enough to read in a dashboard, and inside the letters,
@@ -37,12 +37,18 @@ export type FeedbackTokens = (tenantId: string) => string
 
 const LABEL = "i10/feedback-id/v1"
 
-export function feedbackTokens(secret: string): FeedbackTokens {
+/** `FEEDBACK_ID_KEY`: 32 bytes, hex or base64. Throws on anything else. */
+export function feedbackIdKey(value: string): Buffer {
+  const key = /^[0-9a-fA-F]{64}$/.test(value)
+    ? Buffer.from(value, "hex")
+    : Buffer.from(value, "base64")
+  if (key.byteLength !== 32) throw new Error("must be 32 bytes, hex or base64")
+  return key
+}
+
+export function feedbackTokens(key: Buffer): FeedbackTokens {
   return (tenantId) =>
-    createHmac("sha256", secret)
-      .update(`${LABEL}:${tenantId}`)
-      .digest("hex")
-      .slice(0, 16)
+    createHmac("sha256", key).update(`${LABEL}:${tenantId}`).digest("hex").slice(0, 16)
 }
 
 /**

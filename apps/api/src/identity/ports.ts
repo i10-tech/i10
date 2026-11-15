@@ -244,7 +244,7 @@ export interface IdentityStore {
    * defines (#338: the OIDC client secret, the private_key_jwt keys). `{}` when
    * none are set, null when there is no such connection.
    *
-   * ⚠ THROWS WITHOUT `WEBHOOK_SECRET_KEY`: there is nothing to open them with,
+   * ⚠ THROWS WITHOUT `SEAL_KEYS`: there is nothing to open them with,
    * and an empty answer would read as "no secret set".
    */
   connectionSecrets(

@@ -1049,6 +1049,12 @@ missing id as a 400 rather than a 401.
 consistently, but they are not what the generator produces now. Regenerate any
 that exist in a dev database rather than leaving the two forms side by side.
 
+⚠ **Since #427 new secrets start `i10_whsec_`**, so a secret scanner can tell
+ours from other vendors' `whsec_` secrets. The payload is still base64. A
+generic Standard Webhooks library expects `whsec_`, so remove the leading
+`i10_` before you give it the secret. `@i10/next` and our own verifier accept
+both forms, and older `whsec_` secrets keep working.
+
 ### Take the spec - Standard Webhooks
 
 Verified against the spec, 2026-09-04.

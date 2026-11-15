@@ -16,7 +16,7 @@ import {
   workspaceSettings,
 } from "../db/identity.js"
 import { NO_TENANT } from "../middleware/tenant.js"
-import type { SecretBox } from "../webhooks/signing.js"
+import type { Sealer } from "../crypto/sealer.js"
 import {
   defaultMaxSessionSeconds,
   type AttemptPurpose,
@@ -164,7 +164,7 @@ async function moveSubject(
   }
 }
 
-export function identityStore(db: Database, secrets: SecretBox | null): IdentityStore {
+export function identityStore(db: Database, secrets: Sealer | null): IdentityStore {
   const toAttempt = (r: typeof loginAttempts.$inferSelect): AttemptRow => ({
     id: r.id,
     tenantId: r.tenantId,
@@ -175,7 +175,17 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     loginHint: r.loginHint,
     returnTo: r.returnTo,
     nonce: r.nonce,
-    pkceVerifier: r.pkceVerifier && secrets ? secrets.open(r.pkceVerifier) : null,
+    pkceVerifier:
+      r.pkceVerifier && secrets
+        ? secrets.open(
+            {
+              purpose: "identity.login_attempts.pkce_verifier",
+              tenantId: r.tenantId,
+              rowId: r.id,
+            },
+            r.pkceVerifier,
+          )
+        : null,
     requestId: r.requestId,
     expiresAt: r.expiresAt,
     consumedAt: r.consumedAt,
@@ -404,7 +414,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     },
 
     async connectionSecrets(tenantId, id) {
-      if (!secrets) throw new Error("connection secrets need WEBHOOK_SECRET_KEY")
+      if (!secrets) throw new Error("connection secrets need SEAL_KEYS")
       const [row] = await withTenant(db, tenantId, (tx) =>
         tx
           .select({ sealed: connections.secrets })
@@ -414,7 +424,12 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
       )
       if (!row) return null
       if (!row.sealed) return {}
-      const opened: unknown = JSON.parse(secrets.open(row.sealed))
+      const opened: unknown = JSON.parse(
+        secrets.open(
+          { purpose: "identity.connections.secrets", tenantId, rowId: id },
+          row.sealed,
+        ),
+      )
       return opened && typeof opened === "object" && !Array.isArray(opened)
         ? (opened as Record<string, unknown>)
         : {}
@@ -422,7 +437,12 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
 
     async setConnectionSecrets(tenantId, id, edit) {
       const box = secrets
-      if (!box) throw new Error("connection secrets need WEBHOOK_SECRET_KEY")
+      if (!box) throw new Error("connection secrets need SEAL_KEYS")
+      const context = {
+        purpose: "identity.connections.secrets",
+        tenantId,
+        rowId: id,
+      } as const
       return withTenant(db, tenantId, async (tx) => {
         const [current] = await tx
           .select({ sealed: connections.secrets, config: connections.config })
@@ -432,7 +452,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
           .limit(1)
         if (!current) return null
         const opened: unknown = current.sealed
-          ? JSON.parse(box.open(current.sealed))
+          ? JSON.parse(box.open(context, current.sealed))
           : {}
         const next = edit({
           secrets:
@@ -444,7 +464,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
         const [row] = await tx
           .update(connections)
           .set({
-            secrets: box.seal(JSON.stringify(next.secrets)),
+            secrets: box.seal(context, JSON.stringify(next.secrets)),
             config: next.config,
             updatedAt: new Date(),
           })
@@ -650,7 +670,9 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
     // ── attempts ──
     async createAttempt(input) {
       if (input.pkceVerifier && !secrets)
-        throw new Error("a PKCE verifier needs WEBHOOK_SECRET_KEY to be kept sealed")
+        throw new Error("a PKCE verifier needs SEAL_KEYS to be kept sealed")
+      // ⚠ MADE HERE, NOT BY THE DATABASE: the verifier is sealed to it.
+      const id = Bun.randomUUIDv7()
       const [row] = await withTenant(db, input.tenantId, async (tx) => {
         /*
          * ⚠ PRUNED AS THEY ARE MADE. Starting a sign-in is public, so this
@@ -671,6 +693,7 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
         return tx
           .insert(loginAttempts)
           .values({
+            id,
             tenantId: input.tenantId,
             connectionId: input.connectionId,
             purpose: input.purpose,
@@ -678,7 +701,16 @@ export function identityStore(db: Database, secrets: SecretBox | null): Identity
             bindingHash: input.bindingHash,
             nonce: input.nonce ?? null,
             pkceVerifier:
-              input.pkceVerifier && secrets ? secrets.seal(input.pkceVerifier) : null,
+              input.pkceVerifier && secrets
+                ? secrets.seal(
+                    {
+                      purpose: "identity.login_attempts.pkce_verifier",
+                      tenantId: input.tenantId,
+                      rowId: id,
+                    },
+                    input.pkceVerifier,
+                  )
+                : null,
             requestId: input.requestId ?? null,
             returnTo: input.returnTo ?? null,
             stepUpSessionId: input.stepUpSessionId ?? null,

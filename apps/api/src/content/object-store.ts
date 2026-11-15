@@ -1,6 +1,7 @@
 import { S3Client } from "bun"
 import type { Env } from "../env.js"
-import { parseKeyring, type Body, type Keyring } from "./seal.js"
+import { keyringFromEnv, type Keyring } from "../crypto/keyring.js"
+import type { Body } from "./seal.js"
 
 /**
  * Where message content lives once it leaves Postgres (#136, #168, #188): the
@@ -106,7 +107,9 @@ export function objectStoreFrom(
       region: "auto",
     }),
   )
-  store.keys = env.CONTENT_KEYS ? parseKeyring(env.CONTENT_KEYS) : null
+  store.keys = env.CONTENT_KEYS
+    ? keyringFromEnv("CONTENT_KEYS", env.CONTENT_KEYS)
+    : null
   return store
 }
 

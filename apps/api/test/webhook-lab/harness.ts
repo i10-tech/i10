@@ -9,7 +9,7 @@ import { startWebhookEngine, type WebhookEngine } from "../../src/webhooks/engin
 import type { MailEventType, WebhookEventType } from "../../src/webhooks/events.js"
 import { generateKey } from "../../src/webhooks/keys.js"
 import type { PolicyRules, RetryRules } from "../../src/webhooks/schedule.js"
-import { secretBox } from "../../src/webhooks/signing.js"
+import { testSealer } from "../support/sealer.js"
 import { webhookEndpointStore } from "../../src/webhooks/store.js"
 import { transformer } from "../../src/webhooks/transform.js"
 import { parseQueueUrl, type QueueAddress } from "../../src/webhooks/sqs.js"
@@ -223,7 +223,7 @@ export async function startLab(): Promise<Lab> {
   // ⚠ A NAMESPACE OF ITS OWN PER RUN, so the lab never sees, or flushes, a
   // real queue's keys - and two runs never see each other's.
   const namespace = `i10:webhooks-lab:${crypto.randomUUID().slice(0, 8)}`
-  const secrets = secretBox("ab".repeat(32))
+  const secrets = testSealer()
   const receiver = startReceiver()
   const tenants: string[] = []
   const log = { info: () => {}, warn: () => {}, error: () => {} }
@@ -292,25 +292,32 @@ export async function startLab(): Promise<Lab> {
       }
       const key = generateKey("hmac_sha256")
       const url = `${SQS_URL}/000000000000/${queue}`
-      const [row] = await owner`
+      const id = Bun.randomUUIDv7()
+      const row = { tenantId, rowId: id }
+      await owner`
         insert into core.webhook_endpoints
-          (tenant_id, kind, url, secret_ciphertext, events, aws_access_key_id, aws_secret_ciphertext)
-        values (${tenantId}, 'sqs', ${url}, ${secrets.seal(key.secret)},
+          (id, tenant_id, kind, url, secret_ciphertext, events, aws_access_key_id, aws_secret_ciphertext)
+        values (${id}, ${tenantId}, 'sqs', ${url},
+                ${secrets.seal({ ...row, purpose: "core.webhook_endpoints.secret_ciphertext" }, key.secret)},
                 ${opts.events ?? ALL_EVENTS}::core.webhook_event_type[],
-                'AKIALABLABLABLAB0000', ${secrets.seal("lab-secret-access-key-0000")})
-        returning id`
-      return { id: row!.id as string, secret: key.secret, url }
+                'AKIALABLABLABLAB0000',
+                ${secrets.seal({ ...row, purpose: "core.webhook_endpoints.aws_secret_ciphertext" }, "lab-secret-access-key-0000")})`
+      return { id, secret: key.secret, url }
     },
 
     async endpoint(tenantId, path, opts = {}) {
       const key = generateKey("hmac_sha256")
       const url = `http://${opts.host ?? "lab.test"}:${receiver.port}/${path.replace(/^\//, "")}`
-      const [row] = await owner`
-        insert into core.webhook_endpoints (tenant_id, url, secret_ciphertext, events, rate_limit)
-        values (${tenantId}, ${url}, ${secrets.seal(key.secret)},
-                ${opts.events ?? ALL_EVENTS}::core.webhook_event_type[], ${opts.rateLimit ?? null})
-        returning id`
-      return { id: row!.id as string, secret: key.secret, url }
+      const id = Bun.randomUUIDv7()
+      const sealed = secrets.seal(
+        { purpose: "core.webhook_endpoints.secret_ciphertext", tenantId, rowId: id },
+        key.secret,
+      )
+      await owner`
+        insert into core.webhook_endpoints (id, tenant_id, url, secret_ciphertext, events, rate_limit)
+        values (${id}, ${tenantId}, ${url}, ${sealed},
+                ${opts.events ?? ALL_EVENTS}::core.webhook_event_type[], ${opts.rateLimit ?? null})`
+      return { id, secret: key.secret, url }
     },
 
     async emit(tenantId, data, opts = {}) {

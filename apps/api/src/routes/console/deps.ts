@@ -320,11 +320,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
   /**
    * Customers' credentials for their own DNS, and the machinery that uses them.
    *
-   * ⚠ ALL THREE ARE OPTIONAL TOGETHER, BECAUSE THEY DEPEND ON THE SEALING KEY.
-   * Without `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a credential that
-   * can rewrite a customer's MX records, so the routes answer 501 rather than
-   * storing one in the clear - the same rule `core.domains` and the webhook
-   * secrets already follow.
+   * ⚠ ALL THREE ARE OPTIONAL TOGETHER, BECAUSE THEY DEPEND ON THE SEALING AND
+   * TOKEN KEYS. Without `SEAL_KEYS` there is nowhere safe to keep a credential
+   * that can rewrite a customer's MX records, and without `TOKEN_KEYS` nothing
+   * signs the OAuth state, so the routes answer 501 - the same rule
+   * `core.domains` and the webhook secrets already follow.
    */
   dnsConnections?: DnsConnectionStore
   dnsOAuth?: DnsOAuth

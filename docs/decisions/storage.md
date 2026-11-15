@@ -226,7 +226,8 @@ all four or none. Unset, attachments stay inline and the product works as
 before. Bodies also need `CONTENT_KEYS` (in `prod_api` and `dev`); unset,
 bodies stay in Postgres. That is allowed in development only: with
 `NODE_ENV=production` and the content store set, a missing `CONTENT_KEYS`
-fails `loadEnv()`, so the check-env hook stops the deploy.
+fails `loadEnv()`, so the check-env hook stops the deploy. The other keys
+(`SEAL_KEYS`, `TOKEN_KEYS`, `FEEDBACK_ID_KEY`) are in encryption.md.
 
 ## Not yet
 

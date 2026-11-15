@@ -9,7 +9,7 @@ import { fixedWindow } from "../src/identity/rate-limit.js"
 import { raiseConnectionCredentialEpochs } from "../src/projection/connection-epoch.js"
 import { raiseCredentialEpoch } from "../src/projection/credential-epoch.js"
 import { createOktaEventHooks } from "../src/routes/okta-event-hooks.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 
 /**
  * An Okta event hook against a real database as `i10_api`: the connection is
@@ -33,7 +33,7 @@ const ada = `user_ada_${suffix}`
 const bob = `user_bob_${suffix}`
 const rivalAda = `user_rival_ada_${suffix}`
 const ghost = `user_ghost_${suffix}`
-const box = secretBox("ab".repeat(32))
+const box = testSealer()
 
 suite("Okta event hook against Postgres", () => {
   beforeAll(async () => {

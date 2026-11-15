@@ -5,7 +5,7 @@ import type { Database } from "../src/db/client.js"
 import { identityStore } from "../src/identity/store.js"
 import { mailboxDirectory, managedMailLane } from "../src/mailboxes/store.js"
 import { projectClerkUser } from "../src/projection/writer.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 
 /**
  * What authd is told about managed accounts (#344), against a real database as
@@ -26,7 +26,7 @@ const rival = crypto.randomUUID()
 const suffix = acme.slice(0, 8)
 const ada = `user_ada_${suffix}`
 const bob = `user_bob_${suffix}`
-const box = secretBox("ab".repeat(32))
+const box = testSealer()
 
 suite("authd.managed_accounts", () => {
   beforeAll(async () => {

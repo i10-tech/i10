@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from "bun:test"
 import { domainStore, normaliseDomainName } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
+import { fakeSealer } from "./support/sealer.js"
 
 const TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
 const NOW = new Date("2026-09-05T12:00:00.000Z")
@@ -69,7 +70,7 @@ const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
 
 const roomFor = (status: string) => ({ check: async () => ({ status }) })
 
-const secrets = { seal: (v: string) => `sealed:${v}`, open: (v: string) => v }
+const secrets = fakeSealer
 const deps = {
   region: "eu-central-1",
   /**

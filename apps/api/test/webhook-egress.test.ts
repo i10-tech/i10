@@ -12,7 +12,7 @@ import {
   type Lookup,
 } from "../src/webhooks/egress.js"
 import { webhookEndpointStore } from "../src/webhooks/store.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 
 describe("which addresses a webhook may connect to", () => {
   // ⚠ EVERY ONE OF THESE IS AN ADDRESS A CUSTOMER'S DNS CAN POINT AT, AND
@@ -300,7 +300,7 @@ describe("delivery through a real socket", () => {
 })
 
 describe("registering an endpoint", () => {
-  const secrets = secretBox("ab".repeat(32))
+  const secrets = testSealer()
   // The refusal happens before any query, so no database is needed to prove it.
   const store = (vet: (host: string) => ReturnType<typeof vetHost>) =>
     webhookEndpointStore({} as never, secrets, { vet })

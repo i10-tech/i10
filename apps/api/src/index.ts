@@ -1,7 +1,6 @@
 import { createClerkClient } from "@clerk/backend"
 import { passwordAttempts } from "./console/password-check.js"
 import { codeCooldown } from "./console/code-cooldown.js"
-import { createHmac } from "node:crypto"
 import pino from "pino"
 import { createApp } from "./app.js"
 import { subscriptionOps } from "./billing/db.js"
@@ -180,6 +179,8 @@ import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
 import { dnsConnectionStore } from "./dns/connections.js"
 import { dnsOAuth } from "./dns/oauth.js"
+import { sealerFromEnv } from "./crypto/sealer.js"
+import { tokenKeysFromEnv } from "./crypto/token-keys.js"
 import { dnsPublisher } from "./dns/publish.js"
 import { credentialRenewal } from "./dns/renew.js"
 import { marketingStore } from "./console/marketing.js"
@@ -225,7 +226,6 @@ import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
 import { accountEventOps } from "./webhooks/stalwart-account-db.js"
-import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
 import { fanOutAndEnqueue, runHealthEmails } from "./webhooks/health.js"
@@ -494,11 +494,18 @@ if (Boolean(env.DNS_OAUTH_BROKER_URL) !== Boolean(env.DNS_OAUTH_BROKER_SECRET)) 
 
 /**
  * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
- * `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a customer's signing
- * secret, so the endpoint routes answer 501 and no SES event is ingested -
- * visible, rather than a silent downgrade to unsigned or plaintext.
+ * `SEAL_KEYS` there is nowhere safe to keep a customer's signing secret, so
+ * the endpoint routes answer 501 and no SES event is ingested - visible,
+ * rather than a silent downgrade to unsigned or plaintext.
  */
-const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
+const secrets = sealerFromEnv(env)
+/**
+ * ⚠ NO FALLBACK KEY. Without `TOKEN_KEYS` the features that sign a token (DNS
+ * OAuth, mailbox download links) are off and their routes answer 501.
+ */
+const tokens = tokenKeysFromEnv(env.TOKEN_KEYS)
+if (!tokens)
+  log.warn({}, "TOKEN_KEYS unset - DNS connections and mailbox downloads are off")
 
 /**
  * Registration-time egress check for webhook endpoints: refuse a hostname that
@@ -535,7 +542,7 @@ const history = webhookHistory(
 
 log.info(
   { webhooks: Boolean(secrets) },
-  secrets ? "webhooks enabled" : "WEBHOOKS DISABLED - no WEBHOOK_SECRET_KEY",
+  secrets ? "webhooks enabled" : "WEBHOOKS DISABLED - no SEAL_KEYS",
 )
 
 /**
@@ -1362,12 +1369,6 @@ const mailboxDir = mailboxDirectory(db)
 const mailboxMigrationQueue = contentStore
   ? createMailboxQueue({ redis: queueRedis })
   : null
-const mailboxDownloadSecret = createHmac(
-  "sha256",
-  env.WEBHOOK_SECRET_KEY ?? env.CLERK_WEBHOOK_SECRET,
-)
-  .update("mailbox-download-tokens")
-  .digest("hex")
 
 // Splitting a workspace's mailbox storage across its inboxes (B3). Without a
 // Stalwart URL and token nothing is pushed and the reconcile does it later.
@@ -1540,7 +1541,7 @@ const oidc =
       })
     : null
 if (oidc) engines.set("oidc", oidc)
-else log.warn({}, "OIDC SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
+else log.warn({}, "OIDC SSO DISABLED - it needs SEAL_KEYS and AUTH_ORIGINS")
 /*
  * The SAML engine (#339). The same needs as OIDC (our SP keys are sealed,
  * every URL an IdP is given is on the auth app), plus Redis for the
@@ -1580,7 +1581,7 @@ const saml =
       })
     : null
 if (saml) engines.set("saml", saml)
-else log.warn({}, "SAML SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
+else log.warn({}, "SAML SSO DISABLED - it needs SEAL_KEYS and AUTH_ORIGINS")
 const managedDeps = { store: identity, clerk: identityClerk, log }
 const sweepQueue = createIdentitySweepQueue({ redis: queueRedis })
 const consoleFreshAuth = withSsoFreshness(
@@ -2699,11 +2700,12 @@ const app = createApp({
      */
     delegation: delegationChecker({}),
     /*
-     * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
-     * why all of it arrives together or not at all. A credential that can
-     * rewrite a customer's MX records must not be stored in the clear, so
-     * without a box to seal it in the routes answer 501 - the same rule
-     * `domains` below follows for a DKIM private key.
+     * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING AND TOKEN KEYS,
+     * which is why all of it arrives together or not at all. A credential that
+     * can rewrite a customer's MX records must not be stored in the clear, and
+     * the OAuth `state` must not be signed with a guessable key, so without
+     * both the routes answer 501 - the same rule `domains` below follows for a
+     * DKIM private key.
      *
      * ⚠ AND THE THREE ARE BUILT ONCE, IN ONE SCOPE, BECAUSE THEY REFER TO EACH
      * OTHER. The publisher renews an expiring OAuth credential through the same
@@ -2711,23 +2713,13 @@ const app = createApp({
      * the routes read - so a second `dnsConnectionStore(db, secrets)` here, as
      * there used to be, is a second object claiming to be the same thing.
      */
-    ...(secrets
+    ...(secrets && tokens
       ? (() => {
-          const connections = dnsConnectionStore(db, secrets)
+          const connections = dnsConnectionStore(db, secrets, log)
           const oauth = dnsOAuth({
             apps: env.DNS_OAUTH_APPS,
             redirectBase: env.DNS_OAUTH_REDIRECT_BASE,
-            /*
-             * ⚠ DERIVED FROM THE SEALING KEY RATHER THAN BEING ITS OWN
-             * VARIABLE, and domain-separated so it is not the same value. It
-             * signs the OAuth `state`, which is what stops somebody attaching
-             * their DNS credential to another workspace - a real key, but not
-             * one an operator should have to remember to set separately from
-             * the key this feature already cannot run without.
-             */
-            stateSecret: createHmac("sha256", env.WEBHOOK_SECRET_KEY ?? "")
-              .update("dns-oauth-state")
-              .digest("hex"),
+            tokens,
             /*
              * ⚠ BOTH OR NEITHER, DECIDED HERE SO THE MODULE NEVER SEES A HALF
              * ONE. A URL without a secret would call an authenticated Worker
@@ -2886,7 +2878,7 @@ const app = createApp({
         },
       }
     : {}),
-  ...(contentStore && mailboxMigrationQueue
+  ...(contentStore && mailboxMigrationQueue && tokens
     ? {
         mailboxMigration: {
           jobs: mailboxJobStore(db),
@@ -2904,7 +2896,7 @@ const app = createApp({
                   }
                 : undefined,
             ),
-          tokenSecret: mailboxDownloadSecret,
+          tokens,
         },
       }
     : {}),
