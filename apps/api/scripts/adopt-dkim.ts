@@ -72,10 +72,7 @@ if (!name) {
  * up the entire environment.
  */
 const url = process.env.MIGRATE_DATABASE_URL ?? process.env.DATABASE_URL
-const secrets = sealerFromEnv({
-  SEAL_KEYS: process.env.SEAL_KEYS,
-  WEBHOOK_SECRET_KEY: process.env.WEBHOOK_SECRET_KEY,
-})
+const secrets = sealerFromEnv({ SEAL_KEYS: process.env.SEAL_KEYS })
 const region = process.env.AWS_REGION ?? "eu-central-1"
 
 if (!url) {

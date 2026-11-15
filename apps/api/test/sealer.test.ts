@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto"
+import { createDecipheriv, hkdfSync } from "node:crypto"
 import { keyringFromEnv } from "../src/crypto/keyring.js"
 import { sealer, sealedUnder, type SealContext } from "../src/crypto/sealer.js"
 
@@ -22,22 +22,12 @@ const at: SealContext = {
   rowId: ROW,
 }
 
-/** A value in the old format, as `WEBHOOK_SECRET_KEY` sealed it. */
-function legacySeal(hexKey: string, plaintext: string) {
-  const iv = randomBytes(12)
-  const cipher = createCipheriv("aes-256-gcm", Buffer.from(hexKey, "hex"), iv)
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
-  return ["v1", iv, cipher.getAuthTag(), ct]
-    .map((p) => (typeof p === "string" ? p : p.toString("base64url")))
-    .join(".")
-}
-
 describe("sealing", () => {
   it("round-trips, under the current key, in the v2 format", () => {
     const sealed = box.seal(at, "a secret")
     expect(box.open(at, sealed)).toBe("a secret")
     expect(sealed.startsWith("v2.k1.")).toBe(true)
-    expect(sealedUnder(sealed)).toEqual({ version: "v2", kid: "k1" })
+    expect(sealedUnder(sealed)).toBe("k1")
   })
 
   it("does not carry the plaintext and is not deterministic", () => {
@@ -81,7 +71,7 @@ describe("sealing", () => {
     const old = box.seal(at, "from before")
     const rotated = sealer(ring(`${key("k2", 2)},${key("k1", 1)}`))
     expect(rotated.open(at, old)).toBe("from before")
-    expect(sealedUnder(rotated.seal(at, "new"))).toEqual({ version: "v2", kid: "k2" })
+    expect(sealedUnder(rotated.seal(at, "new"))).toBe("k2")
   })
 
   /**
@@ -117,25 +107,5 @@ describe("sealing", () => {
   it("refuses a context that could be spelled two ways", () => {
     expect(() => box.seal({ ...at, rowId: "a/b" }, "x")).toThrow('no "/"')
     expect(() => box.seal({ ...at, tenantId: "" }, "x")).toThrow()
-  })
-})
-
-describe("the legacy v1 format", () => {
-  const legacy = Buffer.alloc(32, 0xab).toString("hex")
-
-  it("opens only when WEBHOOK_SECRET_KEY is configured", () => {
-    const old = legacySeal(legacy, "dkim private key")
-    expect(sealedUnder(old)).toEqual({ version: "v1" })
-    expect(sealer(ring(key("k1", 1)), legacy).open(at, old)).toBe("dkim private key")
-    expect(() => box.open(at, old)).toThrow(
-      "v1 format and WEBHOOK_SECRET_KEY, the legacy key that opens it, is not configured",
-    )
-  })
-
-  it("fails clearly under the wrong legacy key, and is never written", () => {
-    const old = legacySeal(legacy, "x")
-    const wrong = sealer(ring(key("k1", 1)), Buffer.alloc(32, 0xcd).toString("hex"))
-    expect(() => wrong.open(at, old)).toThrow("does not open under WEBHOOK_SECRET_KEY")
-    expect(sealedUnder(wrong.seal(at, "x"))?.version).toBe("v2")
   })
 })

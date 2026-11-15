@@ -7,13 +7,12 @@ storage.md.
 
 ## The variables
 
-| Variable             | Protects                                                                                                                       | Rotates                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
-| `SEAL_KEYS`          | Webhook signing secrets and SQS keys, DKIM private keys, DNS credentials, SSO connection secrets and PKCE verifiers, SIEM keys | Yes, with the re-seal job            |
-| `TOKEN_KEYS`         | Mailbox download links, the DNS OAuth `state` and its PKCE verifier                                                            | Yes, keep the old key for 15 minutes |
-| `FEEDBACK_ID_KEY`    | The per-workspace token in the Feedback-ID header                                                                              | Never                                |
-| `CONTENT_KEYS`       | Message bodies in R2 (storage.md)                                                                                              | Yes                                  |
-| `WEBHOOK_SECRET_KEY` | Legacy. Opens old `v1` values only. Remove it when the re-seal job reports no `v1` value.                                      | Removed                              |
+| Variable          | Protects                                                                                                                       | Rotates                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `SEAL_KEYS`       | Webhook signing secrets and SQS keys, DKIM private keys, DNS credentials, SSO connection secrets and PKCE verifiers, SIEM keys | Yes, with the re-seal job            |
+| `TOKEN_KEYS`      | Mailbox download links, the DNS OAuth `state` and its PKCE verifier                                                            | Yes, keep the old key for 15 minutes |
+| `FEEDBACK_ID_KEY` | The per-workspace token in the Feedback-ID header                                                                              | Never                                |
+| `CONTENT_KEYS`    | Message bodies in R2 (storage.md)                                                                                              | Yes                                  |
 
 `SEAL_KEYS`, `TOKEN_KEYS` and `CONTENT_KEYS` are keyrings: `kid:base64,kid:base64`.
 The first key is the current key. Each key is 32 random bytes
@@ -61,8 +60,7 @@ token for one use does not verify for another.
 5. Remove the old key from `SEAL_KEYS` and deploy.
 
 The job is safe to stop and run again. It only rewrites a value that is still
-the one it read. The first run after this change also moves every `v1` value
-to `v2`; when it shows zero `v1` values, remove `WEBHOOK_SECRET_KEY`.
+the one it read.
 
 To rotate `TOKEN_KEYS`, put the new key first, deploy, wait 15 minutes, and
 remove the old key. Tokens live 15 minutes at most.

@@ -772,14 +772,6 @@ const schema = z.object({
     }),
 
   /**
-   * ⚠ LEGACY, READ ONLY. The one key that sealed everything before
-   * `SEAL_KEYS` (the `v1.` format). Nothing is sealed with it any more; it
-   * only opens old values until `scripts/reseal-secrets.ts` reports none
-   * left, and then it is removed.
-   */
-  WEBHOOK_SECRET_KEY: z.string().min(32).optional(),
-
-  /**
    * Webhook endpoints being POSTed to at once on the ordered lane, per worker
    * replica; the retry lane gets a quarter of it.
    *
