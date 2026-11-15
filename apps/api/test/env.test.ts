@@ -124,6 +124,40 @@ describe("production must hold the edge secret", () => {
   })
 })
 
+describe("production must hold the body keyring", () => {
+  const store = {
+    CONTENT_STORE_ENDPOINT: "https://account.r2.example.com",
+    CONTENT_STORE_BUCKET: "content",
+    CONTENT_STORE_ACCESS_KEY_ID: "id",
+    CONTENT_STORE_SECRET_ACCESS_KEY: "s".repeat(8),
+  }
+  const prod = {
+    ...base,
+    NODE_ENV: "production",
+    SENTRY_ENVIRONMENT: "production",
+    EDGE_SECRET: "e".repeat(32),
+  }
+  const keyring = `k1:${Buffer.alloc(32, 7).toString("base64")}`
+
+  it("refuses to boot with the content store set and CONTENT_KEYS missing", () => {
+    expect(() => loadEnv({ ...prod, ...store })).toThrow(/CONTENT_KEYS: is required/)
+  })
+
+  it("accepts the keyring, and production with no content store at all", () => {
+    expect(loadEnv({ ...prod, ...store, CONTENT_KEYS: keyring }).CONTENT_KEYS).toBe(
+      keyring,
+    )
+    expect(loadEnv(prod).CONTENT_KEYS).toBeUndefined()
+  })
+
+  it("leaves development and test without it alone", () => {
+    expect(loadEnv({ ...base, ...store }).CONTENT_KEYS).toBeUndefined()
+    expect(
+      loadEnv({ ...base, ...store, NODE_ENV: "test" }).CONTENT_KEYS,
+    ).toBeUndefined()
+  })
+})
+
 /**
  * ⚠ THE DEFAULT PORT IS A FACT ABOUT OUR SERVER, NOT A CONVENTION. The `relay`
  * listener on 2525 is the only one that relays for a client presenting no
