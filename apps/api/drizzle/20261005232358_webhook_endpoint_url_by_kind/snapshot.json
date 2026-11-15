@@ -1,0 +1,43 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "2cce1660-19f5-46a5-951e-4e6d07b2cc8b",
+  "prevIds": [
+    "74f2b2a5-6e2a-4aac-82bf-cbea6318cb3c"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "webhook_endpoints"
+      ],
+      "writes": [
+        "s|ck|core.webhook_endpoints.webhook_endpoints_url_by_kind",
+        "n|ck|core.webhook_endpoints.webhook_endpoints_url_by_kind",
+        "e|ck|core.webhook_endpoints.webhook_endpoints_url_by_kind",
+        "n|con|core.webhook_endpoints.webhook_endpoints_url_by_kind"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core",
+        "n|col|core.webhook_endpoints.kind",
+        "n|col|core.webhook_endpoints.url"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "webhook_endpoints_url_by_kind",
+        "value": "(\"core\".\"webhook_endpoints\".\"kind\" = 'polling') = (\"core\".\"webhook_endpoints\".\"url\" is null)",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

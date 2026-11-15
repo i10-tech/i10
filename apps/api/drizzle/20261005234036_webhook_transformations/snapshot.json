@@ -1,0 +1,144 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "be9363f2-8bac-4f27-bb37-c93df2ec9bdb",
+  "prevIds": [
+    "2cce1660-19f5-46a5-951e-4e6d07b2cc8b"
+  ],
+  "footprints": [
+    {
+      "statementType": "alter_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_attempt_error"
+      ],
+      "writes": [
+        "s|enum|core.webhook_attempt_error"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_deliveries",
+        "transformed"
+      ],
+      "writes": [
+        "s|col|core.webhook_deliveries.transformed",
+        "n|col|core.webhook_deliveries.transformed",
+        "e|col|core.webhook_deliveries.transformed"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "transformation"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.transformation",
+        "n|col|core.webhook_endpoints.transformation",
+        "e|col|core.webhook_endpoints.transformation"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "transformation_enabled"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.transformation_enabled",
+        "n|col|core.webhook_endpoints.transformation_enabled",
+        "e|col|core.webhook_endpoints.transformation_enabled"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "transformed",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "transformation",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "transformation_enabled",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "enums\u0000[\"core\",\"webhook_attempt_error\"]",
+      "set": {
+        "values": [
+          "status",
+          "timeout",
+          "connect",
+          "tls",
+          "blocked",
+          "unresolved",
+          "transform"
+        ]
+      }
+    }
+  ]
+}

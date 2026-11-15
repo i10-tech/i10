@@ -21,10 +21,9 @@ apps/docs/public/scalar/
 # ⚠ WRITTEN BY `drizzle-kit generate`, AND THE SAME TRAP AS openapi.json ABOVE.
 # Prettier and drizzle-kit format JSON differently, so with both owning these
 # files `bun run format` and `bun run db:generate` produce different bytes - and
-# whichever ran last makes the other look like a pending change. 0034 landed
-# unformatted and would have failed `format:check` on the next push; ignoring the
-# directory is the fix, not reformatting files their generator will rewrite.
-apps/api/drizzle/meta/
+# whichever ran last makes the other look like a pending change. Ignoring the
+# snapshots is the fix, not reformatting files their generator will rewrite.
+apps/api/drizzle/*/snapshot.json
 
 # Local Terraform working directories. Untracked, so CI never sees them - this
 # only stops `format:check` failing on a developer's machine after a `tofu init`.

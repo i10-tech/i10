@@ -1,0 +1,469 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "86db1df2-82b3-412d-9523-eb39bdb4ca88",
+  "prevIds": [
+    "c84d23ce-31f4-485d-bf2a-717db0bd95ba"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_replay_kind"
+      ],
+      "writes": [
+        "s|enum|core.webhook_replay_kind",
+        "n|enum|core.webhook_replay_kind",
+        "e|enum|core.webhook_replay_kind",
+        "n|type|core.webhook_replay_kind"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_replay_status"
+      ],
+      "writes": [
+        "s|enum|core.webhook_replay_status",
+        "n|enum|core.webhook_replay_status",
+        "e|enum|core.webhook_replay_status",
+        "n|type|core.webhook_replay_status"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "webhook_replays"
+      ],
+      "writes": [
+        "s|tbl|core.webhook_replays",
+        "n|tbl|core.webhook_replays",
+        "e|tbl|core.webhook_replays",
+        "n|rel|core.webhook_replays",
+        "n|type|core.webhook_replays",
+        "n|rel|core.webhook_replays_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.webhook_replay_kind",
+        "n|enum|core.webhook_replay_status"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "webhook_replays",
+        "webhook_replays_endpoint_idx"
+      ],
+      "writes": [
+        "s|idx|core.webhook_replays_endpoint_idx",
+        "n|idx|core.webhook_replays_endpoint_idx",
+        "e|idx|core.webhook_replays_endpoint_idx",
+        "n|rel|core.webhook_replays_endpoint_idx"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_replays",
+        "n|sch|core",
+        "n|col|core.webhook_replays.endpoint_id",
+        "n|col|core.webhook_replays.created_at"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "webhook_replays"
+      ],
+      "writes": [
+        "s|fk|core.webhook_replays.webhook_replays_endpoint_id_webhook_endpoints_id_fk",
+        "n|fk|core.webhook_replays.webhook_replays_endpoint_id_webhook_endpoints_id_fk",
+        "e|fk|core.webhook_replays.webhook_replays_endpoint_id_webhook_endpoints_id_fk",
+        "n|con|core.webhook_replays.webhook_replays_endpoint_id_webhook_endpoints_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_replays",
+        "n|sch|core",
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core",
+        "n|col|core.webhook_replays.endpoint_id",
+        "n|col|core.webhook_endpoints.id",
+        "e|uniqueness|core.webhook_endpoints.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "webhook_replays"
+      ],
+      "writes": [
+        "s|pol|core.webhook_replays.webhook_replays_tenant",
+        "n|pol|core.webhook_replays.webhook_replays_tenant",
+        "e|pol|core.webhook_replays.webhook_replays_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_replays",
+        "n|sch|core",
+        "e|rls|core.webhook_replays"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_replays",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_replay_kind",
+        "values": [
+          "replay",
+          "replay_missing"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_replay_status",
+        "values": [
+          "queued",
+          "running",
+          "done",
+          "failed"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "endpoint_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "kind",
+        "type": "webhook_replay_kind",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "filter",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "status",
+        "type": "webhook_replay_status",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'queued'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "queued",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "examined",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "cursor",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "error",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "claimed_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "finished_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "webhook_replays_endpoint_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "endpoint_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "webhook_replays_endpoint_id_webhook_endpoints_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "endpoint_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "webhook_endpoints",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "webhook_replays_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_replays",
+        "name": "webhook_replays_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"webhook_replays\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"webhook_replays\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

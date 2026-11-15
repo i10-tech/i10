@@ -1,0 +1,464 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "49894a22-9f55-497c-84bc-3c0f39c70e2b",
+  "prevIds": [
+    "6485bea9-bb36-49f8-8b58-db930491d921"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_fact_snapshots"
+      ],
+      "writes": [
+        "s|tbl|core.risk_fact_snapshots",
+        "n|tbl|core.risk_fact_snapshots",
+        "e|tbl|core.risk_fact_snapshots",
+        "n|rel|core.risk_fact_snapshots",
+        "n|type|core.risk_fact_snapshots",
+        "n|rel|core.risk_fact_snapshots_pkey"
+      ],
+      "reads": [
+        "n|sch|core",
+        "n|enum|core.risk_band"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_assessment_events",
+        "shadow"
+      ],
+      "writes": [
+        "s|col|core.risk_assessment_events.shadow",
+        "n|col|core.risk_assessment_events.shadow",
+        "e|col|core.risk_assessment_events.shadow"
+      ],
+      "reads": [
+        "n|tbl|core.risk_assessment_events",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_assessments",
+        "shadow"
+      ],
+      "writes": [
+        "s|col|core.risk_assessments.shadow",
+        "n|col|core.risk_assessments.shadow",
+        "e|col|core.risk_assessments.shadow"
+      ],
+      "reads": [
+        "n|tbl|core.risk_assessments",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "risk_fact_snapshots",
+        "risk_fact_snapshots_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|core.risk_fact_snapshots_tenant_idx",
+        "n|idx|core.risk_fact_snapshots_tenant_idx",
+        "e|idx|core.risk_fact_snapshots_tenant_idx",
+        "n|rel|core.risk_fact_snapshots_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|core.risk_fact_snapshots",
+        "n|sch|core",
+        "n|col|core.risk_fact_snapshots.tenant_id",
+        "n|col|core.risk_fact_snapshots.taken_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "risk_fact_snapshots",
+        "risk_fact_snapshots_time_idx"
+      ],
+      "writes": [
+        "s|idx|core.risk_fact_snapshots_time_idx",
+        "n|idx|core.risk_fact_snapshots_time_idx",
+        "e|idx|core.risk_fact_snapshots_time_idx",
+        "n|rel|core.risk_fact_snapshots_time_idx"
+      ],
+      "reads": [
+        "n|tbl|core.risk_fact_snapshots",
+        "n|sch|core",
+        "n|col|core.risk_fact_snapshots.taken_at",
+        "n|col|core.risk_fact_snapshots.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_fact_snapshots"
+      ],
+      "writes": [
+        "s|fk|core.risk_fact_snapshots.risk_fact_snapshots_tenant_id_tenants_id_fk",
+        "n|fk|core.risk_fact_snapshots.risk_fact_snapshots_tenant_id_tenants_id_fk",
+        "e|fk|core.risk_fact_snapshots.risk_fact_snapshots_tenant_id_tenants_id_fk",
+        "n|con|core.risk_fact_snapshots.risk_fact_snapshots_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.risk_fact_snapshots",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.risk_fact_snapshots.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "risk_fact_snapshots"
+      ],
+      "writes": [
+        "s|pol|core.risk_fact_snapshots.risk_fact_snapshots_deny",
+        "n|pol|core.risk_fact_snapshots.risk_fact_snapshots_deny",
+        "e|pol|core.risk_fact_snapshots.risk_fact_snapshots_deny"
+      ],
+      "reads": [
+        "n|tbl|core.risk_fact_snapshots",
+        "n|sch|core",
+        "e|rls|core.risk_fact_snapshots"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "risk_fact_snapshots",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_assessment_events",
+        "name": "shadow",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_assessments",
+        "name": "shadow",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "taken_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "ruleset_version",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "trigger",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "score",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "band",
+        "type": "risk_band",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "contributions",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "shadow",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "facts",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "risk_fact_snapshots_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "taken_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "risk_fact_snapshots_time_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "taken_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "risk_fact_snapshots_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "risk_fact_snapshots_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_fact_snapshots",
+        "name": "risk_fact_snapshots_deny",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "false",
+        "withCheck": "false",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

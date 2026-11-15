@@ -1,0 +1,180 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "6f872c57-4e32-4879-b5d2-400b5a87b3a9",
+  "prevIds": [
+    "411a6a26-c47b-4bc3-a1e6-6320a922ee16"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "template_source"
+      ],
+      "writes": [
+        "s|enum|core.template_source",
+        "n|enum|core.template_source",
+        "e|enum|core.template_source",
+        "n|type|core.template_source"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_versions",
+        "files"
+      ],
+      "writes": [
+        "s|col|core.template_versions.files",
+        "n|col|core.template_versions.files",
+        "e|col|core.template_versions.files"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_versions",
+        "path"
+      ],
+      "writes": [
+        "s|col|core.template_versions.path",
+        "n|col|core.template_versions.path",
+        "e|col|core.template_versions.path"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_versions",
+        "commit_sha"
+      ],
+      "writes": [
+        "s|col|core.template_versions.commit_sha",
+        "n|col|core.template_versions.commit_sha",
+        "e|col|core.template_versions.commit_sha"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "source"
+      ],
+      "writes": [
+        "s|col|core.templates.source",
+        "n|col|core.templates.source",
+        "e|col|core.templates.source"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|enum|core.template_source"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "template_source",
+        "values": [
+          "managed",
+          "upload",
+          "github"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "files",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "path",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "commit_sha",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "source",
+        "type": "template_source",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'managed'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

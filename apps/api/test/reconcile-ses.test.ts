@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs"
 import type { SQL } from "drizzle-orm"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "bun:test"
@@ -11,6 +10,7 @@ import {
   sesSentButUnbilledStatement,
   type SesReconcileReport,
 } from "../src/send/reconcile-ses.js"
+import { migrationSql } from "./migration-sql.js"
 
 const dialect = new PgDialect()
 const render = (q: SQL) => dialect.sqlToQuery(q)
@@ -34,10 +34,7 @@ const report = (over: Partial<SesReconcileReport> = {}): SesReconcileReport => (
  * read-only-ness are still checked, and dropping them with the SQL would have
  * retired a dozen guarantees at once.
  */
-const migration = readFileSync(
-  new URL("../drizzle/0028_ses_reconcile_definers.sql", import.meta.url),
-  "utf8",
-)
+const migration = migrationSql("ses_reconcile_definers")
 
 const functionBody = (name: string) => {
   const start = migration.indexOf(`CREATE FUNCTION "core"."${name}"`)

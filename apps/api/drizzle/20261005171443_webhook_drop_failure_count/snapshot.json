@@ -1,0 +1,35 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "b49c19f0-b344-425a-be55-2663c67ca864",
+  "prevIds": [
+    "2b85aaf6-b5c5-468d-a7b9-549789a1b340"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "consecutive_failures"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.consecutive_failures",
+        "n|col|core.webhook_endpoints.consecutive_failures",
+        "e|col|core.webhook_endpoints.consecutive_failures"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"webhook_endpoints\",\"consecutive_failures\"]"
+    }
+  ]
+}

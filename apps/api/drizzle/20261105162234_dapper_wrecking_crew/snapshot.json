@@ -1,0 +1,69 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "d1e005e1-8d29-4fad-9d94-26e73b2b24f7",
+  "prevIds": [
+    "5e717b27-7a25-492e-904f-8613de77e9b2"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "routing_settings",
+        "mail_domains"
+      ],
+      "writes": [
+        "s|col|core.routing_settings.mail_domains",
+        "n|col|core.routing_settings.mail_domains",
+        "e|col|core.routing_settings.mail_domains"
+      ],
+      "reads": [
+        "n|tbl|core.routing_settings",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "routing_settings",
+        "free_plan_id"
+      ],
+      "writes": [
+        "s|col|core.routing_settings.free_plan_id",
+        "n|col|core.routing_settings.free_plan_id",
+        "e|col|core.routing_settings.free_plan_id"
+      ],
+      "reads": [
+        "n|tbl|core.routing_settings",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "routing_settings",
+        "name": "mail_domains",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 1,
+        "default": "'{}'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"routing_settings\",\"free_plan_id\"]"
+    }
+  ]
+}

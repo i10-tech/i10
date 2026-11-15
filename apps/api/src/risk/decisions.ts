@@ -71,8 +71,8 @@ export function decisionStore(db: Database): DecisionStore {
         select core.risk_decision_save(
           ${d.tenantId}::uuid, ${d.kind}::core.risk_decision_kind, ${d.decidedBy}, ${d.note},
           ${d.decidedAt.toISOString()}::timestamptz, ${d.score}, ${d.band}::core.risk_band,
-          ${d.rulesetVersion}, ${d.held}, ${JSON.stringify(d.inView)}::jsonb,
-          ${JSON.stringify(d.covers)}::jsonb, ${d.expiresAt.toISOString()}::timestamptz,
+          ${d.rulesetVersion}, ${d.held}, ${sql.param(d.inView)}::jsonb,
+          ${sql.param(d.covers)}::jsonb, ${d.expiresAt.toISOString()}::timestamptz,
           ${d.snapshotId}::uuid
         ) as id
       `)) as unknown as { id: string }[]

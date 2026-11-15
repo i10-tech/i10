@@ -187,12 +187,12 @@ async function storeOne(
   const updated = (await withTenant(db, tenantId, (tx) =>
     tx.execute(sql`
       update core.message_bodies
-         set attachments = ${JSON.stringify(rewritten)}::jsonb,
+         set attachments = ${sql.param(rewritten)}::jsonb,
              attachments_stored_at = now()
        where message_id = ${row.message_id}::uuid
          and created_at = ${row.created_at}::timestamptz
          and attachments_stored_at is null
-         and attachments = ${JSON.stringify(original)}::jsonb
+         and attachments = ${sql.param(original)}::jsonb
       returning message_id
     `),
   )) as unknown as unknown[]

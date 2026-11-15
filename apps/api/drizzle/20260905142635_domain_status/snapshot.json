@@ -1,0 +1,114 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "9cfed8a3-4103-4d4b-8193-22540b42f976",
+  "prevIds": [
+    "a4af5f2a-c242-46c7-a7a1-2619d7a334b1"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "domain_status"
+      ],
+      "writes": [
+        "s|enum|core.domain_status",
+        "n|enum|core.domain_status",
+        "e|enum|core.domain_status",
+        "n|type|core.domain_status"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "dkim_tokens"
+      ],
+      "writes": [
+        "s|col|core.domains.dkim_tokens",
+        "n|col|core.domains.dkim_tokens",
+        "e|col|core.domains.dkim_tokens"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "status"
+      ],
+      "writes": [
+        "s|col|core.domains.status",
+        "n|col|core.domains.status",
+        "e|col|core.domains.status"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core",
+        "n|enum|core.domain_status"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "domain_status",
+        "values": [
+          "not_started",
+          "pending",
+          "verified",
+          "failed",
+          "temporary_failure"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "dkim_tokens",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "status",
+        "type": "domain_status",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'not_started'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

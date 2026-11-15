@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { webhookEventData } from "@repo/contracts"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { connectionHealthStore } from "../src/identity/health-store.js"
 import { healthOf } from "../src/identity/health.js"
 import { siemStore } from "../src/identity/siem-store.js"
@@ -37,7 +36,7 @@ suite("#345 identity extras", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

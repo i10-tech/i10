@@ -1,0 +1,57 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "542257d9-b404-4cf9-a3ce-4d770c6a2fef",
+  "prevIds": [
+    "5b23f87a-1732-4410-9bbb-fe0121e34fa2"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "webhook_deliveries",
+        "webhook_deliveries_message_idx"
+      ],
+      "writes": [
+        "s|idx|core.webhook_deliveries_message_idx",
+        "n|idx|core.webhook_deliveries_message_idx",
+        "e|idx|core.webhook_deliveries_message_idx",
+        "n|rel|core.webhook_deliveries_message_idx"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core",
+        "n|col|core.webhook_deliveries.message_id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "webhook_deliveries_message_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "message_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    }
+  ]
+}

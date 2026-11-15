@@ -1170,7 +1170,9 @@ const schema = z.object({
    * key first. Generate one with `openssl rand -base64 32`.
    *
    * ⚠ UNSET, BODIES STAY IN POSTGRES. The content store alone moves
-   * attachments; bodies move only when they can be encrypted.
+   * attachments; bodies move only when they can be encrypted. Allowed in
+   * development only: production with the content store set refuses to start
+   * without it (checked below).
    *
    * ⚠ LOSING THESE LOSES EVERY PACKED BODY. Keep a copy outside Doppler, and
    * when rotating keep the old key listed until every body it wrapped has
@@ -1411,6 +1413,28 @@ const validated = schema.superRefine((env, ctx) => {
       message:
         `the content store needs all of ${store.join(", ")} or none of them; ` +
         `with some set it looks configured and stores nothing.`,
+    })
+  }
+
+  /**
+   * ⚠ A MISSING KEYRING IN PRODUCTION IS A DOWNGRADE, NOT A SWITCH. With the
+   * content store set and `CONTENT_KEYS` gone, every body stays in Postgres in
+   * the clear and the only sign is one warning line every five minutes. A
+   * Doppler edit that drops the variable would undo the sealing without any
+   * failure, so production refuses to start; the check-env hook runs this
+   * before a deploy replaces anything.
+   */
+  if (
+    env.NODE_ENV === "production" &&
+    set.length === store.length &&
+    env.CONTENT_KEYS === undefined
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CONTENT_KEYS"],
+      message:
+        `is required when NODE_ENV is production and the content store is set. ` +
+        `Without it message bodies are never sealed and stay in Postgres.`,
     })
   }
 

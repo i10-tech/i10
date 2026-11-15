@@ -1,0 +1,125 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "bb98f9d0-3cba-4c86-a241-3f908ebd0470",
+  "prevIds": [
+    "83c8f075-6ae6-40d8-89eb-ead108a26885"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_deliveries",
+        "next_attempt_at"
+      ],
+      "writes": [
+        "s|col|core.webhook_deliveries.next_attempt_at",
+        "n|col|core.webhook_deliveries.next_attempt_at",
+        "e|col|core.webhook_deliveries.next_attempt_at"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_deliveries",
+        "claimed_until"
+      ],
+      "writes": [
+        "s|col|core.webhook_deliveries.claimed_until",
+        "n|col|core.webhook_deliveries.claimed_until",
+        "e|col|core.webhook_deliveries.claimed_until"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "webhook_deliveries",
+        "webhook_deliveries_due_idx"
+      ],
+      "writes": [
+        "s|idx|core.webhook_deliveries_due_idx",
+        "n|idx|core.webhook_deliveries_due_idx",
+        "e|idx|core.webhook_deliveries_due_idx",
+        "n|rel|core.webhook_deliveries_due_idx"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core",
+        "n|col|core.webhook_deliveries.next_attempt_at"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "next_attempt_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "claimed_until",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "webhook_deliveries_due_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "next_attempt_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"core\".\"webhook_deliveries\".\"status\" = 'pending'",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    }
+  ]
+}

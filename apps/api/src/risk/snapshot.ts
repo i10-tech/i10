@@ -122,9 +122,9 @@ export function snapshotStore(db: Database): SnapshotStore {
         select core.risk_fact_snapshot_save(
           ${tenantId}::uuid, ${at.toISOString()}::timestamptz, ${e.rulesetVersion},
           ${trigger}, ${e.score}, ${e.band}::core.risk_band,
-          ${JSON.stringify(e.contributions)}::jsonb, ${JSON.stringify(e.shadow)}::jsonb,
-          ${JSON.stringify(e.cleared)}::jsonb,
-          ${JSON.stringify(serialiseFacts(facts))}::jsonb, ${force}
+          ${sql.param(e.contributions)}::jsonb, ${sql.param(e.shadow)}::jsonb,
+          ${sql.param(e.cleared)}::jsonb,
+          ${sql.param(serialiseFacts(facts))}::jsonb, ${force}
         ) as id
       `)) as unknown as { id: string | null }[]
       return rows[0]?.id ? String(rows[0].id) : null

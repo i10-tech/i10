@@ -98,7 +98,7 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
   })
 
   afterAll(async () => {

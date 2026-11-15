@@ -1,0 +1,76 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "c1394a56-c880-4e9b-a2c4-2b1693ab1763",
+  "prevIds": [
+    "ed1a54dd-8fd5-485e-8532-9984f8935bdb"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "storage_allocation"
+      ],
+      "writes": [
+        "s|col|authd.accounts.storage_allocation",
+        "n|col|authd.accounts.storage_allocation",
+        "e|col|authd.accounts.storage_allocation"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "authd",
+        "accounts"
+      ],
+      "writes": [
+        "s|ck|authd.accounts.accounts_storage_allocation_positive",
+        "n|ck|authd.accounts.accounts_storage_allocation_positive",
+        "e|ck|authd.accounts.accounts_storage_allocation_positive",
+        "n|con|authd.accounts.accounts_storage_allocation_positive"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd",
+        "n|col|authd.accounts.storage_allocation"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "storage_allocation",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "accounts_storage_allocation_positive",
+        "value": "\"authd\".\"accounts\".\"storage_allocation\" is null or \"authd\".\"accounts\".\"storage_allocation\" > 0",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

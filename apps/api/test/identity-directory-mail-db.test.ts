@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { directoryMailStore } from "../src/identity/mail-store.js"
 import { directoryStore } from "../src/identity/scim-store.js"
 import { KEEP } from "../src/identity/directory-mail.js"
@@ -38,7 +37,7 @@ suite("directory mail", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     sqlApi = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    db = drizzle(sqlApi, { schema }) as unknown as Database
+    db = drizzle({ client: sqlApi }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],
@@ -262,13 +261,13 @@ suite("directory mail", () => {
       await owner`insert into identity.directory_users (tenant_id, directory_id, user_name, external_id, active, clerk_user_id)
       values (${acme}, ${dirA}, ${"boss"}, ${"ext-boss"}, true, ${`user_boss${sfx}`}) returning id`
     await owner`insert into identity.directory_users (tenant_id, directory_id, user_name, active, clerk_user_id, resource)
-      values (${acme}, ${dirA}, ${"report"}, true, ${bob}, ${JSON.stringify({ [urn]: { manager: { value: boss!.id } } })}::jsonb)`
+      values (${acme}, ${dirA}, ${"report"}, true, ${bob}, ${owner.json({ [urn]: { manager: { value: boss!.id } } })}::jsonb)`
     expect(await mail().manager(acme, bob)).toMatchObject({
       status: "found",
       clerkUserId: `user_boss${sfx}`,
       active: true,
     })
-    await owner`update identity.directory_users set resource = ${JSON.stringify({ [urn]: { manager: { value: "nobody" } } })}::jsonb where clerk_user_id = ${bob}`
+    await owner`update identity.directory_users set resource = ${owner.json({ [urn]: { manager: { value: "nobody" } } })}::jsonb where clerk_user_id = ${bob}`
     expect(await mail().manager(acme, bob)).toEqual({ status: "none" })
     expect(await mail().manager(rival, bob)).toEqual({ status: "none" })
   })

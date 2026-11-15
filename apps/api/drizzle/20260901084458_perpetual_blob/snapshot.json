@@ -1,0 +1,665 @@
+{
+  "type": "base",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "bc34b15a-6a01-406f-84e6-d2edae7de27b",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_schema",
+      "statementTarget": [
+        "schema",
+        "authd"
+      ],
+      "writes": [
+        "s|sch|authd",
+        "n|sch|authd",
+        "e|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "accounts"
+      ],
+      "writes": [
+        "s|tbl|authd.accounts",
+        "n|tbl|authd.accounts",
+        "e|tbl|authd.accounts",
+        "n|rel|authd.accounts",
+        "n|type|authd.accounts",
+        "n|rel|authd.accounts_pkey",
+        "n|rel|authd.accounts_email_unique"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "aliases"
+      ],
+      "writes": [
+        "s|tbl|authd.aliases",
+        "n|tbl|authd.aliases",
+        "e|tbl|authd.aliases",
+        "n|rel|authd.aliases",
+        "n|type|authd.aliases",
+        "n|rel|authd.aliases_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "group_members"
+      ],
+      "writes": [
+        "s|tbl|authd.group_members",
+        "n|tbl|authd.group_members",
+        "e|tbl|authd.group_members",
+        "n|rel|authd.group_members",
+        "n|type|authd.group_members",
+        "n|rel|authd.group_members_group_name_clerk_user_id_pk"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "groups"
+      ],
+      "writes": [
+        "s|tbl|authd.groups",
+        "n|tbl|authd.groups",
+        "e|tbl|authd.groups",
+        "n|rel|authd.groups",
+        "n|type|authd.groups",
+        "n|rel|authd.groups_pkey",
+        "n|rel|authd.groups_email_unique"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "webhook_events"
+      ],
+      "writes": [
+        "s|tbl|authd.webhook_events",
+        "n|tbl|authd.webhook_events",
+        "e|tbl|authd.webhook_events",
+        "n|rel|authd.webhook_events",
+        "n|type|authd.webhook_events",
+        "n|rel|authd.webhook_events_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "aliases",
+        "aliases_account_idx"
+      ],
+      "writes": [
+        "s|idx|authd.aliases_account_idx",
+        "n|idx|authd.aliases_account_idx",
+        "e|idx|authd.aliases_account_idx",
+        "n|rel|authd.aliases_account_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.aliases",
+        "n|sch|authd",
+        "n|col|authd.aliases.clerk_user_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "group_members",
+        "group_members_account_idx"
+      ],
+      "writes": [
+        "s|idx|authd.group_members_account_idx",
+        "n|idx|authd.group_members_account_idx",
+        "e|idx|authd.group_members_account_idx",
+        "n|rel|authd.group_members_account_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.group_members",
+        "n|sch|authd",
+        "n|col|authd.group_members.clerk_user_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "aliases"
+      ],
+      "writes": [
+        "s|fk|authd.aliases.aliases_clerk_user_id_accounts_clerk_user_id_fk",
+        "n|fk|authd.aliases.aliases_clerk_user_id_accounts_clerk_user_id_fk",
+        "e|fk|authd.aliases.aliases_clerk_user_id_accounts_clerk_user_id_fk",
+        "n|con|authd.aliases.aliases_clerk_user_id_accounts_clerk_user_id_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.aliases",
+        "n|sch|authd",
+        "n|tbl|authd.accounts",
+        "n|sch|authd",
+        "n|col|authd.aliases.clerk_user_id",
+        "n|col|authd.accounts.clerk_user_id",
+        "e|uniqueness|authd.accounts.clerk_user_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "group_members"
+      ],
+      "writes": [
+        "s|fk|authd.group_members.group_members_group_name_groups_name_fk",
+        "n|fk|authd.group_members.group_members_group_name_groups_name_fk",
+        "e|fk|authd.group_members.group_members_group_name_groups_name_fk",
+        "n|con|authd.group_members.group_members_group_name_groups_name_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.group_members",
+        "n|sch|authd",
+        "n|tbl|authd.groups",
+        "n|sch|authd",
+        "n|col|authd.group_members.group_name",
+        "n|col|authd.groups.name",
+        "e|uniqueness|authd.groups.name"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "group_members"
+      ],
+      "writes": [
+        "s|fk|authd.group_members.group_members_clerk_user_id_accounts_clerk_user_id_fk",
+        "n|fk|authd.group_members.group_members_clerk_user_id_accounts_clerk_user_id_fk",
+        "e|fk|authd.group_members.group_members_clerk_user_id_accounts_clerk_user_id_fk",
+        "n|con|authd.group_members.group_members_clerk_user_id_accounts_clerk_user_id_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.group_members",
+        "n|sch|authd",
+        "n|tbl|authd.accounts",
+        "n|sch|authd",
+        "n|col|authd.group_members.clerk_user_id",
+        "n|col|authd.accounts.clerk_user_id",
+        "e|uniqueness|authd.accounts.clerk_user_id"
+      ]
+    }
+  ],
+  "ddl": [
+    {
+      "name": "authd",
+      "entityType": "schemas"
+    },
+    {
+      "schema": "authd",
+      "name": "accounts",
+      "isRlsEnabled": false,
+      "entityType": "tables"
+    },
+    {
+      "schema": "authd",
+      "name": "aliases",
+      "isRlsEnabled": false,
+      "entityType": "tables"
+    },
+    {
+      "schema": "authd",
+      "name": "group_members",
+      "isRlsEnabled": false,
+      "entityType": "tables"
+    },
+    {
+      "schema": "authd",
+      "name": "groups",
+      "isRlsEnabled": false,
+      "entityType": "tables"
+    },
+    {
+      "schema": "authd",
+      "name": "webhook_events",
+      "isRlsEnabled": false,
+      "entityType": "tables"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "clerk_user_id",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "email",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "display_name",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "description",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "active",
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "clerk_updated_at",
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "aliases",
+      "name": "address",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "aliases",
+      "name": "clerk_user_id",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "group_members",
+      "name": "group_name",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "group_members",
+      "name": "clerk_user_id",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "groups",
+      "name": "name",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "groups",
+      "name": "email",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "groups",
+      "name": "description",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "webhook_events",
+      "name": "event_id",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "webhook_events",
+      "name": "event_type",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "webhook_events",
+      "name": "received_at",
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "entityType": "columns"
+    },
+    {
+      "schema": "authd",
+      "table": "aliases",
+      "name": "aliases_account_idx",
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "clerk_user_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "entityType": "indexes"
+    },
+    {
+      "schema": "authd",
+      "table": "group_members",
+      "name": "group_members_account_idx",
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "clerk_user_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "entityType": "indexes"
+    },
+    {
+      "schema": "authd",
+      "table": "aliases",
+      "name": "aliases_clerk_user_id_accounts_clerk_user_id_fk",
+      "nameExplicit": false,
+      "columns": [
+        "clerk_user_id"
+      ],
+      "schemaTo": "authd",
+      "tableTo": "accounts",
+      "columnsTo": [
+        "clerk_user_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "entityType": "fks"
+    },
+    {
+      "schema": "authd",
+      "table": "group_members",
+      "name": "group_members_group_name_groups_name_fk",
+      "nameExplicit": false,
+      "columns": [
+        "group_name"
+      ],
+      "schemaTo": "authd",
+      "tableTo": "groups",
+      "columnsTo": [
+        "name"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "entityType": "fks"
+    },
+    {
+      "schema": "authd",
+      "table": "group_members",
+      "name": "group_members_clerk_user_id_accounts_clerk_user_id_fk",
+      "nameExplicit": false,
+      "columns": [
+        "clerk_user_id"
+      ],
+      "schemaTo": "authd",
+      "tableTo": "accounts",
+      "columnsTo": [
+        "clerk_user_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "entityType": "fks"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "accounts_pkey",
+      "columns": [
+        "clerk_user_id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "schema": "authd",
+      "table": "aliases",
+      "name": "aliases_pkey",
+      "columns": [
+        "address"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "schema": "authd",
+      "table": "group_members",
+      "name": "group_members_group_name_clerk_user_id_pk",
+      "columns": [
+        "group_name",
+        "clerk_user_id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "schema": "authd",
+      "table": "groups",
+      "name": "groups_pkey",
+      "columns": [
+        "name"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "schema": "authd",
+      "table": "webhook_events",
+      "name": "webhook_events_pkey",
+      "columns": [
+        "event_id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "schema": "authd",
+      "table": "accounts",
+      "name": "accounts_email_unique",
+      "nameExplicit": false,
+      "columns": [
+        "email"
+      ],
+      "nullsNotDistinct": false,
+      "entityType": "uniques"
+    },
+    {
+      "schema": "authd",
+      "table": "groups",
+      "name": "groups_email_unique",
+      "nameExplicit": false,
+      "columns": [
+        "email"
+      ],
+      "nullsNotDistinct": false,
+      "entityType": "uniques"
+    }
+  ]
+}

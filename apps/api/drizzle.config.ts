@@ -8,39 +8,31 @@ import { defineConfig } from "drizzle-kit"
  * command that can drop a column because a branch has not been merged yet.
  * Generate the SQL, read it, commit it, and let the deploy apply it.
  *
- * ⚠ AND A HAND-WRITTEN MIGRATION MUST STILL LEAVE A SNAPSHOT BEHIND, OR
- * `generate` BREAKS FOR EVERYONE AFTER IT. `drizzle-kit` diffs the schema
- * against the LATEST FILE IN `drizzle/meta`, not against the journal - so a
- * migration added by hand, with only a journal entry, leaves that baseline
- * frozen. The next `generate` re-derives every change made since as pending,
- * and the moment one of them looks like a rename it asks an interactive
- * question, which fails outright in a non-TTY.
+ * ⚠ A HAND-WRITTEN MIGRATION STILL GOES THROUGH `generate --custom`, AND MUST
+ * LEAVE `generate` CLEAN. `--custom` writes the folder and a snapshot that
+ * repeats the previous state; only the SQL is yours. Use it for what Drizzle
+ * does not model - a `SECURITY DEFINER` function, an RLS grant, a data
+ * backfill. Anything `schema.ts` does model (a column, an index, a policy)
+ * goes in `schema.ts` and through a plain `generate`; SQL that changes it
+ * behind `schema.ts`'s back makes the next `generate` propose the difference
+ * again. After either kind, `bun run db:generate` must answer "No schema
+ * changes".
  *
- * That is exactly what happened: 0030-0033 were written by hand against a
- * baseline stuck at 0029, and by 0034 `generate` was unusable - it tried to
- * re-apply 0031's `api_keys` work and prompted about `clerk_key_id`. Repaired
- * 2026-09-16 by regenerating a full baseline into an empty directory (nothing
- * to rename against, so it runs clean) and installing it as
- * `meta/0034_snapshot.json`, chained onto 0029's id.
+ * Each migration is a folder, `<UTC timestamp>_<name>/`, holding `migration.sql`
+ * and `snapshot.json`. The migrator runs them in name order and records the
+ * folder name, so a rename after a deploy re-applies it.
  *
- * ⚠ 0030-0033 HAVE NO SNAPSHOTS AND DELIBERATELY NEVER WILL. Only the latest is
- * read, so reconstructing four historical states would be invented precision.
- * The chain runs 0029 -> 0034; the gap is a scar, not a fault.
+ * ⚠ TWO MIGRATIONS IN THE SAME SECOND SORT BY NAME, NOT BY AGE. Folders made by
+ * `generate` cannot collide that way, but a hand-named one can: the SAML and
+ * Google directory migrations shared a second, and "google" sorts before "saml".
+ * `20261107112231_0141_saml_connections_due` carries its old number for that
+ * reason. Name a migration so the order you mean is the order of the names.
  *
- * ⚠ AND IT HAPPENED AGAIN, THE SAME WAY. 0041-0056 were hand-written without
- * refreshing the baseline, so by 2026-09-26 `generate` proposed re-creating
- * `core.delegations`, `domains.delegation_token` and two `subscriptions`
- * columns that production already had. Repaired identically: a full baseline
- * regenerated into an empty directory, installed as `meta/0057_snapshot.json`
- * and chained onto 0056's id - after checking production matched `schema.ts`
- * for each of those objects. It did, except the `delegations` foreign keys,
- * which 0041 named by hand; `schema.ts` now names them the same, or the
- * snapshot would describe constraints that do not exist under those names.
- *
- * So: prefer `bun run db:generate`. If a migration genuinely has to be
- * hand-written - a `SECURITY DEFINER` function, an RLS policy, a data backfill,
- * none of which Drizzle models - add the journal entry AND regenerate the
- * baseline snapshot, then confirm `db:generate` answers "No schema changes".
+ * ⚠ 25 OF THE FOLDERS HAVE NO `snapshot.json`, AND NEVER WILL. They were written
+ * by hand before v1, while the snapshot chain only advanced at `generate`, and
+ * inventing a historical state for them would be false precision. `generate`
+ * diffs against the latest snapshot, so a folder without one is skipped, not
+ * a break. Its `migration.sql` still runs like any other.
  */
 export default defineConfig({
   schema: "./src/db/schema.ts",
@@ -52,6 +44,5 @@ export default defineConfig({
   // behind the same tenant boundary as `core`. Nothing lands in `public`, so
   // an unqualified table name is always a mistake.
   schemaFilter: ["authd", "core", "identity"],
-  strict: true,
   verbose: true,
 })

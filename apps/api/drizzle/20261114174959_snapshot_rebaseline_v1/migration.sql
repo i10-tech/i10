@@ -1,0 +1,14 @@
+-- Changes nothing in the database. It exists for the snapshot.json beside it.
+--
+-- drizzle-kit 0.x wrote a partial index's predicate and a check's expression
+-- with table-qualified columns ("core"."domains"."status" = 'verified'); v1
+-- writes the bare column ("status" = 'verified'). Postgres stores both as the
+-- same expression, but `generate` compares snapshot text, so the first v1
+-- `generate` proposed dropping and re-creating 30 indexes and 2 checks that
+-- already match schema.ts. Several of those indexes are unique, and dropping
+-- one is a window with no constraint.
+--
+-- The generated statements were removed and the snapshot kept, which moves the
+-- baseline to v1's spelling. `bun run db:generate` answers "No schema changes"
+-- after this.
+SELECT 1;

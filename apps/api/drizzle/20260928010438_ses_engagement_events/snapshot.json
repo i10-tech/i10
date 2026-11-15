@@ -1,0 +1,145 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "c6a28018-22ff-444d-8eb2-833a810318a9",
+  "prevIds": [
+    "6a94b428-9b1b-4d9e-8ed7-9db550193d18"
+  ],
+  "footprints": [
+    {
+      "statementType": "alter_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "message_event_type"
+      ],
+      "writes": [
+        "s|enum|core.message_event_type"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "alter_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_event_type"
+      ],
+      "writes": [
+        "s|enum|core.webhook_event_type"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "open_tracking"
+      ],
+      "writes": [
+        "s|col|core.domains.open_tracking",
+        "n|col|core.domains.open_tracking",
+        "e|col|core.domains.open_tracking"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "click_tracking"
+      ],
+      "writes": [
+        "s|col|core.domains.click_tracking",
+        "n|col|core.domains.click_tracking",
+        "e|col|core.domains.click_tracking"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "open_tracking",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "click_tracking",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "enums\u0000[\"core\",\"message_event_type\"]",
+      "set": {
+        "values": [
+          "queued",
+          "sent",
+          "delivered",
+          "delivery_delayed",
+          "bounced",
+          "complained",
+          "rejected",
+          "failed",
+          "opened",
+          "clicked",
+          "unsubscribed"
+        ]
+      }
+    },
+    {
+      "op": "alter",
+      "key": "enums\u0000[\"core\",\"webhook_event_type\"]",
+      "set": {
+        "values": [
+          "email.sent",
+          "email.delivered",
+          "email.delivery_delayed",
+          "email.bounced",
+          "email.complained",
+          "email.failed",
+          "email.opened",
+          "email.clicked",
+          "email.unsubscribed"
+        ]
+      }
+    }
+  ]
+}
