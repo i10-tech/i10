@@ -224,7 +224,9 @@ R2 tokens scope per bucket, never per prefix, so content has its own buckets
 `CONTENT_STORE_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`,
 all four or none. Unset, attachments stay inline and the product works as
 before. Bodies also need `CONTENT_KEYS` (in `prod_api` and `dev`); unset,
-bodies stay in Postgres.
+bodies stay in Postgres. That is allowed in development only: with
+`NODE_ENV=production` and the content store set, a missing `CONTENT_KEYS`
+fails `loadEnv()`, so the check-env hook stops the deploy.
 
 ## Not yet
 
