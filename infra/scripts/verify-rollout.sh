@@ -73,6 +73,17 @@ APPS="${I10_APPS:-$APP i10-stalwart}"
 SYNC_TIMEOUT="${I10_SYNC_TIMEOUT:-180}"
 ROLLOUT_TIMEOUT="${I10_ROLLOUT_TIMEOUT:-240}"
 
+# ⚠ A THIRD BUDGET, FOR AN ARGO THAT IS BUSY WITH AN OLDER COMMIT. The sync
+# budget above assumes Argo is free to look at the deploy commit. It is not
+# while an operation for an earlier revision is still running, and that
+# operation can take minutes: a merge commit still pins the PREVIOUS images, so
+# when those fail a PreSync hook Argo retries it five times with backoff before
+# it lets go. On 2026-11-15 (run 43656952778) that held the deploy commit back
+# for about five and a half minutes; this script gave up at three and reported a
+# failed rollout that then came up perfectly. Time spent behind someone else's
+# operation is not counted against SYNC_TIMEOUT - it is bounded here instead.
+BUSY_TIMEOUT="${I10_BUSY_TIMEOUT:-420}"
+
 # ── the argument ─────────────────────────────────────────────────────────────
 
 # ⚠ READ FROM `SSH_ORIGINAL_COMMAND` WHEN THERE IS ONE, because that is where a
@@ -164,9 +175,17 @@ done
 # sha counts: an old failure is not this deploy's, and a revision that changed
 # nothing in the app starts no operation at all.
 deadline=$((SECONDS + SYNC_TIMEOUT))
+busy_deadline=$((SECONDS + BUSY_TIMEOUT))
 revision="" sync="" health="" phase="" op_revision="" synced=false
+op_target="" busy_noted=false
 
 while (( SECONDS < deadline )); do
+  # ⚠ ITS OWN CALL, NOT A SIXTH FIELD BELOW. `read` fills from the left and an
+  # empty field vanishes, so a target revision appended there would land in
+  # `op_revision` whenever the running operation has no syncResult yet.
+  op_target="$(kubectl get application "$APP" -n "$NAMESPACE" -o \
+    jsonpath='{.status.operationState.operation.sync.revision}' 2>/dev/null)"
+
   # `phase` before `op_revision`: a Running operation has no syncResult yet, and
   # `read` fills fields from the left.
   read -r revision sync health phase op_revision < <(
@@ -186,6 +205,18 @@ while (( SECONDS < deadline )); do
         && "$phase" != "Running" && "$phase" != "Terminating" ]]; then
     synced=true
     break
+  fi
+
+  # Argo is still working through an operation for another revision. The sync
+  # budget starts over when it lets go - see BUSY_TIMEOUT.
+  if [[ ( "$phase" == "Running" || "$phase" == "Terminating" ) \
+        && -n "$op_target" && "$op_target" != "$SHA" ]] \
+     && (( SECONDS < busy_deadline )); then
+    if [[ "$busy_noted" != true ]]; then
+      echo "verify-rollout: Argo is still busy with ${op_target:0:7}; waiting for it to finish first"
+      busy_noted=true
+    fi
+    deadline=$((SECONDS + SYNC_TIMEOUT))
   fi
   sleep 5
 done
