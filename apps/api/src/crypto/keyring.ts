@@ -8,7 +8,7 @@ export interface Keyring {
   keys: ReadonlyMap<string, Buffer>
 }
 
-const KID = /^[A-Za-z0-9_-]{1,32}$/
+export const KID = /^[A-Za-z0-9_-]{1,32}$/
 
 /**
  * ⚠ THE ONE PLACE AN ENVIRONMENT VALUE BECOMES KEY MATERIAL. A wrapped value
