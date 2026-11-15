@@ -18,12 +18,14 @@
  *   a  the current migrator applies every migration to an empty database
  *   b  a database migrated by the OLD migrator, then the current one: nothing
  *      re-applied, the tracking table upgraded in place, and again when two
- *      migrations are still pending
+ *      migrations are still pending, and again when the old table holds the
+ *      hashes applied migrations had before 12421fa0 edited them
  *   c  the schema dumps of a, b and the old migrator's own are identical
  *   d  `drizzle-kit generate` finds no schema changes and `check` is clean
  *   e  the *-db tests run, none skipped, and fail exactly where the old tree's
  *      do
  */
+import { createHash } from "node:crypto"
 import {
   cpSync,
   existsSync,
@@ -45,6 +47,8 @@ const MARK = "i10-migration-proof"
 const PG_DUMP = process.env.PG_DUMP ?? "pg_dump"
 const OLD_REF = process.env.OLD_REF ?? "origin/main"
 const LAG = 2
+// The commit before 12421fa0 edited applied migrations; see b4.
+const PRE_HYPHEN_REF = "12421fa0^"
 
 const adminUrl = process.env.PROOF_ADMIN_URL
 if (!adminUrl) {
@@ -329,6 +333,58 @@ await sql.end()
   const dumpLag = await dump()
   rmSync(lagFolder, { recursive: true, force: true })
   rmSync(lagScript, { force: true })
+
+  // b4: production as it really is. Building the old table from today's files
+  // gives every row today's hash, which is how b1 missed that 12421fa0
+  // (2026-09-28) changed the bytes of migrations already applied. Put back the
+  // hashes those files had before it, read from git rather than from the fix,
+  // so this proves the fix against history and not against itself.
+  await resetDatabase()
+  const preHyphen = await migrateOld()
+  const journalBefore = await run(
+    ["git", "show", `${PRE_HYPHEN_REF}:apps/api/drizzle/meta/_journal.json`],
+    repo,
+  )
+  if (journalBefore.code !== 0)
+    throw new Error(`git show failed: ${tail(journalBefore.out)}`)
+  const tagAt = new Map(
+    (
+      JSON.parse(journalBefore.out) as { entries: { when: number; tag: string }[] }
+    ).entries.map((e) => [String(e.when), e.tag]),
+  )
+  let rewound = 0
+  for (const row of preHyphen.code === 0 ? await tracking() : []) {
+    const tag = tagAt.get(row.created_at)
+    if (!tag) continue
+    const file = await run(
+      ["git", "show", `${PRE_HYPHEN_REF}:apps/api/drizzle/${tag}.sql`],
+      repo,
+    )
+    if (file.code !== 0) throw new Error(`git show ${tag} failed: ${tail(file.out)}`)
+    const hash = createHash("sha256").update(file.out).digest("hex")
+    if (hash === row.hash) continue
+    await ownerRows(
+      `update drizzle.__drizzle_migrations set hash = '${hash}' where id = ${row.id}`,
+    )
+    rewound++
+  }
+  const upgraded = await migrateNew()
+  const afterRewind = await tracking()
+  const nameAt = (createdAt: string) =>
+    afterRewind.find((r) => r.created_at === createdAt)?.name
+  record(
+    "b4 old table with the pre-2026-09-28 hashes, then current: upgraded, every row named",
+    preHyphen.code === 0 &&
+      rewound > 0 &&
+      upgraded.code === 0 &&
+      afterRewind.length === expected.length &&
+      afterRewind.every((r, i) => r.name === expected[i]) &&
+      nameAt("1788375625045") === "20260902190025_sweep_respects_schedule" &&
+      nameAt("1788391257954") === "20260902232057_webhook_rls",
+    upgraded.code === 0
+      ? `${rewound} hashes rewound, ${afterRewind.length} rows named`
+      : (upgraded.out.match(/^migration failed: .*$/m)?.[0] ?? tail(upgraded.out, 2)),
+  )
 
   // c
   const same = dumpA === dumpB && dumpB === dumpOld && dumpOld === dumpLag

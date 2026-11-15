@@ -95,6 +95,55 @@ async function loadPgvector(sql: Sql) {
 }
 
 /**
+ * ⚠ TWO APPLIED MIGRATIONS CHANGED THEIR BYTES AFTER THEY RAN, AND v1's TABLE
+ * UPGRADE CANNOT NAME THEIR ROWS WITHOUT THIS.
+ *
+ * Commit 12421fa0 (2026-09-28, "replace every em dash with a hyphen") edited
+ * comments in already-applied migrations, so every database migrated before it
+ * holds the old file hashes. The 0.x migrator never compared them. v1's upgrade
+ * names each old row by its second-truncated timestamp and falls back to the
+ * hash only when two folders share a second; these two are the later of such a
+ * pair, matched nothing, and aborted the run:
+ *
+ *   ... we found 2 migrations (ids: 8, 10) in the database that do not match
+ *
+ * The schema they produced is the same either way. Each update needs BOTH the
+ * exact timestamp and the exact old hash, so it can only rewrite the known
+ * case, and it is a no-op everywhere else - including after it has run once.
+ * Delete it once every environment has migrated under v1.
+ */
+const PRE_HYPHEN_HASHES = [
+  {
+    migration: "20260902190025_sweep_respects_schedule",
+    createdAt: 1788375625045,
+    old: "9ef228aa70188162b3fe0672532e33c40dd0e09b7b8f371dd3e02ecb90277356",
+    current: "50719f47785a16006cbed3b37c57f233178831cdf65fd020fb3a72b007274626",
+  },
+  {
+    migration: "20260902232057_webhook_rls",
+    createdAt: 1788391257954,
+    old: "36114632ee5c3665853e3ca64c582283979488be9f320e47d9f3e9f21f00708c",
+    current: "c5ea7873ed50dd5c4a35779164e3ecf3c13f108e8a0f703abfc1c4f96c9aac21",
+  },
+] as const
+
+async function reconcilePreHyphenHashes(sql: Sql) {
+  const [table] = await sql<{ exists: boolean }[]>`
+    select to_regclass('drizzle.__drizzle_migrations') is not null as exists
+  `
+  if (!table?.exists) return
+  for (const row of PRE_HYPHEN_HASHES) {
+    const updated = await sql`
+      update drizzle.__drizzle_migrations set hash = ${row.current}
+      where created_at = ${row.createdAt} and hash = ${row.old}
+    `
+    if (updated.count > 0) {
+      console.log(`reconciled the pre-2026-09-28 hash of ${row.migration}`)
+    }
+  }
+}
+
+/**
  * Applies every pending migration in `migrationsFolder` on one new connection,
  * then closes it. Throws on failure; the caller decides what that means.
  */
@@ -110,6 +159,7 @@ export async function applyMigrations(
   try {
     await waitForDatabase(sql)
     await loadPgvector(sql)
+    await reconcilePreHyphenHashes(sql)
     // ⚠ `drizzle({ client })`, NOT `drizzle(sql)`: v1 reads a lone argument as a
     // config, finds neither `client` nor `connection` on a postgres.js client,
     // and dials the driver's defaults (localhost, PG* variables) instead of ours.
