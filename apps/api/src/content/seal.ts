@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
-import type { Keyring } from "../crypto/keyring.js"
+import { currentKey, KID, type Keyring } from "../crypto/keyring.js"
 
 /**
  * Sealing a message body for R2 (#184, #188): compress, then encrypt with a key
@@ -64,16 +64,82 @@ export interface Sealed {
   wrappedKey: string
 }
 
-export function sealBody(keyring: Keyring, ids: BodyIds, body: Body): Sealed {
-  const bodyKey = randomBytes(32)
-  const plain = Buffer.from(JSON.stringify([body.html, body.text]))
-  const record = encrypt(bodyKey, Bun.zstdCompressSync(plain, { level: 9 }), aad(ids))
+const BODY_KEY_BYTES = 32
+/** nonce(12) | AES-256-GCM(body key) | tag(16) */
+const WRAPPED_BYTES = 12 + BODY_KEY_BYTES + 16
+
+function wrapBodyKey(keyring: Keyring, ids: BodyIds, bodyKey: Buffer): string {
   const kid = Buffer.from(keyring.current)
-  const wrapped = Buffer.concat([
+  return Buffer.concat([
     Buffer.from([kid.byteLength]),
     kid,
-    encrypt(keyring.keys.get(keyring.current)!, bodyKey, aad(ids)),
+    encrypt(currentKey(keyring), bodyKey, aad(ids)),
   ]).toString("base64")
+}
+
+function parseWrapped(wrappedKey: string): { kid: string; sealed: Buffer } | null {
+  const wrapped = Buffer.from(wrappedKey, "base64")
+  const kidLength = wrapped[0] ?? 0
+  const kid = wrapped.subarray(1, 1 + kidLength).toString()
+  if (!KID.test(kid) || wrapped.byteLength !== 1 + kidLength + WRAPPED_BYTES)
+    return null
+  return { kid, sealed: wrapped.subarray(1 + kidLength) }
+}
+
+/** The kid a wrapped body key is under, without opening it; null if it is not one. */
+export const bodyKeyUnder = (wrappedKey: string): string | null =>
+  parseWrapped(wrappedKey)?.kid ?? null
+
+/**
+ * ⚠ ERRORS NAME THE KID AND NOTHING ELSE. The rewrap job prints them next to
+ * row ids; the key, the value and the cipher's own message stay out.
+ */
+function unwrapBodyKey(keyring: Keyring, ids: BodyIds, wrappedKey: string): Buffer {
+  const parsed = parseWrapped(wrappedKey)
+  if (!parsed) throw new Error("message body key is not well formed")
+  const master = keyring.keys.get(parsed.kid)
+  if (!master) {
+    // ⚠ LOUD. A body wrapped with a key we no longer hold is lost mail, and a
+    // rotation that dropped an old key too early is how it would happen.
+    throw new Error(
+      `message body is wrapped with key ${parsed.kid}, which is not configured`,
+    )
+  }
+  try {
+    return decrypt(master, parsed.sealed, aad(ids))
+  } catch {
+    throw new Error(`message body key does not open under key ${parsed.kid}`)
+  }
+}
+
+/**
+ * The same body key, wrapped under the current master key: the step that lets
+ * a rotation retire an old key without waiting for retention. The record in R2
+ * is sealed with the body key itself, so it does not change.
+ *
+ * A key already under the current kid comes back as it was, once it opens:
+ * rewriting it would only change the nonce.
+ */
+export function rewrapBodyKey(
+  keyring: Keyring,
+  ids: BodyIds,
+  wrappedKey: string,
+): string {
+  const bodyKey = unwrapBodyKey(keyring, ids, wrappedKey)
+  if (bodyKeyUnder(wrappedKey) === keyring.current) return wrappedKey
+  const fresh = wrapBodyKey(keyring, ids, bodyKey)
+  // ⚠ CHECKED BEFORE IT IS WRITTEN: a wrong value here is a deleted email.
+  if (!unwrapBodyKey(keyring, ids, fresh).equals(bodyKey)) {
+    throw new Error("a re-wrapped body key does not open to the original")
+  }
+  return fresh
+}
+
+export function sealBody(keyring: Keyring, ids: BodyIds, body: Body): Sealed {
+  const bodyKey = randomBytes(BODY_KEY_BYTES)
+  const plain = Buffer.from(JSON.stringify([body.html, body.text]))
+  const record = encrypt(bodyKey, Bun.zstdCompressSync(plain, { level: 9 }), aad(ids))
+  const wrapped = wrapBodyKey(keyring, ids, bodyKey)
   // ⚠ CHECKED HERE, before anything is uploaded or released.
   const back = openBody(keyring, ids, record, wrapped)
   if (back.html !== body.html || back.text !== body.text) {
@@ -88,16 +154,7 @@ export function openBody(
   record: Uint8Array,
   wrappedKey: string,
 ): Body {
-  const wrapped = Buffer.from(wrappedKey, "base64")
-  const kidLength = wrapped[0] ?? 0
-  const kid = wrapped.subarray(1, 1 + kidLength).toString()
-  const master = keyring.keys.get(kid)
-  if (!master) {
-    // ⚠ LOUD. A body wrapped with a key we no longer hold is lost mail, and a
-    // rotation that dropped an old key too early is how it would happen.
-    throw new Error(`message body is wrapped with key ${kid}, which is not configured`)
-  }
-  const bodyKey = decrypt(master, wrapped.subarray(1 + kidLength), aad(ids))
+  const bodyKey = unwrapBodyKey(keyring, ids, wrappedKey)
   const plain = Bun.zstdDecompressSync(decrypt(bodyKey, record, aad(ids)))
   const parsed = JSON.parse(Buffer.from(plain).toString()) as unknown
   if (

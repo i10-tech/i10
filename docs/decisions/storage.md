@@ -198,10 +198,17 @@ another message.
 - **Deleting one email is deleting its key** (crypto-shredding). Retention
   deletes the row and the key together, so the body is unreadable at once; the
   pack goes when no row points into it (`sweepPacks`, same grace as objects).
-- `CONTENT_KEYS` is `kid:base64,...`, current first. Rotate by putting a new
-  key first and keeping the old ones until what they wrapped has expired.
+- `CONTENT_KEYS` is `kid:base64,...`, current first. To rotate, put a new key
+  first, deploy, and run the `rewrap-body-keys` job. It wraps every body key
+  again under the new key, so the old key can go the same day. The steps are
+  in encryption.md. The job changes only `body_key`. It never reads or writes
+  R2: a record is encrypted with its body key, and that key does not change.
 - ⚠ Losing the master keys loses every packed body. Keep a copy outside
   Doppler. A deleted body key survives in Postgres backups until they rotate.
+- ⚠ A re-wrap does not reach backups. After a leak, a database backup taken
+  before the re-wrap still holds body keys wrapped under the leaked key, until
+  that backup expires. Whoever has that backup and the leaked key can open
+  those bodies.
 
 **Reading stays one lookup.** Lists read metadata only. Opening an email is one
 Postgres read and, for a packed body, one ranged GET of just that body's bytes,

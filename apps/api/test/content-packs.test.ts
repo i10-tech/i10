@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { memoryStore, packKey, type ContentStore } from "../src/content/object-store.js"
 import { BodyCache, restoreContent, restorePacked } from "../src/content/packs.js"
-import { openBody, sealBody } from "../src/content/seal.js"
+import { bodyKeyUnder, openBody, rewrapBodyKey, sealBody } from "../src/content/seal.js"
 import { keyringFromEnv } from "../src/crypto/keyring.js"
 
 /**
@@ -79,6 +79,64 @@ describe("sealBody", () => {
     expect(() => openBody(keys, ids, fresh.record, fresh.wrappedKey)).toThrow(
       "wrapped with key k2",
     )
+  })
+})
+
+describe("rewrapBodyKey", () => {
+  const rotated = ring(`k2:${K2},k1:${K1}`)
+  const k2Only = ring(`k2:${K2}`)
+
+  it("moves a body key onto the current key, and the record opens as it was without the old key", () => {
+    const body = { html: "<p>before</p>", text: "before" }
+    const old = sealBody(keys, ids, body)
+    expect(bodyKeyUnder(old.wrappedKey)).toBe("k1")
+
+    const fresh = rewrapBodyKey(rotated, ids, old.wrappedKey)
+
+    expect(bodyKeyUnder(fresh)).toBe("k2")
+    expect(openBody(k2Only, ids, old.record, fresh)).toEqual(body)
+  })
+
+  it("will not move a key copied onto another message or another workspace", () => {
+    const old = sealBody(keys, ids, { html: "mine", text: null })
+    for (const other of [
+      { ...ids, messageId: crypto.randomUUID() },
+      { ...ids, tenantId: crypto.randomUUID() },
+    ]) {
+      expect(() => rewrapBodyKey(rotated, other, old.wrappedKey)).toThrow(
+        "does not open under key k1",
+      )
+    }
+  })
+
+  it("fails on a key it does not hold, and on a tampered or malformed value, with no key material", () => {
+    const old = sealBody(keys, ids, { html: "mine", text: null })
+    expect(() => rewrapBodyKey(k2Only, ids, old.wrappedKey)).toThrow(
+      "message body is wrapped with key k1, which is not configured",
+    )
+
+    const bad = Buffer.from(old.wrappedKey, "base64")
+    bad[bad.byteLength - 1] = bad[bad.byteLength - 1]! ^ 1
+    expect(() => rewrapBodyKey(rotated, ids, bad.toString("base64"))).toThrow(
+      /^message body key does not open under key k1$/,
+    )
+
+    expect(bodyKeyUnder("not a key")).toBeNull()
+    expect(() => rewrapBodyKey(rotated, ids, "not a key")).toThrow(
+      /^message body key is not well formed$/,
+    )
+  })
+
+  it("leaves a key already under the current kid as it is, once it opens", () => {
+    const current = sealBody(rotated, ids, { html: "after", text: null })
+    expect(rewrapBodyKey(rotated, ids, current.wrappedKey)).toBe(current.wrappedKey)
+    expect(() =>
+      rewrapBodyKey(
+        rotated,
+        { ...ids, messageId: crypto.randomUUID() },
+        current.wrappedKey,
+      ),
+    ).toThrow("does not open under key k2")
   })
 })
 

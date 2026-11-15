@@ -17,6 +17,7 @@
     "openapi": "bun scripts/generate-openapi.ts",
     "adopt-dkim": "bun scripts/adopt-dkim.ts",
     "reseal-secrets": "bun scripts/reseal-secrets.ts",
+    "rewrap-body-keys": "bun scripts/rewrap-body-keys.ts",
     "wrap-keys": "bun scripts/wrap-keys.ts",
     "workspace-roles": "bun scripts/workspace-roles.ts",
     "risk-admin": "bun src/risk-admin.ts"

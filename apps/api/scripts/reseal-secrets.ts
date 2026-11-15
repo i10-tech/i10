@@ -30,6 +30,7 @@ import {
   type Sealer,
 } from "../src/crypto/sealer.js"
 import { unlockEnv } from "../src/crypto/unlock.js"
+import { assertSeesEveryRow } from "./owner-role.js"
 
 type Sql = ReturnType<typeof postgres>
 
@@ -49,24 +50,6 @@ interface RetiringEntry {
   ciphertext: string
   [field: string]: unknown
 }
-
-/** Refuses a role that row level security would quietly filter. */
-async function assertSeesEveryRow(sql: Sql, table: string) {
-  const [schema, name] = table.split(".") as [string, string]
-  const [row] = await sql<{ ok: boolean }[]>`
-    select (c.relowner = r.oid or r.rolsuper or r.rolbypassrls) as ok
-      from pg_class c
-      join pg_namespace n on n.oid = c.relnamespace
-      join pg_roles r on r.rolname = current_user
-     where n.nspname = ${schema} and c.relname = ${name}`
-  if (!row?.ok) {
-    throw new Error(
-      `${current(sql)} cannot see every row of ${table}: run as the owner role (MIGRATE_DATABASE_URL)`,
-    )
-  }
-}
-
-const current = (sql: Sql) => sql.options.user
 
 export async function resealSecrets(
   sql: Sql,

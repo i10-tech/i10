@@ -12,7 +12,7 @@ storage.md.
 | `SEAL_KEYS`       | Webhook signing secrets and SQS keys, DKIM private keys, DNS credentials, SSO connection secrets and PKCE verifiers, SIEM keys | Yes, with the re-seal job            |
 | `TOKEN_KEYS`      | Mailbox download links, the DNS OAuth `state` and its PKCE verifier                                                            | Yes, keep the old key for 15 minutes |
 | `FEEDBACK_ID_KEY` | The per-workspace token in the Feedback-ID header                                                                              | Never                                |
-| `CONTENT_KEYS`    | Message bodies in R2 (storage.md)                                                                                              | Yes                                  |
+| `CONTENT_KEYS`    | Message bodies in R2 (storage.md)                                                                                              | Yes, with the re-wrap job            |
 
 `SEAL_KEYS`, `TOKEN_KEYS` and `CONTENT_KEYS` are keyrings: `kid:base64,kid:base64`.
 The first key is the current key. Each key is 32 random bytes
@@ -61,6 +61,34 @@ token for one use does not verify for another.
 
 The job is safe to stop and run again. It only rewrites a value that is still
 the one it read.
+
+## How to rotate `CONTENT_KEYS`
+
+Each message body has its own key. `CONTENT_KEYS` only wraps those keys, in
+`core.message_bodies.body_key`. The bodies in R2 do not change.
+
+1. Put a new key first in `CONTENT_KEYS`. Keep the old key after it.
+2. Deploy, and restart everything that reads `CONTENT_KEYS`: the API, the
+   worker and the content-store job. CronJobs read it when they next start. A
+   changed Doppler value does not reach a running pod by itself.
+   New bodies are then wrapped under the new key. Old bodies still open.
+3. Run the job, first as a dry run, then with `--apply`:
+   `MIGRATE_DATABASE_URL=... CONTENT_KEYS=... bun run --filter @i10/api rewrap-body-keys --apply`.
+   It needs the owner role, because it reads every workspace. It does not
+   need any R2 settings.
+4. Run the dry run again. It must show zero keys under the old kid and no
+   failures. With `--apply`, the job scans again at the end and exits 1 if
+   any key is still under an old kid or does not open.
+5. Remove the old key from `CONTENT_KEYS` and deploy.
+
+The job is safe to stop and run again, and safe to run while the API and the
+content-store job run. It only rewrites a key that is still the one it read.
+A key that does not open is listed by workspace id and message id and is not
+changed. Do not remove its old key until you know why it does not open.
+
+After a leak, the old key still opens body keys in database backups taken
+before step 3. Those bodies stay exposed to whoever has both until the
+backups expire.
 
 To rotate `TOKEN_KEYS`, put the new key first, deploy, wait 15 minutes, and
 remove the old key. Tokens live 15 minutes at most.
