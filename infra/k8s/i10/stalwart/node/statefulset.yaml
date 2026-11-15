@@ -78,7 +78,7 @@ spec:
       # before, just not for the one-second race.
       initContainers:
         - name: wait-for-db
-          image: stalwartlabs/stalwart:v1.0.3-alpine
+          image: stalwartlabs/stalwart:v1.1.0-alpine
           command:
             - sh
             - -c
@@ -102,7 +102,10 @@ spec:
 
       containers:
         - name: stalwart
-          image: stalwartlabs/stalwart:v1.0.3-alpine
+          # ⚠ 1.1.0 IS THE FIRST RELEASE WITH Stalwart Keep, and the init container
+          # above must stay on the same tag. See config/README.md, "Keep", for what
+          # the 1.0.3 to 1.1.0 jump changed for us (nothing that needs a setting).
+          image: stalwartlabs/stalwart:v1.1.0-alpine
           # ⚠ THE FLAG IS NOT OPTIONAL. Without --config the server looks
           # elsewhere, finds nothing, and enters bootstrap mode - serving a setup
           # wizard instead of mail.
@@ -207,6 +210,22 @@ spec:
               valueFrom:
                 secretKeyRef: { name: i10-stalwart-db-role, key: password }
 
+            # ⚠ THE CLUSTER SECRET OF STALWART KEEP, named by the plan's
+            # InMemoryStore as `KEEP_SECRET`. It is an explicit `env` entry and
+            # not `envFrom`: the Keep Secret also holds the member's private key,
+            # which no Stalwart process may see, and bootstrap.sh refuses a plan
+            # that names a variable the pod spec does not list.
+            #
+            # ⚠ NOT `optional`, AND THE Secret MUST EXIST BEFORE THIS MERGES. A
+            # StatefulSet deletes the old pod before it starts the new one, so a
+            # missing `i10-stalwart-keep` leaves the node in
+            # CreateContainerConfigError with nothing serving. Keep's own sync
+            # wave (keep.yaml) holds the roll until the Secret exists, but the
+            # Doppler values are still created first (config/README.md, "Keep").
+            - name: KEEP_SECRET
+              valueFrom:
+                secretKeyRef: { name: i10-stalwart-keep, key: KEEP_CLUSTER_SECRET }
+
           resources:
             requests: { cpu: 200m, memory: 512Mi }
             limits: { memory: 1Gi }
@@ -217,6 +236,10 @@ spec:
             # readOnlyRootFilesystem means anything written outside those two
             # paths needs a writable volume of its own.
             - { name: tmp, mountPath: /tmp }
+            # ⚠ NOT UNDER /etc/stalwart. That is a read-only ConfigMap mount, and
+            # a volume cannot be nested inside one. The plan's InMemoryStore names
+            # these two paths.
+            - { name: keep, mountPath: /etc/stalwart-keep, readOnly: true }
 
           # ⚠ HTTP, NOT tcpSocket. A TCP probe against the mail ports reports
           # healthy for a server that is accepting connections and failing every
@@ -351,6 +374,21 @@ spec:
             name: i10-stalwart-config
         - name: tmp
           emptyDir: {}
+        # ⚠ ONE NODE KEY FOR BOTH NODES, AND ONLY THE TWO FILES A NODE NEEDS. The
+        # store's `keyPath` is shared configuration, so every node reads the same
+        # path; the docs allow a key per node there, but that needs a Secret per
+        # StatefulSet and buys nothing here. Both pods run the same image with
+        # the same Secrets and the same trust, so one key means one entry in
+        # Keep's clients.pem and no way to tell the nodes apart on the wire. If a
+        # node ever needs revoking on its own, split the key then. `items` keeps
+        # the member's private key, which sits in the same Secret, out of the pod.
+        - name: keep
+          secret:
+            secretName: i10-stalwart-keep
+            defaultMode: 0440
+            items:
+              - { key: KEEP_NODE_KEY, path: node.key }
+              - { key: KEEP_SERVERS_PEM, path: servers.pem }
 
   # Metadata lives in Postgres and blobs in R2, so this volume holds only what
   # the server keeps locally. It is small on purpose; growing it is not the

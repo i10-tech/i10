@@ -8,6 +8,9 @@ resources:
   # only), both built from node/statefulset.yaml. See internal/kustomization.yaml.
   - node
   - internal
+  # Stalwart Keep, the in-memory store and coordinator the nodes move to. Redis
+  # stays below until the cutover is verified (config/README.md, "Keep").
+  - keep.yaml
   - redis.yaml
   # Stalwart's own recursive resolver, so blocklist queries are not refused (B2).
   - resolver
@@ -41,3 +44,14 @@ configMapGenerator:
   - name: i10-stalwart-apply
     files:
       - bootstrap.sh
+  # ⚠ KEEP'S OWN CONFIG, HASHED FOR THE SAME REASON AND WITH A HIGHER STAKE. Keep
+  # reads keep.toml only at start, so a plain ConfigMap would change the file
+  # under a running pod and surprise the next restart. A new name rolls it now, as
+  # a deliberate act, and a roll costs the ten minute lock quarantine described in
+  # keep.yaml. The wave is what lets it exist before the Deployment that needs it.
+  - name: i10-stalwart-keep-config
+    files:
+      - config/keep.toml
+    options:
+      annotations:
+        argocd.argoproj.io/sync-wave: "-1"

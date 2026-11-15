@@ -78,8 +78,8 @@ kubectl -n i10-prod create secret generic doppler-token-i10-root \
   --from-literal=serviceToken='dp.st.prod.…'
 ```
 
-One per config: `root`, `api`, `console`, `auth`, `stalwart`, `bulwark`,
-`platform`. They live in `i10-prod` rather than `doppler-operator-system`
+One per config: `root`, `api`, `console`, `auth`, `stalwart`, `stalwart-keep`,
+`bulwark`, `platform`. They live in `i10-prod` rather than `doppler-operator-system`
 because a `tokenSecret` must share a namespace with the `DopplerSecret` naming
 it, and the `i10` AppProject cannot create objects outside `i10-*`. Following
 PSL's one-namespace convention would mean a PSL-repo commit per i10 workload.
