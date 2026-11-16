@@ -2,8 +2,8 @@
 #
 # ⚠ WITHOUT THIS THE SCALEDOBJECT IS PERMANENTLY `READY: False`, AND THE ERROR
 # NAMES THE WRONG LAYER. `i10-prod` carries `default-deny-ingress`, and the
-# allows are for `cnpg-system`, `i10-prod` itself and `traefik` - KEDA runs in
-# `keda` and matches none of them. Its polls are dropped, and what KEDA reports
+# namespace-wide allows are for `cnpg-system` and `traefik` - KEDA runs in
+# `keda` and matches neither. Its polls are dropped, and what KEDA reports
 # is:
 #
 #     dial tcp 10.43.98.149:80: connect: connection refused
@@ -53,3 +53,145 @@ spec:
         # naming 80 here would match nothing and drop exactly what it means to
         # allow.
         - { protocol: TCP, port: 3001 }
+---
+# Who may talk to whom inside i10-prod. The policies below are the whole list.
+#
+# ⚠ THESE RULES BIND ONLY SINCE `allow-same-namespace` WAS REMOVED FOR i10-prod
+# IN THE PSL REPO (2026-11-16). Until then that rule let every pod reach every
+# port, and policies only add, so nothing here narrowed anything. Now a flow
+# missing from these files is dropped silently, with nothing in any log: add the
+# rule here, in the same change that adds the caller.
+#
+# `app.kubernetes.io/part-of: i10-api` is the group of pods that run the API
+# image with the `i10-api` Secret: the API, the worker, every CronJob in this
+# directory and the check-env hook. Not the migration Job, which holds only the
+# database owner's credentials and is admitted to Postgres by its own name.
+#
+# ⚠ `ports` IS THE CONTAINER PORT, as in allow-keda-metrics above. The Service
+# port is rewritten before the policy sees the packet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-redis
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-api
+      ports:
+        - { protocol: TCP, port: 6379 }
+---
+# The API's in-cluster callers: the two Next.js apps server-side, and both
+# Stalwart pods (the WebHook and MtaHook in plan.ndjson, and authd's
+# AUTHD_API_URL for LDAP pass-through). KEDA has its own rule above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-internal-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-auth
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-console
+        # part-of, to take the internal node as well as the edge one.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-stalwart
+      ports:
+        - { protocol: TCP, port: 3001 }
+---
+# Only the two pods that set TEMPLATE_RENDERER_URL (api.yaml, worker.yaml). The
+# CronJobs do not set it, so they have no reason to reach the sandbox.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: template-renderer-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-template-renderer
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-worker
+      ports:
+        - { protocol: TCP, port: 8787 }
+---
+# Everything that names i10-platform-pooler: the API group, PowerDNS (it reads
+# the zones the API writes) and both Stalwart pods (Stalwart's stores, authd,
+# and the wait-for-db init container, which share the pod's labels).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pooler-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/poolerName: i10-platform-pooler
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-powerdns
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-stalwart
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+# Postgres itself: the pooler, and the migration Job, which goes to the primary
+# on purpose (`uri` in i10-platform-app is i10-platform-rw; see api.yaml).
+# The CNPG operator is admitted by allow-cnpg-operator in the psl repo.
+#
+# ⚠ THE CLUSTER'S OWN PODS ARE LISTED FOR REPLICATION. There is one instance
+# today, so nothing uses it, but without it raising `instances` would leave the
+# replica unable to stream from the primary.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: i10-platform
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/poolerName: i10-platform-pooler
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-api-migrate
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: i10-platform
+      ports:
+        - { protocol: TCP, port: 5432 }

@@ -45,6 +45,9 @@ spec:
       # `Forbid` cannot turn one stuck pod into a reconcile that never runs again.
       activeDeadlineSeconds: 300
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: i10-api
         spec:
           restartPolicy: Never
           containers:

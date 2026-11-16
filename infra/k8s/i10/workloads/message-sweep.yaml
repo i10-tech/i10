@@ -63,6 +63,9 @@ spec:
       # Sentry reports it as missed rather than as nothing at all.
       activeDeadlineSeconds: 240
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: i10-api
         spec:
           restartPolicy: Never
           containers:

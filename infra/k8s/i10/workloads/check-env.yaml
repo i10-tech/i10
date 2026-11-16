@@ -41,6 +41,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: i10-api-check-env
+        app.kubernetes.io/part-of: i10-api
     spec:
       restartPolicy: Never
       containers:

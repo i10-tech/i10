@@ -6,9 +6,9 @@ import type { Logger } from "../webhooks/events.js"
 /**
  * Stalwart's MTA hook for mailbox submissions (B5, #380).
  *
- * ⚠ CLUSTER-INTERNAL, BUT THAT IS NOT AUTHENTICATION. Every pod in i10-prod can
- * reach the API (`allow-same-namespace`), and this endpoint decides whether a
- * workspace's people may send mail. Stalwart presents the shared secret as a
+ * ⚠ CLUSTER-INTERNAL, BUT THAT IS NOT AUTHENTICATION. The auth and console pods
+ * can reach the API as well as Stalwart (`api-internal-clients`), and this
+ * endpoint decides whether a workspace's people may send mail. Stalwart presents the shared secret as a
  * Bearer token (`httpAuth` on the MtaHook); nothing is read before it matches.
  *
  * ⚠ THE STATUS CODES ARE THE FAILURE MODE. Stalwart treats any non-2xx, a

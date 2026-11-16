@@ -98,8 +98,8 @@ spec:
 # holds if a template gets out of its isolate. celld's own node traffic is on
 # loopback, which a NetworkPolicy does not touch.
 #
-# Ingress needs nothing here: `i10-prod` already admits its own pods, and the
-# bearer secret is what decides who may compile.
+# Ingress is `template-renderer-clients` in networkpolicy.yaml (the API and the
+# worker only); the bearer secret still decides who may compile.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

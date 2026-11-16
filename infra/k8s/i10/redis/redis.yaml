@@ -72,10 +72,10 @@ spec:
       containers:
         - name: redis
           image: redis:8.10-alpine
-          # ⚠ THE PASSWORD IS THE ONLY THING BETWEEN THE NAMESPACE AND THE
-          # QUEUES. `allow-same-namespace` lets every pod in i10-prod reach
-          # 6379, so without `requirepass` the console, the docs site and the
-          # mail servers could all read and write jobs.
+          # ⚠ TWO LAYERS IN FRONT OF THE QUEUES. `redis-clients`
+          # (workloads/networkpolicy.yaml) admits only the API group to 6379,
+          # and this password is the second layer, for the day a policy is
+          # widened by mistake.
           #
           # It comes from Doppler `prod_api` (REDIS_PASSWORD), the same value
           # that REDIS_URL carries for the API, the worker and the CronJobs.

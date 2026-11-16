@@ -646,8 +646,9 @@ const schema = z.object({
    * sends only autoconfig, autodiscover and MTA-STS to the pod, and the network
    * policy's own comment says 8080 is left out "because the management API
    * belongs behind Traefik". Every management path answers 404 from outside.
-   * `i10-prod` is an allowed source namespace, so the reconcile job reaches it
-   * at `http://i10-stalwart:8080`.
+   * The `stalwart-http-clients` policy admits the API, the worker and the
+   * CronJobs on 8080, so the reconcile job reaches it at
+   * `http://i10-stalwart:8080`.
    *
    * ⚠ OPTIONAL, AND ITS ABSENCE SKIPS THE SAMPLE RATHER THAN ZEROING IT. A
    * deployment that cannot ask the mail server must leave the last figure

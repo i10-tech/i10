@@ -24,14 +24,11 @@
 # activeDeadlineSeconds ends the Job whatever it is doing. backoffLimit 1 lets a
 # node that was mid-restart answer the second time, and no more.
 #
-# ⚠ NO NetworkPolicy WAS ADDED, AND THAT WAS CHECKED RATHER THAN ASSUMED. The
-# namespace denies ingress by default and re-admits `allow-same-namespace` - every
-# pod in i10-prod, every port - which is what lets this Job reach 8080, 25 and
-# 465 on the pods. Policies are additive, so a narrower rule here would change
-# nothing, and the Job has no Service and accepts no connection. There is no
-# egress policy on it. What the network does cost is the first second or two: a
-# new pod's address is dropped until kube-router admits it, which the script's
-# wait rides out.
+# ⚠ ITS LABEL IS ITS NETWORK ACCESS. `stalwart-http-clients` (networkpolicy.yaml)
+# admits `name: i10-stalwart-apply` to 8080 on both nodes; 25 and 465 are open
+# to every source through allow-public-mail. Rename the label and the Job can
+# reach neither node. The first second or two of a new pod's address is dropped
+# until kube-router admits it, which the script's wait rides out.
 ---
 apiVersion: v1
 kind: ServiceAccount

@@ -111,6 +111,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: i10-api
+        app.kubernetes.io/part-of: i10-api
     spec:
       containers:
         - name: api
