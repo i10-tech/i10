@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 import { randomUUID } from "node:crypto"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { Worker } from "groupmq"

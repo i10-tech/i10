@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Applies pending Drizzle migrations, then exits.
  *

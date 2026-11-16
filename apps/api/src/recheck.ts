@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Re-checks whether verified domains are still their holders', then exits.
  *

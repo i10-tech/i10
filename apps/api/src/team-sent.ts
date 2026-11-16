@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Copies what members sent as a team address into the team's own Sent, then
  * exits.

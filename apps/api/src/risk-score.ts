@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Scores workspaces for abuse risk and acts on the result, then exits (#170).
  *
