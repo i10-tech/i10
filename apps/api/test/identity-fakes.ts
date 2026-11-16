@@ -182,6 +182,19 @@ export function memoryStore(
           })),
         }))
     },
+    // This world has no SCIM directories, so only OIDC connections count.
+    async dueExpiryTenants(after, limit) {
+      return [
+        ...new Set(
+          [...connections.values()]
+            .filter((c) => c.protocol === "oidc")
+            .map((c) => c.tenantId),
+        ),
+      ]
+        .filter((t) => after === null || t > after)
+        .sort()
+        .slice(0, limit)
+    },
     async createConnection(tenantId, input) {
       const made = connection({
         id: id(),

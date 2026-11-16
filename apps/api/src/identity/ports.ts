@@ -212,6 +212,12 @@ export interface IdentityStore {
   connections(
     tenantId: string,
   ): Promise<(Connection & { domains: ConnectionDomain[] })[]>
+  /**
+   * Workspaces with an OIDC connection or a SCIM directory, for the daily
+   * expiry pass, in tenant id order after `after` (a SECURITY DEFINER
+   * function: tenant ids only, nothing else of any workspace's).
+   */
+  dueExpiryTenants(after: string | null, limit: number): Promise<string[]>
   createConnection(
     tenantId: string,
     input: { name: string; protocol: Protocol; provider: string; createdBy: string },
