@@ -47,7 +47,7 @@ spec:
       containers:
         # Mirrors the `api` container in api.yaml: keep envFrom and env identical.
         - name: api
-          image: ghcr.io/i10-tech/i10-api:prod-83033cc06504a6392d53a73d481d99148875d090@sha256:ac803c553dd46f1152538d1521e6ec6f9f5a53490acd0d387e2bbe3878de2912
+          image: ghcr.io/i10-tech/i10-api:prod-d5c644675e138859aa216125101f0cac6bb971ca@sha256:3ce67abf1ea017b58d2394ac2195a2d2de5cd9ea0d8cea9375dde83ba123ad8c
           imagePullPolicy: Always
           command: ["bun", "dist/check-env.js"]
           envFrom:
@@ -85,7 +85,7 @@ spec:
             capabilities: { drop: ["ALL"] }
         # Mirrors the `worker` container in worker.yaml: keep envFrom and env identical.
         - name: worker
-          image: ghcr.io/i10-tech/i10-api:prod-83033cc06504a6392d53a73d481d99148875d090@sha256:ac803c553dd46f1152538d1521e6ec6f9f5a53490acd0d387e2bbe3878de2912
+          image: ghcr.io/i10-tech/i10-api:prod-d5c644675e138859aa216125101f0cac6bb971ca@sha256:3ce67abf1ea017b58d2394ac2195a2d2de5cd9ea0d8cea9375dde83ba123ad8c
           imagePullPolicy: Always
           command: ["bun", "dist/check-env.js"]
           envFrom:
