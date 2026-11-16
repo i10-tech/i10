@@ -1,6 +1,7 @@
 import type { Hono } from "hono"
 import { mailboxAddressSchema, setMailboxStorageSchema } from "@repo/contracts"
 import type { ConsoleDeps } from "./deps.js"
+import { freshAuthRefusal } from "../../middleware/session.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
 import type { MailboxStorageRow } from "../../mailboxes/allocation.js"
 
@@ -61,6 +62,12 @@ export function mountMailboxStorage(app: Hono, d: ConsoleDeps): void {
     const { userId, orgId } = c.get("user")
     if (!(await isAdmin(tenantId, userId, orgId)))
       return c.json(forbidden("Only an admin can allocate storage."), 403)
+
+    // ⚠ STEP-UP AFTER THE ROLE CHECK, so a member is told no rather than asked
+    // to re-authenticate. A share given or taken away changes what an inbox can
+    // receive, and a stolen cookie could otherwise starve every other inbox.
+    const stale = await freshAuthRefusal(c)
+    if (stale) return stale
 
     const parsed = setMailboxStorageSchema.safeParse(await readJson(c))
     if (!parsed.success) {
