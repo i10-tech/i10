@@ -26,7 +26,13 @@ import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { createInvitationQueue, invitationScheduler } from "./queue/invitation-queue.js"
 import { createMailboxQueue, enqueueMailboxJob } from "./queue/mailbox-queue.js"
-import { canAccessMailbox, mailboxJobStore } from "./mailboxes/jobs.js"
+import {
+  canAccessMailbox,
+  mailboxJobStore,
+  startMailboxExport,
+} from "./mailboxes/jobs.js"
+import { mailboxAdminLifecycle } from "./mailboxes/lifecycle.js"
+import { mailboxLifecycleStore } from "./mailboxes/lifecycle-store.js"
 import { memberStore } from "./console/members-db.js"
 import { roleStore } from "./console/roles-db.js"
 import {
@@ -1688,6 +1694,33 @@ const mailDeps: DirectoryMailDeps = {
   log,
 }
 const mailLifecycle = mailboxLifecycle(mailDeps)
+
+/*
+ * An owner or admin's suspend, resume, delete and restore of one mailbox. The
+ * purge that ends a deletion runs in the retention CronJob (retention.ts), not here.
+ *
+ * ⚠ `startExport` IS NULL WITHOUT THE OBJECT STORE'S KEYS OR THE QUEUE, and then
+ * `export_then_delete` is refused up front: a deletion that waits for an export
+ * nothing can make would never be purged.
+ */
+const mailboxLifecycleAdmin = mailboxAdminLifecycle({
+  store: mailboxLifecycleStore(db),
+  mail: mailStore,
+  resume: mailDeps,
+  isAdmin: (tenantId, userId) => canAllocateStorage(userId, tenantId),
+  startExport:
+    contentStore?.objectKeys && mailboxMigrationQueue
+      ? (input) =>
+          startMailboxExport(
+            {
+              jobs: mailboxJobStore(db),
+              enqueue: (data) => enqueueMailboxJob(mailboxMigrationQueue, data),
+            },
+            input,
+          )
+      : null,
+  log,
+})
 const scimBaseUrl = (directoryId: string) => `${env.SCIM_BASE_URL}/${directoryId}`
 /*
  * Google Workspace directory sync (#343): domain-wide delegation with our own
@@ -2646,6 +2679,7 @@ const app = createApp({
         canAllocateStorage(userId, tenantId),
       isMember: isWorkspaceMember,
     },
+    mailboxLifecycle: mailboxLifecycleAdmin,
     mailboxes: consoleMailboxes({
       store: consoleMailboxStore(db),
       roles: roleRows,

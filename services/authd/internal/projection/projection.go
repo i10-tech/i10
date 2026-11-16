@@ -44,6 +44,14 @@ type Account struct {
 	// row as the bind and acted on ahead of the credential cache.
 	PaymentHold bool
 
+	// Deleting is true while an owner or admin has the mailbox in its deletion
+	// grace (`authd.accounts.deleting_at`): the mailbox keeps receiving mail until
+	// the purge, and NO BIND succeeds until a restore. Its own column and not
+	// Suspended, because every resume path clears `suspended_at` and a deletion
+	// must survive all of them. Read from the bind's row and acted on ahead of the
+	// credential cache, like the others.
+	Deleting bool
+
 	// Banned and Locked are Clerk's own flags for the user, projected by the
 	// webhook. ⚠ CLERK'S verify_password ANSWERS YES FOR BOTH (probed against its
 	// dev instance 2026-11-07, see `authd.accounts.banned` in apps/api/src/db/

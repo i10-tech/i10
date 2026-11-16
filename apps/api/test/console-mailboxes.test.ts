@@ -284,6 +284,8 @@ function makeMailboxRow(
     ownerName: null,
     ownerEmail: overrides.address,
     active: true,
+    deleting: false,
+    deletion: null,
     suspended: false,
     paymentHold: false,
     domainOff: false,
@@ -494,6 +496,7 @@ describe("GET /console/mailboxes and GET /console/mailboxes/:address", () => {
         },
         domain: "acme.test",
         status: "active",
+        deletion: null,
         signIn: "password",
         aliases: [
           { address: "ada@acme.test", source: "clerk" },

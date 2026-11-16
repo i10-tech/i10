@@ -4,6 +4,7 @@ import { withTenant } from "../db/client.js"
 import { accounts } from "../db/schema.js"
 import { mailboxJobs, tenants } from "../db/core.js"
 import type { TokenKeys } from "../crypto/token-keys.js"
+import type { MailboxJobData } from "../queue/mailbox-queue.js"
 
 /**
  * Who may move a mailbox's mail, and where the jobs that do it are kept (#385).
@@ -175,6 +176,42 @@ export interface MailboxJobStore {
     jobId: string,
     patch: MailboxJobPatch,
   ): Promise<MailboxJobRow | null>
+}
+
+/**
+ * Queues an export of the mailbox, or returns the one already running.
+ *
+ * ⚠ ONE START, TWO CALLERS: the export route and a mailbox's deletion with
+ * `export_then_delete` (mailboxes/lifecycle.ts). Both must mean the same thing by
+ * "an export is running", or a second click and a deletion would each queue one.
+ * The caller has already decided that the person may ask: this is only the queue.
+ */
+export async function startMailboxExport(
+  d: {
+    jobs: Pick<MailboxJobStore, "latest" | "insert">
+    enqueue: (data: MailboxJobData) => Promise<unknown>
+  },
+  input: { tenantId: string; address: string; requestedBy: string },
+): Promise<MailboxJobRow> {
+  const address = input.address.trim().toLowerCase()
+  const current = await d.jobs.latest(input.tenantId, address, "export")
+  if (current && (current.status === "pending" || current.status === "running")) {
+    return current
+  }
+  const job = await d.jobs.insert({
+    tenantId: input.tenantId,
+    mailboxAddress: address,
+    type: "export",
+    requestedBy: input.requestedBy,
+    status: "pending",
+  })
+  await d.enqueue({
+    jobId: job.id,
+    tenantId: input.tenantId,
+    mailboxAddress: address,
+    type: "export",
+  })
+  return job
 }
 
 /**

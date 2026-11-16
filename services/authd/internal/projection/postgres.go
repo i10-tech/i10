@@ -91,7 +91,8 @@ const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
 	          AND rd.tenant_id = a.tenant_id
 	          AND ex.clerk_user_id = a.clerk_user_id),
-		core.mailbox_domain_refused(a.tenant_id, lower(split_part(a.email, '@', 2)))`
+		core.mailbox_domain_refused(a.tenant_id, lower(split_part(a.email, '@', 2))),
+	(a.deleting_at IS NOT NULL)`
 
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
@@ -195,7 +196,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
 			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
 			&a.Managed, &a.ManagedConnection, &a.Suspended, &a.PaymentHold,
-			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt, &a.DomainNotHosted); err != nil {
+			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt, &a.DomainNotHosted, &a.Deleting); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}
 		out = append(out, a)

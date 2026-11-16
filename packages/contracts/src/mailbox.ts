@@ -87,6 +87,55 @@ export const mailboxCreationSettingsSchema = z.object({
 
 export const setMailboxCreationSchema = mailboxCreationSettingsSchema
 
+/** How long a deleted mailbox can be restored, in days. Then it is purged. */
+export const MAILBOX_DELETE_GRACE_DAYS = 30
+
+/**
+ * What happens to the address and its mail when an owner or admin deletes a
+ * mailbox. Sign-in stops at once for all three, and each can be restored for
+ * `MAILBOX_DELETE_GRACE_DAYS`.
+ *
+ *   - `delete`: after the grace the account, its mail and the address go.
+ *   - `export_then_delete`: an export of the mail is started now, and the purge
+ *     waits until it has finished and its download has been available for its
+ *     whole retention.
+ *   - `forward`: after the grace the address stays and delivers to another
+ *     mailbox of the workspace (`forward_to`).
+ */
+export const mailboxDeletionOutcomeSchema = z.enum([
+  "delete",
+  "export_then_delete",
+  "forward",
+])
+
+export const deleteMailboxSchema = z
+  .object({
+    outcome: mailboxDeletionOutcomeSchema,
+    /**
+     * Forward only: the address of the mailbox that receives this one's mail.
+     *
+     * ⚠ AN ADDRESS, AS EVERY MAILBOX ROUTE NAMES ONE. Whether it is a live
+     * mailbox of this workspace is the route's question, not this schema's.
+     */
+    forward_to: mailboxAddressSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.outcome === "forward" && !value.forward_to) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["forward_to"],
+        message: "forward_to is required when the outcome is forward.",
+      })
+    }
+    if (value.outcome !== "forward" && value.forward_to) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["forward_to"],
+        message: "forward_to is only allowed when the outcome is forward.",
+      })
+    }
+  })
+
 export const mailboxSchema = z.object({
   object: z.literal("mailbox"),
   address: z.string(),
@@ -206,6 +255,8 @@ export const mailboxJobSchema = z.object({
 
 export type CreateMailbox = z.infer<typeof createMailboxSchema>
 export type AdminCreateMailbox = z.infer<typeof adminCreateMailboxSchema>
+export type MailboxDeletionOutcome = z.infer<typeof mailboxDeletionOutcomeSchema>
+export type DeleteMailbox = z.infer<typeof deleteMailboxSchema>
 export type MailboxCreationMode = z.infer<typeof mailboxCreationModeSchema>
 export type MailboxCreationSettings = z.infer<typeof mailboxCreationSettingsSchema>
 export type Mailbox = z.infer<typeof mailboxSchema>

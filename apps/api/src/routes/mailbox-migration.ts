@@ -9,6 +9,7 @@ import { unwrapKey } from "../crypto/envelope.js"
 import type { TokenKeys } from "../crypto/token-keys.js"
 import {
   signDownloadToken,
+  startMailboxExport,
   UPLOAD_TTL_S,
   verifyDownloadToken,
   type MailboxAccessResult,
@@ -204,23 +205,10 @@ mailboxMigration.openapi(startExport, async (c) => {
   const tenantId = access.tenantId!
 
   // One at a time: a second request while one runs is the same request.
-  const current = await deps.jobs.latest(tenantId, mailbox, "export")
-  if (current && (current.status === "pending" || current.status === "running")) {
-    return c.json(formatJob(current), 202)
-  }
-
-  const job = await deps.jobs.insert({
+  const job = await startMailboxExport(deps, {
     tenantId,
-    mailboxAddress: mailbox,
-    type: "export",
+    address: mailbox,
     requestedBy: userId,
-    status: "pending",
-  })
-  await deps.enqueue({
-    jobId: job.id,
-    tenantId,
-    mailboxAddress: mailbox,
-    type: "export",
   })
   return c.json(formatJob(job), 202)
 })

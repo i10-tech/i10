@@ -1,0 +1,468 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "d02cc39b-1677-422c-8929-683b696169e9",
+  "prevIds": [
+    "819ac5fd-71a1-4100-b525-4b1dc657e747"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_deletions"
+      ],
+      "writes": [
+        "s|tbl|core.mailbox_deletions",
+        "n|tbl|core.mailbox_deletions",
+        "e|tbl|core.mailbox_deletions",
+        "n|rel|core.mailbox_deletions",
+        "n|type|core.mailbox_deletions",
+        "n|rel|core.mailbox_deletions_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "deleting_at"
+      ],
+      "writes": [
+        "s|col|authd.accounts.deleting_at",
+        "n|col|authd.accounts.deleting_at",
+        "e|col|authd.accounts.deleting_at"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "accounts",
+        "accounts_deleting_idx"
+      ],
+      "writes": [
+        "s|idx|authd.accounts_deleting_idx",
+        "n|idx|authd.accounts_deleting_idx",
+        "e|idx|authd.accounts_deleting_idx",
+        "n|rel|authd.accounts_deleting_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd",
+        "n|col|authd.accounts.deleting_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "mailbox_deletions",
+        "mailbox_deletions_forward_idx"
+      ],
+      "writes": [
+        "s|idx|core.mailbox_deletions_forward_idx",
+        "n|idx|core.mailbox_deletions_forward_idx",
+        "e|idx|core.mailbox_deletions_forward_idx",
+        "n|rel|core.mailbox_deletions_forward_idx"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_deletions",
+        "n|sch|core",
+        "n|col|core.mailbox_deletions.tenant_id",
+        "n|col|core.mailbox_deletions.forward_user_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_deletions"
+      ],
+      "writes": [
+        "s|fk|core.mailbox_deletions.mailbox_deletions_tenant_id_tenants_id_fkey",
+        "n|fk|core.mailbox_deletions.mailbox_deletions_tenant_id_tenants_id_fkey",
+        "e|fk|core.mailbox_deletions.mailbox_deletions_tenant_id_tenants_id_fkey",
+        "n|con|core.mailbox_deletions.mailbox_deletions_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_deletions",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.mailbox_deletions.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_deletions"
+      ],
+      "writes": [
+        "s|pol|core.mailbox_deletions.mailbox_deletions_workspace",
+        "n|pol|core.mailbox_deletions.mailbox_deletions_workspace",
+        "e|pol|core.mailbox_deletions.mailbox_deletions_workspace"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_deletions",
+        "n|sch|core",
+        "e|rls|core.mailbox_deletions"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "mailbox_deletions",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "deleting_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "clerk_user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "address",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "outcome",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "forward_user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "forward_address",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "requested_by",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "deleting_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "purge_after",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "accounts_deleting_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "deleting_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"deleting_at\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "mailbox_deletions_forward_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "forward_user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"forward_user_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "mailbox_deletions_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "mailbox_deletions_pkey",
+        "columns": [
+          "tenant_id",
+          "clerk_user_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "mailbox_deletions_outcome_check",
+        "value": "\"outcome\" in ('delete', 'export_then_delete', 'forward')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "mailbox_deletions_forward_check",
+        "value": "((\"outcome\" = 'forward') = (\"forward_user_id\" is not null)) and ((\"outcome\" = 'forward') = (\"forward_address\" is not null))",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "mailbox_deletions_due_check",
+        "value": "\"purge_after\" >= \"deleting_at\"",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_deletions",
+        "name": "mailbox_deletions_workspace",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"mailbox_deletions\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"mailbox_deletions\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

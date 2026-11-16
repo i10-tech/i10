@@ -113,6 +113,10 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
       // against the same snapshot: asking sequentially leaves a window where an
       // address is free in the first query and claimed as an alias before the
       // second, which is exactly the race this check exists to lose safely.
+      // ⚠ AND A LIST'S ADDRESS, THE THIRD HALF. A deleted mailbox that was set to
+      // forward keeps its address as a list (`fwd-<id>`, mailboxes/lifecycle.ts)
+      // whose only member is where its mail goes, so a new person who took that
+      // address would have their mail copied to somebody else.
       const rows = await union(
         db
           .select({ address: accounts.email })
@@ -122,6 +126,10 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
           .select({ address: aliases.address })
           .from(aliases)
           .where(eq(aliases.address, address)),
+        db
+          .select({ address: sql<string>`${groups.email}`.as("address") })
+          .from(groups)
+          .where(eq(groups.email, address)),
       ).limit(1)
 
       return rows.length > 0
@@ -142,6 +150,11 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
      * authd's every query filters on it, so a mailbox is invisible - no bind,
      * no delivery - until this runs. It is deliberately not part of the
      * projection's upsert, which must never touch it.
+     *
+     * ⚠ NEVER A MAILBOX IN ITS DELETION GRACE. The purge turns `active` off before
+     * it destroys the Stalwart account, so that nothing re-creates it; a directory
+     * push that provisioned the same person in that window would turn it back on.
+     * No row comes back, which `provisionForDirectory` reads as the person being gone.
      */
     async activate(userId, displayName) {
       const name = displayName?.trim() || undefined
@@ -152,7 +165,7 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
           ...(name !== undefined ? { displayName: name } : {}),
           updatedAt: sql`now()`,
         })
-        .where(eq(accounts.clerkUserId, userId))
+        .where(and(eq(accounts.clerkUserId, userId), isNull(accounts.deletingAt)))
         .returning()
 
       return row ? toMailbox(row) : null
@@ -196,7 +209,7 @@ const domainOfEmail = sql`lower(split_part(${accounts.email}, '@', 2))`
  * ⚠ BOTH SUBQUERIES ARE UNCORRELATED, so Postgres reads `core.mailbox_domains()`
  * once per statement and not once per account.
  */
-const inWorkspace = (tenantId: string) =>
+export const inWorkspace = (tenantId: string) =>
   or(
     sql`${domainOfEmail} in (
       select lower(name) from core.mailbox_domains() where tenant_id = ${tenantId}::uuid

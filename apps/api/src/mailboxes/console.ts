@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { directoryUsers } from "../db/identity.js"
+import { mailboxDeletions } from "../db/core.js"
 import { aliases, mailboxUsage } from "../db/schema.js"
 import { can, type RoleStore } from "../console/roles.js"
 import { passthroughFor } from "../identity/ldap.js"
@@ -40,7 +41,7 @@ export type MailboxStatus = (typeof MAILBOX_STATUSES)[number]
 export type MailboxSignInLane = "password" | "oidc" | "ldap" | "off"
 
 export interface MailboxStatusInput {
-  /** Reserved slot for mailbox deletion (later step); never produced yet. */
+  /** `authd.accounts.deleting_at is not null`: in the 30 day deletion grace. */
   deleting?: boolean | undefined
   /** `authd.accounts.suspended_at is not null` */
   suspended: boolean
@@ -66,7 +67,7 @@ export interface MailboxStatusInput {
  * Pure status derivation for a workspace mailbox, first match wins.
  *
  * The order matches what `services/authd/internal/ldapsrv/bind.go` refuses:
- * 1. `deleting` - reserved slot at the top for mailbox deletion.
+ * 1. `deleting` - `refusedByRow` case 1 (`Deleting`, `deleting_at`).
  * 2. `suspended` - checked in `handleBind` (`bind.go:105`) before `refusedByRow`.
  * 3. `payment_hold` - `refusedByRow` case 1 (`bind.go:210`).
  * 4. `domain_off` - `refusedByRow` case 2 (`bind.go:212`, `DomainNotHosted`).
@@ -131,12 +132,25 @@ export interface ConsoleMailboxStorage {
   usedAt: string | null
 }
 
+/** A mailbox in its deletion grace: what was chosen and when it ends. */
+export interface ConsoleMailboxDeletion {
+  outcome: "delete" | "export_then_delete" | "forward"
+  /** When it was deleted. */
+  deletedAt: string
+  /** The last moment it can be restored, and when it is purged (an export may delay that). */
+  purgeAt: string
+  /** Forward only: where the address's mail goes. */
+  forwardTo: string | null
+}
+
 export interface ConsoleMailbox {
   address: string
   displayName: string | null
   owner: ConsoleMailboxOwner
   domain: string
   status: MailboxStatus
+  /** Present exactly while `status` is `deleting`. */
+  deletion: ConsoleMailboxDeletion | null
   signIn: MailboxSignInLane
   aliases: ConsoleMailboxAlias[]
   storage: ConsoleMailboxStorage
@@ -151,6 +165,8 @@ export interface StoredConsoleMailboxRow {
   ownerName: string | null
   ownerEmail: string | null
   active: boolean
+  deleting: boolean
+  deletion: ConsoleMailboxDeletion | null
   suspended: boolean
   paymentHold: boolean
   domainOff: boolean
@@ -222,6 +238,7 @@ interface RawAccountRow extends Record<string, unknown> {
   display_name: string | null
   active: boolean
   storage_allocation: string | number | null
+  deleting: boolean
   suspended: boolean
   payment_hold: boolean
   domain_off: boolean
@@ -289,7 +306,7 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
         .where(inArray(aliases.clerkUserId, clerkUserIds))
         .orderBy(asc(aliases.address)),
       withTenant(db, tenantId, async (tx) => {
-        const [usageRows, dirUsers] = await Promise.all([
+        const [usageRows, dirUsers, deletionRows] = await Promise.all([
           tx
             .select({
               address: mailboxUsage.address,
@@ -316,8 +333,17 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
                 inArray(directoryUsers.clerkUserId, clerkUserIds),
               ),
             ),
+          tx
+            .select()
+            .from(mailboxDeletions)
+            .where(
+              and(
+                eq(mailboxDeletions.tenantId, tenantId),
+                inArray(mailboxDeletions.clerkUserId, clerkUserIds),
+              ),
+            ),
         ])
-        return { usageRows, dirUsers }
+        return { usageRows, dirUsers, deletionRows }
       }),
     ])
 
@@ -351,8 +377,13 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
       }
     }
 
+    const deletionByUser = new Map(
+      tenantScoped.deletionRows.map((d) => [d.clerkUserId, d]),
+    )
+
     return rawRows.map((row) => {
       const address = row.email.toLowerCase()
+      const gone = deletionByUser.get(row.clerk_user_id)
       const usage = usageByAddress.get(address)
       const dirUser = dirUserByClerkId.get(row.clerk_user_id)
       const displayName = row.display_name ?? null
@@ -363,6 +394,18 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
         ownerName: displayName ?? dirUser?.displayName ?? null,
         ownerEmail: dirUser?.email ?? address,
         active: Boolean(row.active),
+        deleting: Boolean(row.deleting),
+        // ⚠ ONLY WHILE THE GATE IS SET: a row without it is not a deletion the
+        // console should show, whatever else is left behind.
+        deletion:
+          row.deleting && gone
+            ? {
+                outcome: gone.outcome as ConsoleMailboxDeletion["outcome"],
+                deletedAt: gone.deletingAt.toISOString(),
+                purgeAt: gone.purgeAfter.toISOString(),
+                forwardTo: gone.forwardAddress,
+              }
+            : null,
         suspended: Boolean(row.suspended),
         paymentHold: Boolean(row.payment_hold),
         domainOff: Boolean(row.domain_off),
@@ -391,6 +434,7 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
            a.display_name,
            a.active,
            a.storage_allocation,
+           (a.deleting_at is not null) as deleting,
            (a.suspended_at is not null) as suspended,
            (a.payment_hold_at is not null) as payment_hold,
            core.mailbox_domain_refused(a.tenant_id, lower(split_part(a.email, '@', 2))) as domain_off,
@@ -527,6 +571,7 @@ export function consoleMailboxes(deps: ConsoleMailboxDeps): ConsoleMailboxes {
     }
 
     const status = deriveMailboxStatus({
+      deleting: row.deleting,
       suspended: row.suspended,
       paymentHold: row.paymentHold,
       domainOff: row.domainOff,
@@ -550,6 +595,7 @@ export function consoleMailboxes(deps: ConsoleMailboxDeps): ConsoleMailboxes {
       },
       domain: domainOf(address),
       status,
+      deletion: row.deletion,
       signIn,
       aliases: row.aliases,
       storage: {
