@@ -5176,6 +5176,60 @@ export const mailboxJobs = core.table(
 )
 
 /**
+ * A mailbox in its deletion grace (mailboxes/lifecycle.ts): what the admin chose
+ * and when it is purged. One row per mailbox, deleted by a restore or by the
+ * purge's last step.
+ *
+ * ⚠ THE ROW IS THE INTENT AND `authd.accounts.deleting_at` IS THE GATE. They are
+ * written in one transaction, and the purge reads this row, so a crash at any
+ * point of the purge leaves the intent to resume from.
+ *
+ * ⚠ KEYED BY THE PERSON, NOT THE ADDRESS: a mailbox is `authd.accounts`'s row for
+ * a Clerk user, and the address is copied here only so the console and the audit
+ * can name a mailbox whose account row is already gone.
+ */
+export const mailboxDeletions = core.table(
+  "mailbox_deletions",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    address: text("address").notNull(),
+    /** `delete`, `export_then_delete` or `forward`. */
+    outcome: text("outcome").notNull(),
+    /** Forward only: the mailbox of this workspace that receives the address's mail. */
+    forwardUserId: text("forward_user_id"),
+    forwardAddress: text("forward_address"),
+    requestedBy: text("requested_by").notNull(),
+    deletingAt: timestamp("deleting_at", { withTimezone: true }).notNull().defaultNow(),
+    purgeAfter: timestamp("purge_after", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.clerkUserId] }),
+    index("mailbox_deletions_forward_idx")
+      .on(t.tenantId, t.forwardUserId)
+      .where(sql`${t.forwardUserId} is not null`),
+    check(
+      "mailbox_deletions_outcome_check",
+      sql`"outcome" in ('delete', 'export_then_delete', 'forward')`,
+    ),
+    check(
+      "mailbox_deletions_forward_check",
+      sql`(("outcome" = 'forward') = ("forward_user_id" is not null)) and (("outcome" = 'forward') = ("forward_address" is not null))`,
+    ),
+    check("mailbox_deletions_due_check", sql`"purge_after" >= "deleting_at"`),
+    pgPolicy("mailbox_deletions_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
  * Per-mailbox disk usage, written by the Stalwart storage sampler alongside
  * `core.tenant_storage` (Step B5).
  *

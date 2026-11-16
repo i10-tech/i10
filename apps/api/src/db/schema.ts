@@ -181,6 +181,23 @@ export const accounts = authd.table(
     paymentHoldAt: timestamp("payment_hold_at", { withTimezone: true }),
 
     /**
+     * Set while an owner or admin has the mailbox in its 30 day deletion grace
+     * (mailboxes/lifecycle.ts): the mailbox still EXISTS and still receives mail,
+     * but nobody can log in to it, and only a restore clears it.
+     *
+     * ⚠ A COLUMN OF ITS OWN, NOT `suspended_at`. Every resume path (the owner's,
+     * the directory's) clears `suspended_at`, and a deletion must survive all of
+     * them; sharing the column would also make a restore guess whether the
+     * suspension it found was its own. authd refuses a bind for it ahead of the
+     * credential cache, from the row the bind already holds.
+     *
+     * ⚠ ONE WRITER: `mailboxDeletions` in mailboxes/lifecycle-store.ts, in the
+     * transaction of its `core.mailbox_deletions` row. The projection's upsert
+     * must never name this column.
+     */
+    deletingAt: timestamp("deleting_at", { withTimezone: true }),
+
+    /**
      * Clerk's `banned`, `locked` and the end of a lockout for this user, projected
      * by the webhook (projection/clerk-user.ts).
      *
@@ -209,6 +226,10 @@ export const accounts = authd.table(
       "accounts_storage_allocation_positive",
       sql`${t.storageAllocation} is null or ${t.storageAllocation} > 0`,
     ),
+    // The purge pass lists deleting mailboxes of every workspace; there are few.
+    index("accounts_deleting_idx")
+      .on(t.deletingAt)
+      .where(sql`${t.deletingAt} is not null`),
   ],
 )
 

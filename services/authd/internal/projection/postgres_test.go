@@ -225,7 +225,7 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 		// The search path and the bind path share the column list.
 		if byAddr[0].PaymentHold != got.PaymentHold || byAddr[0].Banned != got.Banned ||
 			byAddr[0].Locked != got.Locked || byAddr[0].SSORequired != got.SSORequired ||
-			byAddr[0].SSOExempt != got.SSOExempt {
+			byAddr[0].SSOExempt != got.SSOExempt || byAddr[0].Deleting != got.Deleting {
 			t.Fatalf("search read %+v, bind read %+v", byAddr[0], got)
 		}
 		return *got
@@ -239,7 +239,14 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 	if a := read(); !a.PaymentHold || a.Banned || a.Locked || a.SSORequired {
 		t.Fatalf("a payment hold read as %+v", a)
 	}
-	exec(`UPDATE authd.accounts SET payment_hold_at = NULL, banned = true WHERE clerk_user_id = $1`, id)
+	exec(`UPDATE authd.accounts SET payment_hold_at = NULL, deleting_at = now() WHERE clerk_user_id = $1`, id)
+	if a := read(); !a.Deleting || a.PaymentHold || a.Banned || a.Suspended {
+		t.Fatalf("a deletion grace read as %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET deleting_at = NULL, banned = true WHERE clerk_user_id = $1`, id)
+	if a := read(); a.Deleting {
+		t.Fatalf("a restored mailbox still read as deleting: %+v", a)
+	}
 	if a := read(); a.PaymentHold || !a.Banned || a.Locked {
 		t.Fatalf("a ban read as %+v", a)
 	}

@@ -11,6 +11,8 @@
  *      Then deleted workspaces' template images (#244), and mailbox jobs
  *      (#392): fails the ones whose worker was lost, and deletes export and
  *      import archives nobody will use again (mailboxes/sweep.ts).
+ *      Then the mailboxes whose 30 day deletion grace is over are purged
+ *      (mailboxes/lifecycle.ts).
  *   4. Prunes tombstones older than 90 days and drops EMPTY expired partitions.
  *
  * ⚠ HOURLY. Retention is measured in days; an hour late is within any
@@ -28,6 +30,12 @@ import { objectStoreFrom, templateAssetsBucketFrom } from "./content/object-stor
 import { templateAssetStore } from "./templates/assets.js"
 import { sweepPacks } from "./content/packs.js"
 import { sweepTemplates } from "./content/sweep.js"
+import { createClerkClient } from "@clerk/backend"
+import { jmapAs } from "./mail/jmap-as.js"
+import { clerkAddressRemoval } from "./mailboxes/clerk.js"
+import { mailboxJobStore } from "./mailboxes/jobs.js"
+import { mailboxLifecycleStore } from "./mailboxes/lifecycle-store.js"
+import { purgeDueMailboxes } from "./mailboxes/lifecycle.js"
 import { mailboxSweepStore, sweepMailboxJobs } from "./mailboxes/sweep.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
@@ -81,6 +89,8 @@ await withMonitor(
       mailboxJobsLost: 0,
       mailboxArchives: 0,
       mailboxRows: 0,
+      mailboxesPurged: 0,
+      mailboxesWaitingForExport: 0,
       tombstonesPruned: 0,
       partitionsDropped: [] as string[],
       partitionsRefused: [] as string[],
@@ -171,6 +181,42 @@ await withMonitor(
       } catch (error) {
         summary.failed++
         log.error({ err: error }, "could not sweep mailbox jobs")
+      }
+
+      // ── 3d. Mailboxes whose 30 day deletion grace is over ──
+      // Destroys the Stalwart account, takes the address off the person's Clerk
+      // user and removes our rows (mailboxes/lifecycle.ts). It needs Stalwart and
+      // Clerk, so a deployment without them leaves every deleting mailbox deleting
+      // (sign-in refused, nothing destroyed) rather than half of a purge.
+      try {
+        if (
+          env.STALWART_URL &&
+          env.STALWART_API_TOKEN &&
+          env.STALWART_IMPERSONATE_TOKEN
+        ) {
+          const jmap = jmapAs({
+            baseUrl: env.STALWART_URL,
+            registryToken: env.STALWART_API_TOKEN,
+            impersonationToken: env.STALWART_IMPERSONATE_TOKEN,
+          })
+          const purged = await purgeDueMailboxes({
+            store: mailboxLifecycleStore(db),
+            accounts: { destroy: (address) => jmap.destroyAccount({ address }) },
+            clerk: clerkAddressRemoval(
+              createClerkClient({ secretKey: env.CLERK_SECRET_KEY }),
+            ),
+            exports: mailboxJobStore(db),
+            log,
+          })
+          summary.mailboxesPurged = purged.purged
+          summary.mailboxesWaitingForExport = purged.waiting
+          summary.failed += purged.failed
+        } else {
+          log.warn({}, "stalwart is not configured; deleted mailboxes were not purged")
+        }
+      } catch (error) {
+        summary.failed++
+        log.error({ err: error }, "could not purge deleted mailboxes")
       }
 
       // ── 4. Tombstones and empty partitions ──

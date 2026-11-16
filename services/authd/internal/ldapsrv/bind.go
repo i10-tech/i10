@@ -113,6 +113,8 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	// takes effect on both pods at once, and each comes before the verifier and the
 	// credential cache so that a password that was right yesterday cannot open it.
 	//
+	//   - a deletion grace: an owner or admin deleted the mailbox, which still
+	//     receives until the purge; only a restore clears the column.
 	//   - a payment hold: the workspace has no paid plan. Mail still arrives; paying
 	//     again clears the column and the next bind works.
 	//   - Clerk's ban or lock: neither moves `clerk_updated_at` the way a password
@@ -207,6 +209,8 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 // Suspension is checked before it, with its own reason, in handleBind.
 func refusedByRow(a *projection.Account) string {
 	switch {
+	case a.Deleting:
+		return "mailbox_deleting"
 	case a.PaymentHold:
 		return "payment_hold"
 	case a.DomainNotHosted:
