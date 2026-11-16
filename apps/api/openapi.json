@@ -9443,7 +9443,7 @@
             }
           },
           "403": {
-            "description": "The plan does not include another mailbox, or a member asked to allocate storage.",
+            "description": "The plan does not include another mailbox, a member asked to allocate storage, or the workspace lets only owners and admins create mailboxes.",
             "content": {
               "application/json": {
                 "schema": {

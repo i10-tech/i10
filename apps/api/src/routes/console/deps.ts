@@ -43,6 +43,7 @@ import type { IdentityConsoleDeps } from "./identity.js"
 import type { TeamInboxes } from "../../team-inboxes/service.js"
 import type { StorageAllocations } from "../../mailboxes/allocation.js"
 import type { ConsoleMailboxes } from "../../mailboxes/console.js"
+import type { MailboxAdmin } from "../../mailboxes/creation-mode.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -257,6 +258,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * the routes answer 501.
    */
   mailboxes?: ConsoleMailboxes
+  /**
+   * An owner or admin creating a mailbox for a member, and the workspace's
+   * setting for who creates them. Optional; without it the routes answer 501.
+   */
+  mailboxAdmin?: MailboxAdmin
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

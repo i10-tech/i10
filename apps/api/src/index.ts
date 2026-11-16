@@ -166,7 +166,14 @@ import { createStalwartCaller } from "./mail/stalwart.js"
 import { disableDomain } from "./mail/stalwart-domains.js"
 import { mailboxHosting } from "./domains/mailbox-hosting.js"
 import { planAssignmentStore } from "./metering/postgres.js"
-import { mailboxDirectory, managedMailLane, paymentHold } from "./mailboxes/store.js"
+import {
+  hostedDomainsOf,
+  mailboxDirectory,
+  managedMailLane,
+  paymentHold,
+} from "./mailboxes/store.js"
+import { mailboxCreationStore } from "./mailboxes/creation-mode.js"
+import { onMailJoinEvent } from "./mailboxes/on-join.js"
 import { consoleMailboxStore, consoleMailboxes } from "./mailboxes/console.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
 import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
@@ -1391,6 +1398,9 @@ const canAllocateStorage = async (userId: string, tenantId: string) => {
   )
 }
 
+// Who creates mailboxes in a workspace: admins, members, or everyone on joining.
+const mailboxCreation = mailboxCreationStore(db)
+
 // Shared addresses (B8). The Sent copy runs in its own CronJob (team-sent.ts).
 const teamInboxService = teamInboxesFor({
   db,
@@ -1645,6 +1655,17 @@ const mailboxProvisionDeps: ProvisionDeps = {
   mailLane: managedMailLane(db, identity),
   storage: mailboxStorage,
   canAllocate: canAllocateStorage,
+  // ⚠ WIRED UNCONDITIONALLY: without it nothing enforces "who creates mailboxes".
+  creationMode: (tenantId) => mailboxCreation.get(tenantId),
+}
+const mailboxService = mailboxProvisioning(mailboxProvisionDeps)
+
+// Whether a person is a member of the workspace: a row in our roles table, or the
+// owner of a workspace with no organization (it has no membership rows).
+const isWorkspaceMember = async (tenantId: string, userId: string) => {
+  if ((await roleRows.roleOf(tenantId, userId)) !== null) return true
+  const tenant = await workspaceOwnership(db, tenantId)
+  return Boolean(tenant && !tenant.clerkOrgId && tenant.ownerClerkUserId === userId)
 }
 /*
  * Mail from the directory (#344): mailboxes, aliases and lists for the people
@@ -2047,6 +2068,20 @@ const app = createApp({
         {
           revocation: mailAccessRevocation,
           tenantOf: (orgId: string) => members.store.tenantOf(orgId),
+          log,
+        },
+        type,
+        data,
+      ),
+    // A new member gets a mailbox when the workspace's mode is `on_join`.
+    mailJoin: (type: string, data: unknown) =>
+      onMailJoinEvent(
+        {
+          tenantOf: (orgId: string) => members.store.tenantOf(orgId),
+          mode: (tenantId: string) => mailboxCreation.get(tenantId),
+          hostedDomains: hostedDomainsOf(db),
+          identity: mailboxProvisionDeps.identity,
+          provisioning: mailboxService,
           log,
         },
         type,
@@ -2604,6 +2639,13 @@ const app = createApp({
     members,
     teamInboxes: teamInboxService,
     mailboxStorage,
+    mailboxAdmin: {
+      provisioning: mailboxService,
+      settings: mailboxCreation,
+      isAdmin: (tenantId: string, userId: string) =>
+        canAllocateStorage(userId, tenantId),
+      isMember: isWorkspaceMember,
+    },
     mailboxes: consoleMailboxes({
       store: consoleMailboxStore(db),
       roles: roleRows,
@@ -2830,7 +2872,7 @@ const app = createApp({
       : {}),
     log,
   },
-  mailboxes: mailboxProvisioning(mailboxProvisionDeps),
+  mailboxes: mailboxService,
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),

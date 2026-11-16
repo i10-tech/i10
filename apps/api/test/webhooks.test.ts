@@ -495,6 +495,64 @@ describe("a member leaving, arriving from Clerk", () => {
   })
 })
 
+/**
+ * A member joining a workspace in `on_join` mode (mailboxes/on-join.ts). The hook
+ * runs after the roles hook has taken the row, so the person is a member before a
+ * mailbox is offered, and it runs on a redelivery too: it is idempotent itself.
+ */
+describe("a member joining, arriving from Clerk", () => {
+  const order: string[] = []
+  const roles = mock(async (type: string) => {
+    order.push(`roles:${type}`)
+    return "role:inserted"
+  })
+  const mailJoin = mock(async (type: string) => {
+    order.push(`mailJoin:${type}`)
+    return "mailbox:created"
+  })
+  const members = mock(async (type: string) => {
+    order.push(`members:${type}`)
+    return null
+  })
+  const joined = JSON.stringify({
+    type: "organizationMembership.created",
+    data: {
+      id: "orgmem_1",
+      organization: { id: "org_acme" },
+      public_user_data: { user_id: "user_ada" },
+    },
+  })
+  const send = (id: string) =>
+    createApp({
+      clerkWebhooks: {
+        db: forbiddenDb,
+        signingSecret: SECRET,
+        hostedDomains: HOSTED,
+        roles,
+        mailJoin,
+        members,
+      },
+    }).request("/webhooks/clerk", {
+      method: "POST",
+      headers: signed(joined, id),
+      body: joined,
+    })
+
+  beforeEach(() => {
+    order.length = 0
+    applyClerkEvent.mockResolvedValue({ outcome: "duplicate" })
+  })
+
+  it("runs after roles and before members, even as a duplicate", async () => {
+    expect((await send("msg_joined")).status).toBe(200)
+    expect(order).toEqual([
+      "roles:organizationMembership.created",
+      "mailJoin:organizationMembership.created",
+      "members:organizationMembership.created",
+    ])
+  })
+})
+
 describe("GET /readyz", () => {
   it("reports ok when the database answers", async () => {
     const res = await createApp({ pingDb: async () => {} }).request("/readyz")

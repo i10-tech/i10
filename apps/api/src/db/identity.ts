@@ -925,6 +925,12 @@ export const workspaceSettings = identity.table(
     ipGraceUserId: text("ip_grace_user_id"),
     ipGraceAddress: text("ip_grace_address"),
     ipGraceUntil: timestamp("ip_grace_until", { withTimezone: true }),
+    /**
+     * Who creates mailboxes in this workspace: `admins` (owners and admins),
+     * `members` (people create their own) or `on_join` (everyone gets one
+     * when they join). A workspace with no row is `admins`.
+     */
+    mailboxCreation: text("mailbox_creation").notNull().default("admins"),
     updatedBy: text("updated_by"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -945,6 +951,10 @@ export const workspaceSettings = identity.table(
       "workspace_settings_session_bounds_check",
       sql`("max_session_seconds" is null or "max_session_seconds" between 900 and 7776000)
         and ("idle_timeout_seconds" is null or "idle_timeout_seconds" between 300 and 2592000)`,
+    ),
+    check(
+      "workspace_settings_mailbox_creation_check",
+      sql`"mailbox_creation" in ('admins', 'members', 'on_join')`,
     ),
     check("workspace_settings_ip_ranges_check", sql`cardinality("ip_ranges") <= 100`),
     check(

@@ -57,6 +57,36 @@ export const createMailboxSchema = z.object({
   storage_allocation: z.number().int().positive().optional(),
 })
 
+/**
+ * An owner or admin giving an existing member of the workspace a mailbox.
+ *
+ * ⚠ THE ONE PLACE A REQUEST NAMES ANOTHER PERSON, which is why it is its own
+ * schema and not an optional field on `createMailboxSchema` (see the note
+ * there). `user_id` is the workspace member's id as the Team page already
+ * carries it (`/team/members/:userId/...`); the route answers 404 for anybody
+ * who is not a member of the caller's workspace, so it cannot be used to ask
+ * whether some other id exists.
+ */
+export const adminCreateMailboxSchema = createMailboxSchema.extend({
+  user_id: z.string().min(1).max(128),
+})
+
+/**
+ * Who creates mailboxes in a workspace.
+ *
+ *   - `admins`: owners and admins only. The default.
+ *   - `members`: people may also create their own.
+ *   - `on_join`: everyone gets one when they join (a workspace with exactly one
+ *     hosted domain), and members may still create their own.
+ */
+export const mailboxCreationModeSchema = z.enum(["admins", "members", "on_join"])
+
+export const mailboxCreationSettingsSchema = z.object({
+  mode: mailboxCreationModeSchema,
+})
+
+export const setMailboxCreationSchema = mailboxCreationSettingsSchema
+
 export const mailboxSchema = z.object({
   object: z.literal("mailbox"),
   address: z.string(),
@@ -175,6 +205,9 @@ export const mailboxJobSchema = z.object({
 })
 
 export type CreateMailbox = z.infer<typeof createMailboxSchema>
+export type AdminCreateMailbox = z.infer<typeof adminCreateMailboxSchema>
+export type MailboxCreationMode = z.infer<typeof mailboxCreationModeSchema>
+export type MailboxCreationSettings = z.infer<typeof mailboxCreationSettingsSchema>
 export type Mailbox = z.infer<typeof mailboxSchema>
 export type SetMailboxStorage = z.infer<typeof setMailboxStorageSchema>
 export type MailboxStorage = z.infer<typeof mailboxStorageSchema>
