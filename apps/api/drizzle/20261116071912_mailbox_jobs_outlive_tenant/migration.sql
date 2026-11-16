@@ -1,0 +1,1 @@
+ALTER TABLE "core"."mailbox_jobs" DROP CONSTRAINT "mailbox_jobs_tenant_id_tenants_id_fk";

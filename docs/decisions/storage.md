@@ -152,25 +152,48 @@ client never saves a shorter archive.
 Without `OBJECT_KEYS`, export answers 501 and a worker fails an export job
 instead of writing a plain archive. A failed export leaves no object: the
 multipart upload is never completed, and its parts are R2's to expire. A
-finished export is deleted by the archive sweep after 7 days (with the limits
-below).
+finished export is deleted by the archive sweep 7 days after it completed.
 
 **Imports are plain until the job ends.** The customer uploads the archive
 straight to R2 with a presigned PUT, so we cannot seal it before it lands. It
 is deleted:
 
 - when the import finishes, and when it fails (the worker deletes it in both
-  paths);
+  paths; a delete that fails on a finished import leaves the job finished and
+  its key in place for the sweep);
 - when the uploaded file is over the size limit at start;
+- by the archive sweep, for a finished or failed import that still has one;
 - by the archive sweep, a day after the job last changed, for an upload that
   was never started.
 
-The archive sweep (`sweepMailboxArchives`) runs only when a mailbox job of the
-same workspace starts. A workspace that never runs another job keeps an
-abandoned upload, and an expired export, until it does. An upload whose job
-row is gone (the workspace was deleted) is never swept. A job that dies
-without reaching its error path (the pod is killed) stays `running`, and its
-upload stays until the next job in that workspace sweeps it.
+**The archive sweep runs every hour, in `i10-retention`** (step 3c,
+`mailboxes/sweep.ts`), for every workspace at once. It finds rows through two
+SECURITY DEFINER functions, `core.mailbox_jobs_lost` and
+`core.mailbox_archives_due`, and writes each row under its own tenant. It
+deletes the object in R2 first, then clears `object_key`. A run that stops
+between the two simply does both again. Without a content store configured it
+leaves archives alone.
+
+**A lost job is failed.** A job whose worker is killed stays `running`, because
+groupmq fails it without calling our handler. The sweep fails a `running` job
+that has not changed for 3 hours, with the code `worker_lost`. A live job
+writes progress often (an export every 50 messages and every folder, an
+import every 25 messages), so it is never quiet for that long. This runs
+before the archive step, so a lost import's upload is deleted in the same run.
+The mailbox can then start a new job.
+
+**A deleted workspace's archives do not wait for expiry.** A soft-deleted
+workspace (`tenants.status = 'deleted'`) has its exports deleted on the next
+run, expired or not. Its uploads wait out the upload window first: the presigned
+PUT works for 6 hours, so an upload deleted sooner could still land after the
+sweep, with nothing left that names it. The job rows stay with the workspace.
+
+**A tenant row removed by hand leaves its jobs behind on purpose.**
+`mailbox_jobs` has no foreign key to `tenants`, so the rows outlive it and the
+sweep can still find the archives. It treats them like a deleted workspace's,
+then deletes each row once it has no object. A `pending` or `running` job of
+such a workspace is kept until it ends or is failed as lost, because it may
+still write an object.
 
 ## Templates: store once, forget when unused, come back on use
 

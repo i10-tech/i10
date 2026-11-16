@@ -8,6 +8,9 @@
  *      events, webhook deliveries - leaving a tombstone per message.
  *   3. Sweeps templates no body uses that have gone stale, and R2 objects and
  *      body packs (#188) no body names. Step 2 is what makes them unreferenced.
+ *      Then deleted workspaces' template images (#244), and mailbox jobs
+ *      (#392): fails the ones whose worker was lost, and deletes export and
+ *      import archives nobody will use again (mailboxes/sweep.ts).
  *   4. Prunes tombstones older than 90 days and drops EMPTY expired partitions.
  *
  * ⚠ HOURLY. Retention is measured in days; an hour late is within any
@@ -25,6 +28,7 @@ import { objectStoreFrom, templateAssetsBucketFrom } from "./content/object-stor
 import { templateAssetStore } from "./templates/assets.js"
 import { sweepPacks } from "./content/packs.js"
 import { sweepTemplates } from "./content/sweep.js"
+import { mailboxSweepStore, sweepMailboxJobs } from "./mailboxes/sweep.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
 import { unlockEnv } from "./crypto/unlock.js"
@@ -74,6 +78,9 @@ await withMonitor(
       objects: 0,
       packs: 0,
       templateImages: 0,
+      mailboxJobsLost: 0,
+      mailboxArchives: 0,
+      mailboxRows: 0,
       tombstonesPruned: 0,
       partitionsDropped: [] as string[],
       partitionsRefused: [] as string[],
@@ -146,6 +153,24 @@ await withMonitor(
             "could not sweep deleted workspaces' template images",
           )
         }
+      }
+
+      // ── 3c. Mailbox archives and lost jobs (#392) ──
+      // Every workspace's, deleted ones and ones whose tenant row is gone
+      // included. See mailboxes/sweep.ts.
+      try {
+        const swept = await sweepMailboxJobs({
+          store: mailboxSweepStore(db),
+          objects: store,
+          log,
+        })
+        summary.mailboxJobsLost = swept.lost
+        summary.mailboxArchives = swept.archives
+        summary.mailboxRows = swept.rows
+        summary.failed += swept.failed
+      } catch (error) {
+        summary.failed++
+        log.error({ err: error }, "could not sweep mailbox jobs")
       }
 
       // ── 4. Tombstones and empty partitions ──
