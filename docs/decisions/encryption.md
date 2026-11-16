@@ -195,6 +195,20 @@ opening.
 5. Keep the old key for as long as the old path is needed, then delete the old
    path and the old key.
 
+## Redis
+
+Redis holds the send and webhook queues. It is not encrypted, on disk or on the
+wire, and it only listens inside the cluster. What protects it is a password:
+
+- `REDIS_PASSWORD` in Doppler `prod_api`. `REDIS_URL` in the same config refers
+  to it, so the API, the worker and the CronJobs send it. The Redis pod gets it
+  through the `i10-redis-auth` Secret and starts with `requirepass`.
+- Pods outside `i10-prod` cannot reach Redis at all. Pods inside it can reach
+  the port, and the password is what stops them.
+- To change the password: set a new `REDIS_PASSWORD` in Doppler, then restart
+  the Redis pod and every client (API, worker). The queues stop for that
+  minute. Jobs are not lost: the message sweep enqueues them again.
+
 ## Wrapped keys
 
 Doppler holds `SEAL_KEYS`, `TOKEN_KEYS`, `CONTENT_KEYS`, `OBJECT_KEYS` and
