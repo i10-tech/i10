@@ -15,6 +15,7 @@ const PLAIN: Record<Wrappable, string> = {
   SEAL_KEYS: `s1:${b64(3)}`,
   TOKEN_KEYS: `t1:${b64(4)}`,
   CONTENT_KEYS: `c2:${b64(5)},c1:${b64(6)}`,
+  OBJECT_KEYS: `o1:${b64(8)}`,
   FEEDBACK_ID_KEY: Buffer.alloc(32, 7).toString("hex"),
 }
 

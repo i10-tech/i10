@@ -4,7 +4,8 @@ import {
   mailboxJobSchema,
   type MailboxJob,
 } from "@repo/contracts"
-import type { StreamingObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { unwrapKey } from "../crypto/envelope.js"
 import type { TokenKeys } from "../crypto/token-keys.js"
 import {
   signDownloadToken,
@@ -15,6 +16,7 @@ import {
 } from "../mailboxes/jobs.js"
 import { LIMITS } from "../mailboxes/archive.js"
 import { importKey } from "../mailboxes/migration.js"
+import { EXPORT_KEY, openStream, plainLength } from "../mailboxes/sealed-stream.js"
 import type { MailboxJobData } from "../queue/mailbox-queue.js"
 import { requireUser } from "../middleware/session.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
@@ -33,15 +35,18 @@ import { errorResponse, notWired as notWiredFor } from "./shared.js"
  * (jobs.ts). A route that names a mailbox is a route that can read it, so every
  * one of these asks first, and a colleague who is none of those gets a 403.
  *
- * ⚠ THE ARCHIVE NEVER PASSES THROUGH THIS PROCESS. An import is a presigned
- * `PUT` straight to R2, then a second call to say it is there; an export is read
- * from R2 as a stream. Anything that read the archive here would hold it in an
- * API pod's memory - and Bun's own request limit (128 MB) would refuse it first.
+ * ⚠ THE ARCHIVE IS NEVER HELD BY THIS PROCESS. An import is a presigned `PUT`
+ * straight to R2, then a second call to say it is there; an export is read
+ * from R2 as a stream and opened one 64 KiB chunk at a time on its way out
+ * (mailboxes/sealed-stream.ts). Anything that read the archive whole here would
+ * hold it in an API pod's memory - and Bun's own request limit (128 MB) would
+ * refuse it first.
  */
 
 export interface MailboxMigrationDeps {
   jobs: MailboxJobStore
-  store: StreamingObjectStore
+  /** Its `objectKeys` seal and open exports; without them export answers 501. */
+  store: ContentStore
   /** Queues the job under its mailbox's group. */
   enqueue: (data: MailboxJobData) => Promise<unknown>
   /** The decision of jobs.ts, bound to its database and admin check. */
@@ -159,7 +164,7 @@ const startExport = createRoute({
 
 mailboxMigration.openapi(startExport, async (c) => {
   const deps = migration(c)
-  if (!deps) return c.json(notWired, 501)
+  if (!deps?.store.objectKeys) return c.json(notWired, 501)
 
   const mailbox = normal(c.req.valid("param").address)
   const { userId } = c.get("user")
@@ -266,7 +271,8 @@ const download = createRoute({
 
 mailboxMigration.openapi(download, async (c) => {
   const deps = migration(c)
-  if (!deps) return c.json(notWired, 501)
+  const ring = deps?.store.objectKeys
+  if (!deps || !ring) return c.json(notWired, 501)
 
   const mailbox = normal(c.req.valid("param").address)
   const now = (deps.now ?? (() => new Date()))()
@@ -329,12 +335,28 @@ mailboxMigration.openapi(download, async (c) => {
     )
   }
 
-  return c.body(deps.store.read(job.objectKey), 200, {
-    "content-type": "application/gzip",
-    "content-length": String(size),
-    "content-disposition": `attachment; filename="${mailbox.replace(/[^a-z0-9@._-]/g, "_")}-export.tar.gz"`,
-    "cache-control": "no-store",
-  })
+  // ⚠ LOUD, BEFORE ANY BYTE IS SENT. A finished export without its key, or an
+  // object no sealed archive could be, is a fault to see, not a broken download.
+  const ids = { tenantId: job.tenantId, jobId: job.id }
+  if (!job.sealedKey) throw new Error(`mailbox export ${job.id} has no key`)
+  const length = plainLength(size)
+  if (length === null)
+    throw new Error(`mailbox export ${job.id} is not a sealed archive`)
+  const archiveKey = unwrapKey(EXPORT_KEY, ring, ids, job.sealedKey)
+
+  // ⚠ THE LENGTH OF THE ARCHIVE, NOT THE OBJECT: it follows from the object's
+  // size and the chunk size. No range requests, as before: a resumed download
+  // starts again.
+  return c.body(
+    deps.store.read(job.objectKey).pipeThrough(openStream(archiveKey, ids)),
+    200,
+    {
+      "content-type": "application/gzip",
+      "content-length": String(length),
+      "content-disposition": `attachment; filename="${mailbox.replace(/[^a-z0-9@._-]/g, "_")}-export.tar.gz"`,
+      "cache-control": "no-store",
+    },
+  )
 })
 
 // ── Import ──────────────────────────────────────────────────────────────────

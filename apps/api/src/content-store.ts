@@ -6,7 +6,8 @@
  *   1. FINGERPRINTS (risk on): MinHash and link hosts from the stored bodies,
  *      and the farm tripwire. This used to run in the API after every accept;
  *      #171's rule is that nothing beyond a hash runs on the send path.
- *   2. ATTACHMENTS (content store configured): finished messages' files to R2.
+ *   2. ATTACHMENTS (content store and OBJECT_KEYS set): finished messages'
+ *      files to R2, sealed (content/objects.ts).
  *   3. COMPACTION (always): template matching, linking and promotion
  *      (content/compact.ts). It used to ride the hourly risk run, so switching
  *      risk off stopped it, and the system tenant - exempt from scoring, and
@@ -26,9 +27,9 @@
  * and `Forbid` keeps it to one.
  *
  * ⚠ EACH HALF IS OPTIONAL ON ITS OWN SWITCH, AND NONE STOPS THE OTHERS.
- * Without the CONTENT_STORE_* settings attachments stay inline; without
- * CONTENT_KEYS bodies stay in Postgres; without RISK_ENABLED nothing is
- * fingerprinted; compaction runs either way.
+ * Without the CONTENT_STORE_* settings or OBJECT_KEYS attachments and data-URI
+ * images stay inline; without CONTENT_KEYS bodies stay in Postgres; without
+ * RISK_ENABLED nothing is fingerprinted; compaction runs either way.
  */
 import { sql } from "drizzle-orm"
 import pino from "pino"
@@ -70,7 +71,12 @@ await withMonitor(
   async () => {
     const store = objectStoreFrom(env)
     if (!store) log.warn("CONTENT_STORE_* is not set; attachments stay in Postgres")
-    else if (!store.keys) log.warn("CONTENT_KEYS is not set; bodies stay in Postgres")
+    else {
+      if (!store.keys) log.warn("CONTENT_KEYS is not set; bodies stay in Postgres")
+      if (!store.objectKeys)
+        log.warn("OBJECT_KEYS is not set; attachments and images stay in Postgres")
+    }
+    const objectKeys = store?.objectKeys ?? null
     const packing = Boolean(store?.keys)
     // A body younger than this is not packed: see content/packs.ts.
     const PACK_MIN_AGE_MINUTES = 60
@@ -86,7 +92,7 @@ await withMonitor(
           String(r.tenant_id),
         )
       const attachmentsDue = new Set(
-        store
+        objectKeys
           ? await ids(sql`select tenant_id from core.content_store_due(${DUE_LIMIT})`)
           : [],
       )
@@ -174,11 +180,12 @@ await withMonitor(
             log.error({ err: error, tenantId }, "fingerprint pass failed")
           }
         }
-        if (store && attachmentsDue.has(tenantId)) {
+        if (store && objectKeys && attachmentsDue.has(tenantId)) {
           try {
             const r = await storeAttachments(tenantId, {
               db,
               store,
+              keys: objectKeys,
               limit: env.CONTENT_STORE_BATCH,
               log,
             })

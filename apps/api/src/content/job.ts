@@ -129,6 +129,7 @@ export async function analyseContent(
   // ⚠ PACKED BODIES AND IMAGES BACK IN TOO (#168, #188): the trust matcher
   // compares exact bytes.
   const rows = await restoreContent(
+    deps.db,
     deps.store ?? null,
     tenantId,
     stored.map((r) => ({

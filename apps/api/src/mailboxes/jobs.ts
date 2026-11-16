@@ -147,6 +147,7 @@ export type MailboxJobPatch = Partial<
     | "totalFolders"
     | "processedFolders"
     | "objectKey"
+    | "sealedKey"
     | "error"
     | "errorCode"
     | "completedAt"

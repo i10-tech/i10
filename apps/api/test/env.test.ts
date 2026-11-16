@@ -139,7 +139,7 @@ describe("production must hold the edge secret", () => {
   })
 })
 
-describe("production must hold the body keyring", () => {
+describe("production must hold the body and object keyrings", () => {
   const store = {
     CONTENT_STORE_ENDPOINT: "https://account.r2.example.com",
     CONTENT_STORE_BUCKET: "content",
@@ -154,23 +154,43 @@ describe("production must hold the body keyring", () => {
     EDGE_SECRET: "e".repeat(32),
   }
   const bodyKeys = keyring("k1", 7)
+  const objectKeys = keyring("o1", 8)
 
   it("refuses to boot with the content store set and CONTENT_KEYS missing", () => {
-    expect(() => loadEnv({ ...prod, ...store })).toThrow(/CONTENT_KEYS: is required/)
-  })
-
-  it("accepts the keyring, and production with no content store at all", () => {
-    expect(loadEnv({ ...prod, ...store, CONTENT_KEYS: bodyKeys }).CONTENT_KEYS).toBe(
-      bodyKeys,
+    expect(() => loadEnv({ ...prod, ...store, OBJECT_KEYS: objectKeys })).toThrow(
+      /CONTENT_KEYS: is required/,
     )
-    expect(loadEnv(prod).CONTENT_KEYS).toBeUndefined()
   })
 
-  it("leaves development and test without it alone", () => {
-    expect(loadEnv({ ...base, ...store }).CONTENT_KEYS).toBeUndefined()
-    expect(
-      loadEnv({ ...base, ...store, NODE_ENV: "test" }).CONTENT_KEYS,
-    ).toBeUndefined()
+  it("refuses to boot with the content store set and OBJECT_KEYS missing", () => {
+    expect(() => loadEnv({ ...prod, ...store, CONTENT_KEYS: bodyKeys })).toThrow(
+      /OBJECT_KEYS: is required/,
+    )
+  })
+
+  it("accepts both keyrings, and production with no content store at all", () => {
+    const env = loadEnv({
+      ...prod,
+      ...store,
+      CONTENT_KEYS: bodyKeys,
+      OBJECT_KEYS: objectKeys,
+    })
+    expect(env.CONTENT_KEYS).toBe(bodyKeys)
+    expect(env.OBJECT_KEYS).toBe(objectKeys)
+    expect(loadEnv(prod).OBJECT_KEYS).toBeUndefined()
+  })
+
+  it("refuses an OBJECT_KEYS that is not a keyring", () => {
+    expect(() =>
+      loadEnv({ ...base, OBJECT_KEYS: `o1:${Buffer.alloc(16, 1).toString("base64")}` }),
+    ).toThrow(/OBJECT_KEYS/)
+  })
+
+  it("leaves development and test without them alone", () => {
+    const dev = loadEnv({ ...base, ...store })
+    expect(dev.CONTENT_KEYS).toBeUndefined()
+    expect(dev.OBJECT_KEYS).toBeUndefined()
+    expect(loadEnv({ ...base, ...store, NODE_ENV: "test" }).OBJECT_KEYS).toBeUndefined()
   })
 })
 

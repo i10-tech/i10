@@ -3,16 +3,20 @@ import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import {
+  putObjects,
   restoreAttachments,
   storeAttachments,
   sweepObjects,
 } from "../src/content/attachments.js"
 import { compactContent } from "../src/content/compact.js"
 import { restoreInline } from "../src/content/inline.js"
-import { memoryStore } from "../src/content/object-store.js"
+import { memoryStore, packKey } from "../src/content/object-store.js"
+import { restoreContent } from "../src/content/packs.js"
+import { sealBody } from "../src/content/seal.js"
 import { hashEmbedder } from "../src/content/embed.js"
 import { analyseContent } from "../src/content/job.js"
 import { restoreBodies } from "../src/content/restore.js"
+import { keyringFromEnv } from "../src/crypto/keyring.js"
 import { withTenant, type Database } from "../src/db/client.js"
 import * as schema from "../src/db/schema.js"
 import { fingerprintStored } from "../src/risk/content.js"
@@ -39,6 +43,12 @@ let owner: ReturnType<typeof postgres>
 let app: ReturnType<typeof postgres>
 let db: Database
 const tenants: string[] = []
+const objectKeys = keyringFromEnv(
+  "OBJECT_KEYS",
+  `o1:${Buffer.alloc(32, 4).toString("base64")}`,
+)
+/** A store that seals files, as production's has. */
+const sealingStore = () => Object.assign(memoryStore(), { objectKeys })
 
 const receipt = (name: string, order: string) =>
   `<html><body><table width="600"><tr><td><img src="https://cdn.acme.com/logo.png"></td></tr>` +
@@ -293,7 +303,7 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
 
   it("moves data-URI images to R2, compacts around the references, restores exactly, and sweeps only what is unused", async () => {
     const t = await workspace()
-    const store = memoryStore()
+    const store = sealingStore()
     const logo = Buffer.alloc(3_000, 9).toString("base64")
     const withLogo = (name: string, order: string) =>
       receipt(name, order).replace(
@@ -309,8 +319,10 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
     expect(r.extracted).toBe(3)
     expect(r.inlineBytes).toBeGreaterThan(3 * 3_000)
     expect(r.compacted).toBe(3)
-    // One object for three messages, and the template holds a reference.
+    // One object for three messages, sealed, and the template holds a reference.
     expect(store.objects.size).toBe(1)
+    const [object] = [...store.objects.values()]
+    expect(Buffer.from(object!).includes(Buffer.from(logo, "base64"))).toBe(false)
     const [tmpl] =
       await owner`select segments from core.content_templates where tenant_id = ${t}`
     expect(JSON.stringify(tmpl!.segments)).not.toContain(logo.slice(0, 64))
@@ -331,7 +343,7 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
             .where(eq(schema.messageBodies.messageId, id)),
         ),
       )
-      const [back] = await restoreInline(store, t, rows)
+      const [back] = await restoreInline(db, store, t, rows)
       expect(back!.html).toBe(withLogo(["Ada", "Bob", "Cy"][i]!, String(i + 1)))
     }
 
@@ -345,9 +357,57 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
     expect(store.objects.size).toBe(0)
   })
 
-  it("keeps an attachment's content_id through the move to R2 and back", async () => {
+  it("restores a packed body's inline images after the body itself", async () => {
+    const t = await workspace()
+    const keys = keyringFromEnv(
+      "CONTENT_KEYS",
+      `c1:${Buffer.alloc(32, 5).toString("base64")}`,
+    )
+    const store = Object.assign(sealingStore(), { keys })
+    const logo = new Uint8Array(2_000).fill(7)
+    const sha = new Bun.CryptoHasher("sha256").update(logo).digest("hex")
+    await putObjects(t, new Map([[sha, { bytes: logo }]]), {
+      db,
+      store,
+      keys: objectKeys,
+    })
+    const messageId = crypto.randomUUID()
+    const html = `<img src="data:image/png;base64,\u0003${sha}\u0003">`
+    const sealed = sealBody(keys, { tenantId: t, messageId }, { html, text: null })
+    const packId = crypto.randomUUID()
+    store.objects.set(packKey(t, packId), new Uint8Array(sealed.record))
+    const [back] = await restoreContent(db, store, t, [
+      {
+        messageId,
+        html: null as string | null,
+        text: null as string | null,
+        packId,
+        packOffset: 0,
+        packLength: sealed.record.byteLength,
+        bodyKey: sealed.wrappedKey,
+        inlineObjects: [sha],
+      },
+    ])
+    expect(back!.html).toBe(
+      `<img src="data:image/png;base64,${Buffer.from(logo).toString("base64")}">`,
+    )
+  })
+
+  it("leaves data-URI images in the html when OBJECT_KEYS is not set", async () => {
     const t = await workspace()
     const store = memoryStore()
+    const html = `<img src="data:image/png;base64,${Buffer.alloc(3_000, 8).toString("base64")}">`
+    const id = await seed(t, html)
+    expect((await compactContent(t, { db, store })).extracted).toBe(0)
+    expect(store.objects.size).toBe(0)
+    const [row] =
+      await owner`select html, inline_objects from core.message_bodies where message_id = ${id}`
+    expect(row!.html).toBe(html)
+  })
+
+  it("keeps an attachment's content_id through the move to R2 and back", async () => {
+    const t = await workspace()
+    const store = sealingStore()
     const [m] = await owner`
       with m as (
         insert into core.messages (tenant_id, from_address, to_addresses, subject, status, queue, sent_at)
@@ -359,11 +419,11 @@ suite("content passes against Postgres, as i10_api (#171)", () => {
              ${owner.json([{ filename: "logo.png", content_type: "image/png", content_id: "logo", content: Buffer.from("png").toString("base64") }] as never)}
         from m
       returning message_id as id, attachments`
-    expect((await storeAttachments(t, { db, store })).moved).toBe(1)
+    expect((await storeAttachments(t, { db, store, keys: objectKeys })).moved).toBe(1)
     const [row] =
       await owner`select attachments from core.message_bodies where message_id = ${m!.id}`
     expect(row!.attachments[0].content_id).toBe("logo")
-    const back = await restoreAttachments(store, t, row!.attachments)
+    const back = await restoreAttachments(db, store, t, row!.attachments)
     expect(back![0]).toMatchObject({
       content_id: "logo",
       content: Buffer.from("png").toString("base64"),
