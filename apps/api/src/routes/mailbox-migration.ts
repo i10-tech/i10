@@ -9,6 +9,7 @@ import { unwrapKey } from "../crypto/envelope.js"
 import type { TokenKeys } from "../crypto/token-keys.js"
 import {
   signDownloadToken,
+  UPLOAD_TTL_S,
   verifyDownloadToken,
   type MailboxAccessResult,
   type MailboxJobRow,
@@ -78,8 +79,6 @@ declare module "hono" {
 
 /** How long a download link works. The status route mints a fresh one each call. */
 const LINK_TTL_MS = 15 * 60_000
-/** How long the upload URL works: enough to send LIMITS.maxArchiveBytes on a slow line. */
-const UPLOAD_TTL_S = 6 * 60 * 60
 
 const MailboxJob = mailboxJobSchema.openapi("MailboxJob")
 const CreateMailboxImport = createMailboxImportSchema.openapi("CreateMailboxImport")

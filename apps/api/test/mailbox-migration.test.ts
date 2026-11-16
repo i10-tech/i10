@@ -4,7 +4,6 @@ import { memoryStore, type ContentStore } from "../src/content/object-store.js"
 import { unwrapKey } from "../src/crypto/envelope.js"
 import { keyringFromEnv } from "../src/crypto/keyring.js"
 import { LIMITS } from "../src/mailboxes/archive.js"
-import { sweepMailboxArchives } from "../src/mailboxes/jobs.js"
 import {
   exportKey,
   importKey,
@@ -208,6 +207,29 @@ describe("export, then import into another account", () => {
     await runMailboxImport(inn.data, t.deps(t.target.client))
     expect(t.jobs.rows.get(inn.row.id)!.status).toBe("completed")
     expect(t.jobs.rows.get(inn.row.id)!.processedMessages).toBe(3)
+  })
+
+  it("keeps an import that worked completed when its upload cannot be deleted, for the sweep", async () => {
+    const t = setup({ source: { emails: [email("e1", "f-inbox", "one")] } })
+    const out = await t.queue("export", "alice@acme.test")
+    await runMailboxExport(out.data, t.deps(t.source.client))
+
+    const inn = await t.queue("import", "bob@acme.test")
+    const key = importKey(TENANT, inn.row.id)
+    t.store.objects.set(key, await downloaded(t.store, t.jobs.rows.get(out.row.id)!))
+    await t.jobs.update(TENANT, inn.row.id, { objectKey: key })
+    const store = Object.assign(Object.create(t.store) as typeof t.store, {
+      delete: async () => {
+        throw new Error("R2 is down")
+      },
+    })
+    await runMailboxImport(inn.data, t.deps(t.target.client, { store }))
+
+    const imported = t.jobs.rows.get(inn.row.id)!
+    expect(imported.status).toBe("completed")
+    expect(imported.errorCode).toBeNull()
+    // Still named, so `mailbox_archives_due` finds it at once.
+    expect(imported.objectKey).toBe(key)
   })
 })
 
@@ -427,7 +449,7 @@ describe("import", () => {
   })
 })
 
-describe("the queue and the sweep", () => {
+describe("the queue", () => {
   it("queues every job under its mailbox, lowercased, so one mailbox runs one at a time", async () => {
     const added: unknown[] = []
     await enqueueMailboxJob(
@@ -442,35 +464,5 @@ describe("the queue and the sweep", () => {
     expect(added).toEqual([
       expect.objectContaining({ groupId: "alice@acme.test", jobId: "mbx:j1" }),
     ])
-  })
-
-  it("deletes an expired export's archive and an abandoned upload, and nothing live", async () => {
-    const jobs = memoryJobStore()
-    const store = memoryStore()
-    const row = async (type: "export" | "import", key: string, patch = {}) => {
-      const r = await jobs.insert({
-        tenantId: TENANT,
-        mailboxAddress: "a@x.test",
-        type,
-        requestedBy: "u",
-        status: "completed",
-      })
-      await jobs.update(TENANT, r.id, { objectKey: key, ...patch })
-      store.objects.set(key, new Uint8Array([1]))
-      return r
-    }
-    const now = new Date("2026-11-20T00:00:00Z")
-    await row("export", "old-export", { expiresAt: new Date("2026-11-10T00:00:00Z") })
-    await row("export", "live-export", { expiresAt: new Date("2026-11-25T00:00:00Z") })
-    const abandoned = await row("import", "abandoned-upload")
-    // The in-memory clock stamps rows "now"; the abandoned one is old.
-    jobs.rows.set(abandoned.id, {
-      ...jobs.rows.get(abandoned.id)!,
-      updatedAt: new Date("2026-11-10T00:00:00Z"),
-    })
-
-    expect(await sweepMailboxArchives(jobs, store, TENANT, now)).toBe(2)
-    expect([...store.objects.keys()].sort()).toEqual(["live-export"])
-    expect([...jobs.rows.values()].filter((r) => r.objectKey !== null)).toHaveLength(1)
   })
 })

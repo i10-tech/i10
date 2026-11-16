@@ -5130,6 +5130,10 @@ export const deviceResumes = core.table(
  *
  * Tracks the state, progress, and content-store references for mailbox migrations:
  * exporting a mailbox to an archive (zip of EMLs) and importing an archive into a mailbox.
+ *
+ * ⚠ NO FOREIGN KEY TO `tenants`, ON PURPOSE (#392), as for `template_assets`: a
+ * row outlives a tenant row removed by hand, so the sweep in retention.ts can
+ * still find its archive in R2 and delete it, then the row.
  */
 export const mailboxJobs = core.table(
   "mailbox_jobs",
@@ -5137,9 +5141,7 @@ export const mailboxJobs = core.table(
     id: uuid("id")
       .primaryKey()
       .default(sql`uuidv7()`),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id").notNull(),
     mailboxAddress: text("mailbox_address").notNull(),
     type: text("type").notNull(),
     status: text("status").notNull().default("pending"),
