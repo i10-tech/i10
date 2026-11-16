@@ -63,6 +63,50 @@ export function hostedDomainsOf(db: Database) {
 }
 
 /**
+ * Whether anything already receives mail at this address: a mailbox, an alias, or
+ * a list (a team inbox, a directory group, a deleted mailbox's forward).
+ *
+ * ⚠ ACCOUNTS, ALIASES *AND* LISTS. An address free in one table and taken in
+ * another is already receiving somebody's mail; checking only `accounts` would
+ * hand a stranger an address that currently delivers to a real person. The unique
+ * constraints would catch the first case and not the others, and only after we
+ * had written to Clerk.
+ *
+ * ⚠ ONE ROUND TRIP, NOT THREE SELECTS. The halves have to be answered against the
+ * same snapshot: asking sequentially leaves a window where an address is free in
+ * the first query and claimed as an alias before the second, which is exactly the
+ * race this check exists to lose safely.
+ *
+ * ⚠ A LIST'S ADDRESS IS THE THIRD HALF. A deleted mailbox that was set to forward
+ * keeps its address as a list (`fwd-<id>`, mailboxes/lifecycle.ts) whose only
+ * member is where its mail goes, so a new person who took that address would have
+ * their mail copied to somebody else.
+ *
+ * Takes the reader so an alias being added can ask inside its own transaction.
+ */
+export async function addressHeld(
+  db: Pick<Database, "select">,
+  address: string,
+): Promise<boolean> {
+  const rows = await union(
+    db
+      .select({ address: accounts.email })
+      .from(accounts)
+      .where(eq(accounts.email, address)),
+    db
+      .select({ address: aliases.address })
+      .from(aliases)
+      .where(eq(aliases.address, address)),
+    db
+      .select({ address: sql<string>`${groups.email}`.as("address") })
+      .from(groups)
+      .where(eq(groups.email, address)),
+  ).limit(1)
+
+  return rows.length > 0
+}
+
+/**
  * The projection's rows, read and gated for provisioning.
  *
  * ⚠ NO `withTenant` ANYWHERE IN THIS FILE, AND THAT IS NOT AN OVERSIGHT. The
@@ -108,32 +152,7 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
      * person. The unique constraints would catch the first case and not the
      * second, and only after we had written to Clerk.
      */
-    async addressTaken(address) {
-      // ⚠ ONE ROUND TRIP, NOT TWO SELECTS. The two halves have to be answered
-      // against the same snapshot: asking sequentially leaves a window where an
-      // address is free in the first query and claimed as an alias before the
-      // second, which is exactly the race this check exists to lose safely.
-      // ⚠ AND A LIST'S ADDRESS, THE THIRD HALF. A deleted mailbox that was set to
-      // forward keeps its address as a list (`fwd-<id>`, mailboxes/lifecycle.ts)
-      // whose only member is where its mail goes, so a new person who took that
-      // address would have their mail copied to somebody else.
-      const rows = await union(
-        db
-          .select({ address: accounts.email })
-          .from(accounts)
-          .where(eq(accounts.email, address)),
-        db
-          .select({ address: aliases.address })
-          .from(aliases)
-          .where(eq(aliases.address, address)),
-        db
-          .select({ address: sql<string>`${groups.email}`.as("address") })
-          .from(groups)
-          .where(eq(groups.email, address)),
-      ).limit(1)
-
-      return rows.length > 0
-    },
+    addressTaken: (address) => addressHeld(db, address),
 
     async current(userId) {
       const [row] = await db

@@ -112,7 +112,7 @@ export interface MailboxLifecycleStore {
 
 const fwdName = (userId: string) => `fwd-${userId}`
 
-const audit = (tx: Tx, tenantId: string, event: AuditEvent) =>
+export const audit = (tx: Tx, tenantId: string, event: AuditEvent) =>
   tx.insert(events).values({
     tenantId,
     type: event.type,

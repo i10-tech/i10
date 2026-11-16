@@ -44,6 +44,7 @@ import type { TeamInboxes } from "../../team-inboxes/service.js"
 import type { StorageAllocations } from "../../mailboxes/allocation.js"
 import type { ConsoleMailboxes } from "../../mailboxes/console.js"
 import type { MailboxAdmin } from "../../mailboxes/creation-mode.js"
+import type { MailboxAliases } from "../../mailboxes/aliases.js"
 import type { MailboxAdminLifecycle } from "../../mailboxes/lifecycle.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
@@ -269,6 +270,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * the routes answer 501.
    */
   mailboxLifecycle?: MailboxAdminLifecycle
+  /**
+   * The addresses that deliver to a mailbox (B8): an owner or admin adds and
+   * removes them, a member reads their own mailbox's. Optional; without it the
+   * routes answer 501.
+   */
+  mailboxAliases?: MailboxAliases
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

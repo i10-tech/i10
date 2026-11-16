@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm"
+import type { MailboxAliasSource } from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
 import { directoryUsers } from "../db/identity.js"
 import { mailboxDeletions } from "../db/core.js"
@@ -116,7 +117,7 @@ export async function laneForConnection(
 
 export interface ConsoleMailboxAlias {
   address: string
-  source: "clerk" | "directory"
+  source: MailboxAliasSource
 }
 
 export interface ConsoleMailboxOwner {
@@ -350,7 +351,7 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
     const aliasesByUser = new Map<string, ConsoleMailboxAlias[]>()
     for (const row of aliasRows) {
       const source: ConsoleMailboxAlias["source"] =
-        row.source === "directory" ? "directory" : "clerk"
+        row.source === "directory" || row.source === "console" ? row.source : "clerk"
       const list = aliasesByUser.get(row.clerkUserId)
       if (list) list.push({ address: row.address, source })
       else aliasesByUser.set(row.clerkUserId, [{ address: row.address, source }])

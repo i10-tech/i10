@@ -242,17 +242,23 @@ export const aliases = authd.table(
       .references(() => accounts.clerkUserId, { onDelete: "cascade" }),
     /**
      * `clerk` (a verified address on the Clerk user, replaced wholesale by the
-     * projection) or `directory` (an address a company's directory lists,
-     * #344, written only by mailboxes/store.ts).
+     * projection), `directory` (an address a company's directory lists, #344,
+     * written only by mailboxes/store.ts) or `console` (an owner or admin gave it,
+     * B8, written only by mailboxes/aliases.ts).
      *
      * ⚠ THE PROJECTION REPLACES ONLY ITS OWN. Without the split, the next
      * `user.updated` webhook would delete every alias a directory gave.
+     *
+     * ⚠ `console` IS NOT A CLERK ADDRESS ON PURPOSE. A verified address on the Clerk
+     * user is also a way to sign in as that person, and an alias on a second domain
+     * of the workspace should not become one; nor should a mailbox's aliases depend
+     * on a Clerk round trip that can fail after the row is written.
      */
     source: text("source").notNull().default("clerk"),
   },
   (t) => [
     index("aliases_account_idx").on(t.clerkUserId),
-    check("aliases_source_check", sql`"source" in ('clerk', 'directory')`),
+    check("aliases_source_check", sql`"source" in ('clerk', 'directory', 'console')`),
   ],
 )
 
