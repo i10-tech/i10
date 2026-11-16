@@ -51,7 +51,11 @@ describe("sealing", () => {
 
   it("refuses a tampered value", () => {
     const [v, kid, iv, tag, ct] = box.seal(at, "original").split(".")
-    const flipped = [v, kid, iv, tag, `${ct!.slice(0, -2)}AA`].join(".")
+    // Change the FIRST character, to one it is not. The last characters carry
+    // padding bits, and replacing them with fixed text left the bytes unchanged
+    // about once in a thousand runs, so the value opened and the test failed.
+    const first = ct!.startsWith("A") ? "B" : "A"
+    const flipped = [v, kid, iv, tag, `${first}${ct!.slice(1)}`].join(".")
     expect(() => box.open(at, flipped)).toThrow("tampered")
   })
 
