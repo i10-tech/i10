@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { createApp } from "../src/app.js"
-import { memoryStore } from "../src/content/object-store.js"
+import { memoryStore, type ContentStore } from "../src/content/object-store.js"
 import { LIMITS } from "../src/mailboxes/archive.js"
 import {
   decideAccess,
@@ -14,6 +14,8 @@ import type { FreshAuthReader, SessionVerifier } from "../src/middleware/session
 import type { MailboxMigrationDeps } from "../src/routes/mailbox-migration.js"
 import type { MailboxJobData } from "../src/queue/mailbox-queue.js"
 import { keyringFromEnv } from "../src/crypto/keyring.js"
+import { newDataKey, wrapKey } from "../src/crypto/envelope.js"
+import { EXPORT_KEY, sealStream } from "../src/mailboxes/sealed-stream.js"
 import { tokenKeys } from "../src/crypto/token-keys.js"
 import { memoryJobStore } from "./support/job-store.js"
 
@@ -27,6 +29,14 @@ const ring = (fill: number) =>
     ),
   )
 const SECRET = ring(1)
+const objectKeys = keyringFromEnv(
+  "OBJECT_KEYS",
+  `o1:${Buffer.alloc(32, 8).toString("base64")}`,
+)
+/** What the export job writes: a gzipped tar would be here; any bytes do. */
+const ARCHIVE = Bun.gzipSync(
+  new TextEncoder().encode("a tar of the mailbox ".repeat(5_000)),
+)
 const ADDRESS = "alice@acme.test"
 
 const OWNER = "user_owner"
@@ -49,7 +59,10 @@ function build(
   opts: { fresh?: boolean; unwiredFreshAuth?: boolean } = {},
 ) {
   const jobs = memoryJobStore()
-  const store = memoryStore()
+  const store: ReturnType<typeof memoryStore> & ContentStore = Object.assign(
+    memoryStore(),
+    { objectKeys },
+  )
   const queued: MailboxJobData[] = []
   const deps: MailboxMigrationDeps = {
     jobs,
@@ -97,9 +110,15 @@ const completedExport = async (t: ReturnType<typeof build>, patch = {}) => {
     status: "completed",
   })
   const key = exportKey(TENANT, row.id)
-  t.store.objects.set(key, new Uint8Array([1, 2, 3, 4, 5]))
+  const ids = { tenantId: TENANT, jobId: row.id }
+  const archiveKey = newDataKey()
+  const sealed = await new Response(
+    new Blob([ARCHIVE]).stream().pipeThrough(sealStream(archiveKey, ids)),
+  ).arrayBuffer()
+  t.store.objects.set(key, new Uint8Array(sealed))
   await t.jobs.update(TENANT, row.id, {
     objectKey: key,
+    sealedKey: wrapKey(EXPORT_KEY, objectKeys, ids, archiveKey),
     expiresAt: new Date(Date.now() + 86_400_000),
     ...patch,
   })
@@ -282,18 +301,36 @@ describe("the download link", () => {
   const download = (t: ReturnType<typeof build>, link: string) =>
     t.call("GET", link.replace("alice%40acme.test", ADDRESS))
 
-  it("streams the archive to whoever holds a good link, with no session", async () => {
+  it("streams the archive, opened, to whoever holds a good link, with no session", async () => {
     const t = build()
-    await completedExport(t)
+    const row = await completedExport(t)
+    // What R2 holds is sealed, and is not the archive.
+    const inR2 = t.store.objects.get(exportKey(TENANT, row.id))!
+    expect(Buffer.from(inR2).includes(Buffer.from(ARCHIVE.subarray(0, 32)))).toBe(false)
+
     const res = await download(t, (await linkOf(t))!)
     expect(res.status).toBe(200)
     expect(res.headers.get("content-type")).toBe("application/gzip")
-    expect(res.headers.get("content-length")).toBe("5")
+    // The archive's own length, not the sealed object's.
+    expect(res.headers.get("content-length")).toBe(String(ARCHIVE.byteLength))
     expect(res.headers.get("content-disposition")).toContain(
       "alice@acme.test-export.tar.gz",
     )
     expect(res.headers.get("cache-control")).toBe("no-store")
-    expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([1, 2, 3, 4, 5])
+    expect(Buffer.from(await res.arrayBuffer()).equals(Buffer.from(ARCHIVE))).toBe(true)
+  })
+
+  it("is off without OBJECT_KEYS: no export is queued and none is served", async () => {
+    const t = build()
+    await completedExport(t)
+    t.store.objectKeys = null
+    expect((await t.call("POST", `/mailboxes/${ADDRESS}/export`, OWNER)).status).toBe(
+      501,
+    )
+    expect(t.queued).toEqual([])
+    expect(
+      (await t.call("GET", `/mailboxes/${ADDRESS}/export/download`, OWNER)).status,
+    ).toBe(501)
   })
 
   it("serves the owner by session too, and nobody else", async () => {

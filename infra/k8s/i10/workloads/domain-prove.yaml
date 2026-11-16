@@ -78,11 +78,14 @@ spec:
       # minute resumes where this one stopped.
       activeDeadlineSeconds: 50
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: i10-api
         spec:
           restartPolicy: Never
           containers:
             - name: prove
-              image: ghcr.io/i10-tech/i10-api:prod-792c2a46fb1b9c828c6eca96d689c7e9dce61c76@sha256:3b18bb421f641fd2a1a9cba89c8b68ba996707afb1fea9be0dbe8390e0292a16
+              image: ghcr.io/i10-tech/i10-api:prod-11efea13cc16dd2f80f99ba741be613c23ad6424@sha256:5627fd3a19a29c1bb12142fb4614ad484a8ff88be58b1416e98b24c122c4a398
               imagePullPolicy: Always
               command: ["bun", "dist/domain-prove.js"]
               envFrom:

@@ -197,7 +197,7 @@ export function emailLookup(
       // Postgres. Only packed bodies (#188) and bodies whose data-URI images
       // moved (#168) read at all.
       if (!email || !stored) return email
-      const [restored] = await restoreContent(store, tenantId, [
+      const [restored] = await restoreContent(db, store, tenantId, [
         { ...stored, messageId: email.id, html: email.html, text: email.text },
       ])
       return {

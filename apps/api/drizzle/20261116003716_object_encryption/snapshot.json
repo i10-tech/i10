@@ -1,0 +1,81 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "f7c79ef0-4d2d-4555-b10d-3b8f76b2cdec",
+  "prevIds": [
+    "68e5f79e-a83f-43b5-93fa-934172fb3876"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "content_objects",
+        "sealed_key"
+      ],
+      "writes": [
+        "s|col|core.content_objects.sealed_key",
+        "n|col|core.content_objects.sealed_key",
+        "e|col|core.content_objects.sealed_key"
+      ],
+      "reads": [
+        "n|tbl|core.content_objects",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "mailbox_jobs",
+        "sealed_key"
+      ],
+      "writes": [
+        "s|col|core.mailbox_jobs.sealed_key",
+        "n|col|core.mailbox_jobs.sealed_key",
+        "e|col|core.mailbox_jobs.sealed_key"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_jobs",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_objects",
+        "name": "sealed_key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_jobs",
+        "name": "sealed_key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

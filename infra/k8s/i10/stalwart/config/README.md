@@ -115,8 +115,9 @@ running container and does not.
   (the policy, and the reason for it, are in `workloads/api.yaml`),
   `activeDeadlineSeconds: 300` and `backoffLimit: 1`. A failed run's pod stays
   for reading until the next sync.
-- **Network.** No NetworkPolicy was added: `allow-same-namespace` already admits
-  every pod in `i10-prod` to the pods' ports, and policies only add.
+- **Network.** `stalwart-http-clients` (`networkpolicy.yaml`) admits the Job,
+  by its label `app.kubernetes.io/name: i10-stalwart-apply`, to 8080 on both
+  nodes. Its 25 and 465 checks go through `allow-public-mail`.
 - **The script is its own ConfigMap**, `i10-stalwart-apply`, not part of
   `i10-stalwart-config`, whose hash rolls the Stalwart pods.
 - **Not in the Job:** the two checks that read pod logs (authd, the stdout
@@ -502,9 +503,9 @@ what follows are the ones whose reason is not obvious from the value.
   limit. The plan sets 128 MB and 64 MB; restart after applying.
 - ⚠ **THE CLIENT IP COMES FROM X-Forwarded-For, ONE HOP.** Behind Traefik every
   client looked like Traefik for bans and rate limits. Anything that can reach
-  8080 directly can therefore claim any address. Today that is every pod in
-  i10-prod (`allow-same-namespace`, which a NetworkPolicy cannot narrow), plus
-  Traefik.
+  8080 directly can therefore claim any address. That is Traefik plus the pods
+  `stalwart-http-clients` (`networkpolicy.yaml`) lists: the API group, the
+  apply hook and Bulwark.
 - **The cluster and the tailnet are `AllowedIp`** (10.42.0.0/16, fd42::/48,
   100.64.0.0/10, fd7a:115c:a1e0::/48), so a burst of failures from our own
   components can never ban them. **Bans last 30 days** instead of forever.
@@ -981,7 +982,8 @@ The send worker hands direct-route mail to the `relay` listener on **2525**, wit
 - **No hostPort** (node/statefulset.yaml) - nothing on the node's public addresses
   answers on 2525.
 - **Not in `allow-public-mail`** (networkpolicy.yaml) - traffic from outside the
-  namespace cannot reach it. `allow-same-namespace` is what lets the worker in.
+  namespace cannot reach it. `stalwart-relay-clients`, in the same file, admits
+  the send worker and no other pod.
 - **ClusterIP only** (service.yaml) - `i10-stalwart-mail:2525` is the name the
   worker dials, set in worker.yaml because it is an address, not a secret.
 

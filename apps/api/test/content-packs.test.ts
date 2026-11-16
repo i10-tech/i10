@@ -1,8 +1,12 @@
 import { describe, expect, it } from "bun:test"
 import { memoryStore, packKey, type ContentStore } from "../src/content/object-store.js"
-import { BodyCache, restoreContent, restorePacked } from "../src/content/packs.js"
-import { bodyKeyUnder, openBody, rewrapBodyKey, sealBody } from "../src/content/seal.js"
-import { keyringFromEnv } from "../src/crypto/keyring.js"
+import { BodyCache, restorePacked } from "../src/content/packs.js"
+import { BODY_KEY, openBody, sealBody, type BodyIds } from "../src/content/seal.js"
+import { keyUnder as bodyKeyUnder, rewrapKey } from "../src/crypto/envelope.js"
+import { keyringFromEnv, type Keyring } from "../src/crypto/keyring.js"
+
+const rewrapBodyKey = (ring: Keyring, ids: BodyIds, wrapped: string) =>
+  rewrapKey(BODY_KEY, ring, ids, wrapped)
 
 /**
  * Sealing bodies and reading them back out of packs (#188). The database half
@@ -220,22 +224,7 @@ describe("restorePacked", () => {
     expect(again!.html).toBe("<p>hot</p>")
     expect(store.ranges).toBe(1)
   })
-
-  it("restores a packed body's inline images after the body itself", async () => {
-    const store = Object.assign(memoryStore(), { keys })
-    const logo = new Uint8Array(2_000).fill(7)
-    const sha = new Bun.CryptoHasher("sha256").update(logo).digest("hex")
-    store.objects.set(`${tenant}/sha256/${sha}`, logo)
-    const [row] = packed(store, tenant, [
-      { html: `<img src="data:image/png;base64,\u0003${sha}\u0003">`, text: null },
-    ])
-    const [back] = await restoreContent(store, tenant, [
-      { ...row!, inlineObjects: [sha] },
-    ])
-    expect(back!.html).toBe(
-      `<img src="data:image/png;base64,${Buffer.from(logo).toString("base64")}">`,
-    )
-  })
+  // Its inline images after it: test/content-db.test.ts, where the keys live.
 })
 
 describe("BodyCache", () => {

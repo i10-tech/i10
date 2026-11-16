@@ -467,6 +467,9 @@ function startMailboxMigrationWorker() {
     )
     return null
   }
+  if (!store.objectKeys) {
+    log.warn({}, "OBJECT_KEYS is not set: imports run, and an export fails its job")
+  }
 
   const jmap = jmapAs({
     baseUrl: env.STALWART_URL,

@@ -646,8 +646,9 @@ const schema = z.object({
    * sends only autoconfig, autodiscover and MTA-STS to the pod, and the network
    * policy's own comment says 8080 is left out "because the management API
    * belongs behind Traefik". Every management path answers 404 from outside.
-   * `i10-prod` is an allowed source namespace, so the reconcile job reaches it
-   * at `http://i10-stalwart:8080`.
+   * The `stalwart-http-clients` policy admits the API, the worker and the
+   * CronJobs on 8080, so the reconcile job reaches it at
+   * `http://i10-stalwart:8080`.
    *
    * ⚠ OPTIONAL, AND ITS ABSENCE SKIPS THE SAMPLE RATHER THAN ZEROING IT. A
    * deployment that cannot ask the mail server must leave the last figure
@@ -1229,6 +1230,20 @@ const schema = z.object({
   CONTENT_KEYS: keyVariable("CONTENT_KEYS"),
 
   /**
+   * Master keys that wrap the key of each file in R2: attachments, data-URI
+   * images and mailbox export archives. Same format as `CONTENT_KEYS`, with
+   * keys of its own.
+   *
+   * ⚠ UNSET, NOTHING IS STORED IN THE CLEAR. Attachments and images stay in
+   * Postgres, mailbox export answers 501, and a stored file cannot be read.
+   * Allowed in development only: production with the content store set
+   * refuses to start without it (checked below).
+   *
+   * ⚠ LOSING THESE LOSES EVERY STORED FILE AND EXPORT.
+   */
+  OBJECT_KEYS: keyVariable("OBJECT_KEYS"),
+
+  /**
    * Bytes of bodies waiting that make an R2 write worth it (#188). Below it, a
    * workspace's bodies wait for the next run, up to `CONTENT_PACK_MAX_WAIT_HOURS`.
    */
@@ -1472,6 +1487,19 @@ const validated = schema.superRefine((env, ctx) => {
       message:
         `is required when NODE_ENV is production and the content store is set. ` +
         `Without it message bodies are never sealed and stay in Postgres.`,
+    })
+  }
+  if (
+    env.NODE_ENV === "production" &&
+    set.length === store.length &&
+    env.OBJECT_KEYS === undefined
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["OBJECT_KEYS"],
+      message:
+        `is required when NODE_ENV is production and the content store is set. ` +
+        `Without it attachments stay in Postgres and mailbox export is off.`,
     })
   }
 

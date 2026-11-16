@@ -500,9 +500,9 @@ stands instead: stale and honest.
 Probed 2026-09-05: `/jmap`, `/.well-known/jmap` and `/api/schema` all answer
 **404** on `mail.i10.tech`, because `ingressroute.yaml` routes only autoconfig,
 autodiscover and MTA-STS to the pod - and the network policy's own comment says
-8080 is omitted "because the management API belongs behind Traefik". `i10-prod`
-is an allowed source namespace, so the reconcile job reaches it in-cluster at
-`http://i10-stalwart:8080`.
+8080 is omitted "because the management API belongs behind Traefik". The
+`stalwart-http-clients` policy admits the API group, so the reconcile job
+reaches it in-cluster at `http://i10-stalwart:8080`.
 
 #### The wire shape, verified 2026-09-06
 

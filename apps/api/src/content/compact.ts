@@ -3,7 +3,7 @@ import { withTenant, type Database } from "../db/client.js"
 import { fingerprint } from "../risk/fingerprint.js"
 import { putObjects } from "./attachments.js"
 import { extractDataUris } from "./inline.js"
-import type { ObjectStore } from "./object-store.js"
+import type { ContentStore } from "./object-store.js"
 import {
   compactable,
   derive,
@@ -54,10 +54,11 @@ import {
 export interface CompactDeps {
   db: Database
   /**
-   * Where data-URI images go (#168). Absent: they stay in the html, and
-   * compaction runs exactly as before.
+   * Where data-URI images go (#168), sealed under its `objectKeys`. Absent, or
+   * without `OBJECT_KEYS`: they stay in the html, and compaction runs exactly
+   * as before.
    */
-  store?: ObjectStore | null
+  store?: ContentStore | null
   now?: Date
   /** Unexamined bodies per workspace per pass. */
   limit?: number
@@ -176,13 +177,14 @@ export async function compactContent(
   // once as an object, instead of 40 KB of base64 in the skeleton - and two
   // receipts whose images differ still share one template, the image hash
   // being a value like any other.
-  if (deps.store) {
+  const keys = deps.store?.objectKeys
+  if (deps.store && keys) {
     for (const r of rows) {
       if (!r.html) continue
       const extracted = extractDataUris(r.html)
       if (!extracted) continue
       try {
-        await putObjects(tenantId, extracted.objects, { db, store: deps.store })
+        await putObjects(tenantId, extracted.objects, { db, store: deps.store, keys })
         // ⚠ GUARDED ON THE ORIGINAL, like every rewrite here.
         const done = (await withTenant(db, tenantId, (tx) =>
           tx.execute(sql`

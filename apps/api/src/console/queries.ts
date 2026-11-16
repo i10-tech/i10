@@ -676,7 +676,7 @@ export function consoleQueries(
       // ⚠ AFTER THE TRANSACTION, like the attachments: an image read from R2
       // holds nothing open in Postgres (#168).
       if (!email || !stored) return email
-      const [restored] = await restoreContent(store, tenantId, [
+      const [restored] = await restoreContent(db, store, tenantId, [
         {
           inlineObjects: stored.inlineObjects,
           packId: stored.packId,

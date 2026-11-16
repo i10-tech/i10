@@ -4698,6 +4698,14 @@ export const contentObjects = core.table(
     /** Hex SHA-256 of the exact bytes: the object's identity. */
     sha256: text("sha256").notNull(),
     size: bigint("size", { mode: "number" }).notNull(),
+    /**
+     * The object's own key, wrapped under `OBJECT_KEYS` (content/objects.ts).
+     * Not the R2 name: that is `objectKey(tenant, sha256)`.
+     *
+     * ⚠ THE ROW IS WRITTEN IN THE SAME TRANSACTION AS THE UPLOAD, so a row
+     * that can be seen always names the key its object was sealed with.
+     */
+    sealedKey: text("sealed_key").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
       .notNull()
@@ -5139,7 +5147,13 @@ export const mailboxJobs = core.table(
     processedMessages: integer("processed_messages").notNull().default(0),
     totalFolders: integer("total_folders").notNull().default(0),
     processedFolders: integer("processed_folders").notNull().default(0),
+    /** Where the archive is in R2: a path, not a key. */
     objectKey: text("object_key"),
+    /**
+     * An export archive's own key, wrapped under `OBJECT_KEYS`
+     * (mailboxes/sealed-stream.ts). Null for imports, which arrive plain.
+     */
+    sealedKey: text("sealed_key"),
     error: text("error"),
     errorCode: text("error_code"),
     requestedBy: text("requested_by").notNull(),

@@ -1,4 +1,6 @@
-import { objectKey, type ObjectStore } from "./object-store.js"
+import type { Database } from "../db/client.js"
+import type { ContentStore } from "./object-store.js"
+import { readObjects } from "./objects.js"
 
 /**
  * Data-URI images inside stored HTML, moved to R2 by content hash (#168).
@@ -7,7 +9,7 @@ import { objectKey, type ObjectStore } from "./object-store.js"
  * in the HTML itself - often the same 40 KB logo in every message a workspace
  * sends. The content-store job, after the send, lifts each such payload out of
  * the STORED body into R2 (per workspace, `<tenant>/sha256/<hex>`, the same
- * objects attachments use) and leaves a reference in its place:
+ * sealed objects attachments use) and leaves a reference in its place:
  *
  *   data:image/png;base64,<U+0003><sha256><U+0003>
  *
@@ -93,45 +95,30 @@ export interface InlineRow {
 /**
  * Puts the images back into bodies read from storage, AFTER `restoreBodies`.
  *
- * ⚠ LOUD WHEN IT CANNOT. A body with references and no store to read them
- * from is a body we cannot show or resend as it was sent; an empty image would
- * hide that for ever. Rows without references pass through untouched, and no
- * store is needed for them.
+ * ⚠ LOUD WHEN IT CANNOT. A body with references and no store or key to read
+ * them with is a body we cannot show or resend as it was sent; an empty image
+ * would hide that for ever. Rows without references pass through untouched,
+ * and no store is needed for them.
  *
  * ⚠ ONE READ PER OBJECT PER CALL. Fifty compacted receipts with the same logo
  * fetch it once.
  */
 export async function restoreInline<T extends InlineRow>(
-  store: ObjectStore | null,
+  db: Database,
+  store: ContentStore | null,
   tenantId: string,
   rows: T[],
 ): Promise<T[]> {
   const needed = rows.filter((r) => r.html && (r.inlineObjects?.length ?? 0) > 0)
   if (needed.length === 0) return rows
-  if (!store) {
-    throw new Error(
-      "message body has images in the content store, and no content store is configured",
-    )
-  }
-  const cache = new Map<string, Promise<string>>()
-  const read = (sha: string) => {
-    let hit = cache.get(sha)
-    if (!hit) {
-      hit = store
-        .get(objectKey(tenantId, sha))
-        .then((b) => Buffer.from(b).toString("base64"))
-      cache.set(sha, hit)
-    }
-    return hit
-  }
-  return Promise.all(
-    rows.map(async (row) => {
-      if (!row.html || !(row.inlineObjects?.length ?? 0)) return row
-      const refs = inlineReferences(row.html)
-      const payloads = new Map(
-        await Promise.all(refs.map(async (s) => [s, await read(s)] as const)),
-      )
-      return { ...row, html: fill(row.html, (sha) => payloads.get(sha)!) }
-    }),
+  const files = await readObjects(
+    db,
+    store,
+    tenantId,
+    needed.flatMap((r) => inlineReferences(r.html)),
   )
+  return rows.map((row) => {
+    if (!row.html || !(row.inlineObjects?.length ?? 0)) return row
+    return { ...row, html: fill(row.html, (sha) => files.get(sha)!.toString("base64")) }
+  })
 }

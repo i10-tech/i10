@@ -175,23 +175,29 @@ export function databaseOps(
           // finished message may have had its body packed or its data-URI
           // images moved to R2, and must send them as sent.
           const stored = storedById.get(m.id)
-          const [restored] = await restoreContent(opts.store ?? null, m.tenantId, [
-            {
-              messageId: m.id,
-              html: m.html ?? null,
-              text: m.text ?? null,
-              inlineObjects: stored?.inlineObjects ?? null,
-              packId: stored?.packId ?? null,
-              packOffset: stored?.packOffset ?? null,
-              packLength: stored?.packLength ?? null,
-              bodyKey: stored?.bodyKey ?? null,
-            },
-          ])
+          const [restored] = await restoreContent(
+            opts.db,
+            opts.store ?? null,
+            m.tenantId,
+            [
+              {
+                messageId: m.id,
+                html: m.html ?? null,
+                text: m.text ?? null,
+                inlineObjects: stored?.inlineObjects ?? null,
+                packId: stored?.packId ?? null,
+                packOffset: stored?.packOffset ?? null,
+                packLength: stored?.packLength ?? null,
+                bodyKey: stored?.bodyKey ?? null,
+              },
+            ],
+          )
           return {
             ...m,
             html: restored?.html ?? m.html,
             text: restored?.text ?? m.text,
             attachments: (await restoreAttachments(
+              opts.db,
               opts.store ?? null,
               m.tenantId,
               m.attachments as AnyAttachment[] | null,
