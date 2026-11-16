@@ -9592,7 +9592,7 @@
             }
           },
           "403": {
-            "description": "Not the mailbox's owner or a workspace admin.",
+            "description": "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9841,7 +9841,7 @@
             }
           },
           "403": {
-            "description": "Not the mailbox's owner or a workspace admin.",
+            "description": "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
             "content": {
               "application/json": {
                 "schema": {
