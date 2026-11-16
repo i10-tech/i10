@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Validates the process environment with the API's own schema, then exits.
  *

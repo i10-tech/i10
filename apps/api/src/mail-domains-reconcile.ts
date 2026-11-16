@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Brings Stalwart's `Domain` objects in line with `core.mailbox_domains()`, then
  * exits.

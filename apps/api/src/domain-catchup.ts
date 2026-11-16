@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Asks SES about the domains still waiting on it, then exits.
  *

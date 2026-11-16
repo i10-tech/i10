@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Re-enqueues messages the queue has lost track of, then exits.
  *

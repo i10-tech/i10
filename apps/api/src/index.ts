@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 import { createClerkClient } from "@clerk/backend"
 import { passwordAttempts } from "./console/password-check.js"
 import { codeCooldown } from "./console/code-cooldown.js"
