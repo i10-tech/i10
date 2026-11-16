@@ -77,7 +77,11 @@ import {
 import { equalSecrets } from "./webhooks/signing.js"
 import type { WebhookEndpointStore } from "./webhooks/store.js"
 import type { DomainStore } from "./domains/store.js"
-import type { SessionVerifier, SsoGateReader } from "./middleware/session.js"
+import type {
+  FreshAuthReader,
+  SessionVerifier,
+  SsoGateReader,
+} from "./middleware/session.js"
 import type { NetworkOutcome } from "./identity/workspace-policy.js"
 import type { MailboxProvisioning } from "./mailboxes/provision.js"
 
@@ -164,6 +168,15 @@ export interface AppDeps {
    * 501 rather than letting an unauthenticated caller through.
    */
   sessionAuth?: SessionVerifier
+  /**
+   * `requireFreshAuth`'s reader, for the session routes that live outside
+   * `/console` (the mailbox export and import, #385). The console has its own,
+   * set in `ConsoleDeps`; a deployment passes the same one to both.
+   *
+   * ⚠ OMITTED MEANS THOSE ROUTES REFUSE (501), NOT THAT THEY SKIP THE CHECK -
+   * see `freshAuthRefusal`.
+   */
+  freshAuth?: FreshAuthReader
   /**
    * The SSO gate (#337), read by `requireUser` and `requireTenant`. Absent
    * means no identity core in this process, so no managed accounts to gate.
@@ -336,6 +349,7 @@ export function createApp(deps: AppDeps = {}) {
     deps.trustedTemplates ||
     deps.domains ||
     deps.sessionAuth ||
+    deps.freshAuth ||
     deps.mailboxes ||
     deps.ssoGate ||
     deps.apiKeyNetwork
@@ -351,6 +365,7 @@ export function createApp(deps: AppDeps = {}) {
     const trusted = deps.trustedTemplates
     const domainStore = deps.domains
     const sessions = deps.sessionAuth
+    const freshAuth = deps.freshAuth
     const mailboxStore = deps.mailboxes
     const gate = deps.ssoGate
     const network = deps.apiKeyNetwork
@@ -367,6 +382,7 @@ export function createApp(deps: AppDeps = {}) {
       if (trusted) c.set("trustedTemplates", trusted)
       if (domainStore) c.set("domains", domainStore)
       if (sessions) c.set("sessionAuth", sessions)
+      if (freshAuth) c.set("freshAuth", freshAuth)
       if (mailboxStore) c.set("mailboxes", mailboxStore)
       if (gate) c.set("ssoGate", gate)
       if (network) c.set("apiKeyNetwork", network)

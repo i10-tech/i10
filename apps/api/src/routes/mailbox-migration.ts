@@ -18,7 +18,7 @@ import { LIMITS } from "../mailboxes/archive.js"
 import { importKey } from "../mailboxes/migration.js"
 import { EXPORT_KEY, openStream, plainLength } from "../mailboxes/sealed-stream.js"
 import type { MailboxJobData } from "../queue/mailbox-queue.js"
-import { requireUser } from "../middleware/session.js"
+import { freshAuthRefusal, requireUser } from "../middleware/session.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 
 /**
@@ -34,6 +34,20 @@ import { errorResponse, notWired as notWiredFor } from "./shared.js"
  * ⚠ WHO MAY: the mailbox's owner, the workspace's owner, or a workspace admin
  * (jobs.ts). A route that names a mailbox is a route that can read it, so every
  * one of these asks first, and a colleague who is none of those gets a 403.
+ *
+ * ⚠ STARTING AN EXPORT AND RESERVING AN IMPORT ASK FOR A FRESH SESSION, AFTER
+ * THE ACCESS CHECK ABOVE (`freshAuthRefusal`, the function behind the console's
+ * `requireFreshAuth`; these routes are not under /console, so the reader reaches
+ * them through `AppDeps.freshAuth`). An export copies every message out and an
+ * import writes into the mailbox, so a stolen cookie must not be enough - and a
+ * colleague who may not touch the mailbox is told 403 rather than asked to
+ * re-authenticate. Reads (status, download) never ask.
+ *
+ * ⚠ `import/{jobId}/start` DOES NOT, ON PURPOSE. It can only run the job that a
+ * fresh `POST .../import` reserved, and the archive for it may take hours to
+ * send: asking again after the upload would make the final click of a large
+ * migration fail on a session that was fresh when the person began. There is no
+ * cancel route today; one would be a mutation and belong behind the same step-up.
  *
  * ⚠ THE ARCHIVE IS NEVER HELD BY THIS PROCESS. An import is a presigned `PUT`
  * straight to R2, then a second call to say it is there; an export is read
@@ -84,6 +98,16 @@ const forbidden = () =>
     "invalid_access",
     "Only the mailbox's owner or a workspace admin may do that.",
   )
+
+/**
+ * The step-up answer, handed back from a typed route.
+ *
+ * ⚠ CLERK'S HINT, NOT OUR ERROR SHAPE, so it cannot be `c.json(problem(...))`:
+ * the browser's `useReverification` looks for `clerk_error` in the body to open
+ * its dialog (see `freshAuthRefusal`). The OpenAPI handler types only the
+ * documented shapes, hence the cast; the 403 above describes it.
+ */
+const refusal = (response: Response): never => response as never
 
 const address = z.object({ address: z.string() })
 
@@ -156,7 +180,9 @@ const startExport = createRoute({
       content: { "application/json": { schema: MailboxJob } },
     },
     401: errorResponse("Not signed in."),
-    403: errorResponse("Not the mailbox's owner or a workspace admin."),
+    403: errorResponse(
+      "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
+    ),
     404: errorResponse("No such mailbox."),
     501: errorResponse("Mailbox export is not configured."),
   },
@@ -174,6 +200,8 @@ mailboxMigration.openapi(startExport, async (c) => {
       ? c.json(notFound(), 404)
       : c.json(forbidden(), 403)
   }
+  const stale = await freshAuthRefusal(c)
+  if (stale) return refusal(stale)
   const tenantId = access.tenantId!
 
   // One at a time: a second request while one runs is the same request.
@@ -387,7 +415,9 @@ const startUpload = createRoute({
       content: { "application/json": { schema: MailboxJob } },
     },
     401: errorResponse("Not signed in."),
-    403: errorResponse("Not the mailbox's owner or a workspace admin."),
+    403: errorResponse(
+      "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
+    ),
     404: errorResponse("No such mailbox."),
     413: errorResponse("The archive is over the size limit."),
     422: errorResponse("The request is malformed."),
@@ -410,6 +440,8 @@ mailboxMigration.openapi(
         ? c.json(notFound(), 404)
         : c.json(forbidden(), 403)
     }
+    const stale = await freshAuthRefusal(c)
+    if (stale) return refusal(stale)
     if (size > LIMITS.maxArchiveBytes) {
       return c.json(
         problem(
