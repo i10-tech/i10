@@ -2248,6 +2248,9 @@ const app = createApp({
    * a 501 that would claim mailboxes are not a feature.
    */
   sessionAuth: sessions,
+  // ⚠ THE CONSOLE'S READER, SSO FRESHNESS INCLUDED: the mailbox export and import
+  // are session routes outside /console and ask for the same step-up.
+  freshAuth: consoleFreshAuth,
   ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl, enforcement, workspace),
   apiKeyNetwork: (tenantId: string, headers: Headers) =>
     workspace.admitApiKey(tenantId, headers),

@@ -95,6 +95,39 @@ resource "cloudflare_r2_bucket" "content" {
   lifecycle { prevent_destroy = true }
 }
 
+# ⚠ THE BROWSER PUTS A MAILBOX ARCHIVE HERE DIRECTLY (#385). The import flow
+# hands the console a presigned PUT URL for this bucket, so the upload never
+# passes through the API; a cross-origin PUT from a page needs a CORS rule or
+# the preflight fails and the import never starts.
+#
+# - ORIGINS ARE EXACT, NEVER "*". The console (dash.i10.tech) is the only page
+#   that uploads. Keep this in step with CONSOLE_ORIGINS in the API's
+#   environment, which is set outside this repo; add a name here when another
+#   surface uploads.
+# - PUT ONLY. Reads go through the API behind the tenant check and the presign
+#   is write-only, so GET, HEAD and POST stay refused.
+# - Content-Type IS THE ONE HEADER THE UPLOAD SENDS. The presigned URL carries
+#   its own signature in the query string, so Authorization is not needed.
+# - ONE HOUR, because a preflight answer is cheap to repeat and this rule should
+#   be easy to tighten.
+#
+# ⚠ THIS DOES NOT MAKE THE BUCKET PUBLIC. CORS only decides which pages may
+# read a response; the PUT is still refused without a valid signature.
+resource "cloudflare_r2_bucket_cors" "content" {
+  account_id  = var.cloudflare_account_id
+  bucket_name = cloudflare_r2_bucket.content.name
+
+  rules = [{
+    id = "console-import-upload"
+    allowed = {
+      origins = ["https://dash.i10.tech"]
+      methods = ["PUT"]
+      headers = ["Content-Type"]
+    }
+    max_age_seconds = 3600
+  }]
+}
+
 import {
   to = cloudflare_r2_bucket.content_dev
   id = "${var.cloudflare_account_id}/i10-content-dev/default"
@@ -107,6 +140,23 @@ resource "cloudflare_r2_bucket" "content_dev" {
   storage_class = "Standard"
 
   lifecycle { prevent_destroy = true }
+}
+
+# The same upload from a local console (dev/env.example sets CONSOLE_ORIGINS to
+# this origin), against the dev bucket. Exact origin, PUT only, as above.
+resource "cloudflare_r2_bucket_cors" "content_dev" {
+  account_id  = var.cloudflare_account_id
+  bucket_name = cloudflare_r2_bucket.content_dev.name
+
+  rules = [{
+    id = "console-import-upload"
+    allowed = {
+      origins = ["https://dash.i10.localhost"]
+      methods = ["PUT"]
+      headers = ["Content-Type"]
+    }
+    max_age_seconds = 3600
+  }]
 }
 
 # Stalwart's blob store (#357): mailbox message bodies, attachments and Sieve

@@ -6,6 +6,7 @@ import {
 } from "@repo/contracts"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
+import { freshAuthRefusal } from "../../middleware/session.js"
 import type { TeamInboxOutcome } from "../../team-inboxes/service.js"
 
 /**
@@ -19,6 +20,11 @@ import type { TeamInboxOutcome } from "../../team-inboxes/service.js"
  *
  * ⚠ THE ADDRESS IS THE IDENTIFIER, in the path and in the bodies; a Clerk user
  * id never appears (see packages/contracts/src/team-inbox.ts).
+ *
+ * ⚠ CREATING, RESHAPING AND DELETING ONE ARE STEP-UP, and a person who is not
+ * an admin is never asked. A team inbox decides who can read a shared address
+ * and deleting one destroys its Stalwart account, so a stolen cookie must not
+ * be enough. See `stepUp` below for how the member's 403 survives.
  */
 
 const forbidden = (message: string) =>
@@ -34,6 +40,25 @@ export function mountTeamInboxes(app: Hono, d: ConsoleDeps): void {
     userId: c.get("user").userId,
     orgId: c.get("user").orgId,
   })
+
+  /**
+   * Asks an admin for a fresh session; says nothing to anyone else.
+   *
+   * ⚠ THE ROLE CHECK STAYS IN THE SERVICE, so this cannot be a plain
+   * `requireFreshAuth` in front of the route: that would tell a member to
+   * re-authenticate for something they will be refused anyway. Instead it asks
+   * the service the same question the mutations ask first. A non-admin (or a
+   * person with no active workspace) gets `null` here and falls through to the
+   * service, which answers its own `forbidden` / `no_org` before it touches
+   * anything - that refusal is what keeps the fall-through safe, and the tests
+   * pin it. The one place the order is not "role, then step-up" is a member's
+   * request with a malformed body: it is read after this, so it is still a 422.
+   */
+  const stepUp = async (c: Context): Promise<Response | null> => {
+    if (!d.teamInboxes) return null
+    if (!(await d.teamInboxes.isAdmin(viewerOf(c)))) return null
+    return freshAuthRefusal(c)
+  }
 
   /** A path address, or nothing when it could not be one. */
   const addressOf = (raw: string | undefined) => {
@@ -73,6 +98,8 @@ export function mountTeamInboxes(app: Hono, d: ConsoleDeps): void {
 
   app.post("/team-inboxes", async (c) => {
     if (!d.teamInboxes) return c.json(notWired("Team inboxes"), 501)
+    const refusal = await stepUp(c)
+    if (refusal) return refusal
     const parsed = createTeamInboxSchema.safeParse(await readJson(c))
     if (!parsed.success) {
       return c.json(
@@ -107,6 +134,8 @@ export function mountTeamInboxes(app: Hono, d: ConsoleDeps): void {
     if (!d.teamInboxes) return c.json(notWired("Team inboxes"), 501)
     const address = addressOf(c.req.param("address"))
     if (!address) return c.json(NOT_FOUND, 404)
+    const refusal = await stepUp(c)
+    if (refusal) return refusal
 
     const parsed = setTeamInboxMembersSchema.safeParse(await readJson(c))
     if (!parsed.success) {
@@ -126,6 +155,8 @@ export function mountTeamInboxes(app: Hono, d: ConsoleDeps): void {
     if (!d.teamInboxes) return c.json(notWired("Team inboxes"), 501)
     const address = addressOf(c.req.param("address"))
     if (!address) return c.json(NOT_FOUND, 404)
+    const refusal = await stepUp(c)
+    if (refusal) return refusal
 
     const outcome = await d.teamInboxes.remove(viewerOf(c), address)
     if (outcome === "forbidden") {

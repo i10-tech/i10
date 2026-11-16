@@ -143,6 +143,12 @@ const domainOf = (address: string) =>
   address.slice(address.lastIndexOf("@") + 1).toLowerCase()
 
 export interface TeamInboxes {
+  /**
+   * Whether this viewer manages the workspace's team inboxes: the same answer
+   * `create`, `setMembers` and `remove` give before they touch anything, exposed
+   * so a route can ask for a step-up of an admin without asking a member.
+   */
+  isAdmin(viewer: Viewer): Promise<boolean>
   list(viewer: Viewer): Promise<TeamInbox[]>
   get(viewer: Viewer, address: string): Promise<TeamInbox | null>
   create(
@@ -200,6 +206,8 @@ export function teamInboxes(deps: TeamInboxDeps): TeamInboxes {
   }
 
   return {
+    isAdmin: admin,
+
     async list(viewer) {
       const rows = (await admin(viewer))
         ? await store.forTenant(viewer.tenantId)

@@ -10,7 +10,7 @@ import {
   type MailboxAccessFacts,
 } from "../src/mailboxes/jobs.js"
 import { exportKey, importKey } from "../src/mailboxes/migration.js"
-import type { SessionVerifier } from "../src/middleware/session.js"
+import type { FreshAuthReader, SessionVerifier } from "../src/middleware/session.js"
 import type { MailboxMigrationDeps } from "../src/routes/mailbox-migration.js"
 import type { MailboxJobData } from "../src/queue/mailbox-queue.js"
 import { keyringFromEnv } from "../src/crypto/keyring.js"
@@ -44,7 +44,10 @@ const adminChecker: AdminChecker = {
   isAdmin: async (userId, tenantId) => userId === ADMIN && tenantId === TENANT,
 }
 
-function build(over: Partial<MailboxMigrationDeps> = {}) {
+function build(
+  over: Partial<MailboxMigrationDeps> = {},
+  opts: { fresh?: boolean; unwiredFreshAuth?: boolean } = {},
+) {
   const jobs = memoryJobStore()
   const store = memoryStore()
   const queued: MailboxJobData[] = []
@@ -64,7 +67,15 @@ function build(over: Partial<MailboxMigrationDeps> = {}) {
       return user ? { status: "signed-in", userId: user } : { status: "signed-out" }
     },
   }
-  const app = createApp({ sessionAuth: sessions, mailboxMigration: deps })
+  // The step-up reader, as the console fakes it: fresh unless a test says not.
+  const freshAuth: FreshAuthReader = async () => ({
+    status: opts.fresh === false ? "stale" : "fresh",
+  })
+  const app = createApp({
+    sessionAuth: sessions,
+    mailboxMigration: deps,
+    ...(opts.unwiredFreshAuth ? {} : { freshAuth }),
+  })
   const call = (method: string, path: string, user?: string, body?: unknown) =>
     app.request(path, {
       method,
@@ -99,6 +110,86 @@ const linkOf = async (t: ReturnType<typeof build>) => {
   const res = await t.call("GET", `/mailboxes/${ADDRESS}/export`, OWNER)
   return ((await res.json()) as { download_url: string | null }).download_url
 }
+
+describe("step-up on the mutations", () => {
+  const stepUp = async (res: Response) => {
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      name: "invalid_access",
+      clerk_error: { reason: "reverification-error" },
+    })
+  }
+
+  it("asks a stale session before starting an export, and queues nothing", async () => {
+    const t = build({}, { fresh: false })
+    await stepUp(await t.call("POST", `/mailboxes/${ADDRESS}/export`, OWNER))
+    expect(t.queued).toEqual([])
+    expect(t.jobs.rows.size).toBe(0)
+  })
+
+  it("asks a stale session before reserving an import, and reserves nothing", async () => {
+    const t = build({}, { fresh: false })
+    await stepUp(
+      await t.call("POST", `/mailboxes/${ADDRESS}/import`, OWNER, { size: 10 }),
+    )
+    expect(t.jobs.rows.size).toBe(0)
+    expect(t.store.objects.size).toBe(0)
+  })
+
+  it("tells a stale colleague with no access no, not to re-authenticate", async () => {
+    const t = build({}, { fresh: false })
+    for (const [path, body] of [
+      [`/mailboxes/${ADDRESS}/export`, undefined],
+      [`/mailboxes/${ADDRESS}/import`, { size: 10 }],
+    ] as const) {
+      const res = await t.call("POST", path, MEMBER, body)
+      expect(res.status).toBe(403)
+      const answer = await res.json()
+      expect(answer).toMatchObject({ name: "invalid_access" })
+      expect(answer).not.toHaveProperty("clerk_error")
+    }
+  })
+
+  it("leaves reads alone on a stale session", async () => {
+    const t = build({}, { fresh: false })
+    await completedExport(t)
+    expect((await t.call("GET", `/mailboxes/${ADDRESS}/export`, OWNER)).status).toBe(
+      200,
+    )
+    expect((await t.call("GET", `/mailboxes/${ADDRESS}/import`, OWNER)).status).toBe(
+      404,
+    )
+  })
+
+  it("lets the upload be started on a stale session, once a fresh one reserved it", async () => {
+    const fresh = build()
+    const reserved = await fresh.call("POST", `/mailboxes/${ADDRESS}/import`, OWNER, {
+      size: 10,
+    })
+    const job = (await reserved.json()) as { id: string }
+    fresh.store.objects.set(importKey(TENANT, job.id), new Uint8Array(10))
+
+    // Same stores, a session that has since gone stale: the start is not a step-up.
+    const later = build(
+      { jobs: fresh.jobs, store: fresh.store, enqueue: fresh.deps.enqueue },
+      { fresh: false },
+    )
+    const res = await later.call(
+      "POST",
+      `/mailboxes/${ADDRESS}/import/${job.id}/start`,
+      OWNER,
+    )
+    expect(res.status).toBe(202)
+  })
+
+  it("refuses when the reader is not wired, rather than skipping the check", async () => {
+    const t = build({}, { unwiredFreshAuth: true })
+    expect((await t.call("POST", `/mailboxes/${ADDRESS}/export`, OWNER)).status).toBe(
+      501,
+    )
+    expect(t.queued).toEqual([])
+  })
+})
 
 describe("who may move a mailbox's mail", () => {
   it("allows the mailbox's owner, the workspace's owner and an admin, and no other member", async () => {
