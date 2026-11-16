@@ -7,6 +7,7 @@ export default function Loading() {
     <PageSkeleton
       title={PAGE_COPY.mailboxes.title}
       description={PAGE_COPY.mailboxes.description}
+      actions={["w-36"]}
     >
       <div className="space-y-3" aria-hidden>
         <SkeletonBlock className="h-24 w-full rounded-2xl" />

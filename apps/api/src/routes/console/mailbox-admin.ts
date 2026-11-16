@@ -277,11 +277,10 @@ export function mountMailboxAdmin(app: Hono, d: ConsoleDeps): void {
   app.get("/mailboxes/creation-mode", async (c) => {
     const admin = d.mailboxAdmin
     if (!admin) return c.json(notWired("Mailbox creation"), 501)
-    const { tenantId, userId } = actorOf(c)
-    if (!(await admin.isAdmin(tenantId, userId))) {
-      return c.json(forbidden("Only an owner or admin can see this setting."), 403)
-    }
-    return c.json({ mode: await admin.settings.get(tenantId) })
+    // ⚠ ANY MEMBER MAY READ IT: the Mailboxes page shows a member the create
+    // button only when the workspace lets them make their own. It says nothing
+    // a member could not learn by trying; only changing it is an admin's.
+    return c.json({ mode: await admin.settings.get(actorOf(c).tenantId) })
   })
 
   app.put("/mailboxes/creation-mode", async (c) => {

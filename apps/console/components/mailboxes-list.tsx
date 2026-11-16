@@ -18,6 +18,7 @@ import { RowMenu } from "@/components/list/row-menu"
 import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
 import { EmptyState } from "@/components/empty-state"
 import { LoadMore } from "@/components/load-more"
+import { CreateMailbox, type WorkspaceMember } from "@/components/create-mailbox-dialog"
 import { formatBytes } from "@/lib/format"
 
 export interface ConsoleMailboxStorage {
@@ -29,7 +30,7 @@ export interface ConsoleMailboxStorage {
 export interface ConsoleMailbox {
   address: string
   displayName: string | null
-  owner: { name: string | null; email: string | null }
+  owner: { userId?: string | null; name: string | null; email: string | null }
   domain: string
   status: string
   signIn: "password" | "oidc" | "ldap" | "off"
@@ -44,6 +45,9 @@ export interface StoragePool {
   remaining: number | null
   unallocated: number
 }
+
+/** A member's own dialog asks for no storage, so the pool never reaches it. */
+const SELF_POOL = { kind: "uncapped", remaining: null } as const
 
 const STATUS_WORDS: Record<
   string,
@@ -83,25 +87,49 @@ function signInLabel(lane: ConsoleMailbox["signIn"]) {
   return lane
 }
 
+/** What the Create mailbox dialog needs from the page. */
+export interface CreateMailboxProps {
+  domains: string[]
+  held: Record<string, string>
+  clerkEnabled: boolean
+  previewMembers?: WorkspaceMember[]
+}
+
 export function MailboxesList({
   mailboxes,
   pool,
   nextCursor,
   isAdmin,
+  selfServe,
+  create,
 }: {
   mailboxes: ConsoleMailbox[]
   pool: StoragePool
   nextCursor: string | null
   isAdmin: boolean
+  /** The workspace lets members create their own (mode `members` or `on_join`). */
+  selfServe: boolean
+  create: CreateMailboxProps
 }) {
   if (!isAdmin) {
     const mb = mailboxes[0]
     if (!mb) {
+      // ⚠ THE API STILL DECIDES: the mode can change between this render and the
+      // click, and the dialog then says the refusal in its own words.
       return (
         <EmptyState
           icon={<Inbox />}
           title="No mailbox yet"
-          description="You do not have a mailbox in this workspace. Ask an owner or admin if you expected one."
+          description={
+            selfServe && create.domains.length > 0
+              ? "You do not have a mailbox in this workspace yet. You can create your own."
+              : "You do not have a mailbox in this workspace. An owner or admin creates mailboxes for the team."
+          }
+          secondary={
+            selfServe && create.domains.length > 0 ? (
+              <CreateMailbox actor="self" pool={SELF_POOL} {...create} />
+            ) : undefined
+          }
         />
       )
     }
@@ -171,12 +199,26 @@ export function MailboxesList({
 
   const hasRows = mailboxes.length > 0
   if (!hasRows) {
+    /*
+     * ⚠ THE CREATE BUTTON LIVES HERE WHILE THE LIST IS EMPTY AND IN THE HEADER
+     * ONCE IT IS NOT (see the page), for the reason the Domains page gives: two
+     * buttons for one action, far apart, read as two different things. With no
+     * domain hosting mailboxes yet the action is the one that unblocks it.
+     */
+    const hosted = create.domains.length > 0
     return (
       <EmptyState
         icon={<Inbox />}
         title="No mailboxes yet"
-        description="Mailboxes are email addresses on your own domains that people can read and send from in any mail app. Turn on mailbox hosting on a domain to create them."
-        action={{ label: "Go to domains", href: "/domains" }}
+        description={
+          hosted
+            ? "Mailboxes are email addresses on your own domains that people can read and send from in any mail app. Create the first one for a member."
+            : "Mailboxes are email addresses on your own domains that people can read and send from in any mail app. Turn on mailbox hosting on a domain to create them."
+        }
+        {...(hosted ? {} : { action: { label: "Go to domains", href: "/domains" } })}
+        secondary={
+          hosted ? <CreateMailbox actor="admin" pool={pool} {...create} /> : undefined
+        }
       />
     )
   }
