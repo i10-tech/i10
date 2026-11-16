@@ -154,6 +154,46 @@ remove the old key. Tokens live 15 minutes at most.
 - Losing a key loses every value sealed under it. Keep a copy of each key
   outside Doppler.
 
+## Database backups
+
+The Postgres backups in R2 (base backups and WAL, bucket `i10-backups`) are
+encrypted with SSE-C: we send a key with every request, R2 encrypts the object
+with it, and R2 does not keep the key. Without the key, R2 refuses to return
+the object.
+
+- The key is `R2_BACKUPS_SSE_KEY` in Doppler `prod_platform`: 32 random bytes,
+  base64 (`openssl rand -base64 32`). Doppler syncs it into the `r2-backups`
+  Secret, and `sseCustomerKey` in
+  `infra/k8s/i10/platform-db/objectstore.yaml` points at it.
+- It needs the Barman Cloud plugin v0.16.0 or later. The plugin is installed
+  from the PSL repo.
+- Encrypted backups are under `s3://i10-backups/cnpg-sse`. The older path
+  `cnpg` holds the plain backups from before 2026-11-16. The plugin only
+  prunes the path it writes to, so the old path is not pruned any more.
+- Losing the key loses every backup. Keep a copy outside Doppler.
+- The backup is a full copy of the database. The secrets and the wrapped data
+  keys inside it are still sealed (above), but everything else in it is plain
+  once the backup is opened.
+
+What this protects: someone who gets the R2 token, or a copy of the bucket,
+cannot read a backup. What it does not: someone with both the token and the
+key, which is anyone who can read Secrets in `i10-prod` or the Doppler config.
+
+### How to rotate the backup key
+
+The key cannot change in place. Objects written under the old key stop
+opening.
+
+1. Put the new key in Doppler under a new name, and add that name to the
+   `r2-backups` DopplerSecret.
+2. In `objectstore.yaml`, point `sseCustomerKey` at the new name and change
+   `destinationPath` to a new path.
+3. Deploy, restart the database pod, and take a base backup at once
+   (`kubectl cnpg backup i10-platform --method plugin --plugin-name barman-cloud.cloudnative-pg.io`).
+4. Run a restore test from the new path.
+5. Keep the old key for as long as the old path is needed, then delete the old
+   path and the old key.
+
 ## Wrapped keys
 
 Doppler holds `SEAL_KEYS`, `TOKEN_KEYS`, `CONTENT_KEYS`, `OBJECT_KEYS` and
