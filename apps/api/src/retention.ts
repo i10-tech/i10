@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Enforces retention and frees what it leaves behind, then exits
  * (docs/decisions/storage.md).
