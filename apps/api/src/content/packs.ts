@@ -372,11 +372,12 @@ export async function restorePacked<T extends PackedRow>(
  * bodies from R2, then data-URI images (#168).
  */
 export async function restoreContent<T extends PackedRow & InlineRow>(
+  db: Database,
   store: ContentStore | null,
   tenantId: string,
   rows: T[],
 ): Promise<T[]> {
-  return restoreInline(store, tenantId, await restorePacked(store, tenantId, rows))
+  return restoreInline(db, store, tenantId, await restorePacked(store, tenantId, rows))
 }
 
 /**

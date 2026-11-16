@@ -256,6 +256,7 @@ export async function fingerprintStored(
   // Packed bodies (#188) and images (#168) back in: the tripwire reads what
   // was sent.
   const rows = await restoreContent(
+    deps.db,
     deps.store ?? null,
     tenantId,
     restored.map((r) => ({

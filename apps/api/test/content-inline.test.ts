@@ -7,7 +7,11 @@ import {
   MIN_PAYLOAD_CHARS,
   restoreInline,
 } from "../src/content/inline.js"
-import { memoryStore, objectKey } from "../src/content/object-store.js"
+import { memoryStore } from "../src/content/object-store.js"
+import type { Database } from "../src/db/client.js"
+
+/** Never reached: these rows need no read, or fail before one. */
+const noDb = {} as Database
 
 /**
  * Data-URI images lifted out of stored html and put back byte-exactly (#168).
@@ -28,14 +32,7 @@ describe("extractDataUris", () => {
     expect(out.html).toContain(`data:image/png;base64,${MARK}${sha}${MARK}`)
     expect(out.html.length).toBeLessThan(html.length / 10)
     expect(inlineReferences(out.html)).toEqual([sha!])
-
-    const store = memoryStore()
-    const tenant = "t1"
-    for (const [h, o] of out.objects) await store.put(objectKey(tenant, h), o.bytes)
-    const [back] = await restoreInline(store, tenant, [
-      { html: out.html, inlineObjects: [sha!] },
-    ])
-    expect(back!.html).toBe(html)
+    // Restoring through R2 is test/content-db.test.ts, where the keys live.
   })
 
   it("leaves small, non-canonical and already-marked bodies alone", () => {
@@ -64,16 +61,25 @@ describe("extractDataUris", () => {
 describe("restoreInline", () => {
   it("passes rows with no references through without a store", async () => {
     const rows = [{ html: "<p>hi</p>", inlineObjects: null }]
-    expect(await restoreInline(null, "t1", rows)).toBe(rows)
+    expect(await restoreInline(noDb, null, "t1", rows)).toBe(rows)
   })
 
   it("fails loudly when references exist and no store is configured", async () => {
     const out = extractDataUris(page(png(5)))!
     await expect(
-      restoreInline(null, "t1", [
+      restoreInline(noDb, null, "t1", [
         { html: out.html, inlineObjects: [...out.objects.keys()] },
       ]),
     ).rejects.toThrow("no content store is configured")
+  })
+
+  it("fails loudly when references exist and OBJECT_KEYS is not set", async () => {
+    const out = extractDataUris(page(png(6)))!
+    await expect(
+      restoreInline(noDb, memoryStore(), "t1", [
+        { html: out.html, inlineObjects: [...out.objects.keys()] },
+      ]),
+    ).rejects.toThrow("OBJECT_KEYS is not set")
   })
 })
 

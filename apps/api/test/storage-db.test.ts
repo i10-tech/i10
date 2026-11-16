@@ -8,6 +8,7 @@ import {
   sweepObjects,
 } from "../src/content/attachments.js"
 import { memoryStore, objectKey } from "../src/content/object-store.js"
+import { keyringFromEnv } from "../src/crypto/keyring.js"
 import { sweepTemplates } from "../src/content/sweep.js"
 import type { Database } from "../src/db/client.js"
 import { expireTenant } from "../src/retention/expire.js"
@@ -39,6 +40,12 @@ const A = crypto.randomUUID()
 const B = crypto.randomUUID()
 const LOGO = Buffer.from("the same logo, in fifty thousand emails").toString("base64")
 const PDF = Buffer.from("%PDF-1.7 an invoice").toString("base64")
+const keys = keyringFromEnv(
+  "OBJECT_KEYS",
+  `o1:${Buffer.alloc(32, 4).toString("base64")}`,
+)
+/** A store that seals files, as production's has. */
+const sealingStore = () => Object.assign(memoryStore(), { objectKeys: keys })
 
 async function seedMessage(
   tenant: string,
@@ -95,7 +102,7 @@ suite("storage and retention against Postgres, as i10_api", () => {
   })
 
   it("moves finished messages' files to R2 once per workspace, and never a queued one's", async () => {
-    const store = memoryStore()
+    const store = sealingStore()
     const files = [
       { filename: "logo.png", content_type: "image/png", content: LOGO },
       { filename: "invoice.pdf", content: PDF },
@@ -106,9 +113,9 @@ suite("storage and retention against Postgres, as i10_api", () => {
     // Another workspace with the same logo gets its own object.
     await seedMessage(B, { attachments: [files[0]] })
 
-    const r = await storeAttachments(A, { db, store })
+    const r = await storeAttachments(A, { db, store, keys })
     expect(r).toMatchObject({ moved: 2, uploaded: 2, reused: 1, errors: 0 })
-    await storeAttachments(B, { db, store })
+    await storeAttachments(B, { db, store, keys })
     expect(store.objects.size).toBe(3)
 
     const [row] =
@@ -127,7 +134,7 @@ suite("storage and retention against Postgres, as i10_api", () => {
     expect(still!.attachments_stored_at).toBeNull()
 
     // Byte-exact on the way back: a retry sends exactly what the caller sent.
-    const back = await restoreAttachments(store, A, row!.attachments)
+    const back = await restoreAttachments(db, store, A, row!.attachments)
     expect(back).toEqual([
       { filename: "logo.png", content_type: "image/png", content: LOGO },
       { filename: "invoice.pdf", content: PDF },
@@ -187,7 +194,7 @@ suite("storage and retention against Postgres, as i10_api", () => {
   })
 
   it("frees an object only once no body names it, and only past its grace", async () => {
-    const store = memoryStore()
+    const store = sealingStore()
     const T = crypto.randomUUID()
     await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id) values (${T}, ${`s-${T.slice(0, 8)}`}, 'T', ${`storage-test-${T}`})`
     try {
@@ -195,7 +202,7 @@ suite("storage and retention against Postgres, as i10_api", () => {
         attachments: [{ filename: "a", content: LOGO }],
       })
       await seedMessage(T, { attachments: [{ filename: "b", content: LOGO }] })
-      await storeAttachments(T, { db, store })
+      await storeAttachments(T, { db, store, keys })
       expect(store.objects.size).toBe(1)
       await owner`update core.content_objects set last_seen_at = now() - interval '2 days' where tenant_id = ${T}`
 
@@ -219,7 +226,7 @@ suite("storage and retention against Postgres, as i10_api", () => {
 
       // The way back: the same file sent again is uploaded again.
       await seedMessage(T, { attachments: [{ filename: "c", content: LOGO }] })
-      const again = await storeAttachments(T, { db, store })
+      const again = await storeAttachments(T, { db, store, keys })
       expect(again.uploaded).toBe(1)
       expect([...store.objects.keys()][0]).toBe(
         objectKey(

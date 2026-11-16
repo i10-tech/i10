@@ -32,6 +32,7 @@ export function memoryJobStore(clock: () => Date = () => new Date()) {
         totalFolders: 0,
         processedFolders: 0,
         objectKey: input.objectKey ?? null,
+        sealedKey: null,
         error: null,
         errorCode: null,
         requestedBy: input.requestedBy,

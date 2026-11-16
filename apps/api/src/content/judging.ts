@@ -133,6 +133,7 @@ export async function judgeContent(
   })
   if (stored.length === 0) return result
   const rows = await restoreContent(
+    deps.db,
     deps.store ?? null,
     tenantId,
     stored.map((r) => ({

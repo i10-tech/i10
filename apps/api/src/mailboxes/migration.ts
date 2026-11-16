@@ -1,4 +1,5 @@
-import type { StreamingObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { newDataKey, unwrapKey, wrapKey } from "../crypto/envelope.js"
 import {
   JmapAsError,
   type AuthorisedMailbox,
@@ -20,13 +21,19 @@ import {
   type MailboxJobPatch,
   type MailboxJobStore,
 } from "./jobs.js"
+import { EXPORT_KEY, sealStream } from "./sealed-stream.js"
 import { tarStream, type TarEntry } from "./tar.js"
 
 /**
  * Mailbox export and import, as they run in the worker (#385).
  *
- *   EXPORT  folders -> messages -> tar -> gzip -> a multipart write to R2
+ *   EXPORT  folders -> messages -> tar -> gzip -> seal -> a multipart write to R2
  *   IMPORT  R2 -> gunzip/unzip/untar -> messages -> Email/import, one at a time
+ *
+ * ⚠ AN EXPORT IS SEALED, AN IMPORT IS NOT. The export's key is wrapped under
+ * `OBJECT_KEYS` on its job row (sealed-stream.ts). An import is the customer's
+ * own upload, straight to R2 by a presigned PUT, so it is plain until the job
+ * ends and deletes it.
  *
  * ⚠ BOTH ARE PIPES, AND THE MEMORY BOUND IS WHAT THEY ARE FOR. Export hands each
  * message to the archive as a stream, so what is held at any moment is a few
@@ -45,7 +52,8 @@ import { tarStream, type TarEntry } from "./tar.js"
 
 export interface MigrationDeps {
   jobs: MailboxJobStore
-  store: StreamingObjectStore
+  /** Its `objectKeys` seal exports; without them an export fails. */
+  store: ContentStore
   jmap: JmapAsClient
   log?: {
     info: (o: object, m: string) => void
@@ -208,9 +216,16 @@ export async function runMailboxExport(
   const { jobs, store, jmap } = deps
   const mailbox = { address: jobData.mailboxAddress }
   const key = exportKey(jobData.tenantId, jobData.jobId)
+  const ids = { tenantId: jobData.tenantId, jobId: jobData.jobId }
   const patch = (p: MailboxJobPatch) => jobs.update(jobData.tenantId, jobData.jobId, p)
 
   try {
+    // ⚠ NEVER PLAIN. The route does not queue an export without the keys; a
+    // worker without them fails the job instead of writing mail in the clear.
+    const ring = store.objectKeys
+    if (!ring)
+      throw new Error("OBJECT_KEYS is not set, so a mailbox cannot be exported")
+    const archiveKey = newDataKey()
     const folders = await listFolders(jmap, mailbox)
     await patch({
       totalFolders: folders.length,
@@ -307,9 +322,10 @@ export async function runMailboxExport(
     // by `end()`, which the sink calls on a clean close; an error anywhere in
     // the chain skips it, so a failed export never has a half-archive to
     // download. The orphaned parts are R2's to expire.
-    const writer = store.open(key, "application/gzip")
+    const writer = store.open(key, "application/octet-stream")
     await tarStream(entries())
       .pipeThrough(new CompressionStream("gzip"))
+      .pipeThrough(sealStream(archiveKey, ids))
       .pipeTo(
         new WritableStream<Uint8Array>({
           write: (chunk) => writer.write(chunk),
@@ -317,9 +333,15 @@ export async function runMailboxExport(
         }),
       )
 
+    // Wrapped under the ring as it is now, after what may have been hours.
+    const sealedKey = wrapKey(EXPORT_KEY, ring, ids, archiveKey)
+    if (!unwrapKey(EXPORT_KEY, ring, ids, sealedKey).equals(archiveKey)) {
+      throw new Error("a wrapped export key does not open to the original")
+    }
     await patch({
       status: "completed",
       objectKey: key,
+      sealedKey,
       processedFolders,
       processedMessages,
       totalMessages: processedMessages,

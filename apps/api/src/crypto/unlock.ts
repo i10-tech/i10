@@ -21,6 +21,7 @@ export const KEY_VARIABLES = {
   SEAL_KEYS: (value: string) => keyringFromEnv("SEAL_KEYS", value),
   TOKEN_KEYS: (value: string) => keyringFromEnv("TOKEN_KEYS", value),
   CONTENT_KEYS: (value: string) => keyringFromEnv("CONTENT_KEYS", value),
+  OBJECT_KEYS: (value: string) => keyringFromEnv("OBJECT_KEYS", value),
   FEEDBACK_ID_KEY: (value: string) => feedbackIdKey(value),
 } as const satisfies Record<string, (value: string) => unknown>
 

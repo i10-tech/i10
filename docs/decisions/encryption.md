@@ -2,8 +2,8 @@
 
 Some secrets must be read back to be used: a webhook signing secret signs every
 delivery, and a DKIM private key signs every message. We cannot hash them, so we
-encrypt them before they reach a row. Message bodies have their own scheme; see
-storage.md.
+encrypt them before they reach a row. Message bodies, stored files and mailbox
+exports have their own scheme (envelope encryption, below); see storage.md.
 
 ## The variables
 
@@ -13,15 +13,18 @@ storage.md.
 | `TOKEN_KEYS`      | Mailbox download links, the DNS OAuth `state` and its PKCE verifier                                                            | Yes, keep the old key for 15 minutes |
 | `FEEDBACK_ID_KEY` | The per-workspace token in the Feedback-ID header                                                                              | Never                                |
 | `CONTENT_KEYS`    | Message bodies in R2 (storage.md)                                                                                              | Yes, with the re-wrap job            |
+| `OBJECT_KEYS`     | Attachments, data-URI images and mailbox export archives in R2 (storage.md)                                                    | Yes, with the re-wrap job            |
 
-`SEAL_KEYS`, `TOKEN_KEYS` and `CONTENT_KEYS` are keyrings: `kid:base64,kid:base64`.
+`SEAL_KEYS`, `TOKEN_KEYS`, `CONTENT_KEYS` and `OBJECT_KEYS` are keyrings: `kid:base64,kid:base64`.
 The first key is the current key. Each key is 32 random bytes
 (`openssl rand -base64 32`). A kid is up to 32 letters, digits, `_` or `-`.
 Use different keys in each variable.
 
 Production does not start without `SEAL_KEYS`, `TOKEN_KEYS` and
-`FEEDBACK_ID_KEY`. In development, a missing keyring turns its features off:
-the routes answer 501. Nothing falls back to another key.
+`FEEDBACK_ID_KEY`, and with the content store set, not without `CONTENT_KEYS`
+and `OBJECT_KEYS`. In development, a missing keyring turns its features off:
+the routes answer 501, and bodies and files stay in Postgres. Nothing falls
+back to another key, and nothing is stored in plain form instead.
 
 `FEEDBACK_ID_KEY` is never rotated. A new key gives every workspace a new
 token, and Google Postmaster Tools then loses the history of the old ones. It
@@ -48,6 +51,40 @@ v2.<kid>.<iv>.<tag>.<ciphertext>      base64url parts, AES-256-GCM, 12 byte IV
 Token keys use HKDF-SHA256 too, one subkey per use (`i10/token/v1/<use>`). A
 token for one use does not verify for another.
 
+## Envelope encryption
+
+Message bodies, stored files and export archives each have a random 32 byte
+data key of their own. The content is sealed with the data key, and only the
+data key is sealed with a master key (`apps/api/src/crypto/envelope.ts`).
+
+```
+wrapped key   kid-length(1) | kid | nonce(12) | AES-256-GCM(data key) | tag(16)    base64, on the row
+body, file    nonce(12) | AES-256-GCM(content) | tag(16)
+```
+
+| Content        | Master key     | Wrapped key in                    | Associated data (key and content) |
+| -------------- | -------------- | --------------------------------- | --------------------------------- |
+| Message body   | `CONTENT_KEYS` | `core.message_bodies.body_key`    | `i10/body/v1/<tenant>/<message>`  |
+| Stored file    | `OBJECT_KEYS`  | `core.content_objects.sealed_key` | `i10/object/v1/<tenant>/<sha256>` |
+| Export archive | `OBJECT_KEYS`  | `core.mailbox_jobs.sealed_key`    | `i10/export/v1/<tenant>/<job>`    |
+
+The body is zstd-compressed before it is sealed. `<sha256>` is the hash of the
+plain file. An export archive is too large to seal in one piece, so it is a
+stream of chunks (`apps/api/src/mailboxes/sealed-stream.ts`):
+
+```
+header   "i10x" | version(1) = 1 | nonce prefix(7, random per archive)
+chunk    AES-256-GCM(64 KiB of the archive) | tag(16)    the last chunk is shorter, maybe empty
+nonce    prefix(7) | chunk number (uint32, big-endian) | 1 on the last chunk, else 0
+```
+
+Every chunk uses the associated data in the table. A chunk that is moved,
+dropped or repeated does not open. An archive cut short has no chunk sealed as
+the last one, so it fails at its end.
+
+An object without a key, a kid that is not in the ring, and bytes that do not
+open all fail loudly. The errors name the kid or the row, never a key.
+
 ## How to rotate `SEAL_KEYS`
 
 1. Put a new key first in `SEAL_KEYS`. Keep the old key after it.
@@ -62,32 +99,40 @@ token for one use does not verify for another.
 The job is safe to stop and run again. It only rewrites a value that is still
 the one it read.
 
-## How to rotate `CONTENT_KEYS`
+## How to rotate `CONTENT_KEYS` and `OBJECT_KEYS`
 
-Each message body has its own key. `CONTENT_KEYS` only wraps those keys, in
-`core.message_bodies.body_key`. The bodies in R2 do not change.
+`CONTENT_KEYS` only wraps the body keys, in `core.message_bodies.body_key`.
+`OBJECT_KEYS` only wraps the file and export keys, in
+`core.content_objects.sealed_key` and `core.mailbox_jobs.sealed_key`. What is
+in R2 does not change.
 
-1. Put a new key first in `CONTENT_KEYS`. Keep the old key after it.
-2. Deploy, and restart everything that reads `CONTENT_KEYS`: the API, the
-   worker and the content-store job. CronJobs read it when they next start. A
-   changed Doppler value does not reach a running pod by itself.
-   New bodies are then wrapped under the new key. Old bodies still open.
+1. Put a new key first in the variable. Keep the old key after it.
+2. Deploy, and restart everything that reads it: the API, the worker and the
+   content-store job. CronJobs read it when they next start. A changed Doppler
+   value does not reach a running pod by itself. New content is then wrapped
+   under the new key. Old content still opens.
 3. Run the job, first as a dry run, then with `--apply`:
-   `MIGRATE_DATABASE_URL=... CONTENT_KEYS=... bun run --filter @i10/api rewrap-body-keys --apply`.
-   It needs the owner role, because it reads every workspace. It does not
-   need any R2 settings.
+   `MIGRATE_DATABASE_URL=... CONTENT_KEYS=... OBJECT_KEYS=... bun run --filter @i10/api rewrap-keys --apply`.
+   It re-wraps the tables of every keyring you give it, and says which ones
+   it skipped. `rewrap-body-keys` is the same command under its old name. It
+   needs the owner role, because it reads every workspace. It does not need
+   any R2 settings.
 4. Run the dry run again. It must show zero keys under the old kid and no
    failures. With `--apply`, the job scans again at the end and exits 1 if
    any key is still under an old kid or does not open.
-5. Remove the old key from `CONTENT_KEYS` and deploy.
+5. Remove the old key from the variable and deploy.
 
-The job is safe to stop and run again, and safe to run while the API and the
-content-store job run. It only rewrites a key that is still the one it read.
-A key that does not open is listed by workspace id and message id and is not
+The job is safe to stop and run again, and safe to run while the API, the
+worker and the content-store job run. It only rewrites a key that is still the
+one it read. A key that does not open is listed by its row's ids and is not
 changed. Do not remove its old key until you know why it does not open.
 
-After a leak, the old key still opens body keys in database backups taken
-before step 3. Those bodies stay exposed to whoever has both until the
+An export that is still running wraps its key when it finishes, with the keys
+its worker holds. Rotate `OBJECT_KEYS` when no export is running, or run the
+job again after the running ones finish.
+
+After a leak, the old key still opens the keys in database backups taken
+before step 3. That content stays exposed to whoever has both until the
 backups expire.
 
 To rotate `TOKEN_KEYS`, put the new key first, deploy, wait 15 minutes, and
@@ -97,6 +142,11 @@ remove the old key. Tokens live 15 minutes at most.
 
 - A stolen database, backup or dump does not expose the sealed secrets. The
   keys are not in the database.
+- A copy of the R2 bucket opens nothing without the database and the master
+  keys. But a stored file's name is the SHA-256 of the plain file, so someone
+  with the bucket listing can test whether a workspace stored a file they
+  already have. A mailbox import is plain in R2 from the upload until the
+  import ends and deletes it (storage.md).
 - A value moved to another row or workspace by someone who can write to the
   database does not open there.
 - Someone who controls the running server can decrypt everything. The server
@@ -106,8 +156,8 @@ remove the old key. Tokens live 15 minutes at most.
 
 ## Wrapped keys
 
-Doppler holds `SEAL_KEYS`, `TOKEN_KEYS`, `CONTENT_KEYS` and `FEEDBACK_ID_KEY`
-in wrapped (encrypted) form. The key that unwraps them is `KEY_WRAP_KEYS`. It
+Doppler holds `SEAL_KEYS`, `TOKEN_KEYS`, `CONTENT_KEYS`, `OBJECT_KEYS` and
+`FEEDBACK_ID_KEY` in wrapped (encrypted) form. The key that unwraps them is `KEY_WRAP_KEYS`. It
 lives in the Kubernetes Secret `i10-key-wrap`, which is made by hand and is
 in neither Doppler nor git. Each process unwraps once, at start
 (`unlockEnv` in `apps/api/src/crypto/unlock.ts`). Nothing is unwrapped per
@@ -161,7 +211,7 @@ unset KEY_WRAP_KEYS
 The `&&` matters. When the tool fails, it prints nothing, and an empty pipe
 into `doppler secrets set` would erase the key in Doppler.
 
-Do the same for the other three variables. The tool checks the value the way
+Do the same for the other four variables. The tool checks the value the way
 the server does, wraps it, and unwraps it again before it prints. It refuses
 an unknown variable name, empty input and input that is already wrapped.
 Restart the workloads after each Doppler change (Doppler does not restart
@@ -191,7 +241,7 @@ The providers sit behind one small interface (`WrapProvider` in
 
 1. Add a `kms` provider next to `local`, and make it the provider new values
    are wrapped with.
-2. Re-wrap the four values in Doppler with the wrap tool.
+2. Re-wrap the five values in Doppler with the wrap tool.
 3. Give the workloads their AWS credentials, and remove `i10-key-wrap`.
 
 Nothing else changes. The format already carries the provider name.

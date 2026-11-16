@@ -1,6 +1,6 @@
 # Everything done to stored mail after the send, on a schedule (#136, #168,
 # #171, #188): fingerprints and the farm tripwire (risk on), attachments to R2
-# (content store configured), template compaction (always), and full bodies
+# (content store and OBJECT_KEYS set), template compaction (always), and full bodies
 # sealed into packs in R2 (content store and CONTENT_KEYS set).
 #
 # ⚠ THE SAME IMAGE AND ANOTHER COMMAND, like the sweep and the reconciler.
@@ -8,7 +8,7 @@
 #
 # ⚠ ACCEPT WRITES THE RAW MESSAGE AND RETURNS; this is the "process later" half:
 # nothing touches object storage, fingerprints or templates before the 202.
-# Without the CONTENT_STORE_* keys (Doppler, prod_api) attachments stay inline;
+# Without the CONTENT_STORE_* keys or OBJECT_KEYS (Doppler, prod_api) attachments stay inline;
 # without CONTENT_KEYS bodies stay in Postgres; without RISK_ENABLED nothing is fingerprinted; compaction runs either way.
 # It reads REDIS_URL and CLERK_SECRET_KEY from i10-shared/i10-api for the
 # tripwire's re-score. See docs/decisions/storage.md.

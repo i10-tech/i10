@@ -1,19 +1,23 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import postgres from "postgres"
-import { rewrapBodyKeys, type RewrapReport } from "../scripts/rewrap-body-keys.js"
+import { rewrapTarget, TARGETS, type RewrapReport } from "../scripts/rewrap-keys.js"
 import { memoryStore, packKey } from "../src/content/object-store.js"
 import { restorePacked } from "../src/content/packs.js"
-import { bodyKeyUnder, sealBody } from "../src/content/seal.js"
-import { keyringFromEnv } from "../src/crypto/keyring.js"
+import { sealBody } from "../src/content/seal.js"
+import { keyUnder as bodyKeyUnder } from "../src/crypto/envelope.js"
+import { keyringFromEnv, type Keyring } from "../src/crypto/keyring.js"
+import { newDataKey, wrapKey } from "../src/crypto/envelope.js"
+import { EXPORT_KEY } from "../src/mailboxes/sealed-stream.js"
 
 /**
- * The body key re-wrap job against a real database: after a rotation, body
- * keys under the old key move to the new one, packed bodies then open through
- * the application's own read path without the old key, a rerun changes
- * nothing, and a key under a kid that is gone is reported rather than
- * rewritten.
+ * The key re-wrap job against a real database: after a rotation, body keys
+ * under the old key move to the new one, packed bodies then open through the
+ * application's own read path without the old key, a rerun changes nothing,
+ * and a key under a kid that is gone is reported rather than rewritten. The
+ * same job moves export keys on `mailbox_jobs`; stored files are in
+ * test/content-objects-db.test.ts.
  *
- *   STORAGE_TEST_DATABASE_URL=postgres://i10:i10@localhost:5433/pack_scratch bun test test/rewrap-body-keys-db.test.ts
+ *   STORAGE_TEST_DATABASE_URL=postgres://i10:i10@localhost:5433/pack_scratch bun test test/rewrap-keys-db.test.ts
  *
  * ⚠ THE JOB WALKS EVERY ROW IN THE DATABASE, other test files' included, so
  * these assert on this file's own rows and never on whole-table counts.
@@ -32,6 +36,14 @@ const k2 = ring(`${key("k2", 12)},${key("k1", 11)}`)
 const k2Only = ring(key("k2", 12))
 /** A key that was dropped before its bodies moved. */
 const k0 = ring(key("k0", 10))
+
+const bodiesTarget = TARGETS.find((t) => t.table === "core.message_bodies")!
+const jobsTarget = TARGETS.find((t) => t.table === "core.mailbox_jobs")!
+const rewrapBodyKeys = (
+  sql: ReturnType<typeof postgres>,
+  keys: Keyring,
+  opts: { apply: boolean; batchSize?: number },
+) => rewrapTarget(sql, bodiesTarget, keys, opts)
 
 let owner: ReturnType<typeof postgres>
 let app: ReturnType<typeof postgres>
@@ -129,6 +141,7 @@ suite("re-wrapping every body key", () => {
   })
   afterAll(async () => {
     if (tenants.length) {
+      await owner`delete from core.mailbox_jobs where tenant_id = any(${tenants})`
       await owner`delete from core.message_bodies where tenant_id = any(${tenants})`
       await owner`delete from core.messages where tenant_id = any(${tenants})`
       await owner`delete from core.tenants where id = any(${tenants})`
@@ -190,6 +203,30 @@ suite("re-wrapping every body key", () => {
 
     expect(failedIn(report, t).sort()).toEqual(seeded.map((s) => s.messageId).sort())
     expect(await storedKeys(t)).toEqual(before)
+  })
+
+  it("moves export keys on mailbox_jobs too, and leaves imports, which have none", async () => {
+    const t = await workspace()
+    const o1 = keyringFromEnv("OBJECT_KEYS", key("o1", 31))
+    const o2 = keyringFromEnv("OBJECT_KEYS", `${key("o2", 32)},${key("o1", 31)}`)
+    const [exp] = await owner<{ id: string }[]>`
+      insert into core.mailbox_jobs (tenant_id, mailbox_address, type, status, requested_by)
+      values (${t}, 'a@x.test', 'export', 'completed', 'u'), (${t}, 'a@x.test', 'import', 'completed', 'u')
+      returning id`
+    const dataKey = newDataKey()
+    const ids = { tenantId: t, jobId: exp!.id }
+    await owner`update core.mailbox_jobs set sealed_key = ${wrapKey(EXPORT_KEY, o1, ids, dataKey)} where id = ${exp!.id}`
+
+    const report = await rewrapTarget(owner, jobsTarget, o2, {
+      apply: true,
+      batchSize: 1,
+    })
+
+    expect(report.failedRows.filter((f) => f.tenantId === t)).toEqual([])
+    expect(report.nulls).toBeGreaterThanOrEqual(1)
+    const [row] = await owner<{ sealed_key: string }[]>`
+      select sealed_key from core.mailbox_jobs where id = ${exp!.id}`
+    expect(bodyKeyUnder(row!.sealed_key)).toBe("o2")
   })
 
   it("refuses to run as a role that row level security filters", async () => {
