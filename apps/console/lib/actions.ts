@@ -331,6 +331,57 @@ export async function setDomainCatchAll(id: string, address: string | null) {
 }
 
 /**
+ * A mailbox as the API answers a creation (`Mailbox` in @repo/contracts).
+ *
+ * ⚠ MIRRORED, NOT IMPORTED: the console has no dependency on the contracts
+ * package (it ships built, and its schemas would put zod in the browser bundle),
+ * and the same is true of every other response shape in lib/types.ts.
+ */
+export interface CreatedMailbox {
+  object: "mailbox"
+  address: string
+  display_name: string | null
+  active: boolean
+  created_at: string
+  storage_allocated?: number | null
+}
+
+export interface NewMailbox {
+  address: string
+  display_name?: string
+  /** Bytes. Required on a prepaid pool; a cap on pay as you go. Owners and admins only. */
+  storage_allocation?: number
+}
+
+/**
+ * An owner or admin giving a member of the workspace a mailbox (B6).
+ *
+ * ⚠ BEHIND STEP-UP, so the caller proves it is them first (`useStepUp`); the API
+ * refuses a stale session with Clerk's re-verification hint before it reads the
+ * body. Refusals keep their `name` - the dialog says each in its own words.
+ */
+export async function createMailbox(input: NewMailbox & { user_id: string }) {
+  return run(
+    () => api<CreatedMailbox>("/console/mailboxes", { method: "POST", body: input }),
+    ["/mailboxes"],
+  )
+}
+
+/**
+ * A member creating their own mailbox, where the workspace lets them.
+ *
+ * ⚠ THE PERSON'S OWN ROUTE, `POST /mailboxes`, NOT THE ADMIN ONE. It has no
+ * `user_id` and no step-up: the subject is whoever the session says, and the API
+ * answers 403 `invalid_access` while the workspace creates mailboxes by admin only.
+ */
+export async function createOwnMailbox(input: Omit<NewMailbox, "storage_allocation">) {
+  return run(
+    () => api<CreatedMailbox>("/mailboxes", { method: "POST", body: input }),
+    ["/mailboxes"],
+  )
+}
+
+/**
  * Offers a domain to whoever holds an email address. Moves nothing yet.
  *
  * ⚠ `emailed` IS FALSE WHEN THE NOTICE COULD NOT BE SENT. The offer still

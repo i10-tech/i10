@@ -243,11 +243,13 @@ describe("the creation-mode setting", () => {
     expect(await res.json()).toEqual({ mode: "on_join" })
   })
 
-  it("refuses a member for both reading and changing it", async () => {
+  it("lets a member read it but not change it", async () => {
     const w = world()
     const { app, stepUp } = appFor(w, "member", false)
 
-    expect((await call(app, "GET", "/mailboxes/creation-mode")).status).toBe(403)
+    const read = await call(app, "GET", "/mailboxes/creation-mode")
+    expect(read.status).toBe(200)
+    expect(await read.json()).toEqual({ mode: "admins" })
     expect(
       (await call(app, "PUT", "/mailboxes/creation-mode", { mode: "members" })).status,
     ).toBe(403)
