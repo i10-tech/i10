@@ -301,3 +301,31 @@ The providers sit behind one small interface (`WrapProvider` in
 3. Give the workloads their AWS credentials, and remove `i10-key-wrap`.
 
 Nothing else changes. The format already carries the provider name.
+
+## Not encrypted, on purpose
+
+Decided 2026-11-16. Both are open again the day there is a second server.
+
+**The server's disks.** The root disk and the data volume on `psl-vps` are
+plain. That covers the Postgres, Redis and Stalwart volumes and the k3s data
+folder, which holds every Kubernetes Secret, the unwrap key included. Someone
+with a copy of a disk, or with access to the hosting account, reads all of it.
+
+- Why not: with one server, an encrypted disk needs a person to type a
+  passphrase after every reboot, and until then everything is down. Nothing
+  else exists that could hand the key over automatically.
+- k3s secrets encryption is off too. Its key would sit on the same disk as the
+  Secrets, so alone it protects almost nothing.
+- What still holds: the backups in R2 are encrypted, and the secrets and data
+  keys inside the database are sealed. But the keys that open them are on the
+  same disk.
+
+**Connections from the applications to the database pooler.** They do not use
+TLS. The pooler's own connection to Postgres does (TLS 1.3).
+
+- Why not: there is one node, so this traffic never leaves the machine. Only
+  someone who already controls the server could read it, and they can read the
+  database anyway. Network policy limits who can reach the pooler at all (the
+  API group, PowerDNS and Stalwart).
+- With a second node this traffic crosses a real network. Turn TLS on then, in
+  the five clients: API, worker, PowerDNS, Stalwart and authd.
