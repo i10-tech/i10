@@ -41,6 +41,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: i10-worker
+        app.kubernetes.io/part-of: i10-api
     spec:
       # ⚠ LONGER THAN A SEND TAKES, SHORTER THAN THE STALE CLAIM. On SIGTERM the
       # worker stops taking jobs and lets what is in flight finish. Killed

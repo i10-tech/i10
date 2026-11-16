@@ -63,6 +63,9 @@ spec:
       # SES account and then make one `GetEmailIdentity` per candidate.
       activeDeadlineSeconds: 600
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: i10-api
         spec:
           restartPolicy: Never
           containers:

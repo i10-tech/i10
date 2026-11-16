@@ -199,10 +199,10 @@ url_host() {
 # ⚠ IN THE JOB THERE IS NO PORT-FORWARD, AND THE ADDRESSES ARE THE PODS', NOT
 # THE SERVICE'S. The Service picks either node at random and the apply and the
 # reload want to be told which; the pods' own addresses (read through the API,
-# Ready only) also let the Job prove that BOTH nodes answer. The cluster's
-# NetworkPolicies already admit it - `allow-same-namespace` takes every pod in
-# i10-prod on every port - so no rule was added. The first seconds of a new pod
-# reach nothing while kube-router builds its sets, which is what `wait` rides out.
+# Ready only) also let the Job prove that BOTH nodes answer. `stalwart-http-clients`
+# in networkpolicy.yaml is what admits the Job to 8080. The first seconds of a
+# new pod reach nothing while kube-router builds its sets, which is what `wait`
+# rides out.
 connect() {
   disconnect
   if [ "$IN_CLUSTER" = true ]; then
