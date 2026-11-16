@@ -25,8 +25,8 @@ spec:
   retentionPolicy: 30d
   configuration:
     # `cnpg-sse`, not `cnpg`: everything under this path is encrypted with the
-    # SSE-C key below. The plain backups from before 2026-11-16 are under
-    # `cnpg`, and nothing prunes that path any more.
+    # SSE-C key below. `cnpg` held the plain backups and was deleted on
+    # 2026-11-16.
     destinationPath: s3://i10-backups/cnpg-sse
     endpointURL: https://0ccd9b8cd89606709f1c867a1f64d840.r2.cloudflarestorage.com
     s3Credentials:

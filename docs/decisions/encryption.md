@@ -168,8 +168,9 @@ the object.
 - It needs the Barman Cloud plugin v0.16.0 or later. The plugin is installed
   from the PSL repo.
 - Encrypted backups are under `s3://i10-backups/cnpg-sse`. The older path
-  `cnpg` holds the plain backups from before 2026-11-16. The plugin only
-  prunes the path it writes to, so the old path is not pruned any more.
+  `cnpg` held the plain backups. It was deleted on 2026-11-16, so the first
+  restore point is the backup of that day. The plugin only prunes the path it
+  writes to: after a path change, delete the old path by hand.
 - Losing the key loses every backup. Keep a copy outside Doppler.
 - The backup is a full copy of the database. The secrets and the wrapped data
   keys inside it are still sealed (above), but everything else in it is plain
