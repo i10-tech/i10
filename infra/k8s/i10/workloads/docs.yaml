@@ -38,7 +38,7 @@ spec:
           # app still reading `prod-latest` long after its first build means
           # either it has never changed since this line was written, or its
           # path filter in build.yml does not match where its sources live.
-          image: ghcr.io/i10-tech/i10-docs:prod-bec4f0e1fc17538da70e5ea02458dec749874632@sha256:090a7bf45d280fee690177a98bba3d9d0cf7b86a2c79ee8aed94e8fb636cf837
+          image: ghcr.io/i10-tech/i10-docs:prod-11efea13cc16dd2f80f99ba741be613c23ad6424@sha256:1fffb030c933c316a184f787d682c717660775c8c311dcdd21f71a35966dec36
           imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 8080 }
