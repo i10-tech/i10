@@ -1,4 +1,4 @@
-import type { CreateMailbox, Mailbox } from "@repo/contracts"
+import type { CreateMailbox, Mailbox, MailboxCreationMode } from "@repo/contracts"
 import type { ClerkUser } from "../projection/clerk-user.js"
 import type { StorageAllocations } from "./allocation.js"
 
@@ -135,13 +135,21 @@ export interface ProvisionDeps {
   storage?: StorageAllocations
   /**
    * Whether this person is an owner or admin of the workspace that owns the
-   * mailbox's domain - the only people who may size an inbox.
+   * mailbox's domain - the only people who may size an inbox, create one for
+   * somebody else, or create their own while the workspace's mode is `admins`.
    *
    * ⚠ ASKED ABOUT THE TENANT, NOT TAKEN FROM THE REQUEST. This route has no
    * organization in its session, so the answer comes from the workspace the
    * DOMAIN belongs to, which is the one whose pool the mailbox would draw on.
    */
   canAllocate?: (userId: string, tenantId: string) => Promise<boolean>
+  /**
+   * Who creates mailboxes in a workspace (`workspace_settings.mailbox_creation`).
+   *
+   * ⚠ WITHOUT IT NOTHING IS ENFORCED, which is the pre-setting behaviour and
+   * only ever the case in a test: `index.ts` wires it unconditionally.
+   */
+  creationMode?: (tenantId: string) => Promise<MailboxCreationMode>
 }
 
 export type ProvisionOutcome =
@@ -162,8 +170,63 @@ export type ProvisionOutcome =
 const domainOf = (address: string) =>
   address.slice(address.lastIndexOf("@") + 1).toLowerCase()
 
+/**
+ * Local parts that speak for the domain (RFC 2142 and the usual company ones).
+ * Only an owner or admin creates a mailbox at one.
+ */
+const ROLE_LOCAL_PARTS: ReadonlySet<string> = new Set([
+  "abuse",
+  "admin",
+  "administrator",
+  "billing",
+  "dmarc",
+  "hostmaster",
+  "hr",
+  "info",
+  "legal",
+  "mailer-daemon",
+  "marketing",
+  "no-reply",
+  "noc",
+  "noreply",
+  "postmaster",
+  "privacy",
+  "root",
+  "sales",
+  "security",
+  "support",
+  "webmaster",
+])
+
+export const isRoleAddress = (address: string) =>
+  ROLE_LOCAL_PARTS.has(
+    address.slice(0, address.lastIndexOf("@")).toLowerCase().split("+")[0]!,
+  )
+
+export interface CreateOptions {
+  /**
+   * The owner or admin creating the mailbox FOR `userId`, when it is not their
+   * own. Left out, the caller is the person getting the mailbox.
+   *
+   * ⚠ NEVER TAKEN FROM A REQUEST BODY. A route sets it from its verified
+   * session, and `create` still asks whether that person administers the
+   * workspace owning the domain, so a route that forgot its own check cannot
+   * hand somebody else a mailbox.
+   */
+  actorId?: string
+  /**
+   * The workspace the caller is acting in. When given, the address's domain must
+   * belong to it: an admin of one workspace never gives a mailbox on another's.
+   */
+  tenantId?: string
+}
+
 export interface MailboxProvisioning {
-  create(userId: string, input: CreateMailbox): Promise<ProvisionOutcome>
+  create(
+    userId: string,
+    input: CreateMailbox,
+    options?: CreateOptions,
+  ): Promise<ProvisionOutcome>
   /** The caller's own mailbox, or `null`. */
   current(userId: string): Promise<Mailbox | null>
 }
@@ -191,7 +254,10 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
      * no working mail lane on cannot sign in even if a Clerk password existed, and
      * one whose lane IS on needs no Clerk password.
      */
-    async create(userId, input) {
+    async create(userId, input, options = {}) {
+      const actor = options.actorId ?? userId
+      const byAdmin = actor !== userId
+
       const person = await deps.identity.get(userId)
       if (!person) {
         return { status: "rejected", reason: "No such user." }
@@ -201,27 +267,78 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
       if (lane === "off") {
         return {
           status: "mail_signin_off",
-          reason:
-            "Your account signs in with single sign-on, and mail sign-in is not " +
-            "turned on for your connection yet. Ask your admin to turn on mail " +
-            'sign-in on the SSO connection page (Settings, Single sign-on, the connection, "Mail sign-in").',
+          reason: byAdmin
+            ? "This person signs in with single sign-on, and mail sign-in is not " +
+              "turned on for their connection yet. Turn it on on the SSO connection " +
+              'page (Settings, Single sign-on, the connection, "Mail sign-in").'
+            : "Your account signs in with single sign-on, and mail sign-in is not " +
+              "turned on for your connection yet. Ask your admin to turn on mail " +
+              'sign-in on the SSO connection page (Settings, Single sign-on, the connection, "Mail sign-in").',
         }
       }
       if (lane === "unmanaged" && !person.passwordEnabled) {
         return {
           status: "password_required",
-          reason:
-            "Set a password on your account before creating a mailbox. Mail " +
-            "clients sign in with it, and accounts without one cannot.",
+          reason: byAdmin
+            ? "This person has no password on their account. Mail clients sign " +
+              "in with one, so they need to set a password first."
+            : "Set a password on your account before creating a mailbox. Mail " +
+              "clients sign in with it, and accounts without one cannot.",
         }
       }
 
       const address = input.address
       const tenantId = await deps.directory.domainOwner(domainOf(address))
-      if (!tenantId) {
+      // ⚠ ANOTHER WORKSPACE'S DOMAIN READS EXACTLY LIKE ONE NOBODY HOSTS, so an
+      // admin cannot learn which of their neighbours' domains are live.
+      if (!tenantId || (options.tenantId && tenantId !== options.tenantId)) {
         return {
           status: "rejected",
           reason: `We do not host mailboxes on ${domainOf(address)}.`,
+        }
+      }
+
+      // ⚠ WHO MAY CREATE, ASKED OF THE WORKSPACE THAT OWNS THE DOMAIN AND BEFORE
+      // THE ADDRESS IS LOOKED UP, for the reason the sign-in check is first:
+      // somebody who may not create one has no business learning which
+      // addresses are taken. Acting for another person always takes an admin;
+      // creating your own takes one only while the mode is `admins`. `members`
+      // and `on_join` both leave self-serve open (`on_join` adds the automatic
+      // one on joining, mailboxes/on-join.ts). A directory's mailbox
+      // (`provisionForDirectory`) is the company's own act and is not this gate's.
+      if (byAdmin) {
+        if (!(await deps.canAllocate?.(actor, tenantId))) {
+          return {
+            status: "forbidden",
+            reason:
+              "Only an owner or admin of the workspace can create a mailbox for someone.",
+          }
+        }
+      } else if (deps.creationMode) {
+        const mode = await deps.creationMode(tenantId)
+        if (mode === "admins" && !(await deps.canAllocate?.(userId, tenantId))) {
+          return {
+            status: "forbidden",
+            reason:
+              "Only an owner or admin of this workspace creates mailboxes. Ask one " +
+              "to create yours.",
+          }
+        }
+      }
+
+      // ⚠ ROLE ADDRESSES ARE AN ADMIN'S TO GIVE. `postmaster@` and `abuse@` are
+      // where other providers send complaints about the whole domain, and
+      // `admin@` or `billing@` read as speaking for the company. A member making
+      // their own (or `on_join` deriving `admin` from `admin@gmail.com`) must
+      // not end up holding one.
+      if (
+        !byAdmin &&
+        isRoleAddress(address) &&
+        !(await deps.canAllocate?.(userId, tenantId))
+      ) {
+        return {
+          status: "forbidden",
+          reason: `${address} is a role address. Ask an owner or admin to create it.`,
         }
       }
 
@@ -241,7 +358,9 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
       if (existing) {
         return {
           status: "conflict",
-          reason: `You already have a mailbox at ${existing.address}.`,
+          reason: byAdmin
+            ? `This person already has a mailbox at ${existing.address}.`
+            : `You already have a mailbox at ${existing.address}.`,
         }
       }
 
@@ -283,7 +402,7 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
           }
         }
       } else {
-        if (requested !== undefined && !(await deps.canAllocate?.(userId, tenantId))) {
+        if (requested !== undefined && !(await deps.canAllocate?.(actor, tenantId))) {
           return {
             status: "forbidden",
             reason: "Only an owner or admin of the workspace can allocate storage.",
@@ -295,9 +414,11 @@ export function mailboxProvisioning(deps: ProvisionDeps): MailboxProvisioning {
           if (requested === undefined) {
             return {
               status: "rejected",
-              reason:
-                "Your plan's storage is a pool an owner or admin splits across " +
-                "inboxes. Ask one to set up this mailbox with a storage allocation.",
+              reason: byAdmin
+                ? "Your plan's storage is a pool you split across inboxes. Give this " +
+                  "mailbox a storage allocation."
+                : "Your plan's storage is a pool an owner or admin splits across " +
+                  "inboxes. Ask one to set up this mailbox with a storage allocation.",
             }
           }
           const { pool } = await deps.storage.overview(tenantId)

@@ -47,6 +47,22 @@ export function managedMailLane(
 }
 
 /**
+ * The domains a workspace hosts mailboxes on right now: verified and marked as
+ * hosting, through the same `core.mailbox_domains()` the projection uses, so
+ * "exactly one hosted domain" means what the projection means by hosted.
+ */
+export function hostedDomainsOf(db: Database) {
+  return async (tenantId: string): Promise<string[]> => {
+    const rows = (await db.execute(
+      sql`select lower(name) as name
+            from core.mailbox_domains()
+           where tenant_id = ${tenantId}::uuid`,
+    )) as unknown as { name: string }[]
+    return rows.map((r) => r.name)
+  }
+}
+
+/**
  * The projection's rows, read and gated for provisioning.
  *
  * ⚠ NO `withTenant` ANYWHERE IN THIS FILE, AND THAT IS NOT AN OVERSIGHT. The

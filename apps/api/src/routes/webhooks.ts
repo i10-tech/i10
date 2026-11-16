@@ -98,6 +98,15 @@ export interface ClerkWebhookDeps {
    * wherever `roles` is. Needs `organizationMembership.deleted` subscribed.
    */
   mailAccess?: (type: string, data: unknown) => Promise<string | null>
+  /**
+   * A person who joins a workspace in `on_join` mode gets a mailbox
+   * (mailboxes/on-join.ts). Outside the dedupe and idempotent, like the others.
+   *
+   * ⚠ BEST EFFORT AND NEVER THROWS, so it cannot make Svix retry a join whose
+   * roles row is already written. Needs `organizationMembership.created`
+   * subscribed.
+   */
+  mailJoin?: (type: string, data: unknown) => Promise<string | null>
   log?: Logger
 }
 
@@ -197,6 +206,9 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
       // ⚠ AFTER ROLES, which has already taken the row of a person who left: the
       // mailbox is suspended only for somebody who is no longer a member.
       const mailAccess = (await deps.mailAccess?.(event.type, event.data)) ?? null
+      // ⚠ AFTER ROLES TOO: the person is a member (our table says so) before a
+      // mailbox is offered to them.
+      const mailJoin = (await deps.mailJoin?.(event.type, event.data)) ?? null
       const members = (await deps.members?.(event.type, event.data)) ?? null
       const identity = (await deps.identity?.(event.type, event.data)) ?? null
 
@@ -219,6 +231,7 @@ export function createClerkWebhooks(deps?: ClerkWebhookDeps) {
           ...(provisioned ? { provisioned } : {}),
           ...(roles ? { roles } : {}),
           ...(mailAccess ? { mailAccess } : {}),
+          ...(mailJoin ? { mailJoin } : {}),
           ...(members ? { members } : {}),
           ...(identity ? { identity } : {}),
           ...(teamInboxes ? { teamInboxes } : {}),

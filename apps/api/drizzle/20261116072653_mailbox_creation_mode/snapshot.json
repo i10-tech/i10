@@ -1,0 +1,76 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "1368223a-6a2d-4106-a685-ac616622a610",
+  "prevIds": [
+    "b80c6230-532d-468e-8220-2325b07a638b"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "identity",
+        "workspace_settings",
+        "mailbox_creation"
+      ],
+      "writes": [
+        "s|col|identity.workspace_settings.mailbox_creation",
+        "n|col|identity.workspace_settings.mailbox_creation",
+        "e|col|identity.workspace_settings.mailbox_creation"
+      ],
+      "reads": [
+        "n|tbl|identity.workspace_settings",
+        "n|sch|identity"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "identity",
+        "workspace_settings"
+      ],
+      "writes": [
+        "s|ck|identity.workspace_settings.workspace_settings_mailbox_creation_check",
+        "n|ck|identity.workspace_settings.workspace_settings_mailbox_creation_check",
+        "e|ck|identity.workspace_settings.workspace_settings_mailbox_creation_check",
+        "n|con|identity.workspace_settings.workspace_settings_mailbox_creation_check"
+      ],
+      "reads": [
+        "n|tbl|identity.workspace_settings",
+        "n|sch|identity",
+        "n|col|identity.workspace_settings.mailbox_creation"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "identity",
+        "table": "workspace_settings",
+        "name": "mailbox_creation",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'admins'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "identity",
+        "table": "workspace_settings",
+        "name": "workspace_settings_mailbox_creation_check",
+        "value": "\"mailbox_creation\" in ('admins', 'members', 'on_join')",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

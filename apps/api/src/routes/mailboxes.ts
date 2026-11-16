@@ -55,7 +55,8 @@ const create = createRoute({
     },
     401: errorResponse("Not signed in."),
     403: errorResponse(
-      "The plan does not include another mailbox, or a member asked to allocate storage.",
+      "The plan does not include another mailbox, a member asked to allocate " +
+        "storage, or the workspace lets only owners and admins create mailboxes.",
     ),
     409: errorResponse(
       "The account has no password, the address is taken, or the user " +
