@@ -264,6 +264,13 @@ export function identityStore(db: Database, secrets: Sealer | null): IdentitySto
       })
     },
 
+    async dueExpiryTenants(after, limit) {
+      const rows = (await db.execute(
+        sql`select tenant_id from identity.expiry_tenants_due(${after}::uuid, ${Math.trunc(limit)})`,
+      )) as unknown as { tenant_id: string }[]
+      return rows.map((r) => r.tenant_id)
+    },
+
     async createConnection(tenantId, input) {
       const [row] = await withTenant(db, tenantId, (tx) =>
         tx
