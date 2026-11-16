@@ -72,7 +72,26 @@ spec:
       containers:
         - name: redis
           image: redis:8.10-alpine
-          args: ["/etc/redis/redis.conf"]
+          # ⚠ THE PASSWORD IS THE ONLY THING BETWEEN THE NAMESPACE AND THE
+          # QUEUES. `allow-same-namespace` lets every pod in i10-prod reach
+          # 6379, so without `requirepass` the console, the docs site and the
+          # mail servers could all read and write jobs.
+          #
+          # It comes from Doppler `prod_api` (REDIS_PASSWORD), the same value
+          # that REDIS_URL carries for the API, the worker and the CronJobs.
+          # `$(REDIS_PASSWORD)` is expanded by the kubelet from the env below.
+          #
+          # ⚠ A NEW PASSWORD NEEDS A RESTART OF THIS POD AND OF EVERY CLIENT.
+          # Doppler updates the Secrets, but nothing reloads a running pod.
+          args: ["/etc/redis/redis.conf", "--requirepass", "$(REDIS_PASSWORD)"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-redis-auth, key: REDIS_PASSWORD }
+            # redis-cli reads this, so the probes below authenticate.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef: { name: i10-redis-auth, key: REDIS_PASSWORD }
           ports:
             - name: redis
               containerPort: 6379
@@ -84,12 +103,15 @@ spec:
               mountPath: /etc/redis
             - name: data
               mountPath: /data
+          # ⚠ `grep PONG`, NOT THE EXIT CODE. redis-cli exits 0 when the server
+          # answers with an error, so a bare `redis-cli ping` passes on NOAUTH
+          # and would hide a probe that lost its password.
           livenessProbe:
-            exec: { command: ["redis-cli", "ping"] }
+            exec: { command: ["sh", "-c", "redis-cli ping | grep -q PONG"] }
             initialDelaySeconds: 10
             periodSeconds: 15
           readinessProbe:
-            exec: { command: ["redis-cli", "ping"] }
+            exec: { command: ["sh", "-c", "redis-cli ping | grep -q PONG"] }
             initialDelaySeconds: 3
             periodSeconds: 5
       volumes:
