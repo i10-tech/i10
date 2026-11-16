@@ -146,7 +146,8 @@ remove the old key. Tokens live 15 minutes at most.
   keys. But a stored file's name is the SHA-256 of the plain file, so someone
   with the bucket listing can test whether a workspace stored a file they
   already have. A mailbox import is plain in R2 from the upload until the
-  import ends and deletes it (storage.md).
+  import ends and deletes it, or the hourly archive sweep does. An upload that
+  is never started stays for a day after its job last changed (storage.md).
 - A value moved to another row or workspace by someone who can write to the
   database does not open there.
 - Someone who controls the running server can decrypt everything. The server

@@ -1,9 +1,8 @@
-import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { withTenant } from "../db/client.js"
 import { accounts } from "../db/schema.js"
 import { mailboxJobs, tenants } from "../db/core.js"
-import type { ObjectStore } from "../content/object-store.js"
 import type { TokenKeys } from "../crypto/token-keys.js"
 
 /**
@@ -176,12 +175,14 @@ export interface MailboxJobStore {
     jobId: string,
     patch: MailboxJobPatch,
   ): Promise<MailboxJobRow | null>
-  /** Jobs whose archive in the content store is past its keep. */
-  withExpiredObject(tenantId: string, now: Date): Promise<MailboxJobRow[]>
 }
 
-/** An import's archive is kept this long after the job last moved, then goes. */
-const IMPORT_ARCHIVE_KEEP_MS = 24 * 60 * 60 * 1000
+/**
+ * How long an import's upload URL works: enough to send LIMITS.maxArchiveBytes
+ * on a slow line. The sweep in sweep.ts waits this long before it deletes an
+ * upload of a deleted workspace, so no `PUT` can land after it.
+ */
+export const UPLOAD_TTL_S = 6 * 60 * 60
 
 export function mailboxJobStore(db: Database): MailboxJobStore {
   return {
@@ -234,58 +235,5 @@ export function mailboxJobStore(db: Database): MailboxJobStore {
       )
       return row ?? null
     },
-
-    async withExpiredObject(tenantId, now) {
-      return withTenant(db, tenantId, (tx) =>
-        tx
-          .select()
-          .from(mailboxJobs)
-          .where(
-            and(
-              eq(mailboxJobs.tenantId, tenantId),
-              isNotNull(mailboxJobs.objectKey),
-              or(
-                and(eq(mailboxJobs.type, "export"), lt(mailboxJobs.expiresAt, now)),
-                and(
-                  eq(mailboxJobs.type, "import"),
-                  lt(
-                    mailboxJobs.updatedAt,
-                    new Date(now.getTime() - IMPORT_ARCHIVE_KEEP_MS),
-                  ),
-                ),
-              ),
-            ),
-          )
-          .limit(50),
-      )
-    },
   }
-}
-
-/**
- * Deletes the archives in the content store that nobody is going to use again:
- * an export past its seven days, and an import's upload a day after the job last
- * moved (it is deleted when the job ends, so this is for the ones that never
- * started).
- *
- * ⚠ ONE WORKSPACE AT A TIME, because `mailbox_jobs` is under row-level security
- * and finding every workspace's expired jobs at once needs a SECURITY DEFINER
- * function like the ones `retention.ts` reads its due lists from. That function
- * is a migration of its own, so until it exists this runs for the workspace of
- * each job that starts (see `migration.ts`) and nothing sweeps a workspace that
- * never exports again. Hooking it into `retention.ts` is the follow-up.
- */
-export async function sweepMailboxArchives(
-  jobs: MailboxJobStore,
-  store: ObjectStore,
-  tenantId: string,
-  now = new Date(),
-): Promise<number> {
-  const expired = await jobs.withExpiredObject(tenantId, now)
-  for (const job of expired) {
-    // Idempotent, so a sweep that died between the two steps simply runs again.
-    await store.delete(job.objectKey!)
-    await jobs.update(tenantId, job.id, { objectKey: null })
-  }
-  return expired.length
 }

@@ -1,0 +1,36 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "5b43c567-1065-4718-b279-ab87eddcbb4c",
+  "prevIds": [
+    "b80c6230-532d-468e-8220-2325b07a638b"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_jobs"
+      ],
+      "writes": [
+        "s|fk|core.mailbox_jobs.mailbox_jobs_tenant_id_tenants_id_fk",
+        "n|fk|core.mailbox_jobs.mailbox_jobs_tenant_id_tenants_id_fk",
+        "e|fk|core.mailbox_jobs.mailbox_jobs_tenant_id_tenants_id_fk",
+        "n|con|core.mailbox_jobs.mailbox_jobs_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_jobs",
+        "n|sch|core",
+        "e|col|core.mailbox_jobs.tenant_id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"core\",\"mailbox_jobs\",\"mailbox_jobs_tenant_id_tenants_id_fk\"]"
+    }
+  ]
+}
