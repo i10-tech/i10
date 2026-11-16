@@ -5,6 +5,7 @@ import { api, ApiRequestError } from "@/lib/api"
 import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import { PREVIEW } from "@/lib/preview"
+import type { LoginBlock } from "@/lib/sso-types"
 import type {
   ApiKeyRow,
   ContactRow,
@@ -378,6 +379,82 @@ export async function createOwnMailbox(input: Omit<NewMailbox, "storage_allocati
   return run(
     () => api<CreatedMailbox>("/mailboxes", { method: "POST", body: input }),
     ["/mailboxes"],
+  )
+}
+
+/**
+ * ⚠ THE FIVE MAILBOX ACTIONS BELOW ARE AN OWNER OR ADMIN'S, EACH BEHIND STEP-UP
+ * (`useStepUp` in the dialog that calls them), and each revalidates the list and
+ * every mailbox page, because the same status shows on both. They refresh the
+ * caller too, even `deleteMailbox`: a deleted mailbox stays reachable for its 30
+ * days, so unlike `deleteDomain` the page it is called from is not a 404 after.
+ */
+const MAILBOX_PAGES = ["/mailboxes", "/mailboxes/[address]"]
+
+/** A mailbox as the console's list shows it, which the lifecycle routes answer with. */
+type MailboxAfter = { mailbox?: unknown; ok?: true }
+
+const mailboxPath = (address: string) =>
+  `/console/mailboxes/${encodeURIComponent(address)}`
+
+/** Gives one mailbox its share of the storage pool, or `null` to remove a cap (pay as you go). */
+export async function setMailboxStorage(address: string, bytes: number | null) {
+  return run(
+    () =>
+      api<{ mailbox: unknown; quota: "synced" | "deferred" }>(
+        `${mailboxPath(address)}/storage`,
+        { method: "PUT", body: { storage_allocation: bytes } },
+      ),
+    MAILBOX_PAGES,
+  )
+}
+
+/** Stops the sign-in and keeps the mail. */
+export async function suspendMailbox(address: string) {
+  return run(
+    () => api<MailboxAfter>(`${mailboxPath(address)}/suspend`, { method: "POST" }),
+    MAILBOX_PAGES,
+  )
+}
+
+/**
+ * Lifts a suspension. `still_blocked` names what still refuses the sign-in - a
+ * payment hold, a ban, a lock - which is not an owner's to lift.
+ */
+export async function resumeMailbox(address: string) {
+  return run(
+    () =>
+      api<MailboxAfter & { still_blocked: LoginBlock[] }>(
+        `${mailboxPath(address)}/resume`,
+        { method: "POST" },
+      ),
+    MAILBOX_PAGES,
+  )
+}
+
+export interface MailboxDeletion {
+  outcome: "delete" | "export_then_delete" | "forward"
+  /** Forward only: the address of another mailbox of this workspace. */
+  forward_to?: string
+}
+
+/** Deletes with a 30 day way back. Sign-in stops at once; what happens to the mail is `outcome`. */
+export async function deleteMailbox(address: string, choice: MailboxDeletion) {
+  return run(
+    () =>
+      api<MailboxAfter>(`${mailboxPath(address)}/delete`, {
+        method: "POST",
+        body: choice,
+      }),
+    MAILBOX_PAGES,
+  )
+}
+
+/** Undoes a deletion, until its 30 days are over. */
+export async function restoreMailbox(address: string) {
+  return run(
+    () => api<MailboxAfter>(`${mailboxPath(address)}/restore`, { method: "POST" }),
+    MAILBOX_PAGES,
   )
 }
 
