@@ -48,6 +48,11 @@ export const PAGE_COPY = {
     description:
       "Addresses that hard-bounced or complained, plus any you have added by hand. We skip them rather than sending and damaging your reputation. This list is yours alone: another workspace's bounces never land here.",
   },
+  teamInboxes: {
+    title: "Team inboxes",
+    description:
+      "Shared addresses like support@ that several people read and reply from, in their own mail apps.",
+  },
   topics: {
     title: "Topics",
     description:

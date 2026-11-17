@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 import {
   Page,
   PageActions,
@@ -102,6 +103,20 @@ export default async function MailboxesPage({
             create={create}
           />
         )}
+        {/*
+         * ⚠ AT THE FOOT, NOT UNDER THE TITLE: the loading view draws the title and
+         * description only, so a line added there would push everything down when
+         * the page arrives. Until the Email hosting nav group exists this is the way in.
+         */}
+        <p className="mt-6 text-sm text-muted-foreground">
+          Need a shared address like support@ that several people read?{" "}
+          <Link
+            href="/team-inboxes"
+            className="font-medium text-foreground underline-offset-4 hover:underline focus-visible:underline"
+          >
+            Team inboxes
+          </Link>
+        </p>
       </PageBody>
     </Page>
   )

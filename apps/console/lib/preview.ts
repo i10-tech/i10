@@ -36,6 +36,7 @@
 import { ApiRequestError } from "@/lib/api-error"
 import { ssoRoutes } from "@/lib/preview-sso"
 import { mailboxRoutes } from "@/lib/preview-mailboxes"
+import { teamInboxRoutes } from "@/lib/preview-team-inboxes"
 import { webhookRoutes } from "@/lib/preview-webhooks"
 import type { DomainMailboxes } from "@/lib/types"
 
@@ -1192,27 +1193,8 @@ const ROUTES: [
     },
   ],
 
-  [
-    /^\/console\/team-inboxes$/,
-    () => ({
-      data: [
-        {
-          object: "team_inbox",
-          address: "support@acme.com",
-          display_name: "Support Team",
-          members: [{ address: "alex@acme.com" }],
-          created_at: ago(100),
-        },
-        {
-          object: "team_inbox",
-          address: "billing@acme.com",
-          display_name: "Billing",
-          members: [{ address: "alex@acme.com" }],
-          created_at: ago(50),
-        },
-      ],
-    }),
-  ],
+  // ⚠ THE TEAM INBOXES (THE LIST THE DOMAIN PAGE'S CATCH-ALL PICKS FROM TOO) ARE
+  // IN lib/preview-team-inboxes.ts: a second route here would answer first.
 
   [
     /^\/console\/mailboxes\/storage$/,
@@ -1507,6 +1489,7 @@ const ROUTES: [
   ...webhookRoutes(PREVIEW_NOT_FOUND),
   ...ssoRoutes(PREVIEW_NOT_FOUND),
   ...mailboxRoutes(PREVIEW_NOT_FOUND),
+  ...teamInboxRoutes(),
 
   [
     // ⚠ AT RISK IN PREVIEW, so the amber banner, the rail pill and the

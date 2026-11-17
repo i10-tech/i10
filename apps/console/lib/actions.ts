@@ -6,6 +6,7 @@ import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import { PREVIEW } from "@/lib/preview"
 import type { LoginBlock } from "@/lib/sso-types"
+import type { TeamInbox } from "@/lib/team-inbox"
 import type {
   ApiKeyRow,
   ContactRow,
@@ -463,6 +464,49 @@ export async function retryMailboxExport(address: string) {
   return run(
     () => api<MailboxAfter>(`${mailboxPath(address)}/retry-export`, { method: "POST" }),
     MAILBOX_PAGES,
+  )
+}
+
+/**
+ * ⚠ THE THREE TEAM INBOX ACTIONS ARE AN OWNER OR ADMIN'S, EACH BEHIND STEP-UP
+ * (`useStepUp` in the dialog that calls them). The API asks a member for nothing
+ * and just refuses, so a member never reaches a prompt. The address is the
+ * identifier in the path and the members are addresses too, never user ids.
+ */
+const TEAM_INBOX_LIST = "/team-inboxes"
+
+const teamInboxPath = (address: string) =>
+  `/console/team-inboxes/${encodeURIComponent(address)}`
+
+export async function createTeamInbox(input: {
+  address: string
+  display_name?: string
+  members: string[]
+}) {
+  return run(
+    () => api<TeamInbox>("/console/team-inboxes", { method: "POST", body: input }),
+    [TEAM_INBOX_LIST],
+  )
+}
+
+/** Replaces the whole member list in one write, so a retry is harmless. */
+export async function setTeamInboxMembers(address: string, members: string[]) {
+  return run(
+    () =>
+      api<TeamInbox>(`${teamInboxPath(address)}/members`, {
+        method: "PUT",
+        body: { members },
+      }),
+    [TEAM_INBOX_LIST, "/team-inboxes/[address]"],
+  )
+}
+
+/** See `deleteDomain` on `leaving`: the inbox's own page deletes and goes back to the list. */
+export async function deleteTeamInbox(address: string, { leaving = false } = {}) {
+  return run(
+    () => api<undefined>(teamInboxPath(address), { method: "DELETE" }),
+    leaving ? [] : [TEAM_INBOX_LIST],
+    { refreshCaller: false },
   )
 }
 
