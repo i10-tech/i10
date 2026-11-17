@@ -21,6 +21,7 @@ import { MailboxAliases } from "@/components/mailbox-aliases"
 import { MailboxTransfer } from "@/components/mailbox-transfer"
 import { Time } from "@/components/time"
 import type { MailboxAliasList } from "@/lib/mailbox-aliases"
+import type { TransferSnapshot } from "@/lib/mailbox-transfer"
 import {
   availableActions,
   DELETE_GRACE_DAYS,
@@ -60,6 +61,7 @@ export function MailboxDetail({
   pool,
   aliases,
   domains,
+  transfer,
   isAdmin,
   renderedAt,
 }: {
@@ -72,6 +74,8 @@ export function MailboxDetail({
   aliases: MailboxAliasList | null
   /** The domains the workspace hosts mailboxes on, for the Add alias dialog. Admins only. */
   domains: readonly string[]
+  /** The latest export and import, as the server read them. Everyone who sees the page gets it; the API decides who may use it. */
+  transfer: TransferSnapshot
   isAdmin: boolean
   renderedAt: string
 }) {
@@ -182,7 +186,11 @@ export function MailboxDetail({
             isAdmin={isAdmin}
           />
 
-          <MailboxTransfer address={mailbox.address} isAdmin={isAdmin} />
+          <MailboxTransfer
+            address={mailbox.address}
+            deleting={mailbox.status === "deleting"}
+            snapshot={transfer}
+          />
 
           {offered.includes("delete") && (
             <Section>
