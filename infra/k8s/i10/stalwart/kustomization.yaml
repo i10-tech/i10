@@ -8,10 +8,9 @@ resources:
   # only), both built from node/statefulset.yaml. See internal/kustomization.yaml.
   - node
   - internal
-  # Stalwart Keep, the in-memory store and coordinator the nodes move to. Redis
-  # stays below until the cutover is verified (config/README.md, "Keep").
+  # Stalwart Keep, the in-memory store and coordinator of both nodes
+  # (config/README.md, "Stalwart Keep").
   - keep.yaml
-  - redis.yaml
   # Stalwart's own recursive resolver, so blocklist queries are not refused (B2).
   - resolver
   - service.yaml
