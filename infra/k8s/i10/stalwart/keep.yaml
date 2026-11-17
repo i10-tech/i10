@@ -1,6 +1,6 @@
 # Stalwart Keep: the in-memory store and the cluster coordinator of the two
-# Stalwart nodes (#358), replacing i10-stalwart-redis (redis.yaml, removed once
-# the cutover in config/README.md is verified). Keep is Stalwart's own server for
+# Stalwart nodes (#358), and the only one they have; it replaced
+# i10-stalwart-redis on 2026-11-15 (#452). Keep is Stalwart's own server for
 # locks, counters and cluster events: https://stalw.art/docs/cluster/keep/.
 #
 # ⚠ ONE SERVER, ON PURPOSE. psl-vps is a single Kubernetes node, so a three-member
