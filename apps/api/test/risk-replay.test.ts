@@ -319,10 +319,8 @@ describe("shadow rules", () => {
 
   it("ships only the content judge's rules in shadow", () => {
     expect(RULES.filter((r) => r.mode === "shadow").map((r) => r.id)).toEqual([
+      "content.judge.identity",
       "content.judge.phishing",
-      "content.judge.impersonates_brand",
-      "content.judge.asks_for_credentials",
-      "content.judge.spam",
     ])
   })
 })

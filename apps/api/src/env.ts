@@ -1325,7 +1325,7 @@ const schema = z.object({
   RISK_JUDGE_PROVIDER: z.enum(JUDGE_PROVIDERS).optional(),
   /** Default `@cf/cloudflare/clef-flash` (workers-ai) or `jev-1` (systemone). */
   RISK_JUDGE_MODEL: z.string().trim().min(1).optional(),
-  /** Asked when the first model is unsure. Default `@cf/cloudflare/clef` on workers-ai; `none` turns it off. */
+  /** Asked when the first model screens a content as suspicious. Default `@cf/cloudflare/clef` on workers-ai; `none` turns it off. */
   RISK_JUDGE_SECOND_MODEL: z.string().trim().min(1).optional(),
   RISK_JUDGE_CF_ACCOUNT_ID: z.string().trim().min(1).optional(),
   /** A Cloudflare API token with Workers AI read permission. */
@@ -1336,20 +1336,22 @@ const schema = z.object({
    * Judgements per UTC day: every workspace together, each workspace, and
    * second opinions, counted in Redis before each call. ⚠ THE PROVIDER BILLS
    * PER TOKEN AND LIMITS NOTHING FOR US; these are the bill's ceiling.
+   * The defaults fit Cloudflare's free tier of 10,000 neurons a day, at about
+   * 6 per clef-flash call and 38 per clef call: 700 x 6 + 150 x 38 = 9,900.
    */
-  RISK_JUDGE_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(5000),
+  RISK_JUDGE_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(700),
   RISK_JUDGE_TENANT_DAILY_LIMIT: z.coerce
     .number()
     .int()
     .min(0)
     .max(100_000)
-    .default(200),
+    .default(100),
   RISK_JUDGE_SECOND_DAILY_LIMIT: z.coerce
     .number()
     .int()
     .min(0)
     .max(1_000_000)
-    .default(500),
+    .default(150),
 
   /**
    * Which embedder turns content into vectors (content/embed.ts): `minilm`,

@@ -33,6 +33,7 @@ import type {
   StoredJudgement,
 } from "../src/risk/judge/judge.js"
 import { judgementStore } from "../src/risk/judge/store.js"
+import { answers } from "./risk-fixtures.js"
 
 /**
  * The risk engine against a real Postgres, as the role the API runs as (#170).
@@ -1563,23 +1564,27 @@ suite("the risk engine against Postgres, as i10_api", () => {
 
   /** What a judge stores: phishing, brand and credentials at `p`. */
   const storedJudgement = (p: number): StoredJudgement => ({
-    model: "test/judge",
-    answers: {
-      phishing: p,
-      spam: 0.03,
-      impersonates_brand: p,
-      asks_for_credentials: p,
-      is_marketing: 0.4,
-    },
+    model: "test/judge#2",
+    // A screened content the second model confirmed: the second answers decide.
+    answers: answers(0.03, { phish_short: p, imp_short: p }),
     truncated: false,
     usage: { inputTokens: 100, outputTokens: 5 },
-    second: {
-      status: "not_needed",
-      model: null,
-      answers: null,
-      truncated: null,
-      usage: null,
-    },
+    second:
+      p > 0.5
+        ? {
+            status: "answered",
+            model: "test/judge-second",
+            answers: answers(0.03, { phish_short: p, imp_short: p }),
+            truncated: false,
+            usage: { inputTokens: 100, outputTokens: 5 },
+          }
+        : {
+            status: "not_needed",
+            model: null,
+            answers: null,
+            truncated: null,
+            usage: null,
+          },
   })
 
   /** A judge that answers from the subject, or with `outcome`, and records what it was asked. */
@@ -1587,6 +1592,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     const asked: { tenantId: string; email: JudgeEmail }[] = []
     const judge: ContentJudge = {
       model: "test/judge",
+      key: "test/judge#2",
       secondModel: null,
       async judge(tenantId, email) {
         asked.push({ tenantId, email })
@@ -1703,7 +1709,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
       senderName: "Billing Team",
       senderDomain: "judge.example",
       replyToDomain: "elsewhere.example",
-      linkHosts: ["login-verify.example"],
+      recipientDomain: "example.com",
     })
     const [left] =
       await owner`select count(*)::int as n from core.message_bodies where tenant_id = ${t} and judged_at is null`
@@ -1719,14 +1725,19 @@ suite("the risk engine against Postgres, as i10_api", () => {
       db,
       freePlanId: FREE,
       ownerInfo: async () => null,
-      judgeModel: "test/judge",
+      judgeModel: "test/judge#2",
     })
     expect(facts.content!.judged).toBe(2)
     expect(facts.content!.messages).toBe(5)
     expect(facts.content!.days).toEqual({ seen: 2, judged: 2, capped: 0 })
-    expect(facts.content!.questions.phishing.contents).toBe(1)
-    expect(facts.content!.questions.phishing.messages).toBe(1)
-    expect(facts.content!.questions.spam.contents).toBe(0)
+    expect(facts.content!.screened).toBe(1)
+    expect(facts.content!.undecided).toBe(0)
+    expect(facts.content!.signals.identity).toEqual({
+      contents: 1,
+      messages: 1,
+      exacts: [expect.any(String)],
+    })
+    expect(facts.content!.signals.phishing.contents).toBe(0)
 
     // The hourly score sees it, in shadow only.
     const withJudge = await scoreTenant(
@@ -1746,9 +1757,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
 
     const listed = await judgements.list(t, 10)
     expect(listed).toHaveLength(2)
-    expect(
-      listed.every((r) => r.secondStatus === "not_needed" && r.inputTokens === 100),
-    ).toBe(true)
+    expect(listed.filter((r) => r.secondStatus === "not_needed").length).toBe(1)
   })
 
   it("leaves content a spent budget refused for later, and counts it once a day", async () => {

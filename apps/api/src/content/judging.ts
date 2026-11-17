@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
-import { ALLOWLISTED, fingerprint, htmlToText, linkHosts } from "../risk/fingerprint.js"
+import { ALLOWLISTED, fingerprint, htmlToText } from "../risk/fingerprint.js"
 import type { JudgeEmail } from "../risk/judge/contract.js"
 import type { ContentJudge } from "../risk/judge/judge.js"
 import type { JudgementStore } from "../risk/judge/store.js"
@@ -96,7 +96,7 @@ export async function judgeContent(
 
   const stored = await withTenant(deps.db, tenantId, async (tx) => {
     const raw = (await tx.execute(sql`
-      select b.message_id, b.created_at::text as created_at, m.subject, m.from_address, m.reply_to,
+      select b.message_id, b.created_at::text as created_at, m.subject, m.from_address, m.reply_to, m.to_addresses,
              b.html, b.text, b.template_id, b.template_values, b.inline_objects,
              b.pack_id, b.pack_offset, b.pack_length, b.body_key
         from core.message_bodies b
@@ -112,6 +112,7 @@ export async function judgeContent(
       subject: string
       from_address: string
       reply_to: string[] | null
+      to_addresses: string[]
       html: string | null
       text: string | null
       template_id: string | null
@@ -173,7 +174,10 @@ export async function judgeContent(
         senderName: sender.name,
         senderDomain: sender.domain,
         replyToDomain: replyTo ?? null,
-        linkHosts: linkHosts(r.html, r.text),
+        html: r.html,
+        recipientDomain: r.to_addresses[0]
+          ? parseSender(r.to_addresses[0]).domain
+          : null,
       },
     })
   }
@@ -187,7 +191,7 @@ export async function judgeContent(
     else if (seen.mark !== b.trustedBy) seen.mark = null
   }
   const untrusted = [...distinct].filter(([, d]) => d.mark === null).map(([e]) => e)
-  const have = await deps.judgements.judged(tenantId, deps.judge.model, untrusted)
+  const have = await deps.judgements.judged(tenantId, deps.judge.key, untrusted)
   const unresolved = new Set<string>()
   const capped: string[] = []
   let calls = deps.calls ?? JUDGE_CALLS_PER_PASS

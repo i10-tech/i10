@@ -9,23 +9,34 @@ import {
   type JudgeSettings,
 } from "../src/risk/judge/config.js"
 import {
+  JUDGE_CONTRACT,
   JUDGE_QUESTION_IDS,
   JUDGE_QUESTIONS,
+  judgeState,
+  linkEvidence,
   MAX_LINK_HOSTS,
   MAX_TEXT_CHARS,
   type JudgeEmail,
 } from "../src/risk/judge/contract.js"
-import { contentJudge, judgeKeys, type JudgeRedis } from "../src/risk/judge/judge.js"
+import {
+  contentJudge,
+  DOWN_SECONDS,
+  judgeKeys,
+  storageKey,
+  untilMidnightUtc,
+  type JudgeRedis,
+} from "../src/risk/judge/judge.js"
 import {
   JudgeError,
+  NEURONS_SPENT,
   systemOneJudge,
   workersAiJudge,
   type Answers,
   type JudgeProvider,
 } from "../src/risk/judge/providers.js"
-import { verdict } from "../src/risk/judge/verdict.js"
+import { needsSecondOpinion, signalOf } from "../src/risk/judge/verdict.js"
 import type { ProviderHealth } from "../src/risk/provider-health.js"
-import { CONFIRMED_PHISHING_FLOOR, JUDGE_POINTS, RULES } from "../src/risk/rules.js"
+import { IDENTITY_FLOOR, JUDGE_POINTS, RULES } from "../src/risk/rules.js"
 import { bandRank, type Facts, type Rule } from "../src/risk/types.js"
 import { ABUSE, answers, baseFacts, judged, judgedRow, LEGIT } from "./risk-fixtures.js"
 
@@ -52,7 +63,8 @@ const EMAIL: JudgeEmail = {
   senderName: "PayPal Support",
   senderDomain: "secure-paypa1.example",
   replyToDomain: "mailbox.example",
-  linkHosts: ["secure-paypa1.example"],
+  html: null,
+  recipientDomain: "example.com",
 }
 
 const noul = (a: Answers) =>
@@ -99,7 +111,7 @@ describe("the judge contract", () => {
 describe("the workers-ai provider", () => {
   it("posts the state and our questions to the model's run endpoint, and reads every noul", async () => {
     const { f, calls } = fakeFetch({
-      body: cloudflareSays(answers(0.2, { phishing: 0.9 })),
+      body: cloudflareSays(answers(0.2, { phish_short: 0.9 })),
     })
     const judge = workersAiJudge({
       accountId: "acct",
@@ -109,7 +121,7 @@ describe("the workers-ai provider", () => {
     })
     const j = await judge.judge(EMAIL)
     expect(j).toEqual({
-      answers: answers(0.2, { phishing: 0.9 }),
+      answers: answers(0.2, { phish_short: 0.9 }),
       truncated: false,
       usage: { inputTokens: 1204, outputTokens: 5 },
     })
@@ -127,8 +139,12 @@ describe("the workers-ai provider", () => {
           sender_domain: "secure-paypa1.example",
           reply_to_domain: "mailbox.example",
           subject: EMAIL.subject,
-          link_hosts: ["secure-paypa1.example"],
           text: EMAIL.text,
+          links: [{ host: "secure-paypa1.example", same_site_as_sender: true }],
+          links_to_other_sites: 0,
+          links_shown_as_one_site_but_going_to_another: 0,
+          links_to_bare_ip_addresses: 0,
+          recipient_domain: "example.com",
         },
         truncated: false,
       },
@@ -157,8 +173,8 @@ describe("the workers-ai provider", () => {
         fetch: fakeFetch({ body, status }).f,
       }).judge(EMAIL)
     const missing = cloudflareSays(answers(0.1))
-    delete (missing.result.answers as Record<string, unknown>).spam
-    const impossible = cloudflareSays(answers(0.1, { phishing: 1.4 }))
+    delete (missing.result.answers as Record<string, unknown>).spam_short
+    const impossible = cloudflareSays(answers(0.1, { phish_short: 1.4 }))
     for (const [body, status] of [
       [{}, 429],
       [{}, 503],
@@ -240,20 +256,15 @@ describe("hostile mail", () => {
     expect(body.questions).toEqual(JSON.parse(JSON.stringify(JUDGE_QUESTIONS)))
     const state = body.state as { email: Record<string, unknown>; truncated: boolean }
     expect(Object.keys(state).sort()).toEqual(["email", "truncated"])
-    expect(Object.keys(state.email).sort()).toEqual([
-      "link_hosts",
-      "reply_to_domain",
-      "sender_domain",
-      "sender_name",
-      "subject",
-      "text",
-    ])
+    expect(Object.keys(state.email).sort()).toEqual(
+      Object.keys(judgeState(EMAIL).email).sort(),
+    )
     expect(state.email.text).toBe(HOSTILE.replace(/\s+/g, " "))
     // Our instructions never carry a byte of the mail.
     for (const q of Object.values(JUDGE_QUESTIONS))
       expect(q.instructions).not.toContain("Ignore all previous")
     // The answer is the service's, not the one written in the mail.
-    expect(j.answers.phishing).toBe(0.97)
+    expect(j.answers.phish_short).toBe(0.97)
   })
 })
 
@@ -261,18 +272,19 @@ describe("truncation", () => {
   it("cuts the text and the link hosts to their caps and records that it did", async () => {
     const { f, calls } = fakeFetch({ body: cloudflareSays(answers(0.1)) })
     const hosts = Array.from({ length: MAX_LINK_HOSTS + 5 }, (_, i) => `h${i}.example`)
+    const links = hosts.map((h) => `https://${h}/`).join(" ")
     const j = await workersAiJudge({
       accountId: "a",
       token: "t",
       model: "@cf/cloudflare/clef-flash",
       fetch: f,
-    }).judge({ ...EMAIL, text: "word ".repeat(10_000), linkHosts: hosts })
+    }).judge({ ...EMAIL, text: `${"word ".repeat(10_000)} ${links}` })
     const state = calls[0]!.body.state as {
-      email: { text: string; link_hosts: string[] }
+      email: { text: string; links: unknown[] }
       truncated: boolean
     }
     expect(state.email.text).toHaveLength(MAX_TEXT_CHARS)
-    expect(state.email.link_hosts).toHaveLength(MAX_LINK_HOSTS)
+    expect(state.email.links).toHaveLength(MAX_LINK_HOSTS)
     expect(state.truncated).toBe(true)
     expect(j.truncated).toBe(true)
   })
@@ -401,6 +413,66 @@ describe("the budgets", () => {
     expect(events).toEqual(["fail judge:@cf/cloudflare/clef-flash"])
   })
 
+  it("parks a model until midnight UTC when Cloudflare says the day's neurons are spent, and for 300 seconds on any other 429", async () => {
+    const ttls = async (code: number | null) => {
+      const seen: number[] = []
+      const redis = new FakeRedis()
+      redis.setex = async (k, s, v) => void (seen.push(s), redis.kv.set(k, v))
+      const provider: JudgeProvider = {
+        kind: "workers-ai",
+        model: "m",
+        judge: async () => {
+          throw new JudgeError("429", 429, code)
+        },
+      }
+      await contentJudge({
+        primary: provider,
+        limits: LIMITS,
+        redis,
+        now: () => NOW,
+      }).judge("t1", EMAIL)
+      return seen
+    }
+    expect(await ttls(NEURONS_SPENT)).toEqual([14 * 3600])
+    expect(await ttls(null)).toEqual([DOWN_SECONDS])
+    expect(untilMidnightUtc(new Date("2026-11-11T23:59:59.5Z"))).toBe(60)
+  })
+
+  it("reads Cloudflare's error code from a 429 body", async () => {
+    const run = (body: unknown) =>
+      workersAiJudge({
+        accountId: "a",
+        token: "t",
+        model: "@cf/cloudflare/clef",
+        fetch: fakeFetch({ body, status: 429 }).f,
+      }).judge(EMAIL)
+    const code = async (body: unknown) => {
+      let e: unknown
+      await run(body).then(
+        () => {},
+        (x: unknown) => (e = x),
+      )
+      return (e as JudgeError).code
+    }
+    expect(
+      await code({ success: false, errors: [{ code: 4006, message: "limit" }] }),
+    ).toBe(NEURONS_SPENT)
+    expect(await code({})).toBeNull()
+  })
+
+  it("stores and reads judgements under the model and the contract version, and names health by the plain model", async () => {
+    const redis = new FakeRedis()
+    const { health, events } = recordingHealth()
+    const p = scripted("@cf/cloudflare/clef-flash", answers(0.1))
+    const judge = contentJudge({ primary: p.provider, limits: LIMITS, redis, health })
+    const out = await judge.judge("t1", EMAIL)
+    if (out.status !== "judged") throw new Error(out.status)
+    expect(out.judgement.model).toBe(`@cf/cloudflare/clef-flash#${JUDGE_CONTRACT}`)
+    expect(judge.key).toBe(storageKey("@cf/cloudflare/clef-flash"))
+    expect(judge.model).toBe("@cf/cloudflare/clef-flash")
+    expect(events).toEqual(["ok judge:@cf/cloudflare/clef-flash"])
+  })
+
   it("does not park the model on a refusal about the request alone", async () => {
     const redis = new FakeRedis()
     const { health, events } = recordingHealth()
@@ -424,25 +496,35 @@ describe("the second opinion", () => {
     expect(j.judgement.second.status).toBe(status as never)
     return j.judgement
   }
+  const suspicious = answers(0.1, { phish_short: 0.95 })
 
-  it("is not asked when the first model is sure either way", async () => {
-    for (const p of [0.1, 0.9]) {
-      const first = scripted("@cf/cloudflare/clef-flash", answers(p))
-      const two = scripted("@cf/cloudflare/clef", answers(0.1))
-      const judge = contentJudge({
-        primary: first.provider,
-        second: two.provider,
-        limits: LIMITS,
-        redis: new FakeRedis(),
-      })
-      second("not_needed", await judge.judge("t1", EMAIL))
-      expect(two.calls).toHaveLength(0)
-    }
+  it("screens on phish_short above 0.9 or imp_short above 0.5, and on nothing else", () => {
+    expect(needsSecondOpinion(answers(0.1))).toBe(false)
+    expect(needsSecondOpinion(answers(0.1, { phish_short: 0.9 }))).toBe(false)
+    expect(needsSecondOpinion(answers(0.1, { phish_short: 0.91 }))).toBe(true)
+    expect(needsSecondOpinion(answers(0.1, { imp_short: 0.5 }))).toBe(false)
+    expect(needsSecondOpinion(answers(0.1, { imp_short: 0.51 }))).toBe(true)
+    expect(
+      needsSecondOpinion(answers(0.99, { phish_short: 0.1, imp_short: 0.1 })),
+    ).toBe(false)
   })
 
-  it("is asked in the unsure band, and both answers are stored", async () => {
-    const first = scripted("@cf/cloudflare/clef-flash", answers(0.1, { phishing: 0.6 }))
-    const two = scripted("@cf/cloudflare/clef", answers(0.2, { phishing: 0.8 }))
+  it("is not asked when the first model screens the content clean", async () => {
+    const first = scripted("@cf/cloudflare/clef-flash", answers(0.1))
+    const two = scripted("@cf/cloudflare/clef", answers(0.99))
+    const judge = contentJudge({
+      primary: first.provider,
+      second: two.provider,
+      limits: LIMITS,
+      redis: new FakeRedis(),
+    })
+    second("not_needed", await judge.judge("t1", EMAIL))
+    expect(two.calls).toHaveLength(0)
+  })
+
+  it("is asked when screened, and both answers are stored", async () => {
+    const first = scripted("@cf/cloudflare/clef-flash", suspicious)
+    const two = scripted("@cf/cloudflare/clef", answers(0.2, { imp_short: 0.85 }))
     const judge = contentJudge({
       primary: first.provider,
       second: two.provider,
@@ -451,87 +533,153 @@ describe("the second opinion", () => {
     })
     const j = second("answered", await judge.judge("t1", EMAIL))
     expect(j.second.model).toBe("@cf/cloudflare/clef")
-    expect(j.second.answers!.phishing).toBe(0.8)
-    expect(j.answers.phishing).toBe(0.6)
+    expect(j.second.answers!.imp_short).toBe(0.85)
+    expect(j.answers.phish_short).toBe(0.95)
   })
 
   it("is over budget on its own smaller budget, unavailable when it fails, and absent when not configured", async () => {
-    const unsure = answers(0.1, { impersonates_brand: 0.5 })
-    const redis = new FakeRedis()
     const capped = contentJudge({
-      primary: scripted("m1", unsure).provider,
+      primary: scripted("m1", suspicious).provider,
       second: scripted("m2", answers(0.1)).provider,
       limits: { ...LIMITS, secondDaily: 0 },
-      redis,
+      redis: new FakeRedis(),
     })
     second("over_budget", await capped.judge("t1", EMAIL))
     const failing = contentJudge({
-      primary: scripted("m1", unsure).provider,
+      primary: scripted("m1", suspicious).provider,
       second: scripted("m2", 500).provider,
       limits: LIMITS,
       redis: new FakeRedis(),
     })
     second("unavailable", await failing.judge("t1", EMAIL))
     const alone = contentJudge({
-      primary: scripted("m1", unsure).provider,
+      primary: scripted("m1", suspicious).provider,
       limits: LIMITS,
       redis: new FakeRedis(),
     })
     second("not_configured", await alone.judge("t1", EMAIL))
   })
 
-  it("makes a question unsafe only when both models are above the threshold", () => {
-    const first = answers(0.1, { phishing: 0.6 })
-    expect(verdict("phishing", first, answers(0.1, { phishing: 0.7 }))).toEqual({
-      unsafe: true,
-      confirmed: true,
-      probability: 0.6,
-    })
-    expect(verdict("phishing", first, answers(0.1, { phishing: 0.3 }))).toEqual({
-      unsafe: false,
-      confirmed: false,
-      probability: 0.3,
-    })
-    // Unsure and unanswered: the first answer stands, unconfirmed.
-    expect(verdict("phishing", first, null)).toEqual({
-      unsafe: true,
-      confirmed: false,
-      probability: 0.6,
-    })
-    // Sure: no second opinion needed, confirmed as given.
-    expect(verdict("phishing", answers(0.9), null).confirmed).toBe(true)
-    // Unsure below the threshold, with the second model sure: still not unsafe.
-    expect(verdict("phishing", answers(0.4), answers(0.95)).unsafe).toBe(false)
-    // Questions with no second opinion are judged on the first answer alone.
-    expect(verdict("spam", answers(0.6), answers(0.1))).toEqual({
-      unsafe: true,
-      confirmed: true,
-      probability: 0.6,
-    })
+  it("sets identity on imp_short or mailbox above 0.8, phishing on phish_short above 0.9, identity first", () => {
+    expect(signalOf(answers(0.1))).toBeNull()
+    expect(signalOf(answers(0.1, { imp_short: 0.8 }))).toBeNull()
+    expect(signalOf(answers(0.1, { imp_short: 0.81 }))).toBe("identity")
+    expect(signalOf(answers(0.1, { mailbox: 0.81 }))).toBe("identity")
+    expect(signalOf(answers(0.1, { phish_short: 0.9 }))).toBeNull()
+    expect(signalOf(answers(0.1, { phish_short: 0.91 }))).toBe("phishing")
+    expect(signalOf(answers(0.1, { phish_short: 0.99, mailbox: 0.9 }))).toBe("identity")
+    // The other questions are stored, and decide nothing.
+    expect(
+      signalOf(answers(0.1, { scam: 1, imp_any: 1, domain_altered: 1 })),
+    ).toBeNull()
   })
 })
 
 describe("judged content as facts", () => {
-  it("counts unsafe contents, their messages and the unconfirmed ones per question", () => {
-    const c = judged([
-      judgedRow("a", { answers: answers(0.02, { phishing: 0.95 }), messages: 40 }),
-      judgedRow("b", { answers: answers(0.02, { phishing: 0.6 }), messages: 3 }),
-      judgedRow("c", {
-        answers: answers(0.02, { phishing: 0.6 }),
-        secondAnswers: answers(0.02, { phishing: 0.2 }),
-      }),
-      judgedRow("d", { truncated: true }),
-    ])
-    expect(c.judged).toBe(4)
+  const rows = [
+    // Screened, second model says phishing only.
+    judgedRow("a", {
+      answers: answers(0.02, { phish_short: 0.95 }),
+      secondAnswers: answers(0.02, { phish_short: 0.95 }),
+      messages: 40,
+    }),
+    // Screened, second model says identity and phishing: identity only.
+    judgedRow("b", {
+      answers: answers(0.02, { imp_short: 0.6 }),
+      secondAnswers: answers(0.02, { imp_short: 0.9, phish_short: 0.99 }),
+      messages: 3,
+    }),
+    // Screened, second model clears it.
+    judgedRow("c", {
+      answers: answers(0.02, { phish_short: 0.95 }),
+      secondAnswers: answers(0.02),
+    }),
+    // Screened, no second answer: undecided, no signal.
+    judgedRow("d", { answers: answers(0.02, { phish_short: 0.99 }) }),
+    // Not screened, though the second answers would have set a signal.
+    judgedRow("e", { secondAnswers: answers(0.99), truncated: true }),
+  ]
+
+  it("takes signals only from the second model, once per content, identity before phishing", () => {
+    const c = judged(rows)
+    expect(c.judged).toBe(5)
     expect(c.truncated).toBe(1)
-    expect(c.questions.phishing).toEqual({
-      contents: 2,
-      messages: 43,
-      unconfirmed: 1,
-      highest: 0.95,
-      exacts: ["a", "b"],
+    expect(c.screened).toBe(4)
+    expect(c.undecided).toBe(1)
+    expect(c.signals.identity).toEqual({ contents: 1, messages: 3, exacts: ["b"] })
+    expect(c.signals.phishing).toEqual({ contents: 1, messages: 40, exacts: ["a"] })
+  })
+
+  it("never lets the first model set a signal alone", () => {
+    const c = judged([
+      judgedRow("x", { answers: answers(1, { phish_short: 1, mailbox: 1 }) }),
+    ])
+    expect(c.signals.identity.contents + c.signals.phishing.contents).toBe(0)
+    expect(c.undecided).toBe(1)
+  })
+
+  it("sorts the exacts", () => {
+    const row = (e: string) =>
+      judgedRow(e, {
+        answers: answers(0.02, { phish_short: 0.95 }),
+        secondAnswers: answers(0.02, { phish_short: 0.95 }),
+      })
+    expect(judged([row("z"), row("m"), row("a")]).signals.phishing.exacts).toEqual([
+      "a",
+      "m",
+      "z",
+    ])
+  })
+})
+
+describe("the state the judge is asked about", () => {
+  it("serialises to the measured keys in the measured order", () => {
+    const state = judgeState({
+      subject: "Hi",
+      text: "see https://a.example/x",
+      html: null,
+      senderName: "A",
+      senderDomain: "a.example",
+      replyToDomain: null,
+      recipientDomain: "gmail.com",
     })
-    expect(c.questions.spam.contents).toBe(0)
+    expect(JSON.stringify(state)).toBe(
+      '{"email":{"sender_name":"A","sender_domain":"a.example","reply_to_domain":null,"subject":"Hi","text":"see https://a.example/x","links":[{"host":"a.example","same_site_as_sender":true}],"links_to_other_sites":0,"links_shown_as_one_site_but_going_to_another":0,"links_to_bare_ip_addresses":0,"recipient_domain":"gmail.com"},"truncated":false}',
+    )
+  })
+
+  it("leaves the sender-relative facts null when there is no sender domain", () => {
+    const e = linkEvidence(null, "https://a.example", null)
+    expect(e.links).toEqual([{ host: "a.example", same_site_as_sender: null }])
+    expect(e.links_to_other_sites).toBeNull()
+  })
+
+  it("tells same-site links from other-site links, including under two-level suffixes", () => {
+    const e = linkEvidence(
+      null,
+      "https://shop.acme.co.uk/a https://acme.co.uk/b https://other.example/c",
+      "mail.acme.co.uk",
+    )
+    expect(e.links.map((l) => l.same_site_as_sender)).toEqual([true, true, false])
+    expect(e.links_to_other_sites).toBe(1)
+  })
+
+  it("counts a link shown as one site that goes to another", () => {
+    const html =
+      '<a href="https://evil.example/login">https://paypal.com/signin</a>' +
+      '<a href="https://paypal.com/ok">paypal.com</a>' +
+      '<a href="https://evil.example/x">Click &amp; see</a>'
+    const e = linkEvidence(html, "", "paypal.com")
+    expect(e.links_shown_as_one_site_but_going_to_another).toBe(1)
+  })
+
+  it("counts distinct bare IP links", () => {
+    const e = linkEvidence(
+      null,
+      "http://10.0.0.1/a http://10.0.0.1/b https://192.168.1.5:8080/x",
+      "a.example",
+    )
+    expect(e.links_to_bare_ip_addresses).toBe(2)
   })
 })
 
@@ -542,41 +690,53 @@ describe("the judge rules", () => {
 
   it("are all in shadow, and the old classifier is gone", () => {
     expect(judgeRuleIds.sort()).toEqual([
-      "content.judge.asks_for_credentials",
-      "content.judge.impersonates_brand",
+      "content.judge.identity",
       "content.judge.phishing",
-      "content.judge.spam",
     ])
     for (const r of RULES.filter((x) => judgeRuleIds.includes(x.id)))
       expect(r.mode).toBe("shadow")
     expect(RULES.some((r) => r.id === "content.classifier")).toBe(false)
   })
 
-  it("propose their points, keys and the confirmed-phishing floor, with no probability in the evidence", () => {
+  const decided = (exact: string, second: Partial<Answers>) =>
+    judgedRow(exact, {
+      answers: answers(0.02, { phish_short: 0.95 }),
+      secondAnswers: answers(0.02, second),
+    })
+
+  it("propose their points, keys and the identity floor, with no probability in the evidence", () => {
     const c = judged([
-      judgedRow("p1", { answers: answers(0.02, { phishing: 0.9, spam: 0.8 }) }),
+      decided("i1", { imp_short: 0.9 }),
+      decided("p1", { phish_short: 0.95 }),
     ])
     const a = evaluate(baseFacts({ content: c }))
-    const phish = a.shadow.find((s) => s.rule === "content.judge.phishing")!
-    expect(phish.wouldAdd).toBe(JUDGE_POINTS.phishing)
-    expect(phish.wouldFloor).toBe(CONFIRMED_PHISHING_FLOOR)
-    expect(phish.evidence).toEqual({ contents: 1, messages: 10, unconfirmed: 0 })
-    expect(a.shadow.find((s) => s.rule === "content.judge.spam")!.wouldAdd).toBe(
-      JUDGE_POINTS.spam,
-    )
+    const id = a.shadow.find((s) => s.rule === "content.judge.identity")!
+    expect(id.wouldAdd).toBe(JUDGE_POINTS.identity)
+    expect(id.wouldFloor).toBe(IDENTITY_FLOOR)
+    expect(id.evidence).toEqual({ contents: 1, messages: 10 })
+    const ph = a.shadow.find((s) => s.rule === "content.judge.phishing")!
+    expect(ph.wouldAdd).toBe(JUDGE_POINTS.phishing)
+    expect(ph.wouldFloor).toBeUndefined()
     const live = evaluate(baseFacts({ content: c }), liveJudge())
     expect(
-      live.contributions.find((x) => x.rule === "content.judge.phishing")!.keys,
-    ).toEqual(["content:p1"])
-    // Unconfirmed phishing scores, and floors nothing.
-    const unsure = judged([
-      judgedRow("p2", { answers: answers(0.02, { phishing: 0.6 }) }),
+      live.contributions.find((x) => x.rule === "content.judge.identity")!.keys,
+    ).toEqual(["content:i1"])
+  })
+
+  it("scores nothing for a screened content the second model never answered", () => {
+    const c = judged([
+      judgedRow("u", { answers: answers(0.02, { phish_short: 0.99 }) }),
     ])
-    const u = evaluate(baseFacts({ content: unsure })).shadow.find(
-      (s) => s.rule === "content.judge.phishing",
-    )!
-    expect(u.wouldFloor).toBeUndefined()
-    expect(u.evidence.unconfirmed).toBe(1)
+    expect(c.undecided).toBe(1)
+    const a = evaluate(baseFacts({ content: c }), liveJudge())
+    expect(a.contributions.some((x) => x.rule.startsWith("content.judge."))).toBe(false)
+  })
+
+  it("reports phishing for a content only when identity is not set for it", () => {
+    const c = judged([decided("both", { imp_short: 0.9, phish_short: 0.99 })])
+    const a = evaluate(baseFacts({ content: c }))
+    expect(a.shadow.map((s) => s.rule)).toContain("content.judge.identity")
+    expect(a.shadow.map((s) => s.rule)).not.toContain("content.judge.phishing")
   })
 
   /** Seeded, so a failure reproduces. */
@@ -586,12 +746,11 @@ describe("the judge rules", () => {
     for (let i = 0; i < n; i++) {
       const rows = Array.from({ length: Math.floor(rand() * 6) }, (_, k) =>
         judgedRow(`x${i}-${k}`, {
-          answers: answers(rand(), {
-            phishing: rand(),
-            impersonates_brand: rand(),
-            asks_for_credentials: rand(),
-          }),
-          secondAnswers: rand() < 0.5 ? answers(rand()) : null,
+          answers: answers(rand(), { phish_short: rand(), imp_short: rand() }),
+          secondAnswers:
+            rand() < 0.7
+              ? answers(rand(), { phish_short: rand(), mailbox: rand() })
+              : null,
           messages: Math.floor(rand() * 1000),
         }),
       )

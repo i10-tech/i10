@@ -75,7 +75,7 @@ import { formatReport, replaySnapshot, summarise } from "./risk/replay.js"
 import { scoreTenant } from "./risk/runner.js"
 import { JUDGE_QUESTION_IDS } from "./risk/judge/contract.js"
 import { judgementStore } from "./risk/judge/store.js"
-import { JUDGE_THRESHOLD, UNSURE_BAND } from "./risk/judge/verdict.js"
+import { JUDGE_SIGNALS, SCREEN, SIGNALS } from "./risk/judge/verdict.js"
 import { RULESET_VERSION } from "./risk/rules.js"
 import {
   CATEGORY_TEXT,
@@ -251,10 +251,13 @@ function printJudged(content: Facts["content"]) {
   console.log(
     `\ncontent judge (${content.model}), last 7 days: ${content.judged} contents judged in ${content.messages} messages, ${content.truncated} cut to fit; pass saw ${d.seen}, judged ${d.judged}, capped ${d.capped}`,
   )
-  for (const q of JUDGE_QUESTION_IDS) {
-    const s = content.questions[q]
+  console.log(
+    `  screened ${content.screened} (sent to the second model), undecided ${content.undecided} (no second answer, no signal)`,
+  )
+  for (const name of JUDGE_SIGNALS) {
+    const s = content.signals[name]
     console.log(
-      `  ${q.padEnd(22)} unsafe ${s.contents} (${s.messages} messages, ${s.unconfirmed} unconfirmed), highest ${s.highest ?? "-"}` +
+      `  ${name.padEnd(10)} ${s.contents} contents, ${s.messages} messages` +
         (s.exacts.length
           ? `\n        ${s.exacts.map((e) => `content:${e}`).join(" ")}`
           : ""),
@@ -282,7 +285,7 @@ try {
         freePlanId: env.METERING_FREE_PLAN_ID,
         ownerInfo: risk.deps.ownerInfo,
         ...(risk.deps.contentModel ? { contentModel: risk.deps.contentModel } : {}),
-        ...(risk.deps.judge ? { judgeModel: risk.deps.judge.model } : {}),
+        ...(risk.deps.judge ? { judgeModel: risk.deps.judge.key } : {}),
       })
       const a = evaluate(facts, rules)
       const [current, hold, history] = await Promise.all([
@@ -388,8 +391,10 @@ try {
       if (!Number.isInteger(limit) || limit < 1)
         fail("--limit must be a positive whole number")
       const rows = await judgementStore(db).list(id, limit)
+      const tests = (ts: typeof SCREEN) =>
+        ts.map((t) => `${t.question} > ${t.above}`).join(" or ")
       console.log(
-        `\n${rows.length} judgement(s), newest first (threshold ${JUDGE_THRESHOLD}, second opinion between ${UNSURE_BAND.from} and ${UNSURE_BAND.to}):`,
+        `\n${rows.length} judgement(s), newest first (the second model is asked when ${tests(SCREEN)}; signals: ${SIGNALS.map(([n, t]) => `${n} when ${tests(t)}`).join("; ")}):`,
       )
       const fmt = (a: Record<string, number> | null) =>
         a

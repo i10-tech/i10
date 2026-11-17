@@ -1,7 +1,8 @@
 import { watched, type ProviderHealth } from "../provider-health.js"
-import type { JudgeEmail } from "./contract.js"
+import { JUDGE_CONTRACT, type JudgeEmail } from "./contract.js"
 import {
   JudgeError,
+  NEURONS_SPENT,
   type Answers,
   type Judgement,
   type JudgeProvider,
@@ -22,8 +23,14 @@ import { needsSecondOpinion, type SecondStatus } from "./verdict.js"
  * nothing", not "spend freely".
  *
  * ⚠ AN OUTAGE PARKS THE MODEL FOR `DOWN_SECONDS`, so one hourly run does not
- * send every workspace's content into a service that already said no. Every
- * call that was made is reported to `health`, so a dead judge alerts.
+ * send every workspace's content into a service that already said no. Cloudflare
+ * answering 429 with 4006 means the day's neurons are spent: that parks it until
+ * midnight UTC instead. Every call that was made is reported to `health`, so a
+ * dead judge alerts.
+ *
+ * ⚠ JUDGEMENTS ARE STORED UNDER `model#JUDGE_CONTRACT` (`storageKey`), never
+ * the bare model id, so answers to other questions or another state are never
+ * read as answers to these. Health names and the model sent keep the plain id.
  */
 export interface JudgeRedis {
   get(key: string): Promise<string | null>
@@ -50,6 +57,7 @@ export interface SecondOpinion {
 }
 
 export interface StoredJudgement extends Judgement {
+  /** The storage key, not the model id. */
   model: string
   second: SecondOpinion
 }
@@ -63,6 +71,8 @@ export type JudgeOutcome =
 
 export interface ContentJudge {
   model: string
+  /** What judgements are stored and read under: the model and the contract version. */
+  key: string
   secondModel: string | null
   judge(tenantId: string, email: JudgeEmail): Promise<JudgeOutcome>
 }
@@ -78,6 +88,21 @@ export interface ContentJudgeOptions {
 }
 
 export const DOWN_SECONDS = 300
+export const storageKey = (model: string) => `${model}#${JUDGE_CONTRACT}`
+
+/** Seconds to the next midnight UTC, when the day's allowance comes back. */
+export const untilMidnightUtc = (now: Date) =>
+  Math.min(
+    86_400,
+    Math.max(
+      60,
+      Math.ceil(
+        (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) -
+          now.getTime()) /
+          1000,
+      ),
+    ),
+  )
 const day = (now: Date) => now.toISOString().slice(0, 10)
 export const judgeKeys = {
   budget: (now: Date) => `risk:judge:budget:${day(now)}`,
@@ -119,11 +144,12 @@ export function contentJudge(opts: ContentJudgeOptions): ContentJudge {
       )
     } catch (error) {
       const status = error instanceof JudgeError ? error.status : null
+      const spent = error instanceof JudgeError && error.code === NEURONS_SPENT
       if (status === null || status === 429 || status >= 500)
         await redis!
           .setex(
             judgeKeys.down(provider.model),
-            DOWN_SECONDS,
+            spent ? untilMidnightUtc(now()) : DOWN_SECONDS,
             String(status ?? "unreachable"),
           )
           .catch(() => {})
@@ -155,6 +181,7 @@ export function contentJudge(opts: ContentJudgeOptions): ContentJudge {
 
   return {
     model: primary.model,
+    key: storageKey(primary.model),
     secondModel: second?.model ?? null,
     async judge(tenantId, email) {
       if (!redis) return { status: "deferred", reason: "no_redis" }
@@ -172,7 +199,7 @@ export function contentJudge(opts: ContentJudgeOptions): ContentJudge {
       return {
         status: "judged",
         judgement: {
-          model: primary.model,
+          model: storageKey(primary.model),
           ...first,
           second: await secondOpinion(email, first),
         },

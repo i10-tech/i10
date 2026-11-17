@@ -1,5 +1,3 @@
-import type { JudgeQuestion } from "./judge/contract.js"
-
 /**
  * The shapes the risk engine passes around (#170). See docs/decisions/risk.md.
  *
@@ -252,17 +250,20 @@ export interface StaffDecision {
   covers: Concern[]
 }
 
-/** One question across the workspace's judged content (risk/judge/verdict.ts). */
-export interface JudgedQuestion {
-  /** Distinct contents the judge found unsafe on this question. */
+/**
+ * What the content judge found in a content, decided by the second model
+ * alone (risk/judge/verdict.ts). A content has at most one: phishing is
+ * reported only where identity is not.
+ */
+export type JudgeSignal = "identity" | "phishing"
+
+/** One signal across the workspace's judged content. */
+export interface JudgedSignal {
+  /** Distinct contents with this signal. */
   contents: number
   /** Their messages over the window. */
   messages: number
-  /** Of those contents, the ones a second opinion was needed for and not had. */
-  unconfirmed: number
-  /** The highest probability among all judged contents, or null with none. */
-  highest: number | null
-  /** The unsafe contents' exact fingerprints, sorted: the rules' `content:` keys. */
+  /** Their exact fingerprints, sorted: the rules' `content:` keys. */
   exacts: string[]
 }
 
@@ -274,6 +275,7 @@ export interface JudgedQuestion {
  * times it went out. Approved templates and boilerplate are never judged.
  */
 export interface JudgedContent {
+  /** The storage key: the model and the contract version (judge.ts). */
   model: string
   judged: number
   messages: number
@@ -281,7 +283,11 @@ export interface JudgedContent {
   truncated: number
   /** Distinct contents the judge pass saw, judged, and left for a workspace's spent daily cap. */
   days: { seen: number; judged: number; capped: number }
-  questions: Record<JudgeQuestion, JudgedQuestion>
+  /** Judged contents the first model sent on to the second. */
+  screened: number
+  /** Of those, the ones the second model did not answer. They set no signal. */
+  undecided: number
+  signals: Record<JudgeSignal, JudgedSignal>
 }
 
 /** Recent content left out of the cross-workspace rules as trusted (#222). */

@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto"
 import { parse } from "tldts"
 import { describeFlags, isDecisive, parseVerdict } from "./link-verdict.js"
-import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./types.js"
+import type {
+  Band,
+  Facts,
+  FarmPeer,
+  Hit,
+  JudgeSignal,
+  Rule,
+  SimilarityEvidence,
+} from "./types.js"
 
 /**
  * The rules (#170). Every one is a pure function of `Facts`, adds or
@@ -24,7 +32,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 7
+export const RULESET_VERSION = 8
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -632,44 +640,34 @@ const identityRules: Rule[] = [
 // ─── The content judge (risk/judge): shadow until replay has measured it ─────
 
 /**
- * Proposed points per judge rule, and the floor for confirmed phishing.
+ * Proposed points per judge rule, and the floor for the identity signal.
  *
  * ⚠ PROPOSALS, ALL IN SHADOW. They are recorded with every score and move
  * nothing; each is promoted on its own, by a code change and a
  * `RULESET_VERSION` bump, once replay over the snapshots has shown what it
- * would have done. `is_marketing` has no rule: it is stored for later.
+ * would have done.
  *
  * ⚠ NEVER NEGATIVE. The judge reads mail the sender wrote, so its answers may
  * add suspicion and must never take any away; `judgeRule` clamps at zero and
  * the scenario tests prove no judged content lowers a score.
  */
 export const JUDGE_POINTS = {
-  phishing: 30,
-  impersonates_brand: 20,
-  asks_for_credentials: 10,
-  spam: 12,
+  identity: 30,
+  phishing: 10,
 } as const
-export const CONFIRMED_PHISHING_FLOOR: Band = "high"
+export const IDENTITY_FLOOR: Band = "high"
 
-function judgeRule(
-  question: keyof typeof JUDGE_POINTS,
-  summary: string,
-  floor?: Band,
-): Rule {
+function judgeRule(signal: JudgeSignal, summary: string, floor?: Band): Rule {
   return {
-    ...rule(`content.judge.${question}`, "content", summary, (f) => {
-      const q = f.content?.questions[question]
-      if (!q || q.contents === 0) return null
-      const confirmed = q.contents - q.unconfirmed
+    ...rule(`content.judge.${signal}`, "content", summary, (f) => {
+      const s = f.content?.signals[signal]
+      if (!s || s.contents === 0) return null
       // ⚠ COUNTS ONLY IN THE EVIDENCE: it is stored where the workspace can
       // read it, and a probability there is a score to tune against.
       return hit(
-        Math.max(0, JUDGE_POINTS[question]),
-        { contents: q.contents, messages: q.messages, unconfirmed: q.unconfirmed },
-        {
-          keys: q.exacts.map((e) => `content:${e}`),
-          ...(floor && confirmed > 0 ? { floor } : {}),
-        },
+        Math.max(0, JUDGE_POINTS[signal]),
+        { contents: s.contents, messages: s.messages },
+        { keys: s.exacts.map((e) => `content:${e}`), ...(floor ? { floor } : {}) },
       )
     }),
     mode: "shadow",
@@ -679,22 +677,11 @@ function judgeRule(
 function judgeRules(): Rule[] {
   return [
     judgeRule(
-      "phishing",
-      "The content judge found recent mail to be phishing",
-      CONFIRMED_PHISHING_FLOOR,
+      "identity",
+      "The content judge found recent mail presenting itself as an organisation its sender domain does not belong to",
+      IDENTITY_FLOOR,
     ),
-    judgeRule(
-      "impersonates_brand",
-      "The content judge found recent mail posing as a well-known organisation it is not sent from",
-    ),
-    judgeRule(
-      "asks_for_credentials",
-      "The content judge found recent mail asking recipients for credentials or payment details",
-    ),
-    judgeRule(
-      "spam",
-      "The content judge found recent mail to be unsolicited bulk mail",
-    ),
+    judgeRule("phishing", "The content judge found recent mail that reads as phishing"),
   ]
 }
 
