@@ -73,4 +73,36 @@ describe("buildBreadcrumbs", () => {
       { label: "Single sign-on", href: "/settings/sso" },
     ])
   })
+
+  test("a page inside Mailboxes keeps Mailboxes as its section", () => {
+    expect(
+      buildBreadcrumbs({
+        workspace,
+        pathname: "/mailboxes/settings",
+        title: "Mailbox settings \u00b7 i10",
+      }),
+    ).toEqual([
+      { label: "Acme Corp", href: "/" },
+      { label: "Mailboxes", href: "/mailboxes" },
+      { label: "Mailbox settings", href: "/mailboxes/settings" },
+    ])
+    expect(
+      buildBreadcrumbs({
+        workspace,
+        pathname: "/mailboxes/move-in",
+        title: "Move mail in \u00b7 i10",
+      }),
+    ).toEqual([
+      { label: "Acme Corp", href: "/" },
+      { label: "Mailboxes", href: "/mailboxes" },
+      { label: "Move mail in", href: "/mailboxes/move-in" },
+    ])
+  })
+
+  test("team inboxes is a section of its own", () => {
+    expect(buildBreadcrumbs({ workspace, pathname: "/team-inboxes" })).toEqual([
+      { label: "Acme Corp", href: "/" },
+      { label: "Team inboxes", href: "/team-inboxes" },
+    ])
+  })
 })

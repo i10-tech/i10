@@ -2,7 +2,9 @@ import { NAV, SETTINGS_NAV, type NavItem } from "@/lib/nav"
 
 export const SECTIONS: NavItem[] = [...NAV, ...SETTINGS_NAV]
   .flatMap((group) => group.items)
-  .filter((item) => item.href !== "/")
+  // ⚠ NOT A PAGE UNDER A SECTION'S OWN ROW (`/mailboxes/settings`): its trail is
+  // the section, then the page's own title, the same as any other page inside one.
+  .filter((item) => item.href !== "/" && !item.parent)
   // Longest first, so /settings/billing wins over /settings.
   .sort((a, b) => b.href.length - a.href.length)
 

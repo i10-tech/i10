@@ -38,6 +38,15 @@ export const PAGE_COPY = {
     description:
       "Real IMAP mailboxes on your own domains - one address, one password, the same account you sign in with.",
   },
+  mailboxMoveIn: {
+    title: "Move mail in",
+    description:
+      "Bring the mail from your old provider into a mailbox here, so nothing is left behind.",
+  },
+  mailboxSettings: {
+    title: "Mailbox settings",
+    description: "Who can create mailboxes, and how storage is shared between them.",
+  },
   segments: {
     title: "Segments",
     description:

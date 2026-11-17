@@ -5,6 +5,7 @@ import {
   CreditCard,
   Gauge,
   Globe,
+  Import,
   Inbox,
   KeyRound,
   LayoutGrid,
@@ -15,8 +16,10 @@ import {
   Settings,
   ShieldBan,
   ShieldCheck,
+  SlidersHorizontal,
   Tags,
   Users,
+  UsersRound,
   Webhook,
 } from "lucide-react"
 
@@ -43,6 +46,16 @@ export interface NavItem {
   hidden?: boolean
   /** Extra words the command menu matches on. */
   keywords?: string[]
+  /**
+   * The `href` of the item this one sits under, when its path is inside that
+   * item's but it is a destination of its own (`/mailboxes/settings` under
+   * `/mailboxes`). It is listed and highlighted in its own right; what it does
+   * not do is become a breadcrumb section, so the trail reads Mailboxes then the
+   * page, as it does for any other page inside a section.
+   */
+  parent?: string
+  /** What the command menu calls it, where the rail's short label is ambiguous out of context. */
+  commandLabel?: string
 }
 
 export interface NavGroup {
@@ -141,11 +154,46 @@ export const NAV: NavGroup[] = [
         icon: Webhook,
         keywords: ["endpoint", "events", "deliveries", "replay"],
       },
+    ],
+  },
+  /*
+   * ⚠ A PILLAR OF ITS OWN, NOT A DEVELOPERS ITEM (decided 2026-11-08). Mailboxes
+   * are somewhere people read and send mail, not something a program calls, and
+   * they come with their own setup, their own settings and a way to bring old
+   * mail in. Same weight as the group above: a label and its rows.
+   *
+   * ⚠ `/mailboxes/move-in` AND `/mailboxes/settings` ARE INSIDE `/mailboxes` BY
+   * PATH. `activeHref` is what keeps Mailboxes from also lighting up on them.
+   */
+  {
+    label: "Email hosting",
+    items: [
       {
         href: "/mailboxes",
         label: "Mailboxes",
         icon: Inbox,
-        keywords: ["imap", "human", "inbox", "seat"],
+        keywords: ["imap", "human", "inbox", "seat", "email hosting", "setup"],
+      },
+      {
+        href: "/team-inboxes",
+        label: "Team inboxes",
+        icon: UsersRound,
+        keywords: ["shared", "support", "group", "email hosting"],
+      },
+      {
+        href: "/mailboxes/move-in",
+        label: "Move mail in",
+        icon: Import,
+        parent: "/mailboxes",
+        keywords: ["import", "migrate", "gmail", "outlook", "mbox", "old mail"],
+      },
+      {
+        href: "/mailboxes/settings",
+        label: "Settings",
+        commandLabel: "Mailbox settings",
+        icon: SlidersHorizontal,
+        parent: "/mailboxes",
+        keywords: ["who creates", "storage", "pool", "creation", "email hosting"],
       },
     ],
   },
@@ -278,6 +326,23 @@ export function isActive(pathname: string, item: NavItem): boolean {
   if (item.exact) return pathname === item.href
   if (pathname === item.href) return true
   return pathname.startsWith(`${item.href}/`)
+}
+
+/**
+ * The one visible item that owns a pathname: the longest `href` that matches.
+ *
+ * ⚠ `isActive` ALONE LIGHTS EVERY ANCESTOR. `/mailboxes/settings` is inside
+ * `/mailboxes`, so with a per-item test the rail would highlight Mailboxes and
+ * Settings together, and the person would not know which page they are on. The
+ * rail asks for the single owner instead, and a path that no item matches
+ * (a mailbox's own page is `/mailboxes/<address>`, which only Mailboxes
+ * matches) still resolves to its section.
+ */
+export function activeHref(pathname: string, groups: NavGroup[]): string | undefined {
+  return groups
+    .flatMap((group) => group.items)
+    .filter((item) => !item.hidden && isActive(pathname, item))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href
 }
 
 /**

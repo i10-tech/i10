@@ -35,7 +35,7 @@
 
 import { ApiRequestError } from "@/lib/api-error"
 import { ssoRoutes } from "@/lib/preview-sso"
-import { mailboxRoutes } from "@/lib/preview-mailboxes"
+import { mailboxRoutes, previewScenario } from "@/lib/preview-mailboxes"
 import { teamInboxRoutes } from "@/lib/preview-team-inboxes"
 import { transferRoutes } from "@/lib/preview-mailbox-transfer"
 import { webhookRoutes } from "@/lib/preview-webhooks"
@@ -166,6 +166,7 @@ const DOMAINS = [
       enabled: true,
       owned: true,
       sending: true,
+      receiving: true,
       catch_all: "help@acme.com",
       count: 2,
     },
@@ -184,6 +185,7 @@ const DOMAINS = [
       enabled: true,
       owned: true,
       sending: false,
+      receiving: false,
       catch_all: null,
       count: 1,
     },
@@ -204,6 +206,7 @@ const DOMAINS = [
       enabled: false,
       owned: false,
       sending: false,
+      receiving: false,
       catch_all: null,
       count: 0,
     },
@@ -222,6 +225,7 @@ const DOMAINS = [
       enabled: false,
       owned: true,
       sending: true,
+      receiving: false,
       catch_all: null,
       count: 0,
     },
@@ -240,11 +244,31 @@ const DOMAINS = [
       enabled: true,
       owned: true,
       sending: true,
+      receiving: true,
       catch_all: null,
       count: 3,
     },
   },
 ]
+
+/** A domain partway through email hosting setup: proven, hosting on, mail not pointed at us. */
+const SETUP_DOMAIN = {
+  ...DOMAINS[0]!,
+  id: "1f7a1c00-0000-4000-8000-000000000006",
+  name: "acme.dev",
+  status: "pending",
+  delegated: false,
+  open_tracking: false,
+  click_tracking: false,
+  mailboxes: {
+    enabled: true,
+    owned: true,
+    sending: false,
+    receiving: false,
+    catch_all: null,
+    count: 0,
+  },
+}
 
 const NEW_DOMAIN_PREVIEW = {
   ...DOMAINS[0]!,
@@ -256,6 +280,7 @@ const NEW_DOMAIN_PREVIEW = {
     enabled: false,
     owned: false,
     sending: false,
+    receiving: false,
     catch_all: null,
     count: 0,
   },
@@ -264,7 +289,9 @@ const NEW_DOMAIN_PREVIEW = {
 function findDomain(id: string | undefined) {
   if (!id) return null
   return (
-    DOMAINS.find((d) => d.id === id) ?? (id === "prv_new" ? NEW_DOMAIN_PREVIEW : null)
+    DOMAINS.find((d) => d.id === id) ??
+    (id === SETUP_DOMAIN.id ? SETUP_DOMAIN : null) ??
+    (id === "prv_new" ? NEW_DOMAIN_PREVIEW : null)
   )
 }
 
@@ -1023,7 +1050,7 @@ const ROUTES: [
   [/^\/console\/billing\/payment-method-session$/, () => PREVIEW_UNAVAILABLE],
   [
     /^\/console\/me$/,
-    () => ({
+    (_m, query) => ({
       user: {
         id: "user_preview",
         email: "you@acme.dev",
@@ -1039,19 +1066,22 @@ const ROUTES: [
         should_onboard: false,
         facts: { has_domain: true, has_verified_domain: true, has_api_key: true },
       },
-      // The reviewer sees everything an owner would (#335).
-      access: {
-        role: "owner",
-        permissions: [
-          "members:manage",
-          "access_domains:manage",
-          "roles:manage",
-          "owners:manage",
-          "workspace:manage",
-          "workspace:delete",
-          "sso:manage",
-        ],
-      },
+      // The reviewer sees everything an owner would (#335), unless the page
+      // asked to be seen as a member (`?scenario=member`, mailbox pages only).
+      access: ["member", "member-empty"].includes(previewScenario(query) ?? "")
+        ? { role: "member", permissions: [] }
+        : {
+            role: "owner",
+            permissions: [
+              "members:manage",
+              "access_domains:manage",
+              "roles:manage",
+              "owners:manage",
+              "workspace:manage",
+              "workspace:delete",
+              "sso:manage",
+            ],
+          },
     }),
   ],
 
@@ -1383,7 +1413,12 @@ const ROUTES: [
 
   [
     /^\/console\/domains$/,
-    (_m, _q, method, body) => {
+    (_m, query, method, body) => {
+      // ⚠ PARTWAY THROUGH SETUP (`?scenario=setup` on the Mailboxes page): the
+      // domain is proven and hosting is on, but its mail does not point at us.
+      if (method !== "POST" && previewScenario(query) === "setup") {
+        return { data: [SETUP_DOMAIN] }
+      }
       if (method !== "POST") return { data: DOMAINS }
       /*
        * ⚠ THE CREATED DOMAIN FOLLOWS WHAT WAS ASKED FOR. It was always the

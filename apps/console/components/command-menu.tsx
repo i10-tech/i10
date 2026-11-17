@@ -112,7 +112,7 @@ export function CommandMenu() {
       },
       ...destinations.map((item) => ({
         id: item.href,
-        label: item.label,
+        label: item.commandLabel ?? item.label,
         group: "Go to",
         icon: <item.icon />,
         keywords: item.keywords ?? [],
