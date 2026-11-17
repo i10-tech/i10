@@ -100,10 +100,53 @@ spec:
             requests: { cpu: 10m, memory: 16Mi }
             limits: { memory: 32Mi }
 
+        # ⚠ NOTHING ELSE MAKES A STALWART POD WAIT FOR KEEP. When Stalwart opens
+        # the store it retries for up to 30 seconds while Keep refuses
+        # connections, and a store that fails to open leaves the node without an
+        # in-memory store until the node restarts (it logs `Failed to connect to
+        # Stalwart Keep: <reason>`). /healthz/ready only reflects the data store,
+        # so such a node still reports Ready. Argo's sync wave (keep.yaml) orders
+        # Argo syncs and does nothing for a machine reboot, where Keep and both
+        # Stalwart pods start together.
+        #
+        # ⚠ A TCP CONNECT IS ENOUGH, AND IT MUST NOT WAIT FOR MORE. Keep accepts
+        # connections once it listens, which is also when it turns Ready, and
+        # Stalwart's own 30 second retry covers the rest.
+        # Waiting for the lock quarantine (about ten minutes) would hold the node
+        # down for no reason: the node works during it and only its locks wait.
+        # The `-e true` and ClusterIP notes on wait-for-db apply here too.
+        #
+        # ⚠ A LONGER BUDGET THAN wait-for-db, because Keep may be starting at
+        # this very moment: 120 attempts, about two minutes. On giving up it exits
+        # 1 and the kubelet retries the init container, which is the right end
+        # state.
+        - name: wait-for-keep
+          image: stalwartlabs/stalwart:v1.1.0-alpine
+          command:
+            - sh
+            - -c
+            - |
+              host=i10-stalwart-keep.i10-prod.svc.cluster.local
+              for i in $(seq 1 120); do
+                nc -w 2 "$host" 7000 -e true </dev/null && exit 0
+                echo "wait-for-keep: $host:7000 unreachable (attempt $i), retrying"
+                sleep 1
+              done
+              echo "wait-for-keep: $host:7000 still unreachable, giving up"
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+
       containers:
         - name: stalwart
-          # ⚠ 1.1.0 IS THE FIRST RELEASE WITH Stalwart Keep, and the init container
-          # above must stay on the same tag. See config/README.md, "Keep", for what
+          # ⚠ 1.1.0 IS THE FIRST RELEASE WITH Stalwart Keep, and the init containers
+          # above must stay on the same tag. See config/README.md, "Stalwart Keep", for what
           # the 1.0.3 to 1.1.0 jump changed for us (nothing that needs a setting).
           image: stalwartlabs/stalwart:v1.1.0-alpine
           # ⚠ THE FLAG IS NOT OPTIONAL. Without --config the server looks

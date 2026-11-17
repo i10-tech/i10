@@ -231,6 +231,64 @@ export function interpretStalwartAccountEvent(
 }
 
 /**
+ * The four encryption faults a person has to hear about.
+ *
+ * ⚠ THESE ARE ALERTS, NOT MAIL EVENTS. None of them carries a VERP sender or a
+ * message, so `interpretStalwartEvent` returns null for all four and they would
+ * be dropped as "not ours". They are about the server's own encryption, and the
+ * only reader that matters is the operator: `store.decrypt-error` means some
+ * stored blob cannot be read (a changed or missing blob key), `store.crypto-error`
+ * is the same family on the write side, `encryption.gateway-bounced` is a
+ * recipient the gateway refused, and `encryption.key-change` is a correspondent
+ * key waiting for approval. Stalwart's own docs name the first as "the signal to
+ * alert on" and the last two as the ones to alert on for the gateway.
+ *
+ * ⚠ ONLY NON-PERSONAL FIELDS ARE KEPT, AND THE RECIPIENT IS A DOMAIN. The keys
+ * read here (`id` for the blob key, `cipher`, `reason`, `address`) are the names
+ * Stalwart's event reference lists; which of them each event carries is not
+ * documented per event, so every one is optional and a missing one is null.
+ */
+export const OPERATOR_ALERT_TYPES = [
+  "store.decrypt-error",
+  "store.crypto-error",
+  "encryption.gateway-bounced",
+  "encryption.key-change",
+] as const
+
+export type OperatorAlertType = (typeof OPERATOR_ALERT_TYPES)[number]
+
+export interface StalwartOperatorAlert {
+  type: OperatorAlertType
+  occurredAt: Date
+  /** The blob key's id, on the `store.*` events. */
+  keyId: string | null
+  cipher: string | null
+  /** The domain only; a full recipient address is personal data. */
+  recipientDomain: string | null
+  reason: string | null
+}
+
+export function interpretStalwartOperatorAlert(
+  event: StalwartEvent,
+  fallbackAt: Date = new Date(),
+): StalwartOperatorAlert | null {
+  const type = OPERATOR_ALERT_TYPES.find((t) => t === event.type)
+  if (!type) return null
+
+  const data = event.data ?? {}
+  const address = stringOf(data["address"]) ?? stringOf(data["to"])
+  const at = address?.lastIndexOf("@") ?? -1
+  return {
+    type,
+    occurredAt: parseDate(event.createdAt) ?? fallbackAt,
+    keyId: type.startsWith("store.") ? stringOf(data["id"]) : null,
+    cipher: stringOf(data["cipher"]),
+    recipientDomain: address && at >= 0 ? address.slice(at + 1).toLowerCase() : null,
+    reason: stringOf(data["reason"]),
+  }
+}
+
+/**
  * ⚠ ONE QUOTA NOTICE PER MAILBOX PER DAY, NOT ONE PER EVENT. Stalwart reports
  * `limit.quota` for every message it refuses, so a full mailbox on a busy
  * address fires it many times a minute; keyed on the event, each would be a
