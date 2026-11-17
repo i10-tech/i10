@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Inbox, Pause, Play, Trash2, Undo2 } from "lucide-react"
+import { Inbox, Pause, Play, RotateCw, Trash2, Undo2 } from "lucide-react"
 import { Alert } from "@repo/ui/components/alert/alert"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
@@ -22,6 +22,7 @@ import { Time } from "@/components/time"
 import {
   availableActions,
   DELETE_GRACE_DAYS,
+  exportWaitWords,
   meterScale,
   signInLabel,
   statusInfo,
@@ -109,6 +110,8 @@ export function MailboxDetail({
             isAdmin={isAdmin}
             restorable={offered.includes("restore")}
             onRestore={() => actions.start("restore", mailbox.address)}
+            retryable={offered.includes("retry_export")}
+            onRetry={() => actions.start("retry_export", mailbox.address)}
           />
         )}
 
@@ -253,13 +256,21 @@ function DeletionBanner({
   isAdmin,
   restorable,
   onRestore,
+  retryable,
+  onRetry,
 }: {
   deletion: ConsoleMailboxDeletion
   isAdmin: boolean
   restorable: boolean
   onRestore: () => void
+  retryable: boolean
+  onRetry: () => void
 }) {
   const date = <Time iso={deletion.purgeAt} mode="exact" />
+  const wait = exportWaitWords(deletion.exportWait, {
+    restorable: restorable && isAdmin,
+    isAdmin,
+  })
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-danger/25 bg-danger/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="space-y-1">
@@ -281,7 +292,7 @@ function DeletionBanner({
           {deletion.outcome === "forward" && (
             <>
               Mail keeps arriving until {date}. After that the mailbox is erased, and
-              the address keeps delivering to{" "}
+              the address and its aliases keep delivering to{" "}
               <span className="font-mono text-foreground">
                 {deletion.forwardTo ?? "another mailbox"}
               </span>
@@ -295,17 +306,36 @@ function DeletionBanner({
               : "Ask an owner or admin to restore it before then."
             : `The ${DELETE_GRACE_DAYS} days to restore it are over, and it is being removed.`}
         </p>
+        {wait && (
+          <p className="max-w-2xl text-sm font-medium">
+            {wait.text}
+            {wait.date && (
+              <>
+                {" "}
+                <Time iso={wait.date} mode="exact" />.
+              </>
+            )}
+          </p>
+        )}
       </div>
-      {isAdmin && restorable && (
-        <Button
-          size="sm"
-          className="shrink-0 self-start sm:self-auto"
-          onClick={onRestore}
-        >
-          <Undo2 aria-hidden="true" />
-          Restore
-        </Button>
-      )}
+      <div className="flex shrink-0 gap-2 self-start sm:self-auto">
+        {isAdmin && retryable && (
+          <Button size="sm" onClick={onRetry}>
+            <RotateCw aria-hidden="true" />
+            Start export again
+          </Button>
+        )}
+        {isAdmin && restorable && (
+          <Button
+            size="sm"
+            variant={retryable ? "secondary" : undefined}
+            onClick={onRestore}
+          >
+            <Undo2 aria-hidden="true" />
+            Restore
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,9 +1,10 @@
-import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm"
 import type { MailboxAliasSource } from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
 import { directoryUsers } from "../db/identity.js"
-import { mailboxDeletions } from "../db/core.js"
+import { mailboxDeletions, mailboxJobs } from "../db/core.js"
 import { aliases, mailboxUsage } from "../db/schema.js"
+import { exportWait, type ExportWait } from "./lifecycle.js"
 import { can, type RoleStore } from "../console/roles.js"
 import { passthroughFor } from "../identity/ldap.js"
 import type { IdentityStore } from "../identity/ports.js"
@@ -140,8 +141,17 @@ export interface ConsoleMailboxDeletion {
   deletedAt: string
   /** The last moment it can be restored, and when it is purged (an export may delay that). */
   purgeAt: string
-  /** Forward only: where the address's mail goes. */
+  /** Forward only: where the address's mail goes (its aliases follow it). */
   forwardTo: string | null
+  /**
+   * `export_then_delete` only, null otherwise or once the export has done its job:
+   * why the purge is held back (`exportWait` in lifecycle.ts, the purge's own rule).
+   * `readyAfter` is set for `export_ready_after`.
+   */
+  exportWait: {
+    reason: ExportWait["reason"]
+    readyAfter: string | null
+  } | null
 }
 
 export interface ConsoleMailbox {
@@ -286,7 +296,24 @@ export const workspaceMailboxPredicate = (tenantId: string): SQL => sql`(
 const toDate = (value: Date | string): Date =>
   value instanceof Date ? value : new Date(value)
 
-export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
+export function consoleMailboxStore(
+  db: Database,
+  now: () => Date = () => new Date(),
+): ConsoleMailboxStore {
+  const waitFor = (
+    gone: typeof mailboxDeletions.$inferSelect,
+    jobs: Map<string, typeof mailboxJobs.$inferSelect | null>,
+  ): ConsoleMailboxDeletion["exportWait"] => {
+    if (gone.outcome !== "export_then_delete") return null
+    const wait = exportWait(jobs.get(gone.clerkUserId) ?? null, gone, now())
+    if (!wait) return null
+    return {
+      reason: wait.reason,
+      readyAfter:
+        wait.reason === "export_ready_after" ? wait.readyAfter.toISOString() : null,
+    }
+  }
+
   async function hydrate(
     tenantId: string,
     rawRows: RawAccountRow[],
@@ -344,7 +371,29 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
               ),
             ),
         ])
-        return { usageRows, dirUsers, deletionRows }
+        // The latest export of each mailbox that is waiting for one: a page holds
+        // few deleting mailboxes, so one small read each.
+        const exportJobs = new Map<string, typeof mailboxJobs.$inferSelect | null>()
+        for (const d of deletionRows)
+          if (d.outcome === "export_then_delete")
+            exportJobs.set(
+              d.clerkUserId,
+              (
+                await tx
+                  .select()
+                  .from(mailboxJobs)
+                  .where(
+                    and(
+                      eq(mailboxJobs.tenantId, tenantId),
+                      eq(mailboxJobs.mailboxAddress, d.address.toLowerCase()),
+                      eq(mailboxJobs.type, "export"),
+                    ),
+                  )
+                  .orderBy(desc(mailboxJobs.createdAt))
+                  .limit(1)
+              )[0] ?? null,
+            )
+        return { usageRows, dirUsers, deletionRows, exportJobs }
       }),
     ])
 
@@ -405,6 +454,7 @@ export function consoleMailboxStore(db: Database): ConsoleMailboxStore {
                 deletedAt: gone.deletingAt.toISOString(),
                 purgeAt: gone.purgeAfter.toISOString(),
                 forwardTo: gone.forwardAddress,
+                exportWait: waitFor(gone, tenantScoped.exportJobs),
               }
             : null,
         suspended: Boolean(row.suspended),

@@ -31,6 +31,14 @@ export interface ConsoleMailboxDeletion {
   purgeAt: string
   /** Forward only: where the address's mail goes afterwards. */
   forwardTo: string | null
+  /**
+   * `export_then_delete` only: why the purge is held back, or null when it is not.
+   * `readyAfter` is set for `export_ready_after`.
+   */
+  exportWait: {
+    reason: "export_pending" | "export_failed" | "export_missing" | "export_ready_after"
+    readyAfter: string | null
+  } | null
 }
 
 export interface ConsoleMailbox {
@@ -151,13 +159,23 @@ export function canRestore(deletion: ConsoleMailboxDeletion, now: Date): boolean
  * the API refuses every other change to it (`mailbox_deleting`), so the buttons
  * would be a way to read a refusal. A suspended one offers resume where an
  * active one offers suspend.
+ *
+ * ⚠ ONE EXCEPTION: A FAILED OR MISSING EXPORT OFFERS TO START IT AGAIN, and keeps
+ * offering it after the window, because that is when it is the only way out: a
+ * mailbox that can no longer be restored and cannot be erased without its copy.
  */
 export function availableActions(
   mailbox: Pick<ConsoleMailbox, "status" | "deletion">,
   now: Date,
 ): MailboxAction[] {
   if (mailbox.status === "deleting") {
-    return mailbox.deletion && canRestore(mailbox.deletion, now) ? ["restore"] : []
+    const { deletion } = mailbox
+    const actions: MailboxAction[] = []
+    if (deletion && canRestore(deletion, now)) actions.push("restore")
+    const reason = deletion?.exportWait?.reason
+    if (reason === "export_failed" || reason === "export_missing")
+      actions.push("retry_export")
+    return actions
   }
   return mailbox.status === "suspended"
     ? ["storage", "resume", "delete"]
@@ -187,7 +205,8 @@ export interface ActionRefusal {
   body?: Record<string, unknown>
 }
 
-export type MailboxAction = "storage" | "suspend" | "resume" | "delete" | "restore"
+export type MailboxAction =
+  "storage" | "suspend" | "resume" | "delete" | "restore" | "retry_export"
 
 const DOING: Record<MailboxAction, string> = {
   storage: "change the storage",
@@ -195,6 +214,53 @@ const DOING: Record<MailboxAction, string> = {
   resume: "resume the mailbox",
   delete: "delete the mailbox",
   restore: "restore the mailbox",
+  retry_export: "start the export",
+}
+
+/**
+ * What a deletion that waits for its export says about the wait, or null when it
+ * is not waiting. `date` is set where the sentence ends in one.
+ *
+ * ⚠ THE NEXT STEP IS NAMED, AND "RESTORE" ONLY WHILE IT IS STILL OFFERED: after the
+ * window the one way out is another export, and saying "or restore it" there would
+ * point at a button that is not on the page. (Choosing another outcome instead is
+ * not offered: the API fixes the outcome when the deletion begins.)
+ */
+export function exportWaitWords(
+  wait: ConsoleMailboxDeletion["exportWait"],
+  who: { restorable: boolean; isAdmin: boolean },
+): { text: string; date: string | null } | null {
+  if (!wait) return null
+  const or = who.restorable ? ", or restore the mailbox" : ""
+  // A member has neither button: they are told whom to ask.
+  const again = who.isAdmin
+    ? `Start the export again${or}`
+    : "Ask an owner or admin to start the export again"
+  const first = who.isAdmin
+    ? `Start the export${or}`
+    : "Ask an owner or admin to start the export"
+  switch (wait.reason) {
+    case "export_pending":
+      return {
+        text: "The export is still running. The mailbox is erased once it has finished and its download window has passed.",
+        date: null,
+      }
+    case "export_failed":
+      return {
+        text: `The export failed, so the mailbox is not erased yet. ${again}.`,
+        date: null,
+      }
+    case "export_missing":
+      return {
+        text: `There is no export of this mailbox, so it is not erased yet. ${first}.`,
+        date: null,
+      }
+    case "export_ready_after":
+      return {
+        text: "The export is ready to download. The mailbox is erased after its download window ends on",
+        date: wait.readyAfter,
+      }
+  }
 }
 
 /** The heading of the alert a refused action puts in its dialog. */
@@ -234,6 +300,7 @@ export function mailboxActionRefusal(
     case "mailbox_deleting":
       return "This mailbox is already being deleted. Restore it first if you want to change it."
     case "forward_exists":
+    case "not_waiting_for_export":
     case "not_deleting":
     case "restore_window_closed":
     case "not_suspended":

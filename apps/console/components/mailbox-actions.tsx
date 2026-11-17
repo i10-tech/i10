@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import {
   deleteMailbox,
   restoreMailbox,
+  retryMailboxExport,
   resumeMailbox,
   setMailboxStorage,
   suspendMailbox,
@@ -179,6 +180,22 @@ function MailboxActionDialog({
           }
         />
       )
+    case "retry_export":
+      return (
+        <LifecycleDialog
+          action="retry_export"
+          open={open}
+          onOpenChange={onOpenChange}
+          title={`Start the export of ${mailbox.address} again?`}
+          description="We export all its mail again and make it downloadable. The mailbox is erased only after this export has finished and its download window has passed."
+          confirmLabel="Start export"
+          doneLabel="Started"
+          run={() => retryMailboxExport(mailbox.address)}
+          onDone={() =>
+            toastDone("Export started", `We are exporting ${mailbox.address} again.`)
+          }
+        />
+      )
     case "delete":
       return (
         <DeleteDialog
@@ -293,7 +310,7 @@ const OUTCOMES: { value: DeletionOutcome; label: string; description: string }[]
   {
     value: "forward",
     label: "Forward to another mailbox",
-    description: `After ${DELETE_GRACE_DAYS} days the mailbox is erased, but the address stays and delivers to a mailbox you pick.`,
+    description: `After ${DELETE_GRACE_DAYS} days the mailbox is erased, but the address and all its aliases stay and deliver to a mailbox you pick.`,
   },
 ]
 

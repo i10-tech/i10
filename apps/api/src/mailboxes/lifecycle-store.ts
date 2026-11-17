@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNotNull, like, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNotNull, like, sql } from "drizzle-orm"
 import type { MailboxDeletionOutcome } from "@repo/contracts"
 import { withTenant, type Database } from "../db/client.js"
 import { mailboxDeletions, mailboxUsage } from "../db/core.js"
@@ -102,6 +102,12 @@ export interface MailboxLifecycleStore {
     clerkUserId: string,
     at: Date,
   ): Promise<"closed" | "not_due" | "gone">
+  /**
+   * Whether this is the first time in 24 hours that this mailbox's stuck export is
+   * to be reported, and if so, records that it was (an audit event, so the
+   * answer survives the hourly job's pods). `false` when no deletion row stands.
+   */
+  claimExportAlert(tenantId: string, clerkUserId: string, at: Date): Promise<boolean>
   /** The purge's last step: the rows. `gone` when there is no deletion row. */
   finish(
     tenantId: string,
@@ -137,6 +143,49 @@ const toRow = (r: typeof mailboxDeletions.$inferSelect): DeletionRow => ({
 })
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The aliases a forwarded mailbox hands on at its purge, and who gets them: every
+ * alias of every source, to whoever the address's own list still forwards to.
+ *
+ * ⚠ THE TARGET IS THE PRIMARY LIST'S MEMBER, NOT THE ROW'S COLUMN: `close` deletes
+ * that list when its target went, and then the aliases must go the way the address
+ * does (refused) rather than forward to an account that is not there. `null` for
+ * that case, and for no list at all.
+ *
+ * ⚠ AN ALIAS A LIST ALREADY ANSWERS FOR IS LEFT OUT: a list's address is unique, so
+ * writing a second would fail the purge for good, and that address already has its
+ * own route. (Nothing creates one: `addressHeld` refuses it. This is the backstop.)
+ */
+async function aliasesToForward(
+  tx: Tx,
+  row: Pick<DeletionRow, "clerkUserId" | "address">,
+): Promise<{ targetId: string; addresses: string[] } | null> {
+  const [member] = await tx
+    .select({ id: groupMembers.clerkUserId })
+    .from(groupMembers)
+    .where(eq(groupMembers.groupName, fwdName(row.clerkUserId)))
+    .limit(1)
+  if (!member) return null
+  const held = await tx
+    .select({ address: aliases.address })
+    .from(aliases)
+    .where(eq(aliases.clerkUserId, row.clerkUserId))
+    .orderBy(asc(aliases.address))
+  const wanted = held
+    .map((a) => a.address.toLowerCase())
+    .filter((a) => a !== row.address)
+  if (wanted.length === 0) return { targetId: member.id, addresses: [] }
+  const answered = new Set(
+    (
+      await tx
+        .select({ email: groups.email })
+        .from(groups)
+        .where(inArray(groups.email, wanted))
+    ).map((g) => g.email),
+  )
+  return { targetId: member.id, addresses: wanted.filter((a) => !answered.has(a)) }
+}
 
 export function mailboxLifecycleStore(db: Database): MailboxLifecycleStore {
   const lockedRow = (tx: Tx, tenantId: string, clerkUserId: string) =>
@@ -212,7 +261,8 @@ export function mailboxLifecycleStore(db: Database): MailboxLifecycleStore {
         // forward's list has its target as its only member, and the member's row
         // cascades away with the mailbox, which would leave a list that accepts
         // mail for nobody. Refused rather than rewired: where those addresses go
-        // instead is somebody's decision.
+        // instead is somebody's decision. `fwd-%` covers the primary's list
+        // (`fwd-<id>`) and a purged mailbox's alias lists (`aliasListName`, `fwd-<id>-a<hash>`) alike.
         const [inUse] = await tx
           .select({ name: groupMembers.groupName })
           .from(groupMembers)
@@ -442,6 +492,36 @@ export function mailboxLifecycleStore(db: Database): MailboxLifecycleStore {
       })
     },
 
+    async claimExportAlert(tenantId, clerkUserId, at) {
+      return withTenant(db, tenantId, async (tx) => {
+        // The deletion row's lock serialises two pods that both found it stuck.
+        if (!(await lockedRow(tx, tenantId, clerkUserId))) return false
+        const [recent] = await tx
+          .select({ id: events.id })
+          .from(events)
+          .where(
+            and(
+              eq(events.tenantId, tenantId),
+              eq(events.type, "mailbox.export_blocked"),
+              eq(events.subjectUserId, clerkUserId),
+              gt(events.createdAt, new Date(at.getTime() - DAY_MS)),
+            ),
+          )
+          .orderBy(desc(events.createdAt))
+          .limit(1)
+        if (recent) return false
+        // `createdAt` is the caller's clock, like every other time decision here.
+        await tx.insert(events).values({
+          tenantId,
+          type: "mailbox.export_blocked",
+          subjectUserId: clerkUserId,
+          data: {},
+          createdAt: at,
+        })
+        return true
+      })
+    },
+
     async finish(tenantId, clerkUserId, note) {
       return withTenant(db, tenantId, async (tx) => {
         const row = await lockedRow(tx, tenantId, clerkUserId)
@@ -449,7 +529,14 @@ export function mailboxLifecycleStore(db: Database): MailboxLifecycleStore {
 
         // ⚠ A FORWARD KEEPS ITS LIST: from here it is what the address is. Every
         // other outcome drops the person's routes, as the directory's own delete does.
-        if (row.outcome !== "forward") await directoryMail.dropRoutes(tx, clerkUserId)
+        //
+        // ⚠ THE ALIASES ARE READ HERE, BEFORE THE ACCOUNT GOES, because they cascade
+        // with it; their lists are written below, after it, in this same transaction.
+        // An alias is a row in `authd.aliases` until then and a list after, so at no
+        // commit does the address answer for nobody or fall free for a stranger.
+        let forwarded: Awaited<ReturnType<typeof aliasesToForward>> = null
+        if (row.outcome === "forward") forwarded = await aliasesToForward(tx, row)
+        else await directoryMail.dropRoutes(tx, clerkUserId)
         await tx
           .delete(directoryMailboxes)
           .where(
@@ -480,6 +567,15 @@ export function mailboxLifecycleStore(db: Database): MailboxLifecycleStore {
               eq(mailboxUsage.address, row.address),
             ),
           )
+        if (forwarded)
+          for (const alias of forwarded.addresses)
+            await directoryMail.setRoute(tx, {
+              kind: "fwd",
+              leaverId: clerkUserId,
+              email: alias,
+              targetId: forwarded.targetId,
+              alias,
+            })
         await tx
           .delete(mailboxDeletions)
           .where(
@@ -494,6 +590,9 @@ export function mailboxLifecycleStore(db: Database): MailboxLifecycleStore {
           data: {
             outcome: row.outcome,
             address: row.address,
+            ...(forwarded && forwarded.addresses.length > 0
+              ? { aliasesForwarded: forwarded.addresses }
+              : {}),
             ...(note.clerkKept.length > 0 ? { clerkAddressKept: note.clerkKept } : {}),
           },
         })
