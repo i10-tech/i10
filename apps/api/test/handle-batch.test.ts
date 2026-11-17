@@ -482,3 +482,74 @@ describe("a workspace held by the risk engine (#170)", () => {
     }
   })
 })
+
+describe("the pre-send screen (content/screen.ts)", () => {
+  it("runs after the claim and before the held check", async () => {
+    const order: string[] = []
+    const { deps: d } = deps({
+      claim: async (j) => {
+        order.push("claim")
+        return j.messages.map((_, i) => outbound(i))
+      },
+      screen: async () => {
+        order.push("screen")
+        return { kind: "skipped", why: "trusted_workspace" }
+      },
+      held: async () => {
+        order.push("held")
+        return false
+      },
+      markCanceled: mock(async () => {}),
+    })
+    const result = await handleBatch(job(1), d)
+    expect(order).toEqual(["claim", "screen", "held"])
+    expect(result.screen).toEqual({ kind: "skipped", why: "trusted_workspace" })
+  })
+
+  it("cancels the claimed messages, never sends them, when its re-score holds the workspace", async () => {
+    let heldNow = false
+    const markCanceled = mock(async () => {})
+    const { deps: d, transport } = deps({
+      screen: async () => {
+        heldNow = true
+        return { kind: "judged", groups: 1, left: 0, rescored: true }
+      },
+      held: async () => heldNow,
+      markCanceled,
+    })
+    const result = await handleBatch(job(3), d)
+    expect(result.canceled).toBe(3)
+    expect(result.sent).toBe(0)
+    expect(transport.sent).toHaveLength(0)
+    expect(markCanceled).toHaveBeenCalledTimes(3)
+    expect(result.screen).toMatchObject({ kind: "judged", rescored: true })
+  })
+
+  it("still sends the batch when the screen throws, and says so", async () => {
+    const reportError = mock(() => {})
+    const {
+      deps: d,
+      transport,
+      log,
+    } = deps({
+      screen: async () => {
+        throw new Error("judge exploded")
+      },
+      reportError,
+    })
+    const result = await handleBatch(job(2), d)
+    expect(result.sent).toBe(2)
+    expect(transport.sent).toHaveLength(2)
+    expect(result.screen).toEqual({
+      kind: "unscreened",
+      why: "error",
+      judged: 0,
+      rescored: false,
+    })
+    expect(reportError).toHaveBeenCalledTimes(1)
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "ten-1" }),
+      "batch sent unscreened",
+    )
+  })
+})

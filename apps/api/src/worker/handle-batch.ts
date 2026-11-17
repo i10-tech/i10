@@ -1,4 +1,5 @@
 import type { DeliveryRoute } from "../domains/route.js"
+import type { ScreenOutcome } from "../content/screen.js"
 import { describeError } from "../errors.js"
 import type { SendJob } from "../queue/send-queue.js"
 import type { Metering, SentMessage } from "../send/metering.js"
@@ -12,6 +13,9 @@ import type { OutboundMessage, SendOutcome, Transport } from "../send/transport.
  *
  *   1. CLAIM   compare-and-swap in Postgres. Anything not won belongs to
  *              another worker and is dropped, never retried.
+ *      SCREEN  an untrusted workspace's new content is judged and the
+ *              workspace re-scored (#170, content/screen.ts); then a held
+ *              workspace's claimed messages are canceled, never sent.
  *   2. SEND    bounded concurrency, one provider call per message.
  *   3. RECORD  immediately after each call returns, per message.
  *   4. METER   after the fact, and unable to affect any of the above.
@@ -118,6 +122,15 @@ export interface BatchDeps<M extends OutboundMessage = OutboundMessage> {
   held?: (tenantId: string) => Promise<boolean>
   /** Records a claimed message as canceled, never attempted. */
   markCanceled?: (message: M, reason: string) => Promise<void>
+  /**
+   * Judges an untrusted workspace's new content before it goes, and re-scores
+   * the workspace if anything was judged (content/screen.ts). Runs between the
+   * claim and `held`, so a hold the re-score places cancels this very batch.
+   *
+   * ⚠ IT CANNOT STOP A SEND BY FAILING. A throw is recorded as `unscreened`
+   * and the batch goes on to the held check and out, like any other.
+   */
+  screen?: (tenantId: string, messages: readonly M[]) => Promise<ScreenOutcome>
 }
 
 export interface BatchResult {
@@ -138,6 +151,8 @@ export interface BatchResult {
   stranded: number
   /** Claimed messages canceled because the workspace is held (#170). */
   canceled?: number
+  /** What the pre-send screen did, when one is wired. */
+  screen?: ScreenOutcome
 }
 
 export async function handleBatch<M extends OutboundMessage>(
@@ -158,6 +173,8 @@ export async function handleBatch<M extends OutboundMessage>(
     return { claimed: 0, sent: 0, rejected: 0, deferred: 0, stranded: 0 }
   }
 
+  const screen = deps.screen ? await screened(job.tenantId, messages, deps) : undefined
+
   if (
     deps.held &&
     deps.markCanceled &&
@@ -176,6 +193,7 @@ export async function handleBatch<M extends OutboundMessage>(
       deferred: 0,
       stranded: 0,
       canceled: messages.length,
+      ...(screen ? { screen } : {}),
     }
   }
 
@@ -186,6 +204,7 @@ export async function handleBatch<M extends OutboundMessage>(
     rejected: 0,
     deferred: 0,
     stranded: 0,
+    ...(screen ? { screen } : {}),
   }
 
   await inBatches(
@@ -277,6 +296,27 @@ export async function handleBatch<M extends OutboundMessage>(
 
   deps.log.info({ tenantId: job.tenantId, ...result }, "batch complete")
   return result
+}
+
+/** The screen's outcome, with one log line when it looked at anything. */
+async function screened<M extends OutboundMessage>(
+  tenantId: string,
+  messages: readonly M[],
+  deps: BatchDeps<M>,
+): Promise<ScreenOutcome> {
+  let outcome: ScreenOutcome
+  try {
+    outcome = await deps.screen!(tenantId, messages)
+  } catch (error) {
+    deps.reportError?.(error, { phase: "screen", tenantId })
+    outcome = { kind: "unscreened", why: "error", judged: 0, rescored: false }
+  }
+  // ⚠ NEVER THE CONTENT: the tenant, the counts and the reason.
+  if (outcome.kind === "unscreened")
+    deps.log.warn({ tenantId, screen: outcome }, "batch sent unscreened")
+  else if (outcome.kind === "judged")
+    deps.log.info({ tenantId, screen: outcome }, "batch screened")
+  return outcome
 }
 
 /**

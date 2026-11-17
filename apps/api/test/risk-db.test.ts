@@ -1630,7 +1630,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     extra.push(id)
     await seedTenant(id)
     expect(
-      await judgementStore(db).save(id, "e1", storedJudgement(0.9), new Date()),
+      await judgementStore(db).save(id, "e1", storedJudgement(0.9), new Date(), null),
     ).toBe(true)
     const own = await withTenant(db, id, (tx) =>
       tx.select().from(riskContentJudgements),
@@ -1656,7 +1656,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(refused).toBe(true)
     // The first judgement wins; a second save of the same content writes nothing.
     expect(
-      await judgementStore(db).save(id, "e1", storedJudgement(0.1), new Date()),
+      await judgementStore(db).save(id, "e1", storedJudgement(0.1), new Date(), null),
     ).toBe(false)
   })
 
@@ -1752,12 +1752,16 @@ suite("the risk engine against Postgres, as i10_api", () => {
       current!.contributions.some((c) => c.rule.startsWith("content.judge.")),
     ).toBe(false)
     expect((current!.shadow as { rule: string }[]).map((s) => s.rule)).toContain(
-      "content.judge.phishing",
+      "content.judge.identity",
     )
 
     const listed = await judgements.list(t, 10)
     expect(listed).toHaveLength(2)
     expect(listed.filter((r) => r.secondStatus === "not_needed").length).toBe(1)
+    // ⚠ WITH ITS BANDS, so the pre-send screen knows near-duplicates are judged.
+    const kept =
+      await owner`select cardinality(bands)::int as n from core.risk_content_judgements where tenant_id = ${t}`
+    expect(kept.map((r) => r.n)).toEqual([8, 8])
   })
 
   it("leaves content a spent budget refused for later, and counts it once a day", async () => {
@@ -1788,6 +1792,129 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(day).toEqual({ seen: 1, judged: 0, capped: 1 })
   })
 
+  it("keeps a judgement's bands and finds its near-duplicates through the definers, and only those", async () => {
+    const t = crypto.randomUUID()
+    const other = crypto.randomUUID()
+    extra.push(t, other)
+    await seedTenant(t)
+    await seedTenant(other)
+    const store = judgementStore(db)
+    const now = new Date()
+    const ago = (days: number) => new Date(now.getTime() - days * 86_400_000)
+    expect(
+      await store.save(t, "fresh", storedJudgement(0.1), ago(1), ["0:a", "1:b", "2:c"]),
+    ).toBe(true)
+    await store.save(t, "stale", storedJudgement(0.1), ago(9), ["0:a", "1:b"])
+    await store.save(t, "unbanded", storedJudgement(0.1), ago(1), null)
+    await store.save(t, "apart", storedJudgement(0.1), ago(1), ["0:z", "1:y"])
+    await store.save(other, "theirs", storedJudgement(0.1), ago(1), ["0:a", "1:b"])
+
+    const found = await store.near(t, "test/judge#2", ["1:b", "2:c", "7:q"], ago(7))
+    expect(found).toEqual([{ exact: "fresh", bands: ["0:a", "1:b", "2:c"] }])
+    expect(await store.near(t, "another/model#2", ["1:b"], ago(7))).toEqual([])
+    expect(await store.near(t, "test/judge#2", [], ago(7))).toEqual([])
+
+    // ⚠ THE PREVIOUS IMAGE'S FOURTEEN ARGUMENTS STILL SAVE, during a rollout.
+    const [old] = await app`
+      select core.risk_content_judgement_save(
+        ${t}::uuid, 'old-image', 'test/judge#2', '{"imp_short":0.1}'::jsonb, false, null, null,
+        'not_needed'::core.risk_judge_second, null, null, null, null, null, now()
+      ) as saved`
+    expect(old!.saved).toBe(true)
+
+    // Doors, not walls: the definers are i10_api's, the table is nobody's.
+    const direct = await app`select * from core.risk_content_judgements`.then(
+      (rows) => rows.length,
+      (e: unknown) => String(e),
+    )
+    expect(direct).toBe(0)
+    const pub = await owner`
+      select has_function_privilege('public', 'core.risk_content_judged_near(uuid, text, text[], timestamptz)', 'execute') as near,
+             has_function_privilege('public', 'core.risk_content_judgement_save(uuid, text, text, jsonb, boolean, integer, integer, core.risk_judge_second, text, jsonb, boolean, integer, integer, timestamptz, text[])', 'execute') as save`
+    expect(pub[0]).toEqual({ near: false, save: false })
+  })
+
+  it("screens a new workspace's first batch before it goes: one call for every copy, recorded and scored, and only the judged copy stamped", async () => {
+    const { screenBatch, screenStore } = await import("../src/content/screen.js")
+    const { analyseContent } = await import("../src/content/job.js")
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t, { createdAgoHours: 2 })
+    const letter = (name: string) =>
+      `<p>Dear ${name},</p><p>Your mailbox storage is full and incoming mail is being held. ` +
+      `Sign in within 24 hours at https://mail-verify.example/restore to release your messages, ` +
+      `or the account will be closed and every message in it deleted. Thank you, the mail team.</p>`
+    // ⚠ MILLISECONDS, AS ACCEPT MINTS THEM: the screen addresses a body by its Date.
+    const claimed = []
+    for (const name of ["Anna", "Ben", "Chidi"]) {
+      const [row] = await owner`
+        with m as (
+          insert into core.messages (tenant_id, from_address, to_addresses, subject, status, queue, created_at)
+          values (${t}, 'Mail Team <team@judge.example>', '{a@example.com}', 'Mailbox full',
+                  'sending', 'transactional', date_trunc('milliseconds', now()))
+          returning id, created_at, tenant_id
+        )
+        insert into core.message_bodies (message_id, created_at, tenant_id, html)
+        select id, created_at, tenant_id, ${letter(name)} from m
+        returning message_id, created_at`
+      claimed.push({
+        id: String(row!.message_id),
+        createdAt: new Date(row!.created_at as string),
+        subject: "Mailbox full",
+        from: "Mail Team <team@judge.example>",
+        replyTo: [],
+        to: ["a@example.com"],
+        html: letter(name),
+        text: null,
+      })
+    }
+
+    const redis = new FakeRedis()
+    const fake = fakeJudge(() => true)
+    const risk = riskDeps(redis, { judge: fake.judge })
+    const outcome = await screenBatch(t, claimed, {
+      judge: fake.judge,
+      judgements: judgementStore(db),
+      settings: { enabled: true, untrustedDays: 30, maxGroups: 3, deadlineMs: 20_000 },
+      riskEnabled: true,
+      seenRedis: redis,
+      ...screenStore(db),
+      record: (tenantId, items) =>
+        recordContent(tenantId, items, { db, threshold: 99 }),
+      rescore: async (tenantId) =>
+        (await scoreTenant(tenantId, "first-send", risk)).status === "scored",
+    })
+    expect(outcome).toEqual({ kind: "judged", groups: 1, left: 0, rescored: true })
+    expect(fake.asked).toHaveLength(1)
+
+    const bodies = await owner`
+      select count(*) filter (where judged_at is not null)::int as judged,
+             count(*) filter (where fingerprinted_at is not null)::int as printed
+        from core.message_bodies where tenant_id = ${t}`
+    expect(bodies[0]).toEqual({ judged: 1, printed: 3 })
+    const current = await assessmentStore(db).current(t)
+    expect((current!.shadow as { rule: string }[]).map((s) => s.rule)).toContain(
+      "content.judge.identity",
+    )
+    const [events] =
+      await owner`select trigger from core.risk_assessment_events where tenant_id = ${t}`
+    expect(events!.trigger).toBe("first-send")
+
+    // The five-minute pass finds them already counted; the hourly judge still judges the
+    // near copies by their exact content, which nothing has judged.
+    const { fingerprintStored } = await import("../src/risk/content.js")
+    expect(await fingerprintStored(t, { db, threshold: 99 })).toBe(0)
+    const [prints] =
+      await owner`select sum(messages)::int as n from core.content_fingerprints where tenant_id = ${t}`
+    expect(prints!.n).toBe(3)
+    const again = await analyseContent(t, {
+      db,
+      judge: { judge: fake.judge, judgements: judgementStore(db), seenRedis: redis },
+    })
+    expect(again.judged).toBe(2)
+    expect(fake.asked).toHaveLength(3)
+  })
+
   it("purges judgements in the hourly run once they are a month old", async () => {
     const t = crypto.randomUUID()
     extra.push(t)
@@ -1798,8 +1925,9 @@ suite("the risk engine against Postgres, as i10_api", () => {
       "old",
       j.judgement,
       new Date(Date.now() - 31 * 86_400_000),
+      null,
     )
-    await judgementStore(db).save(t, "new", j.judgement, new Date())
+    await judgementStore(db).save(t, "new", j.judgement, new Date(), null)
     const summary = await runAll(riskDeps())
     expect(summary.judgementsPurged).toBeGreaterThanOrEqual(1)
     expect((await judgementStore(db).list(t, 10)).map((r) => r.exact)).toEqual(["new"])

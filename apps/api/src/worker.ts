@@ -58,6 +58,13 @@ import {
 } from "./mailboxes/migration.js"
 import { mailboxJobStore } from "./mailboxes/jobs.js"
 import { jmapAs } from "./mail/jmap-as.js"
+import { screenBatch, screenStore, type ScreenDeps } from "./content/screen.js"
+import { recordContent } from "./risk/content.js"
+import { judgeModels } from "./risk/judge/config.js"
+import { judgementStore } from "./risk/judge/store.js"
+import { scoreTenant } from "./risk/runner.js"
+import { riskRuntime } from "./risk/runtime.js"
+import { riskTrigger } from "./risk/trigger.js"
 
 /**
  * The send worker.
@@ -290,6 +297,63 @@ const ops = databaseOps({
   store: objectStoreFrom(env),
 })
 
+/**
+ * Judging before the first send (content/screen.ts), built once at start.
+ *
+ * ⚠ THE RISK ENGINE ONLY WHEN THE SCREEN CAN RUN: risk on, the screen on and a
+ * judge configured. It is the jobs' own construction (risk/runtime.ts), so a
+ * hold the re-score places is the hourly run's hold; it costs two more Redis
+ * connections and a few queries at start, never anything per batch. A runtime
+ * that cannot be built leaves the worker sending, unscreened.
+ */
+const screenRuntime =
+  env.RISK_ENABLED && env.RISK_SCREEN_BEFORE_SEND && judgeModels(env)
+    ? await riskRuntime({ env, db, sql, log }).catch((error: unknown) => {
+        log.error({ err: error }, "pre-send screen unavailable; sending unscreened")
+        captureError(error, { phase: "screen-boot" })
+        return null
+      })
+    : null
+const risk = screenRuntime?.risk
+// The farm tripwire, when the screen records a batch's fingerprints.
+const tripwire = risk ? riskTrigger(risk.deps) : null
+const screenDeps: ScreenDeps = {
+  ...(risk?.deps.judge ? { judge: risk.deps.judge } : {}),
+  judgements: judgementStore(db),
+  settings: {
+    enabled: env.RISK_SCREEN_BEFORE_SEND,
+    untrustedDays: env.RISK_SCREEN_UNTRUSTED_DAYS,
+    maxGroups: env.RISK_SCREEN_MAX_GROUPS,
+    deadlineMs: env.RISK_SCREEN_DEADLINE_MS,
+  },
+  riskEnabled: env.RISK_ENABLED,
+  ...(risk?.deps.exempt ? { exempt: risk.deps.exempt } : {}),
+  ...(risk ? { trust: risk.cachedTrust } : {}),
+  ...(screenRuntime ? { seenRedis: screenRuntime.cache } : {}),
+  ...screenStore(db),
+  record: async (tenantId, items) => {
+    if (!screenRuntime || !risk || !tripwire) return
+    await recordContent(tenantId, items, {
+      db,
+      redis: screenRuntime.cache,
+      threshold: env.RISK_FARM_TRIPWIRE,
+      rescore: (ids, why) => tripwire.rescore(ids, why),
+      trust: risk.cachedTrust,
+    })
+  },
+  rescore: async (tenantId) =>
+    risk
+      ? (await scoreTenant(tenantId, "first-send", risk.deps)).status === "scored"
+      : false,
+  log,
+}
+const screen = (tenantId: string, messages: readonly ClaimedMessage[]) =>
+  screenBatch(
+    tenantId,
+    messages.map((m) => ({ ...m, html: m.html ?? null, text: m.text ?? null })),
+    screenDeps,
+  )
+
 function startWorker(cls: SendClass) {
   const queue = createSendQueue({
     redis: queueRedis,
@@ -313,6 +377,7 @@ function startWorker(cls: SendClass) {
         // already have left. It was silently discarded before this.
         reportError: captureError,
         concurrency: env.WORKER_CONCURRENCY,
+        screen,
       }),
     // ⚠ BATCHES AT ONCE, NOT MESSAGES AT ONCE - TWO DIFFERENT NUMBERS THAT BOTH
     // WANT TO BE CALLED CONCURRENCY. `WORKER_CONCURRENCY` above is the fan-out
@@ -543,6 +608,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
         Promise.allSettled([
           sql.end({ timeout: 10 }),
           queueRedis.quit(),
+          screenRuntime?.close() ?? Promise.resolve(),
           // Idle relay connections, closed politely rather than dropped.
           relayPool?.closeAllConnections() ?? Promise.resolve(),
         ]),

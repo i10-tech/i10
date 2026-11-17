@@ -1354,6 +1354,29 @@ const schema = z.object({
     .default(150),
 
   /**
+   * Judging before the first send (content/screen.ts): the worker judges an
+   * untrusted workspace's new content between the claim and the held check,
+   * and re-scores it if anything was judged. Needs the judge configured.
+   * ⚠ FAILS OPEN: a spent budget, a down model, the deadline or an error sends
+   * the batch unjudged, for the hourly pass.
+   */
+  RISK_SCREEN_BEFORE_SEND: switchOn(),
+  /** A workspace younger than this many days is untrusted; so is one elevated or worse. */
+  RISK_SCREEN_UNTRUSTED_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
+  /** Groups of near-duplicate content judged per batch, one call each. */
+  RISK_SCREEN_MAX_GROUPS: z.coerce.number().int().min(1).max(20).default(3),
+  /**
+   * The whole screen of one batch, judging and re-score, in milliseconds.
+   * ⚠ KEEP IT WELL UNDER WORKER_JOB_TIMEOUT_MS: the batch is claimed and waits.
+   */
+  RISK_SCREEN_DEADLINE_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(60_000)
+    .default(20_000),
+
+  /**
    * Which embedder turns content into vectors (content/embed.ts): `minilm`,
    * the local all-MiniLM-L6-v2 on WebAssembly (meaning), or `hash` (wording,
    * zero dependencies). ⚠ `minilm` FALLS BACK TO `hash`, loudly, when the model
@@ -1434,6 +1457,20 @@ const validated = schema.superRefine((env, ctx) => {
         `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms). Postgres must ` +
         `release a claim after Redis releases the job, never before, or two ` +
         `workers can both win the claim and send the same message twice.`,
+    })
+  }
+
+  // ⚠ THE SCREEN WAITS INSIDE THE LEASE. A claimed batch sits through the
+  // pre-send screen before the send itself, so the screen must leave most of
+  // the lease for sending, or groupmq hands the job to a second worker.
+  if (env.RISK_SCREEN_DEADLINE_MS * 2 > env.WORKER_JOB_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["RISK_SCREEN_DEADLINE_MS"],
+      message:
+        `${env.RISK_SCREEN_DEADLINE_MS}ms must be at most half of ` +
+        `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms): the batch waits ` +
+        `for the screen inside the job's lease.`,
     })
   }
 

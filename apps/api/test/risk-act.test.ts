@@ -195,12 +195,14 @@ describe("the event-driven trigger", () => {
 })
 
 describe("the accept-time recorder and tripwire", () => {
-  function fakeDb() {
+  /** `stamps`: what the guarded `fingerprinted_at` update wins, as Postgres would return it. */
+  function fakeDb(stamps: { message_id: string }[] = []) {
     const statements: string[] = []
     const tx = {
       execute: mock(async (q: { queryChunks?: unknown[] }) => {
-        statements.push(JSON.stringify(q.queryChunks ?? q))
-        return []
+        const text = JSON.stringify(q.queryChunks ?? q)
+        statements.push(text)
+        return text.includes("fingerprinted_at") ? stamps : []
       }),
     }
     const db = {
@@ -276,7 +278,19 @@ describe("the accept-time recorder and tripwire", () => {
   })
 
   it("stamps a stored body in the same transaction as its sightings", async () => {
-    const { db, statements } = fakeDb()
+    const messageId = crypto.randomUUID()
+    const { db, statements } = fakeDb([{ message_id: messageId }])
+    await recordContent(
+      "t1",
+      [{ ...promo(1), messageId, createdAt: "2026-09-29 10:00:00.123456+00" }],
+      { db, threshold: 5 },
+    )
+    expect(statements.some((s) => s.includes("fingerprinted_at"))).toBe(true)
+    expect(statements.some((s) => s.includes("content_fingerprints"))).toBe(true)
+  })
+
+  it("counts nothing for a body another writer stamped first", async () => {
+    const { db, statements } = fakeDb([])
     await recordContent(
       "t1",
       [
@@ -288,8 +302,8 @@ describe("the accept-time recorder and tripwire", () => {
       ],
       { db, threshold: 5 },
     )
-    expect(statements.some((s) => s.includes("fingerprinted_at"))).toBe(true)
-    expect(statements.some((s) => s.includes("content_fingerprints"))).toBe(true)
+    expect(statements.some((s) => s.includes("content_fingerprints"))).toBe(false)
+    expect(statements.some((s) => s.includes("link_hosts"))).toBe(false)
   })
 
   it("re-scores the cluster when a fingerprint reaches the threshold, once per hour", async () => {

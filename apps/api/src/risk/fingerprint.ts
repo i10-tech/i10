@@ -129,6 +129,24 @@ export function lshBands(sig: readonly number[]): string[] {
   return out
 }
 
+/**
+ * Two bodies are near-duplicates when they share at least this many bands:
+ * the farm check's own line (`fingerprint_peers` counts a near pair at
+ * `shared >= 2`). A changed name or token left pairs sharing 3 to 5 of the 8 in
+ * the measurement above, unrelated mail shares none, and a single shared band
+ * is within reach of chance between texts only loosely alike.
+ *
+ * ⚠ BANDS, NOT `similarity`, BECAUSE BANDS ARE WHAT IS STORED. A judgement keeps
+ * its body's bands and not its signature, so this is the one test that gives
+ * the same answer inside a batch and against last week's judgements.
+ */
+export const NEAR_DUPLICATE_BANDS = 2
+
+export function sharedBands(a: readonly string[], b: readonly string[]): number {
+  const mine = new Set(a)
+  return b.filter((band) => mine.has(band)).length
+}
+
 /** The share of signature slots two texts agree on: an estimate of their Jaccard similarity. */
 export function similarity(a: readonly number[], b: readonly number[]): number {
   let same = 0

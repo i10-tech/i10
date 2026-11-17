@@ -1,0 +1,1 @@
+ALTER TABLE "core"."risk_content_judgements" ADD COLUMN "bands" text[];

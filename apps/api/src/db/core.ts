@@ -4308,6 +4308,16 @@ export const riskContentJudgements = core.table(
     secondInputTokens: integer("second_input_tokens"),
     secondOutputTokens: integer("second_output_tokens"),
     judgedAt: timestamp("judged_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * The judged body's MinHash bands (risk/fingerprint.ts), so a near-duplicate
+     * of it (the same mail to another name) counts as judged before it is sent
+     * (content/screen.ts). Null on judgements made before bands were kept.
+     *
+     * ⚠ NO INDEX OF ITS OWN: every lookup names the workspace, and the primary
+     * key's leading `tenant_id` already narrows it to that workspace's rows,
+     * which the daily budget and the 30-day purge keep to a few thousand.
+     */
+    bands: text("bands").array(),
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.exact, t.model] }),

@@ -36,8 +36,27 @@ export interface JudgementStore {
     model: string,
     exacts: readonly string[],
   ): Promise<Set<string>>
-  /** Stores one; false when another pass stored it first. */
-  save(tenantId: string, exact: string, j: StoredJudgement, at: Date): Promise<boolean>
+  /**
+   * The judgements under `model` since `since` that share a band with `bands`,
+   * with their bands: the near-duplicates a body may already be judged as.
+   */
+  near(
+    tenantId: string,
+    model: string,
+    bands: readonly string[],
+    since: Date,
+  ): Promise<{ exact: string; bands: string[] }[]>
+  /**
+   * Stores one, with the judged body's MinHash bands (null: too short to have
+   * any); false when another pass stored it first.
+   */
+  save(
+    tenantId: string,
+    exact: string,
+    j: StoredJudgement,
+    at: Date,
+    bands: readonly string[] | null,
+  ): Promise<boolean>
   addDay(tenantId: string, day: string, counts: DayCounts): Promise<void>
   /** The facts: content sent in the 7 days before `now` that `model` judged. */
   facts(tenantId: string, model: string, now: Date): Promise<JudgedContent>
@@ -48,6 +67,7 @@ export interface JudgementStore {
 
 const WINDOW_DAYS = 7
 const json = (v: unknown) => (v === null ? null : sql.param(v))
+const textArray = (v: readonly string[]) => `{${v.join(",")}}`
 
 export function judgementStore(db: Database): JudgementStore {
   const rows = async (q: ReturnType<typeof sql>) =>
@@ -58,13 +78,23 @@ export function judgementStore(db: Database): JudgementStore {
       if (exacts.length === 0) return new Set()
       const found = await rows(sql`
         select exact from core.risk_content_judged_exacts(
-          ${tenantId}::uuid, ${model}, ${`{${exacts.join(",")}}`}::text[]
+          ${tenantId}::uuid, ${model}, ${textArray(exacts)}::text[]
         )
       `)
       return new Set(found.map((r) => String(r.exact)))
     },
 
-    async save(tenantId, exact, j, at) {
+    async near(tenantId, model, bands, since) {
+      if (bands.length === 0) return []
+      const found = await rows(sql`
+        select exact, bands from core.risk_content_judged_near(
+          ${tenantId}::uuid, ${model}, ${textArray(bands)}::text[], ${since.toISOString()}::timestamptz
+        )
+      `)
+      return found.map((r) => ({ exact: String(r.exact), bands: r.bands as string[] }))
+    },
+
+    async save(tenantId, exact, j, at, bands) {
       const s = j.second
       const [r] = await rows(sql`
         select core.risk_content_judgement_save(
@@ -72,7 +102,8 @@ export function judgementStore(db: Database): JudgementStore {
           ${j.truncated}, ${j.usage?.inputTokens ?? null}::int, ${j.usage?.outputTokens ?? null}::int,
           ${s.status}::core.risk_judge_second, ${s.model}, ${json(s.answers)}::jsonb,
           ${s.truncated}::boolean, ${s.usage?.inputTokens ?? null}::int,
-          ${s.usage?.outputTokens ?? null}::int, ${at.toISOString()}::timestamptz
+          ${s.usage?.outputTokens ?? null}::int, ${at.toISOString()}::timestamptz,
+          ${bands ? textArray(bands) : null}::text[]
         ) as saved
       `)
       return r?.saved === true
