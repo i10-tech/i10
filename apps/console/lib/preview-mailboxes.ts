@@ -153,6 +153,37 @@ const apiError = (
 ) =>
   new ApiRequestError(statusCode, { statusCode, name, message, ...extra } as ApiError)
 
+/**
+ * Which workspace a page is shown as, from `?scenario=` on the page (see
+ * app/(app)/mailboxes). Preview only: the pages pass it on solely when `PREVIEW`
+ * is on, and it changes what `/console/me`, `/console/domains` and
+ * `/console/mailboxes` answer so each state of the setup can be reviewed from
+ * the keyboard.
+ *
+ *   - `setup`: an owner, a domain proven and hosting on, its mail not pointed at
+ *     us yet, no mailbox.
+ *   - `done`: an owner of a finished workspace (the default fixtures).
+ *   - `member`: somebody who is not an admin, with one mailbox.
+ *   - `member-empty`: the same member with no mailbox.
+ *   - `payg`: the finished workspace on pay as you go storage.
+ */
+export type PreviewScenario = "setup" | "done" | "member" | "member-empty" | "payg"
+
+const SCENARIOS: readonly PreviewScenario[] = [
+  "setup",
+  "done",
+  "member",
+  "member-empty",
+  "payg",
+]
+
+export function previewScenario(query: Query): PreviewScenario | undefined {
+  return SCENARIOS.find((name) => name === query?.scenario)
+}
+
+/** The mailbox the member scenarios give the reader. */
+const MEMBER_ADDRESS = "noah@acme.dev"
+
 /** The pool: 20 GB, of which the mailboxes below hold what they hold. */
 const POOL_TOTAL = 21474836480
 
@@ -357,6 +388,9 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
     remaining: POOL_TOTAL - allocated(),
     unallocated: data.filter((m) => m.storage.allocatedBytes === null).length,
   })
+
+  /** Who may create mailboxes. Held for the life of the dev server, like nothing else here. */
+  let creationMode: "admins" | "members" | "on_join" = "admins"
 
   function find(address: string): PreviewMailbox {
     const mailbox = data.find((m) => m.address === address)
@@ -613,16 +647,40 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
       /^\/console\/mailboxes$/,
       (_m, query, method, body) => {
         if (method === "POST") return createdFrom(body, false)
-        const empty = query?.empty === "1" || query?.empty === 1
+        const scenario = previewScenario(query)
+        const empty =
+          query?.empty === "1" ||
+          query?.empty === 1 ||
+          scenario === "setup" ||
+          scenario === "member-empty"
+        const rows =
+          scenario === "member"
+            ? data.filter((m) => m.address === MEMBER_ADDRESS)
+            : data
+        const live = pool()
         return {
-          data: empty ? [] : data,
-          pool: pool(),
+          data: empty ? [] : rows,
+          pool:
+            scenario === "payg"
+              ? { ...live, kind: "uncapped", total: null, remaining: null }
+              : live,
           nextCursor: null,
         }
       },
     ],
+    [
+      /^\/console\/mailboxes\/creation-mode$/,
+      (_m, _query, method, body) => {
+        if (method !== "PUT") return { mode: creationMode }
+        const mode = (body as { mode?: string } | null)?.mode
+        if (mode === "admins" || mode === "members" || mode === "on_join") {
+          creationMode = mode
+        }
+        return { mode: creationMode }
+      },
+    ],
     // ⚠ ONLY AN ADDRESS (it has an `@`, encoded or not), so the static
-    // `/console/mailboxes/creation-mode` and `/storage` are still nobody's here.
+    // `/console/mailboxes/creation-mode` and `/storage` never reach these.
     [
       /^\/console\/mailboxes\/([^/]*(?:%40|@)[^/]*)\/aliases(?:\/([^/]+))?$/,
       (match, _query, method, body) =>

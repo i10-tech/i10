@@ -190,6 +190,12 @@ export interface DomainMailboxes {
   enabled: boolean
   owned: boolean
   sending: boolean
+  /**
+   * The last DNS check saw this domain's mail pointed at us (an apex MX at our
+   * mail host). Optional because only the setup card reads it and an older answer
+   * has none.
+   */
+  receiving?: boolean
   catch_all: string | null
   count: number
 }

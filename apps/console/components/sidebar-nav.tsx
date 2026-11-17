@@ -17,7 +17,7 @@ import { StatusDot } from "@repo/ui/components/i10/status"
 import type { Attention } from "@/lib/types"
 import { readDomainAttention } from "@/lib/attention"
 import { useResetWhen } from "@/lib/react"
-import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
+import { activeHref, inSettings, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
 /**
  * The left rail.
@@ -85,6 +85,8 @@ export function SidebarNav({
    */
   const settings = groups === undefined && inSettings(pathname)
   const shown = groups ?? (settings ? SETTINGS_NAV : NAV)
+  // ⚠ ONE OWNER OF THE PATH, NOT A PER-ROW PREFIX TEST: see `activeHref`.
+  const current = activeHref(pathname, shown)
 
   return (
     <nav
@@ -123,7 +125,7 @@ export function SidebarNav({
           {group.items
             .filter((item) => !item.hidden)
             .map((item) => {
-              const active = isActive(pathname, item)
+              const active = item.href === current
               const Icon = item.icon
 
               return (
