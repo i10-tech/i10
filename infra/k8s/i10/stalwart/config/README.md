@@ -546,46 +546,100 @@ Message bodies, attachments, Sieve scripts and queued messages in R2 are
 encrypted with the `Blob key 2026-11` SymmetricKey (aes256Gcm), selected in
 both `Email` and `FileStorage`. The key material is `STALWART_BLOB_KEY` in
 Doppler `prod_stalwart`, read from the environment, so it is never in the
-database or a config export. Metadata, the search index and everything else in
-Postgres stay plaintext; encrypt those at the database level if needed.
+database or a config export.
+
+⚠ **ONLY THE BLOBS ARE ENCRYPTED. EVERYTHING IN POSTGRES IS PLAINTEXT.**
+Subjects, senders, recipients, message previews, mailboxes, contacts and the
+search index stay unencrypted in the Postgres data store and in every backup of
+it. Blob encryption covers bodies, attachments, Sieve scripts, files and the
+outbound queue, and nothing else; protecting the rest needs the disks or the
+database encrypted, which psl-vps does not do.
+
+The production key object:
+
+| Field       | Value                              |
+| ----------- | ---------------------------------- |
+| id          | `b`                                |
+| description | `Blob key 2026-11`                 |
+| cipher      | `aes256Gcm`                        |
+| fingerprint | `ef49aa35e2bec4fe2c5340188e1d8dbc` |
+
+The fingerprint is not secret. It is what to compare when something reports a
+key mismatch.
 
 - ⚠ **CHANGING THE VALUE STOPS ALL MAIL.** Stalwart stores a fingerprint of the
   key when it is created. A different value under the same name fails that
   check, and the server then refuses to write any blob (no delivery, no
   append) rather than write unencrypted. Never rotate it in Doppler.
-- ⚠ **LOSING THE VALUE LOSES EVERY MESSAGE.** The copy outside Doppler is the
-  only thing that survives a lost Doppler project. Restore the same value under
-  the same name and the server reads its blobs again.
-- **To rotate:** add a new variable and a new SymmetricKey, point `Email` and
-  `FileStorage` at it, reload, then run a `BlobRecode` task with
-  `encryption: {"@type": "Encrypt", "keyId": <new id>}`. Keep the old key and
-  variable until that task has finished on every shard (one
-  `store.blob-store-recoded` event per shard, 256 in all).
+- ⚠ **LOSING THE VALUE LOSES EVERY MESSAGE, AND THE VALUE ALONE IS NOT THE
+  ESCROW.** Every blob records the id of the SymmetricKey object that encrypted
+  it, not only the key material. A store rebuilt from empty may hand the
+  recreated object a different id than `b`, and then the right value still
+  cannot read a single blob. So the key's escrow is two things together: the
+  value, kept outside Doppler, and the Postgres backup of the Stalwart database,
+  which holds the object and its id. Restoring that database brings back id `b`
+  and the fingerprint above. No recovery from the escrowed value has been
+  rehearsed.
+- **To rotate:**
+  1. Add the new variable to Doppler and restart both nodes first. A variable
+     reaches a pod only on restart, and `bootstrap.sh` refuses a plan that names
+     one the pods lack.
+  2. Add a new SymmetricKey, point `Email` and `FileStorage` at it, reload, then
+     run a `BlobRecode` task with
+     `encryption: {"@type": "Encrypt", "keyId": <new id>}`.
+  3. Keep the old key and variable until that task has finished on every shard
+     (one `store.blob-store-recoded` event per shard, 256 in all).
+  4. Keep an offline copy of the old key as well, in case a backup taken before
+     the rotation is restored: that backup's blobs are encrypted with it.
+  - While an `Encrypt` task is pending its key cannot be deleted, and starting a
+    new `BlobRecode` replaces the pending shards of the earlier one, so do not
+    start a second before the first has finished.
 - **Only the recovery admin can delete a key**, and the server cannot tell
   whether blobs still need it. Never delete one unless a `BlobRecode` has moved
   every blob off it.
 - New blobs are encrypted from the reload on. What was stored before was
   converted once, with a `BlobRecode` task (#365); that is a one-off, so it is
   not in this plan.
+- **Faults are alerted on.** `store.decrypt-error`, `store.crypto-error`,
+  `encryption.key-change` and `encryption.gateway-bounced` are in the webhook's
+  include list; see "Encryption faults" below.
 
 ### The encryption gateway (B14)
 
 `Encryption.gatewayEnable` is on, and `gatewayOutbound` is opportunistic: a
 message to a remote recipient whose OpenPGP key or S/MIME certificate the server
 knows leaves encrypted with that key, and everyone else gets the original. The
-server only knows keys it has harvested from signed mail that recipient sent
-us, and harvesting needs a DMARC pass from the sender's domain, so a recipient
-who gets encrypted mail has already sent us mail from a client that holds the
-private key. `Encryption.atRestEnable` is a different feature (B3 in the
+server only encrypts to keys it trusts at `harvested` or better. Harvesting
+needs a DMARC pass from the sender's domain, and then either an Autocrypt key
+that verified a PGP/MIME signature on the message, or an S/MIME certificate with
+a valid chain to a trusted root. Unsigned Autocrypt keys and self-signed S/MIME
+certificates are `unverified` and are not used.
+`Encryption.atRestEnable` is a different feature (B3 in the
 proposal) and stays off.
+
+The gateway's other settings are written into the plan with the **Stalwart
+1.1.0 defaults**, pinned on purpose so that an upstream change of a default
+cannot move our behaviour silently: `gatewayMethods` (OpenPGP and S/MIME),
+`gatewayMinTrust` (`harvested`), `gatewayHeaderProtection` (`baseline`),
+`gatewayEncryptSigned` (on) and `harvestKeys`
+(`!is_local_domain(sender_domain)`).
+
+⚠ **`baseline` HIDES THE SUBJECT FROM CLIENTS THAT CANNOT SHOW IT.** It
+replaces the outer Subject with `[...]`, which a client without RFC 9788
+support lists as `[...]` and shows the real Subject only at the top of the
+decrypted body. That is a product decision still open: `noConfidentiality`
+keeps the Subject visible, `baseline` hides it.
 
 - ⚠ **THE GATEWAY ENCRYPTS EVERY QUEUED MESSAGE, NOT ONLY MAILBOX MAIL.** It
   runs when a message enters the queue, so the send worker's mail on 2525 would
   be encrypted too: a customer's receipts and sign-up codes would arrive as
   PGP/MIME with the Subject replaced by `[...]`. The policy's second rule
   disables it for `bounce+` envelope senders, which is every message the worker
-  relays (the same test as `MtaStageRcpt.allowRelaying`). The first rule is the
-  default one, which leaves local recipients alone.
+  relays. It is the same test as `MtaStageRcpt.allowRelaying`, with the port
+  named by this expression's own variable: `received_via_port` here,
+  `local_port` there. Without the port, a logged-in user on 465 who submitted
+  with a `bounce+...` envelope sender would skip the gateway. The first rule is
+  the default one, which leaves local recipients alone.
 - **It works through `ses-relay`.** The gateway removes any DKIM signature from
   each encrypted copy and signs it again with the keys the original would use,
   which `MtaStageData.dkimSignDomain` makes none for mail that leaves through
@@ -646,6 +700,14 @@ before the change stops being readable. The switch to R2 dropped the test mail
 that existed then. Moving it again on a server with real mail is an
 `--export`/`--import` into fresh stores (`/docs/management/maintenance/migration`),
 not a plan edit.
+
+⚠ **THE EXPORT IS PLAIN TEXT, AND THE IMPORT WRITES EVERY BLOB UNENCRYPTED.**
+The export reads blobs through the server, so the file holds every message
+decrypted, and its SymmetricKey objects too: handle it like the keys
+themselves. The import runs before any settings exist, so it writes with the
+defaults (LZ4, no encryption). Run a `BlobRecode` task with
+`encryption: {"@type": "Encrypt", "keyId": <id>}` after it, or the imported mail
+sits in R2 in the clear.
 
 **System Sieve scripts are not blobs.** `SieveSystemScript` (`ses-references`)
 is a settings object, and its `contents` live in the data store with the rest of
@@ -1055,6 +1117,29 @@ sender - the customer's `send.<domain>`, whose MX is Amazon's because SES
 requires it - and Amazon drops a DSN for mail it did not send. One return path
 for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
 return path".
+
+### Encryption faults: four more events
+
+`store.decrypt-error`, `store.crypto-error`, `encryption.key-change` and
+`encryption.gateway-bounced` are in the include list too. They carry no VERP
+sender and no mailbox, so `interpretStalwartOperatorAlert`
+(`apps/api/src/webhooks/stalwart.ts`) handles them apart from both other paths.
+The per-recipient info events (`encryption.gateway-encrypted`,
+`gateway-plaintext`) are not subscribed: they fire for every message.
+
+| Stalwart event               | Means                                       | What to do                                                                 |
+| ---------------------------- | ------------------------------------------- | -------------------------------------------------------------------------- |
+| `store.decrypt-error`        | a stored blob cannot be decrypted           | blob key against the fingerprint above; never rotate or delete             |
+| `store.crypto-error`         | an encrypt or decrypt on stored data failed | the same                                                                   |
+| `encryption.gateway-bounced` | the gateway refused a recipient             | that recipient's key, or the outbound policy                               |
+| `encryption.key-change`      | a new key waits for approval                | confirm it, then set the record's `status` over JMAP `x:ExternalPublicKey` |
+
+Each is logged at error level as "Stalwart encryption alert" with the event
+type, key id, cipher, the recipient's DOMAIN and the reason where Stalwart gave
+them. If `OPS_ALERT_EMAIL` is set in the API's Doppler config the same is
+emailed through the system sender, one email per event type per hour. A failed
+send is logged and never makes the route answer 500: that would have Stalwart
+replay the whole batch, delivery events included.
 
 ### Mailbox events: `auth.failed` and `limit.quota`
 
