@@ -2942,6 +2942,10 @@ const app = createApp({
                 accounts: accountEventOps(db),
                 log,
                 secret: env.STALWART_WEBHOOK_SECRET,
+                // Encryption faults: logged always, emailed only with both.
+                ...(env.OPS_ALERT_EMAIL && systemSender
+                  ? { opsAlert: { to: env.OPS_ALERT_EMAIL, sender: systemSender } }
+                  : {}),
               },
             }
           : {}),

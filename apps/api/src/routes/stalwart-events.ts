@@ -6,9 +6,11 @@ import {
   type AccountEventOps,
   type QuotaReached,
 } from "../webhooks/stalwart-account.js"
+import { operatorAlerts, type OpsAlertMail } from "../webhooks/stalwart-ops-alert.js"
 import {
   interpretStalwartAccountEvent,
   interpretStalwartEvent,
+  interpretStalwartOperatorAlert,
   verifyStalwartSignature,
   type StalwartEventBatch,
 } from "../webhooks/stalwart.js"
@@ -53,10 +55,16 @@ export interface StalwartWebhookDeps {
   log: Logger
   /** The `signatureKey` configured on Stalwart's WebHook object. */
   secret: string
+  /**
+   * Where encryption faults are emailed (`OPS_ALERT_EMAIL`). Absent means the
+   * log line is the only alert.
+   */
+  opsAlert?: OpsAlertMail
 }
 
 export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
   const app = new Hono()
+  const raiseAlert = deps ? operatorAlerts(deps.log, deps.opsAlert) : undefined
 
   app.post("/stalwart", async (c) => {
     if (!deps) {
@@ -115,8 +123,21 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
     let recorded = 0
     let queued = 0
     let ignored = 0
+    let alerted = 0
 
     for (const event of events) {
+      // ⚠ AN ENCRYPTION FAULT IS NOBODY'S MESSAGE AND IS NEVER A 500. It has no
+      // VERP sender, so the paths below would drop it; instead it is logged and
+      // emailed to the operator, and `raiseAlert` cannot throw. A 500 here would
+      // make Stalwart replay the whole batch, mail events included, over an
+      // alert we merely failed to send.
+      const alert = interpretStalwartOperatorAlert(event)
+      if (alert && raiseAlert) {
+        await raiseAlert(alert)
+        alerted++
+        continue
+      }
+
       // ⚠ A MAILBOX'S EVENTS ARE NOT A MESSAGE'S, AND ARE HANDLED APART. They
       // write no `message_events` row and fan out to no customer endpoint, so
       // they take their own path rather than a branch inside `ingestEvent`.
@@ -178,12 +199,12 @@ export function createStalwartWebhooks(deps?: StalwartWebhookDeps) {
 
     if (recorded > 0 || ignored > 0) {
       deps.log.info(
-        { received: events.length, recorded, ignored, queued },
+        { received: events.length, recorded, ignored, queued, alerted },
         "ingested Stalwart events",
       )
     }
 
-    return c.json({ ok: true, recorded, ignored }, 200)
+    return c.json({ ok: true, recorded, ignored, alerted }, 200)
   })
 
   return app
