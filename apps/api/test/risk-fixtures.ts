@@ -96,11 +96,15 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
 
 /** Every question answered `p`, or as given. */
 export const answers = (p: number, over: Partial<Answers> = {}): Answers => ({
-  phishing: p,
-  spam: p,
-  impersonates_brand: p,
-  asks_for_credentials: p,
-  is_marketing: p,
+  imp_short: p,
+  imp_any: p,
+  domain_altered: p,
+  mailbox: p,
+  cred_short: p,
+  phish_short: p,
+  scam: p,
+  spam_short: p,
+  marketing_short: p,
   ...over,
 })
 

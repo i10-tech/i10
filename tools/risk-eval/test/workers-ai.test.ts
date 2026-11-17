@@ -15,7 +15,9 @@ const ENV = { [ACCOUNT_ENV]: "acct-1", [TOKEN_ENV]: "tok-1" }
 const documented = (p: number) => ({
   result: {
     model: "clef-flash",
-    answers: Object.fromEntries(QUESTIONS.map((q) => [q, { type: "noul", noul: p }])),
+    answers: Object.fromEntries(
+      JUDGE_QUESTION_IDS.map((q) => [q, { type: "noul", noul: p }]),
+    ),
     usage: { input_tokens: 812, output_tokens: 5 },
   },
   success: true,
@@ -54,18 +56,21 @@ describe("the Workers AI judge", () => {
     expect(sent.model).toBe("clef-flash")
     expect(sent.questions).toEqual(JSON.parse(JSON.stringify(JUDGE_QUESTIONS)))
     expect(sent.state).toMatchObject({
-      email: { sender_domain: "paypa1.example", link_hosts: ["paypa1.example"] },
+      email: {
+        sender_domain: "paypa1.example",
+        links: [{ host: "paypa1.example", same_site_as_sender: true }],
+      },
       truncated: false,
     })
   })
 
   it("fails, never answers no, when a question is missing or the run failed", async () => {
     const partial = documented(0.2)
-    delete (partial.result.answers as Record<string, unknown>).spam
+    delete (partial.result.answers as Record<string, unknown>).spam_short
     const env = { fetch: fakeFetch(partial).f, env: ENV }
     await expect(
       workersAiJudge("@cf/cloudflare/clef", env).judge({ subject: "s", text: "t" }),
-    ).rejects.toThrow("no probability for spam")
+    ).rejects.toThrow("no probability for spam_short")
     const refused = {
       fetch: fakeFetch({ success: false, errors: [{ message: "x" }] }, 200).f,
       env: ENV,
@@ -84,11 +89,14 @@ describe("the Workers AI judge", () => {
     const judge = workersAiJudge("@cf/cloudflare/clef-flash", { fetch: f, env: {} })
     await expect(judge.judge({ subject: "s", text: "t" })).rejects.toThrow(ACCOUNT_ENV)
     expect(calls).toHaveLength(0)
-    expect(findJudge("cf-clef-flash-v1").name).toBe("cf-clef-flash-v1")
-    expect(findJudge("cf-clef-v1").name).toBe("cf-clef-v1")
+    expect(findJudge("cf-clef-flash-v2").name).toBe("cf-clef-flash-v2")
+    expect(findJudge("cf-clef-v2").name).toBe("cf-clef-v2")
   })
 
-  it("keeps the harness's questions in step with the judge contract", () => {
-    expect([...QUESTIONS]).toEqual([...JUDGE_QUESTION_IDS])
+  it("reads each scored question from a question the contract asks", async () => {
+    const { f } = fakeFetch(documented(0.3))
+    const judge = workersAiJudge("@cf/cloudflare/clef", { fetch: f, env: ENV })
+    const answers = await judge.judge({ subject: "s", text: "t" })
+    expect(Object.keys(answers).sort()).toEqual([...QUESTIONS].sort())
   })
 })

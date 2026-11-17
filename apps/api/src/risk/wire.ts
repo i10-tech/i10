@@ -262,7 +262,7 @@ export function riskSystem(input: RiskSystemInput) {
     snapshots,
     decisions,
     ...(deps.contentModel ? { contentModel: deps.contentModel } : {}),
-    ...(judge ? { judgeModel: judge.model } : {}),
+    ...(judge ? { judgeModel: judge.key } : {}),
   }
 
   const takeover = redis

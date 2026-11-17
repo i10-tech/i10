@@ -1,4 +1,10 @@
-import type { Answers, Judge, JudgeInput } from "../judge.js"
+import {
+  QUESTIONS,
+  type Answers,
+  type Judge,
+  type JudgeInput,
+  type Question,
+} from "../judge.js"
 import { JUDGE_QUESTION_IDS, JUDGE_QUESTIONS, judgeState } from "./contract.js"
 
 /**
@@ -25,17 +31,16 @@ type Fetch = typeof fetch
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
-/** Hosts linked from the mail, as the API's fingerprint code finds them. */
-function linkHosts(input: JudgeInput): string[] {
-  const hosts = new Set<string>()
-  const source = `${input.html ?? ""}\n${input.text}`
-  for (const m of source.matchAll(
-    /https?:\/\/([a-z0-9.-]+\.[a-z]{2,})(?=[:/?#"'\s<>]|$)/gi,
-  )) {
-    hosts.add(m[1]!.toLowerCase().replace(/\.$/, ""))
-    if (hosts.size >= 50) break
-  }
-  return [...hosts]
+/**
+ * The harness scores five questions (judge.ts); the contract asks nine. Each
+ * harness question is read from the contract question that measures it.
+ */
+const SCORED_BY: Record<Question, (typeof JUDGE_QUESTION_IDS)[number]> = {
+  phishing: "phish_short",
+  spam: "spam_short",
+  impersonates_brand: "imp_short",
+  asks_for_credentials: "cred_short",
+  is_marketing: "marketing_short",
 }
 
 export function workersAiJudge(
@@ -44,7 +49,7 @@ export function workersAiJudge(
 ): Judge {
   const selector = model.slice(model.lastIndexOf("/") + 1)
   return {
-    name: `cf-${selector}-v1`,
+    name: `cf-${selector}-v2`,
     async judge(input: JudgeInput): Promise<Answers> {
       const env = opts.env ?? process.env
       const account = env[ACCOUNT_ENV]
@@ -53,10 +58,11 @@ export function workersAiJudge(
       const state = judgeState({
         subject: input.subject,
         text: input.text,
+        html: input.html ?? null,
         senderName: null,
         senderDomain: input.fromDomain ?? null,
         replyToDomain: null,
-        linkHosts: linkHosts(input),
+        recipientDomain: null,
       })
       const res = await (opts.fetch ?? fetch)(
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/ai/run/${model}`,
@@ -76,12 +82,13 @@ export function workersAiJudge(
         throw new Error("Workers AI reported the run as unsuccessful")
       const given = body.result.answers
       const answers: Answers = {}
-      for (const id of JUDGE_QUESTION_IDS) {
+      for (const question of QUESTIONS) {
+        const id = SCORED_BY[question]
         const a = isRecord(given) ? given[id] : undefined
         const p = isRecord(a) && a.type === "noul" ? a.noul : undefined
         if (typeof p !== "number")
           throw new Error(`Workers AI gave no probability for ${id}`)
-        answers[id] = p
+        answers[question] = p
       }
       return answers
     },

@@ -265,7 +265,7 @@ the public security DNS resolvers by default, Google Web Risk when listed and
 keyed (the free Safe Browsing API and Spamhaus's free mirrors are
 non-commercial only). Web Risk, or both resolvers agreeing, is critical; one
 resolver alone is 45 points and no floor. The content judge's answers, in
-shadow (see "The content judge").
+shadow, as an identity signal and a phishing signal (see "The content judge").
 
 **Payment and trust:** paid tenure, MFA or passkey on the owner, the owner's
 email on one of the workspace's own verified domains, long clean volume.
@@ -703,7 +703,7 @@ for a while, and the memory stops it re-raising what was cleared afterwards.
 
 ---
 
-## The content judge (ruleset 7)
+## The content judge (ruleset 7, signals since 8)
 
 The content signal used to be a Laya classifier asked one yes/no question
 about one sampled message, only for workspaces already elevated or in a farm,
@@ -711,11 +711,8 @@ cached for six hours. Laya was never deployed, so it never ran, and it would
 have read almost none of the mail. It is gone, with `LAYA_URL`.
 
 **A decision model, behind a port.** `risk/judge`: a judge takes one email
-(subject, text, sender display name and domain, a differing Reply-To domain,
-linked hosts) and answers five typed `noul` questions with a probability
-each, and writes no text: `phishing`, `spam`, `impersonates_brand`,
-`asks_for_credentials`, `is_marketing`. Two providers speak the same System
-One shape:
+and answers nine typed `noul` questions with a probability each. It writes no
+text. Two providers speak the same System One shape:
 
 - `workers-ai`: Cloudflare's REST API, `POST /client/v4/accounts/{id}/ai/run/{model}`,
   for `@cf/cloudflare/clef-flash` (9B, 24,576-token context) and
@@ -724,52 +721,90 @@ One shape:
   `{ result, success, errors }`.
 - `systemone`: a self-hosted Laya, or TypeSafe's Jev, at `POST {url}/v1/systemone`.
 
-The question text lives in `risk/judge/contract.ts`, with a byte-identical copy
-in `tools/risk-eval/src/judges/contract.ts` so the evaluation harness measures
-exactly what runs; an API test fails when they differ.
+**Nine questions, exactly as measured.** The ids are `imp_short`, `imp_any`,
+`domain_altered`, `mailbox`, `cred_short`, `phish_short`, `scam`,
+`spam_short` and `marketing_short`. The model is shown each question's id and
+their order, so the ids, the order, the instructions and the criteria ship
+exactly as they were calibrated. Changing any of them is a different judge.
+The text lives in `risk/judge/contract.ts`, with a byte-identical copy in
+`tools/risk-eval/src/judges/contract.ts` so the evaluation harness measures
+what runs. An API test fails when they differ.
+
+**The state carries evidence, not account facts.** Besides the sender name and
+domain, a differing Reply-To domain, the subject and the text, the state has
+the facts the model cannot work out from text. It lists each linked host with
+whether it is the same site as the sender. It counts links to other sites,
+links shown as one site that go to another, and links to bare IP addresses.
+It names the recipient's domain, from the first recipient of the judged body.
+`contract.ts` computes these (`linkEvidence`) so the harness uses the same
+code. Account facts must not go into the state. In measurement, saying the
+sender domain was verified by the sending account made the model trust the
+sender.
 
 **The email is hostile data.** It travels only in `state.email`, a JSON field
-of its own, never inside a question's instructions, and every instruction
-tells the model to treat the email as evidence and disregard anything in it
-about how it should be judged. Each field is capped (text at 12,000
-characters, which stays under 24K tokens in any script; 25 link hosts), and a
-cut is recorded as `truncated`, on the state and on the judgement.
+of its own, never inside a question's instructions. The questions no longer
+end with a sentence telling the model to disregard instructions inside the
+email: the measured wording had none, and adding one is a contract change that
+has to be measured first. Each field is capped (text
+at 12,000 characters, which stays under 24K tokens in any script; 25 link
+hosts), and a cut is recorded as `truncated`, on the state and on the
+judgement.
+
+**The contract version is in the storage key.** `JUDGE_CONTRACT` versions the
+questions plus the state. Judgements are stored and read under
+`model#JUDGE_CONTRACT`, so answers to the old five questions are never read as
+answers to the nine, and a later wording change starts clean. The stored
+`model` column is text, so this needs no migration. Provider health names and
+the model sent to the provider keep the plain model id.
 
 **Once per content.** The content half of the hourly job (`content/job.ts`,
 `content/judging.ts`) reads bodies of any status, newest first, groups them by
 exact fingerprint, and judges only content with no judgement under the
-current model: a template sent ten thousand times costs one call. Mail queued
+current key: a template sent ten thousand times costs one call. Mail queued
 for tonight is judged before it goes. Content that is known boilerplate or a
 staff-approved template (the same trust matcher as the other passes, failing
 closed) is never judged. A body is stamped `judged_at` once its content is
 resolved; content a budget or an outage refused stays unstamped and is tried
 next hour, within the 7-day window.
 
-**Budgets, before each call, in Redis.** Per workspace per UTC day (200), for
-everybody together (5,000) and, separately, for second opinions (500); failed
-calls count. No Redis, no calls. A failing model is parked for five minutes,
-and every call is reported to provider health. A workspace that spends its
-budget is itself a signal: `core.risk_content_judge_days` records per day the
-distinct contents seen, judged and capped, and the facts carry their 7-day
-sums for a later rule.
+**The first model screens, the second decides.** clef-flash answers all nine
+questions for every content. A content goes to clef when `phish_short` is above
+0.9 or `imp_short` is above 0.5. Only clef's answers set a signal:
 
-**The second opinion.** When the first model's `phishing` or
-`impersonates_brand` probability is in the unsure band (0.35 to 0.75), the
-second model is asked too and both answers are stored. A question is unsafe
-only when both are above 0.5. If the second model is not configured,
-unavailable or over its budget, the first answer stands and is counted as
-unconfirmed. The second opinion can only take suspicion away.
+- **identity** (strong): `imp_short` above 0.8 or `mailbox` above 0.8.
+- **phishing** (weak): `phish_short` above 0.9, reported only when identity is
+  not set for that content.
+
+The first model never decides alone, because its confident answers flagged 26
+to 82% of honest notices. A screened content the second model did not answer
+(not configured, unavailable, over budget) sets no signal and is counted as
+`undecided`. `screened` counts the contents sent on. The thresholds live in one
+table in `risk/judge/verdict.ts`. They were measured on 2026-11-17 (test split,
+600 mails): identity or phishing caught 92.5% of phishing and flagged 0% of
+real legitimate mail, 3.3% of generated legitimate mail and 5.8% of hard
+legitimate notices. Identity alone caught 38% with no legitimate mail flagged.
+They change only with a new measurement.
+
+**Budgets fitted to Cloudflare's free tier.** Cloudflare gives 10,000 neurons a
+day, about 6 per clef-flash call and about 38 per clef call with these
+questions. The defaults are 700 first-model calls, 150 second-model calls and
+100 per workspace per UTC day: 700 x 6 + 150 x 38 = 9,900. They are counted in
+Redis before each call, and failed calls count. No Redis, no calls. A failing
+model is parked for five minutes. Cloudflare answers HTTP 429 with error code
+4006 when the day's neurons are spent, and then the model is parked until
+midnight UTC, so the hourly job does not keep calling a spent account. Every
+call is reported to provider health. A workspace that spends its budget is
+itself a signal: `core.risk_content_judge_days` records per day the distinct
+contents seen, judged and capped, and the facts carry their 7-day sums.
 
 **Facts and rules, in shadow.** `Facts.content` summarises the judged content
-the workspace sent in the last 7 days: per question, the distinct contents
-and messages found unsafe, how many were unconfirmed, the highest probability,
-and the fingerprints concerned, which become `content:<exact>` evidence keys
-so decision memory clears a content once and counts new content in full. Four
-rules read it, all in **shadow**, with proposed points that replay will
-measure: `content.judge.phishing` 30 (floor `high` once any phishing content
-is confirmed), `content.judge.impersonates_brand` 20,
-`content.judge.asks_for_credentials` 10, `content.judge.spam` 12.
-`is_marketing` has no rule yet. Their evidence is counts only, because
+the workspace sent in the last 7 days: `screened`, `undecided`, and per signal
+the distinct contents and messages and their fingerprints, which become
+`content:<exact>` evidence keys so decision memory clears a content once and
+counts new content in full. Two rules read it, both in **shadow**, with
+proposed points that replay will measure: `content.judge.identity` 30 (floor
+`high` once any content has it) and `content.judge.phishing` 10 (no floor).
+The other answers are stored for later. Their evidence is counts only, because
 contributions are stored where the workspace can read them.
 
 **Never negative.** Mail text is attacker-controlled, so a judge answer may
@@ -780,9 +815,17 @@ judged moves the score, the band, a floor or an action.
 
 **Staff only.** `core.risk_content_judgements` and the day counts are deny-all,
 behind the definers in migration 0157: exact probabilities shown to a sender
-would be a gradient to tune against. `risk-admin explain` shows the summary
-and the shadow results; `risk-admin judge <workspace>` lists recent
-judgements with both models' answers.
+would be a gradient to tune against. `risk-admin explain` shows the signals,
+`screened` and `undecided`, and the shadow results; `risk-admin judge
+<workspace>` lists recent judgements with both models' answers.
+
+**Known limits.**
+
+- A content left undecided is not retried. It is stamped judged, so it is
+  looked at again only after its judgement is purged after a month.
+- Phishing that imitates a small unknown organisation is caught only about a
+  third of the time by the identity signal. The phishing signal is the weaker
+  net for it.
 
 ---
 
@@ -872,9 +915,9 @@ day emails the owner as a possible leak.
 | `RISK_JUDGE_SECOND_MODEL`                             | per provider | `@cf/cloudflare/clef` (workers-ai), none (systemone); `none` turns it off |
 | `RISK_JUDGE_CF_ACCOUNT_ID`, `RISK_JUDGE_CF_API_TOKEN` | unset        | Workers AI account and token (workers-ai only)                            |
 | `RISK_JUDGE_URL`, `RISK_JUDGE_API_KEY`                | unset        | Laya or Jev base URL and optional key (systemone only)                    |
-| `RISK_JUDGE_DAILY_LIMIT`                              | `5000`       | judgements per UTC day, every workspace together                          |
-| `RISK_JUDGE_TENANT_DAILY_LIMIT`                       | `200`        | judgements per workspace per UTC day                                      |
-| `RISK_JUDGE_SECOND_DAILY_LIMIT`                       | `500`        | second opinions per UTC day                                               |
+| `RISK_JUDGE_DAILY_LIMIT`                              | `700`        | first-model judgements per UTC day, every workspace together              |
+| `RISK_JUDGE_TENANT_DAILY_LIMIT`                       | `100`        | judgements per workspace per UTC day                                      |
+| `RISK_JUDGE_SECOND_DAILY_LIMIT`                       | `150`        | second-model calls per UTC day                                            |
 
 Every action has its own switch so a bad rule can be turned off without a
 revert.

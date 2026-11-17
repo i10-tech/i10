@@ -43,16 +43,21 @@ export interface Judgement {
 
 export interface JudgeProvider {
   kind: JudgeProviderKind
-  /** What answered: stored with every judgement, and part of its key. */
+  /** What answered. Stored with every judgement as `model#contract` (judge.ts). */
   model: string
   judge(email: JudgeEmail): Promise<Judgement>
 }
+
+/** Cloudflare's code for a spent daily allowance of neurons (HTTP 429). */
+export const NEURONS_SPENT = 4006
 
 /** The service refused or failed; `status` is null when nothing answered. */
 export class JudgeError extends Error {
   constructor(
     message: string,
     readonly status: number | null,
+    /** The service's own error code, where its body gave one. */
+    readonly code: number | null = null,
   ) {
     super(message)
     this.name = "JudgeError"
@@ -118,7 +123,17 @@ async function post(
   } catch (error) {
     throw new JudgeError(`the judge is unreachable: ${String(error)}`, null)
   }
-  if (!res.ok) throw new JudgeError(`the judge answered ${res.status}`, res.status)
+  if (!res.ok) {
+    // Cloudflare's envelope: `{ success: false, errors: [{ code, message }] }`.
+    const body: unknown = await res.json().catch(() => null)
+    const errors = isRecord(body) && Array.isArray(body.errors) ? body.errors : []
+    const code = errors.find((e) => isRecord(e) && typeof e.code === "number")?.code
+    throw new JudgeError(
+      `the judge answered ${res.status}`,
+      res.status,
+      typeof code === "number" ? code : null,
+    )
+  }
   try {
     return { status: res.status, json: await res.json() }
   } catch {

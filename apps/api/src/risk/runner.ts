@@ -182,7 +182,7 @@ async function scoreLocked(
     ...(deps.embedder || deps.contentModel
       ? { contentModel: deps.embedder?.model ?? deps.contentModel! }
       : {}),
-    ...(deps.judge ? { judgeModel: deps.judge.model } : {}),
+    ...(deps.judge ? { judgeModel: deps.judge.key } : {}),
   })
 
   // ⚠ `shadow` AND `cleared` ARE TAKEN OFF HERE, so the assessment `decide`

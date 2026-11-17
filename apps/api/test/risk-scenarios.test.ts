@@ -338,8 +338,8 @@ describe("ruleset 2: velocity, similarity and templates", () => {
     expect(b.contributions.map((c) => c.rule)).not.toContain("trust.known_templates")
   })
 
-  it("is ruleset version 7 (the content judge, in shadow)", () => {
-    expect(RULESET_VERSION).toBe(7)
+  it("is ruleset version 8 (the content judge's two signals, in shadow)", () => {
+    expect(RULESET_VERSION).toBe(8)
   })
 })
 
