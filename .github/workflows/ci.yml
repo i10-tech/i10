@@ -86,6 +86,14 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
       - run: bun run ${{ matrix.task }}
+      # ⚠ THE TESTS RUN THE SOURCE; THIS RUNS WHAT SHIPS. Every API entry is
+      # started from the bundle the build just made and must reach its own
+      # environment check (apps/api/scripts/boot-bundles.ts). A load-order crash
+      # in the bundle passed every other check on 2026-11-16 (#475).
+      - name: API bundle loads
+        if: matrix.task == 'build'
+        working-directory: apps/api
+        run: bun scripts/boot-bundles.ts
 
   openapi:
     name: OpenAPI document
