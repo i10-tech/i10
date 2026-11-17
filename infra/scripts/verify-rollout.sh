@@ -272,6 +272,24 @@ while read -r target; do
     continue
   fi
 
+  # ⚠ A WORKLOAD THIS SYNC DELETED IS NOT A FAILED ROLLOUT. The list below is
+  # read once, and Argo prunes in the same sync this script waits on, so a
+  # Deployment removed from the repo can be listed and then vanish, or carry a
+  # deletionTimestamp, by the time it is checked. #483 removed
+  # i10-stalwart-redis and failed run 44144591741 on exactly that.
+  #
+  # ⚠ NOT-FOUND ONLY, NEVER "THE QUERY FAILED". `--ignore-not-found` prints
+  # nothing for a missing object and exits 0, while a forbidden or unreachable
+  # API exits non-zero, which falls through to FAILED. The name is printed so
+  # an object that exists without a deletionTimestamp is told from one that is
+  # gone.
+  if state="$(kubectl get "$target" -n "$NAMESPACE" --ignore-not-found \
+      -o jsonpath='{.metadata.name}|{.metadata.deletionTimestamp}' 2>/dev/null)" \
+      && [[ -z "$state" || "$state" != *"|" ]]; then
+    echo "  gone     ${target} (removed by this sync)"
+    continue
+  fi
+
   echo "  FAILED   ${target}" >&2
   # ⚠ THE CONTAINER'S OWN STATE, NOT THE DEPLOYMENT'S. `ImagePullBackOff`,
   # `CreateContainerConfigError` and a crashloop are indistinguishable from the
