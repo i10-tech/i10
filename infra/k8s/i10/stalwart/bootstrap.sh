@@ -1105,9 +1105,8 @@ if [ "$RESTART" = true ]; then
   #
   # ⚠ NOT FOR A CHANGE OF IN-MEMORY STORE. One at a time leaves the first pod on
   # the new store while the second still holds the old one, and nodes on
-  # different stores do not see each other's locks. Moving to or from Keep takes
-  # both pods down in one command; see config/README.md, "Keep, in place of
-  # Redis".
+  # different stores do not see each other's locks. A store change takes both
+  # pods down in one command; see config/README.md, "Stalwart Keep".
   disconnect
   restart_pod() {
     local pod=$1 ready=""

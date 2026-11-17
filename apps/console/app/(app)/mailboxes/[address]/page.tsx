@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import { MailboxDetail } from "@/components/mailbox-detail"
 import { tryApi } from "@/lib/api"
 import type { MailboxAliasList } from "@/lib/mailbox-aliases"
+import { transferSnapshot, type MailboxJob } from "@/lib/mailbox-transfer"
 import type { ConsoleMailbox, StoragePool } from "@/lib/mailbox-view"
 import type { DomainSummary, Me } from "@/lib/types"
 
@@ -64,7 +65,7 @@ export default async function MailboxPage({
   const { address: segment } = await params
   const address = addressFrom(segment)
 
-  const [result, me, list, aliases, domains] = await Promise.all([
+  const [result, me, list, aliases, domains, exported, imported] = await Promise.all([
     tryApi<ConsoleMailbox>(`/console/mailboxes/${encodeURIComponent(address)}`),
     tryApi<Me>("/console/me"),
     // Asked of everyone because the role is not known yet; a member's answer is
@@ -79,6 +80,12 @@ export default async function MailboxPage({
     ),
     // Asked of everyone for the same reason as the list above; only an admin's is used.
     tryApi<{ data: DomainSummary[] }>("/console/domains"),
+    // ⚠ THE LATEST EXPORT AND IMPORT, so a run in progress, a finished export's
+    // download and an import started before the person left are all there when
+    // the page opens. The API answers the mailbox's owner, the workspace's owner
+    // and admins; for anyone else the section hides (see `transferSnapshot`).
+    tryApi<MailboxJob>(`/mailboxes/${encodeURIComponent(address)}/export`),
+    tryApi<MailboxJob>(`/mailboxes/${encodeURIComponent(address)}/import`),
   ])
 
   if (!result.ok) {
@@ -101,6 +108,7 @@ export default async function MailboxPage({
       pool={isAdmin && list.ok ? list.data.pool : null}
       aliases={aliases.ok ? aliases.data : null}
       domains={isAdmin && domains.ok ? hostedDomains(domains.data.data) : NO_DOMAINS}
+      transfer={transferSnapshot(exported, imported)}
       isAdmin={isAdmin}
       renderedAt={new Date().toISOString()}
     />

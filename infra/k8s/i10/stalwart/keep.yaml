@@ -1,6 +1,6 @@
 # Stalwart Keep: the in-memory store and the cluster coordinator of the two
-# Stalwart nodes (#358), replacing i10-stalwart-redis (redis.yaml, removed once
-# the cutover in config/README.md is verified). Keep is Stalwart's own server for
+# Stalwart nodes (#358), and the only one they have; it replaced
+# i10-stalwart-redis on 2026-11-15 (#452). Keep is Stalwart's own server for
 # locks, counters and cluster events: https://stalw.art/docs/cluster/keep/.
 #
 # ⚠ ONE SERVER, ON PURPOSE. psl-vps is a single Kubernetes node, so a three-member
@@ -15,12 +15,15 @@
 # has forgotten. Outbound delivery, scheduled tasks and search indexing all take
 # locks, so they stall for that long. Nothing is lost: mail is still received,
 # JMAP and IMAP still answer, and queued mail is delivered when the quarantine
-# ends. Held locks keep working. `Ready` below means "listening", not "locks
-# available", so a green pod does not end the stall.
+# ends. Locks held at the moment of the restart do NOT keep working: a restarted
+# server comes back empty, so a renewal or release of a lost lock is answered
+# `NotFound` and its holder learns that at its next renewal; the quarantine is
+# what stops a second holder taking it meanwhile. `Ready` below means
+# "listening", not "locks available", so a green pod does not end the stall.
 #
 # The things that restart it, and so must not be done casually: a new image, an
 # edit to config/keep.toml (the ConfigMap name carries a hash, so this rolls the
-# pod), a changed CPU limit, and the node rebooting.
+# pod), a changed resource request or limit, and the node rebooting.
 #
 # ⚠ `--start bootstrap` MUST NEVER BE ADDED TO THIS TEMPLATE. It skips the
 # quarantine, which is correct only when no client can hold a lock: the first
@@ -163,8 +166,22 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          # ⚠ REQUESTS EQUAL LIMITS, SO THIS POD IS THE LAST TO BE KILLED. Keep is
+          # the pod whose death costs the most (every kill is the ten minute lock
+          # stall above), and the Keep docs recommend Guaranteed QoS. A Guaranteed
+          # container gets an oom_score_adj of -997, so the kernel's OOM killer
+          # picks it last, and under node pressure the kubelet evicts a pod using
+          # less than it requests only after every pod that uses more. A
+          # Burstable pod with a small request scores near 1000 and goes first.
+          #
+          # The cost is a whole CPU reserved for scheduling though Keep idles at
+          # about 10m. The node had about 1.8 of its 4 CPUs requested, so it fits.
+          # The limits are unchanged on purpose (the CPU limit sets the shard
+          # count, and the 128 MiB cap against 256 MiB is the margin above).
+          # Changing the requests restarts this pod, so merging this costs one
+          # lock quarantine.
           resources:
-            requests: { cpu: 50m, memory: 64Mi }
+            requests: { cpu: "1", memory: 256Mi }
             limits: { cpu: "1", memory: 256Mi }
           volumeMounts:
             - { name: config, mountPath: /etc/keep, readOnly: true }

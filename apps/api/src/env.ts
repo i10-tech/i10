@@ -686,6 +686,17 @@ const schema = z.object({
   STALWART_WEBHOOK_SECRET: z.string().min(1).optional(),
 
   /**
+   * Where Stalwart's encryption faults are emailed: a failed blob decryption, a
+   * bounced encrypted message, a correspondent key waiting for approval.
+   *
+   * ⚠ OPTIONAL, AND UNSET IS NOT SILENT. Every one of those events is logged at
+   * error level whether or not this is set; the address only adds an email, one
+   * per event type per hour, sent through the system sender. It needs that
+   * sender to exist (see `AUTH_EMAIL_FROM`), or nothing is mailed.
+   */
+  OPS_ALERT_EMAIL: z.string().email().optional(),
+
+  /**
    * The bearer token Stalwart's MTA hook presents (B5, #380). A different secret
    * from the webhook's: that one signs what Stalwart tells us, this one
    * authorises a call that decides whether a mailbox may send.
