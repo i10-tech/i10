@@ -14,7 +14,11 @@ import {
   type PurgeDeps,
 } from "../src/mailboxes/lifecycle.js"
 import { mailboxLifecycleStore } from "../src/mailboxes/lifecycle-store.js"
-import { mailboxDirectory } from "../src/mailboxes/store.js"
+import {
+  aliasListName,
+  directoryMail,
+  mailboxDirectory,
+} from "../src/mailboxes/store.js"
 
 /**
  * A mailbox's suspend, resume, deletion, restore and purge against a real database
@@ -94,7 +98,9 @@ const groupExists = async (name: string) =>
 async function reset() {
   await owner`delete from core.mailbox_deletions where tenant_id = ${acme}`
   await owner`delete from identity.directory_mailboxes where tenant_id = ${acme}`
-  await owner`delete from authd.groups where name like 'fwd-%' and name like ${`%${sfx}`}`
+  // The primary's list ends in the id, an alias's list in the alias address.
+  await owner`delete from authd.groups where name like ${`fwd-%${sfx}%`}`
+  await owner`delete from core.mailbox_jobs where tenant_id = ${acme}`
   await owner`delete from authd.accounts where clerk_user_id = any(${people})`
   for (const id of people)
     await owner`insert into authd.accounts (clerk_user_id, email, active, tenant_id)
@@ -169,7 +175,8 @@ suite("a mailbox's lifecycle, against Postgres", () => {
 
   afterAll(async () => {
     await owner`delete from core.mailbox_deletions where tenant_id in (${acme}, ${rival})`
-    await owner`delete from authd.groups where name like ${`fwd-%${sfx}`}`
+    await owner`delete from authd.groups where name like ${`fwd-%${sfx}%`}`
+    await owner`delete from core.mailbox_jobs where tenant_id in (${acme}, ${rival})`
     await owner`delete from authd.accounts where clerk_user_id = any(${people})`
     await owner`delete from core.workspace_roles where tenant_id in (${acme}, ${rival})`
     await owner`delete from core.tenants where id in (${acme}, ${rival})`
@@ -499,6 +506,7 @@ suite("a mailbox's lifecycle, against Postgres", () => {
       deletedAt: T0.toISOString(),
       purgeAt: new Date(T0.getTime() + 30 * DAY).toISOString(),
       forwardTo: address(bob),
+      exportWait: null,
     })
     const listed = (await console.list(viewer)).data.find(
       (m) => m.address === address(ada),
@@ -884,5 +892,357 @@ suite("a mailbox's lifecycle, against Postgres", () => {
       "purged",
     )
     expect(await groupExists(`fwd-${ada}`)).toBe(false)
+  })
+
+  // ── Aliases follow the forward ────────────────────────────────────────────
+
+  describe("a forwarded mailbox's aliases", () => {
+    const aliasOf = (source: string) => `ada.${source}@${domain}`
+    const sources = ["clerk", "directory", "console"] as const
+    const aliasList = (source: string) => aliasListName(ada, aliasOf(source))
+
+    beforeEach(async () => {
+      for (const source of sources)
+        await owner`insert into authd.aliases (address, clerk_user_id, source)
+                    values (${aliasOf(source)}, ${ada}, ${source})`
+    })
+
+    const aliasRows = async () =>
+      (await owner`select address from authd.aliases where clerk_user_id = ${ada}`)
+        .length
+
+    it("keep delivering to the mailbox during the grace, and a restore leaves them as they were", async () => {
+      await deleteAda({ outcome: "forward", forward_to: address(bob) })
+      expect(await aliasRows()).toBe(3)
+      for (const source of sources)
+        expect(await groupExists(aliasList(source))).toBe(false)
+
+      clock = new Date(T0.getTime() + 10 * DAY)
+      expect(
+        await life().restore({ tenantId: acme, address: address(ada), actorId: admin }),
+      ).toBe("restored")
+      expect(await aliasRows()).toBe(3)
+      for (const source of sources)
+        expect(await groupExists(aliasList(source))).toBe(false)
+    })
+
+    it("become forwards to the same target at the purge, every source, and stay held", async () => {
+      await deleteAda({ outcome: "forward", forward_to: address(bob) })
+      clock = new Date(T0.getTime() + 30 * DAY)
+      expect(
+        await purgeMailbox(world().deps, { tenantId: acme, clerkUserId: ada }),
+      ).toBe("purged")
+
+      expect(await aliasRows()).toBe(0)
+      for (const source of sources) {
+        const [group] = await owner`select email, description from authd.groups
+                                     where name = ${aliasList(source)}`
+        expect(group).toMatchObject({ email: aliasOf(source), description: "fwd" })
+        expect(await groupMembers(aliasList(source))).toEqual([bob])
+        // ⚠ HELD: nobody can claim an address that now forwards somebody's mail.
+        expect(await mailboxDirectory(db).addressTaken(aliasOf(source))).toBe(true)
+      }
+      // The primary's own list is unchanged by this.
+      expect(await groupMembers(`fwd-${ada}`)).toEqual([bob])
+      const [event] = await owner`select data from identity.events
+                                   where tenant_id = ${acme} and type = 'mailbox.purged'`
+      expect(event!.data).toMatchObject({
+        aliasesForwarded: sources.map(aliasOf).sort(),
+      })
+    })
+
+    it("are never an address that answers for nobody: a crash before the rows leaves them aliases", async () => {
+      await deleteAda({ outcome: "forward", forward_to: address(bob) })
+      clock = new Date(T0.getTime() + 30 * DAY)
+      const w = world()
+      let armed = true
+      const failing: PurgeDeps = {
+        ...w.deps,
+        store: {
+          ...w.deps.store,
+          async finish(...args) {
+            if (armed) {
+              armed = false
+              throw new Error("database down")
+            }
+            return w.deps.store.finish(...args)
+          },
+        },
+      }
+      await purgeMailbox(failing, { tenantId: acme, clerkUserId: ada }).then(
+        () => {
+          throw new Error("expected the purge to fail")
+        },
+        () => {},
+      )
+
+      // Neither half-way: the rows are still aliases of a closed mailbox (refused
+      // like the primary), with no list yet, and still held.
+      expect(await aliasRows()).toBe(3)
+      for (const source of sources) {
+        expect(await groupExists(aliasList(source))).toBe(false)
+        expect(await mailboxDirectory(db).addressTaken(aliasOf(source))).toBe(true)
+      }
+
+      expect(await purgeMailbox(failing, { tenantId: acme, clerkUserId: ada })).toBe(
+        "purged",
+      )
+      expect(await aliasRows()).toBe(0)
+      for (const source of sources)
+        expect(await groupMembers(aliasList(source))).toEqual([bob])
+    })
+
+    it("go the way of the address when the target is gone, rather than forward to nobody", async () => {
+      await deleteAda({ outcome: "forward", forward_to: address(bob) })
+      await owner`delete from authd.accounts where clerk_user_id = ${bob}`
+      clock = new Date(T0.getTime() + 30 * DAY)
+      expect(
+        await purgeMailbox(world().deps, { tenantId: acme, clerkUserId: ada }),
+      ).toBe("purged")
+      for (const source of sources) {
+        expect(await groupExists(aliasList(source))).toBe(false)
+        expect(await mailboxDirectory(db).addressTaken(aliasOf(source))).toBe(false)
+      }
+    })
+
+    it("leave out an address some other list already answers for, instead of failing the purge", async () => {
+      await deleteAda({ outcome: "forward", forward_to: address(bob) })
+      await owner`insert into authd.groups (name, email, description)
+                  values (${`fwd-${cy}-other`}, ${aliasOf("clerk")}, 'team')`
+      clock = new Date(T0.getTime() + 30 * DAY)
+      expect(
+        await purgeMailbox(world().deps, { tenantId: acme, clerkUserId: ada }),
+      ).toBe("purged")
+      expect(await groupExists(aliasList("clerk"))).toBe(false)
+      expect(await groupExists(aliasList("console"))).toBe(true)
+    })
+
+    it("only a forward hands them on: a plain delete releases them with the mailbox", async () => {
+      await deleteAda()
+      clock = new Date(T0.getTime() + 30 * DAY)
+      await purgeMailbox(world().deps, { tenantId: acme, clerkUserId: ada })
+      for (const source of sources) {
+        expect(await groupExists(aliasList(source))).toBe(false)
+        expect(await mailboxDirectory(db).addressTaken(aliasOf(source))).toBe(false)
+      }
+    })
+
+    it("keep the target from being deleted, like the primary's forward does", async () => {
+      await deleteAda({ outcome: "forward", forward_to: address(bob) })
+      clock = new Date(T0.getTime() + 30 * DAY)
+      await purgeMailbox(world().deps, { tenantId: acme, clerkUserId: ada })
+      // Only the alias lists are left to refuse it: the primary's has been let go.
+      await owner`delete from authd.groups where name = ${`fwd-${ada}`}`
+
+      expect(
+        await life().remove({
+          tenantId: acme,
+          address: address(bob),
+          actorId: admin,
+          request: { outcome: "delete" },
+        }),
+      ).toEqual({ status: "forward_target_in_use" })
+      expect((await gates(bob)).deleting).toBe(false)
+    })
+
+    it("are released together with the primary's forward by the one call that drops routes", async () => {
+      await deleteAda({ outcome: "forward", forward_to: address(bob) })
+      clock = new Date(T0.getTime() + 30 * DAY)
+      await purgeMailbox(world().deps, { tenantId: acme, clerkUserId: ada })
+
+      await db.transaction((tx) => directoryMail.dropRoutes(tx, ada))
+      expect(await groupExists(`fwd-${ada}`)).toBe(false)
+      for (const source of sources) {
+        expect(await groupExists(aliasList(source))).toBe(false)
+        expect(await mailboxDirectory(db).addressTaken(aliasOf(source))).toBe(false)
+      }
+    })
+  })
+
+  // ── A failed export is visible ────────────────────────────────────────────
+
+  describe("a deleting mailbox whose export did not finish", () => {
+    const job = (over: Record<string, unknown>) => ({
+      status: "completed",
+      created_at: new Date(T0.getTime() + 1000),
+      completed_at: new Date(T0.getTime() + 60_000),
+      expires_at: new Date(T0.getTime() + 7 * DAY),
+      ...over,
+    })
+    const addJob = async (over: Record<string, unknown> = {}) => {
+      const j = job(over)
+      await owner`insert into core.mailbox_jobs
+                    (tenant_id, mailbox_address, type, status, requested_by,
+                     created_at, completed_at, expires_at)
+                  values (${acme}, ${address(ada)}, 'export', ${j.status as string}, ${admin},
+                          ${j.created_at as Date}, ${j.completed_at as Date},
+                          ${j.expires_at as Date | null})`
+    }
+    const consoleView = async () => {
+      const c = consoleMailboxes({
+        store: consoleMailboxStore(db, () => clock),
+        pool: async () => ({
+          kind: "uncapped",
+          total: null,
+          allocated: 0,
+          used: 0,
+          remaining: null,
+          unallocated: 0,
+        }),
+      })
+      return (
+        await c.get({ tenantId: acme, userId: admin, isAdmin: true }, address(ada))
+      )?.deletion
+    }
+
+    beforeEach(async () => {
+      await deleteAda({ outcome: "export_then_delete" })
+    })
+
+    it("says in the console why it is waiting, with the purge's own rule", async () => {
+      clock = new Date(T0.getTime() + 2 * DAY)
+      expect((await consoleView())?.exportWait).toEqual({
+        reason: "export_missing",
+        readyAfter: null,
+      })
+
+      await addJob({ status: "running", completed_at: null, expires_at: null })
+      expect((await consoleView())?.exportWait).toEqual({
+        reason: "export_pending",
+        readyAfter: null,
+      })
+
+      await owner`delete from core.mailbox_jobs where tenant_id = ${acme}`
+      await addJob({ status: "failed", expires_at: null })
+      expect((await consoleView())?.exportWait?.reason).toBe("export_failed")
+
+      await owner`delete from core.mailbox_jobs where tenant_id = ${acme}`
+      await addJob()
+      expect((await consoleView())?.exportWait).toEqual({
+        reason: "export_ready_after",
+        readyAfter: new Date(T0.getTime() + 7 * DAY).toISOString(),
+      })
+
+      // Past its retention it is not waiting any more.
+      clock = new Date(T0.getTime() + 8 * DAY)
+      expect((await consoleView())?.exportWait).toBeNull()
+    })
+
+    it("an export from before the deletion is missing, not ready", async () => {
+      await addJob({ created_at: new Date(T0.getTime() - DAY) })
+      expect((await consoleView())?.exportWait?.reason).toBe("export_missing")
+    })
+
+    it("the purge reports a failed export once a day, with the tenant and no address", async () => {
+      const errors: { o: object; m: string }[] = []
+      const log = {
+        info: () => {},
+        warn: () => {},
+        error: (o: object, m: string) => errors.push({ o, m }),
+      }
+      const failed = {
+        id: "j",
+        status: "failed",
+        createdAt: new Date(T0.getTime() + 1000),
+        expiresAt: null,
+      } as unknown as MailboxJobRow
+      const run = async (at: Date) => {
+        clock = at
+        return purgeMailbox(
+          { ...world().deps, log, exports: { latest: async () => failed } },
+          { tenantId: acme, clerkUserId: ada },
+        )
+      }
+
+      const due = new Date(T0.getTime() + 30 * DAY)
+      expect(await run(due)).toBe("waiting_export")
+      expect(await run(new Date(due.getTime() + 60 * 60 * 1000))).toBe("waiting_export")
+      expect(await run(new Date(due.getTime() + 23 * 60 * 60 * 1000))).toBe(
+        "waiting_export",
+      )
+      expect(errors).toHaveLength(1)
+      expect(errors[0]!.o).toEqual({ tenantId: acme, reason: "export_failed" })
+      expect(JSON.stringify(errors)).not.toContain(address(ada))
+
+      expect(await run(new Date(due.getTime() + 25 * 60 * 60 * 1000))).toBe(
+        "waiting_export",
+      )
+      expect(errors).toHaveLength(2)
+    })
+
+    it("a running or finished-but-not-yet-offered export is not an error", async () => {
+      const errors: unknown[] = []
+      const log = {
+        info: () => {},
+        warn: () => {},
+        error: (o: object) => errors.push(o),
+      }
+      for (const latest of [
+        { status: "running", expiresAt: null },
+        { status: "completed", expiresAt: new Date(T0.getTime() + 36 * DAY) },
+      ]) {
+        clock = new Date(T0.getTime() + 30 * DAY)
+        const out = await purgeMailbox(
+          {
+            ...world().deps,
+            log,
+            exports: {
+              latest: async () =>
+                ({
+                  ...latest,
+                  createdAt: new Date(T0.getTime() + 1000),
+                }) as MailboxJobRow,
+            },
+          },
+          { tenantId: acme, clerkUserId: ada },
+        )
+        expect(out).toBe("waiting_export")
+      }
+      expect(errors).toEqual([])
+    })
+
+    it("an admin starts the export again, and it is one the purge counts", async () => {
+      clock = new Date(T0.getTime() + 20 * DAY)
+      const done = await life().retryExport({
+        tenantId: acme,
+        address: address(ada),
+        actorId: admin,
+      })
+      expect(done).toBe("started")
+      // Once from the deletion, once from the retry.
+      expect(exportsStarted).toEqual([
+        { address: address(ada), requestedBy: admin },
+        { address: address(ada), requestedBy: admin },
+      ])
+    })
+
+    it("a retry is refused for what is not waiting for an export", async () => {
+      const input = { tenantId: acme, address: address(ada), actorId: admin }
+      expect(await life().retryExport({ ...input, tenantId: rival })).toBe("not_found")
+      expect(await life({ exportable: false }).retryExport(input)).toBe(
+        "export_unavailable",
+      )
+      expect(await life().retryExport({ ...input, address: address(cy) })).toBe(
+        "not_deleting",
+      )
+
+      await life().restore(input)
+      expect(await life().retryExport(input)).toBe("not_deleting")
+
+      await deleteAda({ outcome: "delete" })
+      expect(await life().retryExport(input)).toBe("not_waiting_for_export")
+    })
+
+    it("a retry whose queue is down says so and changes nothing", async () => {
+      exportShouldFail = true
+      expect(
+        await life().retryExport({
+          tenantId: acme,
+          address: address(ada),
+          actorId: admin,
+        }),
+      ).toBe("export_failed")
+      expect(await gates(ada)).toMatchObject({ deleting: true })
+    })
   })
 })

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm"
 import { union } from "drizzle-orm/pg-core"
 import type { Mailbox } from "@repo/contracts"
@@ -26,6 +27,18 @@ import type { MailboxDirectory, ManagedMailLaneCheck } from "./provision.js"
  * live LDAP or OIDC mail lane. Using both here guarantees provisioning and bind
  * agree on whether the person can sign in to mail.
  */
+/**
+ * The list a purged mailbox's alias becomes when the mailbox was forwarded.
+ *
+ * ⚠ AN ID AND A HASH, NEVER THE ADDRESS ITSELF. Stalwart learns list names
+ * through authd's LDAP `cn`, and every list name it has seen so far is plain
+ * `kind-id`; an `@` or `:` in one is untested there. A Clerk id has no `-`, so
+ * `fwd-<id>-a` cannot prefix another person's lists.
+ */
+export const aliasListPrefix = (leaverId: string) => `fwd-${leaverId}-a`
+export const aliasListName = (leaverId: string, alias: string) =>
+  `${aliasListPrefix(leaverId)}${createHash("sha256").update(alias.toLowerCase()).digest("hex").slice(0, 12)}`
+
 export function managedMailLane(
   db: Database,
   store: Pick<
@@ -80,7 +93,8 @@ export function hostedDomainsOf(db: Database) {
  * ⚠ A LIST'S ADDRESS IS THE THIRD HALF. A deleted mailbox that was set to forward
  * keeps its address as a list (`fwd-<id>`, mailboxes/lifecycle.ts) whose only
  * member is where its mail goes, so a new person who took that address would have
- * their mail copied to somebody else.
+ * their mail copied to somebody else. The same holds for each of its aliases,
+ * which become lists of their own (`aliasListName`) at the purge.
  *
  * Takes the reader so an alias being added can ask inside its own transaction.
  */
@@ -578,6 +592,10 @@ export const directoryMail = {
    * ⚠ NOT A DIRECTORY LIST (`directory_group_id` stays null): its address is
    * the leaver's own, which `mirrorGroup` would refuse as taken, and it is
    * removed with the plan (`dropRoutes`), not with a group.
+   *
+   * `alias` names one more address of the leaver that forwards to the same target
+   * (a purged mailbox's aliases): its list is `aliasListName(id, alias)`, one per address
+   * because a list has one address, and `dropRoutes` takes them with the rest.
    */
   async setRoute(
     tx: Tx,
@@ -586,9 +604,12 @@ export const directoryMail = {
       leaverId: string
       email: string | null
       targetId: string
+      alias?: string
     },
   ): Promise<void> {
-    const name = `${input.kind}-${input.leaverId}`
+    const name = input.alias
+      ? aliasListName(input.leaverId, input.alias)
+      : `${input.kind}-${input.leaverId}`
     await tx
       .insert(groups)
       .values({ name, email: input.email, description: input.kind })
@@ -604,9 +625,13 @@ export const directoryMail = {
   },
 
   async dropRoutes(tx: Tx, leaverId: string): Promise<void> {
-    await tx
-      .delete(groups)
-      .where(inArray(groups.name, [`fwd-${leaverId}`, `dlg-${leaverId}`]))
+    await tx.delete(groups).where(
+      or(
+        inArray(groups.name, [`fwd-${leaverId}`, `dlg-${leaverId}`]),
+        // `starts_with`, not LIKE: a Clerk id has underscores, which LIKE reads as wildcards.
+        sql`starts_with(${groups.name}, ${aliasListPrefix(leaverId)})`,
+      ),
+    )
   },
 
   async dropGroup(tx: Tx, directoryGroupId: string): Promise<void> {

@@ -458,6 +458,14 @@ export async function restoreMailbox(address: string) {
   )
 }
 
+/** Starts again the export a deleting mailbox is waiting for (admin, step-up). */
+export async function retryMailboxExport(address: string) {
+  return run(
+    () => api<MailboxAfter>(`${mailboxPath(address)}/retry-export`, { method: "POST" }),
+    MAILBOX_PAGES,
+  )
+}
+
 /**
  * ⚠ THE TWO ALIAS ACTIONS ARE AN OWNER OR ADMIN'S, BEHIND STEP-UP LIKE THE
  * LIFECYCLE ONES, AND ANSWER WITH THE MAILBOX'S WHOLE ALIAS LIST (`data`, and the

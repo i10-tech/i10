@@ -11,7 +11,7 @@ import {
   type PurgeDeps,
 } from "../src/mailboxes/lifecycle.js"
 import { mailboxLifecycleStore } from "../src/mailboxes/lifecycle-store.js"
-import { mailboxDirectory } from "../src/mailboxes/store.js"
+import { aliasListName, mailboxDirectory } from "../src/mailboxes/store.js"
 import { projectClerkUser } from "../src/projection/writer.js"
 import { directoryMailStore } from "../src/identity/mail-store.js"
 
@@ -75,7 +75,7 @@ const eventTypes = async () =>
 async function reset() {
   await owner`delete from core.mailbox_deletions where tenant_id = ${acme}`
   await owner`delete from identity.directory_mailboxes where tenant_id = ${acme}`
-  await owner`delete from authd.groups where tenant_id = ${acme} or name like ${`%${sfx}`}`
+  await owner`delete from authd.groups where tenant_id = ${acme} or name like ${`%${sfx}`} or name like ${`fwd-%${sfx}%`}`
   await owner`delete from authd.accounts where clerk_user_id = any(${people})`
   for (const id of people)
     await owner`insert into authd.accounts (clerk_user_id, email, active, tenant_id)
@@ -149,7 +149,7 @@ suite("a mailbox's aliases, against Postgres", () => {
 
   afterAll(async () => {
     await owner`delete from core.mailbox_deletions where tenant_id in (${acme}, ${rival})`
-    await owner`delete from authd.groups where tenant_id = ${acme} or name like ${`%${sfx}`}`
+    await owner`delete from authd.groups where tenant_id = ${acme} or name like ${`%${sfx}`} or name like ${`fwd-%${sfx}%`}`
     await owner`delete from authd.accounts where clerk_user_id = any(${people})`
     await owner`delete from core.domains where tenant_id in (${acme}, ${rival})`
     await owner`delete from core.tenants where id in (${acme}, ${rival})`
@@ -407,7 +407,7 @@ suite("a mailbox's aliases, against Postgres", () => {
     expect((await add(at("sales"), at("bob"))).status).toBe("added")
   })
 
-  it("a forward keeps the address's mail going to the target but releases the aliases", async () => {
+  it("a forward keeps the address's mail, and its aliases', going to the target", async () => {
     await add(at("sales"))
     await life().remove({
       tenantId: acme,
@@ -424,9 +424,19 @@ suite("a mailbox's aliases, against Postgres", () => {
     const [route] =
       await owner`select email from authd.groups where name = ${`fwd-${ada}`}`
     expect(route?.email).toBe(at("ada"))
-    // ...and the alias is gone: it delivers nowhere and is free to take.
+    // ...and so does the alias, as a list of its own with the same target. It is no
+    // longer a mailbox's alias, and nobody can take it.
     expect(await delivers(at("sales"))).toBeNull()
     expect(await aliasRows(ada)).toEqual([])
-    expect(await mailboxDirectory(db).addressTaken(at("sales"))).toBe(false)
+    const [aliasRoute] =
+      await owner`select email from authd.groups where name = ${aliasListName(ada, at("sales"))}`
+    expect(aliasRoute?.email).toBe(at("sales"))
+    expect(
+      (
+        await owner`select clerk_user_id from authd.group_members
+                     where group_name = ${aliasListName(ada, at("sales"))}`
+      ).map((r) => r.clerk_user_id),
+    ).toEqual([bob])
+    expect(await mailboxDirectory(db).addressTaken(at("sales"))).toBe(true)
   })
 })
