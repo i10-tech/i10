@@ -136,6 +136,63 @@ export const deleteMailboxSchema = z
     }
   })
 
+/**
+ * How many aliases an owner or admin may give ONE mailbox through the console.
+ *
+ * ⚠ THE ONES A DIRECTORY OR CLERK GIVE ARE NOT COUNTED. They are not the admin's
+ * to add, so a directory that lists forty addresses must not lock the admin out
+ * of adding the one they came for. Every alias is served to the mail server as an
+ * attribute of the person's entry on every lookup, so the number is kept modest.
+ */
+export const MAILBOX_ALIAS_LIMIT = 30
+
+/**
+ * Where an alias came from, which decides who can remove it.
+ *
+ *   - `console`: an owner or admin added it. The only kind this API removes.
+ *   - `clerk`: a verified address on the person's own account, so also a sign-in
+ *     address. Removed by the person, at their account.
+ *   - `directory`: listed by the company's directory, removed there.
+ */
+export const mailboxAliasSourceSchema = z.enum(["console", "clerk", "directory"])
+
+/**
+ * An address on any domain the workspace hosts mail on, that delivers to the
+ * mailbox and may be sent from.
+ *
+ * ⚠ VALIDATED HERE ONLY AS FAR AS THE SHAPE. The local part is held to the
+ * characters every mail server agrees on, lowercased: `+` is refused because the
+ * mail server strips a `+tag` before it looks an address up, so such an alias
+ * would never match anything. Whether the domain is the workspace's, and whether
+ * the address is free, are the store's questions.
+ */
+export const mailboxAliasAddressSchema = mailboxAddressSchema.refine((v) => {
+  const local = v.slice(0, v.lastIndexOf("@"))
+  return (
+    local.length <= 64 &&
+    /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(local) &&
+    !local.includes("..")
+  )
+}, "The part before the @ may use letters, digits, dots, hyphens and underscores, and must start and end with a letter or digit.")
+
+export const addMailboxAliasSchema = z.object({
+  address: mailboxAliasAddressSchema,
+})
+
+export const mailboxAliasSchema = z.object({
+  object: z.literal("mailbox_alias"),
+  address: z.string(),
+  source: mailboxAliasSourceSchema,
+  /** Whether `DELETE` removes it: only an alias an owner or admin added. */
+  removable: z.boolean(),
+})
+
+export const mailboxAliasListSchema = z.object({
+  data: z.array(mailboxAliasSchema),
+  /** The most console aliases one mailbox may have. */
+  limit: z.number().int().positive(),
+})
+
 export const mailboxSchema = z.object({
   object: z.literal("mailbox"),
   address: z.string(),
@@ -260,6 +317,10 @@ export type DeleteMailbox = z.infer<typeof deleteMailboxSchema>
 export type MailboxCreationMode = z.infer<typeof mailboxCreationModeSchema>
 export type MailboxCreationSettings = z.infer<typeof mailboxCreationSettingsSchema>
 export type Mailbox = z.infer<typeof mailboxSchema>
+export type MailboxAliasSource = z.infer<typeof mailboxAliasSourceSchema>
+export type AddMailboxAlias = z.infer<typeof addMailboxAliasSchema>
+export type MailboxAlias = z.infer<typeof mailboxAliasSchema>
+export type MailboxAliasList = z.infer<typeof mailboxAliasListSchema>
 export type SetMailboxStorage = z.infer<typeof setMailboxStorageSchema>
 export type MailboxStorage = z.infer<typeof mailboxStorageSchema>
 export type StoragePool = z.infer<typeof storagePoolSchema>

@@ -32,6 +32,7 @@ import {
   mailboxJobStore,
   startMailboxExport,
 } from "./mailboxes/jobs.js"
+import { mailboxAliases } from "./mailboxes/aliases.js"
 import { mailboxAdminLifecycle } from "./mailboxes/lifecycle.js"
 import { mailboxLifecycleStore } from "./mailboxes/lifecycle-store.js"
 import { memberStore } from "./console/members-db.js"
@@ -2681,6 +2682,10 @@ const app = createApp({
       isMember: isWorkspaceMember,
     },
     mailboxLifecycle: mailboxLifecycleAdmin,
+    mailboxAliases: mailboxAliases({
+      db,
+      isAdmin: (tenantId, userId) => canAllocateStorage(userId, tenantId),
+    }),
     mailboxes: consoleMailboxes({
       store: consoleMailboxStore(db),
       roles: roleRows,

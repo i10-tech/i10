@@ -1,0 +1,1 @@
+ALTER TABLE "authd"."aliases" DROP CONSTRAINT "aliases_source_check", ADD CONSTRAINT "aliases_source_check" CHECK ("source" in ('clerk', 'directory', 'console'));
