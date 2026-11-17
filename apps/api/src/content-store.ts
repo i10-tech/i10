@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * The content job: everything done to stored mail after it is sent, every five
  * minutes, then exits (#136, #168, #171, #188).

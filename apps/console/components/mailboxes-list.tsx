@@ -15,77 +15,23 @@ import {
   ListTile,
 } from "@/components/list/table"
 import { RowMenu } from "@/components/list/row-menu"
-import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
+import { DropdownMenuItem, DropdownMenuSeparator } from "@repo/ui/components/i10/menu"
 import { EmptyState } from "@/components/empty-state"
 import { LoadMore } from "@/components/load-more"
 import { CreateMailbox, type WorkspaceMember } from "@/components/create-mailbox-dialog"
+import { useMailboxActions } from "@/components/mailbox-actions"
 import { formatBytes } from "@/lib/format"
-
-export interface ConsoleMailboxStorage {
-  allocatedBytes: number | null
-  usedBytes: number | null
-  usedAt: string | null
-}
-
-export interface ConsoleMailbox {
-  address: string
-  displayName: string | null
-  owner: { userId?: string | null; name: string | null; email: string | null }
-  domain: string
-  status: string
-  signIn: "password" | "oidc" | "ldap" | "off"
-  storage: ConsoleMailboxStorage
-}
-
-export interface StoragePool {
-  kind: "pool" | "uncapped"
-  total: number | null
-  allocated: number
-  used: number
-  remaining: number | null
-  unallocated: number
-}
+import {
+  availableActions,
+  signInLabel,
+  statusInfo,
+  storageLine,
+  type ConsoleMailbox,
+  type StoragePool,
+} from "@/lib/mailbox-view"
 
 /** A member's own dialog asks for no storage, so the pool never reaches it. */
 const SELF_POOL = { kind: "uncapped", remaining: null } as const
-
-const STATUS_WORDS: Record<
-  string,
-  { label: string; tone: "success" | "warning" | "danger" | "neutral" }
-> = {
-  active: { label: "Active", tone: "success" },
-  inactive: { label: "Not set up yet", tone: "warning" },
-  suspended: { label: "Suspended", tone: "danger" },
-  payment_hold: { label: "Payment needed", tone: "warning" },
-  domain_off: { label: "Domain not hosting", tone: "warning" },
-  banned: { label: "Blocked", tone: "danger" },
-  locked: { label: "Blocked", tone: "danger" },
-  sso_required: { label: "Mail sign-in off", tone: "warning" },
-  deleting: { label: "Deleting", tone: "danger" },
-}
-
-function statusInfo(status: string) {
-  return STATUS_WORDS[status] ?? { label: status, tone: "neutral" as const }
-}
-
-/** What a mailbox's storage line says; unmeasured and unallocated are not zero and not unlimited. */
-function storageLine(storage: ConsoleMailboxStorage) {
-  const used =
-    storage.usedBytes == null ? "Not measured yet" : formatBytes(storage.usedBytes)
-  const of =
-    storage.allocatedBytes == null
-      ? "the default quota"
-      : formatBytes(storage.allocatedBytes)
-  return storage.usedBytes == null ? used : `${used} of ${of}`
-}
-
-function signInLabel(lane: ConsoleMailbox["signIn"]) {
-  if (lane === "off") return "Off"
-  if (lane === "password") return "Password"
-  if (lane === "oidc") return "Provider password"
-  if (lane === "ldap") return "Directory password"
-  return lane
-}
 
 /** What the Create mailbox dialog needs from the page. */
 export interface CreateMailboxProps {
@@ -111,6 +57,8 @@ export function MailboxesList({
   selfServe: boolean
   create: CreateMailboxProps
 }) {
+  const actions = useMailboxActions({ mailboxes, pool })
+
   if (!isAdmin) {
     const mb = mailboxes[0]
     if (!mb) {
@@ -155,6 +103,12 @@ export function MailboxesList({
             <p className="text-sm text-muted-foreground">Sign in</p>
             <p className="font-medium">{signInLabel(mb.signIn)}</p>
           </div>
+          <Link
+            href={`/mailboxes/${encodeURIComponent(mb.address)}`}
+            className="inline-block text-sm font-medium underline-offset-4 hover:underline focus-visible:underline"
+          >
+            View details
+          </Link>
         </div>
 
         <div className="rounded-2xl border bg-card p-6 space-y-4">
@@ -272,7 +226,12 @@ export function MailboxesList({
                       <Inbox className="size-4" />
                     </ListTile>
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{name}</p>
+                      <Link
+                        href={`/mailboxes/${encodeURIComponent(mb.address)}`}
+                        className="block truncate font-medium outline-none hover:underline focus-visible:underline"
+                      >
+                        {name}
+                      </Link>
                       <p className="truncate text-xs text-muted-foreground">
                         {mb.address}
                       </p>
@@ -295,6 +254,7 @@ export function MailboxesList({
                         View
                       </Link>
                     </DropdownMenuItem>
+                    <MailboxMenuItems mailbox={mb} start={actions.start} />
                   </RowMenu>
                 </ListCell>
               </ListRow>
@@ -303,6 +263,50 @@ export function MailboxesList({
         </ListBody>
       </ListTable>
       {nextCursor && <LoadMore cursor={nextCursor} />}
+      {actions.dialogs}
     </div>
+  )
+}
+
+const MENU_LABEL = {
+  storage: "Change storage",
+  suspend: "Suspend",
+  resume: "Resume",
+  restore: "Restore",
+  delete: "Delete",
+} as const
+
+/**
+ * The row menu's actions for one mailbox, the same ones its own page offers
+ * (`availableActions`). Delete is last and apart, as it is on every other list.
+ */
+function MailboxMenuItems({
+  mailbox,
+  start,
+}: {
+  mailbox: ConsoleMailbox
+  start: ReturnType<typeof useMailboxActions>["start"]
+}) {
+  const actions = availableActions(mailbox, new Date())
+  const rest = actions.filter((a) => a !== "delete")
+  return (
+    <>
+      {rest.map((action) => (
+        <DropdownMenuItem key={action} onSelect={() => start(action, mailbox.address)}>
+          {MENU_LABEL[action]}
+        </DropdownMenuItem>
+      ))}
+      {actions.includes("delete") && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={() => start("delete", mailbox.address)}
+          >
+            {MENU_LABEL.delete}
+          </DropdownMenuItem>
+        </>
+      )}
+    </>
   )
 }

@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Finds what we are still holding for domains that no longer exist, then exits.
  *

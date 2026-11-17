@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Reconciles i10's entitlements against Polar, then exits.
  *

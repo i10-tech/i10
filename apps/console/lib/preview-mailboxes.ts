@@ -81,6 +81,12 @@ interface PreviewMailbox {
   owner: { userId: string; clerkUserId: string; name: string | null; email: string }
   domain: string
   status: string
+  deletion: {
+    outcome: "delete" | "export_then_delete" | "forward"
+    deletedAt: string
+    purgeAt: string
+    forwardTo: string | null
+  } | null
   signIn: string
   aliases: string[]
   storage: {
@@ -91,6 +97,55 @@ interface PreviewMailbox {
   createdAt: string
   updatedAt: string
 }
+
+const DAY = 86_400_000
+
+/** A mailbox at `<first name>@acme.dev` for somebody who is not in `PREVIEW_MEMBERS`. */
+function fixture(
+  local: string,
+  name: string,
+  fields: {
+    status: string
+    allocatedBytes: number
+    usedBytes: number
+    deletion?: PreviewMailbox["deletion"]
+  },
+): PreviewMailbox {
+  const now = new Date().toISOString()
+  return {
+    address: `${local}@acme.dev`,
+    displayName: name,
+    owner: {
+      userId: `user_${local}`,
+      clerkUserId: `user_${local}`,
+      name,
+      email: `${local}@acme.dev`,
+    },
+    domain: "acme.dev",
+    status: fields.status,
+    deletion: fields.deletion ?? null,
+    signIn: "password",
+    aliases: [],
+    storage: {
+      allocatedBytes: fields.allocatedBytes,
+      usedBytes: fields.usedBytes,
+      usedAt: now,
+    },
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+const apiError = (
+  statusCode: number,
+  name: string,
+  message: string,
+  extra: Record<string, unknown> = {},
+) =>
+  new ApiRequestError(statusCode, { statusCode, name, message, ...extra } as ApiError)
+
+/** The pool: 20 GB, of which the mailboxes below hold what they hold. */
+const POOL_TOTAL = 21474836480
 
 export function mailboxRoutes(_notFound: unknown): Route[] {
   void _notFound
@@ -106,6 +161,7 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
       },
       domain: "acme.dev",
       status: "active",
+      deletion: null,
       signIn: "password",
       aliases: [],
       storage: {
@@ -127,6 +183,7 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
       },
       domain: "acme.dev",
       status: "payment_hold",
+      deletion: null,
       signIn: "oidc",
       aliases: [],
       storage: {
@@ -148,6 +205,7 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
       },
       domain: "acme.dev",
       status: "sso_required",
+      deletion: null,
       signIn: "off",
       aliases: [],
       storage: { allocatedBytes: null, usedBytes: 0, usedAt: null },
@@ -165,12 +223,54 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
       },
       domain: "acme.dev",
       status: "inactive",
+      deletion: null,
       signIn: "off",
       aliases: [],
       storage: { allocatedBytes: 1073741824, usedBytes: null, usedAt: null },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
+    // ⚠ THE LIFECYCLE STATES, so the page and the menu can be reviewed in each:
+    // suspended and resumes cleanly, suspended and still held for payment,
+    // deleting with a forward, and deleting with its restore window over.
+    // A second live mailbox, so the delete dialog's forward picker has a choice.
+    fixture("noah", "Noah Kim", {
+      status: "active",
+      allocatedBytes: 1073741824,
+      usedBytes: 104857600,
+    }),
+    fixture("gwen", "Gwen Park", {
+      status: "suspended",
+      allocatedBytes: 1073741824,
+      usedBytes: 314572800,
+    }),
+    fixture("ivan", "Ivan Petrov", {
+      status: "suspended",
+      allocatedBytes: 2147483648,
+      usedBytes: 52428800,
+    }),
+    fixture("hank", "Hank Aaron", {
+      status: "deleting",
+      allocatedBytes: 1073741824,
+      usedBytes: 734003200,
+      deletion: {
+        outcome: "forward",
+        deletedAt: new Date(Date.now() - 8 * DAY).toISOString(),
+        purgeAt: new Date(Date.now() + 22 * DAY).toISOString(),
+        forwardTo: "alice@acme.dev",
+      },
+    }),
+    fixture("lena", "Lena Fischer", {
+      status: "deleting",
+      allocatedBytes: 1073741824,
+      usedBytes: 209715200,
+      deletion: {
+        outcome: "export_then_delete",
+        deletedAt: new Date(Date.now() - 31 * DAY).toISOString(),
+        purgeAt: new Date(Date.now() - DAY).toISOString(),
+        forwardTo: null,
+      },
+    }),
   ]
 
   /** A create that works adds the row, so the list can be seen to change. */
@@ -197,6 +297,7 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
       },
       domain: address.split("@")[1] ?? "",
       status: "active",
+      deletion: null,
       signIn: "password",
       aliases: [],
       storage: {
@@ -217,6 +318,170 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
     }
   }
 
+  const allocated = (except?: string) =>
+    data
+      .filter((m) => m.address !== except)
+      .reduce((sum, m) => sum + (m.storage.allocatedBytes ?? 0), 0)
+
+  const pool = () => ({
+    kind: "pool",
+    total: POOL_TOTAL,
+    allocated: allocated(),
+    used: 3234567890,
+    remaining: POOL_TOTAL - allocated(),
+    unallocated: data.filter((m) => m.storage.allocatedBytes === null).length,
+  })
+
+  function find(address: string): PreviewMailbox {
+    const mailbox = data.find((m) => m.address === address)
+    if (!mailbox) throw apiError(404, "not_found", "No such mailbox in this workspace.")
+    return mailbox
+  }
+
+  /**
+   * The lifecycle routes. What each can be refused for is reached from the
+   * keyboard, so every sentence can be reviewed:
+   *
+   *   - storage: more than the pool has left, or none on a prepaid pool;
+   *   - resume: `ivan` is still held for payment after it, any other that is
+   *     not suspended is refused;
+   *   - delete: `bob` is a forward target (409), `dan` cannot export (501) and
+   *     `carol`'s export fails to start (503), and a forward needs a live mailbox.
+   */
+  function lifecycle(address: string, action: string, body: unknown) {
+    const mailbox = find(address)
+    const now = new Date()
+    const touch = () => {
+      mailbox.updatedAt = now.toISOString()
+      return { mailbox }
+    }
+
+    switch (action) {
+      case "storage": {
+        const bytes = (body as { storage_allocation?: number | null } | null)
+          ?.storage_allocation
+        if (bytes === null || bytes === undefined) {
+          throw apiError(
+            422,
+            "validation_error",
+            "Your plan's storage is a pool you split across inboxes, so every inbox needs an amount.",
+          )
+        }
+        const remaining = POOL_TOTAL - allocated(address)
+        if (bytes > remaining) {
+          throw apiError(
+            403,
+            "plan_limit_exceeded",
+            `That is more than is left in the pool: ${remaining} of ${POOL_TOTAL} bytes.`,
+            { remaining, total: POOL_TOTAL },
+          )
+        }
+        mailbox.storage.allocatedBytes = bytes
+        return {
+          mailbox: {
+            address,
+            display_name: mailbox.displayName,
+            storage_allocated: bytes,
+          },
+          quota: "synced",
+        }
+      }
+
+      case "suspend":
+        if (mailbox.status === "deleting") {
+          throw apiError(
+            409,
+            "mailbox_deleting",
+            "That mailbox is being deleted already.",
+          )
+        }
+        mailbox.status = "suspended"
+        return touch()
+
+      case "resume": {
+        if (mailbox.status === "deleting") {
+          throw apiError(
+            409,
+            "deleting",
+            "That mailbox is being deleted. Restore it instead.",
+          )
+        }
+        if (mailbox.status !== "suspended") {
+          throw apiError(409, "not_suspended", "That mailbox is not suspended.")
+        }
+        const held = address.startsWith("ivan@")
+        mailbox.status = held ? "payment_hold" : "active"
+        return { ok: true, still_blocked: held ? ["payment_hold"] : [], ...touch() }
+      }
+
+      case "delete": {
+        const choice = (body ?? {}) as { outcome?: string; forward_to?: string }
+        if (mailbox.status === "deleting") {
+          throw apiError(
+            409,
+            "already_deleting",
+            "That mailbox is already being deleted.",
+          )
+        }
+        if (address.startsWith("bob@")) {
+          throw apiError(
+            409,
+            "forward_target_in_use",
+            "Other addresses are forwarded to this mailbox. Move them first.",
+          )
+        }
+        if (choice.outcome === "export_then_delete" && address.startsWith("dan@")) {
+          throw apiError(
+            501,
+            "internal_server_error",
+            "Mailbox export is not configured on this deployment.",
+          )
+        }
+        if (choice.outcome === "export_then_delete" && address.startsWith("carol@")) {
+          throw apiError(
+            503,
+            "application_error",
+            "The export could not be started, so nothing was deleted. Try again.",
+          )
+        }
+        if (choice.outcome === "forward") {
+          const target = data.find((m) => m.address === choice.forward_to)
+          if (!target || target.status !== "active" || target.address === address) {
+            throw apiError(
+              422,
+              "validation_error",
+              "forward_to must be another mailbox of this workspace that can sign in and receive mail.",
+            )
+          }
+        }
+        mailbox.status = "deleting"
+        mailbox.deletion = {
+          outcome: (choice.outcome ?? "delete") as "delete",
+          deletedAt: now.toISOString(),
+          purgeAt: new Date(now.getTime() + 30 * DAY).toISOString(),
+          forwardTo: choice.outcome === "forward" ? (choice.forward_to ?? null) : null,
+        }
+        return touch()
+      }
+
+      case "restore":
+        if (mailbox.status !== "deleting") {
+          throw apiError(409, "not_deleting", "That mailbox is not being deleted.")
+        }
+        if (mailbox.deletion && Date.parse(mailbox.deletion.purgeAt) <= now.getTime()) {
+          throw apiError(
+            409,
+            "restore_window_closed",
+            "The 30 days to restore this mailbox are over, and it is being removed.",
+          )
+        }
+        mailbox.status = "active"
+        mailbox.deletion = null
+        return touch()
+    }
+    return undefined
+  }
+
   return [
     [
       /^\/mailboxes$/,
@@ -230,17 +495,21 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
         const empty = query?.empty === "1" || query?.empty === 1
         return {
           data: empty ? [] : data,
-          pool: {
-            kind: "pool",
-            total: 10737418240,
-            allocated: data.reduce((s, m) => s + (m.storage.allocatedBytes ?? 0), 0),
-            used: 3234567890,
-            remaining: 5368709120,
-            unallocated: 1,
-          },
+          pool: pool(),
           nextCursor: null,
         }
       },
+    ],
+    // ⚠ ONLY AN ADDRESS (it has an `@`, encoded or not), so the static
+    // `/console/mailboxes/creation-mode` and `/storage` are still nobody's here.
+    [
+      /^\/console\/mailboxes\/([^/]*(?:%40|@)[^/]*)\/(storage|suspend|resume|delete|restore)$/,
+      (match, _query, _method, body) =>
+        lifecycle(decodeURIComponent(match[1]!), match[2]!, body),
+    ],
+    [
+      /^\/console\/mailboxes\/([^/]*(?:%40|@)[^/]*)$/,
+      (match) => find(decodeURIComponent(match[1]!)),
     ],
   ]
 }

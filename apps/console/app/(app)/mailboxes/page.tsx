@@ -11,12 +11,9 @@ import {
 import { CreateMailbox } from "@/components/create-mailbox-dialog"
 import { PanelError } from "@/components/panel-error"
 import { tryApi } from "@/lib/api"
-import {
-  MailboxesList,
-  type ConsoleMailbox,
-  type StoragePool,
-} from "@/components/mailboxes-list"
+import { MailboxesList } from "@/components/mailboxes-list"
 import { addressesByOwner } from "@/lib/mailbox-create"
+import type { ConsoleMailbox, StoragePool } from "@/lib/mailbox-view"
 import { PAGE_COPY } from "@/lib/page-copy"
 import { PREVIEW } from "@/lib/preview"
 import { PREVIEW_MEMBERS } from "@/lib/preview-mailboxes"

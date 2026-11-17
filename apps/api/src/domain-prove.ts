@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Tries again to prove the domains nobody has proved yet, then exits.
  *
