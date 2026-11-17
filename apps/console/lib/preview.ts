@@ -37,6 +37,7 @@ import { ApiRequestError } from "@/lib/api-error"
 import { ssoRoutes } from "@/lib/preview-sso"
 import { mailboxRoutes } from "@/lib/preview-mailboxes"
 import { teamInboxRoutes } from "@/lib/preview-team-inboxes"
+import { transferRoutes } from "@/lib/preview-mailbox-transfer"
 import { webhookRoutes } from "@/lib/preview-webhooks"
 import type { DomainMailboxes } from "@/lib/types"
 
@@ -1490,6 +1491,7 @@ const ROUTES: [
   ...ssoRoutes(PREVIEW_NOT_FOUND),
   ...mailboxRoutes(PREVIEW_NOT_FOUND),
   ...teamInboxRoutes(),
+  ...transferRoutes(),
 
   [
     // ⚠ AT RISK IN PREVIEW, so the amber banner, the rail pill and the
