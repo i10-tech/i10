@@ -1,6 +1,11 @@
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
-import { ALLOWLISTED, fingerprint, htmlToText } from "../risk/fingerprint.js"
+import {
+  ALLOWLISTED,
+  fingerprint,
+  htmlToText,
+  type Fingerprint,
+} from "../risk/fingerprint.js"
 import type { JudgeEmail } from "../risk/judge/contract.js"
 import type { ContentJudge } from "../risk/judge/judge.js"
 import type { JudgementStore } from "../risk/judge/store.js"
@@ -34,6 +39,9 @@ import { classify, trustMark } from "./trust.js"
  * before, trusted, or too short to fingerprint. Content left unjudged (a spent
  * budget, a failing provider) stays unstamped and is tried next hour; past the
  * 7-day window it falls out.
+ *
+ * The pre-send screen (content/screen.ts) judges the same way from the same
+ * pieces below, so a body gets the identical judge input on either path.
  */
 export interface JudgeDeps {
   db: Database
@@ -41,18 +49,22 @@ export interface JudgeDeps {
   judgements: JudgementStore
   store?: ContentStore | null
   /** Already loaded by the caller for its own pass; null: nothing is trusted. */
-  trust?: Awaited<ReturnType<TrustSource["forTenant"]>> | null
+  trust?: Trust | null
   /** Distinct contents the day has seen and capped, deduplicated across passes. */
-  seenRedis?: {
-    sadd(key: string, ...members: string[]): Promise<number>
-    expire(key: string, seconds: number): Promise<unknown>
-  }
+  seenRedis?: SeenRedis
   now?: Date
   /** Bodies read per pass. */
   limit?: number
   /** Judge calls per pass. */
   calls?: number
   log?: { warn?: (o: object, m: string) => void }
+}
+
+export type Trust = Awaited<ReturnType<TrustSource["forTenant"]>>
+
+export interface SeenRedis {
+  sadd(key: string, ...members: string[]): Promise<number>
+  expire(key: string, seconds: number): Promise<unknown>
 }
 
 export interface JudgeResult {
@@ -67,11 +79,31 @@ export interface JudgeResult {
 export const JUDGE_SCAN_LIMIT = 300
 export const JUDGE_CALLS_PER_PASS = 25
 
-interface Body {
-  messageId: string
-  createdAt: string
-  exact: string | null
+/** What both judging paths read of one body: the mail as it is sent. */
+export interface JudgeSource {
+  subject: string
+  from: string
+  replyTo: readonly string[] | null
+  to: readonly string[]
+  html: string | null
+  text: string | null
+}
+
+/** One body as the judge sees it. */
+export interface JudgeCandidate {
+  /** Null when the body is too short to fingerprint. */
+  print: Fingerprint | null
+  /** The trust entry the body fits, or null. */
+  trustedBy: string | null
   email: JudgeEmail
+}
+
+/** One distinct content: the first body seen with this exact fingerprint. */
+export interface DistinctContent {
+  exact: string
+  bands: string[]
+  email: JudgeEmail
+  /** Set only while every body with this fingerprint fitted the same entry. */
   trustedBy: string | null
 }
 
@@ -85,6 +117,112 @@ export function parseSender(address: string): {
   const name = angle ? angle[1]!.replace(/^"(.*)"$/, "$1").trim() || null : null
   const at = raw.lastIndexOf("@")
   return { name, domain: at >= 0 ? raw.slice(at + 1).toLowerCase() || null : null }
+}
+
+/** A body's fingerprint, trust mark and judge input. A failing matcher trusts nothing. */
+export async function judgeCandidate(
+  body: JudgeSource,
+  trust: Trust | null,
+): Promise<JudgeCandidate> {
+  const sender = parseSender(body.from)
+  const replyTo = (body.replyTo ?? [])
+    .map((a) => parseSender(a).domain)
+    .find((d) => d && d !== sender.domain)
+  const found =
+    trust && trust.entries.length > 0
+      ? await classify(
+          { html: body.html, text: body.text },
+          trust.entries,
+          trust.ctx,
+        ).catch(() => null)
+      : null
+  return {
+    print: fingerprint(body.subject, body.html, body.text),
+    trustedBy: found ? trustMark(found.entry) : null,
+    email: {
+      subject: body.subject,
+      text: body.text ?? (body.html ? htmlToText(body.html) : ""),
+      senderName: sender.name,
+      senderDomain: sender.domain,
+      replyToDomain: replyTo ?? null,
+      html: body.html,
+      recipientDomain: body.to[0] ? parseSender(body.to[0]).domain : null,
+    },
+  }
+}
+
+/**
+ * One entry per distinct content, the first body seen standing for it. Bodies
+ * too short to fingerprint and our docs' examples have none.
+ */
+export function distinctContents(
+  bodies: readonly JudgeCandidate[],
+): Map<string, DistinctContent> {
+  const distinct = new Map<string, DistinctContent>()
+  for (const b of bodies) {
+    if (!b.print || ALLOWLISTED.has(b.print.exact)) continue
+    const seen = distinct.get(b.print.exact)
+    if (!seen)
+      distinct.set(b.print.exact, {
+        exact: b.print.exact,
+        bands: b.print.bands,
+        email: b.email,
+        trustedBy: b.trustedBy,
+      })
+    else if (seen.trustedBy !== b.trustedBy) seen.trustedBy = null
+  }
+  return distinct
+}
+
+/**
+ * Adds a pass's counts to the workspace's day.
+ *
+ * ⚠ DISTINCT PER DAY ACROSS PASSES: a content seen every hour, or by the
+ * screen and then the hourly pass, is one.
+ */
+export async function countDay(
+  deps: Pick<JudgeDeps, "judgements" | "seenRedis">,
+  tenantId: string,
+  now: Date,
+  counts: { seen: readonly string[]; judged: number; capped: readonly string[] },
+): Promise<void> {
+  const day = now.toISOString().slice(0, 10)
+  const fresh = async (kind: string, members: readonly string[]) => {
+    const redis = deps.seenRedis
+    if (!redis || members.length === 0) return 0
+    const key = `risk:judge:${kind}:${tenantId}:${day}`
+    try {
+      const added = await redis.sadd(key, ...members)
+      await redis.expire(key, 2 * 86_400)
+      return added
+    } catch {
+      return 0
+    }
+  }
+  await deps.judgements.addDay(tenantId, day, {
+    seen: await fresh("seen", counts.seen),
+    judged: counts.judged,
+    capped: await fresh("capped", counts.capped),
+  })
+}
+
+/** Stamps bodies `judged_at`, in one statement. `createdAt` is the partition key's own value. */
+export async function stampJudged(
+  db: Database,
+  tenantId: string,
+  bodies: readonly { messageId: string; createdAt: string }[],
+): Promise<void> {
+  if (bodies.length === 0) return
+  const rows = bodies.map(
+    (b) => sql`(${b.messageId}::uuid, ${b.createdAt}::timestamptz)`,
+  )
+  await withTenant(db, tenantId, (tx) =>
+    tx.execute(sql`
+      update core.message_bodies b set judged_at = now()
+        from (values ${sql.join(rows, sql`, `)}) as v (message_id, created_at)
+       where b.message_id = v.message_id and b.created_at = v.created_at
+    `),
+  )
 }
 
 export async function judgeContent(
@@ -149,48 +287,30 @@ export async function judgeContent(
   )
 
   const trust = deps.trust ?? null
-  const bodies: Body[] = []
+  const bodies: (JudgeCandidate & { messageId: string; createdAt: string })[] = []
   for (const r of rows) {
-    const sender = parseSender(r.from_address)
-    const replyTo = (r.reply_to ?? [])
-      .map((a) => parseSender(a).domain)
-      .find((d) => d && d !== sender.domain)
-    const found =
-      trust && trust.entries.length > 0
-        ? await classify(
-            { html: r.html, text: r.text },
-            trust.entries,
-            trust.ctx,
-          ).catch(() => null)
-        : null
+    const candidate = await judgeCandidate(
+      {
+        subject: r.subject,
+        from: r.from_address,
+        replyTo: r.reply_to,
+        to: r.to_addresses,
+        html: r.html,
+        text: r.text,
+      },
+      trust,
+    )
     bodies.push({
+      ...candidate,
       messageId: r.message_id,
       createdAt: String(r.created_at),
-      exact: fingerprint(r.subject, r.html, r.text)?.exact ?? null,
-      trustedBy: found ? trustMark(found.entry) : null,
-      email: {
-        subject: r.subject,
-        text: r.text ?? (r.html ? htmlToText(r.html) : ""),
-        senderName: sender.name,
-        senderDomain: sender.domain,
-        replyToDomain: replyTo ?? null,
-        html: r.html,
-        recipientDomain: r.to_addresses[0]
-          ? parseSender(r.to_addresses[0]).domain
-          : null,
-      },
     })
   }
 
-  // One email per distinct content, the newest; trusted only if every body fitted the same entry.
-  const distinct = new Map<string, { email: JudgeEmail; mark: string | null }>()
-  for (const b of bodies) {
-    if (!b.exact || ALLOWLISTED.has(b.exact)) continue
-    const seen = distinct.get(b.exact)
-    if (!seen) distinct.set(b.exact, { email: b.email, mark: b.trustedBy })
-    else if (seen.mark !== b.trustedBy) seen.mark = null
-  }
-  const untrusted = [...distinct].filter(([, d]) => d.mark === null).map(([e]) => e)
+  const distinct = distinctContents(bodies)
+  const untrusted = [...distinct.values()]
+    .filter((d) => d.trustedBy === null)
+    .map((d) => d.exact)
   const have = await deps.judgements.judged(tenantId, deps.judge.key, untrusted)
   const unresolved = new Set<string>()
   const capped: string[] = []
@@ -201,10 +321,19 @@ export async function judgeContent(
       unresolved.add(exact)
       continue
     }
-    const outcome = await deps.judge.judge(tenantId, distinct.get(exact)!.email)
+    const content = distinct.get(exact)!
+    const outcome = await deps.judge.judge(tenantId, content.email)
     if (outcome.status === "judged") {
       calls--
-      if (await deps.judgements.save(tenantId, exact, outcome.judgement, now))
+      if (
+        await deps.judgements.save(
+          tenantId,
+          exact,
+          outcome.judgement,
+          now,
+          content.bands,
+        )
+      )
         result.judged++
       continue
     }
@@ -216,34 +345,15 @@ export async function judgeContent(
   result.capped = capped.length
   result.deferred = unresolved.size - capped.length
 
-  // ⚠ DISTINCT PER DAY ACROSS PASSES: a content seen every hour is one.
-  const day = now.toISOString().slice(0, 10)
-  const fresh = async (kind: string, members: string[]) => {
-    const redis = deps.seenRedis
-    if (!redis || members.length === 0) return 0
-    const key = `risk:judge:${kind}:${tenantId}:${day}`
-    try {
-      const added = await redis.sadd(key, ...members)
-      await redis.expire(key, 2 * 86_400)
-      return added
-    } catch {
-      return 0
-    }
-  }
-  await deps.judgements.addDay(tenantId, day, {
-    seen: await fresh("seen", untrusted),
+  await countDay(deps, tenantId, now, {
+    seen: untrusted,
     judged: result.judged,
-    capped: await fresh("capped", capped),
+    capped,
   })
-
-  await withTenant(deps.db, tenantId, async (tx) => {
-    for (const b of bodies) {
-      if (b.exact && unresolved.has(b.exact)) continue
-      await tx.execute(sql`
-        update core.message_bodies set judged_at = now()
-         where message_id = ${b.messageId}::uuid and created_at = ${b.createdAt}::timestamptz
-      `)
-    }
-  })
+  await stampJudged(
+    deps.db,
+    tenantId,
+    bodies.filter((b) => !(b.print && unresolved.has(b.print.exact))),
+  )
   return result
 }

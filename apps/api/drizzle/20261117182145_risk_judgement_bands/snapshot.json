@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "3ddc6adc-dafd-4a34-8cd1-eb2ac5a710a5",
+  "prevIds": [
+    "84a03ef7-ea66-4a8c-a5da-cdef7bd099cc"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "risk_content_judgements",
+        "bands"
+      ],
+      "writes": [
+        "s|col|core.risk_content_judgements.bands",
+        "n|col|core.risk_content_judgements.bands",
+        "e|col|core.risk_content_judgements.bands"
+      ],
+      "reads": [
+        "n|tbl|core.risk_content_judgements",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "risk_content_judgements",
+        "name": "bands",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

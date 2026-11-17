@@ -827,6 +827,71 @@ would be a gradient to tune against. `risk-admin explain` shows the signals,
   third of the time by the identity signal. The phishing signal is the weaker
   net for it.
 
+### Judging before the first send
+
+The hourly pass judges mail up to an hour after it was accepted, so a new
+account's first phishing run could go out before anything read it. The worker
+now judges an untrusted workspace's new content between the claim and the held
+check (`content/screen.ts`, wired in `worker/handle-batch.ts`): claim, screen,
+held check, send.
+
+**Who is untrusted.** A workspace created less than `RISK_SCREEN_UNTRUSTED_DAYS`
+(30) days ago, or one whose current band is elevated or worse, unless staff
+cleared it: a release or pin whose `auto_actions_paused_until` is still ahead.
+That pause stops the score from acting anyway, so screening such a workspace
+could change nothing. Our own system tenant is never screened, like it is never
+scored.
+
+**What is skipped.** Content the trust matcher vouches for (the five-minute
+pass's cached-verdict matcher, failing closed the same way), content too short
+to fingerprint, content with a judgement under the current key, and content
+near one of this workspace's judgements from the last 7 days. Only bodies
+resolved by their own exact fingerprint (trusted, too short, or with an exact
+judgement) are stamped `judged_at`. ⚠ A NEAR MATCH SKIPS THE WAIT, NEVER THE
+JUDGE: a stamped body is never judged again, and a close copy of judged mail
+with its link swapped would otherwise never be judged at all. Near copies are
+sent at once and stay unstamped, so the hourly pass judges each by its exact
+content. The judge input is
+built by the same code on both paths (`judgeCandidate` in
+`content/judging.ts`), so a body gets the same question either way.
+
+**Near-duplicates are one content.** The exact fingerprint does not fold names,
+so "Hi Anna" and "Hi Ben" differ, and one personalised batch judged content by
+content would spend the day's free Workers AI neurons. Two contents are one
+when they share at least 2 of their 8 MinHash bands, the line the farm check
+already draws (`fingerprint_peers` counts a near pair at 2). A changed name or
+token measured 3 to 5 shared bands, and unrelated mail shares none. Within a
+batch, each content joins the first group whose first member it is that near;
+across batches, a judgement keeps its body's bands (`bands` on
+`core.risk_content_judgements`, saved by both paths) and
+`risk_content_judged_near` finds the ones a new content is near. Bands, not a
+similarity estimate, because bands are what is stored.
+
+**The cap and the deadline.** At most `RISK_SCREEN_MAX_GROUPS` (3) groups per
+batch are judged, one call each, one after another, through the same
+`ContentJudge`, so the daily budgets, the per-workspace budget, model parking
+and the second opinion all apply unchanged. The whole screen, judging and
+re-score, has `RISK_SCREEN_DEADLINE_MS` (20 seconds). Groups past the cap are
+sent unstamped and the hourly pass judges them.
+
+**Re-score, then the held check.** When anything was judged, the screen
+records the batch's fingerprints (the facts read judged content through them)
+and re-scores the workspace with `scoreTenant`, trigger `first-send`. Then the
+existing held check runs, so a hold the re-score placed cancels this batch. A
+body's fingerprints are counted by whichever writer stamps `fingerprinted_at`
+first, the screen or the five-minute pass, never by both.
+
+**Fails open.** A spent budget, a parked or failing model, the deadline or any
+error sends the batch anyway and leaves its content unstamped, so the hourly
+pass still judges it. A judge answer that arrives after the deadline is still
+saved, since it was paid for. Each batch's outcome is on the worker's
+`BatchResult` as `screen`, and every batch that was judged or sent unscreened
+logs one line with the workspace id and the reason, never the content.
+
+**It cannot stop mail yet.** The judge rules are in shadow, so the re-score
+records what the judge found and moves nothing. The screen is in place so that
+the first send is covered on the day the rules leave shadow.
+
 ---
 
 ## Account takeover is a separate response
@@ -918,6 +983,10 @@ day emails the owner as a possible leak.
 | `RISK_JUDGE_DAILY_LIMIT`                              | `700`        | first-model judgements per UTC day, every workspace together              |
 | `RISK_JUDGE_TENANT_DAILY_LIMIT`                       | `100`        | judgements per workspace per UTC day                                      |
 | `RISK_JUDGE_SECOND_DAILY_LIMIT`                       | `150`        | second-model calls per UTC day                                            |
+| `RISK_SCREEN_BEFORE_SEND`                             | `true`       | judge an untrusted workspace's new content in the worker before sending   |
+| `RISK_SCREEN_UNTRUSTED_DAYS`                          | `30`         | a workspace younger than this many days is screened                       |
+| `RISK_SCREEN_MAX_GROUPS`                              | `3`          | groups of near-duplicate content judged per batch                         |
+| `RISK_SCREEN_DEADLINE_MS`                             | `20000`      | the whole screen of one batch, judging and re-score                       |
 
 Every action has its own switch so a bad rule can be turned off without a
 revert.
