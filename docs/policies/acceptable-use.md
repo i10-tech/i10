@@ -4,7 +4,7 @@
 
 This policy says what you may send through i10, what you may not, and what we do when the rules are broken. It applies to everything sent or received through i10: the email API, broadcasts, templates, hosted mailboxes, and anything a customer of yours sends through your account.
 
-Every rule has a short code, such as `AUP-C1`. When we limit, hold or close an account, we tell you which rule the decision rests on. If we cannot name a rule, we do not act.
+Every rule has a short code, such as `AUP-C1`. When we limit, hold or close an account, we tell you which rule the decision rests on. If we cannot name a rule, we do not act for abuse. This does not limit our right to act for non-payment, a legal order, a provider's requirement, or a threat to the security of the service.
 
 ## 1. The short version
 
@@ -82,16 +82,16 @@ To ask for approval, write to compliance@i10.tech with what you send, to whom, h
 
 ## 7. How you send
 
-| Code     | Rule                                                                                                                                                                                                                                |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AUP-S1` | **Keep hard bounces low.** Stay below 4% of the mail you send. At 10% and above we limit or stop your sending. A high bounce rate means the list is old, bought or guessed.                                                         |
-| `AUP-S2` | **Keep complaints low.** Stay below 0.1%, one complaint in a thousand messages. At 0.3% and above we limit or stop your sending. These are the same numbers Gmail and Yahoo apply to you.                                           |
-| `AUP-S3` | **We do not judge rates on a handful of messages.** Below about a hundred messages in the period we look at counts, not percentages. One bounce in three messages is not a 33% bounce rate.                                         |
-| `AUP-S4` | **Do not spread out to hide.** Do not split sending across workspaces, accounts, domains or API keys to stay under a limit or to dilute a bad reputation.                                                                           |
-| `AUP-S5` | **One closed account means closed.** If we suspend or close an account for abuse, do not open another, yourself or through someone else. We keep a record of confirmed abuse after an account is deleted, for exactly this purpose. |
-| `AUP-S6` | **Do not manipulate reputation.** No inbox warm-up networks, no paid engagement, no mail sent only to make a domain or address look trusted, no seed-list gaming.                                                                   |
-| `AUP-S7` | **Grow at a human pace.** A new sender ramps up over days and weeks. A sudden jump to large volume from a new account is held for review.                                                                                           |
-| `AUP-S8` | **Attachments.** Do not send executable files or scripts, files whose real type differs from their name, password-protected archives meant to avoid scanning, or documents with macros. We refuse messages that carry them.         |
+| Code     | Rule                                                                                                                                                                                                                                   |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUP-S1` | **Keep hard bounces low.** Stay below 4% of the mail you send. At 10% and above we limit or stop your sending. A high bounce rate means the list is old, bought or guessed.                                                            |
+| `AUP-S2` | **Keep complaints low.** Stay below 0.1%, one complaint in a thousand messages. At 0.3% and above we limit or stop your sending. These are the same numbers Gmail and Yahoo apply to you.                                              |
+| `AUP-S3` | **We do not judge rates on a handful of messages.** Below about a hundred messages in the period we look at counts, not percentages. One bounce in three messages is not a 33% bounce rate. We measure rates over the last seven days. |
+| `AUP-S4` | **Do not spread out to hide.** Do not split sending across workspaces, accounts, domains or API keys to stay under a limit or to dilute a bad reputation.                                                                              |
+| `AUP-S5` | **One closed account means closed.** If we suspend or close an account for abuse, do not open another, yourself or through someone else. We keep a record of confirmed abuse after an account is deleted, for exactly this purpose.    |
+| `AUP-S6` | **Do not manipulate reputation.** No inbox warm-up networks, no paid engagement, no mail sent only to make a domain or address look trusted, no seed-list gaming.                                                                      |
+| `AUP-S7` | **Grow at a human pace.** A new sender ramps up over days and weeks. A sudden jump to large volume from a new account is held for review.                                                                                              |
+| `AUP-S8` | **Attachments.** Do not send executable files or scripts, files whose real type differs from their name, password-protected archives meant to avoid scanning, or documents with macros. We refuse messages that carry them.            |
 
 ## 8. Sending for your own customers
 
@@ -122,13 +122,13 @@ To ask for approval, write to compliance@i10.tech with what you send, to whom, h
 
 We choose the mildest step that stops the harm.
 
-| Step           | What it means                                                                                                                      |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **Notice**     | We tell you what we saw and which rule it concerns. Nothing is restricted.                                                         |
-| **Limits**     | Your sending volume is reduced while the problem is fixed.                                                                         |
-| **Hold**       | New messages are accepted and kept, not delivered, until a person has reviewed the account. Nothing is lost if the hold is lifted. |
-| **Suspension** | Sending stops. You keep access to your data and can appeal.                                                                        |
-| **Closure**    | The account is closed and the abuse is recorded under `AUP-S5`.                                                                    |
+| Step           | What it means                                                                                                                                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Notice**     | We tell you what we saw and which rule it concerns. Nothing is restricted.                                                                                                                                                          |
+| **Limits**     | Your sending volume is reduced while the problem is fixed.                                                                                                                                                                          |
+| **Hold**       | Sending stops until a person has reviewed the account. New messages are refused, and queued and scheduled messages are cancelled. They are not sent later, so send them again if the hold is lifted. Hosted mailboxes keep working. |
+| **Suspension** | Sending stops. You keep access to your data and can appeal.                                                                                                                                                                         |
+| **Closure**    | The account is closed and the abuse is recorded under `AUP-S5`.                                                                                                                                                                     |
 
 We skip straight to suspension or closure for anything in section 5, for malware or phishing links, for evading a previous decision, and when the law or our providers require it. We may also act without notice when waiting would cause harm to recipients or to other customers' delivery.
 

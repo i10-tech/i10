@@ -328,7 +328,7 @@ export const FAQ = [
   },
   {
     q: "Where is my data stored?",
-    a: "In the EU. i10 sends through eu-central-1 in Frankfurt, and message bodies are sealed into per-workspace packs.",
+    a: "Mail data is stored in Europe. i10 sends through eu-central-1 in Frankfurt and stores messages in Germany and in European object storage. Sign-in data is processed in the United States by our authentication provider. The subprocessors page lists every service and its location.",
   },
   {
     q: "Do you offer discounts for startups or non-profits?",

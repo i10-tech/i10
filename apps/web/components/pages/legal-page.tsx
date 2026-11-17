@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { cn } from "cn"
 import { Frame } from "@/components/site/section"
-import { PAGES, type DocPage } from "@/lib/pages"
+import { PAGES, type DocPage, type DocTable } from "@/lib/pages"
 import { DocToc } from "./doc-toc"
 import { PageHero } from "./page-hero"
 
@@ -11,11 +11,7 @@ const slugify = (s: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
 
-/*
- * A legal document: a sticky table of contents, a readable measure, and a
- * draft notice that nobody can miss. The text is placeholder until it has
- * been written and reviewed; the page says so in the first thing you read.
- */
+/* A legal document: a sticky table of contents and a readable measure. */
 export function LegalPageView({ slug, page }: { slug: string; page: DocPage }) {
   const items = page.sections.map((s) => ({ id: slugify(s.title), title: s.title }))
   const siblings = Object.entries(PAGES).filter(
@@ -55,33 +51,11 @@ export function LegalPageView({ slug, page }: { slug: string; page: DocPage }) {
           </aside>
 
           <article className="max-w-[44rem]">
-            <div
-              data-reveal
-              className="flex gap-3.5 rounded-[14px] bg-brand-soft p-4 text-[13.5px] leading-[21px] text-fg-2 shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--brand)_28%,transparent)]"
-            >
-              <span aria-hidden className="mt-[7px] size-[6px] shrink-0 bg-brand" />
-              <p>
-                <span className="font-[540] text-fg">Draft.</span> This document is a
-                placeholder while i10 prepares its terms. It is not in force and does
-                not describe a binding agreement. Questions until then go to{" "}
-                <a
-                  href="mailto:legal@i10.tech"
-                  className="text-fg underline decoration-line-strong underline-offset-4 hover:decoration-fg"
-                >
-                  legal@i10.tech
-                </a>
-                .
-              </p>
-            </div>
-
             {page.sections.map((section, i) => (
               <section
                 key={section.title}
                 id={items[i]?.id}
-                className={cn(
-                  "scroll-mt-[calc(var(--nav-h)+2rem)]",
-                  i === 0 ? "mt-14" : "mt-12",
-                )}
+                className={cn("scroll-mt-[calc(var(--nav-h)+2rem)]", i > 0 && "mt-12")}
               >
                 <h2
                   data-reveal
@@ -97,11 +71,53 @@ export function LegalPageView({ slug, page }: { slug: string; page: DocPage }) {
                     {para}
                   </p>
                 ))}
+                {section.table && <SectionTable table={section.table} />}
+                {section.after?.map((para) => (
+                  <p key={para} className="mt-4 text-[15px] leading-[26px] text-fg-2">
+                    {para}
+                  </p>
+                ))}
               </section>
             ))}
           </article>
         </div>
       </Frame>
     </>
+  )
+}
+
+/* Scrolls sideways on a narrow screen, so no column is squeezed unreadable. */
+function SectionTable({ table }: { table: DocTable }) {
+  return (
+    <div data-reveal className="mt-6 overflow-x-auto rounded-[14px] border border-line">
+      <table className="w-full min-w-[640px] border-collapse text-left text-[13.5px] leading-[21px]">
+        <thead>
+          <tr>
+            {table.columns.map((column) => (
+              <th key={column} scope="col" className="type-label px-4 py-3 text-fg-4">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row) => (
+            <tr key={row[0]} className="border-t border-line align-top">
+              {row.map((cell, i) =>
+                i === 0 ? (
+                  <th key={i} scope="row" className="px-4 py-3.5 font-[540] text-fg">
+                    {cell}
+                  </th>
+                ) : (
+                  <td key={i} className="px-4 py-3.5 text-fg-2">
+                    {cell}
+                  </td>
+                ),
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
