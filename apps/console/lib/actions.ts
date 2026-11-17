@@ -459,6 +459,14 @@ export async function restoreMailbox(address: string) {
   )
 }
 
+/** Starts again the export a deleting mailbox is waiting for (admin, step-up). */
+export async function retryMailboxExport(address: string) {
+  return run(
+    () => api<MailboxAfter>(`${mailboxPath(address)}/retry-export`, { method: "POST" }),
+    MAILBOX_PAGES,
+  )
+}
+
 /**
  * ⚠ THE THREE TEAM INBOX ACTIONS ARE AN OWNER OR ADMIN'S, EACH BEHIND STEP-UP
  * (`useStepUp` in the dialog that calls them). The API asks a member for nothing

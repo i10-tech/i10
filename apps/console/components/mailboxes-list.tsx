@@ -273,6 +273,7 @@ const MENU_LABEL = {
   suspend: "Suspend",
   resume: "Resume",
   restore: "Restore",
+  retry_export: "Start export again",
   delete: "Delete",
 } as const
 

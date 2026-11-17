@@ -64,6 +64,15 @@ export type DeleteResult =
 
 export type RestoreOutcome = "restored" | "not_found" | "not_deleting" | "window_closed"
 
+export type RetryExportOutcome =
+  | "started"
+  | "not_found"
+  | "not_deleting"
+  /** The deletion chose another outcome, so nothing waits for an export. */
+  | "not_waiting_for_export"
+  | "export_unavailable"
+  | "export_failed"
+
 /** What the console's routes use. */
 export interface MailboxAdminLifecycle {
   /** An owner or admin of the workspace. */
@@ -89,6 +98,12 @@ export interface MailboxAdminLifecycle {
     address: string
     actorId: string
   }): Promise<RestoreOutcome>
+  /** Starts the export a deleting mailbox is waiting for again (admin; a failed one never counts). */
+  retryExport(input: {
+    tenantId: string
+    address: string
+    actorId: string
+  }): Promise<RetryExportOutcome>
 }
 
 export interface MailboxLifecycleDeps {
@@ -204,6 +219,29 @@ export function mailboxAdminLifecycle(d: MailboxLifecycleDeps): MailboxAdminLife
       if (!ref) return "not_found"
       return d.store.restore(tenantId, ref.clerkUserId, actorId, now())
     },
+
+    async retryExport({ tenantId, address, actorId }) {
+      if (!d.startExport) return "export_unavailable"
+      const ref = await d.store.find(tenantId, address)
+      if (!ref) return "not_found"
+      if (!ref.deleting) return "not_deleting"
+      const row = await d.store.deletion(tenantId, ref.clerkUserId)
+      if (!row) return "not_deleting"
+      if (row.outcome !== "export_then_delete") return "not_waiting_for_export"
+      // ⚠ THE SAME START AS THE DELETION'S OWN (`startMailboxExport`): a running one
+      // is returned rather than doubled, and a new one is begun after `deleting_at`,
+      // so it is the one the purge's rule (`exportWait`) will count.
+      try {
+        await d.startExport({ tenantId, address: ref.address, requestedBy: actorId })
+      } catch (error) {
+        d.log.error(
+          { tenantId, err: error instanceof Error ? error.name : "error" },
+          "could not start the export of a mailbox being deleted",
+        )
+        return "export_failed"
+      }
+      return "started"
+    },
   }
 }
 
@@ -236,7 +274,14 @@ export type PurgeOutcome =
 const DESTROY_ATTEMPTS = 3
 
 /**
- * Whether the export `export_then_delete` waits for has done its job.
+ * Why a deleting mailbox is still waiting for its export, or null when it is not.
+ *
+ *   - `export_pending`: one is queued or running (or finished with no end date yet).
+ *   - `export_failed`: the latest one, begun after the deletion, failed.
+ *   - `export_missing`: none was begun after the deletion (the one the deletion
+ *     queued was lost, or an older one was reused); an admin starts one.
+ *   - `export_ready_after`: it finished, and its download has not yet been on offer
+ *     for as long as an export ever is; `readyAfter` is when it has.
  *
  * ⚠ THE LATEST EXPORT OF THE MAILBOX, BEGUN AT OR AFTER THE DELETION, FINISHED, AND
  * PAST ITS OWN RETENTION (`expires_at`, set to `EXPORT_KEEP_MS` after it finished).
@@ -249,15 +294,29 @@ const DESTROY_ATTEMPTS = 3
  * copy. THE EXPORT IS A SNAPSHOT: mail delivered after it began is not in it, and
  * an admin who wants those messages runs another export before the date (the
  * latest one counts).
+ *
+ * ⚠ ONE FUNCTION FOR THE PURGE AND THE CONSOLE, so the banner can never say "ready"
+ * about a mailbox the purge is still holding, or the other way round.
  */
-function exportReady(job: MailboxJobRow | null, row: DeletionRow, at: Date): boolean {
-  return (
-    job !== null &&
-    job.status === "completed" &&
-    job.createdAt.getTime() >= row.deletingAt.getTime() &&
-    job.expiresAt !== null &&
-    at.getTime() >= job.expiresAt.getTime()
-  )
+export type ExportWait =
+  | { reason: "export_pending" | "export_failed" | "export_missing" }
+  | { reason: "export_ready_after"; readyAfter: Date }
+
+export function exportWait(
+  job: Pick<MailboxJobRow, "status" | "createdAt" | "expiresAt"> | null,
+  row: Pick<DeletionRow, "deletingAt">,
+  at: Date,
+): ExportWait | null {
+  if (job && (job.status === "pending" || job.status === "running"))
+    return { reason: "export_pending" }
+  if (!job || job.createdAt.getTime() < row.deletingAt.getTime())
+    return { reason: "export_missing" }
+  if (job.status === "failed") return { reason: "export_failed" }
+  if (job.status !== "completed" || job.expiresAt === null)
+    return { reason: "export_pending" }
+  return at.getTime() >= job.expiresAt.getTime()
+    ? null
+    : { reason: "export_ready_after", readyAfter: job.expiresAt }
 }
 
 async function destroyUntilGone(accounts: MailboxAccounts, address: string) {
@@ -283,7 +342,12 @@ async function destroyUntilGone(accounts: MailboxAccounts, address: string) {
  *      re-derive the mailbox and the address is not theirs to sign in with.
  *   4. DESTROY again: Clerk's event and step 2 can race with a late delivery.
  *   5. THE ROWS, in one transaction, the intent last. Only now is the address free
- *      to anybody else, and nothing of the old mail is left to inherit.
+ *      to anybody else, and nothing of the old mail is left to inherit. For a
+ *      `forward` the same transaction turns every alias the mailbox holds (Clerk's,
+ *      a directory's, the console's) into a list `aliasListName`, `fwd-<id>-a<hash>` with the same
+ *      target, so an alias is a row in `authd.aliases` or a list and never neither.
+ *      From step 1 until then the aliases are refused like the primary (their
+ *      account is inactive); only the primary's list answers meanwhile.
  * A crash after 1 leaves a refused address and a deleting mailbox; after 2, the
  * same with nothing to destroy; after 3, the projection may already have removed the
  * account row, which step 5 allows. At no point does the address accept mail for
@@ -301,7 +365,21 @@ export async function purgeMailbox(
 
   if (row.outcome === "export_then_delete") {
     const job = await d.exports.latest(ref.tenantId, row.address, "export")
-    if (!exportReady(job, row, at)) return "waiting_export"
+    const wait = exportWait(job, row, at)
+    if (wait) {
+      // ⚠ A FAILED OR MISSING EXPORT NEVER RESOLVES ON ITS OWN, and this runs every
+      // hour: said once a day per mailbox (`claimExportAlert`) at error level, which
+      // Sentry picks up. Tenant id only; the address is the customer's.
+      if (
+        (wait.reason === "export_failed" || wait.reason === "export_missing") &&
+        (await d.store.claimExportAlert(ref.tenantId, ref.clerkUserId, at))
+      )
+        d.log.error(
+          { tenantId: ref.tenantId, reason: wait.reason },
+          "a mailbox is past its deletion date and cannot be purged: its export did not finish",
+        )
+      return "waiting_export"
+    }
   }
 
   const closed = await d.store.close(ref.tenantId, ref.clerkUserId, at)

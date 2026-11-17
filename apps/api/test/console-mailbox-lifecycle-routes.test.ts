@@ -7,6 +7,7 @@ import type {
   MailboxAdminLifecycle,
   ResumeResult,
   RestoreOutcome,
+  RetryExportOutcome,
   SuspendResult,
 } from "../src/mailboxes/lifecycle.js"
 import { mountMailboxAdmin } from "../src/routes/console/mailbox-admin.js"
@@ -39,9 +40,13 @@ function world(
     resume?: ResumeResult
     remove?: DeleteResult
     restore?: RestoreOutcome
+    retryExport?: RetryExportOutcome
     wired?: boolean
   } = {},
 ) {
+  const retryExport = mock<MailboxAdminLifecycle["retryExport"]>(
+    async () => over.retryExport ?? "started",
+  )
   const suspend = mock<MailboxAdminLifecycle["suspend"]>(
     async () => over.suspend ?? "suspended",
   )
@@ -60,8 +65,17 @@ function world(
     resume,
     remove,
     restore,
+    retryExport,
   }
-  return { lifecycle, suspend, resume, remove, restore, wired: over.wired ?? true }
+  return {
+    lifecycle,
+    suspend,
+    resume,
+    remove,
+    restore,
+    retryExport,
+    wired: over.wired ?? true,
+  }
 }
 
 function appFor(w: ReturnType<typeof world>, who: keyof typeof people, fresh = true) {
@@ -94,14 +108,18 @@ const path = (verb: string, address = ADDRESS) =>
 
 const named = async (res: Response) => (await res.json()) as { name: string }
 
-describe.each(["suspend", "resume", "delete", "restore"] as const)(
+describe.each(["suspend", "resume", "delete", "restore", "retry-export"] as const)(
   "POST /mailboxes/:address/%s",
   (verb) => {
     const body = verb === "delete" ? { outcome: "delete" } : undefined
     const mocks = (w: ReturnType<typeof world>) =>
-      ({ suspend: w.suspend, resume: w.resume, delete: w.remove, restore: w.restore })[
-        verb
-      ]
+      ({
+        suspend: w.suspend,
+        resume: w.resume,
+        delete: w.remove,
+        restore: w.restore,
+        "retry-export": w.retryExport,
+      })[verb]
 
     it("answers 501 where the lifecycle is not wired", async () => {
       const w = world({ wired: false })
@@ -299,5 +317,32 @@ describe("restore", () => {
     )
     expect(closed.status).toBe(409)
     expect((await named(closed)).name).toBe("restore_window_closed")
+  })
+})
+
+describe("retry-export", () => {
+  it("starts the export again and answers with the mailbox", async () => {
+    const w = world()
+    const res = await call(appFor(w, "admin").app, path("retry-export"))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      mailbox: { address: ADDRESS, status: "deleting" },
+    })
+    expect(w.retryExport).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["not_found", 404, "not_found"],
+    ["not_deleting", 409, "not_deleting"],
+    ["not_waiting_for_export", 409, "not_waiting_for_export"],
+    ["export_unavailable", 501, "internal_server_error"],
+    ["export_failed", 503, "application_error"],
+  ] as const)("maps %s to %i", async (status, code, name) => {
+    const res = await call(
+      appFor(world({ retryExport: status }), "admin").app,
+      path("retry-export"),
+    )
+    expect(res.status).toBe(code)
+    expect((await named(res)).name).toBe(name)
   })
 })

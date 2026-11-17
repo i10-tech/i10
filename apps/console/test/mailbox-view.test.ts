@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import {
   availableActions,
   canRestore,
+  exportWaitWords,
   forwardTargets,
   gigabytesText,
   mailboxActionRefusal,
@@ -21,6 +22,17 @@ const deletion = (purgeAt: string): ConsoleMailboxDeletion => ({
   deletedAt: "2026-10-20T12:00:00.000Z",
   purgeAt,
   forwardTo: null,
+  exportWait: null,
+})
+
+const waiting = (
+  reason: NonNullable<ConsoleMailboxDeletion["exportWait"]>["reason"],
+  purgeAt: string,
+  readyAfter: string | null = null,
+): ConsoleMailboxDeletion => ({
+  ...deletion(purgeAt),
+  outcome: "export_then_delete",
+  exportWait: { reason, readyAfter },
 })
 
 function mailbox(address: string, status: string): ConsoleMailbox {
@@ -69,8 +81,90 @@ describe("which actions a mailbox is offered", () => {
     expect(canRestore(over, NOW)).toBe(false)
   })
 
+  it("offers starting the export again when it failed or was never made, even after the window", () => {
+    const open = "2026-11-20T12:00:00.000Z"
+    const over = "2026-11-15T12:00:00.000Z"
+    for (const reason of ["export_failed", "export_missing"] as const) {
+      expect(
+        availableActions({ status: "deleting", deletion: waiting(reason, open) }, NOW),
+      ).toEqual(["restore", "retry_export"])
+      expect(
+        availableActions({ status: "deleting", deletion: waiting(reason, over) }, NOW),
+      ).toEqual(["retry_export"])
+    }
+    // A running export, or one that is only waiting out its download window, is not retried.
+    for (const reason of ["export_pending", "export_ready_after"] as const) {
+      expect(
+        availableActions({ status: "deleting", deletion: waiting(reason, over) }, NOW),
+      ).toEqual([])
+    }
+  })
+
   it("never offers restore to a deleting row that has no deletion record", () => {
     expect(availableActions({ status: "deleting", deletion: null }, NOW)).toEqual([])
+  })
+})
+
+describe("what a deletion waiting for its export says", () => {
+  const words = (
+    reason: NonNullable<ConsoleMailboxDeletion["exportWait"]>["reason"],
+    who = { restorable: true, isAdmin: true },
+    readyAfter: string | null = null,
+  ) =>
+    exportWaitWords(
+      waiting(reason, "2026-11-20T12:00:00.000Z", readyAfter).exportWait,
+      who,
+    )
+
+  it("says nothing when it is not waiting", () => {
+    expect(exportWaitWords(null, { restorable: true, isAdmin: true })).toBeNull()
+  })
+
+  it("names the next step: start again or restore for a failed export", () => {
+    expect(words("export_failed")?.text).toBe(
+      "The export failed, so the mailbox is not erased yet. Start the export again, or restore the mailbox.",
+    )
+    expect(words("export_missing")?.text).toContain("There is no export")
+  })
+
+  it("does not point at a restore that is no longer offered, or at buttons a member lacks", () => {
+    expect(words("export_failed", { restorable: false, isAdmin: true })?.text).toBe(
+      "The export failed, so the mailbox is not erased yet. Start the export again.",
+    )
+    expect(
+      words("export_failed", { restorable: false, isAdmin: false })?.text,
+    ).toContain("Ask an owner or admin")
+  })
+
+  it("gives the date a finished export is ready to be erased after", () => {
+    const done = words("export_ready_after", undefined, "2026-11-27T12:00:00.000Z")
+    expect(done?.date).toBe("2026-11-27T12:00:00.000Z")
+    expect(words("export_pending")?.date).toBeNull()
+  })
+
+  it("never writes an em dash", () => {
+    for (const reason of [
+      "export_pending",
+      "export_failed",
+      "export_missing",
+      "export_ready_after",
+    ] as const) {
+      expect(words(reason)?.text).not.toContain(String.fromCharCode(0x2014))
+    }
+  })
+
+  it("says what a refused retry means, in the API's own sentence", () => {
+    expect(
+      mailboxActionRefusal(
+        {
+          name: "not_waiting_for_export",
+          status: 409,
+          error: "That mailbox was not deleted with an export first.",
+        },
+        "retry_export",
+      ),
+    ).toBe("That mailbox was not deleted with an export first.")
+    expect(refusalTitle("retry_export")).toBe("Could not start the export")
   })
 })
 

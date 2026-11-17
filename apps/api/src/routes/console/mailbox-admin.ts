@@ -21,6 +21,7 @@ import { notFound, notWired, readJson, validation } from "./http.js"
  *   POST /mailboxes/:address/resume    lift an owner's suspension (step-up)
  *   POST /mailboxes/:address/delete    delete with a 30 day way back (step-up)
  *   POST /mailboxes/:address/restore   undo a deletion inside the 30 days (step-up)
+ *   POST /mailboxes/:address/retry-export   start again the export a deletion waits for (step-up)
  *
  * ⚠ THE LIFECYCLE ROUTES ARE POSTS TO A VERB, NOT A DELETE ON THE MAILBOX: a
  * deletion carries a body (what to do with the address) and is undone by another
@@ -129,7 +130,7 @@ export function mountMailboxAdmin(app: Hono, d: ConsoleDeps): void {
   }
 
   /**
-   * The four lifecycle routes share their opening: wired, then role, then step-up,
+   * The lifecycle routes share their opening: wired, then role, then step-up,
    * then the address in the path (404 when it is none of this workspace's).
    */
   const lifecycle = async (c: Context) => {
@@ -241,6 +242,39 @@ export function mountMailboxAdmin(app: Hono, d: ConsoleDeps): void {
           "The 30 days to restore this mailbox are over, and it is being removed.",
         ),
         409,
+      )
+    return after(c, ready.address)
+  })
+
+  app.post("/mailboxes/:address/retry-export", async (c) => {
+    const ready = await lifecycle(c)
+    if ("refused" in ready) return ready.refused
+    const done = await ready.life.retryExport({
+      tenantId: ready.tenantId,
+      address: ready.address,
+      actorId: ready.userId,
+    })
+    if (done === "not_found") return c.json(NO_MAILBOX, 404)
+    if (done === "not_deleting")
+      return c.json(conflict("not_deleting", "That mailbox is not being deleted."), 409)
+    if (done === "not_waiting_for_export")
+      return c.json(
+        conflict(
+          "not_waiting_for_export",
+          "That mailbox was not deleted with an export first.",
+        ),
+        409,
+      )
+    if (done === "export_unavailable")
+      return c.json(DELETE_REFUSALS.export_unavailable, 501)
+    if (done === "export_failed")
+      return c.json(
+        {
+          statusCode: 503,
+          name: "application_error",
+          message: "The export could not be started. Try again.",
+        } as const,
+        503,
       )
     return after(c, ready.address)
   })
