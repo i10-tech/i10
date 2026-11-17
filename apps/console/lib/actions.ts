@@ -459,6 +459,43 @@ export async function restoreMailbox(address: string) {
 }
 
 /**
+ * ⚠ THE TWO ALIAS ACTIONS ARE AN OWNER OR ADMIN'S, BEHIND STEP-UP LIKE THE
+ * LIFECYCLE ONES, AND ANSWER WITH THE MAILBOX'S WHOLE ALIAS LIST (`data`, and the
+ * `limit`). They revalidate the mailbox page only: an alias is not shown on the
+ * list, so revalidating `/mailboxes` would throw away a render for nothing.
+ */
+const ALIAS_PAGES = ["/mailboxes/[address]"]
+
+interface AliasesAfter {
+  data: { address: string; source: "console" | "clerk" | "directory" }[]
+  limit: number
+}
+
+/** Gives a mailbox one more address, on any domain this workspace hosts mail on. */
+export async function addMailboxAlias(address: string, alias: string) {
+  return run(
+    () =>
+      api<AliasesAfter>(`${mailboxPath(address)}/aliases`, {
+        method: "POST",
+        body: { address: alias },
+      }),
+    ALIAS_PAGES,
+  )
+}
+
+/** Takes away an alias an owner or admin added. The API refuses the ones Clerk or a directory gave. */
+export async function removeMailboxAlias(address: string, alias: string) {
+  return run(
+    () =>
+      api<AliasesAfter>(
+        `${mailboxPath(address)}/aliases/${encodeURIComponent(alias)}`,
+        { method: "DELETE" },
+      ),
+    ALIAS_PAGES,
+  )
+}
+
+/**
  * Offers a domain to whoever holds an email address. Moves nothing yet.
  *
  * ⚠ `emailed` IS FALSE WHEN THE NOTICE COULD NOT BE SENT. The offer still
