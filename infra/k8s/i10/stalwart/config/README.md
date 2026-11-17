@@ -744,13 +744,28 @@ that starts in the default `rejoin` mode refuses new locks for the lock
 quarantine, 604 s for a single server (`max-lock-ttl` 600 s, which Stalwart
 needs, plus 3 s and a small term). Outbound delivery, scheduled tasks and search
 indexing take locks and wait it out. Nothing is lost, and mail is still
-received and served. What restarts the pod: a new Keep image, any edit to
-`keep.toml` (the ConfigMap name carries a hash, which is why the file has no
-comments), a changed CPU limit, and the node rebooting. The Stalwart nodes
-reconnect to it by themselves, and do not need a restart. `--start bootstrap`
-would skip the wait and is deliberately not in the pod template; it is right
-only when no client can hold a lock, which is never true of a restart that is
-not a whole-cluster restart.
+received and served. Locks held at the moment of the restart do not survive it:
+a restarted server comes back empty, a renewal or release of a lost lock is
+answered `NotFound`, and its holder learns that at its next renewal, while the
+quarantine stops a second holder taking it meanwhile. What restarts the pod: a
+new Keep image, any edit to `keep.toml` (the ConfigMap name carries a hash,
+which is why the file has no comments), a changed resource request or limit, and
+the node rebooting.
+
+The docs describe the nodes as retrying reads and lock operations within the
+request deadline (`deadline` 5000 ms, `attemptTimeout` 1000 ms by default) and
+report a Keep restart to subscribers as possible loss, so they discard their
+caches and check their queues. A full outage of the only Keep server longer than
+the deadline was not tested here, so do not assume the nodes recover by
+themselves. After any Keep restart, run the two greps in
+[section 3](#3-checking-the-nodes-are-on-keep) (`Failed to connect to Stalwart
+Keep` and `store.keep-error`) on both nodes, and delete a node that logs them.
+Both Stalwart pods also wait for Keep to accept connections before they start
+(the `wait-for-keep` init container), which covers a machine reboot.
+
+`--start bootstrap` would skip the wait and is deliberately not in the pod
+template; it is right only when no client can hold a lock, which is never true
+of a restart that is not a whole-cluster restart.
 
 ### 1. Create the secrets (once, before Keep first starts)
 
