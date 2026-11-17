@@ -248,6 +248,23 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
       allocatedBytes: 1073741824,
       usedBytes: 104857600,
     }),
+    // More people who can be picked for a team inbox (see lib/preview-team-inboxes.ts).
+    ...(
+      [
+        ["priya", "Priya Nair"],
+        ["marco", "Marco Rossi"],
+        ["sofia", "Sofia Lind"],
+        ["tomas", "Tomas Novak"],
+        ["yuki", "Yuki Tanaka"],
+        ["zara", "Zara Haddad"],
+      ] as const
+    ).map(([local, name]) =>
+      fixture(local, name, {
+        status: "active",
+        allocatedBytes: 536870912,
+        usedBytes: 20971520,
+      }),
+    ),
     fixture("gwen", "Gwen Park", {
       status: "suspended",
       allocatedBytes: 1073741824,
