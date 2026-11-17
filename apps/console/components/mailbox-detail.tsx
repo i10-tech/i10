@@ -17,8 +17,10 @@ import {
 import { UsageMeter } from "@repo/ui/components/usage-meter/usage-meter"
 import { DetailHero, MetaGrid } from "@/components/detail-hero"
 import { useMailboxActions } from "@/components/mailbox-actions"
+import { MailboxAliases } from "@/components/mailbox-aliases"
 import { MailboxTransfer } from "@/components/mailbox-transfer"
 import { Time } from "@/components/time"
+import type { MailboxAliasList } from "@/lib/mailbox-aliases"
 import {
   availableActions,
   DELETE_GRACE_DAYS,
@@ -34,8 +36,9 @@ import {
 } from "@/lib/mailbox-view"
 
 /**
- * One mailbox: who has it, what state it is in, how full it is, and - for an
- * owner or admin - the five things that can be done to it.
+ * One mailbox: who has it, what state it is in, how full it is, the other
+ * addresses that deliver to it, and - for an owner or admin - the five things that
+ * can be done to it.
  *
  * ⚠ A MEMBER SEES THE SAME PAGE WITHOUT THE BUTTONS. The API already answers a
  * member only for their own address (404 for anyone else's), so what is left to
@@ -55,6 +58,8 @@ export function MailboxDetail({
   mailbox,
   others,
   pool,
+  aliases,
+  domains,
   isAdmin,
   renderedAt,
 }: {
@@ -63,6 +68,10 @@ export function MailboxDetail({
   others: readonly ConsoleMailbox[]
   /** The storage pool, for the storage dialog. Admins only. */
   pool: StoragePool | null
+  /** The addresses that deliver here. Null where they could not be read. */
+  aliases: MailboxAliasList | null
+  /** The domains the workspace hosts mailboxes on, for the Add alias dialog. Admins only. */
+  domains: readonly string[]
   isAdmin: boolean
   renderedAt: string
 }) {
@@ -165,6 +174,13 @@ export function MailboxDetail({
               <StorageCard storage={mailbox.storage} />
             </SectionContent>
           </Section>
+
+          <MailboxAliases
+            mailbox={mailbox}
+            list={aliases}
+            domains={domains}
+            isAdmin={isAdmin}
+          />
 
           <MailboxTransfer address={mailbox.address} isAdmin={isAdmin} />
 

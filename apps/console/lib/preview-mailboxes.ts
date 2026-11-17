@@ -1,4 +1,5 @@
 import { ApiRequestError, type ApiError } from "./api-error"
+import { ALIAS_LIMIT, type AliasSource } from "./mailbox-aliases"
 
 type Query = Record<string, string | number | undefined | null> | undefined
 type Route = [
@@ -99,6 +100,14 @@ interface PreviewMailbox {
 }
 
 const DAY = 86_400_000
+
+/** `count` aliases the console added, `<local>.1@acme.dev` and on. */
+function consoleAliases(local: string, count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    address: `${local}.${i + 1}@acme.dev`,
+    source: "console" as const,
+  }))
+}
 
 /** A mailbox at `<first name>@acme.dev` for somebody who is not in `PREVIEW_MEMBERS`. */
 function fixture(
@@ -482,6 +491,101 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
     return undefined
   }
 
+  /**
+   * The aliases of each mailbox, by address. `alice` has one of every kind, `noah`
+   * is five short of the limit so the count line shows, `gwen` is at it so Add is
+   * disabled with its reason, and `hank` (deleting) shows Add disabled while Remove
+   * still works. Every other mailbox has none.
+   */
+  const aliasesOf = new Map<string, { address: string; source: AliasSource }[]>([
+    [
+      "alice@acme.dev",
+      [
+        { address: "admin@acme.dev", source: "console" },
+        { address: "alice.admin@acme.dev", source: "clerk" },
+        { address: "alice.a@acme.dev", source: "directory" },
+        { address: "billing@acme.dev", source: "console" },
+        { address: "hello@acme.com", source: "console" },
+      ],
+    ],
+    ["noah@acme.dev", consoleAliases("noah", 25)],
+    ["gwen@acme.dev", consoleAliases("gwen", ALIAS_LIMIT)],
+    ["hank@acme.dev", [{ address: "hank.aaron@acme.dev", source: "console" }]],
+  ])
+
+  const sorted = (rows: { address: string; source: AliasSource }[]) =>
+    [...rows].sort((a, b) => a.address.localeCompare(b.address))
+
+  /**
+   * The alias routes, and what each can be refused for, reached from the keyboard
+   * by the local part typed so every sentence can be reviewed:
+   *
+   *   - add: `taken` (409), `elsewhere` (422, a domain the workspace does not host),
+   *     `full` (409, the limit), and any mailbox in its deletion grace (409);
+   *   - remove: a directory's or Clerk's is refused (409), and one that is not there
+   *     is a 404.
+   */
+  function aliasRoute(
+    address: string,
+    alias: string | undefined,
+    method: string,
+    body: unknown,
+  ) {
+    const mailbox = find(address)
+    const rows = aliasesOf.get(address) ?? []
+    aliasesOf.set(address, rows)
+    const answer = () => ({ data: sorted(rows), limit: ALIAS_LIMIT })
+
+    if (method === "GET") return answer()
+
+    if (method === "POST") {
+      const wanted = (body as { address?: string } | null)?.address ?? ""
+      const local = wanted.split("@")[0] ?? ""
+      if (mailbox.status === "deleting") {
+        throw apiError(
+          409,
+          "mailbox_deleting",
+          "That mailbox is being deleted. Restore it first, or add the alias to another mailbox.",
+        )
+      }
+      if (local === "elsewhere") {
+        throw apiError(
+          422,
+          "validation_error",
+          "This workspace does not host mailboxes on that domain. Turn on mailboxes for the domain first.",
+        )
+      }
+      if (local === "full") {
+        throw apiError(
+          409,
+          "alias_limit_reached",
+          `A mailbox can have ${ALIAS_LIMIT} aliases added here.`,
+        )
+      }
+      const held =
+        local === "taken" ||
+        data.some((m) => m.address === wanted) ||
+        [...aliasesOf.values()].some((list) => list.some((a) => a.address === wanted))
+      if (held) throw apiError(409, "alias_taken", "That address is already taken.")
+      rows.push({ address: wanted, source: "console" })
+      return answer()
+    }
+
+    const index = rows.findIndex((a) => a.address === alias)
+    if (index === -1) {
+      throw apiError(404, "not_found", "That address is not an alias of this mailbox.")
+    }
+    if (rows[index]!.source !== "console") {
+      throw apiError(
+        409,
+        "alias_not_removable",
+        "That address comes from the person's account or a directory, and is removed there.",
+      )
+    }
+    rows.splice(index, 1)
+    return answer()
+  }
+
   return [
     [
       /^\/mailboxes$/,
@@ -502,6 +606,16 @@ export function mailboxRoutes(_notFound: unknown): Route[] {
     ],
     // ⚠ ONLY AN ADDRESS (it has an `@`, encoded or not), so the static
     // `/console/mailboxes/creation-mode` and `/storage` are still nobody's here.
+    [
+      /^\/console\/mailboxes\/([^/]*(?:%40|@)[^/]*)\/aliases(?:\/([^/]+))?$/,
+      (match, _query, method, body) =>
+        aliasRoute(
+          decodeURIComponent(match[1]!),
+          match[2] ? decodeURIComponent(match[2]) : undefined,
+          method,
+          body,
+        ),
+    ],
     [
       /^\/console\/mailboxes\/([^/]*(?:%40|@)[^/]*)\/(storage|suspend|resume|delete|restore)$/,
       (match, _query, _method, body) =>
