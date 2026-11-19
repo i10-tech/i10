@@ -27,6 +27,7 @@ export function SsoConnectionPageView({
     <BoneScope id="sso-connection" loading={loading}>
       <ConnectionView
         initial={data?.connection}
+        mail={data?.mail}
         abilities={
           data?.abilities ?? { manage: true, owner: shape.owner, userId: null }
         }

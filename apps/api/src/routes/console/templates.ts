@@ -59,7 +59,8 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
     return { name }
   }
 
-  const assetProxy = d.templateAssetProxy ??
+  const assetProxy =
+    d.templateAssetProxy ??
     createAssetProxy({
       limiter: fixedWindow(d.templateAssetCounter ?? null, Date.now, RATE_PREFIX),
     })
@@ -80,7 +81,11 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
       c.header("Retry-After", String(result.retryAfter))
       c.header("Cache-Control", "no-store")
       return c.json(
-        { statusCode: 429, name: "rate_limit_exceeded" as const, message: result.message },
+        {
+          statusCode: 429,
+          name: "rate_limit_exceeded" as const,
+          message: result.message,
+        },
         429,
       )
     }

@@ -26,7 +26,7 @@ patches:
       name: i10-stalwart
     patch: |-
       # ⚠ ONE, AND ONLY AFTER THE PLAN HAS RUN. Started before bootstrap.sh has
-      # applied the Redis in-memory store, the coordinator and the `internal`
+      # applied the shared in-memory store, the coordinator and the `internal`
       # role, this node would share the data store with the edge node and no
       # coordinator, and would run every task. It shipped at 0 (#363) and was
       # raised once the plan was live (2026-11-06). On a rebuild, start at 0

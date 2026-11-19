@@ -50,7 +50,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: renderer
-          image: ghcr.io/i10-tech/i10-template-renderer:prod-46c034947fa8281c0067376a0cd8ab5dc6b8a794@sha256:c5369ec41e6eea6f975316ab8fb2df120c170f83961d22d57036d3292d49339a
+          image: ghcr.io/i10-tech/i10-template-renderer:prod-816b3eb86ffb04b25d53a904c601fea1dc68da03@sha256:fde802faa533fb2e26bc26f26195705a20bce029b940c3b669d261b5c6f97774
           imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 8787 }
@@ -98,8 +98,8 @@ spec:
 # holds if a template gets out of its isolate. celld's own node traffic is on
 # loopback, which a NetworkPolicy does not touch.
 #
-# Ingress needs nothing here: `i10-prod` already admits its own pods, and the
-# bearer secret is what decides who may compile.
+# Ingress is `template-renderer-clients` in networkpolicy.yaml (the API and the
+# worker only); the bearer secret still decides who may compile.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

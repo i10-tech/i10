@@ -28,6 +28,7 @@ import { ProviderMark } from "@/components/provider-mark"
 import { Time, useExactTime } from "@/components/time"
 import { DomainDangerZone } from "@/components/domain-danger-zone"
 import { DomainTracking } from "@/components/domain-tracking"
+import { DomainMailboxes } from "@/components/domain-mailboxes"
 import { DelegationNote } from "@/components/delegation-note"
 import { PublishRecords } from "@/components/publish-records"
 import { RememberShape, useRecordShape } from "@/components/list/remembered-shapes"
@@ -302,6 +303,28 @@ export function DomainDetailView({
                         clickTracking={domain?.click_tracking ?? false}
                         loading={loading}
                       />
+                    </SectionContent>
+                  </Section>
+
+                  <Section>
+                    <SectionTitle>Mailboxes</SectionTitle>
+                    <SectionDescription>
+                      Host mailboxes on this domain, receive mail and set a catch-all
+                      address.
+                    </SectionDescription>
+                    <SectionContent>
+                      <Bone id="mailboxes" shape="box" width="100%" height={96}>
+                        {data && (
+                          <DomainMailboxes
+                            domainId={data.domain.id}
+                            domainName={data.domain.name}
+                            mailboxes={data.domain.mailboxes}
+                            canManage={data.canManageMailboxes}
+                            initialMailboxes={data.mailboxAccounts}
+                            initialTeamInboxes={data.teamInboxes}
+                          />
+                        )}
+                      </Bone>
                     </SectionContent>
                   </Section>
 

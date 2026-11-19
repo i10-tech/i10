@@ -10,6 +10,9 @@ import { mountAccount } from "./console/account.js"
 import { mountTeam } from "./console/team.js"
 import { mountTeamInboxes } from "./console/team-inboxes.js"
 import { mountMailboxStorage } from "./console/mailbox-storage.js"
+import { mountMailboxes } from "./console/mailboxes.js"
+import { mountMailboxAdmin } from "./console/mailbox-admin.js"
+import { mountMailboxAliases } from "./console/mailbox-aliases.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountTemplates } from "./console/templates.js"
@@ -253,6 +256,9 @@ export function createConsole(deps?: ConsoleDeps) {
   mountTeam(app, d)
   mountTeamInboxes(app, d)
   mountMailboxStorage(app, d)
+  mountMailboxAdmin(app, d)
+  mountMailboxAliases(app, d)
+  mountMailboxes(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)

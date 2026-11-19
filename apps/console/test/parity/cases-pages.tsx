@@ -5,8 +5,6 @@ import { email, iso, retext, rows } from "./fixtures"
 const { previewFor } = await import("@/lib/preview")
 const { OverviewView } = await import("@/components/overview-view")
 const { overviewShape } = await import("@/lib/shapes/overview")
-const { MailboxesView } = await import("@/components/mailboxes-view")
-const { mailboxesShape } = await import("@/lib/shapes/mailboxes")
 const { AccountView } = await import("@/components/account-view")
 const { accountShape } = await import("@/lib/shapes/account")
 const { SettingsGeneralView } = await import("@/components/settings-general-view")
@@ -111,14 +109,6 @@ export const PAGE_VIEWS = [
         }),
       },
     ],
-  }),
-
-  defineView({
-    route: "/mailboxes",
-    pathname: "/mailboxes",
-    View: MailboxesView,
-    shape: mailboxesShape,
-    cases: [{ name: "the page", fixture: () => ({}) }],
   }),
 
   defineView({

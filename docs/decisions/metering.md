@@ -500,9 +500,9 @@ stands instead: stale and honest.
 Probed 2026-09-05: `/jmap`, `/.well-known/jmap` and `/api/schema` all answer
 **404** on `mail.i10.tech`, because `ingressroute.yaml` routes only autoconfig,
 autodiscover and MTA-STS to the pod - and the network policy's own comment says
-8080 is omitted "because the management API belongs behind Traefik". `i10-prod`
-is an allowed source namespace, so the reconcile job reaches it in-cluster at
-`http://i10-stalwart:8080`.
+8080 is omitted "because the management API belongs behind Traefik". The
+`stalwart-http-clients` policy admits the API group, so the reconcile job
+reaches it in-cluster at `http://i10-stalwart:8080`.
 
 #### The wire shape, verified 2026-09-06
 
@@ -564,11 +564,17 @@ WHICH IS WHY THERE IS A SERVICE ACCOUNT AT ALL.** It sits in an account's
 and hanging a cron job's credential off it would entangle revoking the job with
 their mailbox.
 
-⚠ **THREE PERMISSIONS OUT OF 660.** `authenticate`, `sysAccountGet`,
+⚠ **THREE PERMISSIONS OUT OF 660 (at creation; see below).** `authenticate`, `sysAccountGet`,
 `sysAccountQuery` - exactly what the two method calls need, and nothing else:
 no mail access, no writes, no configuration. The account carries them as
 `permissions: {"@type": "Replace", …}` and the key inherits, so the grant has
 one home rather than two that can drift.
+
+**2026-11-11:** the same key now also runs the mail domain reconcile (#405), so
+the account gained `sysDomainGet`, `sysDomainQuery`, `sysDomainCreate` and
+`sysDomainUpdate` (not `sysDomainDestroy`). It also already held three
+`sysOAuthGrant*` permissions that this note did not list. Still no mail access
+and no other configuration writes.
 
 ⚠ **AND NO `expiresAt`.** A cron job that stops silently on a date nobody
 remembers is worse than a long-lived key whose blast radius is three read
@@ -1042,6 +1048,12 @@ missing id as a 400 rather than a 401.
 `whsec_` + hex. Secrets minted before the change still decode and sign
 consistently, but they are not what the generator produces now. Regenerate any
 that exist in a dev database rather than leaving the two forms side by side.
+
+⚠ **Since #427 new secrets start `i10_whsec_`**, so a secret scanner can tell
+ours from other vendors' `whsec_` secrets. The payload is still base64. A
+generic Standard Webhooks library expects `whsec_`, so remove the leading
+`i10_` before you give it the secret. `@i10/next` and our own verifier accept
+both forms, and older `whsec_` secrets keep working.
 
 ### Take the spec - Standard Webhooks
 

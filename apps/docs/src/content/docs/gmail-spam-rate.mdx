@@ -1,0 +1,75 @@
+---
+title: Gmail spam rate
+description: How to see how often Gmail users mark your mail as spam, using Google Postmaster Tools.
+---
+
+Gmail does not report individual spam complaints to any sender. Other mailbox
+providers send a complaint for each message a recipient marks as spam, and i10
+shows those. Gmail does not, so **the complaint counts in i10 exclude Gmail**.
+
+The one place Gmail reports spam complaints is Google Postmaster Tools. It shows
+a daily spam rate for your sending domain: the share of mail delivered to Gmail
+inboxes that recipients marked as spam. It does not say which message or which
+recipient.
+
+## See your Gmail spam rate
+
+<Steps>
+<Step>
+
+Open [Postmaster Tools](https://gmail.com/postmaster) and sign in with a Google
+account.
+
+</Step>
+<Step>
+
+Add the domain you send from, the one in your `From` address. Add the domain
+itself, not a single address.
+
+</Step>
+<Step>
+
+Google gives you a `TXT` record. Publish it in your domain's DNS, then choose
+**Verify** in Postmaster Tools. DNS changes can take a while to spread, so try
+again later if verification fails at first.
+
+</Step>
+</Steps>
+
+Once the domain shows as verified, the spam rate chart fills in as you send mail
+to Gmail users.
+
+## What you will and will not see
+
+- **Personal Gmail only.** The data covers mail sent to `@gmail.com` and
+  `@googlemail.com` addresses. Google Workspace recipients are not included.
+- **Volume is required.** With too little daily mail to Gmail, the charts show
+  "No data to display". This is not a sign that something is wrong.
+- **Your domain must be authenticated.** Postmaster Tools reports on mail that
+  passes DKIM for your domain, which is what [DNS setup](/dns) gives you.
+
+## What 0.1% and 0.3% mean
+
+Google's sender guidelines set two numbers for the spam rate in Postmaster
+Tools:
+
+| Spam rate          | What Google asks                                           |
+| ------------------ | ---------------------------------------------------------- |
+| Below **0.1%**     | The target. Keep it here.                                  |
+| **0.3% or higher** | Avoid ever reaching it, especially for a sustained period. |
+
+0.1% is one complaint for every 1,000 messages delivered to Gmail inboxes.
+0.3% is three for every 1,000. If your rate rises, look at who you send to and
+whether they asked for the mail, and make unsubscribing easy.
+
+## The Feedback-ID header
+
+Every message i10 sends carries a `Feedback-ID` header. It holds an identifier
+for your workspace made of letters and digits. It is not your workspace name.
+Postmaster Tools groups complaints by this identifier in its Feedback Loop
+view, so in your own Postmaster Tools account the mail you send through i10
+appears as one group. i10 cannot see that view: Google shows it only to whoever
+verified the domain.
+
+i10 sets this header itself. A `Feedback-ID` header you add to a message is
+ignored.

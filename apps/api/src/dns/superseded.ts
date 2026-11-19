@@ -74,6 +74,9 @@ function parentOf(host: string): string | null {
 /** MX values are `10 mail.example.com` at some providers and bare at others. */
 const exchange = (value: string) => bare(value.replace(/^\d+\s+/, ""))
 
+/** SRV values are `0 1 993 mail.example.com` at some providers and bare at others. */
+const srvTarget = (value: string) => bare(value.replace(/^(?:\d+\s+){1,3}/, ""))
+
 /**
  * The `include:` tokens in an SPF string.
  *
@@ -135,6 +138,12 @@ function ours(type: string, stored: string, wanted: readonly string[]): boolean 
         parent !== null && wanted.some((value) => parentOf(exchange(value)) === parent)
       )
     }
+    case "SRV": {
+      const parent = parentOf(srvTarget(stored))
+      return (
+        parent !== null && wanted.some((value) => parentOf(srvTarget(value)) === parent)
+      )
+    }
     case "TXT": {
       const value = txt(stored)
 
@@ -173,6 +182,56 @@ function ours(type: string, stored: string, wanted: readonly string[]): boolean 
 }
 
 /**
+ * The customer domain being published, read off the `_dmarc.` or `_domainkey.`
+ * record every domain (manual or delegated) carries.
+ */
+function domainOf(desired: readonly DesiredRecord[]): string | null {
+  for (const record of desired) {
+    const name = bare(record.name)
+    if (name.startsWith("_dmarc.")) return name.slice("_dmarc.".length)
+    const dkim = name.indexOf("._domainkey.")
+    if (dkim >= 0) return name.slice(dkim + "._domainkey.".length)
+    if (name.startsWith("_domainkey.")) return name.slice("_domainkey.".length)
+  }
+  return null
+}
+
+/**
+ * The hostname our receiving records point at (`env.MAIL_HOSTNAME`).
+ *
+ * ⚠ AN EXACT HOST, NEVER A PARENT INFERRED FROM THE RECORDS BEING WRITTEN. An
+ * inferred "operator domain" walked up from SPF includes reaches the bare TLD
+ * (`amazonses.com` -> `com`), and then a customer's own `10 acme.com` MX would
+ * read as ours and be deleted. Only a record pointing at exactly this host is
+ * a receiving record we wrote.
+ */
+const receivingHost = () => bare(process.env.MAIL_HOSTNAME || "mail.i10.tech")
+
+/**
+ * Whether `record` is one of the three receiving records (`<domain>` MX,
+ * `_imaps._tcp.<domain>` SRV, `_submissions._tcp.<domain>` SRV) that we wrote
+ * while mailbox hosting was on, left behind after hosting was switched off.
+ *
+ * ⚠ NARROW IN BOTH NAME AND TARGET. Only those three exact `(name, type)` slots
+ * are considered, and only when the target is exactly our mail host. Any other
+ * MX or SRV at the apex (Google Workspace, Fastmail, Microsoft 365, the
+ * customer's own mail server) points elsewhere and is never touched.
+ */
+function retiredReceiving(domain: string | null, record: ExistingRecord): boolean {
+  if (!domain) return false
+  const host = receivingHost()
+  const name = bare(record.name)
+  if (record.type === "MX" && name === domain) return exchange(record.value) === host
+  if (
+    record.type === "SRV" &&
+    (name === `_imaps._tcp.${domain}` || name === `_submissions._tcp.${domain}`)
+  ) {
+    return srvTarget(record.value) === host
+  }
+  return false
+}
+
+/**
  * @param read the adapter's own record, flattened to the three fields this
  *   needs. Cloudflare calls the value `content`, Hetzner and DigitalOcean
  *   disagree about whether a name is absolute - a projection keeps all of
@@ -189,13 +248,18 @@ export function supersededBy<T>(
 ): T[] {
   if (desired.length === 0) return []
 
+  const domain = domainOf(desired)
+
   return existing.filter((entry) => {
     const record = read(entry)
     const wanted = desired.filter(
       (want) => want.type === record.type && bare(want.name) === bare(record.name),
     )
-    // Not a name and type we are publishing: out of scope entirely.
-    if (wanted.length === 0) return false
+    // Not a name and type we are publishing: out of scope unless it is one of
+    // our own receiving records left behind after mailbox hosting was turned off.
+    if (wanted.length === 0) {
+      return retiredReceiving(domain, record)
+    }
 
     // Already one of the records we want. That is `unchanged`, not stale.
     if (wanted.some((want) => sameValue(record.type, record.value, want.value))) {

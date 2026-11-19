@@ -5,7 +5,7 @@ import { createCacheClient, createQueueClient } from "../cache/redis.js"
 import type { Database } from "../db/client.js"
 import type { Env } from "../env.js"
 import { postgresMetering } from "../metering/service.js"
-import { captureMessage } from "../observability.js"
+import { captureError, captureMessage } from "../observability.js"
 import { createSendQueue } from "../queue/send-queue.js"
 import { resilient } from "../send/metering.js"
 import { riskSystem, systemTenantIds } from "./wire.js"
@@ -72,6 +72,7 @@ export async function riskRuntime({
     ...(consoleUrl ? { consoleUrl } : {}),
     exempt: await systemTenantIds(db, env.AUTH_EMAIL_TENANT_SLUG),
     alert: (message, level, context) => captureMessage(message, level, context),
+    report: captureError,
     log,
   })
 

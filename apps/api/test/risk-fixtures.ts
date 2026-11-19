@@ -1,3 +1,5 @@
+import type { Answers } from "../src/risk/judge/providers.js"
+import { summariseJudged, type JudgedRow } from "../src/risk/judge/verdict.js"
 import type { Counts, Facts, FarmPeer, IdentityFacts } from "../src/risk/types.js"
 
 /** Nothing left out as trusted (#222). */
@@ -7,9 +9,9 @@ export const NO_TRUST = { template: 0, boilerplate: 0 }
  * Facts for the risk engine's tests (#170): a quiet, legitimate baseline, and
  * the synthetic scenarios every rule change is held to.
  *
- * ⚠ THE SCENARIOS ARE THE RULES' TEST SUITE, NEVER THE MODEL'S TRAINING DATA.
- * See docs/decisions/risk.md: a model trained on what we imagine abuse looks
- * like learns our imagination.
+ * ⚠ THE SCENARIOS ARE THE RULES' TEST SUITE, NEVER EVALUATION DATA. See
+ * docs/decisions/risk.md: anything measured on what we imagine abuse looks
+ * like measures our imagination.
  */
 export const NOW = new Date("2026-09-28T12:00:00Z")
 const DAY = 86_400_000
@@ -62,6 +64,7 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
       added7d: 0,
       failedOrDisplaced: 0,
       youngestRegisteredAt: daysAgo(900),
+      young: [],
       randomSubdomain: false,
       parents: ["acme.com"],
     },
@@ -69,7 +72,7 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
       tier: "normal",
       tierSource: "default",
       tierChangedAt: null,
-      tierDemotions90d: 0,
+      staffDemotions90d: 0,
       holds180d: 0,
       upheldHolds: 0,
     },
@@ -84,21 +87,48 @@ export function baseFacts(over: Partial<Facts> = {}): Facts {
     parents: { sharedWith: 0, sharedWithHeldOrDead: 0 },
     links: { unsafe: [] },
     content: null,
-    model: null,
     actor: null,
     similarity: null,
-    behaviour: null,
     templates: null,
     ...over,
   }
 }
 
+/** Every question answered `p`, or as given. */
+export const answers = (p: number, over: Partial<Answers> = {}): Answers => ({
+  imp_short: p,
+  imp_any: p,
+  domain_altered: p,
+  mailbox: p,
+  cred_short: p,
+  phish_short: p,
+  scam: p,
+  spam_short: p,
+  marketing_short: p,
+  ...over,
+})
+
+/** A judged content, as the facts loader reads it. */
+export const judgedRow = (exact: string, over: Partial<JudgedRow> = {}): JudgedRow => ({
+  exact,
+  answers: answers(0.02),
+  secondAnswers: null,
+  truncated: false,
+  messages: 10,
+  ...over,
+})
+
+/** The judged-content facts for these rows, as loadFacts would build them. */
+export const judged = (
+  rows: readonly JudgedRow[],
+  days = { seen: rows.length, judged: rows.length, capped: 0 },
+): NonNullable<Facts["content"]> =>
+  summariseJudged("@cf/cloudflare/clef-flash", rows, days)
+
 export function identity(over: Partial<IdentityFacts> = {}): IdentityFacts {
   return {
     firstSeen: daysAgo(10),
     firstCountry: "DE",
-    latestCountry: "DE",
-    latestTimezone: "Europe/Berlin",
     countries: 1,
     torSeen: false,
     hostingSeen: false,
@@ -107,6 +137,9 @@ export function identity(over: Partial<IdentityFacts> = {}): IdentityFacts {
     heldDevicePeers: 0,
     subnetSignupPeers: 0,
     heldSubnetPeers: 0,
+    devicePeerKeys: [],
+    subnetSignupPeerKeys: [],
+    heldPeerKeys: [],
     ...over,
   }
 }
@@ -146,6 +179,7 @@ export const LEGIT: Record<string, () => Facts> = {
         added7d: 1,
         failedOrDisplaced: 0,
         youngestRegisteredAt: daysAgo(2000),
+        young: [],
         randomSubdomain: false,
         parents: ["dev.io"],
       },
@@ -223,6 +257,7 @@ export const LEGIT: Record<string, () => Facts> = {
         added7d: 1,
         failedOrDisplaced: 0,
         youngestRegisteredAt: daysAgo(5),
+        young: [],
         randomSubdomain: false,
         parents: ["brand.com", "acme.com"],
       },
@@ -252,6 +287,7 @@ export const ABUSE: Record<
           added7d: 1,
           failedOrDisplaced: 0,
           youngestRegisteredAt: daysAgo(3),
+          young: [],
           randomSubdomain: false,
           parents: ["cheap-deals.top"],
         },
@@ -275,6 +311,7 @@ export const ABUSE: Record<
           added7d: 1,
           failedOrDisplaced: 0,
           youngestRegisteredAt: daysAgo(4),
+          young: [],
           randomSubdomain: true,
           parents: ["mailer-x.top"],
         },
@@ -369,6 +406,7 @@ export const ABUSE: Record<
           added7d: 1,
           failedOrDisplaced: 0,
           youngestRegisteredAt: daysAgo(2),
+          young: [],
           randomSubdomain: true,
           parents: ["x7.top"],
         },

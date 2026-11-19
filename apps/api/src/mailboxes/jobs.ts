@@ -1,10 +1,10 @@
-import { createHmac, timingSafeEqual } from "node:crypto"
-import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { withTenant } from "../db/client.js"
 import { accounts } from "../db/schema.js"
 import { mailboxJobs, tenants } from "../db/core.js"
-import type { ObjectStore } from "../content/object-store.js"
+import type { TokenKeys } from "../crypto/token-keys.js"
+import type { MailboxJobData } from "../queue/mailbox-queue.js"
 
 /**
  * Who may move a mailbox's mail, and where the jobs that do it are kept (#385).
@@ -97,27 +97,21 @@ export async function canAccessMailbox(
  *
  * ⚠ THE TENANT AND THE JOB ARE BOTH SIGNED, and the route looks the job up under
  * that tenant, so a token for one workspace's job cannot be pointed at another's
- * and a job id on its own opens nothing. The signature is keyed per purpose
- * (`mailbox-download.v1`) so the same secret cannot mint some other kind of
- * token that this would accept.
+ * and a job id on its own opens nothing. The MAC is under the `mailbox-download`
+ * subkey of `TOKEN_KEYS`, so no other kind of token we sign is accepted here.
  */
-const sign = (payload: string, secret: string) =>
-  createHmac("sha256", secret)
-    .update(`mailbox-download.v1.${payload}`)
-    .digest("base64url")
-
 export function signDownloadToken(
   link: { tenantId: string; jobId: string },
   expiresAtMs: number,
-  secret: string,
+  keys: TokenKeys,
 ): string {
   const payload = `${link.tenantId}.${link.jobId}.${expiresAtMs}`
-  return `${payload}.${sign(payload, secret)}`
+  return `${payload}.${keys.sign("mailbox-download", payload)}`
 }
 
 export function verifyDownloadToken(
   token: string,
-  secret: string,
+  keys: TokenKeys,
   nowMs = Date.now(),
 ): { tenantId: string; jobId: string } | null {
   const parts = token.split(".")
@@ -128,15 +122,9 @@ export function verifyDownloadToken(
     string,
     string,
   ]
-
-  const given = Buffer.from(signature, "base64url")
-  const expected = Buffer.from(
-    sign(`${tenantId}.${jobId}.${expires}`, secret),
-    "base64url",
-  )
-  // ⚠ CONSTANT TIME. The lengths are public (a SHA-256 digest), so comparing
-  // them first leaks nothing; the bytes are what must not be compared early.
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null
+  if (!keys.verify("mailbox-download", `${tenantId}.${jobId}.${expires}`, signature)) {
+    return null
+  }
 
   const expiresAt = Number(expires)
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= nowMs) return null
@@ -159,6 +147,7 @@ export type MailboxJobPatch = Partial<
     | "totalFolders"
     | "processedFolders"
     | "objectKey"
+    | "sealedKey"
     | "error"
     | "errorCode"
     | "completedAt"
@@ -187,12 +176,50 @@ export interface MailboxJobStore {
     jobId: string,
     patch: MailboxJobPatch,
   ): Promise<MailboxJobRow | null>
-  /** Jobs whose archive in the content store is past its keep. */
-  withExpiredObject(tenantId: string, now: Date): Promise<MailboxJobRow[]>
 }
 
-/** An import's archive is kept this long after the job last moved, then goes. */
-const IMPORT_ARCHIVE_KEEP_MS = 24 * 60 * 60 * 1000
+/**
+ * Queues an export of the mailbox, or returns the one already running.
+ *
+ * ⚠ ONE START, TWO CALLERS: the export route and a mailbox's deletion with
+ * `export_then_delete` (mailboxes/lifecycle.ts). Both must mean the same thing by
+ * "an export is running", or a second click and a deletion would each queue one.
+ * The caller has already decided that the person may ask: this is only the queue.
+ */
+export async function startMailboxExport(
+  d: {
+    jobs: Pick<MailboxJobStore, "latest" | "insert">
+    enqueue: (data: MailboxJobData) => Promise<unknown>
+  },
+  input: { tenantId: string; address: string; requestedBy: string },
+): Promise<MailboxJobRow> {
+  const address = input.address.trim().toLowerCase()
+  const current = await d.jobs.latest(input.tenantId, address, "export")
+  if (current && (current.status === "pending" || current.status === "running")) {
+    return current
+  }
+  const job = await d.jobs.insert({
+    tenantId: input.tenantId,
+    mailboxAddress: address,
+    type: "export",
+    requestedBy: input.requestedBy,
+    status: "pending",
+  })
+  await d.enqueue({
+    jobId: job.id,
+    tenantId: input.tenantId,
+    mailboxAddress: address,
+    type: "export",
+  })
+  return job
+}
+
+/**
+ * How long an import's upload URL works: enough to send LIMITS.maxArchiveBytes
+ * on a slow line. The sweep in sweep.ts waits this long before it deletes an
+ * upload of a deleted workspace, so no `PUT` can land after it.
+ */
+export const UPLOAD_TTL_S = 6 * 60 * 60
 
 export function mailboxJobStore(db: Database): MailboxJobStore {
   return {
@@ -245,58 +272,5 @@ export function mailboxJobStore(db: Database): MailboxJobStore {
       )
       return row ?? null
     },
-
-    async withExpiredObject(tenantId, now) {
-      return withTenant(db, tenantId, (tx) =>
-        tx
-          .select()
-          .from(mailboxJobs)
-          .where(
-            and(
-              eq(mailboxJobs.tenantId, tenantId),
-              isNotNull(mailboxJobs.objectKey),
-              or(
-                and(eq(mailboxJobs.type, "export"), lt(mailboxJobs.expiresAt, now)),
-                and(
-                  eq(mailboxJobs.type, "import"),
-                  lt(
-                    mailboxJobs.updatedAt,
-                    new Date(now.getTime() - IMPORT_ARCHIVE_KEEP_MS),
-                  ),
-                ),
-              ),
-            ),
-          )
-          .limit(50),
-      )
-    },
   }
-}
-
-/**
- * Deletes the archives in the content store that nobody is going to use again:
- * an export past its seven days, and an import's upload a day after the job last
- * moved (it is deleted when the job ends, so this is for the ones that never
- * started).
- *
- * ⚠ ONE WORKSPACE AT A TIME, because `mailbox_jobs` is under row-level security
- * and finding every workspace's expired jobs at once needs a SECURITY DEFINER
- * function like the ones `retention.ts` reads its due lists from. That function
- * is a migration of its own, so until it exists this runs for the workspace of
- * each job that starts (see `migration.ts`) and nothing sweeps a workspace that
- * never exports again. Hooking it into `retention.ts` is the follow-up.
- */
-export async function sweepMailboxArchives(
-  jobs: MailboxJobStore,
-  store: ObjectStore,
-  tenantId: string,
-  now = new Date(),
-): Promise<number> {
-  const expired = await jobs.withExpiredObject(tenantId, now)
-  for (const job of expired) {
-    // Idempotent, so a sweep that died between the two steps simply runs again.
-    await store.delete(job.objectKey!)
-    await jobs.update(tenantId, job.id, { objectKey: null })
-  }
-  return expired.length
 }

@@ -1,0 +1,7 @@
+listen = "0.0.0.0:7000"
+secret-file = "/secrets/cluster.secret"
+tls-key = "/secrets/keep.key"
+tls-clients = "/secrets/clients.pem"
+ready-file = "/run/keep/settled"
+memory = 134217728
+stats-interval = 60

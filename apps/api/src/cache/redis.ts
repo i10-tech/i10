@@ -43,11 +43,65 @@ export function createCacheClient(url: string): Redis {
  * enqueue and bookkeeping commands rather than the block.
  */
 export function createQueueClient(url: string): Redis {
-  return new Redis(url, {
-    maxRetriesPerRequest: 5,
-    enableOfflineQueue: true,
-    connectTimeout: 5000,
-  })
+  return reloadScriptsOnNoscript(
+    new Redis(url, {
+      maxRetriesPerRequest: 5,
+      enableOfflineQueue: true,
+      connectTimeout: 5000,
+    }),
+  )
+}
+
+type Call = (...args: unknown[]) => Promise<unknown>
+
+/**
+ * ⚠ A REDIS RESTART EMPTIES ITS SCRIPT CACHE, AND groupmq NEVER NOTICES. It
+ * loads each Lua script once, remembers the sha per client for the life of the
+ * process, and only ever calls `evalsha`. After a restart every queue call then
+ * fails with `NOSCRIPT` until the pod restarts too (seen in production
+ * 2026-11-16).
+ *
+ * So remember the source of each script loaded through this client, and when an
+ * `evalsha` answers `NOSCRIPT`, load it again and retry once. Any other error,
+ * and a sha we never saw load, is rethrown untouched.
+ */
+function reloadScriptsOnNoscript(client: Redis): Redis {
+  const sources = new Map<string, string>()
+  const script = client.script.bind(client) as Call
+  const evalsha = client.evalsha.bind(client) as Call
+
+  client.script = (async (...args: unknown[]) => {
+    const sha = await script(...args)
+    const [sub, lua] = args
+    if (
+      typeof sub === "string" &&
+      sub.toLowerCase() === "load" &&
+      typeof lua === "string" &&
+      typeof sha === "string"
+    ) {
+      sources.set(sha, lua)
+    }
+    return sha
+  }) as typeof client.script
+
+  client.evalsha = (async (...args: unknown[]) => {
+    try {
+      return await evalsha(...args)
+    } catch (err) {
+      const lua = typeof args[0] === "string" ? sources.get(args[0]) : undefined
+      if (
+        !(err instanceof Error) ||
+        !err.message.startsWith("NOSCRIPT") ||
+        lua === undefined
+      ) {
+        throw err
+      }
+      await script("load", lua)
+      return evalsha(...args)
+    }
+  }) as typeof client.evalsha
+
+  return client
 }
 
 export function redisKeyCache(client: Redis): KeyCache {

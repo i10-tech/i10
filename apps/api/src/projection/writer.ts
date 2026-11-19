@@ -202,7 +202,7 @@ async function applyUser(
       target: accounts.clerkUserId,
       set: {
         email: sql`excluded.email`,
-        displayName: sql`excluded.display_name`,
+        displayName: sql`coalesce(excluded.display_name, ${accounts.displayName})`,
         clerkUpdatedAt: sql`excluded.clerk_updated_at`,
         // ⚠ BAN AND LOCK ARE CLERK'S AND REWRITTEN ON EVERY EVENT, so lifting one
         // at Clerk lifts it here. The ordering guard below applies to them as to

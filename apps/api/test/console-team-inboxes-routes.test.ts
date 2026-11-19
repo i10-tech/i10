@@ -14,6 +14,7 @@ function appFor(
   w: ReturnType<typeof world>,
   who: keyof typeof people,
   workspace: { tenantId: string; orgId: string } = ACME,
+  fresh = true,
 ) {
   const app = new Hono()
   app.use("*", async (c, next) => {
@@ -24,6 +25,11 @@ function appFor(
       mode: "live",
     })
     c.set("user", { userId: people[who].userId, orgId: workspace.orgId })
+    // The step-up reader the console sets; fresh unless a test says otherwise.
+    c.set(
+      "freshAuth" as never,
+      (async () => ({ status: fresh ? "fresh" : "stale" })) as never,
+    )
     await next()
   })
   mountTeamInboxes(app, { teamInboxes: w.service } as unknown as ConsoleDeps)
@@ -194,6 +200,108 @@ describe("members and deletion", () => {
       (await call(appFor(w, "alice"), "DELETE", "/team-inboxes/support@acme.test"))
         .status,
     ).toBe(404)
+  })
+})
+
+describe("step-up on the mutations", () => {
+  const stale = (w: ReturnType<typeof world>, who: keyof typeof people) =>
+    appFor(w, who, ACME, false)
+  const expectStepUp = async (res: Response) => {
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      name: "invalid_access",
+      clerk_error: { reason: "reverification-error" },
+    })
+  }
+  const path = "/team-inboxes/support@acme.test"
+
+  it("asks a stale admin before creating, and creates nothing", async () => {
+    const w = world()
+    await expectStepUp(await call(stale(w, "alice"), "POST", "/team-inboxes", create))
+    expect(w.rows).toHaveLength(0)
+  })
+
+  it("asks a stale admin before changing the members, and changes nothing", async () => {
+    const w = world()
+    await call(appFor(w, "alice"), "POST", "/team-inboxes", create)
+
+    await expectStepUp(
+      await call(stale(w, "alice"), "PUT", `${path}/members`, {
+        members: ["dave@acme.test"],
+      }),
+    )
+    expect(w.rows[0]!.members).toHaveLength(2)
+    expect(w.revoked).toHaveLength(0)
+  })
+
+  it("asks a stale admin before deleting, and deletes nothing", async () => {
+    const w = world()
+    await call(appFor(w, "alice"), "POST", "/team-inboxes", create)
+
+    await expectStepUp(await call(stale(w, "alice"), "DELETE", path))
+    expect(w.rows).toHaveLength(1)
+    expect(w.destroyed).toHaveLength(0)
+  })
+
+  it("still lets a fresh admin through all three", async () => {
+    const w = world()
+    const admin = appFor(w, "alice")
+
+    expect((await call(admin, "POST", "/team-inboxes", create)).status).toBe(201)
+    expect(
+      (await call(admin, "PUT", `${path}/members`, { members: ["dave@acme.test"] }))
+        .status,
+    ).toBe(200)
+    expect((await call(admin, "DELETE", path)).status).toBe(204)
+  })
+
+  it("tells a stale member no rather than asking them to re-authenticate", async () => {
+    const w = world()
+    await call(appFor(w, "alice"), "POST", "/team-inboxes", create)
+    const member = stale(w, "bob")
+
+    for (const res of [
+      await call(member, "POST", "/team-inboxes", {
+        ...create,
+        address: "x@acme.test",
+      }),
+      await call(member, "PUT", `${path}/members`, { members: ["dave@acme.test"] }),
+      await call(member, "DELETE", path),
+    ]) {
+      expect(res.status).toBe(403)
+      expect(await res.json()).toMatchObject({ name: "forbidden" })
+    }
+    expect(w.rows).toHaveLength(1)
+    expect(w.rows[0]!.members).toHaveLength(2)
+  })
+
+  it("answers a stale person with no workspace by the service, not a prompt", async () => {
+    const w = world()
+    const app = new Hono()
+    app.use("*", async (c, next) => {
+      c.set("auth", { apiKeyId: "", tenantId: ACME.tenantId, scopes: [], mode: "live" })
+      c.set("user", { userId: people.alice.userId })
+      c.set("freshAuth" as never, (async () => ({ status: "stale" })) as never)
+      await next()
+    })
+    mountTeamInboxes(app, { teamInboxes: w.service } as unknown as ConsoleDeps)
+
+    const res = await call(app, "POST", "/team-inboxes", create)
+    expect(res.status).toBe(422)
+  })
+
+  it("refuses when the reader is not wired, rather than skipping the check", async () => {
+    const w = world()
+    const app = new Hono()
+    app.use("*", async (c, next) => {
+      c.set("auth", { apiKeyId: "", tenantId: ACME.tenantId, scopes: [], mode: "live" })
+      c.set("user", { userId: people.alice.userId, orgId: ACME.orgId })
+      await next()
+    })
+    mountTeamInboxes(app, { teamInboxes: w.service } as unknown as ConsoleDeps)
+
+    expect((await call(app, "POST", "/team-inboxes", create)).status).toBe(501)
+    expect(w.rows).toHaveLength(0)
   })
 })
 

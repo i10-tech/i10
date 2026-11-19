@@ -79,11 +79,50 @@ export interface ContentItem {
   createdAt?: string
 }
 
+/**
+ * ⚠ A STORED BODY IS COUNTED ONLY BY THE CALL THAT STAMPS IT. Two writers
+ * record content: this job's five-minute pass and the worker's pre-send screen
+ * (content/screen.ts), and both can meet the same unstamped body at once. The
+ * stamp is taken first, guarded on `fingerprinted_at is null`, and only the
+ * bodies it won are counted, so a body is counted once whoever gets there.
+ */
 export async function recordContent(
   tenantId: string,
   items: readonly ContentItem[],
   deps: ContentDeps,
 ): Promise<void> {
+  const trust = deps.trust
+    ? await deps.trust.forTenant(tenantId).catch(() => null)
+    : null
+  const today = new Date().toISOString().slice(0, 10)
+  const seen: {
+    item: ContentItem
+    day: string
+    print: Fingerprint | null
+    trustedBy: string | null
+    hosts: string[]
+  }[] = []
+  for (const p of items) {
+    const html = typeof p.html === "string" ? p.html : null
+    const text = typeof p.text === "string" ? p.text : null
+    const fp: Fingerprint | null = fingerprint(p.subject, html, text)
+    const print = fp && !ALLOWLISTED.has(fp.exact) ? fp : null
+    const found =
+      print && trust && trust.entries.length > 0
+        ? await classify({ html, text }, trust.entries, trust.ctx).catch(() => null)
+        : null
+    seen.push({
+      item: p,
+      day: p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : today,
+      print,
+      trustedBy: found ? trustMark(found.entry) : null,
+      hosts: linkHosts(html, text),
+    })
+  }
+  const stamped = items.filter((i) => i.messageId && i.createdAt)
+  if (stamped.length === 0 && seen.every((x) => !x.print && x.hosts.length === 0))
+    return
+
   // Keyed by day as well: a body is counted on the day it was accepted.
   const prints = new Map<
     string,
@@ -95,44 +134,47 @@ export async function recordContent(
       trustedBy: string | null
     }
   >()
-  const hosts = new Map<string, { day: string; host: string; messages: number }>()
-  const trust = deps.trust
-    ? await deps.trust.forTenant(tenantId).catch(() => null)
-    : null
-  const today = new Date().toISOString().slice(0, 10)
-  for (const p of items) {
-    const html = typeof p.html === "string" ? p.html : null
-    const text = typeof p.text === "string" ? p.text : null
-    const day = p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : today
-    const fp: Fingerprint | null = fingerprint(p.subject, html, text)
-    if (fp && !ALLOWLISTED.has(fp.exact)) {
-      const found =
-        trust && trust.entries.length > 0
-          ? await classify({ html, text }, trust.entries, trust.ctx).catch(() => null)
-          : null
-      const mark = found ? trustMark(found.entry) : null
-      const key = `${day}|${fp.exact}`
-      const seen = prints.get(key)
-      prints.set(key, {
-        day,
-        exact: fp.exact,
-        bands: fp.bands,
-        messages: (seen?.messages ?? 0) + 1,
-        // ⚠ FAILS CLOSED: one message with this fingerprint that did not fit
-        // makes the fingerprint count.
-        trustedBy: seen && seen.trustedBy !== mark ? null : mark,
-      })
-    }
-    for (const h of linkHosts(html, text)) {
-      const key = `${day}|${h}`
-      const seen = hosts.get(key)
-      hosts.set(key, { day, host: h, messages: (seen?.messages ?? 0) + 1 })
-    }
-  }
-  const stamped = items.filter((i) => i.messageId && i.createdAt)
-  if (prints.size === 0 && hosts.size === 0 && stamped.length === 0) return
-
   await withTenant(deps.db, tenantId, async (tx) => {
+    const won = new Set<string>()
+    if (stamped.length > 0) {
+      const refs = stamped.map(
+        (i) => sql`(${i.messageId}::uuid, ${i.createdAt}::timestamptz)`,
+      )
+      const rows = (await tx.execute(sql`
+        update core.message_bodies b set fingerprinted_at = now()
+          from (values ${sql.join(refs, sql`, `)}) as v (message_id, created_at)
+         where b.message_id = v.message_id and b.created_at = v.created_at
+           and b.fingerprinted_at is null
+        returning b.message_id
+      `)) as unknown as { message_id: string }[]
+      for (const r of rows) won.add(String(r.message_id))
+    }
+    const counted = seen.filter(
+      ({ item }) => !item.messageId || !item.createdAt || won.has(item.messageId),
+    )
+
+    const hosts = new Map<string, { day: string; host: string; messages: number }>()
+    for (const { day, print, trustedBy, hosts: linked } of counted) {
+      if (print) {
+        const key = `${day}|${print.exact}`
+        const before = prints.get(key)
+        prints.set(key, {
+          day,
+          exact: print.exact,
+          bands: print.bands,
+          messages: (before?.messages ?? 0) + 1,
+          // ⚠ FAILS CLOSED: one message with this fingerprint that did not fit
+          // makes the fingerprint count.
+          trustedBy: before && before.trustedBy !== trustedBy ? null : trustedBy,
+        })
+      }
+      for (const h of linked) {
+        const key = `${day}|${h}`
+        const before = hosts.get(key)
+        hosts.set(key, { day, host: h, messages: (before?.messages ?? 0) + 1 })
+      }
+    }
+
     for (const { day, exact, bands, messages, trustedBy } of prints.values()) {
       // ⚠ THE MARK SURVIVES ONLY WHILE EVERY SIGHTING AGREES. A row first
       // seen untrusted stays untrusted for the day; a trusted row seen once
@@ -155,12 +197,6 @@ export async function recordContent(
         values (${tenantId}::uuid, ${day}::date, ${host}, ${messages})
         on conflict (tenant_id, day, host)
         do update set messages = core.link_hosts.messages + excluded.messages
-      `)
-    }
-    for (const i of stamped) {
-      await tx.execute(sql`
-        update core.message_bodies set fingerprinted_at = now()
-         where message_id = ${i.messageId}::uuid and created_at = ${i.createdAt}::timestamptz
       `)
     }
   })
@@ -256,6 +292,7 @@ export async function fingerprintStored(
   // Packed bodies (#188) and images (#168) back in: the tripwire reads what
   // was sent.
   const rows = await restoreContent(
+    deps.db,
     deps.store ?? null,
     tenantId,
     restored.map((r) => ({

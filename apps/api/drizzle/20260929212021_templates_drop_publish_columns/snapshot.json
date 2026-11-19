@@ -1,0 +1,123 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "411a6a26-c47b-4bc3-a1e6-6320a922ee16",
+  "prevIds": [
+    "11792c0f-37f3-4218-afbe-6dfee49ead57"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "published_html"
+      ],
+      "writes": [
+        "s|col|core.templates.published_html",
+        "n|col|core.templates.published_html",
+        "e|col|core.templates.published_html"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "published_text"
+      ],
+      "writes": [
+        "s|col|core.templates.published_text",
+        "n|col|core.templates.published_text",
+        "e|col|core.templates.published_text"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "published_subject"
+      ],
+      "writes": [
+        "s|col|core.templates.published_subject",
+        "n|col|core.templates.published_subject",
+        "e|col|core.templates.published_subject"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "published_at"
+      ],
+      "writes": [
+        "s|col|core.templates.published_at",
+        "n|col|core.templates.published_at",
+        "e|col|core.templates.published_at"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "version"
+      ],
+      "writes": [
+        "s|col|core.templates.version",
+        "n|col|core.templates.version",
+        "e|col|core.templates.version"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"templates\",\"published_html\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"templates\",\"published_text\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"templates\",\"published_subject\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"templates\",\"published_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"templates\",\"version\"]"
+    }
+  ]
+}

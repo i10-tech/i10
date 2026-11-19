@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Scores workspaces for abuse risk and acts on the result, then exits (#170).
  *
@@ -19,6 +20,7 @@
 import pino from "pino"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 import { runAll } from "./risk/runner.js"
 import { embedderFor } from "./content/embed.js"
@@ -55,7 +57,7 @@ if (process.argv.includes("--check-embedder")) {
   )
 }
 
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,
@@ -104,7 +106,6 @@ await withMonitor(
     const { risk, cache } = runtime
 
     try {
-      const model = await risk.labels.model(true).catch(() => null)
       // ⚠ ONLY THIS JOB LOADS THE EMBEDDER (~300 MB for MiniLM); the API only
       // queries vectors by model name. See content/embed.ts.
       const embedder = await embedderFor(env.RISK_EMBEDDER, log)
@@ -112,15 +113,11 @@ await withMonitor(
 
       const summary = await runAll({
         ...risk.deps,
-        model,
         embedder,
         torRedis: cache,
         ...(env.IPINFO_TOKEN ? { ipinfoToken: env.IPINFO_TOKEN } : {}),
       })
-      log.info(
-        { ...summary, model: model ? `v${model.version}` : null },
-        "risk run complete",
-      )
+      log.info(summary, "risk run complete")
 
       if (summary.failed > 0) {
         captureError(new Error(`${summary.failed} workspace(s) could not be scored`), {

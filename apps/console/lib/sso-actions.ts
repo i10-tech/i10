@@ -10,7 +10,10 @@ import type {
   GroupRules,
   LdapSetup,
   LdapTestOutcome,
+  OidcMailSetup,
   OidcSetup,
+  OktaHookMade,
+  OktaHookSetup,
   OwnerExemption,
   RelinkRequest,
   SamlSetup,
@@ -452,5 +455,48 @@ export async function testLdap(id: string, address: string, password?: string) {
       method: "POST",
       body: { address, ...(password ? { password } : {}) },
     }),
+  )
+}
+
+// ── OIDC mail sign-in ───────────────────────────────────────────────────────
+
+export async function oidcMailSetup(id: string) {
+  return run(() => api<OidcMailSetup>(`${conn(id)}/oidc-mail`))
+}
+
+/**
+ * Only what is present changes, and any change to the settings turns the lane
+ * off again: `enabled` is a separate, explicit move (the same request may
+ * carry it). `extra` replaces the whole object.
+ */
+export async function saveOidcMail(
+  id: string,
+  body: {
+    preset?: string
+    issuer?: string
+    clientId?: string
+    extra?: Record<string, string>
+    enabled?: boolean
+  },
+) {
+  return run(() => api<OidcMailSetup>(`${conn(id)}/oidc-mail`, { method: "PUT", body }))
+}
+
+// ── Okta event hook ─────────────────────────────────────────────────────────
+
+export async function oktaHookSetup(id: string) {
+  return run(() => api<OktaHookSetup>(`${conn(id)}/okta-event-hook`))
+}
+
+/** Makes or rotates the secret. The answer carries it once and nothing returns it again. */
+export async function makeOktaHookSecret(id: string) {
+  return run(() =>
+    api<OktaHookMade>(`${conn(id)}/okta-event-hook/secret`, { method: "POST" }),
+  )
+}
+
+export async function removeOktaHookSecret(id: string) {
+  return run(() =>
+    api<OktaHookSetup>(`${conn(id)}/okta-event-hook/secret`, { method: "DELETE" }),
   )
 }

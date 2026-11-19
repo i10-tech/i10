@@ -73,17 +73,28 @@ spec:
       # oldest-first, so the next minute resumes where this one stopped.
       activeDeadlineSeconds: 50
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: i10-api
         spec:
           restartPolicy: Never
           containers:
             - name: catchup
-              image: ghcr.io/i10-tech/i10-api:prod-46c034947fa8281c0067376a0cd8ab5dc6b8a794@sha256:b87d268c885f9076a7cc8001783e201b70a536aada47d8842ce473cba6896153
+              image: ghcr.io/i10-tech/i10-api:prod-816b3eb86ffb04b25d53a904c601fea1dc68da03@sha256:e5ed4d6d4b38b1f2c38606de3d480959467b304bc512ac8ba0ceb3938ef79cfa
               imagePullPolicy: Always
               command: ["bun", "dist/domain-catchup.js"]
               envFrom:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }
               env:
+                # Opens the wrapped keys in i10-api (apps/api/src/crypto/unlock.ts). A
+                # hand-made Secret, never in Doppler; optional, so plain keys still start.
+                - name: KEY_WRAP_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: i10-key-wrap
+                      key: KEY_WRAP_KEYS
+                      optional: true
                 # ⚠ `i10_api`, NOT THE OWNER - the same rule as everywhere else.
                 # This pass reaches across every tenant, and it does it through
                 # one narrow SECURITY DEFINER function

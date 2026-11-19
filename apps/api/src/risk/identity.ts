@@ -216,7 +216,7 @@ export function identityStore(db: Database): IdentityStore {
           ${i.userId}, ${i.tenantId}::uuid, ${i.kind}, ${i.sessionId},
           ${i.ip}, ${subnetOf(i.ip)}, ${i.country}, ${i.tor},
           ${i.userAgent}, ${i.deviceId}, ${i.timezone}, ${i.language},
-          ${i.detail ? JSON.stringify(i.detail) : null}::jsonb
+          ${i.detail ? sql.param(i.detail) : null}::jsonb
         )
       `)
     },

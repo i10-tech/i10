@@ -33,11 +33,20 @@
  * protection is that turning it on is deliberate.
  */
 
+import { ApiRequestError } from "@/lib/api-error"
 import { ssoRoutes } from "@/lib/preview-sso"
+import { mailboxRoutes } from "@/lib/preview-mailboxes"
+import { teamInboxRoutes } from "@/lib/preview-team-inboxes"
+import { transferRoutes } from "@/lib/preview-mailbox-transfer"
 import { webhookRoutes } from "@/lib/preview-webhooks"
 import { cardNote } from "@/lib/shapes/billing"
 import { statusOf } from "@/lib/shapes/domains"
-import type { BillingState, DomainSummary, PlanSummary } from "@/lib/types"
+import type {
+  BillingState,
+  DomainMailboxes,
+  DomainSummary,
+  PlanSummary,
+} from "@/lib/types"
 
 export const PREVIEW =
   process.env.NODE_ENV !== "production" && process.env.CONSOLE_PREVIEW === "1"
@@ -160,6 +169,13 @@ const DOMAINS = [
     // both states side by side.
     open_tracking: true,
     click_tracking: false,
+    mailboxes: {
+      enabled: true,
+      owned: true,
+      sending: true,
+      catch_all: "help@acme.com",
+      count: 2,
+    },
   },
   {
     object: "domain" as const,
@@ -171,6 +187,14 @@ const DOMAINS = [
     delegated: false,
     open_tracking: false,
     click_tracking: false,
+    mailboxes: {
+      enabled: true,
+      owned: true,
+      sending: false,
+      catch_all: null,
+      count: 1,
+    },
+    stalwart: "pending" as const,
   },
   {
     object: "domain" as const,
@@ -182,6 +206,50 @@ const DOMAINS = [
     delegated: false,
     open_tracking: false,
     click_tracking: false,
+    displaced_at: ago(12),
+    mailboxes: {
+      enabled: false,
+      owned: false,
+      sending: false,
+      catch_all: null,
+      count: 0,
+    },
+  },
+  {
+    object: "domain" as const,
+    id: "1f7a1c00-0000-4000-8000-000000000004",
+    name: "off.acme.dev",
+    status: "verified",
+    created_at: ago(45),
+    region: "us-east-1",
+    delegated: true,
+    open_tracking: false,
+    click_tracking: false,
+    mailboxes: {
+      enabled: false,
+      owned: true,
+      sending: true,
+      catch_all: null,
+      count: 0,
+    },
+  },
+  {
+    object: "domain" as const,
+    id: "1f7a1c00-0000-4000-8000-000000000005",
+    name: "sending.acme.io",
+    status: "verified",
+    created_at: ago(30),
+    region: "us-east-1",
+    delegated: true,
+    open_tracking: false,
+    click_tracking: false,
+    mailboxes: {
+      enabled: true,
+      owned: true,
+      sending: true,
+      catch_all: null,
+      count: 3,
+    },
   },
 ]
 
@@ -191,6 +259,13 @@ const NEW_DOMAIN_PREVIEW = {
   name: "mytest.com",
   status: "not_started" as const,
   delegated: false,
+  mailboxes: {
+    enabled: false,
+    owned: false,
+    sending: false,
+    catch_all: null,
+    count: 0,
+  },
 }
 
 function findDomain(id: string | undefined) {
@@ -1225,6 +1300,97 @@ const ROUTES: [
     },
   ],
 
+  // ⚠ THE TEAM INBOXES (THE LIST THE DOMAIN PAGE'S CATCH-ALL PICKS FROM TOO) ARE
+  // IN lib/preview-team-inboxes.ts: a second route here would answer first.
+
+  [
+    /^\/console\/mailboxes\/storage$/,
+    () => ({
+      pool: { total_bytes: 53687091200, allocated_bytes: 10737418240 },
+      data: [
+        {
+          address: "alex@acme.com",
+          display_name: "Alex Smith",
+          storage_allocated: 5368709120,
+        },
+        {
+          address: "help@acme.com",
+          display_name: "Help Desk",
+          storage_allocated: 5368709120,
+        },
+      ],
+    }),
+  ],
+
+  [
+    /^\/console\/domains\/([^/]+)\/mailboxes$/,
+    (m, _q, _method, body) => {
+      const domain = findDomain(m[1])
+      if (!domain) return PREVIEW_NOT_FOUND
+      const payload = (body ?? {}) as { enabled?: boolean }
+      if (domain.displaced_at) {
+        throw new ApiRequestError(409, {
+          statusCode: 409,
+          name: "domain_not_held",
+          reason: "displaced",
+          message:
+            "Another workspace proved this domain, so it can't host mailboxes here.",
+        } as unknown as { statusCode: number; name: string; message: string })
+      }
+      if (domain.mailboxes && !domain.mailboxes.owned) {
+        throw new ApiRequestError(409, {
+          statusCode: 409,
+          name: "domain_not_held",
+          reason: "unowned",
+          message: "Prove you own this domain first.",
+        } as unknown as { statusCode: number; name: string; message: string })
+      }
+      if (typeof payload.enabled === "boolean") {
+        const current = (domain as { mailboxes?: DomainMailboxes }).mailboxes ?? {
+          enabled: false,
+          owned: true,
+          sending: true,
+          catch_all: null,
+          count: 0,
+        }
+        current.enabled = payload.enabled
+        ;(domain as { mailboxes?: DomainMailboxes }).mailboxes = current
+      }
+      return {
+        mailboxes: (domain as { mailboxes?: DomainMailboxes }).mailboxes,
+        stalwart:
+          (domain as { stalwart?: "synced" | "pending" | "unmanaged" }).stalwart ??
+          "synced",
+      }
+    },
+  ],
+
+  [
+    /^\/console\/domains\/([^/]+)\/catch-all$/,
+    (m, _q, _method, body) => {
+      const domain = findDomain(m[1])
+      if (!domain) return PREVIEW_NOT_FOUND
+      const payload = (body ?? {}) as { address?: string | null }
+      if ("address" in payload) {
+        const current = (domain as { mailboxes?: DomainMailboxes }).mailboxes ?? {
+          enabled: true,
+          owned: true,
+          sending: true,
+          catch_all: null,
+          count: 0,
+        }
+        current.catch_all = payload.address ?? null
+        ;(domain as { mailboxes?: DomainMailboxes }).mailboxes = current
+      }
+      return {
+        mailboxes: (domain as { mailboxes?: DomainMailboxes }).mailboxes,
+        stalwart:
+          (domain as { stalwart?: "synced" | "pending" | "unmanaged" }).stalwart ??
+          "synced",
+      }
+    },
+  ],
+
   [
     /^\/console\/domains\/([^/]+)$/,
     (m, _q, method) => {
@@ -1429,6 +1595,9 @@ const ROUTES: [
   // ⚠ THE WEBHOOK SCREENS' FIXTURES LIVE IN THEIR OWN MODULE (#286).
   ...webhookRoutes(PREVIEW_NOT_FOUND),
   ...ssoRoutes(PREVIEW_NOT_FOUND),
+  ...mailboxRoutes(PREVIEW_NOT_FOUND),
+  ...teamInboxRoutes(),
+  ...transferRoutes(),
 
   [
     // ⚠ AT RISK IN PREVIEW, so the amber banner, the rail pill and the

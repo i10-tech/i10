@@ -13,7 +13,8 @@ import DomainsNewLoading from "@/app/(app)/domains/new/loading"
 import EmailsLoading from "@/app/(app)/emails/(index)/loading"
 import EmailsRecordLoading from "@/app/(app)/emails/[id]/loading"
 import LogsLoading from "@/app/(app)/logs/loading"
-import MailboxesLoading from "@/app/(app)/mailboxes/loading"
+import MailboxesLoading from "@/app/(app)/mailboxes/(index)/loading"
+import MailboxesRecordLoading from "@/app/(app)/mailboxes/[address]/loading"
 import SegmentsLoading from "@/app/(app)/segments/loading"
 import SettingsLoading from "@/app/(app)/settings/(index)/loading"
 import SettingsBillingLoading from "@/app/(app)/settings/billing/loading"
@@ -27,6 +28,8 @@ import SettingsTeamLoading from "@/app/(app)/settings/team/loading"
 import SettingsUnsubscribePageLoading from "@/app/(app)/settings/unsubscribe-page/loading"
 import SettingsUsageLoading from "@/app/(app)/settings/usage/loading"
 import SuppressionsLoading from "@/app/(app)/suppressions/loading"
+import TeamInboxesLoading from "@/app/(app)/team-inboxes/(index)/loading"
+import TeamInboxesRecordLoading from "@/app/(app)/team-inboxes/[address]/loading"
 import TemplatesLoading from "@/app/(app)/templates/(index)/loading"
 import TemplatesRecordLoading from "@/app/(app)/templates/[id]/loading"
 import TemplatesFolderRecordLoading from "@/app/(app)/templates/folder/[id]/loading"
@@ -60,6 +63,7 @@ const ROUTES: { route: string; Loading: React.ComponentType }[] = [
   { route: "/emails/[id]", Loading: EmailsRecordLoading },
   { route: "/logs", Loading: LogsLoading },
   { route: "/mailboxes", Loading: MailboxesLoading },
+  { route: "/mailboxes/[address]", Loading: MailboxesRecordLoading },
   { route: "/segments", Loading: SegmentsLoading },
   { route: "/settings", Loading: SettingsLoading },
   { route: "/settings/billing", Loading: SettingsBillingLoading },
@@ -73,6 +77,8 @@ const ROUTES: { route: string; Loading: React.ComponentType }[] = [
   { route: "/settings/unsubscribe-page", Loading: SettingsUnsubscribePageLoading },
   { route: "/settings/usage", Loading: SettingsUsageLoading },
   { route: "/suppressions", Loading: SuppressionsLoading },
+  { route: "/team-inboxes", Loading: TeamInboxesLoading },
+  { route: "/team-inboxes/[address]", Loading: TeamInboxesRecordLoading },
   { route: "/templates", Loading: TemplatesLoading },
   { route: "/templates/[id]", Loading: TemplatesRecordLoading },
   { route: "/templates/folder/[id]", Loading: TemplatesFolderRecordLoading },

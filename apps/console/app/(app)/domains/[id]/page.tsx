@@ -72,7 +72,16 @@ export default async function DomainDetailPage({
    * ⚠ AND A FAILURE IN ANY OF THEM HIDES THE BUTTON RATHER THAN THE PAGE. This
    * is an accelerator; the records table below is the thing somebody came for.
    */
-  const [inspection, providers, connections, keys, transfer, me] = await Promise.all([
+  const [
+    inspection,
+    providers,
+    connections,
+    keys,
+    transfer,
+    me,
+    teamInboxesRes,
+    mailboxStorageRes,
+  ] = await Promise.all([
     tryApi<DnsInspection>("/console/dns/lookup", { query: { domain: domain.name } }),
     tryApi<{ data: ConnectableProvider[] }>("/console/dns/providers"),
     tryApi<{ data: DnsConnection[] }>("/console/dns/connections"),
@@ -94,6 +103,13 @@ export default async function DomainDetailPage({
     ),
     // For the transfer dialog, which refuses the person's own addresses.
     tryApi<Me>("/console/me"),
+    // ⚠ READ HERE SO THE CATCH-ALL MORPHSELECT HAS ITS DESTINATIONS ON FIRST RENDER.
+    tryApi<{ data: Array<{ address: string; display_name: string | null }> }>(
+      "/console/team-inboxes",
+    ),
+    tryApi<{ data: Array<{ address: string; display_name: string | null }> }>(
+      "/console/mailboxes/storage",
+    ),
   ])
 
   /*
@@ -129,6 +145,14 @@ export default async function DomainDetailPage({
       ? (connections.data.data.find((c) => c.provider === connectable.slug) ?? null)
       : null
 
+  const canManageMailboxes =
+    me.ok &&
+    Boolean(
+      me.data.access?.role === "owner" ||
+      me.data.access?.role === "admin" ||
+      me.data.access?.permissions.includes("workspace:manage"),
+    )
+
   const data: DomainDetailData = {
     domain,
     delegation: delegation?.ok ? delegation.data : null,
@@ -139,6 +163,15 @@ export default async function DomainDetailPage({
     keyImpact,
     transfer: transfer.ok ? transfer.data.data : null,
     ownEmails: me.ok ? me.data.user.verified_emails : [],
+    canManageMailboxes,
+    mailboxAccounts:
+      mailboxStorageRes.ok && Array.isArray(mailboxStorageRes.data?.data)
+        ? mailboxStorageRes.data.data
+        : [],
+    teamInboxes:
+      teamInboxesRes.ok && Array.isArray(teamInboxesRes.data?.data)
+        ? teamInboxesRes.data.data
+        : [],
   }
 
   return <DomainDetailView shape={domainDetailShape.of(data)} data={data} />

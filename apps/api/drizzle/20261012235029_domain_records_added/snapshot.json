@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "ed0ec526-e832-45b4-92b8-d8ea7d611d26",
+  "prevIds": [
+    "09b238d3-2211-4570-96de-f865e1e178d6"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "records_added_at"
+      ],
+      "writes": [
+        "s|col|core.domains.records_added_at",
+        "n|col|core.domains.records_added_at",
+        "e|col|core.domains.records_added_at"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "records_added_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

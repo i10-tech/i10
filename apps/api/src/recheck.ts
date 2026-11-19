@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Re-checks whether verified domains are still their holders', then exits.
  *
@@ -35,6 +36,7 @@ import { ensureSesTenant } from "./domains/ses-tenant.js"
 import { nodeTxtLookup } from "./domains/ownership.js"
 import { readDelegation } from "./domains/referral.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import {
   captureError,
   captureMessage,
@@ -70,12 +72,11 @@ import {
 } from "./identity/saml-refresh.js"
 import { connectionHealthStore } from "./identity/health-store.js"
 import { directoryStore } from "./identity/scim-store.js"
-import { sql as dsql } from "drizzle-orm"
 import { guardedFetch } from "./identity/oidc-fetch.js"
 import { parseAllowList, vetHost } from "./webhooks/egress.js"
 
 const log = pino({ name: "i10-domain-recheck" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,
@@ -230,10 +231,16 @@ await withMonitor(
 
           const now = new Date()
           try {
-            const tenantRows = (await db.execute(
-              dsql`select id from core.tenants`,
-            )) as unknown as { id: string }[]
-            for (const { id: tenantId } of tenantRows) {
+            // ⚠ NOT `select id from core.tenants`: as i10_api with no tenant set,
+            // its policy's uuid cast throws, and this pass never ran.
+            const tenantIds: string[] = []
+            for (let after: string | null = null; ;) {
+              const page = await base.dueExpiryTenants(after, 500)
+              if (!page.length) break
+              tenantIds.push(...page)
+              after = page.at(-1)!
+            }
+            for (const tenantId of tenantIds) {
               try {
                 const conns = await base.connections(tenantId)
                 for (const conn of conns) {

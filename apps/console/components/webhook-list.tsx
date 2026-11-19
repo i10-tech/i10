@@ -570,7 +570,10 @@ export function WebhookList({
                             )}
                           </Bone>
                         </ListCell>
-                        <ListCell hideBelow="md" className="text-xs text-muted-foreground">
+                        <ListCell
+                          hideBelow="md"
+                          className="text-xs text-muted-foreground"
+                        >
                           <Bone id="kind" width={48} lineHeight={16}>
                             {endpoint && KIND_LABEL[endpoint.kind]}
                           </Bone>
@@ -829,7 +832,10 @@ function PreviousSecrets({ endpoint }: { endpoint: WebhookEndpoint }) {
     .at(-1)
   if (!last) return null
   return (
-    <p className="flex min-w-0 items-center gap-1.5 text-xs text-warning" data-skeleton="skip">
+    <p
+      className="flex min-w-0 items-center gap-1.5 text-xs text-warning"
+      data-skeleton="skip"
+    >
       <KeyRound className="size-3.5 shrink-0" />
       <span className="truncate">
         {endpoint.previous_secrets.length === 1

@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "e95abfdf-caed-46f3-a1ef-44c8fc0fd346",
+  "prevIds": [
+    "68ba2550-c4a3-4bdb-a0cd-091ca97af5f6"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "rate_limit"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.rate_limit",
+        "n|col|core.webhook_endpoints.rate_limit",
+        "e|col|core.webhook_endpoints.rate_limit"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "rate_limit",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

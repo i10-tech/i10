@@ -3,14 +3,13 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import { Hono } from "hono"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { identityStore } from "../src/identity/store.js"
 import { mintHookSecret } from "../src/identity/okta-event-hook.js"
 import { fixedWindow } from "../src/identity/rate-limit.js"
 import { raiseConnectionCredentialEpochs } from "../src/projection/connection-epoch.js"
 import { raiseCredentialEpoch } from "../src/projection/credential-epoch.js"
 import { createOktaEventHooks } from "../src/routes/okta-event-hooks.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 
 /**
  * An Okta event hook against a real database as `i10_api`: the connection is
@@ -34,13 +33,13 @@ const ada = `user_ada_${suffix}`
 const bob = `user_bob_${suffix}`
 const rivalAda = `user_rival_ada_${suffix}`
 const ghost = `user_ghost_${suffix}`
-const box = secretBox("ab".repeat(32))
+const box = testSealer()
 
 suite("Okta event hook against Postgres", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

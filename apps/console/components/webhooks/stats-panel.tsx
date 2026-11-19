@@ -143,7 +143,10 @@ export function StatsPanel({
                         )}
                       </Bone>
                     </ListCell>
-                    <ListCell hideBelow="sm" className="tabular text-right text-xs text-muted-foreground">
+                    <ListCell
+                      hideBelow="sm"
+                      className="tabular text-right text-xs text-muted-foreground"
+                    >
                       <Bone id="retrying" width={32} lineHeight={16} align="end">
                         {row && formatNumber(row.pending)}
                       </Bone>

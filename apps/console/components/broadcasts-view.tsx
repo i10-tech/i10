@@ -232,7 +232,9 @@ export function BroadcastsView({
                       options={STATUSES.map((s) => ({
                         value: s,
                         label: BROADCAST_STATUS[s] ?? s,
-                        icon: <StatusDot tone={describeStatus(broadcastTone(s)).tone} />,
+                        icon: (
+                          <StatusDot tone={describeStatus(broadcastTone(s)).tone} />
+                        ),
                       }))}
                     />
                   )}
@@ -243,7 +245,10 @@ export function BroadcastsView({
                       label="Segment"
                       allLabel="All segments"
                       triggerWidth={176}
-                      options={segments.map(([val, lbl]) => ({ value: val, label: lbl }))}
+                      options={segments.map(([val, lbl]) => ({
+                        value: val,
+                        label: lbl,
+                      }))}
                     />
                   )}
                   <ViewToggle value={view} onChange={setView} />
@@ -448,7 +453,10 @@ export function BroadcastsView({
                                     )}
                                   </Bone>
                                 </ListCell>
-                                <ListCell hideBelow="sm" className="tabular text-right text-xs text-muted-foreground">
+                                <ListCell
+                                  hideBelow="sm"
+                                  className="tabular text-right text-xs text-muted-foreground"
+                                >
                                   <Bone
                                     id="recipients"
                                     width={48}

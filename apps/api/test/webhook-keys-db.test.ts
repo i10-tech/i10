@@ -2,10 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { webhookDeliveryOps } from "../src/webhooks/db.js"
 import { verifyEd25519 } from "../src/webhooks/keys.js"
-import { secretBox, verifySignature } from "../src/webhooks/signing.js"
+import { verifySignature } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 import {
   webhookEndpointStore,
   type WebhookEndpointStore,
@@ -23,7 +23,7 @@ const URL = process.env.WEBHOOKS_TEST_DATABASE_URL
 const API_URL = URL?.replace(/\/\/[^@]+@/, "//i10_api:i10_api@")
 const suite = URL ? describe : describe.skip
 
-const secrets = secretBox("ab".repeat(32))
+const secrets = testSealer()
 let owner: ReturnType<typeof postgres>
 let app: ReturnType<typeof postgres>
 let db: Database
@@ -58,7 +58,7 @@ suite("webhook signing keys in the database", () => {
   beforeAll(() => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
     store = webhookEndpointStore(db, secrets)
   })
   afterAll(async () => {

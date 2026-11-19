@@ -21,6 +21,10 @@ export interface DomainDetailData {
   keyImpact: KeyImpact[]
   transfer: TransferOffer | null
   ownEmails: string[]
+  /** For the Mailboxes section: who may change it, and the catch-all's choices. */
+  canManageMailboxes: boolean
+  mailboxAccounts: { address: string; display_name: string | null }[]
+  teamInboxes: { address: string; display_name: string | null }[]
 }
 
 export interface DomainDetailShape {

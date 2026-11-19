@@ -281,3 +281,55 @@ describe("revoking a member's access to a team inbox", () => {
     expect(s.seen.some((r) => r.methodCalls[0]![0] === "x:Account/set")).toBe(false)
   })
 })
+
+describe("destroying a person's own account (a deleted mailbox's purge)", () => {
+  it("destroys the user's account with the admin token, and forgets its cached id", async () => {
+    const s = server(accounts)
+    const cache = new MailboxIdCache()
+    const c = jmapAs({
+      baseUrl: "http://i10-stalwart:8080",
+      registryToken: ADMIN,
+      impersonationToken: IMPERSONATE,
+      fetch: s.fetcher,
+      cache,
+    })
+
+    await c.call({ address: "bob@acme.test" }, [["Mailbox/get", {}, "c0"]])
+    expect(cache.get("bob@acme.test")).not.toBeNull()
+    expect(await c.destroyAccount({ address: "bob@acme.test" })).toBe(true)
+    expect(s.destroyed).toEqual(["u1"])
+    expect(s.seen.filter((r) => r.methodCalls[0]![0] === "x:Account/set")).toHaveLength(
+      1,
+    )
+    expect(
+      s.seen
+        .filter((r) => r.methodCalls[0]![0] === "x:Account/set")
+        .every((r) => r.token === ADMIN),
+    ).toBe(true)
+    expect(cache.get("bob@acme.test")).toBeNull()
+  })
+
+  it("says so when the registry has none, which is how a purge knows it is done", async () => {
+    const s = server([])
+    expect(await client(s.fetcher).destroyAccount({ address: "bob@acme.test" })).toBe(
+      false,
+    )
+    expect(s.destroyed).toEqual([])
+  })
+
+  it("will not destroy a team inbox's account as somebody's mailbox", async () => {
+    const s = server(accounts)
+    expect(
+      await code(client(s.fetcher).destroyAccount({ address: "support@acme.test" })),
+    ).toBe("ambiguous_account")
+    expect(s.destroyed).toEqual([])
+  })
+
+  it("refuses an address that is not one, without asking the registry", async () => {
+    const s = server(accounts)
+    expect(await code(client(s.fetcher).destroyAccount({ address: "bob" }))).toBe(
+      "invalid_address",
+    )
+    expect(s.seen).toHaveLength(0)
+  })
+})

@@ -2,7 +2,15 @@ import { desc, eq } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { riskAssessmentEvents, riskAssessments } from "../db/core.js"
 import type { PreviousState } from "./decide.js"
-import type { Assessment, Band } from "./types.js"
+import type {
+  Assessment,
+  Band,
+  ClearedContribution,
+  ShadowContribution,
+} from "./types.js"
+
+/** A transaction `withTenant` opened, for work that must commit with the caller's. */
+export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 /**
  * Where assessments live (#170): the current one per workspace, and the
@@ -17,11 +25,14 @@ export const EVENT_SWING = 10
 export interface StoredAssessment extends PreviousState {
   score: number
   contributions: Assessment["contributions"]
+  /** What shadow rules would have added; never read by `decide`. */
+  shadow: ShadowContribution[]
+  /** What staff decisions cleared; never read by `decide`. */
+  cleared: ClearedContribution[]
   rulesetVersion: number
   sesPolicySetAt: Date | null
   alertedAt: Date | null
   computedAt: Date
-  modelScore: number | null
 }
 
 export interface AssessmentStore {
@@ -29,8 +40,11 @@ export interface AssessmentStore {
   save(input: {
     tenantId: string
     assessment: Assessment
+    /** Recorded beside the assessment, with no effect on it. */
+    shadow: ShadowContribution[]
+    /** Recorded beside the assessment, with no effect on it. */
+    cleared: ClearedContribution[]
     bandSince: Date
-    modelScore: number | null
     previous: { band: Band; score: number } | null
     actions: string[]
     trigger: string
@@ -43,12 +57,14 @@ export interface AssessmentStore {
   /**
    * Staff's hand on the score: pause automatic actions until a date.
    * ⚠ AUDITED: the who and why become an event row, like every other action.
+   * `alsoInTx` runs in the same transaction (the decision record, decisions.ts).
    */
   pause(
     tenantId: string,
     until: Date,
     at: Date,
     audit?: { by: string; reason: string },
+    alsoInTx?: (tx: Tx) => Promise<void>,
   ): Promise<boolean>
   history(
     tenantId: string,
@@ -72,19 +88,21 @@ export function assessmentStore(db: Database): AssessmentStore {
         sesPolicy: row.sesPolicy,
         score: row.score,
         contributions: row.contributions as Assessment["contributions"],
+        shadow: row.shadow as ShadowContribution[],
+        cleared: row.cleared as ClearedContribution[],
         rulesetVersion: row.rulesetVersion,
         sesPolicySetAt: row.sesPolicySetAt,
         alertedAt: row.alertedAt,
         computedAt: row.computedAt,
-        modelScore: row.modelScore,
       }
     },
 
     async save({
       tenantId,
       assessment,
+      shadow,
+      cleared,
       bandSince,
-      modelScore,
       previous,
       actions,
       trigger,
@@ -103,7 +121,8 @@ export function assessmentStore(db: Database): AssessmentStore {
           band: assessment.band,
           rulesetVersion: assessment.rulesetVersion,
           contributions: assessment.contributions,
-          modelScore,
+          shadow,
+          cleared,
           bandSince,
           computedAt: at,
         }
@@ -119,6 +138,8 @@ export function assessmentStore(db: Database): AssessmentStore {
             fromBand: previous?.band ?? null,
             rulesetVersion: assessment.rulesetVersion,
             contributions: assessment.contributions,
+            shadow,
+            cleared,
             actions,
             trigger,
             occurredAt: at,
@@ -143,7 +164,7 @@ export function assessmentStore(db: Database): AssessmentStore {
       )
     },
 
-    async pause(tenantId, until, at, audit) {
+    async pause(tenantId, until, at, audit, alsoInTx) {
       return withTenant(db, tenantId, async (tx) => {
         const [row] = await tx
           .update(r)
@@ -159,6 +180,8 @@ export function assessmentStore(db: Database): AssessmentStore {
             fromBand: row.band,
             rulesetVersion: row.rulesetVersion,
             contributions: row.contributions,
+            shadow: row.shadow,
+            cleared: row.cleared,
             actions: [
               `pin:until=${until.toISOString()}`,
               `by:${audit.by}`,
@@ -168,6 +191,7 @@ export function assessmentStore(db: Database): AssessmentStore {
             occurredAt: at,
           })
         }
+        await alsoInTx?.(tx)
         return true
       })
     },

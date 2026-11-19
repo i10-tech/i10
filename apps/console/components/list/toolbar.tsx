@@ -190,11 +190,7 @@ export function ListSearch({
       placed.current = true
       return
     }
-    animate(
-      width,
-      next,
-      open ? motionTokens.spring.morph : motionTokens.spring.smooth,
-    )
+    animate(width, next, open ? motionTokens.spring.morph : motionTokens.spring.smooth)
   }, [open, reduced, width, goal])
 
   // A toolbar or end cluster that resizes while the field is open is not a
@@ -238,8 +234,15 @@ export function ListSearch({
   const fade: Transition = reduced
     ? { duration: 0.15 }
     : open
-      ? { duration: motionTokens.duration.standard, ease: [...motionTokens.ease.enter] as [number, number, number, number], delay: 0.06 }
-      : { duration: motionTokens.duration.instant, ease: [...motionTokens.ease.standard] as [number, number, number, number] }
+      ? {
+          duration: motionTokens.duration.standard,
+          ease: [...motionTokens.ease.enter] as [number, number, number, number],
+          delay: 0.06,
+        }
+      : {
+          duration: motionTokens.duration.instant,
+          ease: [...motionTokens.ease.standard] as [number, number, number, number],
+        }
 
   return (
     <motion.div

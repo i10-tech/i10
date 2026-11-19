@@ -1,9 +1,10 @@
 import { describe, expect, it, mock } from "bun:test"
-import type { Mailbox } from "@repo/contracts"
+import type { CreateMailbox, Mailbox } from "@repo/contracts"
 import {
   mailboxProvisioning,
   type MailboxDirectory,
   type MailboxIdentity,
+  type ManagedMailLane,
   type ProvisionDeps,
 } from "../src/mailboxes/provision.js"
 import type { ClerkUser } from "../src/projection/clerk-user.js"
@@ -33,10 +34,13 @@ const clerkUser = (over: Partial<ClerkUser> = {}): ClerkUser => ({
   ...over,
 })
 
-const mailbox = (address = "me@i10.tech"): Mailbox => ({
+const mailbox = (
+  address = "me@i10.tech",
+  displayName: string | null = "Mohamed",
+): Mailbox => ({
   object: "mailbox",
   address,
-  display_name: "Mohamed",
+  display_name: displayName,
   active: true,
   created_at: new Date(0).toISOString(),
 })
@@ -48,10 +52,13 @@ function harness(
     capacity?: ProvisionDeps["capacity"]
     project?: ProvisionDeps["project"]
     passwordEnabled?: boolean
+    mailLane?: ManagedMailLane
   } = {},
 ) {
   const addVerifiedAddress = mock(async () => {})
-  const activate = mock(async () => mailbox())
+  const activate = mock(async (_userId: string, displayName?: string) =>
+    mailbox("me@i10.tech", displayName ?? "Mohamed"),
+  )
 
   const identity: MailboxIdentity = {
     get: async () => ({
@@ -76,21 +83,80 @@ function harness(
     capacity: over.capacity ?? { check: async () => ({ status: "allowed" }) },
     project: over.project ?? (async () => ({ email: "me@i10.tech" })),
     featureId: "mailboxes",
+    ...(over.mailLane !== undefined ? { mailLane: async () => over.mailLane! } : {}),
     now: () => new Date("2026-09-08T00:00:00Z"),
   })
 
   return { provisioning, addVerifiedAddress, activate }
 }
 
-const create = (h: ReturnType<typeof harness>, address = "me@i10.tech") =>
-  h.provisioning.create("user_1", { address })
+const create = (
+  h: ReturnType<typeof harness>,
+  address = "me@i10.tech",
+  extra: Omit<CreateMailbox, "address"> = {},
+) => h.provisioning.create("user_1", { address, ...extra })
 
-describe("the password precondition", () => {
-  it("refuses a passwordless account", async () => {
+describe("the password and SSO mail-lane precondition", () => {
+  it("allows an unmanaged account with a Clerk password", async () => {
+    const h = harness({ passwordEnabled: true, mailLane: "unmanaged" })
+    const outcome = await create(h)
+
+    expect(outcome.status).toBe("created")
+  })
+
+  it("refuses an unmanaged passwordless account with password_required", async () => {
     const h = harness({ passwordEnabled: false })
     const outcome = await create(h)
 
     expect(outcome.status).toBe("password_required")
+  })
+
+  it("allows a managed SSO account with OIDC mail lane on even without a Clerk password", async () => {
+    const h = harness({ passwordEnabled: false, mailLane: "oidc" })
+    const outcome = await create(h)
+
+    expect(outcome.status).toBe("created")
+  })
+
+  it("allows a managed SSO account with LDAP pass-through lane on even without a Clerk password", async () => {
+    const h = harness({ passwordEnabled: false, mailLane: "ldap" })
+    const outcome = await create(h)
+
+    expect(outcome.status).toBe("created")
+  })
+
+  it("refuses a managed SSO account with no mail lane on with mail_signin_off, naming the SSO connection page", async () => {
+    const addressTaken = mock(async () => true)
+    const domainOwner = mock(async () => TENANT)
+    const h = harness({
+      passwordEnabled: false,
+      mailLane: "off",
+      directory: { addressTaken, domainOwner },
+    })
+    const outcome = await create(h)
+
+    expect(outcome).toEqual({
+      status: "mail_signin_off",
+      reason: expect.stringContaining(
+        'Settings, Single sign-on, the connection, "Mail sign-in"',
+      ),
+    })
+    expect(addressTaken).not.toHaveBeenCalled()
+    expect(domainOwner).not.toHaveBeenCalled()
+    expect(h.addVerifiedAddress).not.toHaveBeenCalled()
+    expect(h.activate).not.toHaveBeenCalled()
+  })
+
+  /**
+   * ⚠ EVEN IF A CLERK PASSWORD EXISTS, authd never asks Clerk for a managed
+   * account's password, so a managed account with no mail lane on still cannot
+   * sign in to mail and must be refused with `mail_signin_off`.
+   */
+  it("refuses a managed SSO account with no mail lane on even if passwordEnabled is true", async () => {
+    const h = harness({ passwordEnabled: true, mailLane: "off" })
+    const outcome = await create(h)
+
+    expect(outcome.status).toBe("mail_signin_off")
   })
 
   /**
@@ -245,6 +311,26 @@ describe("creating the mailbox", () => {
     const outcome = await create(harness())
 
     expect(outcome).toMatchObject({ status: "created", mailbox: { active: true } })
+  })
+
+  it("passes display_name through to the account row on activate", async () => {
+    const h = harness({
+      passwordEnabled: false,
+      mailLane: "oidc",
+    })
+    const outcome = await create(h, "me@i10.tech", {
+      display_name: "  Ada Lovelace  ",
+    })
+
+    expect(h.activate).toHaveBeenCalledWith("user_1", "Ada Lovelace")
+    expect(outcome).toEqual({
+      status: "created",
+      mailbox: expect.objectContaining({
+        address: "me@i10.tech",
+        display_name: "Ada Lovelace",
+        active: true,
+      }),
+    })
   })
 
   /** The projection is the only writer, so its refusal is authoritative. */

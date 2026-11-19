@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { createApp } from "../src/app.js"
-import { memoryStore } from "../src/content/object-store.js"
+import { memoryStore, type ContentStore } from "../src/content/object-store.js"
 import { LIMITS } from "../src/mailboxes/archive.js"
 import {
   decideAccess,
@@ -10,14 +10,33 @@ import {
   type MailboxAccessFacts,
 } from "../src/mailboxes/jobs.js"
 import { exportKey, importKey } from "../src/mailboxes/migration.js"
-import type { SessionVerifier } from "../src/middleware/session.js"
+import type { FreshAuthReader, SessionVerifier } from "../src/middleware/session.js"
 import type { MailboxMigrationDeps } from "../src/routes/mailbox-migration.js"
 import type { MailboxJobData } from "../src/queue/mailbox-queue.js"
+import { keyringFromEnv } from "../src/crypto/keyring.js"
+import { newDataKey, wrapKey } from "../src/crypto/envelope.js"
+import { EXPORT_KEY, sealStream } from "../src/mailboxes/sealed-stream.js"
+import { tokenKeys } from "../src/crypto/token-keys.js"
 import { memoryJobStore } from "./support/job-store.js"
 
 const TENANT = "00000000-0000-4000-8000-000000000001"
 const OTHER_TENANT = "00000000-0000-4000-8000-000000000002"
-const SECRET = "test-secret-at-least-32-chars-long-123456"
+const ring = (fill: number) =>
+  tokenKeys(
+    keyringFromEnv(
+      "TOKEN_KEYS",
+      `k${fill}:${Buffer.alloc(32, fill).toString("base64")}`,
+    ),
+  )
+const SECRET = ring(1)
+const objectKeys = keyringFromEnv(
+  "OBJECT_KEYS",
+  `o1:${Buffer.alloc(32, 8).toString("base64")}`,
+)
+/** What the export job writes: a gzipped tar would be here; any bytes do. */
+const ARCHIVE = Bun.gzipSync(
+  new TextEncoder().encode("a tar of the mailbox ".repeat(5_000)),
+)
 const ADDRESS = "alice@acme.test"
 
 const OWNER = "user_owner"
@@ -35,9 +54,15 @@ const adminChecker: AdminChecker = {
   isAdmin: async (userId, tenantId) => userId === ADMIN && tenantId === TENANT,
 }
 
-function build(over: Partial<MailboxMigrationDeps> = {}) {
+function build(
+  over: Partial<MailboxMigrationDeps> = {},
+  opts: { fresh?: boolean; unwiredFreshAuth?: boolean } = {},
+) {
   const jobs = memoryJobStore()
-  const store = memoryStore()
+  const store: ReturnType<typeof memoryStore> & ContentStore = Object.assign(
+    memoryStore(),
+    { objectKeys },
+  )
   const queued: MailboxJobData[] = []
   const deps: MailboxMigrationDeps = {
     jobs,
@@ -45,7 +70,7 @@ function build(over: Partial<MailboxMigrationDeps> = {}) {
     enqueue: async (data) => void queued.push(data),
     access: (userId, address) =>
       decideAccess(address === ADDRESS ? facts : null, userId, adminChecker),
-    tokenSecret: SECRET,
+    tokens: SECRET,
     ...over,
   }
   // The signed-in user is named by a header, which is all a session fake needs.
@@ -55,7 +80,15 @@ function build(over: Partial<MailboxMigrationDeps> = {}) {
       return user ? { status: "signed-in", userId: user } : { status: "signed-out" }
     },
   }
-  const app = createApp({ sessionAuth: sessions, mailboxMigration: deps })
+  // The step-up reader, as the console fakes it: fresh unless a test says not.
+  const freshAuth: FreshAuthReader = async () => ({
+    status: opts.fresh === false ? "stale" : "fresh",
+  })
+  const app = createApp({
+    sessionAuth: sessions,
+    mailboxMigration: deps,
+    ...(opts.unwiredFreshAuth ? {} : { freshAuth }),
+  })
   const call = (method: string, path: string, user?: string, body?: unknown) =>
     app.request(path, {
       method,
@@ -77,9 +110,15 @@ const completedExport = async (t: ReturnType<typeof build>, patch = {}) => {
     status: "completed",
   })
   const key = exportKey(TENANT, row.id)
-  t.store.objects.set(key, new Uint8Array([1, 2, 3, 4, 5]))
+  const ids = { tenantId: TENANT, jobId: row.id }
+  const archiveKey = newDataKey()
+  const sealed = await new Response(
+    new Blob([ARCHIVE]).stream().pipeThrough(sealStream(archiveKey, ids)),
+  ).arrayBuffer()
+  t.store.objects.set(key, new Uint8Array(sealed))
   await t.jobs.update(TENANT, row.id, {
     objectKey: key,
+    sealedKey: wrapKey(EXPORT_KEY, objectKeys, ids, archiveKey),
     expiresAt: new Date(Date.now() + 86_400_000),
     ...patch,
   })
@@ -90,6 +129,86 @@ const linkOf = async (t: ReturnType<typeof build>) => {
   const res = await t.call("GET", `/mailboxes/${ADDRESS}/export`, OWNER)
   return ((await res.json()) as { download_url: string | null }).download_url
 }
+
+describe("step-up on the mutations", () => {
+  const stepUp = async (res: Response) => {
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      name: "invalid_access",
+      clerk_error: { reason: "reverification-error" },
+    })
+  }
+
+  it("asks a stale session before starting an export, and queues nothing", async () => {
+    const t = build({}, { fresh: false })
+    await stepUp(await t.call("POST", `/mailboxes/${ADDRESS}/export`, OWNER))
+    expect(t.queued).toEqual([])
+    expect(t.jobs.rows.size).toBe(0)
+  })
+
+  it("asks a stale session before reserving an import, and reserves nothing", async () => {
+    const t = build({}, { fresh: false })
+    await stepUp(
+      await t.call("POST", `/mailboxes/${ADDRESS}/import`, OWNER, { size: 10 }),
+    )
+    expect(t.jobs.rows.size).toBe(0)
+    expect(t.store.objects.size).toBe(0)
+  })
+
+  it("tells a stale colleague with no access no, not to re-authenticate", async () => {
+    const t = build({}, { fresh: false })
+    for (const [path, body] of [
+      [`/mailboxes/${ADDRESS}/export`, undefined],
+      [`/mailboxes/${ADDRESS}/import`, { size: 10 }],
+    ] as const) {
+      const res = await t.call("POST", path, MEMBER, body)
+      expect(res.status).toBe(403)
+      const answer = await res.json()
+      expect(answer).toMatchObject({ name: "invalid_access" })
+      expect(answer).not.toHaveProperty("clerk_error")
+    }
+  })
+
+  it("leaves reads alone on a stale session", async () => {
+    const t = build({}, { fresh: false })
+    await completedExport(t)
+    expect((await t.call("GET", `/mailboxes/${ADDRESS}/export`, OWNER)).status).toBe(
+      200,
+    )
+    expect((await t.call("GET", `/mailboxes/${ADDRESS}/import`, OWNER)).status).toBe(
+      404,
+    )
+  })
+
+  it("lets the upload be started on a stale session, once a fresh one reserved it", async () => {
+    const fresh = build()
+    const reserved = await fresh.call("POST", `/mailboxes/${ADDRESS}/import`, OWNER, {
+      size: 10,
+    })
+    const job = (await reserved.json()) as { id: string }
+    fresh.store.objects.set(importKey(TENANT, job.id), new Uint8Array(10))
+
+    // Same stores, a session that has since gone stale: the start is not a step-up.
+    const later = build(
+      { jobs: fresh.jobs, store: fresh.store, enqueue: fresh.deps.enqueue },
+      { fresh: false },
+    )
+    const res = await later.call(
+      "POST",
+      `/mailboxes/${ADDRESS}/import/${job.id}/start`,
+      OWNER,
+    )
+    expect(res.status).toBe(202)
+  })
+
+  it("refuses when the reader is not wired, rather than skipping the check", async () => {
+    const t = build({}, { unwiredFreshAuth: true })
+    expect((await t.call("POST", `/mailboxes/${ADDRESS}/export`, OWNER)).status).toBe(
+      501,
+    )
+    expect(t.queued).toEqual([])
+  })
+})
 
 describe("who may move a mailbox's mail", () => {
   it("allows the mailbox's owner, the workspace's owner and an admin, and no other member", async () => {
@@ -182,18 +301,36 @@ describe("the download link", () => {
   const download = (t: ReturnType<typeof build>, link: string) =>
     t.call("GET", link.replace("alice%40acme.test", ADDRESS))
 
-  it("streams the archive to whoever holds a good link, with no session", async () => {
+  it("streams the archive, opened, to whoever holds a good link, with no session", async () => {
     const t = build()
-    await completedExport(t)
+    const row = await completedExport(t)
+    // What R2 holds is sealed, and is not the archive.
+    const inR2 = t.store.objects.get(exportKey(TENANT, row.id))!
+    expect(Buffer.from(inR2).includes(Buffer.from(ARCHIVE.subarray(0, 32)))).toBe(false)
+
     const res = await download(t, (await linkOf(t))!)
     expect(res.status).toBe(200)
     expect(res.headers.get("content-type")).toBe("application/gzip")
-    expect(res.headers.get("content-length")).toBe("5")
+    // The archive's own length, not the sealed object's.
+    expect(res.headers.get("content-length")).toBe(String(ARCHIVE.byteLength))
     expect(res.headers.get("content-disposition")).toContain(
       "alice@acme.test-export.tar.gz",
     )
     expect(res.headers.get("cache-control")).toBe("no-store")
-    expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([1, 2, 3, 4, 5])
+    expect(Buffer.from(await res.arrayBuffer()).equals(Buffer.from(ARCHIVE))).toBe(true)
+  })
+
+  it("is off without OBJECT_KEYS: no export is queued and none is served", async () => {
+    const t = build()
+    await completedExport(t)
+    t.store.objectKeys = null
+    expect((await t.call("POST", `/mailboxes/${ADDRESS}/export`, OWNER)).status).toBe(
+      501,
+    )
+    expect(t.queued).toEqual([])
+    expect(
+      (await t.call("GET", `/mailboxes/${ADDRESS}/export/download`, OWNER)).status,
+    ).toBe(501)
   })
 
   it("serves the owner by session too, and nobody else", async () => {
@@ -261,15 +398,7 @@ describe("the download link", () => {
       401,
     )
     expect(
-      (
-        await get(
-          signDownloadToken(
-            link,
-            Date.now() + 60_000,
-            "another-secret-that-is-long-enough!!",
-          ),
-        )
-      ).status,
+      (await get(signDownloadToken(link, Date.now() + 60_000, ring(2)))).status,
     ).toBe(401)
     const good = signDownloadToken(link, Date.now() + 60_000, SECRET)
     expect((await get(`${good.slice(0, -3)}AAA`)).status).toBe(401)

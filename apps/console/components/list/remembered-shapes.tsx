@@ -150,13 +150,25 @@ export function clearSeededShapes(): void {
   seeded.clear()
 }
 
+const decoded = (segment: string) => {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
 /**
  * Hook for record page loading.tsx: reads the route id via useRouteParams() and gets
- * the seeded shape, falling back to def.fallback on a cold deep link.
+ * the seeded shape, falling back to def.fallback on a cold deep link. `param` names
+ * the route segment when it is not `id` (a mailbox is `[address]`); the value is
+ * read decoded, so a list can seed it under the address as typed.
  */
-export function useRecordShape<S, D>(def: ShapeDef<S, D>): S {
+export function useRecordShape<S, D>(def: ShapeDef<S, D>, param = "id"): S {
   const params = useRouteParams()
-  const raw = params?.id
-  const id = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : undefined
+  const raw = params?.[param]
+  const segment =
+    typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : undefined
+  const id = segment === undefined ? undefined : decoded(segment)
   return React.useMemo(() => (id ? getSeededShape(def, id) : def.fallback), [def, id])
 }

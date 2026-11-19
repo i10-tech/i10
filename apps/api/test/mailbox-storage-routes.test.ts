@@ -49,12 +49,17 @@ function world(plan: typeof PRO | null = PRO) {
 function appFor(
   w: ReturnType<typeof world>,
   who: string,
-  opts: { orgId?: string | undefined; unwired?: boolean } = {},
+  opts: { orgId?: string | undefined; unwired?: boolean; fresh?: boolean } = {},
 ) {
   const app = new Hono()
   app.use("*", async (c, next) => {
     c.set("auth", { apiKeyId: "", tenantId: ACME, scopes: [], mode: "live" })
     c.set("user", { userId: who, orgId: "orgId" in opts ? opts.orgId : ORG })
+    // The step-up reader the console sets; fresh unless a test says otherwise.
+    c.set(
+      "freshAuth" as never,
+      (async () => ({ status: opts.fresh === false ? "stale" : "fresh" })) as never,
+    )
     await next()
   })
   mountMailboxStorage(
@@ -114,6 +119,31 @@ describe("who may size an inbox", () => {
 
     expect(res.status).toBe(403)
     expect(w.tenants[ACME]![0]!.allocation).toBe(4 * GIB)
+  })
+
+  it("asks a stale admin to confirm it is them, and changes nothing", async () => {
+    const w = world()
+    const res = await put(appFor(w, ADMIN, { fresh: false }), "kim@acme.test", {
+      storage_allocation: GIB,
+    })
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      name: "invalid_access",
+      clerk_error: { reason: "reverification-error" },
+    })
+    expect(w.tenants[ACME]![1]!.allocation).toBeNull()
+    expect(w.registry.methods).toHaveLength(0)
+  })
+
+  it("tells a stale member no, not to re-authenticate", async () => {
+    const w = world()
+    const res = await put(appFor(w, MEMBER, { fresh: false }), "kim@acme.test", {
+      storage_allocation: GIB,
+    })
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ name: "forbidden" })
   })
 
   it("answers 403 to anyone with no organization, since there is no role to ask about", async () => {

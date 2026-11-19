@@ -182,6 +182,16 @@ export interface DomainSummary {
   displaced_at?: string | null
   /** Console only: set-up's one "Send email" from this domain, once it has had it. */
   onboarding_email?: { id: string; to: string; at: string } | null
+  /** Console only (#406): mailbox hosting on this domain. */
+  mailboxes?: DomainMailboxes
+}
+
+export interface DomainMailboxes {
+  enabled: boolean
+  owned: boolean
+  sending: boolean
+  catch_all: string | null
+  count: number
 }
 
 export interface Domain extends DomainSummary {

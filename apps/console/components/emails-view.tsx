@@ -214,7 +214,9 @@ export function EmailsView({ shape, data }: { shape: EmailsShape; data?: EmailsD
                                       {email && (
                                         <span className="flex min-w-0">
                                           <span className="truncate">
-                                            {email.to[0] ? bareAddress(email.to[0]) : "-"}
+                                            {email.to[0]
+                                              ? bareAddress(email.to[0])
+                                              : "-"}
                                           </span>
                                           {email.to.length > 1 && (
                                             <span className="shrink-0 pl-1 text-muted-foreground">

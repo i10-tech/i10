@@ -1,0 +1,35 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "62290d3d-b6f1-4af6-ba87-2685d9548386",
+  "prevIds": [
+    "818c9704-c852-4c54-a353-aa41e5ffe9a1"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "idempotency_keys",
+        "message_id"
+      ],
+      "writes": [
+        "s|col|core.idempotency_keys.message_id",
+        "n|col|core.idempotency_keys.message_id",
+        "e|col|core.idempotency_keys.message_id"
+      ],
+      "reads": [
+        "n|tbl|core.idempotency_keys",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"idempotency_keys\",\"message_id\"]"
+    }
+  ]
+}

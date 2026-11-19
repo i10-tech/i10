@@ -1,0 +1,179 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "244f89a4-9565-4691-ac63-72091986851a",
+  "prevIds": [
+    "b49c19f0-b344-425a-be55-2663c67ca864"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "webhook_delivery_lane"
+      ],
+      "writes": [
+        "s|enum|core.webhook_delivery_lane",
+        "n|enum|core.webhook_delivery_lane",
+        "e|enum|core.webhook_delivery_lane",
+        "n|type|core.webhook_delivery_lane"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_deliveries",
+        "sequence"
+      ],
+      "writes": [
+        "s|col|core.webhook_deliveries.sequence",
+        "n|col|core.webhook_deliveries.sequence",
+        "e|col|core.webhook_deliveries.sequence"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_deliveries",
+        "first_failed_at"
+      ],
+      "writes": [
+        "s|col|core.webhook_deliveries.first_failed_at",
+        "n|col|core.webhook_deliveries.first_failed_at",
+        "e|col|core.webhook_deliveries.first_failed_at"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_deliveries",
+        "lane"
+      ],
+      "writes": [
+        "s|col|core.webhook_deliveries.lane",
+        "n|col|core.webhook_deliveries.lane",
+        "e|col|core.webhook_deliveries.lane"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_deliveries",
+        "n|sch|core",
+        "n|enum|core.webhook_delivery_lane"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "next_sequence"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.next_sequence",
+        "n|col|core.webhook_endpoints.next_sequence",
+        "e|col|core.webhook_endpoints.next_sequence"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "webhook_delivery_lane",
+        "values": [
+          "ordered",
+          "retry"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "sequence",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "first_failed_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_deliveries",
+        "name": "lane",
+        "type": "webhook_delivery_lane",
+        "typeSchema": "core",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'ordered'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "next_sequence",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

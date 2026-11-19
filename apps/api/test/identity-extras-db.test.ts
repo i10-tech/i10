@@ -3,13 +3,12 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { webhookEventData } from "@repo/contracts"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { connectionHealthStore } from "../src/identity/health-store.js"
 import { healthOf } from "../src/identity/health.js"
 import { siemStore } from "../src/identity/siem-store.js"
 import { identityStore } from "../src/identity/store.js"
 import { keyStore } from "../src/auth/store.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 import { identityWebhooks } from "../src/webhooks/identity-events.js"
 import { SECRET } from "./identity-siem-fakes.js"
 
@@ -31,13 +30,13 @@ let database: Database
 const acme = crypto.randomUUID()
 const rival = crypto.randomUUID()
 const conn = crypto.randomUUID()
-const box = secretBox("00".repeat(32))
+const box = testSealer()
 
 suite("#345 identity extras", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

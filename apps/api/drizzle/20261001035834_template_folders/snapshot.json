@@ -1,0 +1,578 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "bd77d14e-f88b-4cbe-aee7-f5c98eaed906",
+  "prevIds": [
+    "c238701f-8ca0-4942-82ca-6b01f6f1799d"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_folders"
+      ],
+      "writes": [
+        "s|tbl|core.template_folders",
+        "n|tbl|core.template_folders",
+        "e|tbl|core.template_folders",
+        "n|rel|core.template_folders",
+        "n|type|core.template_folders",
+        "n|rel|core.template_folders_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_versions",
+        "from"
+      ],
+      "writes": [
+        "s|col|core.template_versions.from",
+        "n|col|core.template_versions.from",
+        "e|col|core.template_versions.from"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_versions",
+        "reply_to"
+      ],
+      "writes": [
+        "s|col|core.template_versions.reply_to",
+        "n|col|core.template_versions.reply_to",
+        "e|col|core.template_versions.reply_to"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_versions",
+        "preview_text"
+      ],
+      "writes": [
+        "s|col|core.template_versions.preview_text",
+        "n|col|core.template_versions.preview_text",
+        "e|col|core.template_versions.preview_text"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "folder_id"
+      ],
+      "writes": [
+        "s|col|core.templates.folder_id",
+        "n|col|core.templates.folder_id",
+        "e|col|core.templates.folder_id"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "from"
+      ],
+      "writes": [
+        "s|col|core.templates.from",
+        "n|col|core.templates.from",
+        "e|col|core.templates.from"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "reply_to"
+      ],
+      "writes": [
+        "s|col|core.templates.reply_to",
+        "n|col|core.templates.reply_to",
+        "e|col|core.templates.reply_to"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "preview_text"
+      ],
+      "writes": [
+        "s|col|core.templates.preview_text",
+        "n|col|core.templates.preview_text",
+        "e|col|core.templates.preview_text"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "variables"
+      ],
+      "writes": [
+        "s|col|core.templates.variables",
+        "n|col|core.templates.variables",
+        "e|col|core.templates.variables"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "template_folders",
+        "template_folders_tenant_name_uq"
+      ],
+      "writes": [
+        "s|idx|core.template_folders_tenant_name_uq",
+        "n|idx|core.template_folders_tenant_name_uq",
+        "e|idx|core.template_folders_tenant_name_uq",
+        "n|rel|core.template_folders_tenant_name_uq"
+      ],
+      "reads": [
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "n|col|core.template_folders.tenant_id",
+        "n|col|core.template_folders.name"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_folders"
+      ],
+      "writes": [
+        "s|fk|core.template_folders.template_folders_tenant_id_tenants_id_fk",
+        "n|fk|core.template_folders.template_folders_tenant_id_tenants_id_fk",
+        "e|fk|core.template_folders.template_folders_tenant_id_tenants_id_fk",
+        "n|con|core.template_folders.template_folders_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.template_folders.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "templates"
+      ],
+      "writes": [
+        "s|fk|core.templates.templates_folder_id_template_folders_id_fk",
+        "n|fk|core.templates.templates_folder_id_template_folders_id_fk",
+        "e|fk|core.templates.templates_folder_id_template_folders_id_fk",
+        "n|con|core.templates.templates_folder_id_template_folders_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core",
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "n|col|core.templates.folder_id",
+        "n|col|core.template_folders.id",
+        "e|uniqueness|core.template_folders.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_folders"
+      ],
+      "writes": [
+        "s|pol|core.template_folders.template_folders_tenant",
+        "n|pol|core.template_folders.template_folders_tenant",
+        "e|pol|core.template_folders.template_folders_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "e|rls|core.template_folders"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "template_folders",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "gen_random_uuid()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "from",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "reply_to",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "preview_text",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "folder_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "from",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "reply_to",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "preview_text",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "variables",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "template_folders_tenant_name_uq",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "template_folders_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "templates_folder_id_template_folders_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "folder_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "template_folders",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "template_folders_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "template_folders_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"template_folders\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"template_folders\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

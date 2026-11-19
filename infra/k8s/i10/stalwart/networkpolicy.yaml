@@ -1,8 +1,8 @@
 # The one policy that lets mail in from the internet.
 #
 # ⚠ WITHOUT THIS, EVERY MAIL CONNECTION IS DROPPED WITH NO LOG ANYWHERE. The
-# namespace carries `default-deny-ingress`, and the only allows are for
-# `cnpg-system`, `i10-prod` itself, and `traefik`. HTTP works because Traefik is
+# namespace carries `default-deny-ingress`, and the namespace-wide allows are for
+# `cnpg-system` and `traefik`. HTTP works because Traefik is
 # an allowed namespace - it proxies from inside the cluster. Mail does not go
 # through Traefik: it arrives from the internet straight onto the pod's
 # hostPorts, matches no allow rule, and kube-router drops it in FORWARD.
@@ -21,17 +21,10 @@
 # Scoped to the Stalwart pod and to three ports. 587 is absent because nothing
 # listens there, and 8080 because the management API belongs behind Traefik.
 #
-# ⚠ THIS POLICY IS NOT WHAT LETS THE SEND WORKER RELAY, AND BELIEVING IT WAS
-# COST A ROUND OF LOOKING IN THE WRONG PLACE. NetworkPolicies are ADDITIVE: the
-# namespace also carries `allow-same-namespace`, whose `podSelector: {}` and
-# `from: namespaceSelector(i10-prod)` admit every pod in i10-prod to every other
-# pod on EVERY port. The worker is in i10-prod, so it already reaches 2525, and
-# no rule here needs to change for it. Verified 2026-09-17 by probing 465 from a
-# throwaway pod in the namespace.
-#
-# What this rule governs is traffic from OUTSIDE the namespace - which is to say
-# the internet, since it has no `from`. The ports below are the ones the world
-# is allowed to reach.
+# ⚠ THIS POLICY IS NOT WHAT LETS THE SEND WORKER RELAY. `stalwart-relay-clients`
+# below admits the worker, and only the worker, to 2525. Policies are ADDITIVE,
+# so the ports here are open to every source, pods in i10-prod included: this
+# rule is the list of what the world may reach.
 #
 # ⚠ 2525 MUST NEVER BE ADDED HERE. The `relay` listener takes mail without
 # authentication because only the cluster can reach it; listing it would make
@@ -51,3 +44,126 @@ spec:
         - { protocol: TCP, port: 25 }
         - { protocol: TCP, port: 465 }
         - { protocol: TCP, port: 993 }
+---
+# Stalwart Keep: reachable from the two Stalwart nodes on 7000, and no egress.
+#
+# The ingress half is the only way in: since `allow-same-namespace` went
+# (2026-11-16, see workloads/networkpolicy.yaml) no other pod reaches 7000.
+# Keep's own mutual TLS is the second layer: a client needs a private key whose
+# public half is in clients.pem, and Keep drops everything else after a
+# handshake.
+#
+# ⚠ THE EGRESS HALF IS REAL. A single server has no peers and resolves nothing,
+# so a Keep that is somehow made to dial out has nowhere to go. `egress: []`
+# with `Egress` in policyTypes is the same shape as template-renderer-no-egress.
+# Replies to an accepted connection are not egress and still work, and the
+# kubelet's probes do not pass through pod policy.
+#
+# ⚠ THE SELECTOR IS `part-of`, NOT `name`, TO TAKE BOTH NODES. The internal node
+# is labelled `name: i10-stalwart-internal`, so `name: i10-stalwart` would admit
+# the edge node and leave the node that does most of the JMAP work outside it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stalwart-keep
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-stalwart-keep
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-stalwart
+      ports:
+        - { protocol: TCP, port: 7000 }
+  egress: []
+---
+# JMAP and the management API on 8080, on both nodes, for the pods inside the
+# namespace. Traefik is admitted separately (psl repo). Binding since
+# 2026-11-16; see the header above redis-clients in workloads/networkpolicy.yaml.
+#
+#   - the API group: STALWART_URL (storage sampling, mail-domains-reconcile) and
+#     impersonated JMAP;
+#   - the apply hook, which calls each node by pod IP (bootstrap.sh, connect and
+#     verify). Its 25 and 465 checks need nothing: allow-public-mail has no `from`;
+#   - Bulwark, whose JMAP goes through the i10-stalwart Service
+#     (config/README.md, "Two nodes on one box"). Its URL is in Doppler.
+#
+# ⚠ ANYTHING THAT REACHES 8080 CAN SET X-Forwarded-For (plan.ndjson `Http`), so
+# every source here can claim any client address. Keep this list short.
+#
+# The two nodes need no rule between them: the coordinator is Keep (plan.ndjson
+# `Coordinator: Default`), and only Stalwart's Zenoh coordinator connects nodes
+# directly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stalwart-http-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: i10-stalwart
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-stalwart-apply
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-bulwark
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# The unauthenticated relay, for the send worker alone (STALWART_RELAY_HOST in
+# worker.yaml). The API and the CronJobs never relay.
+#
+# ⚠ THIS RULE IS THE RELAY'S ACCESS CONTROL. 2525 takes mail with no AUTH, so
+# every pod added here can hand Stalwart mail to send. The edge node only: the
+# internal node does not serve the listener.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stalwart-relay-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-stalwart
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-worker
+      ports:
+        - { protocol: TCP, port: 2525 }
+---
+# Stalwart's own resolver, for both nodes (DnsResolver in plan.ndjson names the
+# Service's fixed 10.43.53.53:53, which lands on 5353). Stalwart asks over TCP;
+# UDP is listed because the Service publishes it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stalwart-unbound-clients
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-stalwart-unbound
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: i10-stalwart
+      ports:
+        - { protocol: TCP, port: 5353 }
+        - { protocol: UDP, port: 5353 }

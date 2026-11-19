@@ -1465,6 +1465,7 @@
               "domain_already_claimed",
               "plan_limit_exceeded",
               "password_required",
+              "mail_signin_off",
               "mailbox_already_exists",
               "restricted_api_key",
               "confirmation_required",
@@ -4202,7 +4203,8 @@
                     "MX",
                     "TXT",
                     "CNAME",
-                    "NS"
+                    "NS",
+                    "SRV"
                   ]
                 },
                 "ttl": {
@@ -4222,6 +4224,12 @@
                   "type": "string"
                 },
                 "priority": {
+                  "type": "integer"
+                },
+                "weight": {
+                  "type": "integer"
+                },
+                "port": {
                   "type": "integer"
                 }
               },
@@ -9435,7 +9443,7 @@
             }
           },
           "403": {
-            "description": "The plan does not include another mailbox, or a member asked to allocate storage.",
+            "description": "The plan does not include another mailbox, a member asked to allocate storage, or the workspace lets only owners and admins create mailboxes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9584,7 +9592,7 @@
             }
           },
           "403": {
-            "description": "Not the mailbox's owner or a workspace admin.",
+            "description": "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9833,7 +9841,7 @@
             }
           },
           "403": {
-            "description": "Not the mailbox's owner or a workspace admin.",
+            "description": "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
             "content": {
               "application/json": {
                 "schema": {

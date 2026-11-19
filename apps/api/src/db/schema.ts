@@ -1,4 +1,4 @@
-import { relations, sql } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
@@ -181,6 +181,23 @@ export const accounts = authd.table(
     paymentHoldAt: timestamp("payment_hold_at", { withTimezone: true }),
 
     /**
+     * Set while an owner or admin has the mailbox in its 30 day deletion grace
+     * (mailboxes/lifecycle.ts): the mailbox still EXISTS and still receives mail,
+     * but nobody can log in to it, and only a restore clears it.
+     *
+     * ⚠ A COLUMN OF ITS OWN, NOT `suspended_at`. Every resume path (the owner's,
+     * the directory's) clears `suspended_at`, and a deletion must survive all of
+     * them; sharing the column would also make a restore guess whether the
+     * suspension it found was its own. authd refuses a bind for it ahead of the
+     * credential cache, from the row the bind already holds.
+     *
+     * ⚠ ONE WRITER: `mailboxDeletions` in mailboxes/lifecycle-store.ts, in the
+     * transaction of its `core.mailbox_deletions` row. The projection's upsert
+     * must never name this column.
+     */
+    deletingAt: timestamp("deleting_at", { withTimezone: true }),
+
+    /**
      * Clerk's `banned`, `locked` and the end of a lockout for this user, projected
      * by the webhook (projection/clerk-user.ts).
      *
@@ -209,6 +226,10 @@ export const accounts = authd.table(
       "accounts_storage_allocation_positive",
       sql`${t.storageAllocation} is null or ${t.storageAllocation} > 0`,
     ),
+    // The purge pass lists deleting mailboxes of every workspace; there are few.
+    index("accounts_deleting_idx")
+      .on(t.deletingAt)
+      .where(sql`${t.deletingAt} is not null`),
   ],
 )
 
@@ -221,17 +242,23 @@ export const aliases = authd.table(
       .references(() => accounts.clerkUserId, { onDelete: "cascade" }),
     /**
      * `clerk` (a verified address on the Clerk user, replaced wholesale by the
-     * projection) or `directory` (an address a company's directory lists,
-     * #344, written only by mailboxes/store.ts).
+     * projection), `directory` (an address a company's directory lists, #344,
+     * written only by mailboxes/store.ts) or `console` (an owner or admin gave it,
+     * B8, written only by mailboxes/aliases.ts).
      *
      * ⚠ THE PROJECTION REPLACES ONLY ITS OWN. Without the split, the next
      * `user.updated` webhook would delete every alias a directory gave.
+     *
+     * ⚠ `console` IS NOT A CLERK ADDRESS ON PURPOSE. A verified address on the Clerk
+     * user is also a way to sign in as that person, and an alias on a second domain
+     * of the workspace should not become one; nor should a mailbox's aliases depend
+     * on a Clerk round trip that can fail after the row is written.
      */
     source: text("source").notNull().default("clerk"),
   },
   (t) => [
     index("aliases_account_idx").on(t.clerkUserId),
-    check("aliases_source_check", sql`"source" in ('clerk', 'directory')`),
+    check("aliases_source_check", sql`"source" in ('clerk', 'directory', 'console')`),
   ],
 )
 
@@ -487,27 +514,3 @@ export const bindFailureBudget = authd.table("bind_failure_budget", {
   windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
   count: integer("count").notNull(),
 })
-
-export const accountsRelations = relations(accounts, ({ many }) => ({
-  aliases: many(aliases),
-  memberships: many(groupMembers),
-}))
-
-export const aliasesRelations = relations(aliases, ({ one }) => ({
-  account: one(accounts, {
-    fields: [aliases.clerkUserId],
-    references: [accounts.clerkUserId],
-  }),
-}))
-
-export const groupsRelations = relations(groups, ({ many }) => ({
-  members: many(groupMembers),
-}))
-
-export const groupMembersRelations = relations(groupMembers, ({ one }) => ({
-  group: one(groups, { fields: [groupMembers.groupName], references: [groups.name] }),
-  account: one(accounts, {
-    fields: [groupMembers.clerkUserId],
-    references: [accounts.clerkUserId],
-  }),
-}))

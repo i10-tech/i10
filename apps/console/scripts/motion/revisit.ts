@@ -12,12 +12,21 @@
 import { chromium, type Page } from "playwright-core"
 
 const args = process.argv.slice(2)
-const base = args.includes("--base") ? args[args.indexOf("--base") + 1]! : "http://localhost:3043"
+const base = args.includes("--base")
+  ? args[args.indexOf("--base") + 1]!
+  : "http://localhost:3043"
 // --requests also prints each fetch a click sent and what came back.
 const verbose = args.includes("--requests")
 const FOLDER = "/templates/folder/f01de700-0000-4000-8000-000000000002"
 
-type Frame = { t: number; path: string; bars: number; busy: number; page: string; text: string }
+type Frame = {
+  t: number
+  path: string
+  bars: number
+  busy: number
+  page: string
+  text: string
+}
 
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -25,7 +34,11 @@ await page.addInitScript(() => {
   const w = window as unknown as { __frames: unknown[]; __sampling: boolean }
   w.__frames = []
   w.__sampling = false
-  document.addEventListener("click", () => ((window as unknown as { __clickAt: number }).__clickAt = performance.now()), true)
+  document.addEventListener(
+    "click",
+    () => ((window as unknown as { __clickAt: number }).__clickAt = performance.now()),
+    true,
+  )
   const tick = () => {
     if (w.__sampling) {
       const main = document.querySelector("main")
@@ -80,7 +93,9 @@ async function measure(
     w.__sampling = false
     return w.__frames
   })) as Frame[]
-  const at = await page.evaluate(() => (window as unknown as { __clickAt: number }).__clickAt)
+  const at = await page.evaluate(
+    () => (window as unknown as { __clickAt: number }).__clickAt,
+  )
   const after = frames.filter((f) => f.t >= at)
   const barred = after.filter((f) => f.bars > 0)
   const content = after.find((f) => f.page === want && f.bars === 0 && f.busy === 0)
@@ -155,10 +170,18 @@ await measure("after a mutation: All templates", "/templates", "index", async ()
 
 // Something changes on the server between visits: the layout the templates page is drawn in.
 await measure("revisit: same folder (2)", FOLDER, "folder", link(FOLDER))
-await page.context().addCookies([{ name: "i10-view-templates", value: "table", url: base }])
-const changed = await measure("revisit after a change", "/templates", "index", async () => {
-  await page.locator('main nav[aria-label="Breadcrumb"] a[href="/templates"]').click()
-}, 5000)
+await page
+  .context()
+  .addCookies([{ name: "i10-view-templates", value: "table", url: base }])
+const changed = await measure(
+  "revisit after a change",
+  "/templates",
+  "index",
+  async () => {
+    await page.locator('main nav[aria-label="Breadcrumb"] a[href="/templates"]').click()
+  },
+  5000,
+)
 const at = changed[0]!.t
 const table = changed.find((f) => f.text === "table")
 console.log(

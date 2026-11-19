@@ -114,8 +114,8 @@ export function WebhookAttentionBanner({
         }
       >
         <span className="block not-first:mt-1.5">
-          Nothing has been delivered for at least 15 minutes. We keep retrying, and
-          we switch an endpoint off if it goes days without a success.
+          Nothing has been delivered for at least 15 minutes. We keep retrying, and we
+          switch an endpoint off if it goes days without a success.
         </span>
         {names("banner-failing-name", failing, false)}
       </Alert>

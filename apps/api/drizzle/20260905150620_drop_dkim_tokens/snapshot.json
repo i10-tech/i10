@@ -1,0 +1,35 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "f17c482d-9a4e-4c5f-af62-dbd0f44c5038",
+  "prevIds": [
+    "67a3a65c-3294-4d2b-be65-a98fa330f5fd"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "dkim_tokens"
+      ],
+      "writes": [
+        "s|col|core.domains.dkim_tokens",
+        "n|col|core.domains.dkim_tokens",
+        "e|col|core.domains.dkim_tokens"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"core\",\"domains\",\"dkim_tokens\"]"
+    }
+  ]
+}

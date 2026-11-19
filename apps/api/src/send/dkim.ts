@@ -80,6 +80,13 @@ export interface DkimKey {
  * no `Cc` and no `Reply-To` still lists both in `h=`, and mailauth verifies it
  * `pass` - checked alongside the same message carrying both. Getting this wrong
  * produces a signature that verifies for us and nowhere else.
+ *
+ * ⚠ `feedback-id` IS HERE BECAUSE GOOGLE WILL NOT TRUST IT OTHERWISE. Its
+ * Feedback Loop documentation requires traffic to be DKIM-signed by the
+ * sender's own domain AFTER the header is added, to stop anyone spoofing
+ * another sender's identifiers. Left out of `h=`, the header could be replaced
+ * in transit and the signature would still verify. It is oversigned like `cc`:
+ * a message without one still lists the name, so none can be added either.
  */
 const SIGNED_HEADERS = [
   "from",
@@ -92,6 +99,7 @@ const SIGNED_HEADERS = [
   "mime-version",
   "content-type",
   "content-transfer-encoding",
+  "feedback-id",
 ]
 
 /**
@@ -151,9 +159,9 @@ export async function signMessage(
   // message; this is a function returning `{ headerName, signature }`. The
   // assembly is one line and it is explicit about where the header lands.
   //
-  // The value is not folded. At 566 characters for our header set and an
-  // RSA-2048 key it is comfortably inside RFC 5322's 998-octet line limit, and
-  // measured at 582 including the header name - folding it would mean
-  // re-implementing FWS rules for no gain.
+  // The value is not folded. At about 600 characters for our header set and an
+  // RSA-2048 key, header name included, it is comfortably inside RFC 5322's
+  // 998-octet line limit - folding it would mean re-implementing FWS rules for
+  // no gain.
   return `${headerName}: ${signature}\r\n${raw}`
 }

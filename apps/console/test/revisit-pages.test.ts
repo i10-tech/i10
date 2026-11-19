@@ -33,8 +33,14 @@ function routeOf(file: string): string {
 }
 
 const kept = pages(appDir)
-  .filter((file) => fs.readFileSync(file, "utf8").includes('from "@/components/revisit"'))
-  .map((file) => ({ file, route: routeOf(file), source: fs.readFileSync(file, "utf8") }))
+  .filter((file) =>
+    fs.readFileSync(file, "utf8").includes('from "@/components/revisit"'),
+  )
+  .map((file) => ({
+    file,
+    route: routeOf(file),
+    source: fs.readFileSync(file, "utf8"),
+  }))
 
 /**
  * ⚠ A KEPT PAGE NEEDS THREE THINGS THAT LIVE IN THREE FILES (lib/revisits.ts):
@@ -44,22 +50,31 @@ const kept = pages(appDir)
  */
 describe("kept pages", () => {
   test("templates are kept", () => {
-    expect(kept.map((p) => p.route).sort()).toEqual(["/templates", "/templates/folder/[id]"])
+    expect(kept.map((p) => p.route).sort()).toEqual([
+      "/templates",
+      "/templates/folder/[id]",
+    ])
   })
 
   for (const page of kept) {
     test(`${page.route} tells Next to keep it for ${REVISIT_SECONDS}s`, () => {
-      expect(page.source).toContain(`export const unstable_dynamicStaleTime = ${REVISIT_SECONDS}\n`)
+      expect(page.source).toContain(
+        `export const unstable_dynamicStaleTime = ${REVISIT_SECONDS}\n`,
+      )
     })
   }
 
   test("the check knows every kept page and nothing else", () => {
-    expect(KEPT_PAGES.map((p) => p.route).sort()).toEqual(kept.map((p) => p.route).sort())
+    expect(KEPT_PAGES.map((p) => p.route).sort()).toEqual(
+      kept.map((p) => p.route).sort(),
+    )
   })
 
   test("the check finds a page by its path", () => {
     expect(keptPage("/templates")).not.toBeNull()
-    expect(keptPage("/templates/folder/f01de700-0000-4000-8000-000000000002")).not.toBeNull()
+    expect(
+      keptPage("/templates/folder/f01de700-0000-4000-8000-000000000002"),
+    ).not.toBeNull()
     expect(keptPage("/templates/folder")).toBeNull()
     expect(keptPage("/domains")).toBeNull()
   })

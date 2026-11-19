@@ -131,7 +131,8 @@ export function useMarquee({
               : 0
         if (depth !== 0) {
           const step =
-            Math.sign(depth) * Math.min(MAX_SCROLL_PER_FRAME, Math.ceil(Math.abs(depth) / 4))
+            Math.sign(depth) *
+            Math.min(MAX_SCROLL_PER_FRAME, Math.ceil(Math.abs(depth) / 4))
           const was = offset().y
           if (scroller) scroller.scrollTop += step
           else window.scrollBy(0, step)

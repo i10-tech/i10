@@ -23,7 +23,7 @@ const FACTS: { icon: IconName; hue: Hue; title: string; body: string }[] = [
     icon: "globe",
     hue: "domain",
     title: "Sent from Frankfurt",
-    body: "One region, chosen once: eu-central-1. Your mail and its metadata stay in the EU.",
+    body: "One region, chosen once: eu-central-1. Your mail and its metadata are stored in the EU.",
   },
   {
     icon: "shield",

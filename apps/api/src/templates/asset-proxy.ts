@@ -34,7 +34,8 @@ export const FETCHES_PER_WORKSPACE: Limit = { max: 120, windowSeconds: 60 }
 /** Upstream fetches to one host, all workspaces together, redirect hops included. */
 export const FETCHES_PER_HOST: Limit = { max: 300, windowSeconds: 60 }
 
-export const RATE_LIMITED_MESSAGE = "Too many template asset requests. Wait a moment and try again."
+export const RATE_LIMITED_MESSAGE =
+  "Too many template asset requests. Wait a moment and try again."
 
 export type AssetKind = "image" | "font" | "css"
 
@@ -64,7 +65,8 @@ const fail = (status: 400 | 403 | 413 | 415 | 502, message: string): AssetResult
 })
 
 const ascii = (b: Uint8Array, at: number, text: string) =>
-  b.length >= at + text.length && [...text].every((ch, i) => b[at + i] === ch.charCodeAt(0))
+  b.length >= at + text.length &&
+  [...text].every((ch, i) => b[at + i] === ch.charCodeAt(0))
 
 const startsWith = (b: Uint8Array, ...bytes: number[]) =>
   b.length >= bytes.length && bytes.every((v, i) => b[i] === v)
@@ -81,7 +83,8 @@ export function sniff(b: Uint8Array): Sniffed | null {
   if (startsWith(b, 0xff, 0xd8, 0xff)) return { kind: "image", type: "image/jpeg" }
   if (ascii(b, 0, "GIF87a") || ascii(b, 0, "GIF89a"))
     return { kind: "image", type: "image/gif" }
-  if (ascii(b, 0, "RIFF") && ascii(b, 8, "WEBP")) return { kind: "image", type: "image/webp" }
+  if (ascii(b, 0, "RIFF") && ascii(b, 8, "WEBP"))
+    return { kind: "image", type: "image/webp" }
   if (ascii(b, 4, "ftyp") && (ascii(b, 8, "avif") || ascii(b, 8, "avis")))
     return { kind: "image", type: "image/avif" }
   if (ascii(b, 0, "wOF2")) return { kind: "font", type: "font/woff2" }
@@ -98,7 +101,8 @@ const SNIFF_BYTES = 12
 type Parsed = { ok: true; url: URL } | { ok: false; message: string }
 
 function parseTarget(raw: string): Parsed {
-  if (raw.length === 0 || raw.length > MAX_URL_LENGTH) return { ok: false, message: "Not a usable URL." }
+  if (raw.length === 0 || raw.length > MAX_URL_LENGTH)
+    return { ok: false, message: "Not a usable URL." }
   let url: URL
   try {
     url = new URL(raw)
@@ -134,7 +138,10 @@ export function createAssetProxy(options: AssetProxyOptions = {}): AssetProxy {
   })
 
   // Insertion order is recency: a hit is deleted and set again.
-  const cache = new Map<string, { value: Extract<AssetResult, { ok: true }>; at: number }>()
+  const cache = new Map<
+    string,
+    { value: Extract<AssetResult, { ok: true }>; at: number }
+  >()
   let cached = 0
   const pending = new Map<string, Promise<AssetResult>>()
 
@@ -177,7 +184,10 @@ export function createAssetProxy(options: AssetProxyOptions = {}): AssetProxy {
       const pinned = pinnedRequest(url, verdict)
       const response = await doFetch(pinned.url, {
         method: "GET",
-        headers: { host: pinned.host, accept: wantCss ? "text/css,*/*;q=0.1" : "image/*,font/*,*/*;q=0.1" },
+        headers: {
+          host: pinned.host,
+          accept: wantCss ? "text/css,*/*;q=0.1" : "image/*,font/*,*/*;q=0.1",
+        },
         signal,
         redirect: "manual",
         ...(pinned.serverName ? { tls: { serverName: pinned.serverName } } : {}),
@@ -217,7 +227,8 @@ export function createAssetProxy(options: AssetProxyOptions = {}): AssetProxy {
       for (;;) {
         const { done, value } = await reader.read()
         if (done) break
-        for (let i = 0; i < value.byteLength && size + i < SNIFF_BYTES; i++) head[size + i] = value[i]!
+        for (let i = 0; i < value.byteLength && size + i < SNIFF_BYTES; i++)
+          head[size + i] = value[i]!
         size += value.byteLength
         chunks.push(value)
         if (!wantCss && sniffed === undefined && size >= SNIFF_BYTES) {
@@ -246,7 +257,8 @@ export function createAssetProxy(options: AssetProxyOptions = {}): AssetProxy {
     }
     const found = sniffed ?? sniff(body)
     if (!found) throw new Refusal(fail(415, "That file type is not served."))
-    if (found.kind === "font" && size > FONT_CAP) throw new Refusal(fail(413, "That file is too large."))
+    if (found.kind === "font" && size > FONT_CAP)
+      throw new Refusal(fail(413, "That file is too large."))
     return { ok: true as const, body, type: found.type }
   }
 

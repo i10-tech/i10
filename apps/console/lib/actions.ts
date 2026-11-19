@@ -5,11 +5,14 @@ import { api, ApiRequestError } from "@/lib/api"
 import { safeFailure } from "@/lib/failure"
 import { forgetOnboardingSkip } from "@/lib/onboarding-skip"
 import { PREVIEW } from "@/lib/preview"
+import type { LoginBlock } from "@/lib/sso-types"
+import type { TeamInbox } from "@/lib/team-inbox"
 import type {
   ApiKeyRow,
   ContactRow,
   CreatedApiKey,
   Domain,
+  DomainMailboxes,
   PropertyRow,
   SegmentRow,
   TemplateDetail,
@@ -292,6 +295,255 @@ export async function updateDomainTracking(
         body: change,
       }),
     [`/domains/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
+ * Turns mailbox hosting on or off for one domain (#406).
+ */
+export async function setDomainMailboxes(id: string, enabled: boolean) {
+  return run(
+    () =>
+      api<{
+        mailboxes: DomainMailboxes
+        stalwart: "synced" | "pending" | "unmanaged"
+      }>(`/console/domains/${encodeURIComponent(id)}/mailboxes`, {
+        method: "PUT",
+        body: { enabled },
+      }),
+    [`/domains/${encodeURIComponent(id)}`, "/domains"],
+  )
+}
+
+/**
+ * Sets or clears the catch-all address for one domain (#406).
+ */
+export async function setDomainCatchAll(id: string, address: string | null) {
+  return run(
+    () =>
+      api<{
+        mailboxes: DomainMailboxes
+        stalwart: "synced" | "pending" | "unmanaged"
+      }>(`/console/domains/${encodeURIComponent(id)}/catch-all`, {
+        method: "PUT",
+        body: { address },
+      }),
+    [`/domains/${encodeURIComponent(id)}`],
+  )
+}
+
+/**
+ * A mailbox as the API answers a creation (`Mailbox` in @repo/contracts).
+ *
+ * ⚠ MIRRORED, NOT IMPORTED: the console has no dependency on the contracts
+ * package (it ships built, and its schemas would put zod in the browser bundle),
+ * and the same is true of every other response shape in lib/types.ts.
+ */
+export interface CreatedMailbox {
+  object: "mailbox"
+  address: string
+  display_name: string | null
+  active: boolean
+  created_at: string
+  storage_allocated?: number | null
+}
+
+export interface NewMailbox {
+  address: string
+  display_name?: string
+  /** Bytes. Required on a prepaid pool; a cap on pay as you go. Owners and admins only. */
+  storage_allocation?: number
+}
+
+/**
+ * An owner or admin giving a member of the workspace a mailbox (B6).
+ *
+ * ⚠ BEHIND STEP-UP, so the caller proves it is them first (`useStepUp`); the API
+ * refuses a stale session with Clerk's re-verification hint before it reads the
+ * body. Refusals keep their `name` - the dialog says each in its own words.
+ */
+export async function createMailbox(input: NewMailbox & { user_id: string }) {
+  return run(
+    () => api<CreatedMailbox>("/console/mailboxes", { method: "POST", body: input }),
+    ["/mailboxes"],
+  )
+}
+
+/**
+ * A member creating their own mailbox, where the workspace lets them.
+ *
+ * ⚠ THE PERSON'S OWN ROUTE, `POST /mailboxes`, NOT THE ADMIN ONE. It has no
+ * `user_id` and no step-up: the subject is whoever the session says, and the API
+ * answers 403 `invalid_access` while the workspace creates mailboxes by admin only.
+ */
+export async function createOwnMailbox(input: Omit<NewMailbox, "storage_allocation">) {
+  return run(
+    () => api<CreatedMailbox>("/mailboxes", { method: "POST", body: input }),
+    ["/mailboxes"],
+  )
+}
+
+/**
+ * ⚠ THE FIVE MAILBOX ACTIONS BELOW ARE AN OWNER OR ADMIN'S, EACH BEHIND STEP-UP
+ * (`useStepUp` in the dialog that calls them), and each revalidates the list and
+ * every mailbox page, because the same status shows on both. They refresh the
+ * caller too, even `deleteMailbox`: a deleted mailbox stays reachable for its 30
+ * days, so unlike `deleteDomain` the page it is called from is not a 404 after.
+ */
+const MAILBOX_PAGES = ["/mailboxes", "/mailboxes/[address]"]
+
+/** A mailbox as the console's list shows it, which the lifecycle routes answer with. */
+type MailboxAfter = { mailbox?: unknown; ok?: true }
+
+const mailboxPath = (address: string) =>
+  `/console/mailboxes/${encodeURIComponent(address)}`
+
+/** Gives one mailbox its share of the storage pool, or `null` to remove a cap (pay as you go). */
+export async function setMailboxStorage(address: string, bytes: number | null) {
+  return run(
+    () =>
+      api<{ mailbox: unknown; quota: "synced" | "deferred" }>(
+        `${mailboxPath(address)}/storage`,
+        { method: "PUT", body: { storage_allocation: bytes } },
+      ),
+    MAILBOX_PAGES,
+  )
+}
+
+/** Stops the sign-in and keeps the mail. */
+export async function suspendMailbox(address: string) {
+  return run(
+    () => api<MailboxAfter>(`${mailboxPath(address)}/suspend`, { method: "POST" }),
+    MAILBOX_PAGES,
+  )
+}
+
+/**
+ * Lifts a suspension. `still_blocked` names what still refuses the sign-in - a
+ * payment hold, a ban, a lock - which is not an owner's to lift.
+ */
+export async function resumeMailbox(address: string) {
+  return run(
+    () =>
+      api<MailboxAfter & { still_blocked: LoginBlock[] }>(
+        `${mailboxPath(address)}/resume`,
+        { method: "POST" },
+      ),
+    MAILBOX_PAGES,
+  )
+}
+
+export interface MailboxDeletion {
+  outcome: "delete" | "export_then_delete" | "forward"
+  /** Forward only: the address of another mailbox of this workspace. */
+  forward_to?: string
+}
+
+/** Deletes with a 30 day way back. Sign-in stops at once; what happens to the mail is `outcome`. */
+export async function deleteMailbox(address: string, choice: MailboxDeletion) {
+  return run(
+    () =>
+      api<MailboxAfter>(`${mailboxPath(address)}/delete`, {
+        method: "POST",
+        body: choice,
+      }),
+    MAILBOX_PAGES,
+  )
+}
+
+/** Undoes a deletion, until its 30 days are over. */
+export async function restoreMailbox(address: string) {
+  return run(
+    () => api<MailboxAfter>(`${mailboxPath(address)}/restore`, { method: "POST" }),
+    MAILBOX_PAGES,
+  )
+}
+
+/** Starts again the export a deleting mailbox is waiting for (admin, step-up). */
+export async function retryMailboxExport(address: string) {
+  return run(
+    () => api<MailboxAfter>(`${mailboxPath(address)}/retry-export`, { method: "POST" }),
+    MAILBOX_PAGES,
+  )
+}
+
+/**
+ * ⚠ THE THREE TEAM INBOX ACTIONS ARE AN OWNER OR ADMIN'S, EACH BEHIND STEP-UP
+ * (`useStepUp` in the dialog that calls them). The API asks a member for nothing
+ * and just refuses, so a member never reaches a prompt. The address is the
+ * identifier in the path and the members are addresses too, never user ids.
+ */
+const TEAM_INBOX_LIST = "/team-inboxes"
+
+const teamInboxPath = (address: string) =>
+  `/console/team-inboxes/${encodeURIComponent(address)}`
+
+export async function createTeamInbox(input: {
+  address: string
+  display_name?: string
+  members: string[]
+}) {
+  return run(
+    () => api<TeamInbox>("/console/team-inboxes", { method: "POST", body: input }),
+    [TEAM_INBOX_LIST],
+  )
+}
+
+/** Replaces the whole member list in one write, so a retry is harmless. */
+export async function setTeamInboxMembers(address: string, members: string[]) {
+  return run(
+    () =>
+      api<TeamInbox>(`${teamInboxPath(address)}/members`, {
+        method: "PUT",
+        body: { members },
+      }),
+    [TEAM_INBOX_LIST, "/team-inboxes/[address]"],
+  )
+}
+
+/** See `deleteDomain` on `leaving`: the inbox's own page deletes and goes back to the list. */
+export async function deleteTeamInbox(address: string, { leaving = false } = {}) {
+  return run(
+    () => api<undefined>(teamInboxPath(address), { method: "DELETE" }),
+    leaving ? [] : [TEAM_INBOX_LIST],
+    { refreshCaller: false },
+  )
+}
+
+/**
+ * ⚠ THE TWO ALIAS ACTIONS ARE AN OWNER OR ADMIN'S, BEHIND STEP-UP LIKE THE
+ * LIFECYCLE ONES, AND ANSWER WITH THE MAILBOX'S WHOLE ALIAS LIST (`data`, and the
+ * `limit`). They revalidate the mailbox page only: an alias is not shown on the
+ * list, so revalidating `/mailboxes` would throw away a render for nothing.
+ */
+const ALIAS_PAGES = ["/mailboxes/[address]"]
+
+interface AliasesAfter {
+  data: { address: string; source: "console" | "clerk" | "directory" }[]
+  limit: number
+}
+
+/** Gives a mailbox one more address, on any domain this workspace hosts mail on. */
+export async function addMailboxAlias(address: string, alias: string) {
+  return run(
+    () =>
+      api<AliasesAfter>(`${mailboxPath(address)}/aliases`, {
+        method: "POST",
+        body: { address: alias },
+      }),
+    ALIAS_PAGES,
+  )
+}
+
+/** Takes away an alias an owner or admin added. The API refuses the ones Clerk or a directory gave. */
+export async function removeMailboxAlias(address: string, alias: string) {
+  return run(
+    () =>
+      api<AliasesAfter>(
+        `${mailboxPath(address)}/aliases/${encodeURIComponent(alias)}`,
+        { method: "DELETE" },
+      ),
+    ALIAS_PAGES,
   )
 }
 

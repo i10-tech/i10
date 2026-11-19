@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import * as schema from "../src/db/schema.js"
-import { assertRlsSubject, type Database } from "../src/db/client.js"
+import { assertRlsSubject, withTenant, type Database } from "../src/db/client.js"
+import {
+  riskContentJudgements,
+  riskFactSnapshots,
+  riskStaffDecisions,
+} from "../src/db/core.js"
 import { sendingTierStore } from "../src/metering/tiers.js"
 import { recordContent } from "../src/risk/content.js"
 import { loadFacts } from "../src/risk/facts.js"
@@ -10,8 +15,25 @@ import { holdStore } from "../src/risk/holds.js"
 import { identityStore, recordSighting } from "../src/risk/identity.js"
 import { labelStore } from "../src/risk/labels.js"
 import { runAll, scoreTenant, type RiskDeps } from "../src/risk/runner.js"
+import {
+  decisionStore,
+  staffDecision,
+  type StaffDecisionDeps,
+} from "../src/risk/decisions.js"
+import { DECISION_MEMORY_DAYS, evaluate } from "../src/risk/engine.js"
+import { digest, RULES } from "../src/risk/rules.js"
+import { reviveFacts, snapshotStore } from "../src/risk/snapshot.js"
+import type { Rule } from "../src/risk/types.js"
 import { assessmentStore } from "../src/risk/store.js"
 import type { ResolvedEmail } from "../src/send/accept.js"
+import type { JudgeEmail } from "../src/risk/judge/contract.js"
+import type {
+  ContentJudge,
+  JudgeOutcome,
+  StoredJudgement,
+} from "../src/risk/judge/judge.js"
+import { judgementStore } from "../src/risk/judge/store.js"
+import { answers } from "./risk-fixtures.js"
 
 /**
  * The risk engine against a real Postgres, as the role the API runs as (#170).
@@ -76,9 +98,13 @@ class FakeRedis {
   }
   async sadd(k: string, ...m: string[]) {
     const s = this.sets.get(k) ?? new Set()
+    const before = s.size
     m.forEach((x) => s.add(x))
     this.sets.set(k, s)
-    return m.length
+    return s.size - before
+  }
+  async expire() {
+    return 1
   }
   async spop(k: string, count: number) {
     const s = [...(this.sets.get(k) ?? [])].slice(0, count)
@@ -123,6 +149,7 @@ function riskDeps(
       alert: (m) => alerts.push(m),
     },
     labels: labelStore(db),
+    snapshots: snapshotStore(db),
     switches: { enabled: true, tiers: true, holds: true, sesPolicy: true },
     redis: redis as never,
     alerts,
@@ -153,7 +180,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     // ⚠ LOGS IN AS i10_api ITSELF, the way the API does. On the CNPG image the
     // owner `i10` is not a superuser (as in production) and cannot SET ROLE.
     app = postgres(API_URL!, { max: 4, onnotice: () => {}, prepare: false })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
     const [plan] = await owner`select id from core.plans where id = ${FREE}`
     if (!plan) {
       await owner`insert into core.plans (id, name, source) values (${FREE}, 'Free', 'catalog') on conflict do nothing`.catch(
@@ -184,7 +211,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(who?.current_user).toBe("i10_api")
   })
 
-  it("cannot read identity events or models directly: they are deny-all", async () => {
+  it("cannot read identity events directly: they are deny-all", async () => {
     await identityStore(db).record({
       userId: "risk-test-direct",
       tenantId: null,
@@ -254,8 +281,9 @@ suite("the risk engine against Postgres, as i10_api", () => {
     await assessmentStore(db).save({
       tenantId: ids.e,
       assessment: { score: 90, band: "critical", contributions: [], rulesetVersion: 1 },
+      shadow: [],
+      cleared: [],
       bandSince: new Date(),
-      modelScore: null,
       previous: null,
       actions: [],
       trigger: "test",
@@ -325,6 +353,13 @@ suite("the risk engine against Postgres, as i10_api", () => {
     }
     expect(facts.identity?.devicePeers).toBe(3)
     expect(facts.identity?.subnetSignupPeers).toBe(3)
+    // ⚠ The definer names the peers by the same digest rules.ts uses, never by id.
+    const peers =
+      await owner`select owner_clerk_user_id as u from core.tenants where id in ${owner([ids.b, ids.c, ids.d])}`
+    const expected = peers.map((p) => `user:${digest(String(p.u))}`).sort()
+    expect(facts.identity?.devicePeerKeys).toEqual(expected)
+    expect(facts.identity?.subnetSignupPeerKeys).toEqual(expected)
+    expect(JSON.stringify(facts.identity)).not.toContain(String(peers[0]!.u))
   })
 
   it("scores and acts end to end, and is idempotent run after run", async () => {
@@ -398,6 +433,499 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(summary.scored).toBeGreaterThan(0)
   })
 
+  // ⚠ FACT SNAPSHOTS: every event's facts, otherwise the first score of a UTC
+  // day, and never readable by a workspace (risk/snapshot.ts).
+  it("snapshots the facts on every event, and otherwise once per workspace per UTC day", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    const count = async () =>
+      (
+        await owner`select count(*)::int as n from core.risk_fact_snapshots where tenant_id = ${id}`
+      )[0]!.n as number
+    const events = async () =>
+      (
+        await owner`select count(*)::int as n from core.risk_assessment_events where tenant_id = ${id}`
+      )[0]!.n as number
+    const day = new Date()
+    day.setUTCHours(1, 0, 0, 0)
+    const at = (hours: number) => new Date(day.getTime() + hours * 3_600_000)
+    const deps = (hours: number) => riskDeps(new FakeRedis(), { now: () => at(hours) })
+
+    // The first assessment is an event: its facts are kept.
+    await scoreTenant(id, "test", deps(0))
+    expect(await events()).toBe(1)
+    expect(await count()).toBe(1)
+    // Nothing moved an hour later: no event, and today already has one.
+    await scoreTenant(id, "hourly", deps(1))
+    await scoreTenant(id, "hourly", deps(2))
+    expect(await events()).toBe(1)
+    expect(await count()).toBe(1)
+    // The next UTC day keeps its first quiet score, and only its first.
+    await scoreTenant(id, "hourly", deps(23.5))
+    await scoreTenant(id, "hourly", deps(24.5))
+    expect(await count()).toBe(2)
+    // An event is kept whatever the day already has.
+    const store = snapshotStore(db)
+    const facts = await loadFacts(id, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+    })
+    const e = evaluate(facts)
+    expect(
+      await store.record({
+        tenantId: id,
+        at: at(25),
+        trigger: "t",
+        evaluated: e,
+        facts,
+        force: false,
+      }),
+    ).toBeNull()
+    expect(
+      await store.record({
+        tenantId: id,
+        at: at(25),
+        trigger: "t",
+        evaluated: e,
+        facts,
+        force: true,
+      }),
+    ).toEqual(expect.any(String))
+    expect(await count()).toBe(3)
+
+    // What was kept replays to what was stored, through real jsonb.
+    const kept = await store.list({
+      since: at(-1),
+      until: at(48),
+      tenantId: id,
+      limit: 10,
+    })
+    expect(kept.map((k) => k.trigger)).toEqual(["test", "hourly", "t"])
+    for (const k of kept) {
+      const back = reviveFacts(k.facts)
+      expect(back.now).toBeInstanceOf(Date)
+      expect(evaluate(back).band).toBe(k.band)
+      expect(evaluate(back).score).toBe(k.score)
+    }
+    // Keyset paging walks the same rows one at a time.
+    const first = await store.list({
+      since: at(-1),
+      until: at(48),
+      tenantId: id,
+      limit: 1,
+    })
+    const second = await store.list({
+      since: at(-1),
+      until: at(48),
+      tenantId: id,
+      after: first[0]!,
+      limit: 1,
+    })
+    expect(second[0]!.id).toBe(kept[1]!.id)
+  })
+
+  // ─── Decision memory (docs/decisions/risk.md, "Decision memory") ──────────
+
+  const staffDeps = (now?: () => Date): StaffDecisionDeps => ({
+    db,
+    freePlanId: FREE,
+    ownerInfo: async () => null,
+    rules: RULES,
+    holds: holdStore(db),
+    assessments: assessmentStore(db),
+    snapshots: snapshotStore(db),
+    decisions: decisionStore(db),
+    ...(now ? { now } : {}),
+  })
+  const unsafeLink = (tenant: string, host: string) =>
+    owner`insert into core.link_hosts (tenant_id, day, host, messages, verdict, checked_at)
+          values (${tenant}, current_date, ${host}, 1, 'webrisk=SOCIAL_ENGINEERING', now())`
+  /** Whether a promise rejected, without `.rejects` (which hangs on postgres.js under bun). */
+  const rejected = (p: Promise<unknown>) =>
+    p.then(
+      () => false,
+      () => true,
+    )
+  const inDays = (n: number) => () => new Date(Date.now() + n * 86_400_000)
+
+  it("records a staff decision with a forced snapshot of the facts it was made on", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    const host = `phish-${RUN}.example.top`
+    await unsafeLink(id, host)
+    expect((await scoreTenant(id, "test", riskDeps())).band).toBe("critical")
+    expect(await holdStore(db).current(id)).not.toBeNull()
+
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "release",
+      by: "mo",
+      note: "the host is the customer's own staging site",
+    })
+    expect(r.status).toBe("recorded")
+    expect(await holdStore(db).current(id)).toBeNull()
+
+    const [d] = await decisionStore(db).list(id)
+    expect(d).toMatchObject({
+      kind: "release",
+      decidedBy: "mo",
+      note: "the host is the customer's own staging site",
+      band: "critical",
+      held: true,
+      revokedAt: null,
+    })
+    expect(d!.covers).toEqual([
+      { rule: "links.unsafe", points: 90, keys: [`host:${host}`] },
+    ])
+    expect(d!.inView.map((c) => c.rule)).toEqual(["links.unsafe"])
+    expect(d!.expiresAt.getTime() - d!.decidedAt.getTime()).toBe(
+      DECISION_MEMORY_DAYS * 86_400_000,
+    )
+
+    const snaps = await snapshotStore(db).list({
+      since: new Date(Date.now() - 3_600_000),
+      until: new Date(Date.now() + 3_600_000),
+      tenantId: id,
+      limit: 10,
+    })
+    const snap = snaps.find((s) => s.id === d!.snapshotId)!
+    expect(snap.trigger).toBe("staff:release")
+    expect(snap.contributions.map((c) => c.rule)).toContain("links.unsafe")
+    // The decision is replayable: its facts reproduce the engine's answer then.
+    expect(evaluate(reviveFacts(snap.facts)).band).toBe("critical")
+  })
+
+  it("keeps staff decisions deny-all: a workspace cannot read or forge its own", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    await scoreTenant(id, "test", riskDeps())
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "pin",
+      by: "mo",
+      note: "known sender",
+    })
+    expect(r.status).toBe("recorded")
+    const [kept] =
+      await owner`select count(*)::int as n from core.risk_staff_decisions where tenant_id = ${id}`
+    expect(kept!.n).toBe(1)
+    expect(
+      await withTenant(db, id, (tx) => tx.select().from(riskStaffDecisions)),
+    ).toHaveLength(0)
+    expect(await app`select * from core.risk_staff_decisions`).toHaveLength(0)
+    expect(
+      await rejected(
+        withTenant(db, id, (tx) =>
+          tx.insert(riskStaffDecisions).values({
+            tenantId: id,
+            kind: "release",
+            decidedBy: "forged",
+            note: "forged",
+            decidedAt: new Date(),
+            score: 0,
+            band: "low",
+            rulesetVersion: 1,
+            held: false,
+            inView: [],
+            covers: [],
+            expiresAt: new Date(Date.now() + 86_400_000),
+          }),
+        ),
+      ),
+    ).toBe(true)
+    // ⚠ The door itself refuses an uphold that claims to clear something.
+    expect(
+      await rejected(
+        decisionStore(db).save(db, {
+          tenantId: id,
+          kind: "uphold",
+          decidedBy: "mo",
+          note: "n",
+          decidedAt: new Date(),
+          score: 0,
+          band: "low",
+          rulesetVersion: 1,
+          held: true,
+          inView: [],
+          covers: [{ rule: "links.unsafe", points: 90 }],
+          expiresAt: new Date(),
+          snapshotId: null,
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it("holds, is released, stays released on the same evidence after the pause, and holds again on new", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    await unsafeLink(id, `one-${RUN}.example.top`)
+    expect((await scoreTenant(id, "test", riskDeps())).band).toBe("critical")
+    expect(await holdStore(db).current(id)).not.toBeNull()
+
+    const released = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "release",
+      by: "mo",
+      note: "false positive",
+      pauseDays: 1,
+    })
+    expect(released.status).toBe("recorded")
+
+    // Two days on, the pause is over and the evidence is the same: no hold.
+    const after = await scoreTenant(
+      id,
+      "hourly",
+      riskDeps(new FakeRedis(), { now: inDays(2) }),
+    )
+    expect(after.band).not.toBe("critical")
+    expect(await holdStore(db).current(id)).toBeNull()
+    const current = await assessmentStore(db).current(id)
+    expect(current!.autoActionsPausedUntil!.getTime()).toBeLessThan(
+      inDays(2)().getTime(),
+    )
+    expect(current!.cleared.map((c) => c.rule)).toEqual(["links.unsafe"])
+    expect(current!.cleared[0]!.clearedBy).toBe(
+      released.status === "recorded" ? released.id : "",
+    )
+    expect(current!.contributions.map((c) => c.rule)).not.toContain("links.unsafe")
+
+    // A new host is new evidence: held again.
+    await unsafeLink(id, `two-${RUN}.example.top`)
+    const again = await scoreTenant(
+      id,
+      "hourly",
+      riskDeps(new FakeRedis(), { now: inDays(2) }),
+    )
+    expect(again.band).toBe("critical")
+    expect(await holdStore(db).current(id)).not.toBeNull()
+  })
+
+  it("counts a cleared concern again once the decision is revoked, and records the revocation", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    await unsafeLink(id, `rev-${RUN}.example.top`)
+    await scoreTenant(id, "test", riskDeps())
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "release",
+      by: "mo",
+      note: "looked fine",
+      pauseDays: 1,
+    })
+    if (r.status !== "recorded") throw new Error(r.status)
+    const store = decisionStore(db)
+    expect(
+      await store.revoke({ id: r.id, by: "lead", note: "it was not", at: new Date() }),
+    ).toBe(id)
+    expect(
+      await store.revoke({ id: r.id, by: "lead", note: "again", at: new Date() }),
+    ).toBeNull()
+    const [d] = await store.list(id)
+    expect(d).toMatchObject({ revokedBy: "lead", revokeNote: "it was not" })
+    expect(d!.revokedAt).toBeInstanceOf(Date)
+
+    const back = await scoreTenant(
+      id,
+      "hourly",
+      riskDeps(new FakeRedis(), { now: inDays(2) }),
+    )
+    expect(back.band).toBe("critical")
+  })
+
+  it("records an upheld hold and clears nothing with it", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    await unsafeLink(id, `upheld-${RUN}.example.top`)
+    await scoreTenant(id, "test", riskDeps())
+    const r = await staffDecision(staffDeps(), {
+      tenantId: id,
+      kind: "uphold",
+      by: "mo",
+      note: "phishing, confirmed",
+      pauseDays: 1,
+    })
+    expect(r.status).toBe("recorded")
+    const [d] = await decisionStore(db).list(id)
+    expect(d!.covers).toEqual([])
+    expect(d!.inView.map((c) => c.rule)).toEqual(["links.unsafe"])
+    const facts = await loadFacts(id, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+    })
+    expect(facts.decisions).toEqual([])
+    expect(evaluate(facts).band).toBe("critical")
+  })
+
+  it("keeps fact snapshots deny-all: a workspace cannot read even its own", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    await scoreTenant(id, "test", riskDeps())
+    const [kept] =
+      await owner`select count(*)::int as n from core.risk_fact_snapshots where tenant_id = ${id}`
+    expect(kept!.n).toBe(1)
+    const own = await withTenant(db, id, (tx) => tx.select().from(riskFactSnapshots))
+    expect(own).toHaveLength(0)
+    expect(await app`select * from core.risk_fact_snapshots`).toHaveLength(0)
+    await expect(
+      withTenant(db, id, (tx) =>
+        tx.insert(riskFactSnapshots).values({
+          tenantId: id,
+          takenAt: new Date(),
+          rulesetVersion: 1,
+          trigger: "forged",
+          score: 0,
+          band: "low",
+          contributions: [],
+          shadow: [],
+          facts: {},
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it("purges fact snapshots past the retention window in the hourly run", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    const store = snapshotStore(db)
+    const facts = await loadFacts(id, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+    })
+    const e = evaluate(facts)
+    const old = new Date(Date.now() - 181 * 86_400_000)
+    const recent = new Date(Date.now() - 179 * 86_400_000)
+    for (const at of [old, recent])
+      await store.record({
+        tenantId: id,
+        at,
+        trigger: "t",
+        evaluated: e,
+        facts,
+        force: true,
+      })
+
+    const summary = await runAll(riskDeps(), { concurrency: 2 })
+    expect(summary.snapshotsPurged).toBeGreaterThanOrEqual(1)
+    const left =
+      await owner`select taken_at from core.risk_fact_snapshots where tenant_id = ${id} and trigger = 't'`
+    expect(left.map((r) => new Date(r.taken_at).getTime())).toEqual([recent.getTime()])
+  })
+
+  it("records shadow contributions with the assessment and its event, and lets them move nothing", async () => {
+    const loud: Rule = {
+      id: "test.shadow_critical",
+      category: "content",
+      summary: "Test-only: always fires at critical, in shadow",
+      mode: "shadow",
+      evaluate: () => ({ points: 100, evidence: { test: true }, floor: "critical" }),
+    }
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id, { createdAgoHours: 24 * 90 })
+    const r = await scoreTenant(
+      id,
+      "test",
+      riskDeps(new FakeRedis(), { rules: [...RULES, loud] }),
+    )
+    expect(r.band).toBe("low")
+    expect(r.actions).toEqual([])
+    expect(await holdStore(db).current(id)).toBeNull()
+
+    const current = await assessmentStore(db).current(id)
+    expect(current!.shadow.map((c) => c.rule)).toEqual([loud.id])
+    expect(current!.contributions.map((c) => c.rule)).not.toContain(loud.id)
+    const [event] = await assessmentStore(db).history(id, 1)
+    expect((event!.shadow as { rule: string }[]).map((c) => c.rule)).toEqual([loud.id])
+    const [snap] = await snapshotStore(db).list({
+      since: new Date(Date.now() - 3_600_000),
+      until: new Date(Date.now() + 3_600_000),
+      tenantId: id,
+      limit: 1,
+    })
+    expect(snap!.shadow.map((c) => c.rule)).toEqual([loud.id])
+  })
+
+  // ⚠ THE LINK PROVIDERS' WIRING: what each says is stored once, an answer that
+  // is not yet enough stays unchecked for the next run, and the score reads the
+  // providers back out of the stored verdict (#222).
+  it("stores each link host's verdict from the providers, leaves an unsure one unchecked, and scores by who flagged it", async () => {
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t)
+    const link = (host: string) => `<a href="https://${host}/x">${host}</a>`
+    await recordContent(
+      t,
+      [
+        {
+          from: "a@x.top",
+          to: "r@example.com",
+          subject: "Exclusive offer just for you",
+          html:
+            "<p>Claim your reward today, friend. Limited stock, act now before the offer ends. " +
+            ["one-list", "two-lists", "unsure", "fine"]
+              .map((h) => link(`${h}-${RUN}.example.top`))
+              .join(" ") +
+            "</p>",
+        } as ResolvedEmail,
+      ],
+      { db, threshold: 99 },
+    )
+    const verdicts: Record<string, string | null> = {
+      [`one-list-${RUN}.example.top`]: "cloudflare=blocked",
+      [`two-lists-${RUN}.example.top`]: "cloudflare=blocked;quad9=blocked",
+      [`unsure-${RUN}.example.top`]: null,
+    }
+    const links = {
+      cached: async () => null,
+      lookup: async (host: string) => (host in verdicts ? verdicts[host]! : "clean"),
+      stats: () => ({
+        cloudflare: { clean: 1, unsafe: 2, unknown: 1, skipped: 0 },
+      }),
+    }
+    const redis = new FakeRedis()
+    await redis.sadd("risk:dirty", t)
+    const summary = await runAll(riskDeps(redis, { links }), { concurrency: 2 })
+
+    const rows =
+      await owner`select host, verdict, checked_at from core.link_hosts where tenant_id = ${t}`
+    const byHost = new Map(rows.map((r) => [r.host as string, r]))
+    expect(byHost.get(`one-list-${RUN}.example.top`)?.verdict).toBe(
+      "cloudflare=blocked",
+    )
+    expect(byHost.get(`two-lists-${RUN}.example.top`)?.verdict).toBe(
+      "cloudflare=blocked;quad9=blocked",
+    )
+    expect(byHost.get(`fine-${RUN}.example.top`)?.verdict).toBe("clean")
+    // not enough to store: asked again next run, never recorded clean
+    expect(byHost.get(`unsure-${RUN}.example.top`)?.checked_at).toBeNull()
+    expect(summary.linksChecked).toBeGreaterThanOrEqual(3)
+    expect(summary.unsafe).toBeGreaterThanOrEqual(2)
+    expect(summary.links).toEqual({
+      cloudflare: { clean: 1, unsafe: 2, unknown: 1, skipped: 0 },
+    })
+
+    const rule = (await assessmentStore(db).current(t))?.contributions.find(
+      (c) => c.rule === "links.unsafe",
+    )
+    expect(rule?.points).toBe(90)
+    expect(rule?.floor).toBe("critical")
+    expect(String(rule?.evidence.hosts)).toContain(
+      "cloudflare: blocked, quad9: blocked",
+    )
+    expect(String(rule?.evidence.hosts)).toContain("cloudflare: blocked)")
+  })
+
   it("records a sighting, spots impossible travel, and responds", async () => {
     const redis = new FakeRedis()
     const store = identityStore(db)
@@ -440,20 +968,84 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(responded).toEqual([`risk-test-${RUN}-traveller`])
   })
 
-  it("stores labels and models through the definers, and keeps a failed model inactive", async () => {
+  it("stores labels under the workspace's own policy", async () => {
     const labels = labelStore(db)
-    await labels.add({
-      tenantId: ids.a,
-      label: "abuse",
-      source: "staff",
-      features: { farm_linked: 1 },
-      setBy: "mo",
+    const since = new Date(Date.now() - 60_000)
+    expect(await labels.has(ids.a, "staff", since)).toBe(false)
+    await labels.add({ tenantId: ids.a, label: "abuse", source: "staff", setBy: "mo" })
+    expect(await labels.has(ids.a, "staff", since)).toBe(true)
+    expect(await labels.has(ids.b, "staff", since)).toBe(false)
+  })
+
+  it("counts only staff demotions toward the demotion rule, never the score's own", async () => {
+    const { evaluate } = await import("../src/risk/engine.js")
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    const tiers = sendingTierStore(db)
+    const move = (tier: "strict" | "normal", source: "score" | "staff") =>
+      tiers.set({ tenantId: id, tier, source, reason: "test", setBy: source })
+    const facts = () =>
+      loadFacts(id, { db, freePlanId: FREE, ownerInfo: async () => null })
+    const demotionRule = async () =>
+      evaluate(await facts()).contributions.find((c) => c.rule === "history.demotions")
+
+    // The score demoting twice is the score's own verdict: no new evidence.
+    for (const tier of ["strict", "normal", "strict", "normal"] as const)
+      await move(tier, "score")
+    expect((await facts()).history.staffDemotions90d).toBe(0)
+    expect(await demotionRule()).toBeUndefined()
+
+    // A person demoting twice still counts.
+    for (const tier of ["strict", "normal", "strict"] as const)
+      await move(tier, "staff")
+    expect((await facts()).history.staffDemotions90d).toBe(2)
+    expect((await demotionRule())?.points).toBe(8)
+  })
+
+  it("scores past a rule that throws, and logs and reports it with the rule and workspace", async () => {
+    const { spyOn } = await import("bun:test")
+    const { RULES } = await import("../src/risk/rules.js")
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    // The owner's address is on the workspace's own domain, so trust.owner_domain
+    // has something to say while trust.mfa throws.
+    const domain = `throws-${RUN}.com`
+    await owner`insert into core.domains (tenant_id, name, status, verified_at)
+                values (${id}, ${domain}, 'verified', now())`
+    const broken = RULES.find((r) => r.id === "trust.mfa")!
+    const spy = spyOn(broken, "evaluate").mockImplementation(() => {
+      throw new Error("boom")
     })
-    expect(await labels.count()).toBeGreaterThan(0)
-    const r = await labels.retrain()
-    expect(r.active).toBe(false)
-    expect((await labels.model(true))?.active ?? false).toBe(false)
-    expect((await labels.model(false))?.version).toBe(r.version)
+    const logged: object[] = []
+    const reported: Record<string, unknown>[] = []
+    try {
+      const r = await scoreTenant(
+        id,
+        "test",
+        riskDeps(new FakeRedis(), {
+          ownerInfo: async () => ({ mfa: true, email: `owner@${domain}` }),
+          log: { error: (o, m) => m === "risk rule threw" && logged.push(o) },
+          report: (_error, context) => reported.push(context),
+        }),
+      )
+      expect(r.status).toBe("scored")
+      expect(r.ruleFailures).toBe(1)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(logged).toEqual([
+      expect.objectContaining({ rule: "trust.mfa", tenantId: id }),
+    ])
+    expect(reported).toEqual([
+      expect.objectContaining({ rule: "trust.mfa", tenantId: id }),
+    ])
+    // The other rules still scored: the stored assessment lists them.
+    const stored = await assessmentStore(db).current(id)
+    const rules = stored?.contributions.map((c) => c.rule) ?? []
+    expect(rules).toContain("trust.owner_domain")
+    expect(rules).not.toContain("trust.mfa")
   })
 
   // ─── Templates, compaction and the vector layer (#169, #170, #171) ───
@@ -580,6 +1172,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
     // c is held by staff (earlier test) = confirmed. b's mail reads like c's.
     const near = await contentNeighbours(db, ids.b, e.model, FREE, new Date())
     expect(near.taintedSimilar).toBe(1)
+    expect(near.taintedPeerKeys).toEqual([`peer:${digest(ids.c)}`])
     expect(near.bestTaintedSimilarity!).toBeGreaterThan(0.8)
     const far = await contentNeighbours(db, ids.clean, e.model, FREE, new Date())
     expect(far.taintedSimilar).toBe(0)
@@ -645,7 +1238,6 @@ suite("the risk engine against Postgres, as i10_api", () => {
       tenantId: suspect,
       label: "abuse",
       source: "staff",
-      features: {},
       setBy: "mo",
     })
     expect(
@@ -654,40 +1246,8 @@ suite("the risk engine against Postgres, as i10_api", () => {
     ).toBe(1)
   })
 
-  it("finds labelled behavioural neighbours and counts an actor's velocity", async () => {
-    const { storeBehaviour, behaviourNeighbours, actorVelocity } =
-      await import("../src/content/vectors.js")
-    const { features } = await import("../src/risk/model.js")
-    const { loadFacts } = await import("../src/risk/facts.js")
-    for (const id of [ids.a, ids.b, ids.c, ids.d, ids.clean]) {
-      const f = await loadFacts(id, {
-        db,
-        freePlanId: FREE,
-        ownerInfo: async () => null,
-      })
-      await storeBehaviour(db, id, features(f))
-    }
-    const labels = labelStore(db)
-    for (const id of [ids.a, ids.c, ids.d]) {
-      await labels.add({
-        tenantId: id,
-        label: "abuse",
-        source: "staff",
-        features: {},
-        setBy: "mo",
-      })
-    }
-    await labels.add({
-      tenantId: ids.clean,
-      label: "legit",
-      source: "staff",
-      features: {},
-      setBy: "mo",
-    })
-    const n = await behaviourNeighbours(db, ids.b, 10)
-    expect(n.labelled).toBe(4)
-    expect(n.abuse).toBe(3)
-
+  it("counts an actor's velocity", async () => {
+    const { actorVelocity } = await import("../src/content/vectors.js")
     const [t] =
       await owner`select owner_clerk_user_id from core.tenants where id = ${ids.a}`
     const v = await actorVelocity(db, t!.owner_clerk_user_id)
@@ -937,7 +1497,6 @@ suite("the risk engine against Postgres, as i10_api", () => {
       tenantId: t,
       label: "abuse",
       source: "staff",
-      features: {},
       setBy: "staff@i10",
     })
     const revoked = await reviewTrusted(db, store, t, new Date())
@@ -945,7 +1504,7 @@ suite("the risk engine against Postgres, as i10_api", () => {
   })
 
   it("leaves trusted vectors out of content neighbours and reports the evidence", async () => {
-    const { storeContentVectors, contentNeighbours, behaviourNeighbours } =
+    const { storeContentVectors, contentNeighbours } =
       await import("../src/content/vectors.js")
     const { hashEmbedder } = await import("../src/content/embed.js")
     const { boilerplateStore } = await import("../src/risk/trusted.js")
@@ -999,8 +1558,379 @@ suite("the risk engine against Postgres, as i10_api", () => {
     const nearest = await boilerplateStore(db).nearest(x!, e.model, day)
     expect(nearest?.name).toBe(`test/near-${RUN}`)
     expect(nearest!.similarity).toBeGreaterThan(0.99)
-
-    const b = await behaviourNeighbours(db, ids.a)
-    if (b.labelled > 0) expect(b.medianDistance).not.toBeNull()
   })
+
+  // ── The content judge (risk/judge, content/judging.ts) ──
+
+  /** What a judge stores: phishing, brand and credentials at `p`. */
+  const storedJudgement = (p: number): StoredJudgement => ({
+    model: "test/judge#2",
+    // A screened content the second model confirmed: the second answers decide.
+    answers: answers(0.03, { phish_short: p, imp_short: p }),
+    truncated: false,
+    usage: { inputTokens: 100, outputTokens: 5 },
+    second:
+      p > 0.5
+        ? {
+            status: "answered",
+            model: "test/judge-second",
+            answers: answers(0.03, { phish_short: p, imp_short: p }),
+            truncated: false,
+            usage: { inputTokens: 100, outputTokens: 5 },
+          }
+        : {
+            status: "not_needed",
+            model: null,
+            answers: null,
+            truncated: null,
+            usage: null,
+          },
+  })
+
+  /** A judge that answers from the subject, or with `outcome`, and records what it was asked. */
+  function fakeJudge(phishy: (subject: string) => boolean, outcome?: JudgeOutcome) {
+    const asked: { tenantId: string; email: JudgeEmail }[] = []
+    const judge: ContentJudge = {
+      model: "test/judge",
+      key: "test/judge#2",
+      secondModel: null,
+      async judge(tenantId, email) {
+        asked.push({ tenantId, email })
+        return (
+          outcome ?? {
+            status: "judged",
+            judgement: storedJudgement(phishy(email.subject) ? 0.95 : 0.03),
+          }
+        )
+      },
+    }
+    return { judge, asked }
+  }
+
+  async function seedMail(
+    tenantId: string,
+    subject: string,
+    html: string,
+    status: "queued" | "sent",
+  ) {
+    await owner`
+      with m as (
+        insert into core.messages (tenant_id, from_address, to_addresses, reply_to, subject, status, queue, sent_at)
+        values (${tenantId}, ${"Billing Team <billing@judge.example>"}, '{a@example.com}',
+                '{help@elsewhere.example}', ${subject}, ${status}, 'transactional',
+                ${status === "sent" ? new Date() : null})
+        returning id, created_at, tenant_id
+      )
+      insert into core.message_bodies (message_id, created_at, tenant_id, html)
+      select id, created_at, tenant_id, ${html} from m`
+  }
+
+  it("keeps content judgements and their day counts deny-all: a workspace cannot read or forge its own", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    expect(
+      await judgementStore(db).save(id, "e1", storedJudgement(0.9), new Date(), null),
+    ).toBe(true)
+    const own = await withTenant(db, id, (tx) =>
+      tx.select().from(riskContentJudgements),
+    )
+    expect(own).toHaveLength(0)
+    expect(await app`select * from core.risk_content_judgements`).toHaveLength(0)
+    expect(await app`select * from core.risk_content_judge_days`).toHaveLength(0)
+    let refused = false
+    try {
+      await withTenant(db, id, (tx) =>
+        tx.insert(riskContentJudgements).values({
+          tenantId: id,
+          exact: "forged",
+          model: "test/judge",
+          answers: {},
+          truncated: false,
+          secondStatus: "not_needed",
+        }),
+      )
+    } catch {
+      refused = true
+    }
+    expect(refused).toBe(true)
+    // The first judgement wins; a second save of the same content writes nothing.
+    expect(
+      await judgementStore(db).save(id, "e1", storedJudgement(0.1), new Date(), null),
+    ).toBe(false)
+  })
+
+  it("judges each distinct content once, of any status, skips boilerplate, and scores it only in shadow", async () => {
+    const { boilerplateStore, trustSource } = await import("../src/risk/trusted.js")
+    const { parseSubmission } = await import("../src/content/trust.js")
+    const { analyseContent } = await import("../src/content/job.js")
+    const { fingerprintStored } = await import("../src/risk/content.js")
+    const skeleton = parseSubmission({
+      html: BOILER("{{name}}"),
+      text: null,
+      holes: { name: 40 },
+    })
+    if ("error" in skeleton) throw new Error(skeleton.error)
+    await boilerplateStore(db).add({
+      name: `test/judge-${RUN}`,
+      skeleton,
+      model: null,
+      embedding: null,
+      reason: "integration test",
+      by: "risk-db",
+    })
+    const t = await trustTenant(`judge-${RUN}.com`)
+    const promo =
+      "<p>Our spring collection is here: linen shirts, light jackets and canvas shoes, all made in small batches by the same workshop as last year.</p>"
+    const phish =
+      "<p>Your mailbox will be closed today. Confirm your password at https://login-verify.example/m to keep receiving mail.</p>"
+    // ⚠ QUEUED, NOT SENT: the judge does not wait for delivery.
+    for (let i = 0; i < 3; i++) await seedMail(t, "Spring collection", promo, "queued")
+    await seedMail(t, "Mailbox closing", phish, "sent")
+    await seedMail(t, "Reset your password", BOILER("Ada"), "sent")
+    const trust = trustSource(db, { verdict: async () => "clean", ttlMs: 0 })
+    await fingerprintStored(t, { db, threshold: 99, trust })
+
+    const redis = new FakeRedis()
+    const fake = fakeJudge((s) => s === "Mailbox closing")
+    const judgements = judgementStore(db)
+    const deps = {
+      db,
+      trust,
+      judge: { judge: fake.judge, judgements, seenRedis: redis },
+    }
+    expect((await analyseContent(t, deps)).judged).toBe(2)
+    expect(fake.asked.map((a) => a.email.subject).sort()).toEqual([
+      "Mailbox closing",
+      "Spring collection",
+    ])
+    const sent = fake.asked.find((a) => a.email.subject === "Mailbox closing")!.email
+    expect(sent).toMatchObject({
+      senderName: "Billing Team",
+      senderDomain: "judge.example",
+      replyToDomain: "elsewhere.example",
+      recipientDomain: "example.com",
+    })
+    const [left] =
+      await owner`select count(*)::int as n from core.message_bodies where tenant_id = ${t} and judged_at is null`
+    expect(left!.n).toBe(0)
+
+    // Once per content: nothing new, nothing asked.
+    await seedMail(t, "Spring collection", promo, "queued")
+    expect((await analyseContent(t, deps)).judged).toBe(0)
+    expect(fake.asked).toHaveLength(2)
+
+    await fingerprintStored(t, { db, threshold: 99, trust })
+    const facts = await loadFacts(t, {
+      db,
+      freePlanId: FREE,
+      ownerInfo: async () => null,
+      judgeModel: "test/judge#2",
+    })
+    expect(facts.content!.judged).toBe(2)
+    expect(facts.content!.messages).toBe(5)
+    expect(facts.content!.days).toEqual({ seen: 2, judged: 2, capped: 0 })
+    expect(facts.content!.screened).toBe(1)
+    expect(facts.content!.undecided).toBe(0)
+    expect(facts.content!.signals.identity).toEqual({
+      contents: 1,
+      messages: 1,
+      exacts: [expect.any(String)],
+    })
+    expect(facts.content!.signals.phishing.contents).toBe(0)
+
+    // The hourly score sees it, in shadow only.
+    const withJudge = await scoreTenant(
+      t,
+      "test",
+      riskDeps(redis, { judge: fake.judge }),
+    )
+    const current = await assessmentStore(db).current(t)
+    const without = evaluate({ ...facts, content: null }, RULES)
+    expect(withJudge.score).toBe(without.score)
+    expect(
+      current!.contributions.some((c) => c.rule.startsWith("content.judge.")),
+    ).toBe(false)
+    expect((current!.shadow as { rule: string }[]).map((s) => s.rule)).toContain(
+      "content.judge.identity",
+    )
+
+    const listed = await judgements.list(t, 10)
+    expect(listed).toHaveLength(2)
+    expect(listed.filter((r) => r.secondStatus === "not_needed").length).toBe(1)
+    // ⚠ WITH ITS BANDS, so the pre-send screen knows near-duplicates are judged.
+    const kept =
+      await owner`select cardinality(bands)::int as n from core.risk_content_judgements where tenant_id = ${t}`
+    expect(kept.map((r) => r.n)).toEqual([8, 8])
+  })
+
+  it("leaves content a spent budget refused for later, and counts it once a day", async () => {
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t)
+    await seedMail(
+      t,
+      "Weekly notes",
+      "<p>Notes from the allotment society: compost turning on Saturday, seed swap the week after, and the shed key moves to plot nine.</p>",
+      "sent",
+    )
+    const redis = new FakeRedis()
+    const capped = fakeJudge(() => false, { status: "capped" })
+    const { analyseContent } = await import("../src/content/job.js")
+    const deps = {
+      db,
+      judge: { judge: capped.judge, judgements: judgementStore(db), seenRedis: redis },
+    }
+    await analyseContent(t, deps)
+    await analyseContent(t, deps)
+    expect(capped.asked).toHaveLength(2)
+    const [left] =
+      await owner`select count(*)::int as n from core.message_bodies where tenant_id = ${t} and judged_at is null`
+    expect(left!.n).toBe(1)
+    const [day] =
+      await owner`select seen, judged, capped from core.risk_content_judge_days where tenant_id = ${t}`
+    expect(day).toEqual({ seen: 1, judged: 0, capped: 1 })
+  })
+
+  it("keeps a judgement's bands and finds its near-duplicates through the definers, and only those", async () => {
+    const t = crypto.randomUUID()
+    const other = crypto.randomUUID()
+    extra.push(t, other)
+    await seedTenant(t)
+    await seedTenant(other)
+    const store = judgementStore(db)
+    const now = new Date()
+    const ago = (days: number) => new Date(now.getTime() - days * 86_400_000)
+    expect(
+      await store.save(t, "fresh", storedJudgement(0.1), ago(1), ["0:a", "1:b", "2:c"]),
+    ).toBe(true)
+    await store.save(t, "stale", storedJudgement(0.1), ago(9), ["0:a", "1:b"])
+    await store.save(t, "unbanded", storedJudgement(0.1), ago(1), null)
+    await store.save(t, "apart", storedJudgement(0.1), ago(1), ["0:z", "1:y"])
+    await store.save(other, "theirs", storedJudgement(0.1), ago(1), ["0:a", "1:b"])
+
+    const found = await store.near(t, "test/judge#2", ["1:b", "2:c", "7:q"], ago(7))
+    expect(found).toEqual([{ exact: "fresh", bands: ["0:a", "1:b", "2:c"] }])
+    expect(await store.near(t, "another/model#2", ["1:b"], ago(7))).toEqual([])
+    expect(await store.near(t, "test/judge#2", [], ago(7))).toEqual([])
+
+    // ⚠ THE PREVIOUS IMAGE'S FOURTEEN ARGUMENTS STILL SAVE, during a rollout.
+    const [old] = await app`
+      select core.risk_content_judgement_save(
+        ${t}::uuid, 'old-image', 'test/judge#2', '{"imp_short":0.1}'::jsonb, false, null, null,
+        'not_needed'::core.risk_judge_second, null, null, null, null, null, now()
+      ) as saved`
+    expect(old!.saved).toBe(true)
+
+    // Doors, not walls: the definers are i10_api's, the table is nobody's.
+    const direct = await app`select * from core.risk_content_judgements`.then(
+      (rows) => rows.length,
+      (e: unknown) => String(e),
+    )
+    expect(direct).toBe(0)
+    const pub = await owner`
+      select has_function_privilege('public', 'core.risk_content_judged_near(uuid, text, text[], timestamptz)', 'execute') as near,
+             has_function_privilege('public', 'core.risk_content_judgement_save(uuid, text, text, jsonb, boolean, integer, integer, core.risk_judge_second, text, jsonb, boolean, integer, integer, timestamptz, text[])', 'execute') as save`
+    expect(pub[0]).toEqual({ near: false, save: false })
+  })
+
+  it("screens a new workspace's first batch before it goes: one call for every copy, recorded and scored, and only the judged copy stamped", async () => {
+    const { screenBatch, screenStore } = await import("../src/content/screen.js")
+    const { analyseContent } = await import("../src/content/job.js")
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t, { createdAgoHours: 2 })
+    const letter = (name: string) =>
+      `<p>Dear ${name},</p><p>Your mailbox storage is full and incoming mail is being held. ` +
+      `Sign in within 24 hours at https://mail-verify.example/restore to release your messages, ` +
+      `or the account will be closed and every message in it deleted. Thank you, the mail team.</p>`
+    // ⚠ MILLISECONDS, AS ACCEPT MINTS THEM: the screen addresses a body by its Date.
+    const claimed = []
+    for (const name of ["Anna", "Ben", "Chidi"]) {
+      const [row] = await owner`
+        with m as (
+          insert into core.messages (tenant_id, from_address, to_addresses, subject, status, queue, created_at)
+          values (${t}, 'Mail Team <team@judge.example>', '{a@example.com}', 'Mailbox full',
+                  'sending', 'transactional', date_trunc('milliseconds', now()))
+          returning id, created_at, tenant_id
+        )
+        insert into core.message_bodies (message_id, created_at, tenant_id, html)
+        select id, created_at, tenant_id, ${letter(name)} from m
+        returning message_id, created_at`
+      claimed.push({
+        id: String(row!.message_id),
+        createdAt: new Date(row!.created_at as string),
+        subject: "Mailbox full",
+        from: "Mail Team <team@judge.example>",
+        replyTo: [],
+        to: ["a@example.com"],
+        html: letter(name),
+        text: null,
+      })
+    }
+
+    const redis = new FakeRedis()
+    const fake = fakeJudge(() => true)
+    const risk = riskDeps(redis, { judge: fake.judge })
+    const outcome = await screenBatch(t, claimed, {
+      judge: fake.judge,
+      judgements: judgementStore(db),
+      settings: { enabled: true, untrustedDays: 30, maxGroups: 3, deadlineMs: 20_000 },
+      riskEnabled: true,
+      seenRedis: redis,
+      ...screenStore(db),
+      record: (tenantId, items) =>
+        recordContent(tenantId, items, { db, threshold: 99 }),
+      rescore: async (tenantId) =>
+        (await scoreTenant(tenantId, "first-send", risk)).status === "scored",
+    })
+    expect(outcome).toEqual({ kind: "judged", groups: 1, left: 0, rescored: true })
+    expect(fake.asked).toHaveLength(1)
+
+    const bodies = await owner`
+      select count(*) filter (where judged_at is not null)::int as judged,
+             count(*) filter (where fingerprinted_at is not null)::int as printed
+        from core.message_bodies where tenant_id = ${t}`
+    expect(bodies[0]).toEqual({ judged: 1, printed: 3 })
+    const current = await assessmentStore(db).current(t)
+    expect((current!.shadow as { rule: string }[]).map((s) => s.rule)).toContain(
+      "content.judge.identity",
+    )
+    const [events] =
+      await owner`select trigger from core.risk_assessment_events where tenant_id = ${t}`
+    expect(events!.trigger).toBe("first-send")
+
+    // The five-minute pass finds them already counted; the hourly judge still judges the
+    // near copies by their exact content, which nothing has judged.
+    const { fingerprintStored } = await import("../src/risk/content.js")
+    expect(await fingerprintStored(t, { db, threshold: 99 })).toBe(0)
+    const [prints] =
+      await owner`select sum(messages)::int as n from core.content_fingerprints where tenant_id = ${t}`
+    expect(prints!.n).toBe(3)
+    const again = await analyseContent(t, {
+      db,
+      judge: { judge: fake.judge, judgements: judgementStore(db), seenRedis: redis },
+    })
+    expect(again.judged).toBe(2)
+    expect(fake.asked).toHaveLength(3)
+  })
+
+  it("purges judgements in the hourly run once they are a month old", async () => {
+    const t = crypto.randomUUID()
+    extra.push(t)
+    await seedTenant(t)
+    const j = { judgement: storedJudgement(0.9) }
+    await judgementStore(db).save(
+      t,
+      "old",
+      j.judgement,
+      new Date(Date.now() - 31 * 86_400_000),
+      null,
+    )
+    await judgementStore(db).save(t, "new", j.judgement, new Date(), null)
+    const summary = await runAll(riskDeps())
+    expect(summary.judgementsPurged).toBeGreaterThanOrEqual(1)
+    expect((await judgementStore(db).list(t, 10)).map((r) => r.exact)).toEqual(["new"])
+    // ⚠ THE HOURLY RUN SCORES EVERY WORKSPACE THIS SUITE MADE, which outlasts the default.
+  }, 60_000)
 })

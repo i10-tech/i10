@@ -4,7 +4,6 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { marker, resolveTemplateSend } from "@repo/templates"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import type { CheckRun, GitHubApp } from "../src/github/client.js"
 import { githubStore, type GithubStore } from "../src/github/store.js"
 import { githubSyncer, type GithubSyncer } from "../src/github/sync.js"
@@ -110,7 +109,7 @@ suite("github-connected templates", () => {
   beforeAll(() => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    db = drizzle(app, { schema }) as unknown as Database
+    db = drizzle({ client: app }) as unknown as Database
     templates = templateStore(db)
     store = githubStore(db)
   })

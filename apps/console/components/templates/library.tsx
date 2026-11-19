@@ -866,9 +866,9 @@ function TemplateTable({
   }
   onDragStart: (id: string, e: React.DragEvent) => void
   onDragEnd: () => void
-  folderDrag: (f: TemplateFolder) =>
-    | { onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void }
-    | undefined
+  folderDrag: (
+    f: TemplateFolder,
+  ) => { onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void } | undefined
   onFolderRename: (f: TemplateFolder) => void
   onFolderDelete: (f: TemplateFolder) => void
   loading?: boolean
@@ -997,7 +997,10 @@ function TemplateTable({
                 <ListCell hideBelow="sm" className="text-muted-foreground">
                   -
                 </ListCell>
-                <ListCell className="text-xs text-muted-foreground" title={f?.updated_at}>
+                <ListCell
+                  className="text-xs text-muted-foreground"
+                  title={f?.updated_at}
+                >
                   <Bone id="date" lineHeight={16} width={60}>
                     {f && <Time iso={f.updated_at} />}
                   </Bone>
@@ -1190,7 +1193,10 @@ function TemplateTable({
                     )}
                   </Bone>
                 </ListCell>
-                <ListCell className="text-xs text-muted-foreground" title={t?.updated_at}>
+                <ListCell
+                  className="text-xs text-muted-foreground"
+                  title={t?.updated_at}
+                >
                   <Bone id="date" lineHeight={16} width={60}>
                     {t && <Time iso={t.updated_at} />}
                   </Bone>

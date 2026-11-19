@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from "bun:test"
 import { domainStore, normaliseDomainName } from "../src/domains/store.js"
 import type { Database } from "../src/db/client.js"
 import type { DomainIdentity } from "../src/domains/identity.js"
+import { fakeSealer } from "./support/sealer.js"
 
 const TENANT = "0199a3f2-b4c1-7f3e-9d2a-8b1c4e5f6071"
 const NOW = new Date("2026-09-05T12:00:00.000Z")
@@ -69,7 +70,7 @@ const identity = (over: Partial<DomainIdentity> = {}): DomainIdentity => ({
 
 const roomFor = (status: string) => ({ check: async () => ({ status }) })
 
-const secrets = { seal: (v: string) => `sealed:${v}`, open: (v: string) => v }
+const secrets = fakeSealer
 const deps = {
   region: "eu-central-1",
   /**
@@ -428,6 +429,60 @@ describe("verifying", () => {
     // ⚠ AND IT ASSERTS NOTHING ELSE. Not the status, not `verified_at`.
     expect(written).not.toHaveProperty("status")
     expect(written).not.toHaveProperty("verifiedAt")
+  })
+
+  it("checks the apex MX against mailHost and stores receiving on verify and refresh", async () => {
+    let written: Record<string, unknown> | undefined
+    const db = {
+      execute: async () => [],
+      transaction: async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          execute: async () => [],
+          select: () => ({
+            from: () => ({
+              where: () => ({
+                limit: async () => [row({ status: "verified", hostsMailboxes: true })],
+              }),
+            }),
+          }),
+          update: () => ({
+            set: (v: Record<string, unknown>) => {
+              written = v
+              return {
+                where: () => ({
+                  returning: async () => [
+                    row({ status: "verified", hostsMailboxes: true, receiving: true }),
+                  ],
+                }),
+              }
+            },
+          }),
+        }),
+    } as unknown as Database
+
+    const store = domainStore({
+      db,
+      identity: identity({
+        status: async () => ({ dkimTokens: ["aaa"], status: "verified" }),
+      }),
+      capacity: roomFor("allowed"),
+      ...deps,
+      dns: { ...deps.dns, mailHost: "mail.i10.tech" },
+      mx: async () => [{ exchange: "MAIL.I10.TECH.", priority: 10 }],
+      now: () => NOW,
+    })
+
+    const v = await store.verify(TENANT, row().id)
+    expect(v.status).toBe("ok")
+    expect(written).toMatchObject({ receiving: true })
+    if (v.status === "ok") {
+      expect(v.domain.records.filter((r) => r.record === "Receiving")).toHaveLength(3)
+    }
+
+    written = undefined
+    const r = await store.refresh(TENANT, row().id)
+    expect(r.status).toBe("ok")
+    expect(written).toMatchObject({ receiving: true })
   })
 })
 

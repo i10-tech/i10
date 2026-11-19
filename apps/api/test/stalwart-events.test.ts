@@ -852,3 +852,166 @@ describe("the ingest endpoint", () => {
     })
   })
 })
+
+/**
+ * ⚠ ENCRYPTION FAULTS CARRY NO MESSAGE, SO THE MAIL PATHS WOULD DROP ALL FOUR.
+ * They are the only way a bad blob key or a bounced encrypted message is ever
+ * noticed, and a failure to tell somebody must never be a 500 - that replays the
+ * whole batch, mail events included.
+ */
+describe("encryption faults", () => {
+  const TYPES = [
+    "store.decrypt-error",
+    "store.crypto-error",
+    "encryption.key-change",
+    "encryption.gateway-bounced",
+  ] as const
+
+  const sign = (body: string) =>
+    createHmac("sha256", SECRET).update(body, "utf8").digest("base64")
+
+  const run = async (
+    events: StalwartEvent[],
+    opsAlert?: { to: string; sender: { send: (i: never) => Promise<void> } },
+  ) => {
+    const errors: { o: Record<string, unknown>; m: string }[] = []
+    const app = createStalwartWebhooks({
+      events: ops(),
+      accounts: accountsFake(),
+      log: {
+        ...log,
+        error: (o: object, m: string) => errors.push({ o: o as never, m }),
+      },
+      secret: SECRET,
+      ...(opsAlert ? { opsAlert: opsAlert as never } : {}),
+    })
+    const body = JSON.stringify({ events })
+    const res = await app.request("/stalwart", {
+      method: "POST",
+      headers: { "X-Signature": sign(body) },
+      body,
+    })
+    return { res, errors }
+  }
+
+  const fault = (type: string, data: Record<string, unknown> = {}) =>
+    ({
+      id: "1",
+      type,
+      createdAt: "2026-11-17T10:05:00Z",
+      data,
+    }) satisfies StalwartEvent
+
+  it("logs each of the four at error level, with a domain and no address", async () => {
+    const { res, errors } = await run([
+      fault("store.decrypt-error", { id: "b", cipher: "aes256Gcm" }),
+      fault("store.crypto-error", { id: "b" }),
+      fault("encryption.key-change", { address: "Someone@Partner.example" }),
+      fault("encryption.gateway-bounced", {
+        address: "someone@partner.example",
+        reason: "No usable encryption key for this recipient",
+      }),
+    ])
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ alerted: 4 })
+    expect(errors.map((e) => e.o["event"])).toEqual([...TYPES])
+    expect(errors.every((e) => e.m === "Stalwart encryption alert")).toBe(true)
+    expect(errors[0]?.o).toMatchObject({ keyId: "b", cipher: "aes256Gcm" })
+    expect(errors[2]?.o).toMatchObject({ recipientDomain: "partner.example" })
+    expect(JSON.stringify(errors)).not.toContain("someone@")
+  })
+
+  it("emails once per type per hour key, not once per event", async () => {
+    const send = mock(async () => {})
+    const { res } = await run(
+      [
+        fault("store.decrypt-error", { id: "b" }),
+        fault("store.decrypt-error", { id: "b" }),
+        fault("store.crypto-error"),
+        fault("encryption.key-change"),
+        fault("encryption.gateway-bounced"),
+        fault("store.decrypt-error", {}),
+      ],
+      { to: "ops@example.com", sender: { send } },
+    )
+
+    expect(res.status).toBe(200)
+    const calls = send.mock.calls as unknown as [
+      { to: string; idempotencyKey: string; subject: string },
+    ][]
+    expect(calls.map(([c]) => c.idempotencyKey)).toEqual([
+      "stalwart-alert:store.decrypt-error:2026-11-17T10",
+      "stalwart-alert:store.crypto-error:2026-11-17T10",
+      "stalwart-alert:encryption.key-change:2026-11-17T10",
+      "stalwart-alert:encryption.gateway-bounced:2026-11-17T10",
+    ])
+    expect(calls.every(([c]) => c.to === "ops@example.com")).toBe(true)
+    expect(calls[0]?.[0].subject).toContain("store.decrypt-error")
+  })
+
+  it("sends a new email in the next hour", async () => {
+    const send = mock(async () => {})
+    await run(
+      [
+        fault("store.decrypt-error"),
+        { ...fault("store.decrypt-error"), createdAt: "2026-11-17T11:00:00Z" },
+      ],
+      { to: "ops@example.com", sender: { send } },
+    )
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it("only logs when no alert address is configured", async () => {
+    const { res, errors } = await run([fault("store.decrypt-error")])
+    expect(res.status).toBe(200)
+    expect(errors).toHaveLength(1)
+  })
+
+  it("still answers 200 when the email cannot be sent, and logs it", async () => {
+    const { res, errors } = await run(
+      [fault("store.decrypt-error"), event("delivery.delivered", { to: "a@x.test" })],
+      {
+        to: "ops@example.com",
+        sender: {
+          send: async () => {
+            throw new Error("send path down")
+          },
+        },
+      },
+    )
+
+    expect(res.status).toBe(200)
+    expect(errors.map((e) => e.m)).toEqual([
+      "Stalwart encryption alert",
+      "could not email the Stalwart alert",
+    ])
+  })
+
+  it.each(["replayed", "conflict"])(
+    "does not treat another process's earlier send (%s) as a failure",
+    async (status) => {
+      const { errors } = await run([fault("store.crypto-error")], {
+        to: "ops@example.com",
+        sender: {
+          send: async () => {
+            throw new Error(`auth email refused by the send path: ${status}`)
+          },
+        },
+      })
+      expect(errors.map((e) => e.m)).toEqual(["Stalwart encryption alert"])
+    },
+  )
+
+  it("still ignores an unrelated event it does not handle", async () => {
+    const send = mock(async () => {})
+    const { res, errors } = await run(
+      [fault("encryption.gateway-encrypted"), fault("store.blob-store-recoded")],
+      { to: "ops@example.com", sender: { send } },
+    )
+
+    expect(await res.json()).toMatchObject({ recorded: 0, ignored: 2, alerted: 0 })
+    expect(errors).toEqual([])
+    expect(send).not.toHaveBeenCalled()
+  })
+})

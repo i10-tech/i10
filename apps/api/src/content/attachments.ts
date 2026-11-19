@@ -1,9 +1,12 @@
-import { sql, type SQL } from "drizzle-orm"
+import { sql } from "drizzle-orm"
+import type { Keyring } from "../crypto/keyring.js"
 import { withTenant, type Database } from "../db/client.js"
-import { objectKey, type ObjectStore } from "./object-store.js"
+import { objectKey, type ContentStore, type ObjectStore } from "./object-store.js"
+import { inList, readObjects, sealObject } from "./objects.js"
 
 /**
- * Attachments in R2, content-addressed per workspace (#136, #168, #188).
+ * Attachments in R2, content-addressed per workspace and sealed under
+ * `OBJECT_KEYS` (#136, #168, #188, content/objects.ts).
  *
  * The lifecycle of one file:
  *   1. Accept stores it inline in `message_bodies.attachments`, base64, in the
@@ -51,20 +54,11 @@ export const isStored = (a: unknown): a is StoredAttachment =>
 const sha256Hex = (bytes: Uint8Array) =>
   new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
 
-/**
- * ⚠ AN `IN (...)` LIST, NEVER `= any(${array})`. Drizzle expands an array
- * parameter to `($1, $2)` - a ROW, not an array - which works with one element
- * and breaks on the second.
- */
-const list = (values: readonly string[]): SQL =>
-  sql.join(
-    values.map((v) => sql`${v}`),
-    sql`, `,
-  )
-
 export interface StoreDeps {
   db: Database
   store: ObjectStore
+  /** `OBJECT_KEYS`. Without them nothing moves: see content-store.ts. */
+  keys: Keyring
   /** Bodies per workspace per run. */
   limit?: number
   log?: { warn?: (o: object, m: string) => void }
@@ -93,12 +87,7 @@ export interface StoreResult {
  * carry ten megabytes; reading a batch of them at once is how a job runs out
  * of memory.
  *
- * ⚠ THE ORDER CLOSES THE RACE WITH THE SWEEP. For every hash: touch its
- * `content_objects` row (`last_seen_at = now()`); if there is none, upload,
- * then insert it. Only then is the body rewritten. The sweep deletes a row
- * only under `FOR UPDATE SKIP LOCKED` and only when `last_seen_at` is older
- * than its grace, so a touched object is never taken, and one the sweep took
- * first simply has no row left for the touch to find - and is uploaded again.
+ * ⚠ EVERY FILE IS IN R2 BEFORE ITS BODY IS REWRITTEN: see `putObjects`.
  */
 export async function storeAttachments(
   tenantId: string,
@@ -148,7 +137,7 @@ async function storeOne(
   // key and carries microseconds; a Date keeps milliseconds, and an UPDATE
   // keyed on the rounded value matches nothing (content/job.ts learned this).
   row: { message_id: string; created_at: string },
-  { db, store }: StoreDeps,
+  { db, store, keys }: StoreDeps,
 ) {
   const [body] = (await withTenant(db, tenantId, (tx) =>
     tx.execute(sql`
@@ -179,7 +168,7 @@ async function storeOne(
     }
   })
 
-  const { uploaded, reused } = await putObjects(tenantId, files, { db, store })
+  const { uploaded, reused } = await putObjects(tenantId, files, { db, store, keys })
 
   // ⚠ GUARDED ON THE ORIGINAL. The rewrite lands only if the row still holds
   // exactly what was hashed; anything that changed it since wins, and the
@@ -187,12 +176,12 @@ async function storeOne(
   const updated = (await withTenant(db, tenantId, (tx) =>
     tx.execute(sql`
       update core.message_bodies
-         set attachments = ${JSON.stringify(rewritten)}::jsonb,
+         set attachments = ${sql.param(rewritten)}::jsonb,
              attachments_stored_at = now()
        where message_id = ${row.message_id}::uuid
          and created_at = ${row.created_at}::timestamptz
          and attachments_stored_at is null
-         and attachments = ${JSON.stringify(original)}::jsonb
+         and attachments = ${sql.param(original)}::jsonb
       returning message_id
     `),
   )) as unknown as unknown[]
@@ -204,20 +193,30 @@ async function storeOne(
 }
 
 /**
- * Makes sure every file is in R2 and has its `content_objects` row, before a
- * body is rewritten to point at it. Shared by attachments and inline images.
+ * Makes sure every file is sealed in R2 and has its `content_objects` row,
+ * before a body is rewritten to point at it. Shared by attachments and inline
+ * images.
  *
  * ⚠ THE ORDER CLOSES THE RACE WITH THE SWEEP. For every hash: touch its row
- * (`last_seen_at = now()`); if there is none, upload, then insert it. Only then
+ * (`last_seen_at = now()`); if there is none, insert it and upload. Only then
  * may the caller rewrite the body. The sweep deletes a row only under
  * `FOR UPDATE SKIP LOCKED` and only past its grace, so a touched object is
  * never taken, and one the sweep took first has no row for the touch to find -
  * and is uploaded again.
+ *
+ * ⚠ THE ROW AND THE UPLOAD ARE ONE TRANSACTION, AND THAT IS THE DEDUP'S
+ * SAFETY. The row holds the key the object was sealed with. Two first uploads
+ * of one file at once: the second insert waits on the first's uncommitted row.
+ * If the first commits, its object is in R2 and the second reuses it; if the
+ * first fails, it rolls back and the second inserts and uploads its own. So a
+ * row anyone can see always names the key of the object in R2. A commit that
+ * fails after the PUT leaves an object without a row, and the next upload of
+ * that file overwrites it under a key of its own.
  */
 export async function putObjects(
   tenantId: string,
   files: ReadonlyMap<string, { bytes: Uint8Array; type?: string | undefined }>,
-  { db, store }: { db: Database; store: ObjectStore },
+  { db, store, keys }: { db: Database; store: ObjectStore; keys: Keyring },
 ): Promise<{ uploaded: number; reused: number }> {
   let uploaded = 0
   let reused = 0
@@ -228,7 +227,7 @@ export async function putObjects(
       (await withTenant(db, tenantId, (tx) =>
         tx.execute(sql`
           update core.content_objects set last_seen_at = now()
-           where tenant_id = ${tenantId}::uuid and sha256 in (${list(hashes)})
+           where tenant_id = ${tenantId}::uuid and sha256 in (${inList(hashes)})
           returning sha256
         `),
       )) as unknown as { sha256: string }[]
@@ -239,18 +238,37 @@ export async function putObjects(
       reused++
       continue
     }
-    await store.put(objectKey(tenantId, sha256), file.bytes, file.type)
-    // ⚠ THE ROW ONLY AFTER THE UPLOAD SUCCEEDED. A row is the promise that
-    // the object exists; the next message with this file trusts it and skips
-    // the PUT.
-    await withTenant(db, tenantId, (tx) =>
-      tx.execute(sql`
-        insert into core.content_objects (tenant_id, sha256, size)
-        values (${tenantId}::uuid, ${sha256}, ${file.bytes.byteLength})
-        on conflict (tenant_id, sha256) do update set last_seen_at = now()
-      `),
-    )
-    uploaded++
+    const sealed = sealObject(keys, { tenantId, sha256 }, file.bytes)
+    const inserted = await withTenant(db, tenantId, async (tx) => {
+      const mine = (await tx.execute(sql`
+        insert into core.content_objects (tenant_id, sha256, size, sealed_key)
+        values (${tenantId}::uuid, ${sha256}, ${file.bytes.byteLength}, ${sealed.sealedKey})
+        on conflict (tenant_id, sha256) do nothing
+        returning sha256
+      `)) as unknown as unknown[]
+      if (mine.length === 0) {
+        const touched = (await tx.execute(sql`
+          update core.content_objects set last_seen_at = now()
+           where tenant_id = ${tenantId}::uuid and sha256 = ${sha256}
+          returning sha256
+        `)) as unknown as unknown[]
+        // Taken by the sweep between the two statements: the body stays
+        // inline and the next run uploads it again.
+        if (touched.length === 0)
+          throw new Error(`stored file ${sha256} was just swept`)
+        return false
+      }
+      // ⚠ NOT THE FILE'S OWN TYPE: the object is ciphertext. The type is in
+      // the attachment entry or the data URI, which is where readers take it.
+      await store.put(
+        objectKey(tenantId, sha256),
+        sealed.bytes,
+        "application/octet-stream",
+      )
+      return true
+    })
+    if (inserted) uploaded++
+    else reused++
   }
   return { uploaded, reused }
 }
@@ -263,29 +281,29 @@ export async function putObjects(
  * from must fail, not go out without its attachment.
  */
 export async function restoreAttachments(
-  store: ObjectStore | null,
+  db: Database,
+  store: ContentStore | null,
   tenantId: string,
   attachments: readonly AnyAttachment[] | null,
 ): Promise<InlineAttachment[] | null> {
   if (!attachments) return null
   if (!attachments.some(isStored)) return attachments as InlineAttachment[]
-  if (!store) {
-    throw new Error(
-      "message has attachments in the content store, and no content store is configured",
-    )
-  }
-  return Promise.all(
-    attachments.map(async (a) => {
-      if (!isStored(a)) return a as InlineAttachment
-      const bytes = await store.get(objectKey(tenantId, a.sha256))
-      return {
-        filename: a.filename,
-        ...(a.content_type ? { content_type: a.content_type } : {}),
-        ...(a.content_id ? { content_id: a.content_id } : {}),
-        content: Buffer.from(bytes).toString("base64"),
-      }
-    }),
+  const files = await readObjects(
+    db,
+    store,
+    tenantId,
+    attachments.filter(isStored).map((a) => a.sha256),
   )
+  return attachments.map((a) => {
+    if (!isStored(a)) return a as InlineAttachment
+    const bytes = files.get(a.sha256)!
+    return {
+      filename: a.filename,
+      ...(a.content_type ? { content_type: a.content_type } : {}),
+      ...(a.content_id ? { content_id: a.content_id } : {}),
+      content: bytes.toString("base64"),
+    }
+  })
 }
 
 /** Name, type and decoded size of each file, whichever shape it is stored in. */

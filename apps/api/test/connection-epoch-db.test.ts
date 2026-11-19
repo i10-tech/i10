@@ -2,10 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { identityStore } from "../src/identity/store.js"
 import { raiseConnectionCredentialEpochs } from "../src/projection/connection-epoch.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 
 /**
  * Revoking a connection's cached mail passwords (#383), against a real database
@@ -26,13 +25,13 @@ const suffix = acme.slice(0, 8)
 const [ada, bob, carol, dan, eve] = ["ada", "bob", "carol", "dan", "eve"].map(
   (n) => `user_${n}_${suffix}`,
 ) as [string, string, string, string, string]
-const box = secretBox("ab".repeat(32))
+const box = testSealer()
 
 suite("raising a connection's credential epochs", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id, clerk_org_id)
                 values (${acme}, ${`a-${suffix}`}, 'Acme', ${`owner-${acme}`}, ${`org_${suffix}`})`
   })

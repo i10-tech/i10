@@ -73,6 +73,17 @@ APPS="${I10_APPS:-$APP i10-stalwart}"
 SYNC_TIMEOUT="${I10_SYNC_TIMEOUT:-180}"
 ROLLOUT_TIMEOUT="${I10_ROLLOUT_TIMEOUT:-240}"
 
+# ⚠ A THIRD BUDGET, FOR AN ARGO THAT IS BUSY WITH AN OLDER COMMIT. The sync
+# budget above assumes Argo is free to look at the deploy commit. It is not
+# while an operation for an earlier revision is still running, and that
+# operation can take minutes: a merge commit still pins the PREVIOUS images, so
+# when those fail a PreSync hook Argo retries it five times with backoff before
+# it lets go. On 2026-11-15 (run 43656952778) that held the deploy commit back
+# for about five and a half minutes; this script gave up at three and reported a
+# failed rollout that then came up perfectly. Time spent behind someone else's
+# operation is not counted against SYNC_TIMEOUT - it is bounded here instead.
+BUSY_TIMEOUT="${I10_BUSY_TIMEOUT:-420}"
+
 # ── the argument ─────────────────────────────────────────────────────────────
 
 # ⚠ READ FROM `SSH_ORIGINAL_COMMAND` WHEN THERE IS ONE, because that is where a
@@ -156,20 +167,56 @@ done
 # "stale images" on a rollout that then came up perfectly. A revision that
 # changed nothing in this Application starts no operation at all, so the rule
 # is "none running", not "one succeeded for this revision".
+#
+# ⚠ BUT ONE THAT FAILED FOR THIS REVISION IS A FAILED DEPLOY. A hook Job that
+# exits non-zero (i10-stalwart's PostSync apply, #412) ends the operation
+# `Failed` while the app still reads `Synced`, because every manifest WAS
+# applied - so "none running" alone would pass it. Only an operation for THIS
+# sha counts: an old failure is not this deploy's, and a revision that changed
+# nothing in the app starts no operation at all.
 deadline=$((SECONDS + SYNC_TIMEOUT))
-revision="" sync="" health="" phase="" synced=false
+busy_deadline=$((SECONDS + BUSY_TIMEOUT))
+revision="" sync="" health="" phase="" op_revision="" synced=false
+op_target="" busy_noted=false
 
 while (( SECONDS < deadline )); do
-  read -r revision sync health phase < <(
+  # ⚠ ITS OWN CALL, NOT A SIXTH FIELD BELOW. `read` fills from the left and an
+  # empty field vanishes, so a target revision appended there would land in
+  # `op_revision` whenever the running operation has no syncResult yet.
+  op_target="$(kubectl get application "$APP" -n "$NAMESPACE" -o \
+    jsonpath='{.status.operationState.operation.sync.revision}' 2>/dev/null)"
+
+  # `phase` before `op_revision`: a Running operation has no syncResult yet, and
+  # `read` fills fields from the left.
+  read -r revision sync health phase op_revision < <(
     kubectl get application "$APP" -n "$NAMESPACE" -o \
-      jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status} {.status.operationState.phase}' \
+      jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status} {.status.operationState.phase} {.status.operationState.syncResult.revision}' \
       2>/dev/null
   )
+
+  if [[ "$op_revision" == "$SHA" && ( "$phase" == "Failed" || "$phase" == "Error" ) ]]; then
+    echo "verify-rollout: FAILED - Argo's sync of ${SHORT} ended ${phase}" >&2
+    kubectl get application "$APP" -n "$NAMESPACE" -o \
+      jsonpath='  {.status.operationState.message}{"\n"}{range .status.operationState.syncResult.resources[?(@.hookPhase=="Failed")]}  hook {.kind}/{.name}: {.message}{"\n"}{end}' >&2 2>&1
+    exit 1
+  fi
 
   if [[ "$revision" == "$SHA" && "$sync" == "Synced" \
         && "$phase" != "Running" && "$phase" != "Terminating" ]]; then
     synced=true
     break
+  fi
+
+  # Argo is still working through an operation for another revision. The sync
+  # budget starts over when it lets go - see BUSY_TIMEOUT.
+  if [[ ( "$phase" == "Running" || "$phase" == "Terminating" ) \
+        && -n "$op_target" && "$op_target" != "$SHA" ]] \
+     && (( SECONDS < busy_deadline )); then
+    if [[ "$busy_noted" != true ]]; then
+      echo "verify-rollout: Argo is still busy with ${op_target:0:7}; waiting for it to finish first"
+      busy_noted=true
+    fi
+    deadline=$((SECONDS + SYNC_TIMEOUT))
   fi
   sleep 5
 done
@@ -222,6 +269,24 @@ while read -r target; do
   if kubectl rollout status "$target" -n "$NAMESPACE" \
       --timeout="${ROLLOUT_TIMEOUT}s" >/dev/null 2>&1; then
     echo "  ok       ${target}"
+    continue
+  fi
+
+  # ⚠ A WORKLOAD THIS SYNC DELETED IS NOT A FAILED ROLLOUT. The list below is
+  # read once, and Argo prunes in the same sync this script waits on, so a
+  # Deployment removed from the repo can be listed and then vanish, or carry a
+  # deletionTimestamp, by the time it is checked. #483 removed
+  # i10-stalwart-redis and failed run 44144591741 on exactly that.
+  #
+  # ⚠ NOT-FOUND ONLY, NEVER "THE QUERY FAILED". `--ignore-not-found` prints
+  # nothing for a missing object and exits 0, while a forbidden or unreachable
+  # API exits non-zero, which falls through to FAILED. The name is printed so
+  # an object that exists without a deletionTimestamp is told from one that is
+  # gone.
+  if state="$(kubectl get "$target" -n "$NAMESPACE" --ignore-not-found \
+      -o jsonpath='{.metadata.name}|{.metadata.deletionTimestamp}' 2>/dev/null)" \
+      && [[ -z "$state" || "$state" != *"|" ]]; then
+    echo "  gone     ${target} (removed by this sync)"
     continue
   fi
 

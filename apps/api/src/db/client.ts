@@ -1,7 +1,6 @@
 import { sql, type SQL } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres, { type Sql } from "postgres"
-import * as schema from "./schema.js"
 
 export type Database = ReturnType<typeof createDb>["db"]
 
@@ -29,7 +28,7 @@ export function createDb(url: string) {
     onnotice: () => {},
   })
 
-  return { sql, db: drizzle(sql, { schema }) }
+  return { sql, db: drizzle({ client: sql }) }
 }
 
 /**

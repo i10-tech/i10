@@ -1,15 +1,28 @@
+import "./openapi-first.js"
 /**
  * The staff side of the risk engine (#170), until the admin app (#217) exists.
  *
  *   bun run risk-admin explain  <tenant>
  *   bun run risk-admin score    <tenant>
- *   bun run risk-admin hold     <tenant> --by <you> --reason "<why>" [--scope all]
- *   bun run risk-admin release  <tenant> --by <you> --reason "<why>" --outcome false_positive|upheld [--pause-days 14]
- *   bun run risk-admin pin      <tenant> --by <you> --reason "<why>" [--days 30]
+ *   bun run risk-admin hold     <tenant> --by <you> --reason "<why>" [--scope all] [--category <c>]
+ *   bun run risk-admin release  <tenant> --by <you> --reason "<why>" --outcome false_positive|upheld [--pause-days 14] [--rules a,b]
+ *   bun run risk-admin pin      <tenant> --by <you> --reason "<why>" [--days 30] [--rules a,b]
+ *   bun run risk-admin decisions <tenant>
+ *   bun run risk-admin revoke-decision <decision id> --by <you> --reason "<why>"
+ *   bun run risk-admin cases    [--tenant <id>]
  *   bun run risk-admin tier     <tenant> strict|normal --by <you> --reason "<why>"
  *   bun run risk-admin label    <tenant> abuse|legit --by <you> [--note "<text>"]
  *   bun run risk-admin linked   <clerk user id>
- *   bun run risk-admin train
+ *   bun run risk-admin judge    <tenant> [--limit 50]
+ *   bun run risk-admin replay   [--since <iso date>] [--until <iso date>] [--tenant <id>] [--json]
+ *
+ * `replay` re-scores the kept fact snapshots (default: the last 30 days) with
+ * the rules in this checkout and the current RISK_SHADOW_RULES, and prints what
+ * would change. It writes nothing and calls no outside service.
+ *
+ * `judge` lists the content judge's recent judgements for a workspace: the
+ * fingerprint, the model, every answer, the second opinion and whether the
+ * text was cut. ⚠ STAFF ONLY: never paste these numbers to a customer.
  *
  * Trusted content (#222):
  *
@@ -34,22 +47,43 @@
  * `--reason`, so what staff do here is audited exactly like what the score
  * does. It connects as `i10_api`, like everything else - no bypass role.
  *
- * ⚠ A RELEASE IS ALSO A LABEL. `false_positive` teaches the model the
- * workspace was legitimate; `upheld` that it was abuse. The features are
- * frozen as they are now, which is what the score saw.
+ * ⚠ A RELEASE IS ALSO A LABEL. `false_positive` records the workspace as
+ * legitimate; `upheld` as abuse.
+ *
+ * ⚠ A RELEASE OR A PIN CLEARS WHAT WAS IN VIEW (risk/decisions.ts): every live
+ * concern, or only those `--rules` names. The same evidence then stays cleared
+ * for DECISION_MEMORY_DAYS; new evidence counts in full. `--reason` is the
+ * decision's note. `revoke-decision` undoes the clearing and is recorded.
+ * `cases` prints every decision as a JSON line, disagreements with the engine
+ * first, for measuring the engine against people.
  */
 import { readFile } from "node:fs/promises"
 import { createClerkClient } from "@clerk/backend"
 import { sql } from "drizzle-orm"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { createCacheClient } from "./cache/redis.js"
+import {
+  decisionCases,
+  staffDecision,
+  type StaffDecisionResult,
+} from "./risk/decisions.js"
 import { evaluate } from "./risk/engine.js"
 import { loadFacts } from "./risk/facts.js"
-import { explainPrediction, features, predict } from "./risk/model.js"
-import { RULES } from "./risk/rules.js"
+import { formatReport, replaySnapshot, summarise } from "./risk/replay.js"
 import { scoreTenant } from "./risk/runner.js"
-import { CATEGORY_TEXT, type Category } from "./risk/types.js"
+import { JUDGE_QUESTION_IDS } from "./risk/judge/contract.js"
+import { judgementStore } from "./risk/judge/store.js"
+import { JUDGE_SIGNALS, SCREEN, SIGNALS } from "./risk/judge/verdict.js"
+import { RULESET_VERSION } from "./risk/rules.js"
+import {
+  CATEGORY_TEXT,
+  type Category,
+  type Facts,
+  type ClearedContribution,
+  type ShadowContribution,
+} from "./risk/types.js"
 import { riskSystem, systemTenantIds } from "./risk/wire.js"
 import { systemSenderFor } from "./auth-email/system.js"
 import { createQueueClient } from "./cache/redis.js"
@@ -65,9 +99,12 @@ import type { TrustedTemplate } from "./risk/trusted.js"
 const [command, ...rest] = process.argv.slice(2)
 const flags = new Map<string, string>()
 const positional: string[] = []
+/** Flags that take no value, so `--json --tenant x` does not read `--tenant` as one. */
+const SWITCHES = new Set(["json"])
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i]!
-  if (a.startsWith("--")) flags.set(a.slice(2), rest[++i] ?? "")
+  if (a.startsWith("--") && SWITCHES.has(a.slice(2))) flags.set(a.slice(2), "")
+  else if (a.startsWith("--")) flags.set(a.slice(2), rest[++i] ?? "")
   else positional.push(a)
 }
 const need = (name: string) => {
@@ -80,7 +117,7 @@ function fail(message: string): never {
   process.exit(2)
 }
 
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(console))
 const { sql: pg, db } = createDb(env.DATABASE_URL)
 await assertRlsSubject(pg)
 const cache = createCacheClient(env.REDIS_URL)
@@ -95,6 +132,8 @@ const risk = riskSystem({
   log: { warn: (o, m) => console.warn(m, o), error: (o, m) => console.error(m, o) },
 })
 const tenant = () => positional[0] ?? fail("a workspace id is required")
+/** The rules the engine runs with here, RISK_SHADOW_RULES applied. */
+const rules = risk.rules
 const quiet = { warn: () => {}, error: () => {}, info: () => {} }
 
 /*
@@ -175,6 +214,57 @@ async function templateById(id: string) {
   return t
 }
 
+/** `--rules a,b`: the concerns a release or pin clears; all live ones when absent. */
+const ruleList = () => {
+  const v = flags.get("rules")?.trim()
+  return v
+    ? v
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean)
+    : undefined
+}
+
+/** Prints what a decision recorded and cleared. */
+function report(r: StaffDecisionResult) {
+  if (r.status !== "recorded") return
+  console.log(
+    `decision ${r.id} recorded (engine: score ${r.evaluated.score}, ${r.evaluated.band})`,
+  )
+  for (const c of r.covers)
+    console.log(
+      `  clears ${c.rule} at ${c.points}${c.keys ? ` for ${c.keys.join(", ")}` : ""}`,
+    )
+  const left = r.evaluated.contributions.filter(
+    (c) => c.points > 0 && !r.covers.some((x) => x.rule === c.rule),
+  )
+  for (const c of left) console.log(`  not cleared: ${c.rule} (${c.points})`)
+}
+
+/** The judged-content summary `explain` prints: what the judge rules read. */
+function printJudged(content: Facts["content"]) {
+  if (!content) {
+    console.log("\ncontent judge: no judge configured, or nothing judged")
+    return
+  }
+  const d = content.days
+  console.log(
+    `\ncontent judge (${content.model}), last 7 days: ${content.judged} contents judged in ${content.messages} messages, ${content.truncated} cut to fit; pass saw ${d.seen}, judged ${d.judged}, capped ${d.capped}`,
+  )
+  console.log(
+    `  screened ${content.screened} (sent to the second model), undecided ${content.undecided} (no second answer, no signal)`,
+  )
+  for (const name of JUDGE_SIGNALS) {
+    const s = content.signals[name]
+    console.log(
+      `  ${name.padEnd(10)} ${s.contents} contents, ${s.messages} messages` +
+        (s.exacts.length
+          ? `\n        ${s.exacts.map((e) => `content:${e}`).join(" ")}`
+          : ""),
+    )
+  }
+}
+
 function parseHoles(spec: string | undefined): Record<string, number> {
   const out: Record<string, number> = {}
   for (const part of (spec ?? "").split(",").filter(Boolean)) {
@@ -186,15 +276,6 @@ function parseHoles(spec: string | undefined): Record<string, number> {
   return out
 }
 
-async function frozenFeatures(tenantId: string) {
-  const facts = await loadFacts(tenantId, {
-    db,
-    freePlanId: env.METERING_FREE_PLAN_ID,
-    ownerInfo: risk.deps.ownerInfo,
-  })
-  return features(facts) as unknown as Record<string, number>
-}
-
 try {
   switch (command) {
     case "explain": {
@@ -203,15 +284,10 @@ try {
         db,
         freePlanId: env.METERING_FREE_PLAN_ID,
         ownerInfo: risk.deps.ownerInfo,
+        ...(risk.deps.contentModel ? { contentModel: risk.deps.contentModel } : {}),
+        ...(risk.deps.judge ? { judgeModel: risk.deps.judge.key } : {}),
       })
-      const model = await risk.labels.model(true)
-      const feats = features(facts)
-      if (model)
-        facts.model = {
-          probability: predict(model.weights, feats),
-          version: model.version,
-        }
-      const a = evaluate(facts)
+      const a = evaluate(facts, rules)
       const [current, hold, history] = await Promise.all([
         risk.assessments.current(id),
         risk.holds.current(id),
@@ -237,7 +313,7 @@ try {
       )
       console.log("\ncontributions:")
       for (const c of a.contributions) {
-        const r = RULES.find((x) => x.id === c.rule)
+        const r = rules.find((x) => x.id === c.rule)
         console.log(
           `  ${String(c.points).padStart(4)}  ${c.rule.padEnd(28)} ${r?.summary ?? ""}`,
         )
@@ -248,15 +324,46 @@ try {
         // distances, never who the neighbours are.
         if (c.detail) console.log(`        based on: ${JSON.stringify(c.detail)}`)
       }
+      // ⚠ SHADOW RULES ARE SHOWN, AND SHOWN AS DOING NOTHING: none of these
+      // points is in the score above, and none of them can act.
+      const braked = env.RISK_SHADOW_RULES
+      if (braked.length > 0)
+        console.log(`\nforced into shadow by RISK_SHADOW_RULES: ${braked.join(", ")}`)
+      console.log(
+        a.shadow.length > 0
+          ? "\nshadow (NO EFFECT on the score, band or any action):"
+          : "\nshadow: nothing fired",
+      )
+      for (const c of a.shadow) {
+        const r = rules.find((x) => x.id === c.rule)
+        console.log(
+          `  (${String(c.wouldAdd).padStart(4)}) ${c.rule.padEnd(28)} ${r?.summary ?? ""}`,
+        )
+        console.log(
+          `        ${JSON.stringify(c.evidence)}${c.wouldFloor ? `  would floor=${c.wouldFloor}` : ""}`,
+        )
+      }
+      // ⚠ CLEARED CONCERNS ARE SHOWN, AND SHOWN AS WORTH ZERO: a person already
+      // weighed this same evidence, and which decision says so.
+      console.log(
+        a.cleared.length > 0
+          ? "\ncleared by a staff decision (NO EFFECT; new evidence would count):"
+          : "\ncleared: nothing",
+      )
+      for (const c of a.cleared) {
+        console.log(
+          `  (${String(c.wouldAdd).padStart(4)}) ${c.rule.padEnd(28)} by decision ${c.clearedBy} of ${c.decidedAt}, until ${c.expiresAt}`,
+        )
+        console.log(
+          `        ${JSON.stringify(c.evidence)}${c.wouldFloor ? `  would floor=${c.wouldFloor}` : ""}`,
+        )
+      }
       console.log(
         `\ntrusted content, last 7 days: ${facts.farm.trusted.template} approved-template, ${facts.farm.trusted.boilerplate} boilerplate`,
       )
-      if (model && facts.model) {
-        console.log(`\nmodel v${model.version}: ${facts.model.probability.toFixed(3)}`)
-        for (const p of explainPrediction(model.weights, feats).slice(0, 6)) {
-          console.log(`  ${p.pull >= 0 ? "+" : ""}${p.pull.toFixed(2)}  ${p.feature}`)
-        }
-      }
+      printJudged(facts.content)
+      for (const f of a.failures)
+        console.log(`\nrule ${f.rule} threw: ${String(f.error)}`)
       console.log(
         `\nfarm peers: ${facts.farm.peers.length}, parents shared with: ${facts.parents.sharedWith}`,
       )
@@ -265,27 +372,72 @@ try {
         console.log(
           `  ${e.occurredAt.toISOString()}  ${e.fromBand ?? "-"} -> ${e.band} (${e.score}) [${e.trigger}] ${e.actions.join(" ")}`,
         )
+        const shadow = e.shadow as ShadowContribution[]
+        if (shadow.length > 0)
+          console.log(
+            `        shadow, no effect: ${shadow.map((c) => `${c.rule}:${c.wouldAdd}`).join(" ")}`,
+          )
+        const cleared = e.cleared as ClearedContribution[]
+        if (cleared.length > 0)
+          console.log(
+            `        cleared, no effect: ${cleared.map((c) => `${c.rule}:${c.wouldAdd} by ${c.clearedBy}`).join(" ")}`,
+          )
+      }
+      break
+    }
+    case "judge": {
+      const id = tenant()
+      const limit = Number(flags.get("limit") ?? 50)
+      if (!Number.isInteger(limit) || limit < 1)
+        fail("--limit must be a positive whole number")
+      const rows = await judgementStore(db).list(id, limit)
+      const tests = (ts: typeof SCREEN) =>
+        ts.map((t) => `${t.question} > ${t.above}`).join(" or ")
+      console.log(
+        `\n${rows.length} judgement(s), newest first (the second model is asked when ${tests(SCREEN)}; signals: ${SIGNALS.map(([n, t]) => `${n} when ${tests(t)}`).join("; ")}):`,
+      )
+      const fmt = (a: Record<string, number> | null) =>
+        a
+          ? JUDGE_QUESTION_IDS.map((q) => `${q}=${a[q]?.toFixed(2) ?? "?"}`).join(" ")
+          : "-"
+      for (const r of rows) {
+        console.log(
+          `\n  ${r.judgedAt.toISOString()}  content:${r.exact}  ${r.model}${r.truncated ? "  TRUNCATED" : ""}` +
+            (r.inputTokens !== null
+              ? `  ${r.inputTokens}+${r.outputTokens} tokens`
+              : ""),
+        )
+        console.log(`        ${fmt(r.answers)}`)
+        console.log(
+          `        second opinion: ${r.secondStatus}${r.secondModel ? ` (${r.secondModel})` : ""}` +
+            (r.secondAnswers ? `  ${fmt(r.secondAnswers)}` : "") +
+            (r.secondTruncated ? "  TRUNCATED" : ""),
+        )
       }
       break
     }
     case "score": {
-      const model = await risk.labels.model(true)
-      console.log(await scoreTenant(tenant(), "staff", { ...risk.deps, model }))
+      console.log(await scoreTenant(tenant(), "staff", risk.deps))
       break
     }
     case "hold": {
       const scope = flags.get("scope") === "all" ? "all" : "api"
       const category = (flags.get("category") ?? "sending_pattern") as Category
       if (!(category in CATEGORY_TEXT)) fail(`unknown category ${category}`)
-      const r = await risk.holds.hold({
+      const r = await staffDecision(risk.staff, {
         tenantId: tenant(),
-        source: "staff",
-        setBy: need("by"),
-        reason: need("reason"),
-        category,
-        scope,
+        kind: "hold",
+        by: need("by"),
+        note: need("reason"),
+        hold: { category, scope },
       })
-      console.log(r ? `held; ${r.canceled} queued message(s) canceled` : "already held")
+      if (r.status !== "recorded") console.log("already held")
+      else {
+        const current = await risk.holds.current(tenant())
+        console.log(
+          `held; ${current?.canceledMessages ?? 0} queued message(s) canceled; decision ${r.id} recorded`,
+        )
+      }
       break
     }
     case "release": {
@@ -295,20 +447,23 @@ try {
         fail("--outcome is false_positive or upheld")
       const by = need("by")
       const reason = need("reason")
-      const feats = await frozenFeatures(id)
-      const released = await risk.holds.release({
+      const rulesNamed = ruleList()
+      if (outcome === "upheld" && rulesNamed)
+        fail("an upheld hold clears nothing; drop --rules")
+      const r = await staffDecision(risk.staff, {
         tenantId: id,
-        setBy: by,
-        reason,
-        outcome,
+        kind: outcome === "false_positive" ? "release" : "uphold",
+        by,
+        note: reason,
         pauseDays: Number(flags.get("pause-days") ?? 14),
+        ...(rulesNamed ? { rules: rulesNamed } : {}),
       })
-      if (!released) fail("not held")
+      if (r.status === "not_held") fail("not held")
+      report(r)
       await risk.labels.add({
         tenantId: id,
         label: outcome === "false_positive" ? "legit" : "abuse",
         source: outcome === "false_positive" ? "hold_released" : "hold_upheld",
-        features: feats,
         setBy: by,
         note: reason,
       })
@@ -318,21 +473,66 @@ try {
     }
     case "pin": {
       const days = Number(flags.get("days") ?? 30)
+      const rulesNamed = ruleList()
+      const r = await staffDecision(risk.staff, {
+        tenantId: tenant(),
+        kind: "pin",
+        by: need("by"),
+        note: need("reason"),
+        pauseUntil: new Date(Date.now() + days * 86_400_000),
+        ...(rulesNamed ? { rules: rulesNamed } : {}),
+      })
+      if (r.status === "no_assessment") fail("no assessment yet; run score first")
+      console.log(`automatic actions paused for ${days} days`)
+      report(r)
+      break
+    }
+    case "decisions": {
       const now = new Date()
-      const ok = await risk.assessments.pause(
-        tenant(),
-        new Date(now.getTime() + days * 86_400_000),
-        now,
-        {
-          by: need("by"),
-          reason: need("reason"),
-        },
-      )
+      for (const d of await risk.decisions.list(tenant())) {
+        const state = d.revokedAt
+          ? `revoked ${d.revokedAt.toISOString()} by ${d.revokedBy}: ${d.revokeNote}`
+          : d.covers.length === 0
+            ? "clears nothing"
+            : d.expiresAt > now
+              ? `clears until ${d.expiresAt.toISOString()}`
+              : `expired ${d.expiresAt.toISOString()}`
+        console.log(
+          `\n${d.id}  ${d.kind} by ${d.decidedBy} at ${d.decidedAt.toISOString()}  [${state}]`,
+        )
+        console.log(
+          `  engine then: score ${d.score}, ${d.band}${d.held ? ", held" : ""}; snapshot ${d.snapshotId ?? "gone"}`,
+        )
+        console.log(`  note: ${d.note}`)
+        for (const c of d.covers)
+          console.log(
+            `  clears ${c.rule} at ${c.points}${c.keys ? ` for ${c.keys.join(", ")}` : ""}`,
+          )
+        for (const c of d.inView.filter(
+          (x) => !d.covers.some((y) => y.rule === x.rule),
+        ))
+          console.log(`  in view, not cleared: ${c.rule} (${c.points})`)
+      }
+      break
+    }
+    case "revoke-decision": {
+      const id = positional[0] ?? fail("a decision id is required")
+      const tenantId = await risk.decisions.revoke({
+        id,
+        by: need("by"),
+        note: need("reason"),
+        at: new Date(),
+      })
+      if (!tenantId) fail("no such decision, or already revoked")
       console.log(
-        ok
-          ? `automatic actions paused for ${days} days`
-          : "no assessment yet; run score first",
+        `revoked; what it cleared counts again from the next score of ${tenantId}`,
       )
+      break
+    }
+    case "cases": {
+      const only = flags.get("tenant")?.trim() || undefined
+      for (const c of decisionCases(await risk.decisions.list(only)))
+        console.log(JSON.stringify(c))
       break
     }
     case "tier": {
@@ -359,7 +559,6 @@ try {
         tenantId: id,
         label,
         source: "staff",
-        features: await frozenFeatures(id),
         setBy: by,
         ...(flags.get("note") ? { note: flags.get("note")! } : {}),
       })
@@ -447,9 +646,9 @@ try {
         console.log(`matched ${t.matched} message(s)`)
         console.log("\nholes:")
         for (const h of t.holes) console.log(`  {{${h.name}}}  max ${h.max}`)
-        console.log("\nlinks in the fixed part, with Web Risk:")
+        console.log("\nlinks in the fixed part, as the link checkers see them:")
         for (const host of t.staticHosts)
-          console.log(`  ${host}  ${(await risk.webRisk.lookup(host)) ?? "unknown"}`)
+          console.log(`  ${host}  ${(await risk.links.lookup(host)) ?? "unknown"}`)
         const shown = describeSkeleton({ segments: t.segments }, t.holes)
         if (shown.html !== null) console.log(`\n--- html ---\n${shown.html}`)
         if (shown.text !== null) console.log(`\n--- text ---\n${shown.text}`)
@@ -460,11 +659,11 @@ try {
           )
       } else if (sub === "approve") {
         // ⚠ EVERY LINK IN THE FIXED PART MUST BE CHECKED CLEAN FIRST. Unknown
-        // (budget spent, Web Risk down) is not clean: try again later.
+        // (budget spent, a provider down) is not clean: try again later.
         for (const host of t.staticHosts) {
-          const v = await risk.webRisk.lookup(host)
+          const v = await risk.links.lookup(host)
           if (v !== "clean")
-            fail(`Web Risk says ${v ?? "nothing yet"} for ${host}; not approved`)
+            fail(`The link check says ${v ?? "nothing yet"} for ${host}; not approved`)
         }
         const r = await risk.trustedTemplates.decide(
           t.tenantId,
@@ -502,6 +701,45 @@ try {
       }
       break
     }
+    case "replay": {
+      const date = (name: string, fallback: Date) => {
+        const v = flags.get(name)
+        if (v === undefined) return fallback
+        const d = new Date(v)
+        if (Number.isNaN(d.getTime())) fail(`--${name} is not a date: ${v}`)
+        return d
+      }
+      const until = date("until", new Date())
+      const since = date("since", new Date(until.getTime() - 30 * 86_400_000))
+      const only = flags.get("tenant")?.trim() || undefined
+      // Paged, so only one page of facts is ever held at once.
+      const results = []
+      let after: { takenAt: Date; id: string } | undefined
+      for (;;) {
+        const page = await risk.snapshots.list({
+          since,
+          until,
+          ...(only ? { tenantId: only } : {}),
+          ...(after ? { after } : {}),
+          limit: 500,
+        })
+        for (const s of page) results.push(replaySnapshot(s, rules))
+        if (page.length < 500) break
+        after = page[page.length - 1]!
+      }
+      const report = summarise(results, rules)
+      if (flags.has("json"))
+        console.log(
+          JSON.stringify({ since, until, report, snapshots: results }, null, 2),
+        )
+      else {
+        console.log(
+          `\nreplay of ${since.toISOString()} to ${until.toISOString()}${only ? ` for ${only}` : ""}, ruleset v${RULESET_VERSION} from this checkout\n`,
+        )
+        console.log(formatReport(report))
+      }
+      break
+    }
     case "linked": {
       const user = positional[0] ?? fail("a Clerk user id is required")
       const rows = await db.execute(sql`
@@ -510,19 +748,17 @@ try {
       console.table(rows)
       break
     }
-    case "train": {
-      const r = await risk.labels.retrain()
-      console.log(
-        `model v${r.version} ${r.active ? "ACTIVE" : "inactive"}`,
-        r.evaluation,
-      )
-      break
-    }
     default:
       fail(
-        "commands: explain, score, hold, release, pin, tier, label, linked, train, boilerplate, templates - see the header of src/risk-admin.ts",
+        "commands: explain, score, hold, release, pin, decisions, revoke-decision, cases, tier, label, linked, replay, boilerplate, templates - see the header of src/risk-admin.ts",
       )
   }
+} catch (error) {
+  // A refused input (a missing note, a rule that is not a live concern) is a
+  // message for staff, not a stack trace.
+  if (!(error instanceof RangeError)) throw error
+  console.error(error.message)
+  process.exitCode = 2
 } finally {
   await cache.quit().catch(() => {})
   await (queueRedis as ReturnType<typeof createQueueClient> | null)

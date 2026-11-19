@@ -46,6 +46,7 @@ export type Service =
   | "domain-catchup"
   | "domain-prove"
   | "domain-orphans"
+  | "mail-domains-reconcile"
   | "risk-score"
   | "content-store"
   | "retention"

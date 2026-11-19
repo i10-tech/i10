@@ -32,6 +32,7 @@ export function memoryJobStore(clock: () => Date = () => new Date()) {
         totalFolders: 0,
         processedFolders: 0,
         objectKey: input.objectKey ?? null,
+        sealedKey: null,
         error: null,
         errorCode: null,
         requestedBy: input.requestedBy,
@@ -65,16 +66,6 @@ export function memoryJobStore(clock: () => Date = () => new Date()) {
       const next = { ...row, ...patch, updatedAt: clock() }
       rows.set(jobId, next)
       return { ...next }
-    },
-    async withExpiredObject(tenantId, now) {
-      return [...rows.values()].filter(
-        (r) =>
-          r.tenantId === tenantId &&
-          r.objectKey !== null &&
-          ((r.type === "export" && r.expiresAt !== null && r.expiresAt < now) ||
-            (r.type === "import" &&
-              r.updatedAt.getTime() < now.getTime() - 24 * 3600_000)),
-      )
     },
   }
   return store

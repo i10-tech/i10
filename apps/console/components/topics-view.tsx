@@ -210,7 +210,9 @@ export function TopicsView({ shape, data }: { shape: TopicsShape; data?: TopicsD
                                   width={NAME_WIDTHS[i % NAME_WIDTHS.length]}
                                   lineHeight={24}
                                 >
-                                  {t && <p className="truncate font-medium">{t.name}</p>}
+                                  {t && (
+                                    <p className="truncate font-medium">{t.name}</p>
+                                  )}
                                 </Bone>
                                 {/*
                                  * ⚠ THE DESCRIPTION'S LINE IS ALWAYS THERE, as on
@@ -221,7 +223,9 @@ export function TopicsView({ shape, data }: { shape: TopicsShape; data?: TopicsD
                                  */}
                                 <Bone
                                   id="description"
-                                  width={DESCRIPTION_WIDTHS[i % DESCRIPTION_WIDTHS.length]}
+                                  width={
+                                    DESCRIPTION_WIDTHS[i % DESCRIPTION_WIDTHS.length]
+                                  }
                                   lineHeight={16}
                                 >
                                   {t && (
@@ -326,7 +330,9 @@ export function TopicsView({ shape, data }: { shape: TopicsShape; data?: TopicsD
                                 {/* Its own line, as in the grid: see the card above. */}
                                 <Bone
                                   id="description"
-                                  width={DESCRIPTION_WIDTHS[i % DESCRIPTION_WIDTHS.length]}
+                                  width={
+                                    DESCRIPTION_WIDTHS[i % DESCRIPTION_WIDTHS.length]
+                                  }
                                   lineHeight={16}
                                 >
                                   {t && (

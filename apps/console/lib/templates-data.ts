@@ -47,7 +47,9 @@ export async function loadTemplates(): Promise<TemplatesData> {
 }
 
 /** One folder's page, or null when there is no such folder. Throws when the API fails. */
-export async function loadTemplateFolder(id: string): Promise<TemplateFolderData | null> {
+export async function loadTemplateFolder(
+  id: string,
+): Promise<TemplateFolderData | null> {
   if (!UUID.test(id)) return null
   const [result, cookieStore] = await Promise.all([
     tryApi<Library>("/console/templates"),
@@ -74,5 +76,7 @@ export async function loadTemplateFolder(id: string): Promise<TemplateFolderData
 export async function templateFolderNamed(id: string): Promise<TemplateFolder | null> {
   if (!UUID.test(id)) return null
   const result = await tryApi<{ folders?: TemplateFolder[] }>("/console/templates")
-  return result.ok ? ((result.data.folders ?? []).find((f) => f.id === id) ?? null) : null
+  return result.ok
+    ? ((result.data.folders ?? []).find((f) => f.id === id) ?? null)
+    : null
 }

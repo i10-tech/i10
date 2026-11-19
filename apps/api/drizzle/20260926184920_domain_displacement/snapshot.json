@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "b88534a4-d5ab-4857-96f7-e9ae60a9cfba",
+  "prevIds": [
+    "cc99b5da-85a0-4e52-b5b3-61a7507dc6cd"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "displaced_at"
+      ],
+      "writes": [
+        "s|col|core.domains.displaced_at",
+        "n|col|core.domains.displaced_at",
+        "e|col|core.domains.displaced_at"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "displaced_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

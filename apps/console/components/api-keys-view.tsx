@@ -79,7 +79,9 @@ const STATE_OPTIONS = [
 const NAME_WIDTHS = ["62%", "48%", "72%", "55%"]
 
 const createdBy = (key: ApiKeyRow) =>
-  key.created_by ? (key.created_by.name ?? key.created_by.email ?? "Unknown") : "Unknown"
+  key.created_by
+    ? (key.created_by.name ?? key.created_by.email ?? "Unknown")
+    : "Unknown"
 
 /**
  * The key list.
@@ -393,7 +395,10 @@ export function ApiKeysView({
                                       ))}
                                   </Bone>
                                 </ListCell>
-                                <ListCell hideBelow="md" className="text-xs text-muted-foreground">
+                                <ListCell
+                                  hideBelow="md"
+                                  className="text-xs text-muted-foreground"
+                                >
                                   <Bone id="last-used" width={68} lineHeight={16}>
                                     {key &&
                                       (key.last_used_at ? (
@@ -408,15 +413,24 @@ export function ApiKeysView({
                                       ))}
                                   </Bone>
                                 </ListCell>
-                                <ListCell hideBelow="lg" className="text-xs text-muted-foreground">
+                                <ListCell
+                                  hideBelow="lg"
+                                  className="text-xs text-muted-foreground"
+                                >
                                   <Bone id="created" width={68} lineHeight={16}>
                                     {key && <Time iso={key.created_at} />}
                                   </Bone>
                                 </ListCell>
-                                <ListCell hideBelow="xl" className="text-xs text-muted-foreground">
+                                <ListCell
+                                  hideBelow="xl"
+                                  className="text-xs text-muted-foreground"
+                                >
                                   <Bone id="created-by" width={80} lineHeight={16}>
                                     {key && (
-                                      <span className="block truncate" title={createdBy(key)}>
+                                      <span
+                                        className="block truncate"
+                                        title={createdBy(key)}
+                                      >
                                         {createdBy(key)}
                                       </span>
                                     )}

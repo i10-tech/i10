@@ -524,10 +524,13 @@ describe("creating a mailbox", () => {
     ],
   })
 
-  const mailboxOf = (allocation: number | null): Mailbox => ({
+  const mailboxOf = (
+    allocation: number | null,
+    displayName: string | null = "Sam",
+  ): Mailbox => ({
     object: "mailbox",
     address: ADDRESS,
-    display_name: "Sam",
+    display_name: displayName,
     active: true,
     created_at: new Date(0).toISOString(),
     storage_allocated: allocation,
@@ -542,7 +545,9 @@ describe("creating a mailbox", () => {
     const rows = [...(opts.existing ?? [])]
     const tenants = { [TENANT]: rows }
     const addVerifiedAddress = mock(async () => {})
-    const activate = mock(async () => mailboxOf(null))
+    const activate = mock(async (_userId: string, displayName?: string) =>
+      mailboxOf(null, displayName ?? "Sam"),
+    )
 
     const identity: MailboxIdentity = {
       get: async () => ({ user: clerkUser(), passwordEnabled: true }),
@@ -554,7 +559,7 @@ describe("creating a mailbox", () => {
       // Null until the projection has made the row: one mailbox per person.
       current: async () => {
         const made = rows.find((r) => r.address === ADDRESS)
-        return made ? mailboxOf(made.allocation) : null
+        return made ? mailboxOf(made.allocation, made.display_name ?? "Sam") : null
       },
       activate,
     }
@@ -584,11 +589,20 @@ describe("creating a mailbox", () => {
     const h = harness({ plan: PRO, admin: true })
     const outcome = await h.provisioning.create("user_1", {
       address: ADDRESS,
+      display_name: "Sam Carter",
       storage_allocation: 4 * GIB,
     })
 
-    expect(outcome.status).toBe("created")
+    expect(outcome).toEqual({
+      status: "created",
+      mailbox: expect.objectContaining({
+        address: ADDRESS,
+        display_name: "Sam Carter",
+        storage_allocated: 4 * GIB,
+      }),
+    })
     expect(h.rows.find((r) => r.address === ADDRESS)!.allocation).toBe(4 * GIB)
+    expect(h.rows.find((r) => r.address === ADDRESS)!.display_name).toBe("Sam Carter")
     // Activated by the same write that allocated, not by a second one.
     expect(h.activate).not.toHaveBeenCalled()
   })

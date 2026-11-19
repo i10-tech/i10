@@ -24,8 +24,13 @@ func TestEveryRowGateBeatsAWarmCache(t *testing.T) {
 	gates := map[string]func(a *projection.Account, on bool){
 		"suspended":    func(a *projection.Account, on bool) { a.Suspended = on },
 		"payment hold": func(a *projection.Account, on bool) { a.PaymentHold = on },
-		"clerk ban":    func(a *projection.Account, on bool) { a.Banned = on },
-		"clerk lock":   func(a *projection.Account, on bool) { a.Locked = on },
+		// A mailbox in its 30 day deletion grace (apps/api/src/mailboxes/lifecycle.ts).
+		"deleting":   func(a *projection.Account, on bool) { a.Deleting = on },
+		"clerk ban":  func(a *projection.Account, on bool) { a.Banned = on },
+		"clerk lock": func(a *projection.Account, on bool) { a.Locked = on },
+		// #406: the workspace stopped hosting mail on the domain. Nothing is
+		// written to the mailbox for it, so this is the only thing that closes it.
+		"domain not hosted": func(a *projection.Account, on bool) { a.DomainNotHosted = on },
 	}
 	for name, set := range gates {
 		t.Run(name, func(t *testing.T) {

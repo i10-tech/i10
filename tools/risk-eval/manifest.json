@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "datasets": {
+    "hf-multilingual-synth": {
+      "phishing_email_multilingual.csv": {
+        "bytes": 191209,
+        "sha256": "55ce9cf197b28ebafcb46073da0213fcca1626e8a0bfb530ce61b2d2e3407a93"
+      }
+    },
+    "nazario": {
+      "phishing-2015": {
+        "bytes": 8815568,
+        "sha256": "7523e62a5e6e4ee8134ab8b1a628e423097a7779e1003b28422864aa34f1c319"
+      },
+      "phishing-2016": {
+        "bytes": 12578274,
+        "sha256": "42393e4d686193bfb879d1608c23fd4d3b698ccd4d73f0e1d2276ba709718483"
+      },
+      "phishing-2017": {
+        "bytes": 11352450,
+        "sha256": "110fba876b38b44035bf065788952674bc68a7b6879c345a515a9ac844b1d704"
+      },
+      "phishing-2018": {
+        "bytes": 8775701,
+        "sha256": "83f49cf2a76c7b29b205d22d8778e46848e36af0f15ee1df126a543696acd48d"
+      },
+      "phishing-2019": {
+        "bytes": 5211476,
+        "sha256": "cab39d6fcb38cf80cdaabb3e6ffd1222777e2fcaac7e8480321b7f729c2e3c0e"
+      },
+      "phishing-2020": {
+        "bytes": 5826445,
+        "sha256": "99e20bf25f5e8556d37103f2c8140cd75181a62d3df91df8acf9d9aece9f08bb"
+      },
+      "phishing-2021": {
+        "bytes": 2719946,
+        "sha256": "636707cff42245d1482e4ae8a2c03369717a5e06bf9d1a0f4ec5dcd846661cee"
+      },
+      "phishing-2022": {
+        "bytes": 4775954,
+        "sha256": "a6291e2cb990204766fce425423949b403cce4ae6a660fc8d08812e40a063fa7"
+      },
+      "phishing-2023": {
+        "bytes": 7763704,
+        "sha256": "5007f1c1dc91b15e93e988afa3a1cf402e15c88f765d3057be8bfec50dae1fe8"
+      },
+      "phishing-2024": {
+        "bytes": 15457816,
+        "sha256": "60afa40a2757170093a2bde31ec9cda4e54d33992203ce04bfbbc86d2e5e5b99"
+      },
+      "phishing-2025": {
+        "bytes": 18769863,
+        "sha256": "f1fa7e0fe35c9a16f36d9aa20ade7e1d3908d1d0c1d917b8c53c8aa799ec1c8f"
+      },
+      "phishing0.mbox": {
+        "bytes": 3119972,
+        "sha256": "6184b0a34ed8cbbb252676e21c1eab9eac5fa4be89c61e30cc9954ebbb25d848"
+      },
+      "phishing1.mbox": {
+        "bytes": 4191770,
+        "sha256": "99f02474a11086408a5ce6d11ef38823f003c6611a4312c31fbee96773eeba28"
+      },
+      "phishing2.mbox": {
+        "bytes": 10420294,
+        "sha256": "5113277984eae759a5ff958ccf408b542441ce033a49b923ab3b0f324075e6bd"
+      },
+      "phishing3.mbox": {
+        "bytes": 20067215,
+        "sha256": "b29336d2e31c2dff19639415e98ed2aced5b4d63675ea5e29bea1a7d4e452841"
+      }
+    },
+    "spamassassin": {
+      "20030228_easy_ham.tar.bz2": {
+        "bytes": 1612216,
+        "sha256": "2b7b65904bcfcc31d2b5f51946f2d261370b257402cbbd62930b46ab83367438"
+      },
+      "20030228_easy_ham_2.tar.bz2": {
+        "bytes": 1077892,
+        "sha256": "b4bd3dc5ae5b40f38e99a0e41ad7d16b428b56e818e3a6ffa07330d62004dd38"
+      },
+      "20030228_hard_ham.tar.bz2": {
+        "bytes": 1029898,
+        "sha256": "ce2ce67880643dbde65ea7f85bffbfe4417349c4bd80b6b0de56262ae6b0a9c9"
+      },
+      "20030228_spam.tar.bz2": {
+        "bytes": 1183768,
+        "sha256": "c08debc32413804949a866be45ef78195cec2cbafd1da744ed76cdb860589743"
+      },
+      "20050311_spam_2.tar.bz2": {
+        "bytes": 2059029,
+        "sha256": "44280a0e28bf7645b2279e8e42659271ad82c6f40bf8d364dbda7f1df344a765"
+      }
+    },
+    "untroubled": {
+      "2019.7z": {
+        "bytes": 20727696,
+        "sha256": "9b44477fbe9d1643712c78ba8544c05337b80aa87dcab71a09222c8e3d1b8595"
+      },
+      "2020.7z": {
+        "bytes": 36813845,
+        "sha256": "a2baa235678171a7b44853b70e610b4c19311cc459f935235f0932648289a589"
+      },
+      "2021.7z": {
+        "bytes": 22550575,
+        "sha256": "7fcc8b458ba531ef63ad3a084ad8c28cbf0fffb651d7e5fba6bd87e0a9264a0b"
+      },
+      "2022.7z": {
+        "bytes": 19533792,
+        "sha256": "171f343cc3d359357142374fe98d642f5d95017f07b3e8abe81ba8fe8bd1e1ec"
+      },
+      "2023.7z": {
+        "bytes": 29183084,
+        "sha256": "6032850eff57eefec70208c5e568c73aa3ef1ab7e9d9122eaf67ce77ad4c29d6"
+      },
+      "2024.7z": {
+        "bytes": 15080579,
+        "sha256": "1de672fd034cec6c34944da0fa68d02dc31254340b68696a9013e7ceeb74d238"
+      },
+      "2025.7z": {
+        "bytes": 18471207,
+        "sha256": "3d3ad01f6eb7f90bad6a51d653847e2a8f3818e7abdc17efac9d9da021b3860e"
+      },
+      "2026-01.7z": {
+        "bytes": 2934205,
+        "sha256": "3cc7e8e3206c529c9f758d5f5f540d0a1d9412e0e457cf34a520571d321829c1"
+      },
+      "2026-02.7z": {
+        "bytes": 3042298,
+        "sha256": "e6c626379c902919f4f8f8e88aa77a458b43079280fa6f960de8f241093a0ef6"
+      },
+      "2026-03.7z": {
+        "bytes": 4094958,
+        "sha256": "2e11a746cf473bf3751ebe750cc971b86b25805481b9b3fc2a159a5bbe4569db"
+      },
+      "2026-04.7z": {
+        "bytes": 6627289,
+        "sha256": "85b91f9c853534f23032e310a6603bb016601acc330e1bb5546d280ccd7b2dab"
+      },
+      "2026-05.7z": {
+        "bytes": 6225607,
+        "sha256": "4dd591e1e76bfeed1e9ab26b68902e6dc55c351e1be00e3b45e91c7d40c74fb5"
+      },
+      "2026-06.7z": {
+        "bytes": 7873866,
+        "sha256": "7a41b220da0f26638f8bd2f102cfbb28a526fcca046eacf197d16cf0be97228c"
+      },
+      "2026-07.7z": {
+        "bytes": 3312247,
+        "sha256": "226979e7872d1b917130682a2a23dad84123139e7810df592bc9485d3045de4b"
+      },
+      "2026-08.7z": {
+        "bytes": 1982167,
+        "sha256": "d4f156ec5a169ceb9771e6dc0703924d69f059a13bb13e997225055e0831106c"
+      },
+      "2026-09.7z": {
+        "bytes": 2009979,
+        "sha256": "0e2cd6d56012d66cfc621d2775c118ecbb29754c603f70ed05d763e90616ffda"
+      },
+      "2026-10.7z": {
+        "bytes": 1500797,
+        "sha256": "45d0ac0ada06ed100a5707bf0bd9339e5a9ddb33a375ea8048e5fe0f68452b04"
+      }
+    }
+  }
+}

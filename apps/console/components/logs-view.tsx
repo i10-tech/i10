@@ -209,7 +209,9 @@ function LogsContent({
                   <ListHead>Endpoint</ListHead>
                   <ListHead className="w-[6rem]">Status</ListHead>
                   <ListHead className="w-[7rem] text-right">Duration</ListHead>
-                  <ListHead hideBelow="lg" className="w-[12rem]">Client</ListHead>
+                  <ListHead hideBelow="lg" className="w-[12rem]">
+                    Client
+                  </ListHead>
                   <ListHead className="w-[9rem] text-right">When</ListHead>
                 </ListHeader>
                 {/* No `divide-y`: the folded detail rows would each draw a second line. */}

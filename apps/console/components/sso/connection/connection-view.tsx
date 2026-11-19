@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import type { SsoAbilities, SsoConnection } from "@/lib/sso-types"
 import type { SsoConnectionShape } from "@/lib/shapes/sso-connection"
 import { SettingsGroup } from "../settings-card"
@@ -10,7 +11,7 @@ import { DomainsRow } from "./domains-row"
 import { Enforcement } from "./enforcement"
 import { GroupRulesGroup } from "./group-rules-group"
 import { Header } from "./header"
-import { LdapRow } from "./ldap-row"
+import { MailSignIn, type MailSignInInitial } from "./mail-sign-in"
 import { NewPeopleGroup } from "./new-people-group"
 import { ProviderSettings } from "./provider-settings"
 import { SessionsGroup } from "./sessions-group"
@@ -46,6 +47,7 @@ function standIn(shape: SsoConnectionShape): SsoConnection {
 
 export function ConnectionView({
   initial,
+  mail,
   abilities,
   authOrigin,
   clerkEnabled,
@@ -54,6 +56,8 @@ export function ConnectionView({
 }: {
   /** Absent while loading: the same page, drawn from `shape` with a bar for each piece. */
   initial?: SsoConnection
+  /** The mail sign-in section's first reads; absent while loading. */
+  mail?: MailSignInInitial
   abilities: SsoAbilities
   authOrigin: string | null
   clerkEnabled: boolean
@@ -119,6 +123,20 @@ export function ConnectionView({
       </div>
 
       <div className="space-y-2">
+        <h3 className="text-sm font-medium">Mail sign-in</h3>
+        {/* ⚠ NOT WHILE A SKELETON: it reads the connection's setup by id. */}
+        <Bone id="mail-sign-in" shape="box" width="100%" height={72}>
+          {saved && (
+            <MailSignIn
+              connection={connection}
+              abilities={abilities}
+              initial={mail ?? {}}
+            />
+          )}
+        </Bone>
+      </div>
+
+      <div className="space-y-2">
         <h3 className="text-sm font-medium">Roles from groups</h3>
         <GroupRulesGroup connection={connection} abilities={abilities} />
       </div>
@@ -132,7 +150,6 @@ export function ConnectionView({
         <h3 className="text-sm font-medium text-muted-foreground">Advanced settings</h3>
         <ProviderSettings connection={connection} abilities={abilities} shape={shape} />
         <SetupLinksRow connection={connection} authOrigin={authOrigin} />
-        <LdapRow connection={connection} abilities={abilities} />
         {shape.isOkta && <UniversalLogoutRow connection={connection} />}
       </div>
 

@@ -1,0 +1,2 @@
+ALTER TABLE "identity"."workspace_settings" ADD COLUMN "mailbox_creation" text DEFAULT 'admins' NOT NULL;--> statement-breakpoint
+ALTER TABLE "identity"."workspace_settings" ADD CONSTRAINT "workspace_settings_mailbox_creation_check" CHECK ("mailbox_creation" in ('admins', 'members', 'on_join'));

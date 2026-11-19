@@ -115,7 +115,16 @@ interface CfRecord {
   content: string
   ttl: number
   priority?: number
+  data?: {
+    priority?: number
+    weight?: number
+    port?: number
+    target?: string
+  }
 }
+
+const valueOf = (record: CfRecord): string =>
+  record.type === "SRV" && record.data?.target ? record.data.target : record.content
 
 export function cloudflareWriter(): ZoneWriter {
   return {
@@ -184,7 +193,7 @@ export function cloudflareWriter(): ZoneWriter {
             (record) => ({
               name: record.name,
               type: record.type,
-              value: record.content,
+              value: valueOf(record),
             }),
             sameValue,
           ).filter((record) => !conflicts.includes(record))
@@ -208,7 +217,12 @@ export function cloudflareWriter(): ZoneWriter {
           (r) =>
             r.type === record.type &&
             sameName(r.name, record.name) &&
-            sameValue(r.type, r.content, record.value),
+            sameValue(r.type, valueOf(r), record.value) &&
+            (record.type !== "SRV" ||
+              !r.data ||
+              ((r.data.priority === undefined || r.data.priority === record.priority) &&
+                (r.data.weight === undefined || r.data.weight === record.weight) &&
+                (r.data.port === undefined || r.data.port === record.port))),
         )
         if (already) {
           outcome.unchanged.push(record)
@@ -217,23 +231,40 @@ export function cloudflareWriter(): ZoneWriter {
 
         await call(credential, `/zones/${zone.id}/dns_records`, {
           method: "POST",
-          body: JSON.stringify({
-            type: record.type,
-            // ⚠ THE FULL NAME, WHICH CLOUDFLARE ACCEPTS AND PREFERS. Sending a
-            // relative one works too and is the classic way to create
-            // `mail.example.com.example.com` when a caller has already
-            // qualified it.
-            name: record.name,
-            content: record.value,
-            ttl: record.ttl,
-            ...(record.priority === undefined ? {} : { priority: record.priority }),
-            // ⚠ NEVER PROXIED. An orange-clouded record answers with
-            // Cloudflare's HTTP addresses instead of the value - which is
-            // exactly how `ns1.i10.tech` came to resolve to 104.21.27.97 and
-            // serve no DNS at all. It is only meaningful for A/AAAA/CNAME, and
-            // sending it for the others is ignored.
-            proxied: false,
-          }),
+          body: JSON.stringify(
+            record.type === "SRV"
+              ? {
+                  type: "SRV",
+                  name: record.name,
+                  ttl: record.ttl,
+                  // ⚠ CLOUDFLARE TAKES SRV FIELDS IN `data`, NOT `content`.
+                  data: {
+                    priority: record.priority ?? 0,
+                    weight: record.weight ?? 0,
+                    port: record.port ?? 0,
+                    target: record.value,
+                  },
+                }
+              : {
+                  type: record.type,
+                  // ⚠ THE FULL NAME, WHICH CLOUDFLARE ACCEPTS AND PREFERS. Sending a
+                  // relative one works too and is the classic way to create
+                  // `mail.example.com.example.com` when a caller has already
+                  // qualified it.
+                  name: record.name,
+                  content: record.value,
+                  ttl: record.ttl,
+                  ...(record.priority === undefined
+                    ? {}
+                    : { priority: record.priority }),
+                  // ⚠ NEVER PROXIED. An orange-clouded record answers with
+                  // Cloudflare's HTTP addresses instead of the value - which is
+                  // exactly how `ns1.i10.tech` came to resolve to 104.21.27.97 and
+                  // serve no DNS at all. It is only meaningful for A/AAAA/CNAME, and
+                  // sending it for the others is ignored.
+                  proxied: false,
+                },
+          ),
         })
         outcome.created.push(record)
       }
@@ -262,7 +293,7 @@ async function listRecords(
 const describe = (record: CfRecord) => ({
   name: record.name,
   type: record.type,
-  value: record.content,
+  value: valueOf(record),
   reason: `A ${record.type} record already exists at ${record.name}.`,
 })
 

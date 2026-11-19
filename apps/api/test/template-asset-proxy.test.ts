@@ -9,7 +9,11 @@ import {
   RATE_PREFIX,
   REQUESTS_PER_WORKSPACE,
 } from "../src/templates/asset-proxy.js"
-import { fixedWindow, SSO_RATE_PREFIX, type Counter } from "../src/identity/rate-limit.js"
+import {
+  fixedWindow,
+  SSO_RATE_PREFIX,
+  type Counter,
+} from "../src/identity/rate-limit.js"
 import type { ConsoleDeps } from "../src/routes/console.js"
 import type { Lookup } from "../src/webhooks/egress.js"
 
@@ -25,7 +29,9 @@ const BEARER = { Authorization: "Bearer stub" }
 
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 1, 2, 3]
 const WOFF2 = [...Buffer.from("wOF2"), 0, 1, 0, 0, 0, 0, 0, 0, 9, 9]
-const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>')
+const SVG = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
+)
 
 const bytes = (b: ArrayLike<number>) => new Uint8Array(b)
 
@@ -63,10 +69,14 @@ function harness(
       sessions: {
         verify: async (req: Request) => ({
           status: "signed-in" as const,
-          userId: req.headers.get("authorization") === "Bearer other" ? "user_2" : "user_1",
+          userId:
+            req.headers.get("authorization") === "Bearer other" ? "user_2" : "user_1",
         }),
       },
-      tenants: { resolve: async ({ userId }: { userId: string }) => (userId === "user_2" ? OTHER_TENANT : TENANT) },
+      tenants: {
+        resolve: async ({ userId }: { userId: string }) =>
+          userId === "user_2" ? OTHER_TENANT : TENANT,
+      },
       templateAssetProxy: proxy,
       marketing: {} as ConsoleDeps["marketing"],
       queries: {} as ConsoleDeps["queries"],
@@ -130,7 +140,11 @@ describe("GET /console/template-assets/proxy", () => {
 
   it("refuses a private address literal", async () => {
     const { get, calls } = harness({})
-    for (const u of ["http://127.0.0.1/a.png", "http://169.254.169.254/latest", "http://[::1]/a.png"]) {
+    for (const u of [
+      "http://127.0.0.1/a.png",
+      "http://169.254.169.254/latest",
+      "http://[::1]/a.png",
+    ]) {
       expect((await get(u)).status).toBe(403)
     }
     expect(calls).toEqual([])
@@ -179,9 +193,15 @@ describe("GET /console/template-assets/proxy", () => {
   })
 
   it("refuses a redirect to a metadata literal and to a non-http scheme", async () => {
-    for (const location of ["http://169.254.169.254/latest/meta-data", "file:///etc/passwd"]) {
+    for (const location of [
+      "http://169.254.169.254/latest/meta-data",
+      "file:///etc/passwd",
+    ]) {
       const { get } = harness({
-        "cdn.example.com/a.png": new Response(null, { status: 301, headers: { location } }),
+        "cdn.example.com/a.png": new Response(null, {
+          status: 301,
+          headers: { location },
+        }),
       })
       expect((await get("https://cdn.example.com/a.png")).status).toBe(403)
     }
@@ -304,7 +324,12 @@ function direct(redirects: Record<string, string> = {}) {
     if (to) return new Response(null, { status: 302, headers: { location: to } })
     return new Response(bytes(PNG))
   }) as unknown as typeof fetch
-  const proxy = createAssetProxy({ lookup, fetch: fakeFetch, now: c.now, limiter: rec.take })
+  const proxy = createAssetProxy({
+    lookup,
+    fetch: fakeFetch,
+    now: c.now,
+    limiter: rec.take,
+  })
   return { proxy, clock: c, keys: rec.keys, upstream }
 }
 
@@ -324,11 +349,21 @@ describe("the asset proxy's rate limits", () => {
     expect(res.headers.get("Retry-After")).toBe("60")
     expect(res.headers.get("Cache-Control")).toBe("no-store")
     const body = (await res.json()) as { message: string }
-    expect(body.message).toBe("Too many template asset requests. Wait a moment and try again.")
+    expect(body.message).toBe(
+      "Too many template asset requests. Wait a moment and try again.",
+    )
     // Another workspace is not affected.
-    expect((await get("https://cdn.example.com/a.png", "", { Authorization: "Bearer other" })).status).toBe(200)
+    expect(
+      (
+        await get("https://cdn.example.com/a.png", "", {
+          Authorization: "Bearer other",
+        })
+      ).status,
+    ).toBe(200)
     c.advance(30_000)
-    expect((await get("https://cdn.example.com/a.png")).headers.get("Retry-After")).toBe("30")
+    expect(
+      (await get("https://cdn.example.com/a.png")).headers.get("Retry-After"),
+    ).toBe("30")
   })
 
   it("counts cache hits toward the request cap but not the upstream caps", async () => {
@@ -358,17 +393,25 @@ describe("the asset proxy's rate limits", () => {
   it("caps a workspace's upstream fetches, and resets with the window", async () => {
     const { proxy, clock: c } = direct()
     for (let i = 0; i < FETCHES_PER_WORKSPACE.max; i++) {
-      expect((await proxy.fetch(unique("cdn.example.com", i), undefined, "w1")).ok).toBe(true)
+      expect(
+        (await proxy.fetch(unique("cdn.example.com", i), undefined, "w1")).ok,
+      ).toBe(true)
     }
     const over = await proxy.fetch(unique("cdn.example.com", 9999), undefined, "w1")
     expect(over).toMatchObject({ ok: false, status: 429 })
     expect((over as { retryAfter: number }).retryAfter).toBeGreaterThanOrEqual(1)
     // A cached asset is still served: it costs no fetch.
-    expect((await proxy.fetch(unique("cdn.example.com", 0), undefined, "w1")).ok).toBe(true)
+    expect((await proxy.fetch(unique("cdn.example.com", 0), undefined, "w1")).ok).toBe(
+      true,
+    )
     // Another workspace still fetches.
-    expect((await proxy.fetch(unique("cdn.example.com", 9999), undefined, "w2")).ok).toBe(true)
+    expect(
+      (await proxy.fetch(unique("cdn.example.com", 9999), undefined, "w2")).ok,
+    ).toBe(true)
     c.advance(60_000)
-    expect((await proxy.fetch(unique("cdn.example.com", 9999), undefined, "w1")).ok).toBe(true)
+    expect(
+      (await proxy.fetch(unique("cdn.example.com", 9999), undefined, "w1")).ok,
+    ).toBe(true)
   })
 
   it("caps fetches to one host across workspaces", async () => {
@@ -378,25 +421,35 @@ describe("the asset proxy's rate limits", () => {
     // 3 x 100 = 300 fetches, each workspace under its own 120 cap.
     for (const w of workspaces) {
       for (let i = 0; i < 100; i++) {
-        expect((await proxy.fetch(unique("cdn.example.com", n++), undefined, w)).ok).toBe(true)
+        expect(
+          (await proxy.fetch(unique("cdn.example.com", n++), undefined, w)).ok,
+        ).toBe(true)
       }
     }
     expect(upstream).toHaveLength(FETCHES_PER_HOST.max)
-    expect(await proxy.fetch(unique("cdn.example.com", n++), undefined, "w1")).toMatchObject({
+    expect(
+      await proxy.fetch(unique("cdn.example.com", n++), undefined, "w1"),
+    ).toMatchObject({
       ok: false,
       status: 429,
     })
     // A different host is a different budget.
-    expect((await proxy.fetch(unique("fonts.example.com", 1), undefined, "w1")).ok).toBe(true)
+    expect(
+      (await proxy.fetch(unique("fonts.example.com", 1), undefined, "w1")).ok,
+    ).toBe(true)
     c.advance(60_000)
-    expect((await proxy.fetch(unique("cdn.example.com", n++), undefined, "w1")).ok).toBe(true)
+    expect(
+      (await proxy.fetch(unique("cdn.example.com", n++), undefined, "w1")).ok,
+    ).toBe(true)
   })
 
   it("counts the host of every redirect hop", async () => {
     const { proxy, keys, upstream } = direct({
       "cdn.example.com/a.png": "https://fonts.example.com/b.png",
     })
-    expect((await proxy.fetch("https://cdn.example.com/a.png", undefined, "w1")).ok).toBe(true)
+    expect(
+      (await proxy.fetch("https://cdn.example.com/a.png", undefined, "w1")).ok,
+    ).toBe(true)
     expect(upstream).toEqual(["cdn.example.com/a.png", "fonts.example.com/b.png"])
     expect(keys.filter((k) => k.startsWith("host:"))).toEqual([
       "host:cdn.example.com",
@@ -407,7 +460,9 @@ describe("the asset proxy's rate limits", () => {
   })
 
   it("refuses a redirect hop whose host is out of budget", async () => {
-    const { proxy } = direct({ "cdn.example.com/a.png": "https://fonts.example.com/b.png" })
+    const { proxy } = direct({
+      "cdn.example.com/a.png": "https://fonts.example.com/b.png",
+    })
     for (let i = 0; i < FETCHES_PER_HOST.max; i++) {
       // Fill fonts.example.com's budget from other workspaces' direct fetches.
       await proxy.fetch(unique("fonts.example.com", i), undefined, `f${i % 4}`)

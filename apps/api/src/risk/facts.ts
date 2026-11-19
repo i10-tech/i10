@@ -3,13 +3,18 @@ import { withTenant, type Database } from "../db/client.js"
 import { reputationStore } from "../ses-status/reputation-store.js"
 import { looksRandomLabel, registrable, subdomainOf } from "./rules.js"
 import { BAND_COUNT } from "./fingerprint.js"
+import { judgementStore } from "./judge/store.js"
 import { boilerplateStore } from "./trusted.js"
-import type { Facts, FarmPeer, IdentityFacts, TrustedCounts } from "./types.js"
-import {
-  actorVelocity,
-  behaviourNeighbours,
-  contentNeighbours,
-} from "../content/vectors.js"
+import type {
+  Concern,
+  DecisionKind,
+  Facts,
+  FarmPeer,
+  IdentityFacts,
+  StaffDecision,
+  TrustedCounts,
+} from "./types.js"
+import { actorVelocity, contentNeighbours, peerKeys } from "../content/vectors.js"
 
 /**
  * Everything a rule may read about one workspace (#170).
@@ -35,6 +40,11 @@ export interface FactsDeps {
    * similarity layer is not consulted and `similarity` is null.
    */
   contentModel?: string
+  /**
+   * The content judge's first model (risk/judge). Absent: no judge is
+   * configured and `content` is null.
+   */
+  judgeModel?: string
 }
 
 type Row = Record<string, unknown>
@@ -130,9 +140,13 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     const [tier] = await q(sql`
       select tier, source, changed_at from core.sending_tiers where tenant_id = ${tenantId}::uuid
     `)
+    // ⚠ STAFF DEMOTIONS ONLY. The score demotes on its own band, so counting
+    // its own demotions would let a high score raise the score with no new
+    // evidence.
     const [tierEvents] = await q(sql`
       select count(*) as n from core.sending_tier_events
        where tenant_id = ${tenantId}::uuid and to_tier = 'strict' and from_tier <> 'strict'
+         and source = 'staff'
          and changed_at > ${ago(90)}::timestamptz
     `)
     const [holds] = await q(sql`
@@ -196,10 +210,11 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     info,
     actor,
     similarity,
-    behaviour,
     templates,
     trusted,
     boilerplateNear,
+    decisions,
+    content,
   ] = await Promise.all([
     identityFacts(db, owner, now),
     ownerWorkspaces(db, owner),
@@ -210,7 +225,6 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
     deps.contentModel
       ? soft(contentNeighbours(db, tenantId, deps.contentModel, deps.freePlanId, now))
       : Promise.resolve(null),
-    soft(behaviourNeighbours(db, tenantId)),
     soft(templateFacts(db, tenantId, now)),
     soft(trustedCounts(db, tenantId, now)),
     deps.contentModel
@@ -221,6 +235,10 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
             new Date(now.getTime() - 7 * DAY).toISOString().slice(0, 10),
           ),
         )
+      : Promise.resolve(null),
+    decisionsInEffect(db, tenantId, now),
+    deps.judgeModel
+      ? soft(judgementStore(db).facts(tenantId, deps.judgeModel, now))
       : Promise.resolve(null),
   ])
   const trustedNow: TrustedCounts = trusted ?? { template: 0, boilerplate: 0 }
@@ -281,6 +299,13 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
       youngestRegisteredAt: registered.length
         ? new Date(Math.max(...registered.map((d) => d.getTime())))
         : null,
+      young: verified
+        .filter((d) => {
+          const at = date(d.registered_at)
+          return at !== null && now.getTime() - at.getTime() <= 30 * DAY
+        })
+        .map((d) => String(d.name))
+        .sort(),
       randomSubdomain: verified.some((d) => {
         const sub = subdomainOf(String(d.name))
         return sub ? looksRandomLabel(sub.split(".")[0]!) : false
@@ -291,7 +316,7 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
       tier: (t.tier?.tier as "strict" | "normal") ?? "normal",
       tierSource: (t.tier?.source as "score" | "staff") ?? "default",
       tierChangedAt: date(t.tier?.changed_at),
-      tierDemotions90d: num(t.tierEvents?.n),
+      staffDemotions90d: num(t.tierEvents?.n),
       holds180d: num(t.holds?.holds),
       upheldHolds: num(t.holds?.upheld),
     },
@@ -313,15 +338,37 @@ export async function loadFacts(tenantId: string, deps: FactsDeps): Promise<Fact
         day: String(u.day),
       })),
     },
-    content: null,
-    model: null,
+    content,
     actor,
     similarity: similarity
       ? { ...similarity, trusted: trustedNow, boilerplateNear: boilerplateNear ?? null }
       : null,
-    behaviour: behaviour && behaviour.labelled > 0 ? behaviour : null,
     templates,
+    decisions,
   }
+}
+
+/**
+ * The staff decisions that may still clear a concern: releases and pins not
+ * yet expired at `now`. Revoked ones come too, with their revocation, so the
+ * rule that skips them is in evaluation and replays with the snapshot.
+ */
+export async function decisionsInEffect(
+  db: Database,
+  tenantId: string,
+  now: Date,
+): Promise<StaffDecision[]> {
+  const rows = (await db.execute(sql`
+    select * from core.risk_decisions_in_effect(${tenantId}::uuid, ${now.toISOString()}::timestamptz)
+  `)) as unknown as Row[]
+  return rows.map((r) => ({
+    id: String(r.id),
+    kind: r.kind as DecisionKind,
+    decidedAt: date(r.decided_at)!,
+    expiresAt: date(r.expires_at)!,
+    revokedAt: date(r.revoked_at),
+    covers: r.covers as Concern[],
+  }))
 }
 
 async function identityFacts(
@@ -337,8 +384,6 @@ async function identityFacts(
   return {
     firstSeen: date(r.first_seen),
     firstCountry: (r.first_country as string | null) ?? null,
-    latestCountry: (r.latest_country as string | null) ?? null,
-    latestTimezone: (r.latest_timezone as string | null) ?? null,
     countries: num(r.countries),
     torSeen: r.tor_seen === true,
     hostingSeen: r.hosting_seen === true,
@@ -347,6 +392,9 @@ async function identityFacts(
     heldDevicePeers: num(r.held_device_peers),
     subnetSignupPeers: num(r.subnet_signup_peers),
     heldSubnetPeers: num(r.held_subnet_peers),
+    devicePeerKeys: peerKeys(r.device_peer_keys, "user"),
+    subnetSignupPeerKeys: peerKeys(r.subnet_peer_keys, "user"),
+    heldPeerKeys: peerKeys(r.held_peer_keys, "user"),
   }
 }
 

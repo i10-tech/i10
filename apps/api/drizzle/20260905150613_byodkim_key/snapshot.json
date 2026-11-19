@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "67a3a65c-3294-4d2b-be65-a98fa330f5fd",
+  "prevIds": [
+    "10307c24-3673-491f-b78c-f1a0f3ee1e20"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "domains",
+        "dkim_private_key_sealed"
+      ],
+      "writes": [
+        "s|col|core.domains.dkim_private_key_sealed",
+        "n|col|core.domains.dkim_private_key_sealed",
+        "e|col|core.domains.dkim_private_key_sealed"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "dkim_private_key_sealed",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

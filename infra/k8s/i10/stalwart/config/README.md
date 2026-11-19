@@ -35,8 +35,9 @@ updates it in place, so re-applying converges rather than duplicating.
 
 In practice you do not run that by hand. `../bootstrap.sh` does the whole
 sequence - apply, ensure the tracer, reload, restart, verify, and print the DNS
-records the server expects - and it is idempotent, so it is also the thing to
-run after any edit to this file:
+records the server expects - and it is idempotent. Since #412 Argo runs it for
+you after every sync (next section); by hand it is for a restart, a fresh
+install and a preview:
 
 ```sh
 ./infra/k8s/i10/stalwart/bootstrap.sh            # apply and roll
@@ -44,6 +45,85 @@ run after any edit to this file:
 ./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # show what would change
 PLAN_FILE=path ./infra/k8s/i10/stalwart/bootstrap.sh --dry-run  # a branch's plan
 ```
+
+## Applied by Argo (#412)
+
+`../apply-hook.yaml` is a PostSync hook Job in the `i10-stalwart` Argo app. It
+runs the same `bootstrap.sh` as `--in-cluster --if-changed`, so there is one
+engine and two ways of reaching Stalwart: a port-forward and `kubectl exec` by
+hand, the pods' own addresses and plain sockets in the Job. A merged edit to
+`plan.ndjson` is applied and verified with no human step.
+
+What one run does:
+
+1. **Gate.** A dry run against the live server. If it says every object is
+   `unchanged`, the Job logs "Nothing changed" and ends: a sync that did not
+   touch the plan costs a few reads. If the plan has a schema error, or names an
+   environment variable the pods do not have, the dry run fails the sync before
+   anything is written.
+2. **Apply** once, through the edge node (`i10-stalwart-0`). The settings live
+   in the shared Postgres store, so applying on the second node too would only
+   repeat the writes. The applier writes every operation, not only the changed
+   ones, as it always has; each is idempotent.
+3. **Reload on every node**, each addressed directly, so it does not depend on
+   the coordinator carrying the request.
+4. **Verify** against both nodes: the SMTP greeting and the certificate served
+   without SNI (edge), the autoconfig and MTA-STS paths (both), and the `relay`
+   listener. A failure fails the sync; the plan is already applied by then, and
+   the log says so.
+
+⚠ **THE JOB NEVER RESTARTS A POD.** A restart is a mail blip, and a plan change
+should not cost one by default. Which settings need one is not something the
+Job can decide with certainty, so it applies the plan, reloads, and tells a
+person. The dry run names the object types this README documents as read only
+at startup - `Certificate` and `SystemSettings` (the served certificate),
+`Role` and `Authentication` (the cached permission set), `Cache` (sizes),
+`BlobStore`, `InMemoryStore`, `Coordinator` and `ClusterRole` (store and role
+settings) - and when the plan changed one of them the log ends
+
+```
+! A PERSON MUST RESTART THE PODS: run ./bootstrap.sh by hand on psl-vps.
+! Restart needed for: Cache (read at startup, a reload does not apply them)
+```
+
+That list is what is PROVEN, not everything: it is by object type, so it
+over-reports, and a startup-read setting that is not on it would be missed. When
+unsure, restart.
+
+⚠ **THE PODS HAVE ALREADY ROLLED BEFORE THE HOOK RUNS.** Editing `plan.ndjson`
+renames the ConfigMap (it carries the content hash), which rolls both pods; the
+hook runs after they are Healthy. A startup-read setting is therefore applied
+after the startup that should have read it, which is exactly why the line above
+asks for a second restart. The Job's pod is deleted when it succeeds, so that
+line is readable only while the sync is open: after a plan change that touches
+the list, run `./bootstrap.sh` by hand, do not wait to be told.
+
+⚠ **THE ENVIRONMENT CHECK CANNOT `exec`, SO IT ASKS THE POD SPEC.** By hand the
+check lists the running container's variables. The Job has no `exec` (its Role
+is `get` on the two pods and nothing else), so it reads each pod's spec: a name
+passes if the pod's `env` lists it, or if the pod takes `envFrom` the
+`i10-stalwart` Secret and the Job, which takes the same Secret, holds that key.
+It cannot see a key added to the Secret after a pod started. That is narrow in
+practice - a plan change rolls the pods first, and they start with the Secret as
+it is then - but a hand re-run of the hook after adding a key to Doppler
+passes without the pods having it. `./bootstrap.sh --dry-run` by hand asks the
+running container and does not.
+
+- **Credential.** `STALWART_RECOVERY_ADMIN` and every `@fromSecret` value reach
+  the Job through `envFrom: i10-stalwart`. They are never put in argv or printed.
+- **Never wedges a sync.** `hook-delete-policy: BeforeHookCreation,HookSucceeded`
+  (the policy, and the reason for it, are in `workloads/api.yaml`),
+  `activeDeadlineSeconds: 300` and `backoffLimit: 1`. A failed run's pod stays
+  for reading until the next sync.
+- **Network.** `stalwart-http-clients` (`networkpolicy.yaml`) admits the Job,
+  by its label `app.kubernetes.io/name: i10-stalwart-apply`, to 8080 on both
+  nodes. Its 25 and 465 checks go through `allow-public-mail`.
+- **The script is its own ConfigMap**, `i10-stalwart-apply`, not part of
+  `i10-stalwart-config`, whose hash rolls the Stalwart pods.
+- **Not in the Job:** the two checks that read pod logs (authd, the stdout
+  tracer), and the DNS listing. They need `pods/log`, and say nothing about a
+  plan. `./bootstrap.sh --verify` runs them.
+- **A third node** has to be named in the Job's `STALWART_NODES` and in its Role.
 
 ⚠ **IT SPEAKS STALWART'S MANAGEMENT API DIRECTLY, OVER A PORT-FORWARD.** It used
 to start one `stalwart-cli` pod per command - an image pull, a scheduling round
@@ -423,9 +503,9 @@ what follows are the ones whose reason is not obvious from the value.
   limit. The plan sets 128 MB and 64 MB; restart after applying.
 - ⚠ **THE CLIENT IP COMES FROM X-Forwarded-For, ONE HOP.** Behind Traefik every
   client looked like Traefik for bans and rate limits. Anything that can reach
-  8080 directly can therefore claim any address. Today that is every pod in
-  i10-prod (`allow-same-namespace`, which a NetworkPolicy cannot narrow), plus
-  Traefik.
+  8080 directly can therefore claim any address. That is Traefik plus the pods
+  `stalwart-http-clients` (`networkpolicy.yaml`) lists: the API group, the
+  apply hook and Bulwark.
 - **The cluster and the tailnet are `AllowedIp`** (10.42.0.0/16, fd42::/48,
   100.64.0.0/10, fd7a:115c:a1e0::/48), so a burst of failures from our own
   components can never ban them. **Bans last 30 days** instead of forever.
@@ -466,46 +546,100 @@ Message bodies, attachments, Sieve scripts and queued messages in R2 are
 encrypted with the `Blob key 2026-11` SymmetricKey (aes256Gcm), selected in
 both `Email` and `FileStorage`. The key material is `STALWART_BLOB_KEY` in
 Doppler `prod_stalwart`, read from the environment, so it is never in the
-database or a config export. Metadata, the search index and everything else in
-Postgres stay plaintext; encrypt those at the database level if needed.
+database or a config export.
+
+⚠ **ONLY THE BLOBS ARE ENCRYPTED. EVERYTHING IN POSTGRES IS PLAINTEXT.**
+Subjects, senders, recipients, message previews, mailboxes, contacts and the
+search index stay unencrypted in the Postgres data store and in every backup of
+it. Blob encryption covers bodies, attachments, Sieve scripts, files and the
+outbound queue, and nothing else; protecting the rest needs the disks or the
+database encrypted, which psl-vps does not do.
+
+The production key object:
+
+| Field       | Value                              |
+| ----------- | ---------------------------------- |
+| id          | `b`                                |
+| description | `Blob key 2026-11`                 |
+| cipher      | `aes256Gcm`                        |
+| fingerprint | `ef49aa35e2bec4fe2c5340188e1d8dbc` |
+
+The fingerprint is not secret. It is what to compare when something reports a
+key mismatch.
 
 - ⚠ **CHANGING THE VALUE STOPS ALL MAIL.** Stalwart stores a fingerprint of the
   key when it is created. A different value under the same name fails that
   check, and the server then refuses to write any blob (no delivery, no
   append) rather than write unencrypted. Never rotate it in Doppler.
-- ⚠ **LOSING THE VALUE LOSES EVERY MESSAGE.** The copy outside Doppler is the
-  only thing that survives a lost Doppler project. Restore the same value under
-  the same name and the server reads its blobs again.
-- **To rotate:** add a new variable and a new SymmetricKey, point `Email` and
-  `FileStorage` at it, reload, then run a `BlobRecode` task with
-  `encryption: {"@type": "Encrypt", "keyId": <new id>}`. Keep the old key and
-  variable until that task has finished on every shard (one
-  `store.blob-store-recoded` event per shard, 256 in all).
+- ⚠ **LOSING THE VALUE LOSES EVERY MESSAGE, AND THE VALUE ALONE IS NOT THE
+  ESCROW.** Every blob records the id of the SymmetricKey object that encrypted
+  it, not only the key material. A store rebuilt from empty may hand the
+  recreated object a different id than `b`, and then the right value still
+  cannot read a single blob. So the key's escrow is two things together: the
+  value, kept outside Doppler, and the Postgres backup of the Stalwart database,
+  which holds the object and its id. Restoring that database brings back id `b`
+  and the fingerprint above. No recovery from the escrowed value has been
+  rehearsed.
+- **To rotate:**
+  1. Add the new variable to Doppler and restart both nodes first. A variable
+     reaches a pod only on restart, and `bootstrap.sh` refuses a plan that names
+     one the pods lack.
+  2. Add a new SymmetricKey, point `Email` and `FileStorage` at it, reload, then
+     run a `BlobRecode` task with
+     `encryption: {"@type": "Encrypt", "keyId": <new id>}`.
+  3. Keep the old key and variable until that task has finished on every shard
+     (one `store.blob-store-recoded` event per shard, 256 in all).
+  4. Keep an offline copy of the old key as well, in case a backup taken before
+     the rotation is restored: that backup's blobs are encrypted with it.
+  - While an `Encrypt` task is pending its key cannot be deleted, and starting a
+    new `BlobRecode` replaces the pending shards of the earlier one, so do not
+    start a second before the first has finished.
 - **Only the recovery admin can delete a key**, and the server cannot tell
   whether blobs still need it. Never delete one unless a `BlobRecode` has moved
   every blob off it.
 - New blobs are encrypted from the reload on. What was stored before was
   converted once, with a `BlobRecode` task (#365); that is a one-off, so it is
   not in this plan.
+- **Faults are alerted on.** `store.decrypt-error`, `store.crypto-error`,
+  `encryption.key-change` and `encryption.gateway-bounced` are in the webhook's
+  include list; see "Encryption faults" below.
 
 ### The encryption gateway (B14)
 
 `Encryption.gatewayEnable` is on, and `gatewayOutbound` is opportunistic: a
 message to a remote recipient whose OpenPGP key or S/MIME certificate the server
 knows leaves encrypted with that key, and everyone else gets the original. The
-server only knows keys it has harvested from signed mail that recipient sent
-us, and harvesting needs a DMARC pass from the sender's domain, so a recipient
-who gets encrypted mail has already sent us mail from a client that holds the
-private key. `Encryption.atRestEnable` is a different feature (B3 in the
+server only encrypts to keys it trusts at `harvested` or better. Harvesting
+needs a DMARC pass from the sender's domain, and then either an Autocrypt key
+that verified a PGP/MIME signature on the message, or an S/MIME certificate with
+a valid chain to a trusted root. Unsigned Autocrypt keys and self-signed S/MIME
+certificates are `unverified` and are not used.
+`Encryption.atRestEnable` is a different feature (B3 in the
 proposal) and stays off.
+
+The gateway's other settings are written into the plan with the **Stalwart
+1.1.0 defaults**, pinned on purpose so that an upstream change of a default
+cannot move our behaviour silently: `gatewayMethods` (OpenPGP and S/MIME),
+`gatewayMinTrust` (`harvested`), `gatewayHeaderProtection` (`baseline`),
+`gatewayEncryptSigned` (on) and `harvestKeys`
+(`!is_local_domain(sender_domain)`).
+
+⚠ **`baseline` HIDES THE SUBJECT FROM CLIENTS THAT CANNOT SHOW IT.** It
+replaces the outer Subject with `[...]`, which a client without RFC 9788
+support lists as `[...]` and shows the real Subject only at the top of the
+decrypted body. That is a product decision still open: `noConfidentiality`
+keeps the Subject visible, `baseline` hides it.
 
 - ⚠ **THE GATEWAY ENCRYPTS EVERY QUEUED MESSAGE, NOT ONLY MAILBOX MAIL.** It
   runs when a message enters the queue, so the send worker's mail on 2525 would
   be encrypted too: a customer's receipts and sign-up codes would arrive as
   PGP/MIME with the Subject replaced by `[...]`. The policy's second rule
   disables it for `bounce+` envelope senders, which is every message the worker
-  relays (the same test as `MtaStageRcpt.allowRelaying`). The first rule is the
-  default one, which leaves local recipients alone.
+  relays. It is the same test as `MtaStageRcpt.allowRelaying`, with the port
+  named by this expression's own variable: `received_via_port` here,
+  `local_port` there. Without the port, a logged-in user on 465 who submitted
+  with a `bounce+...` envelope sender would skip the gateway. The first rule is
+  the default one, which leaves local recipients alone.
 - **It works through `ses-relay`.** The gateway removes any DKIM signature from
   each encrypted copy and signs it again with the keys the original would use,
   which `MtaStageData.dkimSignDomain` makes none for mail that leaves through
@@ -567,6 +701,14 @@ that existed then. Moving it again on a server with real mail is an
 `--export`/`--import` into fresh stores (`/docs/management/maintenance/migration`),
 not a plan edit.
 
+⚠ **THE EXPORT IS PLAIN TEXT, AND THE IMPORT WRITES EVERY BLOB UNENCRYPTED.**
+The export reads blobs through the server, so the file holds every message
+decrypted, and its SymmetricKey objects too: handle it like the keys
+themselves. The import runs before any settings exist, so it writes with the
+defaults (LZ4, no encryption). Run a `BlobRecode` task with
+`encryption: {"@type": "Encrypt", "keyId": <id>}` after it, or the imported mail
+sits in R2 in the clear.
+
 **System Sieve scripts are not blobs.** `SieveSystemScript` (`ses-references`)
 is a settings object, and its `contents` live in the data store with the rest of
 the plan. Proven on the switch (2026-11-06): re-applying the plan rewrote the
@@ -595,10 +737,10 @@ To switch, in this order:
 
 Stalwart runs as a two-node cluster on psl-vps: `i10-stalwart-0` (edge) and
 `i10-stalwart-internal-0` (internal), both built from `node/statefulset.yaml`.
-They share Postgres (data, search), R2 (blobs) and `i10-stalwart-redis`
-(in-memory store and coordinator, `redis.yaml`). Neither holds data of its own,
-and the pod hostname is the node id, so each StatefulSet's `-0` keeps its id
-across restarts.
+They share Postgres (data, search), R2 (blobs) and Stalwart Keep
+(`i10-stalwart-keep`, the in-memory store and coordinator, `keep.yaml`; see
+[Stalwart Keep](#stalwart-keep)). Neither holds data of its own, and the pod hostname is the node id, so each
+StatefulSet's `-0` keeps its id across restarts.
 
 | Node     | Listeners                    | Tasks                              | Reached through                                            |
 | -------- | ---------------------------- | ---------------------------------- | ---------------------------------------------------------- |
@@ -630,16 +772,243 @@ startup; the coordinator carries cache invalidations and setting reloads, not
 these. `bootstrap.sh` restarts every pod labelled
 `app.kubernetes.io/part-of=i10-stalwart`, edge first.
 
-To bring it up, in this order:
+To bring it up from nothing, in this order:
 
-1. Merge with the internal StatefulSet at `replicas: 0` (as shipped). Argo
-   starts `i10-stalwart-redis` and rolls the edge pod for its new label.
-2. `./bootstrap.sh` on psl-vps: it applies `InMemoryStore` (Redis), then
+1. Create the Keep keys in Doppler ([Stalwart Keep](#stalwart-keep), step 1).
+   Merge with the internal StatefulSet at `replicas: 0`. Argo starts
+   `i10-stalwart-keep` first and rolls the edge pod for its new label.
+2. Wait until Keep has been up for eleven minutes, so the first restart does not
+   meet its lock quarantine.
+3. `./bootstrap.sh` on psl-vps: it applies `InMemoryStore` (Keep), then
    `Coordinator` (which Stalwart refuses while the in-memory store is local),
    creates the `internal` role, and restarts.
-3. Raise `replicas` to 1 in `internal/kustomization.yaml` and merge.
-4. Check both nodes are `active` in `x:ClusterNode/get`, and that JMAP answers
+4. Raise `replicas` to 1 in `internal/kustomization.yaml` and merge.
+5. Check both nodes are `active` in `x:ClusterNode/get`, and that JMAP answers
    with either pod deleted.
+
+## Stalwart Keep
+
+Both nodes keep their locks, counters and cluster events in
+[Stalwart Keep](https://stalw.art/docs/cluster/keep/), one `i10-stalwart-keep`
+pod (`../keep.yaml`). It is the only in-memory store Stalwart has. It replaced
+`i10-stalwart-redis` on 2026-11-15 (#452), and that Redis was removed after two
+days without a fault.
+
+⚠ **A SINGLE KEEP SERVER, BECAUSE THERE IS ONE KUBERNETES NODE.** Keep supports
+one server or a cluster of members. Three members on psl-vps would all die with
+the node, and would cost a fixed member list of IP literals, `hostNetwork` and a
+peer port that Kubernetes cannot firewall. The Stalwart side is the `Keep`
+variant of `InMemoryStore` in `plan.ndjson`, with `Coordinator` left at
+`Default`, which reuses the same client.
+
+⚠ **EVERY RESTART OF THE KEEP POD STALLS LOCKS FOR ABOUT TEN MINUTES.** A server
+that starts in the default `rejoin` mode refuses new locks for the lock
+quarantine, 604 s for a single server (`max-lock-ttl` 600 s, which Stalwart
+needs, plus 3 s and a small term). Outbound delivery, scheduled tasks and search
+indexing take locks and wait it out. Nothing is lost, and mail is still
+received and served. Locks held at the moment of the restart do not survive it:
+a restarted server comes back empty, a renewal or release of a lost lock is
+answered `NotFound`, and its holder learns that at its next renewal, while the
+quarantine stops a second holder taking it meanwhile. What restarts the pod: a
+new Keep image, any edit to `keep.toml` (the ConfigMap name carries a hash,
+which is why the file has no comments), a changed resource request or limit, and
+the node rebooting.
+
+The docs describe the nodes as retrying reads and lock operations within the
+request deadline (`deadline` 5000 ms, `attemptTimeout` 1000 ms by default) and
+report a Keep restart to subscribers as possible loss, so they discard their
+caches and check their queues. A full outage of the only Keep server longer than
+the deadline was not tested here, so do not assume the nodes recover by
+themselves. After any Keep restart, run the two greps in
+[section 3](#3-checking-the-nodes-are-on-keep) (`Failed to connect to Stalwart
+Keep` and `store.keep-error`) on both nodes, and delete a node that logs them.
+Both Stalwart pods also wait for Keep to accept connections before they start
+(the `wait-for-keep` init container), which covers a machine reboot.
+
+`--start bootstrap` would skip the wait and is deliberately not in the pod
+template; it is right only when no client can hold a lock, which is never true
+of a restart that is not a whole-cluster restart.
+
+### 1. Create the secrets (once, before Keep first starts)
+
+Five values go in Doppler, in a config of their own, `prod_stalwart_keep`, so
+they never become environment variables of the Stalwart pods (`keep.yaml`
+explains). Run this on a machine that has `doppler` and `kubectl`; the keys live
+in a temporary directory that is removed on exit and never in the repository.
+The project and config names (`i10`, `prod_stalwart_keep`) are assumed, and
+these commands were not run when this was written, so check them first. The
+`>/dev/null` keeps `doppler` from printing the values it stores:
+
+```sh
+set -eu
+umask 077
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+
+# One key pair for Keep, and one for the two Stalwart nodes together.
+openssl genpkey -algorithm ed25519 -out keep.key
+openssl pkey -in keep.key -pubout -out keep.pub
+openssl genpkey -algorithm ed25519 -out node.key
+openssl pkey -in node.key -pubout -out node.pub
+# The cluster secret: 32 hexadecimal digits, shared by Keep and the nodes.
+openssl rand -hex 16 | tr -d '\n' >cluster.secret
+
+doppler configs create prod_stalwart_keep -p i10 -e prod
+doppler secrets set KEEP_CLUSTER_SECRET -p i10 -c prod_stalwart_keep <cluster.secret >/dev/null
+doppler secrets set KEEP_MEMBER_KEY -p i10 -c prod_stalwart_keep <keep.key >/dev/null
+doppler secrets set KEEP_CLIENTS_PEM -p i10 -c prod_stalwart_keep <node.pub >/dev/null
+doppler secrets set KEEP_NODE_KEY -p i10 -c prod_stalwart_keep <node.key >/dev/null
+doppler secrets set KEEP_SERVERS_PEM -p i10 -c prod_stalwart_keep <keep.pub >/dev/null
+
+kubectl -n i10-prod create secret generic doppler-token-i10-stalwart-keep \
+  --from-literal=serviceToken="$(doppler configs tokens create stalwart-keep-k8s \
+    -p i10 -c prod_stalwart_keep --plain)"
+```
+
+| Doppler key           | Holds                  | Read by                           |
+| --------------------- | ---------------------- | --------------------------------- |
+| `KEEP_CLUSTER_SECRET` | the 32 hex digits      | Keep (file), both nodes (env)     |
+| `KEEP_MEMBER_KEY`     | Keep's private key     | Keep only                         |
+| `KEEP_CLIENTS_PEM`    | the nodes' public key  | Keep: the clients it accepts      |
+| `KEEP_NODE_KEY`       | the nodes' private key | both nodes (one key, shared)      |
+| `KEEP_SERVERS_PEM`    | Keep's public key      | both nodes: the server they trust |
+
+One node key serves both nodes. The store's `keyPath` is shared configuration,
+so both nodes read the same path; a key each would need a Secret per
+StatefulSet, and both pods already have the same trust, the same Secrets and the
+same image. Keep then lists one client key. Split it the day one node must be
+revoked alone.
+
+The Doppler operator copies the values into the `i10-stalwart-keep` Secret.
+Before merging, and again after, check its key list, because a DopplerSecret
+that names a key Doppler lacks does not fail:
+
+```sh
+kubectl -n i10-prod get secret i10-stalwart-keep -o json | jq -r '.data | keys[]'
+```
+
+Expect the five `KEEP_*` keys plus Doppler's own `DOPPLER_*` ones. A trailing
+newline on any value is harmless: Keep and Stalwart both accept it.
+
+### 2. Changing the in-memory store
+
+The nodes read `InMemoryStore` only when they start (a `Reload` copies the
+running one, `crates/common/src/cache/reload.rs`), so an edit to its line in
+`plan.ndjson` (hosts, keys, timeouts) does nothing until they restart. The hook
+logs `Restart needed for: InMemoryStore` until then; that is this procedure, not
+a fault.
+
+⚠ **BOTH NODES RESTART TOGETHER, NEVER ONE AT A TIME.** Nodes on different store
+settings do not see each other's locks, and both take outbound queue locks, so
+one message could be delivered twice. If a node restarts alone while the two
+differ, restart the other one at once.
+
+1. **Merge the change.** The ConfigMap name changes, so both nodes roll, and the
+   PostSync hook applies `plan.ndjson` after them.
+2. **If Keep restarted, wait out its quarantine.** Keep must have been running
+   for eleven minutes (604 s plus margin) before the nodes take their first
+   locks:
+
+   ```sh
+   kubectl -n i10-prod get pod -l app.kubernetes.io/name=i10-stalwart-keep \
+     -o jsonpath='{.items[0].status.containerStatuses[0].state.running.startedAt}{"\n"}'
+   ```
+
+3. **Restart every Stalwart node together.** One command, so neither is ever up
+   on settings the other is not on:
+
+   ```sh
+   kubectl -n i10-prod delete pod i10-stalwart-0 i10-stalwart-internal-0 --wait=false
+   kubectl -n i10-prod wait --for=condition=Ready pod/i10-stalwart-0 \
+     pod/i10-stalwart-internal-0 --timeout=300s
+   ```
+
+   Not `./bootstrap.sh`: its restart goes one pod at a time, which is right for
+   a certificate or a role and wrong for a store change. Scaling to 0 and back is
+   not an option either, since `selfHeal` reverts a hand-edited `replicas` within
+   seconds.
+
+### 3. Checking the nodes are on Keep
+
+- Neither node says `Failed to connect to Stalwart Keep`, and neither logs a
+  `store.keep-error` event:
+  `kubectl -n i10-prod logs i10-stalwart-0 -c stalwart | grep -E 'Stalwart Keep|keep-error'`,
+  then the same for `i10-stalwart-internal-0`. Both print nothing when it
+  worked. A node that failed to open the store runs without an in-memory store
+  until it restarts, so a hit here means delete that pod once Keep is fixed.
+- Keep sees them: its last `keep: stats` line (one a minute) shows `conns` above
+  0, about 3 per node, and `busy` 0.
+- Both nodes are `active` in `x:ClusterNode/get`, and `x:InMemoryStore/get`
+  returns the `Keep` variant:
+
+  ```sh
+  kubectl -n i10-prod port-forward svc/i10-stalwart 18080:8080 &
+  ADMIN=$(kubectl -n i10-prod get secret i10-stalwart \
+    -o jsonpath='{.data.STALWART_RECOVERY_ADMIN}' | base64 -d)
+  curl -s -K - -H 'Content-Type: application/json' http://127.0.0.1:18080/jmap/ \
+    -d '{"using":["urn:ietf:params:jmap:core","urn:stalwart:jmap"],"methodCalls":[["x:ClusterNode/get",{"ids":null},"c1"],["x:InMemoryStore/get",{"ids":null},"c2"]]}' \
+    <<<"user = \"$ADMIN\""
+  ```
+
+- A send and a receive: send a message from the product to an address you read
+  and confirm it arrives; send one in from outside to a mailbox and confirm it
+  appears over JMAP. Both go through the queue, which takes its locks from Keep.
+- JMAP keeps answering with either pod deleted: delete
+  `i10-stalwart-internal-0`, call the API or open the webmail, wait for it to
+  return, then do the same with `i10-stalwart-0`.
+- `./bootstrap.sh --verify`.
+
+### What 1.0.3 to 1.1.0 changed for us
+
+Read from the 1.1.0 changelog and the two schemas, and checked by dry-running
+the whole of `plan.ndjson` against a 1.1.0 server (every object and field is
+accepted).
+
+- **Passkey permissions.** New `sysPasskey*` permissions are missing from the
+  default roles of an upgraded server, and the release suggests starting once
+  with `STALWART_UPDATE_ROLE_PERMISSIONS=true`. **We do not**: passkeys are for
+  accounts in the internal directory, ours are all in the authd LDAP directory,
+  and the recovery administrator holds every permission. The variable would
+  also edit the roles `Authentication` points at, which are ours.
+- **`/healthz/ready` now answers 503 while the data store does not answer.**
+  Both nodes go unready during a Postgres failover and the `i10-stalwart`
+  Service has no endpoint until it ends. That is the probe doing its job. The
+  mail ports are hostPorts and do not depend on it.
+- **PostgreSQL waits are bounded** (`responseTimeout`, default 2 minutes).
+  `config.json` does not set it, so the default applies.
+- **Shutdown drains outbound delivery and releases its queue locks** (up to 8
+  seconds), so a Stalwart restart no longer leaves a 10 minute lock behind. The
+  pods' default 30 second grace period covers it.
+- **Cache swap**: the Redis variant became `InMemory`, and a `FileSystem` blob
+  swap store went. `plan.ndjson` sets only the cache sizes, so neither applies.
+- **The relay on 2525, the LDAP directory and the roles** are untouched by the
+  changelog, and the dry run accepted them as written.
+
+The image cannot be rolled back: 1.1.0 may have written data 1.0.3 cannot read.
+Restore from the nightly backup if it comes to that.
+
+Not verified: that two nodes on different 1.x versions share a queue correctly
+during the roll. The two StatefulSets restart within a minute of each other and
+the queue lock code shows no format change between the two, but a mixed-version
+pair was never run.
+
+### Counters and keys on Keep
+
+From the [Keep docs](https://stalw.art/docs/cluster/keep/stalwart#move-from-redis):
+a counter's expiry is set only when it is created and is not refreshed on each
+increment, `key_get` returns a 64-bit integer and not decimal text, and keys
+written by expressions and Sieve are lost when Keep stops without a handoff.
+Nothing in `plan.ndjson` calls `key_get`, `key_set` or `key_incr`, and the one
+Sieve script (`ses-references`) uses `editheader` and `variables` only. What
+does use the store is the throttles (`iprate`, `rcptrate`, `rcptflood`,
+`submithour`, `submitday`, the outbound `backstop` and the queue quota), whose
+counters start from zero when Keep restarts, so a restart lets one window's worth
+through again. The fixed windows suit a counter that does not refresh. Keep has
+no persistence.
+
+Under its 128 MiB cap Keep evicts counters first and never a lock. A counter that
+is evicted restarts from zero.
 
 ## The internal relay
 
@@ -649,7 +1018,8 @@ The send worker hands direct-route mail to the `relay` listener on **2525**, wit
 - **No hostPort** (node/statefulset.yaml) - nothing on the node's public addresses
   answers on 2525.
 - **Not in `allow-public-mail`** (networkpolicy.yaml) - traffic from outside the
-  namespace cannot reach it. `allow-same-namespace` is what lets the worker in.
+  namespace cannot reach it. `stalwart-relay-clients`, in the same file, admits
+  the send worker and no other pod.
 - **ClusterIP only** (service.yaml) - `i10-stalwart-mail:2525` is the name the
   worker dials, set in worker.yaml because it is an address, not a secret.
 
@@ -747,6 +1117,29 @@ sender - the customer's `send.<domain>`, whose MX is Amazon's because SES
 requires it - and Amazon drops a DSN for mail it did not send. One return path
 for both routes costs exactly this; see docs/decisions/mail-routing.md, "One
 return path".
+
+### Encryption faults: four more events
+
+`store.decrypt-error`, `store.crypto-error`, `encryption.key-change` and
+`encryption.gateway-bounced` are in the include list too. They carry no VERP
+sender and no mailbox, so `interpretStalwartOperatorAlert`
+(`apps/api/src/webhooks/stalwart.ts`) handles them apart from both other paths.
+The per-recipient info events (`encryption.gateway-encrypted`,
+`gateway-plaintext`) are not subscribed: they fire for every message.
+
+| Stalwart event               | Means                                       | What to do                                                                 |
+| ---------------------------- | ------------------------------------------- | -------------------------------------------------------------------------- |
+| `store.decrypt-error`        | a stored blob cannot be decrypted           | blob key against the fingerprint above; never rotate or delete             |
+| `store.crypto-error`         | an encrypt or decrypt on stored data failed | the same                                                                   |
+| `encryption.gateway-bounced` | the gateway refused a recipient             | that recipient's key, or the outbound policy                               |
+| `encryption.key-change`      | a new key waits for approval                | confirm it, then set the record's `status` over JMAP `x:ExternalPublicKey` |
+
+Each is logged at error level as "Stalwart encryption alert" with the event
+type, key id, cipher, the recipient's DOMAIN and the reason where Stalwart gave
+them. If `OPS_ALERT_EMAIL` is set in the API's Doppler config the same is
+emailed through the system sender, one email per event type per hour. A failed
+send is logged and never makes the route answer 500: that would have Stalwart
+replay the whole batch, delivery events included.
 
 ### Mailbox events: `auth.failed` and `limit.quota`
 

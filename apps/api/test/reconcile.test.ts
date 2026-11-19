@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs"
 import type { SQL } from "drizzle-orm"
 import { PgDialect } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "bun:test"
@@ -11,6 +10,7 @@ import {
   unbilledIdsStatement,
   type UsageBucket,
 } from "../src/send/reconcile.js"
+import { migrationSql } from "./migration-sql.js"
 
 const dialect = new PgDialect()
 const render = (q: SQL) => dialect.sqlToQuery(q)
@@ -33,10 +33,7 @@ const bucket = (tenantId: string, d: string, count: number): UsageBucket => ({
  * dropping the assertions along with the SQL would have quietly retired four
  * guarantees at once.
  */
-const migration = readFileSync(
-  new URL("../drizzle/0013_metering_snapshots.sql", import.meta.url),
-  "utf8",
-)
+const migration = migrationSql("metering_snapshots")
 
 const functionBody = (name: string) => {
   const start = migration.indexOf(`CREATE FUNCTION "core"."${name}"`)
@@ -255,10 +252,7 @@ describe("every tenant should exist as a customer", () => {
 
 describe("the paying-tenant list", () => {
   const payingBody = () => {
-    const sql30 = readFileSync(
-      new URL("../drizzle/0030_paying_tenants_snapshot.sql", import.meta.url),
-      "utf8",
-    )
+    const sql30 = migrationSql("paying_tenants_snapshot")
     const start = sql30.indexOf(`CREATE FUNCTION "core"."paying_tenants_snapshot"`)
     expect(start, "paying_tenants_snapshot is not in 0030").toBeGreaterThan(-1)
     return sql30.slice(start, sql30.indexOf("$$;", start))

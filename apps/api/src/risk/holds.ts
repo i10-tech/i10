@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { riskAssessments, sendingHoldEvents, sendingHolds } from "../db/core.js"
+import type { Tx } from "./store.js"
 import type { Category } from "./types.js"
 
 /**
@@ -28,6 +29,8 @@ export interface HoldInput {
   setBy: string
   /** `all` also stops mailboxes, and only staff may set it. */
   scope?: "api" | "all"
+  /** Runs in the hold's transaction: a staff hold's decision record (decisions.ts). */
+  alsoInTx?: (tx: Tx) => Promise<void>
 }
 
 export interface CurrentHold {
@@ -58,6 +61,8 @@ export interface HoldStore {
     reason: string
     outcome: "false_positive" | "upheld"
     pauseDays?: number
+    /** Runs in the release's transaction: the decision record (decisions.ts). */
+    alsoInTx?: (tx: Tx) => Promise<void>
   }): Promise<boolean>
   markNotified(tenantId: string): Promise<void>
   markReviewAlerted(tenantId: string): Promise<void>
@@ -132,6 +137,7 @@ export function holdStore(db: Database, now: () => Date = () => new Date()): Hol
           setBy: input.setBy,
           occurredAt: at,
         })
+        await input.alsoInTx?.(tx)
         return { canceled: canceled.length }
       })
     },
@@ -142,6 +148,7 @@ export function holdStore(db: Database, now: () => Date = () => new Date()): Hol
       reason,
       outcome,
       pauseDays = DEFAULT_PAUSE_DAYS,
+      alsoInTx,
     }) {
       if (!reason.trim()) throw new RangeError("a release needs a reason")
       const at = now()
@@ -169,6 +176,7 @@ export function holdStore(db: Database, now: () => Date = () => new Date()): Hol
             autoActionsPausedUntil: new Date(at.getTime() + pauseDays * 86_400_000),
           })
           .where(eq(riskAssessments.tenantId, tenantId))
+        await alsoInTx?.(tx)
         return true
       })
     },

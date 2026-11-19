@@ -243,7 +243,9 @@ export function DomainsView({
                       label="Status"
                       allLabel="All statuses"
                       options={STATUSES.map((s) => {
-                        const described = describeStatus(s === "displaced" ? "failed" : s)
+                        const described = describeStatus(
+                          s === "displaced" ? "failed" : s,
+                        )
                         return {
                           value: s,
                           label:
@@ -392,6 +394,11 @@ export function DomainsView({
                                         </Link>
                                       )}
                                     </Bone>
+                                    {d?.mailboxes?.enabled && (
+                                      <Badge size="sm" tone="neutral">
+                                        Mailboxes
+                                      </Badge>
+                                    )}
                                   </div>
                                 </ListCell>
                                 <ListCell>
@@ -422,7 +429,10 @@ export function DomainsView({
                                     )}
                                   </Bone>
                                 </ListCell>
-                                <ListCell hideBelow="lg" className="font-mono text-xs text-muted-foreground">
+                                <ListCell
+                                  hideBelow="lg"
+                                  className="font-mono text-xs text-muted-foreground"
+                                >
                                   <Bone id="region" lineHeight={16} width={56}>
                                     {d?.region}
                                   </Bone>

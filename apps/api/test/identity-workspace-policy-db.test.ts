@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { assertRlsSubject, type Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { workspacePolicyStore } from "../src/identity/workspace-policy-store.js"
 
 /**
@@ -28,7 +27,7 @@ suite("#345 workspace policy store", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

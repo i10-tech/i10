@@ -358,7 +358,9 @@ jobs:
     # there is no staging cluster for them to roll into yet.
     if: ${{ github.ref == 'refs/heads/main' && needs.build.result == 'success' }}
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    # Above verify-rollout's worst case: 7 minutes behind an older Argo
+    # operation, 3 for the sync and 4 for the rollouts, plus the pin itself.
+    timeout-minutes: 20
     permissions:
       # The only job that writes to the repository.
       contents: write

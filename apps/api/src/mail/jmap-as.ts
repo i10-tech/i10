@@ -159,6 +159,16 @@ export interface JmapAsClient {
   destroyGroup(group: AuthorisedGroup): Promise<boolean>
 
   /**
+   * Destroys a person's own account, mail and all (a deleted mailbox's purge,
+   * mailboxes/lifecycle.ts). `false` when the registry has no such account.
+   *
+   * ⚠ NOT PROBED AGAINST A USER ACCOUNT ON 1.0.3, ONLY A GROUP'S (probe 8 in
+   * `team-mail.ts`): the purge therefore asks the registry again afterwards and
+   * treats an account that is still there as a failure, never as done.
+   */
+  destroyAccount(mailbox: AuthorisedMailbox): Promise<boolean>
+
+  /**
    * Takes these mailboxes out of the team inbox's Group account in the registry,
    * so they lose access now rather than at their next directory lookup.
    * Nothing to do when either side has no account yet.
@@ -501,6 +511,36 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
     }
   }
 
+  /** `x:Account/set destroy` for whichever account `resolve` finds; false when none. */
+  async function destroyAccountOf(
+    address: string,
+    resolve: () => Promise<StalwartAccountId>,
+  ): Promise<boolean> {
+    let id: StalwartAccountId
+    try {
+      id = await resolve()
+    } catch (error) {
+      if (error instanceof JmapAsError && error.code === "no_account") return false
+      throw error
+    }
+
+    const [, result] = (
+      await post(opts.registryToken, REGISTRY_USING, [
+        ["x:Account/set", { destroy: [id] }, "d"],
+      ])
+    )[0]!
+    cache.forget(address)
+
+    const destroyed = Array.isArray(result.destroyed) ? result.destroyed : []
+    if (!destroyed.includes(id)) {
+      throw new JmapAsError(
+        "stalwart",
+        `stalwart did not destroy the account for ${address}`,
+      )
+    }
+    return true
+  }
+
   return {
     async call(mailbox, methods, using = MAIL_USING) {
       refuseNamedAccounts(methods)
@@ -539,31 +579,10 @@ export function jmapAs(opts: JmapAsOptions): JmapAsClient {
       )
     },
 
-    async destroyGroup(group) {
-      let id: StalwartAccountId
-      try {
-        id = await resolveGroup(group)
-      } catch (error) {
-        if (error instanceof JmapAsError && error.code === "no_account") return false
-        throw error
-      }
+    destroyGroup: (group) => destroyAccountOf(group.address, () => resolveGroup(group)),
 
-      const [, result] = (
-        await post(opts.registryToken, REGISTRY_USING, [
-          ["x:Account/set", { destroy: [id] }, "d"],
-        ])
-      )[0]!
-      cache.forget(group.address)
-
-      const destroyed = Array.isArray(result.destroyed) ? result.destroyed : []
-      if (!destroyed.includes(id)) {
-        throw new JmapAsError(
-          "stalwart",
-          `stalwart did not destroy the account for ${group.address}`,
-        )
-      }
-      return true
-    },
+    destroyAccount: (mailbox) =>
+      destroyAccountOf(mailbox.address, () => resolveAccount(mailbox)),
 
     /**
      * ⚠ REMOVING THE DIRECTORY ROW IS NOT ENOUGH. Probed on prod (1.0.3,

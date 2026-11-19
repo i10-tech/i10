@@ -50,6 +50,12 @@ const FIELD_NAME = /^[\x21-\x39\x3b-\x7e]+$/
  * from the row id rather than the caller's to choose, and `Content-Type` would
  * contradict the structure built below. `Bcc` is absent for a different reason -
  * see `buildRawMessage`.
+ *
+ * ⚠ `Feedback-ID` IS OURS ON BOTH ROUTES. It is what Google Postmaster Tools
+ * groups a workspace's Gmail complaints by (send/feedback-id.ts), so a caller who
+ * could set it could file their complaints under another workspace's name, or
+ * under none. On SES this drops the caller's copy and SES writes the real one
+ * from a message tag; on the direct route we write it below.
  */
 const OWNED = new Set([
   "from",
@@ -64,7 +70,22 @@ const OWNED = new Set([
   "content-type",
   "content-transfer-encoding",
   "content-disposition",
+  "feedback-id",
 ])
+
+/**
+ * ⚠ EVERY `X-SES-` HEADER IS SES'S INSTRUCTION TO ITSELF, NOT THE CALLER'S TO
+ * GIVE. On raw content SES reads `X-SES-MESSAGE-TAGS`, `X-SES-CONFIGURATION-SET`
+ * and the rest from the header block, and AWS documents `ses:feedback-id-a`
+ * being set that way. The contract accepts any field name, so without this a
+ * caller could set the Feedback-ID tag, or `i10_message_id` - the key every
+ * delivery event is matched back to its message by - through a header we never
+ * meant to be a channel. The direct route has no use for them either.
+ */
+const isOwned = (name: string): boolean => {
+  const lower = name.toLowerCase()
+  return OWNED.has(lower) || lower.startsWith("x-ses-")
+}
 
 /**
  * The complete message, ready for SES's `Content.Raw`.
@@ -73,11 +94,17 @@ const OWNED = new Set([
  * absent from what recipients receive; SES takes the actual recipient list from
  * `Destination`, so writing one here would deliver the same mail and disclose
  * every hidden recipient to everyone else on it.
+ *
+ * ⚠ `feedbackId` IS THE DIRECT ROUTE'S, AND THE SES ROUTE MUST NOT PASS IT. SES
+ * builds its own `Feedback-ID` and Google wants exactly one such header per
+ * message; a second one written here would either be refused or leave two.
+ * Absent, no header is written at all.
  */
 export function buildRawMessage(
   message: OutboundMessage,
   attachments: readonly MimeAttachment[],
   now: Date = new Date(),
+  feedbackId?: string,
 ): string {
   const headers: string[] = [
     addressHeader("From", [message.from]),
@@ -100,8 +127,10 @@ export function buildRawMessage(
     "MIME-Version: 1.0",
   )
 
+  if (feedbackId) headers.push(`Feedback-ID: ${feedbackId}`)
+
   for (const [name, value] of Object.entries(message.headers ?? {})) {
-    if (OWNED.has(name.toLowerCase())) continue
+    if (isOwned(name)) continue
     // ⚠ A NAME THAT IS NOT A FIELD NAME IS DROPPED, NOT WRITTEN (#189). The
     // contract refuses them; this is the second line, for any path that did
     // not come through it, because a name is written raw before the colon.

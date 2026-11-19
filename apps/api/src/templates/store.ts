@@ -301,7 +301,11 @@ export interface TemplateStore {
     tenantId: string,
     id: string,
   ): Promise<
-    | (Preview & { from: string | null; reply_to: string[] | null; stamp: string | null })
+    | (Preview & {
+        from: string | null
+        reply_to: string[] | null
+        stamp: string | null
+      })
     | (Problems & { stamp: string | null })
     | null
   >
@@ -583,9 +587,10 @@ export function templateStore(
         id: templates.id,
         folderId: templates.folderId,
         updatedAt: templates.updatedAt,
-        place: sql<number>`row_number() over (partition by ${templates.folderId} order by ${templates.updatedAt} desc, ${templates.id} desc)`.as(
-          "place",
-        ),
+        place:
+          sql<number>`row_number() over (partition by ${templates.folderId} order by ${templates.updatedAt} desc, ${templates.id} desc)`.as(
+            "place",
+          ),
       })
       .from(templates)
       .where(and(inArray(templates.folderId, folderIds), isNull(templates.removedAt)))

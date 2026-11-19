@@ -1,0 +1,1010 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "671279e0-f743-405f-ac10-16e4cb03f4d7",
+  "prevIds": [
+    "c0e7e402-10ef-4b96-b8f1-524bb9b481cf"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "behaviour_vectors"
+      ],
+      "writes": [
+        "s|tbl|core.behaviour_vectors",
+        "n|tbl|core.behaviour_vectors",
+        "e|tbl|core.behaviour_vectors",
+        "n|rel|core.behaviour_vectors",
+        "n|type|core.behaviour_vectors",
+        "n|rel|core.behaviour_vectors_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_templates"
+      ],
+      "writes": [
+        "s|tbl|core.content_templates",
+        "n|tbl|core.content_templates",
+        "e|tbl|core.content_templates",
+        "n|rel|core.content_templates",
+        "n|type|core.content_templates",
+        "n|rel|core.content_templates_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_vectors"
+      ],
+      "writes": [
+        "s|tbl|core.content_vectors",
+        "n|tbl|core.content_vectors",
+        "e|tbl|core.content_vectors",
+        "n|rel|core.content_vectors",
+        "n|type|core.content_vectors",
+        "n|rel|core.content_vectors_tenant_id_day_exact_model_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "template_id"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.template_id",
+        "n|col|core.message_bodies.template_id",
+        "e|col|core.message_bodies.template_id"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "template_values"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.template_values",
+        "n|col|core.message_bodies.template_values",
+        "e|col|core.message_bodies.template_values"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "compacted_at"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.compacted_at",
+        "n|col|core.message_bodies.compacted_at",
+        "e|col|core.message_bodies.compacted_at"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "behaviour_vectors",
+        "behaviour_vectors_hnsw_idx"
+      ],
+      "writes": [
+        "s|idx|core.behaviour_vectors_hnsw_idx",
+        "n|idx|core.behaviour_vectors_hnsw_idx",
+        "e|idx|core.behaviour_vectors_hnsw_idx",
+        "n|rel|core.behaviour_vectors_hnsw_idx"
+      ],
+      "reads": [
+        "n|tbl|core.behaviour_vectors",
+        "n|sch|core",
+        "n|col|core.behaviour_vectors.embedding"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "content_templates",
+        "content_templates_skeleton_unique"
+      ],
+      "writes": [
+        "s|idx|core.content_templates_skeleton_unique",
+        "n|idx|core.content_templates_skeleton_unique",
+        "e|idx|core.content_templates_skeleton_unique",
+        "n|rel|core.content_templates_skeleton_unique"
+      ],
+      "reads": [
+        "n|tbl|core.content_templates",
+        "n|sch|core",
+        "n|col|core.content_templates.tenant_id",
+        "n|col|core.content_templates.skeleton_hash"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "content_templates",
+        "content_templates_bands_idx"
+      ],
+      "writes": [
+        "s|idx|core.content_templates_bands_idx",
+        "n|idx|core.content_templates_bands_idx",
+        "e|idx|core.content_templates_bands_idx",
+        "n|rel|core.content_templates_bands_idx"
+      ],
+      "reads": [
+        "n|tbl|core.content_templates",
+        "n|sch|core",
+        "n|col|core.content_templates.bands"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "content_vectors",
+        "content_vectors_hnsw_idx"
+      ],
+      "writes": [
+        "s|idx|core.content_vectors_hnsw_idx",
+        "n|idx|core.content_vectors_hnsw_idx",
+        "e|idx|core.content_vectors_hnsw_idx",
+        "n|rel|core.content_vectors_hnsw_idx"
+      ],
+      "reads": [
+        "n|tbl|core.content_vectors",
+        "n|sch|core",
+        "n|col|core.content_vectors.embedding"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "content_vectors",
+        "content_vectors_day_idx"
+      ],
+      "writes": [
+        "s|idx|core.content_vectors_day_idx",
+        "n|idx|core.content_vectors_day_idx",
+        "e|idx|core.content_vectors_day_idx",
+        "n|rel|core.content_vectors_day_idx"
+      ],
+      "reads": [
+        "n|tbl|core.content_vectors",
+        "n|sch|core",
+        "n|col|core.content_vectors.day"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "behaviour_vectors"
+      ],
+      "writes": [
+        "s|fk|core.behaviour_vectors.behaviour_vectors_tenant_id_tenants_id_fk",
+        "n|fk|core.behaviour_vectors.behaviour_vectors_tenant_id_tenants_id_fk",
+        "e|fk|core.behaviour_vectors.behaviour_vectors_tenant_id_tenants_id_fk",
+        "n|con|core.behaviour_vectors.behaviour_vectors_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.behaviour_vectors",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.behaviour_vectors.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_templates"
+      ],
+      "writes": [
+        "s|fk|core.content_templates.content_templates_tenant_id_tenants_id_fk",
+        "n|fk|core.content_templates.content_templates_tenant_id_tenants_id_fk",
+        "e|fk|core.content_templates.content_templates_tenant_id_tenants_id_fk",
+        "n|con|core.content_templates.content_templates_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.content_templates",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.content_templates.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_vectors"
+      ],
+      "writes": [
+        "s|fk|core.content_vectors.content_vectors_tenant_id_tenants_id_fk",
+        "n|fk|core.content_vectors.content_vectors_tenant_id_tenants_id_fk",
+        "e|fk|core.content_vectors.content_vectors_tenant_id_tenants_id_fk",
+        "n|con|core.content_vectors.content_vectors_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.content_vectors",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.content_vectors.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "behaviour_vectors"
+      ],
+      "writes": [
+        "s|pol|core.behaviour_vectors.behaviour_vectors_tenant",
+        "n|pol|core.behaviour_vectors.behaviour_vectors_tenant",
+        "e|pol|core.behaviour_vectors.behaviour_vectors_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.behaviour_vectors",
+        "n|sch|core",
+        "e|rls|core.behaviour_vectors"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_templates"
+      ],
+      "writes": [
+        "s|pol|core.content_templates.content_templates_tenant",
+        "n|pol|core.content_templates.content_templates_tenant",
+        "e|pol|core.content_templates.content_templates_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.content_templates",
+        "n|sch|core",
+        "e|rls|core.content_templates"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "content_vectors"
+      ],
+      "writes": [
+        "s|pol|core.content_vectors.content_vectors_tenant",
+        "n|pol|core.content_vectors.content_vectors_tenant",
+        "e|pol|core.content_vectors.content_vectors_tenant"
+      ],
+      "reads": [
+        "n|tbl|core.content_vectors",
+        "n|sch|core",
+        "e|rls|core.content_vectors"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "behaviour_vectors",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "content_templates",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "content_vectors",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "behaviour_vectors",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "behaviour_vectors",
+        "name": "embedding",
+        "type": "vector(39)",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "behaviour_vectors",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "skeleton_hash",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "segments",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "bands",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "static_bytes",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "holes",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "messages",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "first_seen_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "last_seen_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "day",
+        "type": "date",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "exact",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "model",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "embedding",
+        "type": "halfvec(384)",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "template_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "template_values",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "compacted_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "behaviour_vectors",
+        "name": "behaviour_vectors_hnsw_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "embedding",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": {
+              "name": "vector_l2_ops",
+              "default": false
+            }
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "hnsw",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "content_templates_skeleton_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "skeleton_hash",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "content_templates_bands_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "bands",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "gin",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "content_vectors_hnsw_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "embedding",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": {
+              "name": "halfvec_cosine_ops",
+              "default": false
+            }
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "hnsw",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "content_vectors_day_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "day",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "behaviour_vectors",
+        "name": "behaviour_vectors_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "content_templates_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "content_vectors_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "behaviour_vectors",
+        "name": "behaviour_vectors_pkey",
+        "columns": [
+          "tenant_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "content_templates_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "content_vectors_tenant_id_day_exact_model_pk",
+        "columns": [
+          "tenant_id",
+          "day",
+          "exact",
+          "model"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "behaviour_vectors",
+        "name": "behaviour_vectors_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"behaviour_vectors\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"behaviour_vectors\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_templates",
+        "name": "content_templates_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"content_templates\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"content_templates\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "content_vectors",
+        "name": "content_vectors_tenant",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"content_vectors\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"content_vectors\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

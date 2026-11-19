@@ -22,7 +22,7 @@ import {
   type MailEventType,
   type WebhookEventType,
 } from "./events.js"
-import type { SecretBox } from "./signing.js"
+import type { Sealer } from "../crypto/sealer.js"
 
 /**
  * The webhook path, bound to Postgres and the delivery queue.
@@ -63,12 +63,12 @@ const FOREVER = new Date("2999-12-31T00:00:00Z")
 export interface WebhookDbOptions {
   db: Database
   queue: Queue<WebhookJob>
-  secrets: SecretBox
+  secrets: Sealer
 }
 
 // ⚠ NO `secrets`. Nothing in the ingest path signs anything - only the
 // delivery worker does - and this object lives for the life of the process, so
-// taking the SecretBox here would pin the AES key in memory for a use that does
+// taking the Sealer here would pin the AES keys in memory for a use that does
 // not exist.
 export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventOps {
   return {
@@ -198,7 +198,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
               // matches the sending domain; a tag filter needs every tag it
               // names, with the same value, on the message.
               sql`(${webhookEndpoints.filterDomains} is null or ${eventDomain}::text = any(${webhookEndpoints.filterDomains}))`,
-              sql`(${webhookEndpoints.filterTags} is null or ${JSON.stringify(eventTags)}::jsonb @> ${webhookEndpoints.filterTags})`,
+              sql`(${webhookEndpoints.filterTags} is null or ${sql.param(eventTags)}::jsonb @> ${webhookEndpoints.filterTags})`,
             ),
           )
           .returning({
@@ -413,6 +413,7 @@ export function webhookDeliveryOps(
           return null
         }
 
+        const endpoint = { tenantId: job.tenantId, rowId: row.endpointId }
         return {
           id: row.id,
           tenantId: job.tenantId,
@@ -425,11 +426,17 @@ export function webhookDeliveryOps(
           keys: [
             {
               scheme: row.signatureScheme,
-              secret: opts.secrets.open(row.secretCiphertext),
+              secret: opts.secrets.open(
+                { ...endpoint, purpose: "core.webhook_endpoints.secret_ciphertext" },
+                row.secretCiphertext,
+              ),
             },
             ...liveRetiring(row.retiringSecrets, new Date()).map((r) => ({
               scheme: r.scheme,
-              secret: opts.secrets.open(r.ciphertext),
+              secret: opts.secrets.open(
+                { ...endpoint, purpose: "core.webhook_endpoints.retiring_secrets" },
+                r.ciphertext,
+              ),
             })),
           ],
           eventType: row.eventType as WebhookEventType,
@@ -449,7 +456,13 @@ export function webhookDeliveryOps(
             row.kind === "sqs" && row.awsAccessKeyId && row.awsSecretCiphertext
               ? {
                   accessKeyId: row.awsAccessKeyId,
-                  secretAccessKey: opts.secrets.open(row.awsSecretCiphertext),
+                  secretAccessKey: opts.secrets.open(
+                    {
+                      ...endpoint,
+                      purpose: "core.webhook_endpoints.aws_secret_ciphertext",
+                    },
+                    row.awsSecretCiphertext,
+                  ),
                 }
               : null,
         }

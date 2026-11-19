@@ -212,6 +212,12 @@ export interface IdentityStore {
   connections(
     tenantId: string,
   ): Promise<(Connection & { domains: ConnectionDomain[] })[]>
+  /**
+   * Workspaces with an OIDC connection or a SCIM directory, for the daily
+   * expiry pass, in tenant id order after `after` (a SECURITY DEFINER
+   * function: tenant ids only, nothing else of any workspace's).
+   */
+  dueExpiryTenants(after: string | null, limit: number): Promise<string[]>
   createConnection(
     tenantId: string,
     input: { name: string; protocol: Protocol; provider: string; createdBy: string },
@@ -244,7 +250,7 @@ export interface IdentityStore {
    * defines (#338: the OIDC client secret, the private_key_jwt keys). `{}` when
    * none are set, null when there is no such connection.
    *
-   * ⚠ THROWS WITHOUT `WEBHOOK_SECRET_KEY`: there is nothing to open them with,
+   * ⚠ THROWS WITHOUT `SEAL_KEYS`: there is nothing to open them with,
    * and an empty answer would read as "no secret set".
    */
   connectionSecrets(

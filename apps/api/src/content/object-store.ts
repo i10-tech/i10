@@ -1,6 +1,7 @@
 import { S3Client } from "bun"
 import type { Env } from "../env.js"
-import { parseKeyring, type Body, type Keyring } from "./seal.js"
+import { keyringFromEnv, type Keyring } from "../crypto/keyring.js"
+import type { Body } from "./seal.js"
 
 /**
  * Where message content lives once it leaves Postgres (#136, #168, #188): the
@@ -55,11 +56,17 @@ export interface StreamingObjectStore extends ObjectStore {
 export type ContentStore = StreamingObjectStore & {
   /** Master keys (CONTENT_KEYS). Absent: bodies stay in Postgres. */
   keys?: Keyring | null
+  /**
+   * Master keys for files and exports (OBJECT_KEYS, content/objects.ts).
+   * Absent: attachments and images stay in Postgres, and export is off.
+   */
+  objectKeys?: Keyring | null
   cache?: { get(key: string): Body | null; set(key: string, body: Body): void } | null
 }
 
 /**
- * `<tenant_id>/sha256/<hex>`.
+ * `<tenant_id>/sha256/<hex>`, the hex being the SHA-256 of the PLAIN file. The
+ * object itself is sealed (content/objects.ts).
  *
  * ⚠ THE TENANT FIRST, AND THE HASH IS THE WHOLE REST. Two workspaces sending
  * the same file get two objects: dedup is per workspace (#171), because a
@@ -86,6 +93,7 @@ export function objectStoreFrom(
     | "CONTENT_STORE_ACCESS_KEY_ID"
     | "CONTENT_STORE_SECRET_ACCESS_KEY"
     | "CONTENT_KEYS"
+    | "OBJECT_KEYS"
   >,
 ): ContentStore | null {
   if (
@@ -106,7 +114,12 @@ export function objectStoreFrom(
       region: "auto",
     }),
   )
-  store.keys = env.CONTENT_KEYS ? parseKeyring(env.CONTENT_KEYS) : null
+  store.keys = env.CONTENT_KEYS
+    ? keyringFromEnv("CONTENT_KEYS", env.CONTENT_KEYS)
+    : null
+  store.objectKeys = env.OBJECT_KEYS
+    ? keyringFromEnv("OBJECT_KEYS", env.OBJECT_KEYS)
+    : null
   return store
 }
 

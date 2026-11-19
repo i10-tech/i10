@@ -18,7 +18,6 @@ import {
   unique,
   uniqueIndex,
   uuid,
-  vector,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 import type { JoinRole } from "../console/roles.js"
@@ -356,6 +355,28 @@ export const domains = core.table(
     /** What the domain is used for. A domain may do both, or only one. */
     sends: boolean("sends").notNull().default(true),
     hostsMailboxes: boolean("hosts_mailboxes").notNull().default(false),
+    /**
+     * Whether the last DNS check saw an apex MX pointing at our mail host.
+     *
+     * ⚠ A CHECK RESULT, NOT A GATE. Stalwart accepts mail for any domain in
+     * `core.mailbox_domains()` whether or not this is true; this is what the
+     * console's mailbox checklist reads to show whether inbound mail will reach
+     * us yet.
+     */
+    receiving: boolean("receiving").notNull().default(false),
+
+    /**
+     * Where mail to an address on this domain that is nobody's goes (#406), or
+     * null for "refuse it". Meaningful only while the domain hosts mailboxes.
+     *
+     * ⚠ AN ADDRESS, NOT A MAILBOX ID. It is what Stalwart's `Domain.catchAllAddress`
+     * holds, so the reconcile can compare the two without a lookup. The route
+     * that writes it checks that the address is a mailbox or a team inbox of
+     * THIS workspace on one of its hosted domains; nothing below the route
+     * re-checks, and a mailbox deleted afterwards leaves it pointing at nothing
+     * (Stalwart then bounces the mail, which is the same as no catch-all).
+     */
+    catchAllAddress: text("catch_all_address"),
 
     /**
      * The return path's subdomain, stored as the label only ("send"), not the
@@ -473,7 +494,7 @@ export const domains = core.table(
     sesTenantLayout: integer("ses_tenant_layout"),
 
     /**
-     * The DKIM private key, sealed with `WEBHOOK_SECRET_KEY`.
+     * The DKIM private key, sealed with `SEAL_KEYS` (`crypto/sealer.ts`).
      *
      * ⚠ SEALED, WHICH IS WHAT LETS IT LIVE IN THIS TABLE AT ALL. A database
      * backup, a replica or a read-only analytics grant must never be enough to
@@ -1667,6 +1688,13 @@ export const messageBodies = core.table(
      * rule is that nothing beyond a hash runs on the send path.
      */
     fingerprintedAt: timestamp("fingerprinted_at", { withTimezone: true }),
+    /**
+     * When the hourly risk run's content judge resolved this body: judged its
+     * content, found it judged already, trusted, or too short to fingerprint
+     * (content/judging.ts). Any status, like `fingerprinted_at`: mail queued
+     * for tonight is judged before it goes.
+     */
+    judgedAt: timestamp("judged_at", { withTimezone: true }),
 
     /**
      * Where this body went when it left Postgres (#188): a pack in R2 at
@@ -1713,6 +1741,10 @@ export const messageBodies = core.table(
     index("message_bodies_unfingerprinted_idx")
       .on(t.tenantId, t.createdAt)
       .where(sql`${t.fingerprintedAt} is null`),
+    // What the content judge has not resolved yet.
+    index("message_bodies_unjudged_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(sql`${t.judgedAt} is null`),
     // Retention deletes by tenant and age; the content-store job finds work
     // the same way.
     index("message_bodies_tenant_created_idx").on(t.tenantId, t.createdAt),
@@ -3870,9 +3902,8 @@ export const onboarding = core.table("onboarding", {
 /**
  * A customer's credential for their own DNS provider.
  *
- * ⚠ THE SECRET IS SEALED WITH THE SAME KEY AND THE SAME ENVELOPE AS A WEBHOOK
- * SIGNING SECRET (`webhook_endpoints.secret_ciphertext`), and it is never
- * returned by any route. A DNS API token is the most dangerous credential this
+ * ⚠ THE SECRET IS SEALED THE SAME WAY AS A WEBHOOK SIGNING SECRET
+ * (`crypto/sealer.ts`), and it is never returned by any route. A DNS API token is the most dangerous credential this
  * product stores: it can rewrite a customer's MX records and take delivery of
  * their mail. It is written once, read only by the record writer, and the
  * console sees a label and a timestamp.
@@ -4054,8 +4085,14 @@ export const riskAssessments = core.table(
     /** Which rules produced it. See `RULESET_VERSION` in risk/rules.ts. */
     rulesetVersion: integer("ruleset_version").notNull(),
     contributions: jsonb("contributions").notNull(),
-    /** The model's probability when a model was consulted; null otherwise. */
-    modelScore: real("model_score"),
+    /** What shadow rules would have added: recorded, with no effect. */
+    shadow: jsonb("shadow")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** What staff decisions cleared: recorded, worth zero. See risk/engine.ts. */
+    cleared: jsonb("cleared")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** When the band last changed. Hysteresis reads it. */
     bandSince: timestamp("band_since", { withTimezone: true }).notNull().defaultNow(),
     /**
@@ -4095,6 +4132,12 @@ export const riskAssessmentEvents = core.table(
     fromBand: riskBand("from_band"),
     rulesetVersion: integer("ruleset_version").notNull(),
     contributions: jsonb("contributions").notNull(),
+    shadow: jsonb("shadow")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    cleared: jsonb("cleared")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** What the run did: `tier:strict`, `hold`, `ses:strict`, `alert`, ... */
     actions: text("actions")
       .array()
@@ -4107,6 +4150,213 @@ export const riskAssessmentEvents = core.table(
   (t) => [
     index("risk_assessment_events_tenant_idx").on(t.tenantId, t.occurredAt),
     tenantPolicy("risk_assessment_events_tenant", t.tenantId),
+  ],
+)
+
+/**
+ * The facts an assessment was computed from, so a rule change can be replayed
+ * against them (risk/snapshot.ts, risk/replay.ts).
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, BEHIND DEFINERS. The facts carry other workspaces'
+ * ids (farm peers), the owner's Clerk id and first country, domain names and
+ * link hosts: a workspace must never read its own row, let alone another's.
+ *
+ * ⚠ NOT ONE ROW PER RUN. Written when the event log writes an event, and
+ * otherwise at most once per workspace per UTC day; deleted after
+ * `SNAPSHOT_RETENTION_DAYS`.
+ */
+export const riskFactSnapshots = core.table(
+  "risk_fact_snapshots",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    takenAt: timestamp("taken_at", { withTimezone: true }).notNull(),
+    /** The ruleset the facts were scored under, and so the shape they had. */
+    rulesetVersion: integer("ruleset_version").notNull(),
+    trigger: text("trigger").notNull(),
+    score: integer("score").notNull(),
+    band: riskBand("band").notNull(),
+    contributions: jsonb("contributions").notNull(),
+    shadow: jsonb("shadow").notNull(),
+    cleared: jsonb("cleared")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** `Facts`, through `serialiseFacts`. */
+    facts: jsonb("facts").notNull(),
+  },
+  (t) => [
+    index("risk_fact_snapshots_tenant_idx").on(t.tenantId, t.takenAt),
+    // The purge and a replay over every workspace read by time alone.
+    index("risk_fact_snapshots_time_idx").on(t.takenAt, t.id),
+    pgPolicy("risk_fact_snapshots_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/** What a person decided: released a hold, pinned the band, upheld a hold, or held. */
+export const riskDecisionKind = core.enum("risk_decision_kind", [
+  "release",
+  "pin",
+  "uphold",
+  "hold",
+])
+
+/**
+ * Staff decisions about a workspace and the concerns they covered (risk/decisions.ts).
+ *
+ * ⚠ THE ENGINE'S MEMORY OF WHAT A PERSON ALREADY CLEARED. A release or a pin
+ * clears the concerns it `covers` until `expires_at`: the same evidence is then
+ * recorded and worth zero, and new evidence counts in full. See
+ * docs/decisions/risk.md, "Decision memory".
+ *
+ * ⚠ NEVER DELETED. A revocation is recorded on the row; the row stays, because
+ * staff decisions are the ground truth the engine is measured against.
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, BEHIND DEFINERS, like the fact snapshots: the note is
+ * staff's, and the concerns carry other workspaces' digests.
+ */
+export const riskStaffDecisions = core.table(
+  "risk_staff_decisions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    kind: riskDecisionKind("kind").notNull(),
+    decidedBy: text("decided_by").notNull(),
+    note: text("note").notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    /** The engine's view at that moment, and whether the workspace was held. */
+    score: integer("score").notNull(),
+    band: riskBand("band").notNull(),
+    rulesetVersion: integer("ruleset_version").notNull(),
+    held: boolean("held").notNull(),
+    /** Every live contribution at that moment. */
+    inView: jsonb("in_view").notNull(),
+    /** The concerns it clears (`Concern[]`); empty unless a release or a pin. */
+    covers: jsonb("covers").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** The facts it was made on. Null once the snapshot ages out. */
+    snapshotId: uuid("snapshot_id").references(() => riskFactSnapshots.id, {
+      onDelete: "set null",
+    }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by"),
+    revokeNote: text("revoke_note"),
+  },
+  (t) => [
+    index("risk_staff_decisions_tenant_idx").on(t.tenantId, t.decidedAt),
+    index("risk_staff_decisions_snapshot_idx").on(t.snapshotId),
+    pgPolicy("risk_staff_decisions_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/** Why a judgement has, or has not, a second model's answer (risk/judge/verdict.ts). */
+export const riskJudgeSecond = core.enum("risk_judge_second", [
+  "not_needed",
+  "answered",
+  "unavailable",
+  "over_budget",
+  "not_configured",
+])
+
+/**
+ * The content judge's answers, once per distinct content a workspace sent
+ * (risk/judge, content/judging.ts).
+ *
+ * ⚠ KEYED BY THE EXACT FINGERPRINT AND THE MODEL, NOT BY MESSAGE: a template
+ * sent ten thousand times is one row and cost one call. Deleted 30 days after
+ * it was judged, and judged again if the content is still being sent.
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, BEHIND DEFINERS. The answers describe the
+ * workspace's own mail, but exact probabilities shown to a sender are a
+ * gradient to tune against: send, read the number, reword, repeat. What a
+ * workspace may see is the category of a hold, never these.
+ */
+export const riskContentJudgements = core.table(
+  "risk_content_judgements",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    exact: text("exact").notNull(),
+    /** The first model, which answered `answers`. */
+    model: text("model").notNull(),
+    /** `{ <question>: P(yes) }` for every question in risk/judge/contract.ts. */
+    answers: jsonb("answers").notNull(),
+    /** Whether the state was cut to fit, by us or by the service. */
+    truncated: boolean("truncated").notNull(),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    secondStatus: riskJudgeSecond("second_status").notNull(),
+    secondModel: text("second_model"),
+    secondAnswers: jsonb("second_answers"),
+    secondTruncated: boolean("second_truncated"),
+    secondInputTokens: integer("second_input_tokens"),
+    secondOutputTokens: integer("second_output_tokens"),
+    judgedAt: timestamp("judged_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * The judged body's MinHash bands (risk/fingerprint.ts), so a near-duplicate
+     * of it (the same mail to another name) counts as judged before it is sent
+     * (content/screen.ts). Null on judgements made before bands were kept.
+     *
+     * ⚠ NO INDEX OF ITS OWN: every lookup names the workspace, and the primary
+     * key's leading `tenant_id` already narrows it to that workspace's rows,
+     * which the daily budget and the 30-day purge keep to a few thousand.
+     */
+    bands: text("bands").array(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.exact, t.model] }),
+    index("risk_content_judgements_judged_idx").on(t.judgedAt),
+    pgPolicy("risk_content_judgements_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
+  ],
+)
+
+/**
+ * What the content judge pass met per workspace per UTC day: distinct
+ * contents seen, judged, and left unjudged because the workspace's own daily
+ * budget was spent. A workspace whose content is mostly unique is itself a
+ * signal, and this is where a later rule reads it.
+ *
+ * ⚠ DENY-ALL, STAFF ONLY, like the judgements.
+ */
+export const riskContentJudgeDays = core.table(
+  "risk_content_judge_days",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    seen: integer("seen").notNull().default(0),
+    judged: integer("judged").notNull().default(0),
+    capped: integer("capped").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day] }),
+    index("risk_content_judge_days_day_idx").on(t.day),
+    pgPolicy("risk_content_judge_days_deny", {
+      for: "all",
+      using: sql`false`,
+      withCheck: sql`false`,
+    }),
   ],
 )
 
@@ -4349,12 +4599,9 @@ export const mailboxAuthFailures = core.table(
 )
 
 /**
- * What a workspace turned out to be, for training the model (#170).
- *
- * ⚠ THE FEATURES ARE STORED WITH THE LABEL, AS THEY WERE WHEN IT WAS GIVEN.
- * Training then never reconstructs history, and a label cannot quietly start
- * describing a workspace that has since changed. `weight` lets a staff verdict
- * count for more than an inference like "an AWS-managed pause".
+ * What a workspace turned out to be (#170): the ground truth the rules are
+ * measured against. `weight` lets a staff verdict count for more than an
+ * inference like "an AWS-managed pause".
  */
 export const riskLabels = core.table(
   "risk_labels",
@@ -4370,7 +4617,6 @@ export const riskLabels = core.table(
     /** `staff`, `hold_upheld`, `hold_released`, `ses_aws_pause`, `tenure`. */
     source: text("source").notNull(),
     weight: real("weight").notNull().default(1),
-    features: jsonb("features").notNull(),
     setBy: text("set_by").notNull(),
     note: text("note"),
     labeledAt: timestamp("labeled_at", { withTimezone: true }).notNull().defaultNow(),
@@ -4381,42 +4627,10 @@ export const riskLabels = core.table(
   ],
 )
 
-/**
- * Trained models (#170). Global rather than per workspace, so, like
- * `identity_events`, readable only through definer functions.
- *
- * ⚠ `active` IS THE EVALUATION GATE, NOT A PREFERENCE. A model is only
- * consulted when its held-out evaluation on real labels passed; every other
- * version is kept for comparison and contributes nothing.
- */
-export const riskModels = core.table(
-  "risk_models",
-  {
-    id: uuid("id")
-      .primaryKey()
-      .default(sql`uuidv7()`),
-    version: integer("version").notNull(),
-    /** Feature names in order, weights, bias, and normalisation. */
-    weights: jsonb("weights").notNull(),
-    /** Label counts, AUC, precision and recall on the held-out set. */
-    evaluation: jsonb("evaluation").notNull(),
-    active: boolean("active").notNull().default(false),
-    trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("risk_models_version_unique").on(t.version),
-    pgPolicy("risk_models_deny", {
-      for: "all",
-      using: sql`false`,
-      withCheck: sql`false`,
-    }),
-  ],
-)
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Content intelligence (#169, #170, #171): templates discovered from what a
-// workspace sends, and the vectors that let similar mail and similar
-// workspaces be found. See docs/decisions/risk.md, "Templates and vectors".
+// workspace sends, and the vectors that let similar mail be found. See
+// docs/decisions/risk.md, "Templates and vectors".
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Dimensions of every content embedding, whichever embedder produced it. */
@@ -4494,6 +4708,14 @@ export const contentObjects = core.table(
     /** Hex SHA-256 of the exact bytes: the object's identity. */
     sha256: text("sha256").notNull(),
     size: bigint("size", { mode: "number" }).notNull(),
+    /**
+     * The object's own key, wrapped under `OBJECT_KEYS` (content/objects.ts).
+     * Not the R2 name: that is `objectKey(tenant, sha256)`.
+     *
+     * ⚠ THE ROW IS WRITTEN IN THE SAME TRANSACTION AS THE UPLOAD, so a row
+     * that can be seen always names the key its object was sealed with.
+     */
+    sealedKey: text("sealed_key").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
       .notNull()
@@ -4642,33 +4864,6 @@ export const contentVectors = core.table(
   ],
 )
 
-/** Dimensions of the behaviour vector: `FEATURE_NAMES` in risk/model.ts. */
-export const BEHAVIOUR_DIMENSIONS = 39
-
-/**
- * Each workspace's behaviour as a point in space: its model features,
- * standardised (#170).
- *
- * ⚠ THIS IS HOW "A NEW WORKSPACE THAT LOOKS LIKE A BAD ONE" IS ASKED. Its
- * nearest neighbours among LABELLED workspaces are a fact the rules read -
- * observations, never another workspace's score, so no score can feed
- * another (the feedback-loop rule in docs/decisions/risk.md).
- */
-export const behaviourVectors = core.table(
-  "behaviour_vectors",
-  {
-    tenantId: uuid("tenant_id")
-      .primaryKey()
-      .references(() => tenants.id, { onDelete: "cascade" }),
-    embedding: vector("embedding", { dimensions: BEHAVIOUR_DIMENSIONS }).notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    index("behaviour_vectors_hnsw_idx").using("hnsw", t.embedding.op("vector_l2_ops")),
-    tenantPolicy("behaviour_vectors_tenant", t.tenantId),
-  ],
-)
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Trusted content (#222): known public boilerplate, and templates a workspace
 // submitted and staff approved. See docs/decisions/risk.md, "Trusted templates".
@@ -4679,7 +4874,7 @@ export const behaviourVectors = core.table(
  * emails, React Email starters - mail many unrelated workspaces send because
  * they all started from the same place.
  *
- * ⚠ GLOBAL, SO DENY-ALL LIKE `risk_models`. It is not any workspace's data, so
+ * ⚠ GLOBAL, SO DENY-ALL LIKE `identity_events`. It is not any workspace's data, so
  * a tenant policy cannot describe it; it is read and written only through
  * definer functions (the risk migrations), and a direct query returns nothing.
  *
@@ -4945,6 +5140,10 @@ export const deviceResumes = core.table(
  *
  * Tracks the state, progress, and content-store references for mailbox migrations:
  * exporting a mailbox to an archive (zip of EMLs) and importing an archive into a mailbox.
+ *
+ * ⚠ NO FOREIGN KEY TO `tenants`, ON PURPOSE (#392), as for `template_assets`: a
+ * row outlives a tenant row removed by hand, so the sweep in retention.ts can
+ * still find its archive in R2 and delete it, then the row.
  */
 export const mailboxJobs = core.table(
   "mailbox_jobs",
@@ -4952,9 +5151,7 @@ export const mailboxJobs = core.table(
     id: uuid("id")
       .primaryKey()
       .default(sql`uuidv7()`),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id").notNull(),
     mailboxAddress: text("mailbox_address").notNull(),
     type: text("type").notNull(),
     status: text("status").notNull().default("pending"),
@@ -4962,7 +5159,13 @@ export const mailboxJobs = core.table(
     processedMessages: integer("processed_messages").notNull().default(0),
     totalFolders: integer("total_folders").notNull().default(0),
     processedFolders: integer("processed_folders").notNull().default(0),
+    /** Where the archive is in R2: a path, not a key. */
     objectKey: text("object_key"),
+    /**
+     * An export archive's own key, wrapped under `OBJECT_KEYS`
+     * (mailboxes/sealed-stream.ts). Null for imports, which arrive plain.
+     */
+    sealedKey: text("sealed_key"),
     error: text("error"),
     errorCode: text("error_code"),
     requestedBy: text("requested_by").notNull(),
@@ -4975,6 +5178,96 @@ export const mailboxJobs = core.table(
     index("mailbox_jobs_tenant_idx").on(t.tenantId, t.status),
     index("mailbox_jobs_address_idx").on(t.mailboxAddress),
     pgPolicy("mailbox_jobs_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * A mailbox in its deletion grace (mailboxes/lifecycle.ts): what the admin chose
+ * and when it is purged. One row per mailbox, deleted by a restore or by the
+ * purge's last step.
+ *
+ * ⚠ THE ROW IS THE INTENT AND `authd.accounts.deleting_at` IS THE GATE. They are
+ * written in one transaction, and the purge reads this row, so a crash at any
+ * point of the purge leaves the intent to resume from.
+ *
+ * ⚠ KEYED BY THE PERSON, NOT THE ADDRESS: a mailbox is `authd.accounts`'s row for
+ * a Clerk user, and the address is copied here only so the console and the audit
+ * can name a mailbox whose account row is already gone.
+ */
+export const mailboxDeletions = core.table(
+  "mailbox_deletions",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    address: text("address").notNull(),
+    /** `delete`, `export_then_delete` or `forward`. */
+    outcome: text("outcome").notNull(),
+    /** Forward only: the mailbox of this workspace that receives the address's mail. */
+    forwardUserId: text("forward_user_id"),
+    forwardAddress: text("forward_address"),
+    requestedBy: text("requested_by").notNull(),
+    deletingAt: timestamp("deleting_at", { withTimezone: true }).notNull().defaultNow(),
+    purgeAfter: timestamp("purge_after", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.clerkUserId] }),
+    index("mailbox_deletions_forward_idx")
+      .on(t.tenantId, t.forwardUserId)
+      .where(sql`${t.forwardUserId} is not null`),
+    check(
+      "mailbox_deletions_outcome_check",
+      sql`"outcome" in ('delete', 'export_then_delete', 'forward')`,
+    ),
+    check(
+      "mailbox_deletions_forward_check",
+      sql`(("outcome" = 'forward') = ("forward_user_id" is not null)) and (("outcome" = 'forward') = ("forward_address" is not null))`,
+    ),
+    check("mailbox_deletions_due_check", sql`"purge_after" >= "deleting_at"`),
+    pgPolicy("mailbox_deletions_workspace", {
+      for: "all",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+      withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Per-mailbox disk usage, written by the Stalwart storage sampler alongside
+ * `core.tenant_storage` (Step B5).
+ *
+ * ⚠ KEYED BY LOWERCASED ADDRESS, ONE ROW PER MAILBOX, OVERWRITTEN ON EACH
+ * SAMPLE. A mailbox that has never been sampled has no row here, which the
+ * console mailbox routes return as `usedBytes: null, usedAt: null` rather than
+ * pretending zero bytes were measured.
+ */
+export const mailboxUsage = core.table(
+  "mailbox_usage",
+  {
+    address: text("address").notNull(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    usedBytes: bigint("used_bytes", { mode: "number" }).notNull(),
+    sampledAt: timestamp("sampled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /*
+     * ⚠ KEYED BY WORKSPACE AND ADDRESS, NOT ADDRESS ALONE. A domain can change
+     * hands; with `address` as the key, the new holder's upsert would hit the old
+     * holder's row, which row level security hides, and Postgres refuses the
+     * whole statement - taking that workspace's `tenant_storage` sample (its
+     * bill) down with it. The old holder's row is simply left behind.
+     */
+    primaryKey({ columns: [t.tenantId, t.address] }),
+    pgPolicy("mailbox_usage_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
       withCheck: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

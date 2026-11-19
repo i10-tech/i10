@@ -1,0 +1,106 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "fcfe9761-8dc9-441e-8873-ac245c0ac64a",
+  "prevIds": [
+    "0e6fbfde-f5ac-4869-8b28-b106acc7c5c4"
+  ],
+  "footprints": [
+    {
+      "statementType": "alter_enum",
+      "statementTarget": [
+        "enum",
+        "core",
+        "template_kind"
+      ],
+      "writes": [
+        "s|enum|core.template_kind"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_versions",
+        "design"
+      ],
+      "writes": [
+        "s|col|core.template_versions.design",
+        "n|col|core.template_versions.design",
+        "e|col|core.template_versions.design"
+      ],
+      "reads": [
+        "n|tbl|core.template_versions",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "templates",
+        "design"
+      ],
+      "writes": [
+        "s|col|core.templates.design",
+        "n|col|core.templates.design",
+        "e|col|core.templates.design"
+      ],
+      "reads": [
+        "n|tbl|core.templates",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_versions",
+        "name": "design",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "templates",
+        "name": "design",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "enums\u0000[\"core\",\"template_kind\"]",
+      "set": {
+        "values": [
+          "html",
+          "tsx",
+          "visual"
+        ]
+      }
+    }
+  ]
+}

@@ -1,6 +1,9 @@
 import { z } from "zod"
-import { parseKeyring } from "./content/seal.js"
+import { isWrapped, KEY_VARIABLES, type Wrappable } from "./crypto/unlock.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
+import { JUDGE_PROVIDERS, judgeSettingsProblems } from "./risk/judge/config.js"
+import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
+import { RULES } from "./risk/rules.js"
 import { SYSTEM_FROM } from "./system-mail.js"
 import { parseAllowList } from "./webhooks/egress.js"
 
@@ -54,6 +57,34 @@ const switchOn = () =>
       if (["false", "0", "no", "off"].includes(raw)) return false
       ctx.addIssue({ code: "custom", message: `expected true/false, got "${v}"` })
       return z.NEVER
+    })
+
+/**
+ * A key variable, checked the way the code that reads it will parse it.
+ *
+ * ⚠ A WRAPPED VALUE HERE MEANS THE ENTRY POINT SKIPPED `unlockEnv`. Said
+ * plainly, because the parser's own complaint ("not 32 bytes") would send the
+ * reader to check a key that is fine.
+ */
+const keyVariable = (name: Wrappable) =>
+  z
+    .string()
+    .min(1)
+    .optional()
+    .superRefine((value, ctx) => {
+      if (value === undefined) return
+      if (isWrapped(value)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "is still wrapped: unlockEnv() did not run before loadEnv()",
+        })
+        return
+      }
+      try {
+        KEY_VARIABLES[name](value)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+      }
     })
 
 const schema = z.object({
@@ -369,6 +400,28 @@ const schema = z.object({
     .optional()
     .transform((v) => v === "true" || v === "1" || v === "yes" || v === "on"),
 
+  /**
+   * Whether the mail-domain reconcile may write to Stalwart. Off, it logs the
+   * plan and changes nothing.
+   *
+   * ⚠ READ ONLY BY THAT JOB, like `DOMAIN_ORPHANS_REMOVE`. The reconcile can
+   * only disable a domain, and only one carrying our marker, but a wrong desired
+   * set still stops a customer's mail, so the first runs report before they act.
+   */
+  MAIL_DOMAINS_RECONCILE_APPLY: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1" || v === "yes" || v === "on"),
+
+  /**
+   * Whether that reconcile may take over a domain somebody added to Stalwart by
+   * hand (sets the marker, enables it). Off, it only reports them.
+   */
+  MAIL_DOMAINS_RECONCILE_ADOPT: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1" || v === "yes" || v === "on"),
+
   SES_ENABLED: z
     .string()
     .optional()
@@ -593,8 +646,9 @@ const schema = z.object({
    * sends only autoconfig, autodiscover and MTA-STS to the pod, and the network
    * policy's own comment says 8080 is left out "because the management API
    * belongs behind Traefik". Every management path answers 404 from outside.
-   * `i10-prod` is an allowed source namespace, so the reconcile job reaches it
-   * at `http://i10-stalwart:8080`.
+   * The `stalwart-http-clients` policy admits the API, the worker and the
+   * CronJobs on 8080, so the reconcile job reaches it at
+   * `http://i10-stalwart:8080`.
    *
    * ⚠ OPTIONAL, AND ITS ABSENCE SKIPS THE SAMPLE RATHER THAN ZEROING IT. A
    * deployment that cannot ask the mail server must leave the last figure
@@ -632,6 +686,17 @@ const schema = z.object({
   STALWART_WEBHOOK_SECRET: z.string().min(1).optional(),
 
   /**
+   * Where Stalwart's encryption faults are emailed: a failed blob decryption, a
+   * bounced encrypted message, a correspondent key waiting for approval.
+   *
+   * ⚠ OPTIONAL, AND UNSET IS NOT SILENT. Every one of those events is logged at
+   * error level whether or not this is set; the address only adds an email, one
+   * per event type per hour, sent through the system sender. It needs that
+   * sender to exist (see `AUTH_EMAIL_FROM`), or nothing is mailed.
+   */
+  OPS_ALERT_EMAIL: z.string().email().optional(),
+
+  /**
    * The bearer token Stalwart's MTA hook presents (B5, #380). A different secret
    * from the webhook's: that one signs what Stalwart tells us, this one
    * authorises a call that decides whether a mailbox may send.
@@ -653,7 +718,7 @@ const schema = z.object({
    * `relay` listener accepts without AUTH because only the cluster can reach
    * it; see infra/k8s/i10/stalwart/config/README.md, "The internal relay". So
    * this is set in worker.yaml rather than Doppler, and nothing about the
-   * direct route is a secret except the DKIM keys `WEBHOOK_SECRET_KEY` unseals.
+   * direct route is a secret except the DKIM keys `SEAL_KEYS` unseals.
    *
    * ⚠ OPTIONAL SO THE WORKER STARTS WITHOUT IT, AND THE DIRECT TRANSPORT
    * REFUSES TO SEND WHEN IT IS ABSENT. Requiring it would make every deployment
@@ -685,20 +750,40 @@ const schema = z.object({
   // ── webhooks ──────────────────────────────────────────────────────────────
 
   /**
-   * Encrypts customers' webhook signing secrets at rest. 32 bytes, hex or
-   * base64 - `openssl rand -hex 32`.
+   * The keyring that seals every secret we must read back: webhook signing
+   * secrets, DKIM private keys, DNS, SSO and SIEM credentials
+   * (`crypto/sealer.ts`). `kid:base64,kid:base64`, the current key first;
+   * `openssl rand -base64 32` per key.
    *
-   * ⚠ OPTIONAL, AND ITS ABSENCE DISABLES WEBHOOKS RATHER THAN WEAKENING THEM.
-   * Without a key the endpoint routes answer 501 and no delivery is attempted,
-   * which is a visible missing feature. The alternative - falling back to
-   * storing secrets in plaintext - would be a silent downgrade of the one thing
-   * that makes a webhook trustworthy.
+   * ⚠ OPTIONAL OUTSIDE PRODUCTION, AND ITS ABSENCE DISABLES THOSE FEATURES
+   * RATHER THAN WEAKENING THEM. Without it the webhook routes answer 501 and
+   * no delivery is attempted; the alternative, storing secrets in the clear,
+   * would be a silent downgrade. Production refuses to start without it.
    *
-   * ⚠ AND LOSING IT IS NOT RECOVERABLE. Every stored secret becomes
-   * undecryptable, so every customer has to rotate. It belongs in Doppler with
-   * the same care as CLERK_SECRET_KEY.
+   * ⚠ LOSING A KEY LOSES EVERY VALUE SEALED UNDER IT. Rotate by putting a new
+   * key first, running `scripts/reseal-secrets.ts --apply`, and removing the
+   * old key only once the job reports nothing left under it.
    */
-  WEBHOOK_SECRET_KEY: z.string().min(32).optional(),
+  SEAL_KEYS: keyVariable("SEAL_KEYS"),
+
+  /**
+   * HMAC keys for tokens we sign and check later: mailbox download links and
+   * the DNS OAuth state and PKCE verifier (`crypto/token-keys.ts`). Same
+   * format as `SEAL_KEYS`, and a different key. Unset outside production, those
+   * features answer 501. Keep an old key listed for 15 minutes after
+   * rotating, the longest a token lives.
+   */
+  TOKEN_KEYS: keyVariable("TOKEN_KEYS"),
+
+  /**
+   * Keys the per-workspace Feedback-ID token (send/feedback-id.ts). 32 bytes,
+   * hex or base64.
+   *
+   * ⚠ NEVER ROTATED. A new key changes every workspace's token and orphans
+   * what Google Postmaster Tools recorded under the old ones. It is low
+   * sensitivity: it maps a tenant id to a token and nothing else.
+   */
+  FEEDBACK_ID_KEY: keyVariable("FEEDBACK_ID_KEY"),
 
   /**
    * Webhook endpoints being POSTed to at once on the ordered lane, per worker
@@ -1001,6 +1086,38 @@ const schema = z.object({
   RISK_ACT_TAKEOVER: switchOn(),
 
   /**
+   * Live rule ids forced into shadow, comma separated: the emergency brake for
+   * a rule misfiring in production. A braked rule is still evaluated and
+   * recorded, and moves no score, band or action.
+   * ⚠ AN ID WE DO NOT KNOW REFUSES TO BOOT, so a typo cannot leave the rule it
+   * meant to stop running live. ⚠ THERE IS NO SETTING THE OTHER WAY: making a
+   * shadow rule live is a code change and a `RULESET_VERSION` bump.
+   */
+  RISK_SHADOW_RULES: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      const ids = [
+        ...new Set(
+          (v ?? "")
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean),
+        ),
+      ]
+      const live = new Set(RULES.filter((r) => r.mode !== "shadow").map((r) => r.id))
+      const unknown = ids.filter((id) => !live.has(id))
+      if (unknown.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `not a live rule: ${unknown.join(", ")}`,
+        })
+        return z.NEVER
+      }
+      return ids
+    }),
+
+  /**
    * How many distinct workspaces may send the same fingerprint in 48 hours
    * before they are re-scored immediately. A prompt, not a verdict - see
    * risk/content.ts.
@@ -1113,24 +1230,29 @@ const schema = z.object({
    * key first. Generate one with `openssl rand -base64 32`.
    *
    * ⚠ UNSET, BODIES STAY IN POSTGRES. The content store alone moves
-   * attachments; bodies move only when they can be encrypted.
+   * attachments; bodies move only when they can be encrypted. Allowed in
+   * development only: production with the content store set refuses to start
+   * without it (checked below).
    *
    * ⚠ LOSING THESE LOSES EVERY PACKED BODY. Keep a copy outside Doppler, and
    * when rotating keep the old key listed until every body it wrapped has
    * expired.
    */
-  CONTENT_KEYS: z
-    .string()
-    .min(1)
-    .optional()
-    .superRefine((value, ctx) => {
-      if (value === undefined) return
-      try {
-        parseKeyring(value)
-      } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message })
-      }
-    }),
+  CONTENT_KEYS: keyVariable("CONTENT_KEYS"),
+
+  /**
+   * Master keys that wrap the key of each file in R2: attachments, data-URI
+   * images and mailbox export archives. Same format as `CONTENT_KEYS`, with
+   * keys of its own.
+   *
+   * ⚠ UNSET, NOTHING IS STORED IN THE CLEAR. Attachments and images stay in
+   * Postgres, mailbox export answers 501, and a stored file cannot be read.
+   * Allowed in development only: production with the content store set
+   * refuses to start without it (checked below).
+   *
+   * ⚠ LOSING THESE LOSES EVERY STORED FILE AND EXPORT.
+   */
+  OBJECT_KEYS: keyVariable("OBJECT_KEYS"),
 
   /**
    * Bytes of bodies waiting that make an R2 write worth it (#188). Below it, a
@@ -1156,7 +1278,42 @@ const schema = z.object({
   /** Messages retention deletes per statement. */
   RETENTION_BATCH: z.coerce.number().int().min(1).max(10_000).default(1000),
 
-  /** Google Web Risk, for link reputation. Unset: no unsafe-link signal. */
+  /**
+   * The link checkers that run, comma separated (#222): `dns` (Cloudflare's and
+   * Quad9's malware-blocking resolvers, no account) and `webrisk` (Google, which
+   * also needs WEBRISK_API_KEY). Default `dns`; an empty value runs none.
+   * ⚠ A NAME WE DO NOT KNOW REFUSES TO BOOT, so a typo cannot quietly turn the
+   * unsafe-link signal off.
+   */
+  RISK_LINK_PROVIDERS: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      const names = (v ?? "dns")
+        .split(",")
+        .map((n) => n.trim().toLowerCase())
+        .filter(Boolean)
+      const unknown = names.filter(
+        (n) => !(LINK_PROVIDER_CHOICES as readonly string[]).includes(n),
+      )
+      if (unknown.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `unknown link provider ${unknown.join(", ")}; expected ${LINK_PROVIDER_CHOICES.join(", ")}`,
+        })
+        return z.NEVER
+      }
+      return [...new Set(names)] as LinkProviderChoice[]
+    }),
+
+  /**
+   * Queries per resolver per UTC day for the `dns` provider, counted in Redis
+   * before each is sent. ⚠ THE RESOLVERS ARE FREE AND PUBLIC: this is what stops
+   * a farm linking thousands of fresh domains from making us a nuisance to them.
+   */
+  RISK_DNS_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(5000),
+
+  /** Google Web Risk, for link reputation. Needs `webrisk` in RISK_LINK_PROVIDERS. */
   WEBRISK_API_KEY: z.string().min(1).optional(),
 
   /**
@@ -1167,10 +1324,68 @@ const schema = z.object({
   WEBRISK_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(3000),
 
   /**
-   * Laya, the content classifier (docs/decisions/risk.md). It needs a GPU host
-   * we do not run on the CX33, so it is off until this points somewhere.
+   * The content judge (docs/decisions/risk.md, "The content judge"): a
+   * decision model asked typed questions about each distinct content once.
+   * `workers-ai` is Cloudflare's hosted Clef (needs RISK_JUDGE_CF_ACCOUNT_ID
+   * and RISK_JUDGE_CF_API_TOKEN); `systemone` is a self-hosted Laya or Jev at
+   * RISK_JUDGE_URL. Unset: nothing is judged, and the judge rules score nothing.
+   *
+   * ⚠ A HOSTED PROVIDER RECEIVES MAIL SUBJECTS AND TEXT. It is a processor and
+   * must be on the subprocessor list before this is set in production.
    */
-  LAYA_URL: z.url().optional(),
+  RISK_JUDGE_PROVIDER: z.enum(JUDGE_PROVIDERS).optional(),
+  /** Default `@cf/cloudflare/clef-flash` (workers-ai) or `jev-1` (systemone). */
+  RISK_JUDGE_MODEL: z.string().trim().min(1).optional(),
+  /** Asked when the first model screens a content as suspicious. Default `@cf/cloudflare/clef` on workers-ai; `none` turns it off. */
+  RISK_JUDGE_SECOND_MODEL: z.string().trim().min(1).optional(),
+  RISK_JUDGE_CF_ACCOUNT_ID: z.string().trim().min(1).optional(),
+  /** A Cloudflare API token with Workers AI read permission. */
+  RISK_JUDGE_CF_API_TOKEN: z.string().min(1).optional(),
+  RISK_JUDGE_URL: z.url().optional(),
+  RISK_JUDGE_API_KEY: z.string().min(1).optional(),
+  /**
+   * Judgements per UTC day: every workspace together, each workspace, and
+   * second opinions, counted in Redis before each call. ⚠ THE PROVIDER BILLS
+   * PER TOKEN AND LIMITS NOTHING FOR US; these are the bill's ceiling.
+   * The defaults fit Cloudflare's free tier of 10,000 neurons a day, at about
+   * 6 per clef-flash call and 38 per clef call: 700 x 6 + 150 x 38 = 9,900.
+   */
+  RISK_JUDGE_DAILY_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(700),
+  RISK_JUDGE_TENANT_DAILY_LIMIT: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .default(100),
+  RISK_JUDGE_SECOND_DAILY_LIMIT: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(1_000_000)
+    .default(150),
+
+  /**
+   * Judging before the first send (content/screen.ts): the worker judges an
+   * untrusted workspace's new content between the claim and the held check,
+   * and re-scores it if anything was judged. Needs the judge configured.
+   * ⚠ FAILS OPEN: a spent budget, a down model, the deadline or an error sends
+   * the batch unjudged, for the hourly pass.
+   */
+  RISK_SCREEN_BEFORE_SEND: switchOn(),
+  /** A workspace younger than this many days is untrusted; so is one elevated or worse. */
+  RISK_SCREEN_UNTRUSTED_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
+  /** Groups of near-duplicate content judged per batch, one call each. */
+  RISK_SCREEN_MAX_GROUPS: z.coerce.number().int().min(1).max(20).default(3),
+  /**
+   * The whole screen of one batch, judging and re-score, in milliseconds.
+   * ⚠ KEEP IT WELL UNDER WORKER_JOB_TIMEOUT_MS: the batch is claimed and waits.
+   */
+  RISK_SCREEN_DEADLINE_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(60_000)
+    .default(20_000),
 
   /**
    * Which embedder turns content into vectors (content/embed.ts): `minilm`,
@@ -1179,7 +1394,6 @@ const schema = z.object({
    * files are missing - vectors are tagged with their model and never mixed.
    */
   RISK_EMBEDDER: z.enum(["minilm", "hash"]).default("minilm"),
-  LAYA_API_KEY: z.string().min(1).optional(),
 })
 
 /**
@@ -1257,6 +1471,20 @@ const validated = schema.superRefine((env, ctx) => {
     })
   }
 
+  // ⚠ THE SCREEN WAITS INSIDE THE LEASE. A claimed batch sits through the
+  // pre-send screen before the send itself, so the screen must leave most of
+  // the lease for sending, or groupmq hands the job to a second worker.
+  if (env.RISK_SCREEN_DEADLINE_MS * 2 > env.WORKER_JOB_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["RISK_SCREEN_DEADLINE_MS"],
+      message:
+        `${env.RISK_SCREEN_DEADLINE_MS}ms must be at most half of ` +
+        `WORKER_JOB_TIMEOUT_MS (${env.WORKER_JOB_TIMEOUT_MS}ms): the batch waits ` +
+        `for the screen inside the job's lease.`,
+    })
+  }
+
   /**
    * ⚠ THE DEFAULT IS THE BUG, WHICH IS WHY THIS IS A CHECK AND NOT A DEFAULT.
    * `SENTRY_ENVIRONMENT` falls back to "development", so a production
@@ -1289,6 +1517,44 @@ const validated = schema.superRefine((env, ctx) => {
         `with some set it looks configured and stores nothing.`,
     })
   }
+
+  /**
+   * ⚠ A MISSING KEYRING IN PRODUCTION IS A DOWNGRADE, NOT A SWITCH. With the
+   * content store set and `CONTENT_KEYS` gone, every body stays in Postgres in
+   * the clear and the only sign is one warning line every five minutes. A
+   * Doppler edit that drops the variable would undo the sealing without any
+   * failure, so production refuses to start; the check-env hook runs this
+   * before a deploy replaces anything.
+   */
+  if (
+    env.NODE_ENV === "production" &&
+    set.length === store.length &&
+    env.CONTENT_KEYS === undefined
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CONTENT_KEYS"],
+      message:
+        `is required when NODE_ENV is production and the content store is set. ` +
+        `Without it message bodies are never sealed and stay in Postgres.`,
+    })
+  }
+  if (
+    env.NODE_ENV === "production" &&
+    set.length === store.length &&
+    env.OBJECT_KEYS === undefined
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["OBJECT_KEYS"],
+      message:
+        `is required when NODE_ENV is production and the content store is set. ` +
+        `Without it attachments stay in Postgres and mailbox export is off.`,
+    })
+  }
+
+  for (const problem of judgeSettingsProblems(env))
+    ctx.addIssue({ code: "custom", path: [problem.path], message: problem.message })
 
   const github = [
     "GITHUB_APP_ID",
@@ -1332,6 +1598,24 @@ const validated = schema.superRefine((env, ctx) => {
         `it no Cloudflare header can be believed, and the IP allowlists would ` +
         `refuse every request.`,
     })
+  }
+
+  /**
+   * ⚠ THE SAME DOWNGRADE AS A MISSING `CONTENT_KEYS`, ONE LEVEL WORSE. Without
+   * these, webhooks, SSO, DNS connections and mailbox downloads quietly switch
+   * off, and the Feedback-ID loses its workspace token. A Doppler edit that
+   * drops one must fail the deploy, not the features.
+   */
+  if (env.NODE_ENV === "production") {
+    for (const name of ["SEAL_KEYS", "TOKEN_KEYS", "FEEDBACK_ID_KEY"] as const) {
+      if (env[name] === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: `is required when NODE_ENV is production. See docs/decisions/encryption.md.`,
+        })
+      }
+    }
   }
 
   if (env.NODE_ENV === "production" && env.WEBHOOK_EGRESS_ALLOW?.trim()) {

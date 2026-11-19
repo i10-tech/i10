@@ -57,6 +57,142 @@ export const createMailboxSchema = z.object({
   storage_allocation: z.number().int().positive().optional(),
 })
 
+/**
+ * An owner or admin giving an existing member of the workspace a mailbox.
+ *
+ * ⚠ THE ONE PLACE A REQUEST NAMES ANOTHER PERSON, which is why it is its own
+ * schema and not an optional field on `createMailboxSchema` (see the note
+ * there). `user_id` is the workspace member's id as the Team page already
+ * carries it (`/team/members/:userId/...`); the route answers 404 for anybody
+ * who is not a member of the caller's workspace, so it cannot be used to ask
+ * whether some other id exists.
+ */
+export const adminCreateMailboxSchema = createMailboxSchema.extend({
+  user_id: z.string().min(1).max(128),
+})
+
+/**
+ * Who creates mailboxes in a workspace.
+ *
+ *   - `admins`: owners and admins only. The default.
+ *   - `members`: people may also create their own.
+ *   - `on_join`: everyone gets one when they join (a workspace with exactly one
+ *     hosted domain), and members may still create their own.
+ */
+export const mailboxCreationModeSchema = z.enum(["admins", "members", "on_join"])
+
+export const mailboxCreationSettingsSchema = z.object({
+  mode: mailboxCreationModeSchema,
+})
+
+export const setMailboxCreationSchema = mailboxCreationSettingsSchema
+
+/** How long a deleted mailbox can be restored, in days. Then it is purged. */
+export const MAILBOX_DELETE_GRACE_DAYS = 30
+
+/**
+ * What happens to the address and its mail when an owner or admin deletes a
+ * mailbox. Sign-in stops at once for all three, and each can be restored for
+ * `MAILBOX_DELETE_GRACE_DAYS`.
+ *
+ *   - `delete`: after the grace the account, its mail and the address go.
+ *   - `export_then_delete`: an export of the mail is started now, and the purge
+ *     waits until it has finished and its download has been available for its
+ *     whole retention.
+ *   - `forward`: after the grace the address stays and delivers to another
+ *     mailbox of the workspace (`forward_to`).
+ */
+export const mailboxDeletionOutcomeSchema = z.enum([
+  "delete",
+  "export_then_delete",
+  "forward",
+])
+
+export const deleteMailboxSchema = z
+  .object({
+    outcome: mailboxDeletionOutcomeSchema,
+    /**
+     * Forward only: the address of the mailbox that receives this one's mail.
+     *
+     * ⚠ AN ADDRESS, AS EVERY MAILBOX ROUTE NAMES ONE. Whether it is a live
+     * mailbox of this workspace is the route's question, not this schema's.
+     */
+    forward_to: mailboxAddressSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.outcome === "forward" && !value.forward_to) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["forward_to"],
+        message: "forward_to is required when the outcome is forward.",
+      })
+    }
+    if (value.outcome !== "forward" && value.forward_to) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["forward_to"],
+        message: "forward_to is only allowed when the outcome is forward.",
+      })
+    }
+  })
+
+/**
+ * How many aliases an owner or admin may give ONE mailbox through the console.
+ *
+ * ⚠ THE ONES A DIRECTORY OR CLERK GIVE ARE NOT COUNTED. They are not the admin's
+ * to add, so a directory that lists forty addresses must not lock the admin out
+ * of adding the one they came for. Every alias is served to the mail server as an
+ * attribute of the person's entry on every lookup, so the number is kept modest.
+ */
+export const MAILBOX_ALIAS_LIMIT = 30
+
+/**
+ * Where an alias came from, which decides who can remove it.
+ *
+ *   - `console`: an owner or admin added it. The only kind this API removes.
+ *   - `clerk`: a verified address on the person's own account, so also a sign-in
+ *     address. Removed by the person, at their account.
+ *   - `directory`: listed by the company's directory, removed there.
+ */
+export const mailboxAliasSourceSchema = z.enum(["console", "clerk", "directory"])
+
+/**
+ * An address on any domain the workspace hosts mail on, that delivers to the
+ * mailbox and may be sent from.
+ *
+ * ⚠ VALIDATED HERE ONLY AS FAR AS THE SHAPE. The local part is held to the
+ * characters every mail server agrees on, lowercased: `+` is refused because the
+ * mail server strips a `+tag` before it looks an address up, so such an alias
+ * would never match anything. Whether the domain is the workspace's, and whether
+ * the address is free, are the store's questions.
+ */
+export const mailboxAliasAddressSchema = mailboxAddressSchema.refine((v) => {
+  const local = v.slice(0, v.lastIndexOf("@"))
+  return (
+    local.length <= 64 &&
+    /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(local) &&
+    !local.includes("..")
+  )
+}, "The part before the @ may use letters, digits, dots, hyphens and underscores, and must start and end with a letter or digit.")
+
+export const addMailboxAliasSchema = z.object({
+  address: mailboxAliasAddressSchema,
+})
+
+export const mailboxAliasSchema = z.object({
+  object: z.literal("mailbox_alias"),
+  address: z.string(),
+  source: mailboxAliasSourceSchema,
+  /** Whether `DELETE` removes it: only an alias an owner or admin added. */
+  removable: z.boolean(),
+})
+
+export const mailboxAliasListSchema = z.object({
+  data: z.array(mailboxAliasSchema),
+  /** The most console aliases one mailbox may have. */
+  limit: z.number().int().positive(),
+})
+
 export const mailboxSchema = z.object({
   object: z.literal("mailbox"),
   address: z.string(),
@@ -175,7 +311,16 @@ export const mailboxJobSchema = z.object({
 })
 
 export type CreateMailbox = z.infer<typeof createMailboxSchema>
+export type AdminCreateMailbox = z.infer<typeof adminCreateMailboxSchema>
+export type MailboxDeletionOutcome = z.infer<typeof mailboxDeletionOutcomeSchema>
+export type DeleteMailbox = z.infer<typeof deleteMailboxSchema>
+export type MailboxCreationMode = z.infer<typeof mailboxCreationModeSchema>
+export type MailboxCreationSettings = z.infer<typeof mailboxCreationSettingsSchema>
 export type Mailbox = z.infer<typeof mailboxSchema>
+export type MailboxAliasSource = z.infer<typeof mailboxAliasSourceSchema>
+export type AddMailboxAlias = z.infer<typeof addMailboxAliasSchema>
+export type MailboxAlias = z.infer<typeof mailboxAliasSchema>
+export type MailboxAliasList = z.infer<typeof mailboxAliasListSchema>
 export type SetMailboxStorage = z.infer<typeof setMailboxStorageSchema>
 export type MailboxStorage = z.infer<typeof mailboxStorageSchema>
 export type StoragePool = z.infer<typeof storagePoolSchema>

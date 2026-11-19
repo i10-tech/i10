@@ -7,6 +7,7 @@ import type { Env } from "../env.js"
 import { sendingTierStore } from "../metering/tiers.js"
 import { sesReputationPolicy } from "./act.js"
 import type { OwnerInfo } from "./facts.js"
+import { decisionStore, type StaffDecisionDeps } from "./decisions.js"
 import { holdStore } from "./holds.js"
 import { identityStore, takeoverResponder } from "./identity.js"
 import { labelStore } from "./labels.js"
@@ -14,9 +15,15 @@ import { riskNotices } from "./notice.js"
 import type { RiskDeps } from "./runner.js"
 import { embedderModelName } from "../content/embed.js"
 import { objectStoreFrom } from "../content/object-store.js"
+import { forceShadow } from "./engine.js"
+import { RULES } from "./rules.js"
+import { snapshotStore } from "./snapshot.js"
 import { assessmentStore } from "./store.js"
 import { boilerplateStore, trustSource, trustedTemplateStore } from "./trusted.js"
-import { asVerdict, webRiskChecker } from "./webrisk.js"
+import { asVerdict } from "./link-check.js"
+import { buildLinks } from "./link-config.js"
+import { providerHealth } from "./provider-health.js"
+import { buildJudge } from "./judge/config.js"
 
 /**
  * Building the risk engine (#170), once, the same way in every process that
@@ -53,12 +60,23 @@ export interface RiskSystemInput {
     | "RISK_ACT_HOLDS"
     | "RISK_ACT_SES_POLICY"
     | "RISK_ACT_TAKEOVER"
+    | "RISK_SHADOW_RULES"
     | "METERING_FREE_PLAN_ID"
     | "SES_ENABLED"
     | "AWS_REGION"
-    | "LAYA_URL"
-    | "LAYA_API_KEY"
+    | "RISK_JUDGE_PROVIDER"
+    | "RISK_JUDGE_MODEL"
+    | "RISK_JUDGE_SECOND_MODEL"
+    | "RISK_JUDGE_CF_ACCOUNT_ID"
+    | "RISK_JUDGE_CF_API_TOKEN"
+    | "RISK_JUDGE_URL"
+    | "RISK_JUDGE_API_KEY"
+    | "RISK_JUDGE_DAILY_LIMIT"
+    | "RISK_JUDGE_TENANT_DAILY_LIMIT"
+    | "RISK_JUDGE_SECOND_DAILY_LIMIT"
     | "RISK_EMBEDDER"
+    | "RISK_LINK_PROVIDERS"
+    | "RISK_DNS_DAILY_LIMIT"
     | "WEBRISK_API_KEY"
     | "WEBRISK_DAILY_LIMIT"
     | "CONTENT_STORE_ENDPOINT"
@@ -76,6 +94,7 @@ export interface RiskSystemInput {
     level: "warning" | "error",
     context: Record<string, unknown>,
   ) => void
+  report?: RiskDeps["report"]
   log?: RiskDeps["log"]
 }
 
@@ -124,20 +143,43 @@ export function riskSystem(input: RiskSystemInput) {
   const assessments = assessmentStore(db)
   const labels = labelStore(db)
   const identity = identityStore(db)
+  const snapshots = snapshotStore(db)
+  const decisions = decisionStore(db)
+  const rules = forceShadow(RULES, env.RISK_SHADOW_RULES)
+  // Logged by every process that builds the engine, so a braked rule is never
+  // a surprise in any of them.
+  if (env.RISK_SHADOW_RULES.length > 0)
+    log?.warn?.(
+      { rules: env.RISK_SHADOW_RULES },
+      "RISK_SHADOW_RULES: these rules run in shadow and have no effect",
+    )
   const notices =
     input.sender && input.consoleUrl
       ? riskNotices({ db, clerk, sender: input.sender, consoleUrl: input.consoleUrl })
       : undefined
-  const webRisk = webRiskChecker({
-    ...(env.WEBRISK_API_KEY ? { key: env.WEBRISK_API_KEY } : {}),
-    dailyLimit: env.WEBRISK_DAILY_LIMIT,
+  const health = providerHealth({
     ...(redis ? { redis } : {}),
+    ...(input.alert ? { alert: input.alert } : {}),
+    ...(log ? { log } : {}),
+  })
+  const { checker: links, webRisk } = buildLinks({
+    providers: env.RISK_LINK_PROVIDERS,
+    ...(env.WEBRISK_API_KEY ? { webRiskKey: env.WEBRISK_API_KEY } : {}),
+    webRiskDailyLimit: env.WEBRISK_DAILY_LIMIT,
+    dnsDailyLimit: env.RISK_DNS_DAILY_LIMIT,
+    ...(redis ? { redis } : {}),
+    health,
+    ...(log ? { log } : {}),
+  })
+  const judge = buildJudge(env, {
+    ...(redis ? { redis } : {}),
+    health,
     ...(log ? { log } : {}),
   })
   const trustedTemplates = trustedTemplateStore(db)
   const boilerplate = boilerplateStore(db)
   /*
-   * ⚠ TWO SOURCES, ONE DIFFERENCE: WHO MAY SPEND THE WEB RISK BUDGET. The
+   * ⚠ TWO SOURCES, ONE DIFFERENCE: WHO MAY SPEND THE LINK-CHECK BUDGETS. The
    * five-minute fingerprint pass (content-store job) reads cached verdicts
    * only - it runs twelve times an hour over every workspace, and a hole's link
    * it cannot vouch for yet simply earns no credit until the hourly job, which
@@ -146,12 +188,12 @@ export function riskSystem(input: RiskSystemInput) {
   const cachedTrust = trustSource(db, {
     templates: trustedTemplates,
     boilerplate,
-    verdict: async (host) => asVerdict(await webRisk.cached(host)),
+    verdict: async (host) => asVerdict(await links.cached(host)),
   })
   const jobTrust = trustSource(db, {
     templates: trustedTemplates,
     boilerplate,
-    verdict: async (host) => asVerdict(await webRisk.lookup(host)),
+    verdict: async (host) => asVerdict(await links.lookup(host)),
   })
 
   const deps: RiskDeps = {
@@ -175,7 +217,11 @@ export function riskSystem(input: RiskSystemInput) {
       ...(log ? { log } : {}),
     },
     labels,
-    webRisk,
+    snapshots,
+    rules,
+    links,
+    ...(webRisk ? { webRisk } : {}),
+    health,
     trust: jobTrust,
     trustedTemplates,
     ...(notices
@@ -200,15 +246,23 @@ export function riskSystem(input: RiskSystemInput) {
     },
     ...(redis ? { redis } : {}),
     ...(input.exempt ? { exempt: input.exempt } : {}),
-    ...(env.LAYA_URL
-      ? {
-          laya: {
-            url: env.LAYA_URL,
-            ...(env.LAYA_API_KEY ? { apiKey: env.LAYA_API_KEY } : {}),
-          },
-        }
-      : {}),
+    ...(judge ? { judge } : {}),
+    ...(input.report ? { report: input.report } : {}),
     ...(log ? { log } : {}),
+  }
+
+  /** What a staff decision reads and writes: the facts the score would see right now. */
+  const staff: StaffDecisionDeps = {
+    db,
+    freePlanId: deps.freePlanId,
+    ownerInfo: deps.ownerInfo,
+    rules,
+    holds,
+    assessments,
+    snapshots,
+    decisions,
+    ...(deps.contentModel ? { contentModel: deps.contentModel } : {}),
+    ...(judge ? { judgeModel: judge.key } : {}),
   }
 
   const takeover = redis
@@ -228,9 +282,14 @@ export function riskSystem(input: RiskSystemInput) {
     holds,
     assessments,
     labels,
+    snapshots,
+    decisions,
+    staff,
+    rules,
     identity,
     takeover,
     notices,
+    links,
     webRisk,
     trustedTemplates,
     boilerplate,

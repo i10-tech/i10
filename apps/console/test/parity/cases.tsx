@@ -13,10 +13,12 @@ const { LIST_VIEWS } = await import("./cases-lists")
 const { PAGE_VIEWS } = await import("./cases-pages")
 const { RECORD_VIEWS } = await import("./cases-records")
 const { IDENTITY_VIEWS } = await import("./cases-identity")
+const { MAIL_VIEWS } = await import("./cases-mail")
 
 export const VIEWS: ParityView[] = [
   ...LIST_VIEWS,
   ...PAGE_VIEWS,
   ...RECORD_VIEWS,
   ...IDENTITY_VIEWS,
+  ...MAIL_VIEWS,
 ]

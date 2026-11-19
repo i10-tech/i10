@@ -30,7 +30,8 @@ export const MAX_ASSETS = 40
 /** The most fetches in flight at once. */
 export const MAX_CONCURRENT = 6
 
-const PIXEL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+const PIXEL =
+  "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
 const NO_FONT = "data:,"
 
 interface Run {
@@ -46,7 +47,8 @@ function makeRun(fetchAsset: FetchAsset, max: number, concurrent: number): Run {
   // A finished fetch hands its slot to the next waiter, so `active` never
   // dips below the limit while somebody is queued.
   const gate = async <T>(fn: () => Promise<T>): Promise<T> => {
-    if (active >= concurrent) await new Promise<void>((resolve) => waiting.push(resolve))
+    if (active >= concurrent)
+      await new Promise<void>((resolve) => waiting.push(resolve))
     else active++
     try {
       return await fn()
@@ -77,7 +79,8 @@ const ENTITIES: Record<string, string> = {
   "&lt;": "<",
   "&gt;": ">",
 }
-const decode = (s: string) => s.replace(/&(?:amp|quot|#39|apos|lt|gt);/g, (e) => ENTITIES[e]!)
+const decode = (s: string) =>
+  s.replace(/&(?:amp|quot|#39|apos|lt|gt);/g, (e) => ENTITIES[e]!)
 const encode = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")
 
@@ -87,7 +90,10 @@ function resolve(raw: string, base: string | undefined): string | null {
   if (!value || /^data:/i.test(value)) return null
   try {
     if (base === undefined && !/^(https?:)?\/\//i.test(value)) return null
-    const url = new URL(base === undefined && value.startsWith("//") ? `https:${value}` : value, base)
+    const url = new URL(
+      base === undefined && value.startsWith("//") ? `https:${value}` : value,
+      base,
+    )
     return url.protocol === "http:" || url.protocol === "https:" ? url.href : null
   } catch {
     return null
@@ -126,7 +132,11 @@ function rewriteUrls(
   })
 }
 
-async function rewriteCss(css: string, base: string | undefined, run: Run): Promise<string> {
+async function rewriteCss(
+  css: string,
+  base: string | undefined,
+  run: Run,
+): Promise<string> {
   // An import loads nothing inside an image, and its URL is not an image.
   const flat = css.replace(/@import[^;]*;/gi, "")
   const fonts = await replaceAsync(flat, /@font-face\s*\{[^}]*\}/gi, async (m) =>
@@ -141,14 +151,15 @@ const ATTR = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g
 
 async function rewriteTag(m: RegExpExecArray, run: Run): Promise<string> {
   const name = m[1]!.toLowerCase()
-  const attrs: { name: string; value: string | null }[] = [...(m[2] ?? "").matchAll(ATTR)].map(
-    (a) => ({
-      name: a[1]!.toLowerCase(),
-      value: a[2] !== undefined || a[3] !== undefined || a[4] !== undefined
+  const attrs: { name: string; value: string | null }[] = [
+    ...(m[2] ?? "").matchAll(ATTR),
+  ].map((a) => ({
+    name: a[1]!.toLowerCase(),
+    value:
+      a[2] !== undefined || a[3] !== undefined || a[4] !== undefined
         ? decode(a[2] ?? a[3] ?? a[4] ?? "")
         : null,
-    }),
-  )
+  }))
   const get = (n: string) => attrs.find((a) => a.name === n)?.value ?? null
 
   if (name === "link") {
@@ -199,8 +210,10 @@ async function rewriteTag(m: RegExpExecArray, run: Run): Promise<string> {
 }
 
 async function rewriteSegment(html: string, run: Run): Promise<string> {
-  const styled = await replaceAsync(html, /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, async (m) =>
-    `${m[1]}${await rewriteCss(m[2]!, undefined, run)}${m[3]}`,
+  const styled = await replaceAsync(
+    html,
+    /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi,
+    async (m) => `${m[1]}${await rewriteCss(m[2]!, undefined, run)}${m[3]}`,
   )
   return replaceAsync(styled, TAG, (m) => rewriteTag(m, run))
 }
@@ -214,7 +227,11 @@ export async function inlineAssets(
   fetchAsset: FetchAsset,
   limits: { max?: number; concurrent?: number } = {},
 ): Promise<string> {
-  const run = makeRun(fetchAsset, limits.max ?? MAX_ASSETS, limits.concurrent ?? MAX_CONCURRENT)
+  const run = makeRun(
+    fetchAsset,
+    limits.max ?? MAX_ASSETS,
+    limits.concurrent ?? MAX_CONCURRENT,
+  )
   const segments = html.split(/(<!--[\s\S]*?-->)/)
   const done = await Promise.all(
     segments.map((s, i) => (i % 2 === 1 ? s : rewriteSegment(s, run))),

@@ -1,7 +1,8 @@
-import { normaliseError, type ApiError } from "./api-error"
+import { normaliseError, type ApiError, ApiRequestError } from "./api-error"
 import "server-only"
 import { auth } from "@clerk/nextjs/server"
 import { safeFailure } from "@/lib/failure"
+import { isReachablePath } from "@/lib/api-path"
 import { clientContextHeader } from "@/lib/client-context"
 import {
   previewFor,
@@ -79,16 +80,7 @@ function baseUrl(): string {
 // that guarantees its shape - see ./api-error - and a dozen files import it
 // from here.
 export type { ApiError }
-
-export class ApiRequestError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: ApiError,
-  ) {
-    super(body.message)
-    this.name = "ApiRequestError"
-  }
-}
+export { ApiRequestError } from "./api-error"
 
 interface RequestOptions {
   method?: string
@@ -227,18 +219,11 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
    * parameters this function never saw, past any validation the API does on the
    * ones it expects.
    */
-  if (
-    !path.startsWith("/console/") ||
-    path.includes("..") ||
-    path.includes("//") ||
-    path.includes("?") ||
-    path.includes("#") ||
-    path.includes("\\")
-  ) {
+  if (!isReachablePath(path)) {
     throw new ApiRequestError(400, {
       statusCode: 400,
       name: "invalid_path",
-      message: `Refused to request ${path}: the console may only call /console/*.`,
+      message: `Refused to request ${path}: the console may only call /console/* and /mailboxes/*.`,
     })
   }
 

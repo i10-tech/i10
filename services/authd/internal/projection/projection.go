@@ -44,6 +44,14 @@ type Account struct {
 	// row as the bind and acted on ahead of the credential cache.
 	PaymentHold bool
 
+	// Deleting is true while an owner or admin has the mailbox in its deletion
+	// grace (`authd.accounts.deleting_at`): the mailbox keeps receiving mail until
+	// the purge, and NO BIND succeeds until a restore. Its own column and not
+	// Suspended, because every resume path clears `suspended_at` and a deletion
+	// must survive all of them. Read from the bind's row and acted on ahead of the
+	// credential cache, like the others.
+	Deleting bool
+
 	// Banned and Locked are Clerk's own flags for the user, projected by the
 	// webhook. ⚠ CLERK'S verify_password ANSWERS YES FOR BOTH (probed against its
 	// dev instance 2026-11-07, see `authd.accounts.banned` in apps/api/src/db/
@@ -52,6 +60,20 @@ type Account struct {
 	// Clerk says nothing when it does, so the query reads the clock.
 	Banned bool
 	Locked bool
+
+	// DomainNotHosted is true when the workspace no longer hosts mailboxes on the
+	// account's domain: hosting was switched off, the workspace lost the name to
+	// another that proved it, or its proof lapsed (#406). Read as
+	// `core.mailbox_domain_refused(tenant_id, domain)` in the SAME query as the
+	// account, so it is never older than the row the bind holds.
+	//
+	// ⚠ A DOMAIN-LEVEL GATE, NOT A STAMP ON THE MAILBOX. Nothing is written to
+	// `authd.accounts` when hosting goes off, so `suspended_at` stays what an admin
+	// set and switching hosting back on reopens every login that was not
+	// suspended by hand. Like Suspended the mailbox still resolves as a recipient
+	// (Stalwart's own Domain object decides whether mail is accepted); only the
+	// BIND is refused, ahead of the credential cache.
+	DomainNotHosted bool
 
 	// SSORequired is true when the account's address is on a domain an active
 	// connection REQUIRES SSO for (`authd.required_domains`). A managed account

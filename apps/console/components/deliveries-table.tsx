@@ -409,7 +409,10 @@ function DeliveryRows({
                         </Bone>
                       </ListCell>
                     )}
-                    <ListCell hideBelow="md" className="tabular text-right text-xs text-muted-foreground">
+                    <ListCell
+                      hideBelow="md"
+                      className="tabular text-right text-xs text-muted-foreground"
+                    >
                       <Bone id="attempts" width={24} lineHeight={16} align="end">
                         {delivery?.attempts}
                       </Bone>

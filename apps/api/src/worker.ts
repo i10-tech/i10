@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 import { randomUUID } from "node:crypto"
 import { SESv2Client } from "@aws-sdk/client-sesv2"
 import { Worker } from "groupmq"
@@ -5,6 +6,7 @@ import pino from "pino"
 import { createQueueClient } from "./cache/redis.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { captureError, flushObservability, initObservability } from "./observability.js"
 import {
   createSendQueue,
@@ -16,18 +18,19 @@ import { postgresMetering } from "./metering/service.js"
 import { resilient } from "./send/metering.js"
 import { SmtpTransport } from "@upyo/smtp"
 import { resolveRoute, type DeliveryRoute } from "./domains/route.js"
+import { feedbackIdKey, feedbackTokens } from "./send/feedback-id.js"
 import { sesTransport } from "./send/ses.js"
 import { systemTenancy, withSystemTenant } from "./send/system-tenant.js"
 import { sesIdentity } from "./domains/identity.js"
 import { configurationSetsFor } from "./send/configuration-sets.js"
 import { domainSendingLookup } from "./send/signing-key.js"
+import { sealerFromEnv } from "./crypto/sealer.js"
 import { stalwartTransport } from "./send/stalwart.js"
 import { relayConfig } from "./send/relay.js"
 import type { Transport } from "./send/transport.js"
 import { startWebhookEngine } from "./webhooks/engine.js"
 import { transformer } from "./webhooks/transform.js"
 import { parseAllowList } from "./webhooks/egress.js"
-import { secretBox } from "./webhooks/signing.js"
 import { databaseOps, type ClaimedMessage } from "./worker/db-adapter.js"
 import { objectStoreFrom } from "./content/object-store.js"
 import { handleBatch } from "./worker/handle-batch.js"
@@ -55,6 +58,13 @@ import {
 } from "./mailboxes/migration.js"
 import { mailboxJobStore } from "./mailboxes/jobs.js"
 import { jmapAs } from "./mail/jmap-as.js"
+import { screenBatch, screenStore, type ScreenDeps } from "./content/screen.js"
+import { recordContent } from "./risk/content.js"
+import { judgeModels } from "./risk/judge/config.js"
+import { judgementStore } from "./risk/judge/store.js"
+import { scoreTenant } from "./risk/runner.js"
+import { riskRuntime } from "./risk/runtime.js"
+import { riskTrigger } from "./risk/trigger.js"
 
 /**
  * The send worker.
@@ -73,7 +83,7 @@ import { jmapAs } from "./mail/jmap-as.js"
  */
 
 const log = pino({ name: "i10-worker" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,
@@ -129,6 +139,22 @@ queueRedis.on("error", (err: Error) => log.error({ err }, "send queue unavailabl
 
 const sesClient = new SESv2Client({ region: env.AWS_REGION })
 
+// ⚠ ONE DERIVATION FOR BOTH ROUTES. Without its key mail still sends, only
+// without a workspace token in its Feedback-ID - see send/feedback-id.ts. A
+// warning rather than a refusal, since the loss is Gmail complaint detail, not
+// mail; env.ts requires the key in production.
+const feedbackToken = env.FEEDBACK_ID_KEY
+  ? feedbackTokens(feedbackIdKey(env.FEEDBACK_ID_KEY))
+  : undefined
+if (!feedbackToken) {
+  log.warn(
+    "FEEDBACK_ID_KEY unset - mail sends without a per-workspace Feedback-ID, so Gmail complaints cannot be attributed to a workspace",
+  )
+}
+
+/** Null without `SEAL_KEYS`: no DKIM key or webhook secret can be opened. */
+const secrets = sealerFromEnv(env)
+
 /*
  * ⚠ OUR OWN MAIL NAMES ITS TENANT HERE, NOT IN THE CLAIM (#206). Customer mail
  * takes its tenant from its domain row; ours has none by design - its sender
@@ -139,6 +165,7 @@ const ses = withSystemTenant(
   sesTransport({
     client: sesClient,
     configurationSetName: env.SES_CONFIGURATION_SET,
+    feedbackToken,
   }),
   systemTenancy({
     from: env.AUTH_EMAIL_FROM,
@@ -173,18 +200,17 @@ let relayPool: SmtpTransport | null = null
  * `deferred` keeps the message in the queue with its attempt counted, so
  * nothing is lost and the backlog is what raises the alarm.
  *
- * ⚠ AND IT NEEDS `WEBHOOK_SECRET_KEY` AS MUCH AS IT NEEDS AN SMTP HOST. That is
- * what seals the DKIM private keys; without it they cannot be opened, and a
- * message signed with nothing is one that fails DMARC at the recipient.
+ * ⚠ AND IT NEEDS `SEAL_KEYS` AS MUCH AS IT NEEDS AN SMTP HOST. That is what
+ * seals the DKIM private keys; without it they cannot be opened, and a message
+ * signed with nothing is one that fails DMARC at the recipient.
  */
 function directTransport(): Transport {
   const host = env.STALWART_RELAY_HOST
 
-  if (!host || !env.WEBHOOK_SECRET_KEY) {
-    const missing = [
-      !host && "STALWART_RELAY_HOST",
-      !env.WEBHOOK_SECRET_KEY && "WEBHOOK_SECRET_KEY",
-    ].filter(Boolean)
+  if (!host || !secrets) {
+    const missing = [!host && "STALWART_RELAY_HOST", !secrets && "SEAL_KEYS"].filter(
+      Boolean,
+    )
 
     log.warn({ missing }, "DIRECT ROUTE UNAVAILABLE - messages routed direct will wait")
     return {
@@ -208,6 +234,7 @@ function directTransport(): Transport {
 
   return stalwartTransport({
     mailer: relayPool,
+    feedbackToken,
     // ⚠ SMTP CAN TAKE A MESSAGE AND STILL REFUSE SOME OF ITS RECIPIENTS, and
     // before upyo we could not see it happen. `warn` rather than `error`: the
     // message was delivered to everyone else, so this is not a failed send - it
@@ -221,10 +248,7 @@ function directTransport(): Transport {
     // label is per domain (`core.domains.mail_from_subdomain`, which SES uses
     // too). The transport builds the VERP envelope from it; see
     // docs/decisions/mail-routing.md, "One return path".
-    domainSending: domainSendingLookup({
-      db,
-      secrets: secretBox(env.WEBHOOK_SECRET_KEY),
-    }),
+    domainSending: domainSendingLookup({ db, secrets }),
   })
 }
 
@@ -273,6 +297,63 @@ const ops = databaseOps({
   store: objectStoreFrom(env),
 })
 
+/**
+ * Judging before the first send (content/screen.ts), built once at start.
+ *
+ * ⚠ THE RISK ENGINE ONLY WHEN THE SCREEN CAN RUN: risk on, the screen on and a
+ * judge configured. It is the jobs' own construction (risk/runtime.ts), so a
+ * hold the re-score places is the hourly run's hold; it costs two more Redis
+ * connections and a few queries at start, never anything per batch. A runtime
+ * that cannot be built leaves the worker sending, unscreened.
+ */
+const screenRuntime =
+  env.RISK_ENABLED && env.RISK_SCREEN_BEFORE_SEND && judgeModels(env)
+    ? await riskRuntime({ env, db, sql, log }).catch((error: unknown) => {
+        log.error({ err: error }, "pre-send screen unavailable; sending unscreened")
+        captureError(error, { phase: "screen-boot" })
+        return null
+      })
+    : null
+const risk = screenRuntime?.risk
+// The farm tripwire, when the screen records a batch's fingerprints.
+const tripwire = risk ? riskTrigger(risk.deps) : null
+const screenDeps: ScreenDeps = {
+  ...(risk?.deps.judge ? { judge: risk.deps.judge } : {}),
+  judgements: judgementStore(db),
+  settings: {
+    enabled: env.RISK_SCREEN_BEFORE_SEND,
+    untrustedDays: env.RISK_SCREEN_UNTRUSTED_DAYS,
+    maxGroups: env.RISK_SCREEN_MAX_GROUPS,
+    deadlineMs: env.RISK_SCREEN_DEADLINE_MS,
+  },
+  riskEnabled: env.RISK_ENABLED,
+  ...(risk?.deps.exempt ? { exempt: risk.deps.exempt } : {}),
+  ...(risk ? { trust: risk.cachedTrust } : {}),
+  ...(screenRuntime ? { seenRedis: screenRuntime.cache } : {}),
+  ...screenStore(db),
+  record: async (tenantId, items) => {
+    if (!screenRuntime || !risk || !tripwire) return
+    await recordContent(tenantId, items, {
+      db,
+      redis: screenRuntime.cache,
+      threshold: env.RISK_FARM_TRIPWIRE,
+      rescore: (ids, why) => tripwire.rescore(ids, why),
+      trust: risk.cachedTrust,
+    })
+  },
+  rescore: async (tenantId) =>
+    risk
+      ? (await scoreTenant(tenantId, "first-send", risk.deps)).status === "scored"
+      : false,
+  log,
+}
+const screen = (tenantId: string, messages: readonly ClaimedMessage[]) =>
+  screenBatch(
+    tenantId,
+    messages.map((m) => ({ ...m, html: m.html ?? null, text: m.text ?? null })),
+    screenDeps,
+  )
+
 function startWorker(cls: SendClass) {
   const queue = createSendQueue({
     redis: queueRedis,
@@ -296,6 +377,7 @@ function startWorker(cls: SendClass) {
         // already have left. It was silently discarded before this.
         reportError: captureError,
         concurrency: env.WORKER_CONCURRENCY,
+        screen,
       }),
     // ⚠ BATCHES AT ONCE, NOT MESSAGES AT ONCE - TWO DIFFERENT NUMBERS THAT BOTH
     // WANT TO BE CALLED CONCURRENCY. `WORKER_CONCURRENCY` above is the fan-out
@@ -350,20 +432,20 @@ function startWorker(cls: SendClass) {
  * shutdown, a Redis reconnect or a database pool problem has to be got right.
  *
  * ⚠ AND IT IS ABSENT RATHER THAN BROKEN WHEN THERE IS NO KEY. Without
- * `WEBHOOK_SECRET_KEY` the stored secrets cannot be decrypted, so there is
- * nothing to sign with - starting a worker that would fail every delivery
- * would fill the failure counters and disable every customer's endpoint.
+ * `SEAL_KEYS` the stored secrets cannot be decrypted, so there is nothing to
+ * sign with - starting a worker that would fail every delivery would fill the
+ * failure counters and disable every customer's endpoint.
  */
 function startWebhookWorker() {
-  if (!env.WEBHOOK_SECRET_KEY) {
-    log.warn({}, "WEBHOOK DELIVERY DISABLED - no WEBHOOK_SECRET_KEY")
+  if (!secrets) {
+    log.warn({}, "WEBHOOK DELIVERY DISABLED - no SEAL_KEYS")
     return null
   }
 
   const engine = startWebhookEngine({
     db,
     redis: queueRedis,
-    secrets: secretBox(env.WEBHOOK_SECRET_KEY),
+    secrets,
     log,
     name: `${workerId}:webhooks`,
     concurrency: env.WEBHOOK_CONCURRENCY,
@@ -451,6 +533,9 @@ function startMailboxMigrationWorker() {
     )
     return null
   }
+  if (!store.objectKeys) {
+    log.warn({}, "OBJECT_KEYS is not set: imports run, and an export fails its job")
+  }
 
   const jmap = jmapAs({
     baseUrl: env.STALWART_URL,
@@ -523,6 +608,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
         Promise.allSettled([
           sql.end({ timeout: 10 }),
           queueRedis.quit(),
+          screenRuntime?.close() ?? Promise.resolve(),
           // Idle relay connections, closed politely rather than dropped.
           relayPool?.closeAllConnections() ?? Promise.resolve(),
         ]),

@@ -12,6 +12,22 @@ const config: NextConfig = {
   transpilePackages: ["@repo/ui"],
   reactStrictMode: true,
   poweredByHeader: false,
+  // The fonts our own email templates load (apps/api/src/templates/shared.ts).
+  // A font is only applied across origins when the response allows it, and a
+  // mail client is always another origin, so without this header the files
+  // would download and then be thrown away. They are public open-licence fonts
+  // with fixed names, hence the open origin and the long cache.
+  async headers() {
+    return [
+      {
+        source: "/email/fonts/:file",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+    ]
+  },
 }
 
 export default config

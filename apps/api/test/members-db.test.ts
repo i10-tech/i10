@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { memberStore } from "../src/console/members-db.js"
 
 /**
@@ -27,7 +26,7 @@ suite("member store", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id, clerk_org_id)
                 values (${acme}, ${`m-${acme.slice(0, 8)}`}, 'Acme', 'u_a', ${org}),
                        (${rival}, ${`m-${rival.slice(0, 8)}`}, 'Rival', 'u_r', null)`

@@ -57,9 +57,9 @@ commit-msg: that message does not match this repository's rules.
 
   <type>(<scope>): <subject>
 
-  type   feat fix docs style refactor perf test build ci chore revert
+  type   feat fix docs style refactor perf test build ci chore revert infra
   scope  api auth console web docs sdk ui contracts emails metering
-         authd billing send stalwart bulwark infra ci deps repo
+         authd billing send dns sso stalwart bulwark infra ci deps repo
          (optional - `chore: …` with no scope is fine)
 
 The scope list is in commitlint.config.mjs, with a note on each of the

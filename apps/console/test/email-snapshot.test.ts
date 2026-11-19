@@ -6,7 +6,8 @@ import { inlineAssets, type AssetKind, type FetchAsset } from "../lib/email-snap
  * replaces it, and what happens when an asset cannot be had.
  */
 
-const PIXEL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+const PIXEL =
+  "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
 
 function fake(files: Record<string, string | null>) {
   const calls: [string, AssetKind][] = []
@@ -19,7 +20,9 @@ function fake(files: Record<string, string | null>) {
 
 describe("inlineAssets", () => {
   it("inlines an <img> and drops its srcset", async () => {
-    const { fetchAsset } = fake({ "https://cdn.test/a.png": "data:image/png;base64,AAA" })
+    const { fetchAsset } = fake({
+      "https://cdn.test/a.png": "data:image/png;base64,AAA",
+    })
     const out = await inlineAssets(
       '<img src="https://cdn.test/a.png" srcset="https://cdn.test/a2.png 2x" width="40" alt="x &amp; y">',
       fetchAsset,
@@ -29,7 +32,10 @@ describe("inlineAssets", () => {
 
   it("keeps the box of a failed image with a transparent pixel", async () => {
     const { fetchAsset } = fake({})
-    const out = await inlineAssets('<img width="120" height="30" src="https://cdn.test/gone.png">', fetchAsset)
+    const out = await inlineAssets(
+      '<img width="120" height="30" src="https://cdn.test/gone.png">',
+      fetchAsset,
+    )
     expect(out).toContain(`src="${PIXEL}"`)
     expect(out).toContain('width="120"')
     expect(out).toContain('height="30"')
@@ -80,7 +86,7 @@ describe("inlineAssets", () => {
         `.h{background:url("https://cdn.test/h.png")}</style>`,
       fetchAsset,
     )
-    expect(out).toContain("src:url(data:font/woff2;base64,FFF) format(\"woff2\")")
+    expect(out).toContain('src:url(data:font/woff2;base64,FFF) format("woff2")')
     expect(out).toContain("src:url(data:,)")
     expect(out).toContain("url(data:image/png;base64,HHH)")
     expect(calls.find((c) => c[0].endsWith("a.woff2"))?.[1]).toBe("font")
@@ -107,7 +113,12 @@ describe("inlineAssets", () => {
 
   it("drops a stylesheet link it could not fetch", async () => {
     const { fetchAsset } = fake({})
-    expect(await inlineAssets('<link rel="stylesheet" href="https://css.test/x.css">', fetchAsset)).toBe("")
+    expect(
+      await inlineAssets(
+        '<link rel="stylesheet" href="https://css.test/x.css">',
+        fetchAsset,
+      ),
+    ).toBe("")
   })
 
   it("ignores comments, such as Outlook's conditional blocks", async () => {
@@ -123,7 +134,10 @@ describe("inlineAssets", () => {
     await inlineAssets(same, fetchAsset)
     expect(calls).toHaveLength(1)
 
-    const many = Array.from({ length: 60 }, (_, i) => `<img src="https://cdn.test/${i}.png">`).join("")
+    const many = Array.from(
+      { length: 60 },
+      (_, i) => `<img src="https://cdn.test/${i}.png">`,
+    ).join("")
     const capped = fake({})
     const out = await inlineAssets(many, capped.fetchAsset)
     expect(capped.calls).toHaveLength(40)
@@ -140,7 +154,10 @@ describe("inlineAssets", () => {
       active--
       return "data:image/png;base64,AAA"
     }
-    const many = Array.from({ length: 30 }, (_, i) => `<img src="https://cdn.test/${i}.png">`).join("")
+    const many = Array.from(
+      { length: 30 },
+      (_, i) => `<img src="https://cdn.test/${i}.png">`,
+    ).join("")
     await inlineAssets(many, fetchAsset)
     expect(peak).toBe(6)
   })

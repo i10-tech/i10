@@ -27,11 +27,15 @@
 export interface DesiredRecord {
   /** Fully qualified, no trailing dot. e.g. `mail.example.com`. */
   name: string
-  type: "NS" | "TXT" | "MX" | "CNAME" | "A"
+  type: "NS" | "TXT" | "MX" | "CNAME" | "A" | "SRV"
   value: string
   ttl: number
-  /** MX only. */
+  /** MX and SRV. */
   priority?: number
+  /** SRV only. */
+  weight?: number
+  /** SRV only. */
+  port?: number
 }
 
 /** A record already in the zone that the desired set would shadow or replace. */

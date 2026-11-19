@@ -92,7 +92,8 @@ function ours(url: string): boolean {
 
 /** The type to inline as: the CDN's header, or the font's extension when that is generic. */
 function inlineType(url: string, header: string | null): string | null {
-  if (header && header !== "application/octet-stream") return header.split(";")[0]!.trim()
+  if (header && header !== "application/octet-stream")
+    return header.split(";")[0]!.trim()
   const ext = new URL(url).pathname.split(".").pop()?.toLowerCase() ?? ""
   return FONT_TYPES[ext] ?? null
 }

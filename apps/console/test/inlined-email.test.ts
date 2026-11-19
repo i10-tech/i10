@@ -26,7 +26,12 @@ afterEach(() => {
 describe("startInlining", () => {
   it("publishes only the inlined email when it is ready in time", async () => {
     const seen: string[] = []
-    start("raw", async () => "inlined", (h) => seen.push(h), 20)
+    start(
+      "raw",
+      async () => "inlined",
+      (h) => seen.push(h),
+      20,
+    )
     await tick()
     await new Promise((r) => setTimeout(r, 40))
     expect(seen).toEqual(["inlined"])
@@ -35,7 +40,12 @@ describe("startInlining", () => {
   it("shows the plain email when slow, then swaps to the inlined one", async () => {
     const d = deferred()
     const seen: string[] = []
-    start("raw", () => d.promise, (h) => seen.push(h), 10)
+    start(
+      "raw",
+      () => d.promise,
+      (h) => seen.push(h),
+      10,
+    )
     await new Promise((r) => setTimeout(r, 30))
     expect(seen).toEqual(["raw"])
     d.resolve("inlined")
@@ -45,7 +55,7 @@ describe("startInlining", () => {
 
   it("ignores a stale result once cancelled, slow timer included", async () => {
     const d = deferred()
-    const publish = mock((_: string) => {})
+    const publish = mock((html: string) => void html)
     const cancel = start("old", () => d.promise, publish, 10)
     cancel()
     d.resolve("old-inlined")
@@ -57,9 +67,19 @@ describe("startInlining", () => {
     const a = deferred()
     const b = deferred()
     const seen: string[] = []
-    const cancelA = start("a", () => a.promise, (h) => seen.push(h), 1000)
+    const cancelA = start(
+      "a",
+      () => a.promise,
+      (h) => seen.push(h),
+      1000,
+    )
     cancelA()
-    start("b", () => b.promise, (h) => seen.push(h), 1000)
+    start(
+      "b",
+      () => b.promise,
+      (h) => seen.push(h),
+      1000,
+    )
     b.resolve("b-inlined")
     a.resolve("a-inlined")
     await tick()
@@ -68,7 +88,12 @@ describe("startInlining", () => {
 
   it("falls back to the plain email when inlining fails", async () => {
     const seen: string[] = []
-    start("raw", () => Promise.reject(new Error("x")), (h) => seen.push(h), 1000)
+    start(
+      "raw",
+      () => Promise.reject(new Error("x")),
+      (h) => seen.push(h),
+      1000,
+    )
     await tick()
     expect(seen).toEqual(["raw"])
   })

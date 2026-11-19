@@ -1,6 +1,15 @@
+import { createHash } from "node:crypto"
 import { parse } from "tldts"
-import { countryLongitude } from "./geo.js"
-import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./types.js"
+import { describeFlags, isDecisive, parseVerdict } from "./link-verdict.js"
+import type {
+  Band,
+  Facts,
+  FarmPeer,
+  Hit,
+  JudgeSignal,
+  Rule,
+  SimilarityEvidence,
+} from "./types.js"
 
 /**
  * The rules (#170). Every one is a pure function of `Facts`, adds or
@@ -9,7 +18,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * ⚠ BUMP `RULESET_VERSION` WITH ANY CHANGE TO A NUMBER OR A RULE. Assessments
  * record it, and "the score moved because we changed the rules" has to be
  * distinguishable from "the customer changed behaviour" - in an appeal, and in
- * the model's training data.
+ * any later evaluation against labels.
  *
  * ⚠ EVERY RATE HAS A MINIMUM VOLUME. On 100 sends one complaint is 1%, which
  * would read as three times Gmail's limit. A rate that has not seen enough
@@ -23,7 +32,7 @@ import type { Band, Facts, FarmPeer, Hit, Rule, SimilarityEvidence } from "./typ
  * test/risk-scenarios.test.ts: a change must still catch every abuse scenario
  * and leave every legitimate one alone.
  */
-export const RULESET_VERSION = 3
+export const RULESET_VERSION = 8
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -47,8 +56,25 @@ function rule(
 const hit = (
   points: number,
   evidence: Hit["evidence"],
-  extra: { floor?: Band; freshAt?: Date } = {},
-): Hit => ({ points, evidence, ...extra })
+  extra: { floor?: Band; freshAt?: Date; keys?: readonly string[] } = {},
+): Hit => {
+  const { keys, ...rest } = extra
+  return {
+    points,
+    evidence,
+    ...rest,
+    ...(keys ? { keys: [...new Set(keys)].sort() } : {}),
+  }
+}
+
+/**
+ * An opaque, stable key for another workspace or person. The definers write
+ * the same digest (migration 0155), so no raw id of anybody else reaches a
+ * contribution: contributions are stored where the workspace itself can read
+ * them.
+ */
+export const digest = (id: string): string =>
+  createHash("sha256").update(id).digest("hex").slice(0, 16)
 
 /** The highest tier of a graded rule that applies, or null. */
 function graded<T>(tiers: readonly (readonly [boolean, T])[]): T | null {
@@ -57,6 +83,10 @@ function graded<T>(tiers: readonly (readonly [boolean, T])[]): T | null {
 }
 
 // ─── SES: the strongest signals there are ────────────────────────────────────
+
+/** One reputation finding: its type and when it opened, which a new episode never shares. */
+const findingKey = (x: { type: string; openedAt: Date }) =>
+  `finding:${x.type}:${x.openedAt.toISOString()}`
 
 const sesRules: Rule[] = [
   rule(
@@ -71,7 +101,11 @@ const sesRules: Rule[] = [
         ? hit(
             60,
             { pausedAt: pause.at.toISOString() },
-            { floor: "high", freshAt: pause.at },
+            {
+              floor: "high",
+              freshAt: pause.at,
+              keys: [`pause:${pause.at.toISOString()}`],
+            },
           )
         : null
     },
@@ -83,12 +117,27 @@ const sesRules: Rule[] = [
     "The workspace's SES tenant is paused right now",
     (f) =>
       f.ses.current === "disabled"
-        ? hit(40, { origin: f.ses.currentOrigin }, { floor: "elevated" })
+        ? hit(
+            40,
+            { origin: f.ses.currentOrigin },
+            {
+              floor: "elevated",
+              ...(f.ses.changedAt
+                ? { keys: [`disabled:${f.ses.changedAt.toISOString()}`] }
+                : {}),
+            },
+          )
         : null,
   ),
   rule("ses.paused.history", "provider_flag", "Paused by SES 31-180 days ago", (f) => {
     const old = f.ses.pauses.filter((p) => !within(p.at, 30, f.now))
-    return old.length > 0 ? hit(15, { pauses: old.length }) : null
+    return old.length > 0
+      ? hit(
+          15,
+          { pauses: old.length },
+          { keys: old.map((p) => `pause:${p.at.toISOString()}`) },
+        )
+      : null
   }),
   rule(
     "ses.finding.high.open",
@@ -97,7 +146,11 @@ const sesRules: Rule[] = [
     (f) => {
       const open = f.ses.findings.filter((x) => x.impact === "high" && !x.resolvedAt)
       return open.length > 0
-        ? hit(35, { types: open.map((x) => x.type).join(","), open: open.length })
+        ? hit(
+            35,
+            { types: open.map((x) => x.type).join(","), open: open.length },
+            { keys: open.map(findingKey) },
+          )
         : null
     },
   ),
@@ -109,7 +162,9 @@ const sesRules: Rule[] = [
       const recent = f.ses.findings.filter(
         (x) => x.impact === "high" && x.resolvedAt && within(x.openedAt, 30, f.now),
       )
-      return recent.length > 0 ? hit(15, { episodes: recent.length }) : null
+      return recent.length > 0
+        ? hit(15, { episodes: recent.length }, { keys: recent.map(findingKey) })
+        : null
     },
   ),
   rule(
@@ -119,7 +174,11 @@ const sesRules: Rule[] = [
     (f) => {
       const open = f.ses.findings.filter((x) => x.impact === "low" && !x.resolvedAt)
       return open.length > 0
-        ? hit(12, { types: open.map((x) => x.type).join(",") })
+        ? hit(
+            12,
+            { types: open.map((x) => x.type).join(",") },
+            { keys: open.map(findingKey) },
+          )
         : null
     },
   ),
@@ -127,7 +186,16 @@ const sesRules: Rule[] = [
     "ses.reinstated",
     "provider_flag",
     "Reinstated after a pause and still on SES's probation",
-    (f) => (f.ses.current === "reinstated" ? hit(10, {}) : null),
+    (f) =>
+      f.ses.current === "reinstated"
+        ? hit(
+            10,
+            {},
+            f.ses.changedAt
+              ? { keys: [`reinstated:${f.ses.changedAt.toISOString()}`] }
+              : {},
+          )
+        : null,
   ),
 ]
 
@@ -295,10 +363,10 @@ const behaviourRules: Rule[] = [
   rule(
     "history.demotions",
     "sending_pattern",
-    "Demoted to the strict tier twice or more in 90 days",
+    "Demoted to the strict tier by staff twice or more in 90 days",
     (f) =>
-      f.history.tierDemotions90d >= 2
-        ? hit(8, { demotions: f.history.tierDemotions90d })
+      f.history.staffDemotions90d >= 2
+        ? hit(8, { demotions: f.history.staffDemotions90d })
         : null,
   ),
   rule(
@@ -331,7 +399,13 @@ const domainRules: Rule[] = [
         [age <= 7, 25],
         [age <= 30, 12],
       ] as const)
-      return points === null ? null : hit(points, { domainAgeDays: Math.floor(age) })
+      return points === null
+        ? null
+        : hit(
+            points,
+            { domainAgeDays: Math.floor(age) },
+            { keys: f.domains.young.map((d) => `domain:${d}`) },
+          )
     },
   ),
   rule(
@@ -423,29 +497,6 @@ export function farmEvidence(
   }
 }
 
-export function behaviourEvidence(
-  signal: string,
-  f: Facts,
-): SimilarityEvidence | undefined {
-  const b = f.behaviour
-  if (!b) return undefined
-  return {
-    signal,
-    model: "behaviour-v1",
-    neighbours: b.labelled,
-    distinct_workspaces: b.labelled,
-    median_similarity: null,
-    best_similarity: null,
-    median_distance: round2(b.medianDistance),
-    nearest_distance: round2(b.nearestDistance),
-    confirmed_abuse_neighbours: b.abuse,
-    known_template_matches: f.similarity?.trusted.template ?? f.farm.trusted.template,
-    boilerplate_matches:
-      f.similarity?.trusted.boilerplate ?? f.farm.trusted.boilerplate,
-    boilerplate_match: null,
-  }
-}
-
 const withDetail = (h: Hit, detail: SimilarityEvidence | undefined): Hit =>
   detail ? { ...h, detail } : h
 
@@ -462,6 +513,8 @@ export const linkingFeatures = (p: Facts["farm"]["peers"][number]): number =>
     p.free && p.young,
   ].filter(Boolean).length
 
+const peerKey = (p: FarmPeer) => `peer:${digest(p.peer)}`
+
 const farmRules: Rule[] = [
   rule(
     "farm.cluster",
@@ -472,12 +525,13 @@ const farmRules: Rule[] = [
       const loose = f.farm.peers.filter((p) => linkingFeatures(p) === 1)
       const detail = farmEvidence("farm.cluster", f, [...linked, ...loose])
       const evidence = { linkedPeers: linked.length, loosePeers: loose.length }
+      const keys = [...linked, ...loose].map(peerKey)
       if (linked.length >= 4) {
-        return withDetail(hit(55, evidence, { floor: "high" }), detail)
+        return withDetail(hit(55, evidence, { floor: "high", keys }), detail)
       }
-      if (linked.length >= 2) return withDetail(hit(30, evidence), detail)
+      if (linked.length >= 2) return withDetail(hit(30, evidence, { keys }), detail)
       if (linked.length + loose.length >= 4)
-        return withDetail(hit(15, evidence), detail)
+        return withDetail(hit(15, evidence, { keys }), detail)
       return null
     },
   ),
@@ -489,7 +543,7 @@ const farmRules: Rule[] = [
       const held = f.farm.peers.filter((p) => p.held)
       return held.length > 0
         ? withDetail(
-            hit(35, { heldPeers: held.length }),
+            hit(35, { heldPeers: held.length }, { keys: held.map(peerKey) }),
             farmEvidence("farm.with_held", f, f.farm.peers),
           )
         : null
@@ -509,10 +563,14 @@ const identityRules: Rule[] = [
       if (!id) return null
       const held = id.heldDevicePeers + id.heldSubnetPeers
       return held > 0
-        ? hit(40, {
-            heldDevicePeers: id.heldDevicePeers,
-            heldSubnetPeers: id.heldSubnetPeers,
-          })
+        ? hit(
+            40,
+            {
+              heldDevicePeers: id.heldDevicePeers,
+              heldSubnetPeers: id.heldSubnetPeers,
+            },
+            { keys: id.heldPeerKeys },
+          )
         : null
     },
   ),
@@ -526,7 +584,13 @@ const identityRules: Rule[] = [
         [peers >= 3, 25],
         [peers >= 1, 8],
       ] as const)
-      return points === null ? null : hit(points, { devicePeers: peers })
+      return points === null
+        ? null
+        : hit(
+            points,
+            { devicePeers: peers },
+            { keys: f.identity?.devicePeerKeys ?? [] },
+          )
     },
   ),
   rule(
@@ -535,7 +599,13 @@ const identityRules: Rule[] = [
     "Many accounts signed up from the owner's network within a day",
     (f) => {
       const peers = f.identity?.subnetSignupPeers ?? 0
-      return peers >= 4 ? hit(15, { subnetSignupPeers: peers }) : null
+      return peers >= 4
+        ? hit(
+            15,
+            { subnetSignupPeers: peers },
+            { keys: f.identity?.subnetSignupPeerKeys ?? [] },
+          )
+        : null
     },
   ),
   rule("identity.tor", "account_security", "The owner used Tor", (f) =>
@@ -565,18 +635,55 @@ const identityRules: Rule[] = [
       return n >= 4 ? hit(8, { countries: n }) : null
     },
   ),
-  rule(
-    "identity.timezone_mismatch",
-    "account_security",
-    "The browser's timezone is far from the IP's country",
-    (f) => {
-      const id = f.identity
-      if (!id?.latestTimezone || !id.latestCountry) return null
-      const gap = timezoneGapHours(id.latestTimezone, id.latestCountry, f.now)
-      return gap !== null && gap >= 6 ? hit(3, { gapHours: gap }) : null
-    },
-  ),
 ]
+
+// ─── The content judge (risk/judge): shadow until replay has measured it ─────
+
+/**
+ * Proposed points per judge rule, and the floor for the identity signal.
+ *
+ * ⚠ PROPOSALS, ALL IN SHADOW. They are recorded with every score and move
+ * nothing; each is promoted on its own, by a code change and a
+ * `RULESET_VERSION` bump, once replay over the snapshots has shown what it
+ * would have done.
+ *
+ * ⚠ NEVER NEGATIVE. The judge reads mail the sender wrote, so its answers may
+ * add suspicion and must never take any away; `judgeRule` clamps at zero and
+ * the scenario tests prove no judged content lowers a score.
+ */
+export const JUDGE_POINTS = {
+  identity: 30,
+  phishing: 10,
+} as const
+export const IDENTITY_FLOOR: Band = "high"
+
+function judgeRule(signal: JudgeSignal, summary: string, floor?: Band): Rule {
+  return {
+    ...rule(`content.judge.${signal}`, "content", summary, (f) => {
+      const s = f.content?.signals[signal]
+      if (!s || s.contents === 0) return null
+      // ⚠ COUNTS ONLY IN THE EVIDENCE: it is stored where the workspace can
+      // read it, and a probability there is a score to tune against.
+      return hit(
+        Math.max(0, JUDGE_POINTS[signal]),
+        { contents: s.contents, messages: s.messages },
+        { keys: s.exacts.map((e) => `content:${e}`), ...(floor ? { floor } : {}) },
+      )
+    }),
+    mode: "shadow",
+  }
+}
+
+function judgeRules(): Rule[] {
+  return [
+    judgeRule(
+      "identity",
+      "The content judge found recent mail presenting itself as an organisation its sender domain does not belong to",
+      IDENTITY_FLOOR,
+    ),
+    judgeRule("phishing", "The content judge found recent mail that reads as phishing"),
+  ]
+}
 
 // ─── Content and links ───────────────────────────────────────────────────────
 
@@ -584,64 +691,39 @@ const contentRules: Rule[] = [
   rule(
     "links.unsafe",
     "unsafe_links",
-    "Mail linked to a host Google Web Risk lists as malware or phishing",
-    (f) =>
-      f.links.unsafe.length > 0
-        ? hit(
-            90,
-            {
-              hosts: f.links.unsafe
-                .slice(0, 5)
-                .map((l) => `${l.host} (${l.verdict})`)
-                .join(", "),
-            },
-            {
-              floor: "critical",
-              // ⚠ THE DAY THE LINK WAS SENT, NOT NOW: only mail sent after a
-              // staff release is evidence the person releasing never saw.
-              freshAt: new Date(
-                Math.max(
-                  ...f.links.unsafe.map((l) => Date.parse(`${l.day}T23:59:59Z`)),
-                ),
-              ),
-            },
-          )
-        : null,
+    "Mail linked to a host that Web Risk, or both DNS security resolvers, list as malware or phishing",
+    (f) => {
+      if (f.links.unsafe.length === 0) return null
+      const flagged = f.links.unsafe.map((l) => ({
+        ...l,
+        flags: parseVerdict(l.verdict),
+      }))
+      // ⚠ ONE LIST'S OPINION IS 45 POINTS AND NO FLOOR. Web Risk, or two
+      // independent lists agreeing, is 90 and critical; one resolver's false
+      // positive must not hold a customer's mail on its own.
+      const decisive = flagged.some((l) => isDecisive(l.flags))
+      return hit(
+        decisive ? 90 : 45,
+        {
+          hosts: flagged
+            .slice(0, 5)
+            .map((l) => `${l.host} (${describeFlags(l.flags)})`)
+            .join(", "),
+        },
+        {
+          ...(decisive ? { floor: "critical" as const } : {}),
+          keys: f.links.unsafe.map((l) => `host:${l.host}`),
+          // ⚠ THE DAY THE LINK WAS SENT, NOT NOW: only mail sent after a
+          // staff release is evidence the person releasing never saw.
+          freshAt: new Date(
+            Math.max(...f.links.unsafe.map((l) => Date.parse(`${l.day}T23:59:59Z`))),
+          ),
+        },
+      )
+    },
     true,
   ),
-  rule(
-    "content.classifier",
-    "content",
-    "A content classifier judged recent mail phishing or unsolicited bulk",
-    (f) => {
-      const p = f.content?.probability ?? 0
-      const points = graded([
-        [p >= 0.9, 30],
-        [p >= 0.75, 12],
-      ] as const)
-      return points === null
-        ? null
-        : hit(points, { probability: Math.round(p * 100) / 100 })
-    },
-  ),
-  rule(
-    "model",
-    "sending_pattern",
-    "The trained model's estimate that this workspace is abusive",
-    (f) => {
-      const p = f.model?.probability ?? 0
-      const points = graded([
-        [p >= 0.9, 20],
-        [p >= 0.7, 10],
-      ] as const)
-      return points === null
-        ? null
-        : hit(points, {
-            probability: Math.round(p * 100) / 100,
-            version: f.model!.version,
-          })
-    },
-  ),
+  ...judgeRules(),
 ]
 
 // ─── Earned trust: negative points ───────────────────────────────────────────
@@ -690,7 +772,7 @@ const actorRules: Rule[] = [
  * ⚠ MODEST POINTS ON PURPOSE. Embedding similarity is new here and has not
  * been calibrated on real traffic; it is evidence that adds up with other
  * evidence, never enough alone to hold anybody. The weights rise once labels
- * show how it performs - which is also when the model starts to weigh it.
+ * show how it performs.
  */
 const similarityRules: Rule[] = [
   rule(
@@ -701,11 +783,15 @@ const similarityRules: Rule[] = [
       const s = f.similarity
       if (!s || s.taintedSimilar === 0) return null
       return withDetail(
-        hit(s.taintedSimilar >= 2 ? 30 : 20, {
-          confirmedWorkspaces: s.taintedSimilar,
-          similarity: round2(s.bestTaintedSimilarity),
-          model: s.model,
-        }),
+        hit(
+          s.taintedSimilar >= 2 ? 30 : 20,
+          {
+            confirmedWorkspaces: s.taintedSimilar,
+            similarity: round2(s.bestTaintedSimilarity),
+            model: s.model,
+          },
+          { keys: s.taintedPeerKeys },
+        ),
         contentEvidence("content.like_confirmed_abuse", f),
       )
     },
@@ -718,30 +804,14 @@ const similarityRules: Rule[] = [
       const n = f.similarity?.youngFreeSimilar ?? 0
       return n >= 4
         ? withDetail(
-            hit(12, { youngFreeWorkspaces: n, model: f.similarity!.model }),
+            hit(
+              12,
+              { youngFreeWorkspaces: n, model: f.similarity!.model },
+              { keys: f.similarity!.youngFreePeerKeys },
+            ),
             contentEvidence("content.semantic_crowd", f),
           )
         : null
-    },
-  ),
-  rule(
-    "behaviour.like_abuse",
-    "sending_pattern",
-    "Behaves like workspaces that turned out to be abusive",
-    (f) => {
-      const b = f.behaviour
-      if (!b || b.labelled < 5) return null
-      const share = b.abuse / b.labelled
-      const points = graded([
-        [share >= 0.7, 20],
-        [share >= 0.5, 8],
-      ] as const)
-      return points === null
-        ? null
-        : withDetail(
-            hit(points, { abuseNeighbours: b.abuse, labelledNeighbours: b.labelled }),
-            behaviourEvidence("behaviour.like_abuse", f),
-          )
     },
   ),
 ]
@@ -851,44 +921,4 @@ export function registrable(host: string): string | null {
 /** The subdomain labels in front of the registrable domain, if any. */
 export function subdomainOf(host: string): string | null {
   return parse(host).subdomain || null
-}
-
-/**
- * How far the browser's timezone is from where the IP's country is, in hours.
- *
- * ⚠ WEAK ON PURPOSE. It compares the zone's current UTC offset with the
- * country centre's solar offset, which is off by hours for wide countries -
- * hence the six-hour threshold and three points. It only matters in company.
- */
-export function timezoneGapHours(
-  tz: string,
-  country: string,
-  now: Date,
-): number | null {
-  const offset = zoneOffsetHours(tz, now)
-  const lon = countryLongitude(country)
-  if (offset === null || lon === null) return null
-  const solar = lon / 15
-  let gap = Math.abs(offset - solar)
-  if (gap > 12) gap = 24 - gap
-  return Math.round(gap)
-}
-
-function zoneOffsetHours(tz: string, now: Date): number | null {
-  try {
-    const name = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "shortOffset",
-    })
-      .formatToParts(now)
-      .find((p) => p.type === "timeZoneName")?.value
-    if (!name) return null
-    const m = /GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?/.exec(name)
-    if (!m) return null
-    if (!m[1]) return 0
-    const sign = m[1] === "-" ? -1 : 1
-    return sign * (Number(m[2]) + Number(m[3] ?? 0) / 60)
-  } catch {
-    return null
-  }
 }

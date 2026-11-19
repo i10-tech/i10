@@ -128,7 +128,7 @@ spec:
       # and `records.auth`. A read-only grant produces a server that starts,
       # answers, and then fails at whichever of those it reaches first - which
       # is a failure mode that looks like a corrupt zone. The grants themselves
-      # live in apps/api/drizzle/0040_pdns_role_grants.sql; migration 0023
+      # live in apps/api/drizzle/*_pdns_role_grants/migration.sql; migration 0023
       # wrote them out in a comment and deferred them to this moment.
       - name: pdns
         ensure: present

@@ -1,0 +1,115 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "c84d23ce-31f4-485d-bf2a-717db0bd95ba",
+  "prevIds": [
+    "b3eb4728-899c-4078-8726-2f7a716a8572"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "headers"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.headers",
+        "n|col|core.webhook_endpoints.headers",
+        "e|col|core.webhook_endpoints.headers"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "filter_domains"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.filter_domains",
+        "n|col|core.webhook_endpoints.filter_domains",
+        "e|col|core.webhook_endpoints.filter_domains"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "webhook_endpoints",
+        "filter_tags"
+      ],
+      "writes": [
+        "s|col|core.webhook_endpoints.filter_tags",
+        "n|col|core.webhook_endpoints.filter_tags",
+        "e|col|core.webhook_endpoints.filter_tags"
+      ],
+      "reads": [
+        "n|tbl|core.webhook_endpoints",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "headers",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "filter_domains",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 1,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "webhook_endpoints",
+        "name": "filter_tags",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

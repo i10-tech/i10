@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { marker, resolveTemplateSend } from "@repo/templates"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import type { Renderer } from "../src/templates/renderer.js"
 import {
   fileSetHash,
@@ -50,7 +49,7 @@ suite("templates", () => {
   beforeAll(() => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    store = templateStore(drizzle(app, { schema }) as unknown as Database)
+    store = templateStore(drizzle({ client: app }) as unknown as Database)
   })
   afterAll(async () => {
     if (tenants.length) await owner`delete from core.tenants where id = any(${tenants})`
@@ -333,7 +332,7 @@ suite("templates", () => {
       },
     })
     try {
-      const cached = templateStore(drizzle(counted, { schema }) as unknown as Database)
+      const cached = templateStore(drizzle({ client: counted }) as unknown as Database)
       const t = await workspace()
       const created = await cached.create(t, { name: "cached" })
       if ("conflict" in created) throw new Error("conflict")
@@ -420,7 +419,7 @@ suite("templates", () => {
   it("stores a template image once per workspace, public, and deletes it with the workspace (#244)", async () => {
     const bucket = memoryStore()
     const assets = templateAssetStore({
-      db: drizzle(app, { schema }) as unknown as Database,
+      db: drizzle({ client: app }) as unknown as Database,
       store: bucket,
       publicUrl: "https://assets.test/",
     })
@@ -474,7 +473,7 @@ suite("template folders, defaults and fallbacks", () => {
   beforeAll(() => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     app = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    store = templateStore(drizzle(app, { schema }) as unknown as Database)
+    store = templateStore(drizzle({ client: app }) as unknown as Database)
   })
   afterAll(async () => {
     if (tenants.length) await owner`delete from core.tenants where id = any(${tenants})`
@@ -525,9 +524,12 @@ suite("template folders, defaults and fallbacks", () => {
       ids.push(made.id)
       await new Promise((r) => setTimeout(r, 5))
     }
-    const listed = async () =>
-      (await store.folders(t)).find((f) => f.id === folder.id)!
-    expect((await listed()).preview.map((p) => p.id)).toEqual([ids[3]!, ids[2]!, ids[1]!])
+    const listed = async () => (await store.folders(t)).find((f) => f.id === folder.id)!
+    expect((await listed()).preview.map((p) => p.id)).toEqual([
+      ids[3]!,
+      ids[2]!,
+      ids[1]!,
+    ])
     expect((await listed()).templates).toBe(4)
 
     // An edit moves a template to the front, and its stamp moves with it.
@@ -539,7 +541,11 @@ suite("template folders, defaults and fallbacks", () => {
 
     // Gone from its repository: left out, the next one steps up.
     await owner`update core.templates set removed_at = now() where id = ${ids[0]!}`
-    expect((await listed()).preview.map((p) => p.id)).toEqual([ids[3]!, ids[2]!, ids[1]!])
+    expect((await listed()).preview.map((p) => p.id)).toEqual([
+      ids[3]!,
+      ids[2]!,
+      ids[1]!,
+    ])
 
     const one = await store.renameFolder(t, folder.id, "Newest 2")
     expect(one && "preview" in one && one.preview).toHaveLength(3)

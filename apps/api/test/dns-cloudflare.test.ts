@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { cloudflareWriter } from "../src/dns/providers/cloudflare.js"
+import { digitalOceanWriter } from "../src/dns/providers/digitalocean.js"
+import { hetznerWriter } from "../src/dns/providers/hetzner.js"
 import { DnsWriteError, type DesiredRecord, type RemoteZone } from "../src/dns/port.js"
 
 /**
@@ -465,6 +467,63 @@ describe("what gets sent to Cloudflare", () => {
     expect(posts[0]?.body).toMatchObject({ priority: 10 })
     expect(posts[1]?.body).not.toHaveProperty("priority")
   })
+
+  it("sends SRV records using Cloudflare's data: { priority, weight, port, target } shape", async () => {
+    const seen = stub((url) => (url.includes("dns_records?") ? ok([]) : ok({})))
+    await writer.publish(token, ZONE, [
+      want({
+        name: "_imaps._tcp.example.com",
+        type: "SRV",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 993,
+      }),
+    ])
+    const post = seen.find((s) => s.method === "POST")
+    expect(post?.body).toEqual({
+      name: "_imaps._tcp.example.com",
+      type: "SRV",
+      ttl: 300,
+      data: {
+        priority: 0,
+        weight: 1,
+        port: 993,
+        target: "mail.i10.tech",
+      },
+    })
+  })
+
+  it("matches an existing Cloudflare SRV record by data.target without duplicating", async () => {
+    const seen = stub((url) =>
+      url.includes("dns_records?")
+        ? ok([
+            cf({
+              id: "srv-1",
+              type: "SRV",
+              name: "_imaps._tcp.example.com",
+              content: "0\t1\t993\tmail.i10.tech",
+              data: { priority: 0, weight: 1, port: 993, target: "mail.i10.tech." },
+            }),
+          ])
+        : ok({}),
+    )
+
+    const outcome = await writer.publish(token, ZONE, [
+      want({
+        name: "_imaps._tcp.example.com",
+        type: "SRV",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 993,
+      }),
+    ])
+
+    expect(outcome.unchanged).toHaveLength(1)
+    expect(outcome.created).toEqual([])
+    expect(seen.some((s) => s.method === "POST")).toBe(false)
+  })
 })
 
 describe("when Cloudflare refuses", () => {
@@ -528,5 +587,61 @@ describe("when Cloudflare refuses", () => {
     const seen = stub(() => ok([]))
     await writer.zones({ token: "stub-pasted" })
     expect(seen[0]).toBeDefined()
+  })
+})
+
+describe("SRV in DigitalOcean and Hetzner", () => {
+  it("publishes SRV to DigitalOcean with priority, weight, port, and trailing dot on data", async () => {
+    const seen = stub((url, method) =>
+      method === "GET" && url.includes("/records")
+        ? { body: { domain_records: [], links: {} } }
+        : { body: {} },
+    )
+    await digitalOceanWriter().publish(token, ZONE, [
+      want({
+        name: "_submissions._tcp.example.com",
+        type: "SRV",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 465,
+      }),
+    ])
+    const post = seen.find((s) => s.method === "POST")
+    expect(post?.body).toEqual({
+      name: "_submissions._tcp",
+      type: "SRV",
+      data: "mail.i10.tech.",
+      ttl: 300,
+      priority: 0,
+      weight: 1,
+      port: 465,
+    })
+  })
+
+  it("publishes SRV to Hetzner with priority, weight, port, and target folded into value", async () => {
+    const seen = stub((url, method) =>
+      method === "GET" && url.includes("/records")
+        ? { body: { records: [] } }
+        : { body: {} },
+    )
+    await hetznerWriter().publish({ token: "hz-token" }, ZONE, [
+      want({
+        name: "_imaps._tcp.example.com",
+        type: "SRV",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 993,
+      }),
+    ])
+    const post = seen.find((s) => s.method === "POST")
+    expect(post?.body).toEqual({
+      zone_id: "zone-1",
+      name: "_imaps._tcp",
+      type: "SRV",
+      ttl: 300,
+      value: "0 1 993 mail.i10.tech.",
+    })
   })
 })

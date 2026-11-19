@@ -1,0 +1,136 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "c67dae02-78e1-4a13-8969-4366162ae087",
+  "prevIds": [
+    "d9dcffba-d4cb-45c5-ac3b-71d5c9ce6417"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "bind_failure_budget"
+      ],
+      "writes": [
+        "s|tbl|authd.bind_failure_budget",
+        "n|tbl|authd.bind_failure_budget",
+        "e|tbl|authd.bind_failure_budget",
+        "n|rel|authd.bind_failure_budget",
+        "n|type|authd.bind_failure_budget",
+        "n|rel|authd.bind_failure_budget_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "accounts",
+        "credential_epoch"
+      ],
+      "writes": [
+        "s|col|authd.accounts.credential_epoch",
+        "n|col|authd.accounts.credential_epoch",
+        "e|col|authd.accounts.credential_epoch"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "bind_failure_budget",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "credential_epoch",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "bind_failure_budget",
+        "name": "clerk_user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "bind_failure_budget",
+        "name": "window_start",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "bind_failure_budget",
+        "name": "count",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "bind_failure_budget",
+        "name": "bind_failure_budget_pkey",
+        "columns": [
+          "clerk_user_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

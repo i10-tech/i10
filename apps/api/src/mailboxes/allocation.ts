@@ -183,6 +183,8 @@ export interface AllocationStore {
     model: StorageModel
     /** Flip the subscription gate in the same write (a new mailbox). */
     activate?: boolean
+    /** Store the mailbox's display name in the same write (#407). */
+    displayName?: string
   }): Promise<DecideOutcome>
 
   /** Every inbox of the tenant. */
@@ -199,7 +201,7 @@ interface LockedRow extends Record<string, unknown> {
 
 export function allocationStore(db: Database): AllocationStore {
   return {
-    async allocate({ tenantId, address, bytes, model, activate }) {
+    async allocate({ tenantId, address, bytes, model, activate, displayName }) {
       return db.transaction(async (tx) => {
         const locked = (await tx.execute(sql`
           select email, storage_allocation as allocation
@@ -220,6 +222,7 @@ export function allocationStore(db: Database): AllocationStore {
         })
         if (outcome.status !== "ok") return outcome
 
+        const name = displayName?.trim() || undefined
         // ⚠ BY TENANT AS WELL AS ADDRESS, so an address in another workspace
         // matches nothing here even if a caller got this far with it.
         await tx
@@ -227,6 +230,7 @@ export function allocationStore(db: Database): AllocationStore {
           .set({
             storageAllocation: bytes,
             ...(activate ? { active: true } : {}),
+            ...(name !== undefined ? { displayName: name } : {}),
             updatedAt: sql`now()`,
           })
           .where(
@@ -288,6 +292,7 @@ export interface StorageAllocations {
     address: string
     bytes: number | null
     activate?: boolean
+    displayName?: string
   }): Promise<AllocateOutcome>
 }
 
@@ -316,7 +321,7 @@ export function storageAllocations(deps: StorageAllocationDeps): StorageAllocati
       return { pool: summarize(m, mailboxes, used), mailboxes }
     },
 
-    async allocate({ tenantId, address, bytes, activate }) {
+    async allocate({ tenantId, address, bytes, activate, displayName }) {
       const wanted = address.trim().toLowerCase()
       const outcome = await deps.store.allocate({
         tenantId,
@@ -324,6 +329,7 @@ export function storageAllocations(deps: StorageAllocationDeps): StorageAllocati
         bytes,
         model: await model(tenantId),
         activate,
+        ...(displayName !== undefined ? { displayName } : {}),
       })
       if (outcome.status !== "ok") return outcome
 

@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { AddressTakenError } from "../src/team-inboxes/service.js"
 import { sentCopyStore, teamInboxStore } from "../src/team-inboxes/store.js"
 
@@ -32,7 +31,7 @@ let copies: ReturnType<typeof sentCopyStore>
 suite("team inboxes in Postgres", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
-    const db = drizzle(owner, { schema }) as unknown as Database
+    const db = drizzle({ client: owner }) as unknown as Database
     store = teamInboxStore(db)
     copies = sentCopyStore(db)
 

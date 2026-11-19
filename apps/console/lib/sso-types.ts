@@ -338,6 +338,52 @@ export interface LdapTestOutcome {
   recorded: boolean
 }
 
+// ── Mail sign-in: OIDC password check and the Okta event hook (#383) ────────
+
+/** One of the provider kinds the OIDC mail lane has a preset for. */
+export interface OidcMailPresetInfo {
+  id: string
+  label: string
+  issuerHint: string
+  clientIdHint: string
+  /** Optional, non-secret form fields this preset takes. */
+  extras: { key: string; label: string }[]
+}
+
+/** `GET/PUT .../oidc-mail`. Nothing here is a secret. */
+export interface OidcMailSetup {
+  preset: string | null
+  defaultPreset: string | null
+  presets: OidcMailPresetInfo[]
+  issuer: string | null
+  clientId: string | null
+  /** Read from the issuer's discovery document when an owner saves. */
+  tokenEndpoint: string | null
+  extra: Record<string, string>
+  enabled: boolean
+  /** False when this connection's provider has no OIDC mail lane. */
+  available: boolean
+  /** LDAP pass-through is on, so this lane cannot be turned on. */
+  ldapEnabled: boolean
+}
+
+/** `GET .../okta-event-hook`. Never the secret itself. */
+export interface OktaHookSetup {
+  url: string
+  /** The Okta "authentication field" name. */
+  header: string
+  secretSet: boolean
+  hint: string | null
+  issuedAt: string | null
+  /** What to subscribe the hook to in Okta. */
+  events: string[]
+}
+
+/** The answer to making or rotating the secret: the only time it is shown. */
+export interface OktaHookMade extends OktaHookSetup {
+  secret: string
+}
+
 /** What a viewer may do, from `/console/team/roles`. */
 export interface SsoAbilities {
   /** `sso:manage`: an admin. */

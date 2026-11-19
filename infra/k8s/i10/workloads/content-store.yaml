@@ -1,6 +1,6 @@
 # Everything done to stored mail after the send, on a schedule (#136, #168,
 # #171, #188): fingerprints and the farm tripwire (risk on), attachments to R2
-# (content store configured), template compaction (always), and full bodies
+# (content store and OBJECT_KEYS set), template compaction (always), and full bodies
 # sealed into packs in R2 (content store and CONTENT_KEYS set).
 #
 # ⚠ THE SAME IMAGE AND ANOTHER COMMAND, like the sweep and the reconciler.
@@ -8,7 +8,7 @@
 #
 # ⚠ ACCEPT WRITES THE RAW MESSAGE AND RETURNS; this is the "process later" half:
 # nothing touches object storage, fingerprints or templates before the 202.
-# Without the CONTENT_STORE_* keys (Doppler, prod_api) attachments stay inline;
+# Without the CONTENT_STORE_* keys or OBJECT_KEYS (Doppler, prod_api) attachments stay inline;
 # without CONTENT_KEYS bodies stay in Postgres; without RISK_ENABLED nothing is fingerprinted; compaction runs either way.
 # It reads REDIS_URL and CLERK_SECRET_KEY from i10-shared/i10-api for the
 # tripwire's re-score. See docs/decisions/storage.md.
@@ -32,17 +32,28 @@ spec:
       # Under the five-minute interval, so a hung upload cannot hold `Forbid`.
       activeDeadlineSeconds: 240
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: i10-api
         spec:
           restartPolicy: Never
           containers:
             - name: content-store
-              image: ghcr.io/i10-tech/i10-api:prod-46c034947fa8281c0067376a0cd8ab5dc6b8a794@sha256:b87d268c885f9076a7cc8001783e201b70a536aada47d8842ce473cba6896153
+              image: ghcr.io/i10-tech/i10-api:prod-816b3eb86ffb04b25d53a904c601fea1dc68da03@sha256:e5ed4d6d4b38b1f2c38606de3d480959467b304bc512ac8ba0ceb3938ef79cfa
               imagePullPolicy: Always
               command: ["bun", "dist/content-store.js"]
               envFrom:
                 - secretRef: { name: i10-shared }
                 - secretRef: { name: i10-api }
               env:
+                # Opens the wrapped keys in i10-api (apps/api/src/crypto/unlock.ts). A
+                # hand-made Secret, never in Doppler; optional, so plain keys still start.
+                - name: KEY_WRAP_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: i10-key-wrap
+                      key: KEY_WRAP_KEYS
+                      optional: true
                 # ⚠ `i10_api`, NOT THE OWNER. The pass finds its workspaces
                 # through SECURITY DEFINER functions that return ids only (0076)
                 # and does the work per tenant, under RLS.

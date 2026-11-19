@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { KEEP } from "../src/identity/directory-mail.js"
 import { directoryMailStore } from "../src/identity/mail-store.js"
 
@@ -32,7 +31,7 @@ suite("resuming a mailbox, in the store", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     sqlApi = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    db = drizzle(sqlApi, { schema }) as unknown as Database
+    db = drizzle({ client: sqlApi }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

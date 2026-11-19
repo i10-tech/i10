@@ -225,7 +225,7 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 		// The search path and the bind path share the column list.
 		if byAddr[0].PaymentHold != got.PaymentHold || byAddr[0].Banned != got.Banned ||
 			byAddr[0].Locked != got.Locked || byAddr[0].SSORequired != got.SSORequired ||
-			byAddr[0].SSOExempt != got.SSOExempt {
+			byAddr[0].SSOExempt != got.SSOExempt || byAddr[0].Deleting != got.Deleting {
 			t.Fatalf("search read %+v, bind read %+v", byAddr[0], got)
 		}
 		return *got
@@ -239,7 +239,14 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 	if a := read(); !a.PaymentHold || a.Banned || a.Locked || a.SSORequired {
 		t.Fatalf("a payment hold read as %+v", a)
 	}
-	exec(`UPDATE authd.accounts SET payment_hold_at = NULL, banned = true WHERE clerk_user_id = $1`, id)
+	exec(`UPDATE authd.accounts SET payment_hold_at = NULL, deleting_at = now() WHERE clerk_user_id = $1`, id)
+	if a := read(); !a.Deleting || a.PaymentHold || a.Banned || a.Suspended {
+		t.Fatalf("a deletion grace read as %+v", a)
+	}
+	exec(`UPDATE authd.accounts SET deleting_at = NULL, banned = true WHERE clerk_user_id = $1`, id)
+	if a := read(); a.Deleting {
+		t.Fatalf("a restored mailbox still read as deleting: %+v", a)
+	}
 	if a := read(); a.PaymentHold || !a.Banned || a.Locked {
 		t.Fatalf("a ban read as %+v", a)
 	}
@@ -315,5 +322,120 @@ func TestAccountByUIDReadsTheRowGates(t *testing.T) {
 	exec(`DELETE FROM authd.required_domains WHERE domain = 'required.test'`)
 	if a := read(); a.SSORequired || a.SSOExempt {
 		t.Fatalf("turning the requirement off did not restore the account: %+v", a)
+	}
+}
+
+// The domain gate (#406), against the real function: whether an account's domain
+// still hosts mail is read in the SAME query as the account, as the `authd` role,
+// which may execute `core.mailbox_domain_refused` and nothing else in `core`.
+//
+// What a mocked Store cannot prove, and what each case pins:
+//   - hosting on and the workspace holding the name: not refused;
+//   - hosting switched off: refused, with nothing written to the mailbox, so a
+//     suspension an admin set by hand is neither added nor lifted by it;
+//   - the domain taken by another workspace's proof (displaced): refused;
+//   - a name with no `core.domains` row at all (i10's own): never refused;
+//   - an account with no tenant on a name that has a row but does not host: refused.
+func TestAccountReadsWhetherItsDomainStillHostsMail(t *testing.T) {
+	dsn, admin := os.Getenv("AUTHD_TEST_DATABASE_URL"), os.Getenv("AUTHD_TEST_ADMIN_DATABASE_URL")
+	if dsn == "" || admin == "" {
+		t.Skip("AUTHD_TEST_DATABASE_URL and AUTHD_TEST_ADMIN_DATABASE_URL are not both set")
+	}
+	ctx := context.Background()
+
+	w, err := pgxpool.New(ctx, admin)
+	if err != nil {
+		t.Fatalf("connect as admin: %v", err)
+	}
+	t.Cleanup(w.Close)
+
+	const (
+		slug   = "hosting-gate-test"
+		domain = "hosting-gate-test.example"
+		hosted = "user_hosting_gate"
+		bare   = "user_hosting_gate_none"
+		own    = "user_hosting_gate_own"
+	)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := w.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed %q: %v", sql, err)
+		}
+	}
+	purge := func() {
+		for _, id := range []string{hosted, bare, own} {
+			if _, err := w.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id = $1`, id); err != nil {
+				t.Logf("purge account: %v", err)
+			}
+		}
+		if _, err := w.Exec(ctx, `DELETE FROM core.tenants WHERE slug = $1`, slug); err != nil {
+			t.Logf("purge tenant: %v", err)
+		}
+	}
+	purge()
+	t.Cleanup(purge)
+
+	exec(`INSERT INTO core.tenants (slug, name, owner_clerk_user_id) VALUES ($1, 'Hosting gate test', 'user_owner')`, slug)
+	// Proven by DKIM at some point, SES never verified it: the point of #406 is that
+	// this still hosts.
+	exec(`INSERT INTO core.domains (tenant_id, name, hosts_mailboxes, identity_registered_at, status)
+		SELECT id, $2, true, now(), 'pending' FROM core.tenants WHERE slug = $1`, slug, domain)
+	exec(`INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id)
+		SELECT $1, $2, true, id FROM core.tenants WHERE slug = $3`, hosted, "ada@"+domain, slug)
+	// No tenant, on a name that has a row.
+	exec(`INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ($1, $2, true)`, bare, "bob@"+domain)
+	// No tenant, on a name nobody registered: i10's own shape.
+	exec(`INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ($1, $2, true)`, own, "own@unregistered-hosting-gate.example")
+
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatalf("NewPostgres: %v", err)
+	}
+	defer store.Close()
+
+	refused := func(id string) bool {
+		t.Helper()
+		got, err := store.AccountByUID(ctx, id)
+		if err != nil || got == nil {
+			t.Fatalf("AccountByUID(%s) = (%v, %v)", id, got, err)
+		}
+		return got.DomainNotHosted
+	}
+
+	if refused(hosted) {
+		t.Fatal("a mailbox on a hosted, owned domain was refused")
+	}
+	if refused(own) {
+		t.Fatal("an unregistered domain (i10's own) was refused")
+	}
+
+	// A hand-set suspension, to prove hosting off neither adds nor lifts one.
+	exec(`UPDATE authd.accounts SET suspended_at = now() WHERE clerk_user_id = $1`, hosted)
+
+	exec(`UPDATE core.domains SET hosts_mailboxes = false WHERE name = $1`, domain)
+	if !refused(hosted) || !refused(bare) {
+		t.Fatal("hosting off did not refuse the mailboxes on the domain")
+	}
+	if refused(own) {
+		t.Fatal("hosting off on one domain refused an unrelated one")
+	}
+	var suspended bool
+	if err := w.QueryRow(ctx, `SELECT suspended_at IS NOT NULL FROM authd.accounts WHERE clerk_user_id = $1`, hosted).Scan(&suspended); err != nil || !suspended {
+		t.Fatalf("the hand-set suspension changed (suspended=%v, err=%v)", suspended, err)
+	}
+
+	// Back on: the gate opens by itself, and the suspension is still there.
+	exec(`UPDATE core.domains SET hosts_mailboxes = true WHERE name = $1`, domain)
+	if refused(hosted) {
+		t.Fatal("hosting back on left the mailbox refused")
+	}
+	if err := w.QueryRow(ctx, `SELECT suspended_at IS NOT NULL FROM authd.accounts WHERE clerk_user_id = $1`, hosted).Scan(&suspended); err != nil || !suspended {
+		t.Fatalf("hosting back on lifted the hand-set suspension (suspended=%v, err=%v)", suspended, err)
+	}
+
+	// Another workspace proved the name: displaced rows never host.
+	exec(`UPDATE core.domains SET displaced_at = now(), status = 'failed' WHERE name = $1`, domain)
+	if !refused(hosted) {
+		t.Fatal("a displaced domain still let its mailboxes sign in")
 	}
 }

@@ -58,15 +58,16 @@ export async function GET(
   try {
     // ⚠ `api()` SERVES THE FIXTURE IN PREVIEW MODE and forwards the session
     // otherwise, so neither is repeated here.
-    const draft = await api<DraftPreview>(
-      `/console/templates/${id}/draft-preview`,
-    )
+    const draft = await api<DraftPreview>(`/console/templates/${id}/draft-preview`)
     const body = { html: draft.html, subject: draft.subject, text: draft.text }
     if (PREVIEW) return reply(body, 200, DROP)
 
     const session = await auth()
     const same =
-      v !== null && draft.stamp != null && draft.stamp === v && w === (session.orgId ?? PERSONAL)
+      v !== null &&
+      draft.stamp != null &&
+      draft.stamp === v &&
+      w === (session.orgId ?? PERSONAL)
     return reply(body, 200, same ? KEEP : DROP)
   } catch (error) {
     if (error instanceof ApiRequestError) {

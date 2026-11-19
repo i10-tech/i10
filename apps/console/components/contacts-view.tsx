@@ -197,10 +197,7 @@ function ContactsContent({
   return (
     <>
       <ListToolbar>
-        <UrlListSearch
-          placeholder="Search name or address"
-          label="Search contacts"
-        />
+        <UrlListSearch placeholder="Search name or address" label="Search contacts" />
         {/* No total: only a page of contacts is loaded, so it is just Clear. */}
         <UrlListResults params={FILTERS} />
         <ListToolbarEnd>

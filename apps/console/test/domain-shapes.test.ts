@@ -70,6 +70,9 @@ describe("domainDetailShape", () => {
     keyImpact: [{ id: "key_1", name: "Deploy Key", keeps: [] }],
     transfer: null,
     ownEmails: ["user@example.com"],
+    canManageMailboxes: true,
+    mailboxAccounts: [],
+    teamInboxes: [],
   }
 
   beforeEach(() => {

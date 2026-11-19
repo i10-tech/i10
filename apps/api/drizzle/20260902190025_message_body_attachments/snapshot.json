@@ -1,0 +1,81 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "2d7e2e7c-de71-4a3c-8b83-76427bf4747b",
+  "prevIds": [
+    "d5078122-9b94-4480-a071-cdb74f0e6041"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "attachments"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.attachments",
+        "n|col|core.message_bodies.attachments",
+        "e|col|core.message_bodies.attachments"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "message_bodies",
+        "tags"
+      ],
+      "writes": [
+        "s|col|core.message_bodies.tags",
+        "n|col|core.message_bodies.tags",
+        "e|col|core.message_bodies.tags"
+      ],
+      "reads": [
+        "n|tbl|core.message_bodies",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "attachments",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_bodies",
+        "name": "tags",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

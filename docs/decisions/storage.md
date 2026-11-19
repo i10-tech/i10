@@ -15,7 +15,9 @@ i10-tech/i10#188.
 | Message row, events, webhook deliveries     | Postgres, monthly partitions                  | the plan's retention period            |
 | Body, until packed; compacted bodies always | Postgres, `message_bodies`                    | the plan's retention period            |
 | Full body, once packed (#188)               | R2 `i10-content`, `<tenant_id>/packs/<id>`    | no body points into the pack, plus 24h |
-| Attachment and inline-image bytes           | R2 `i10-content`, `<tenant_id>/sha256/<hash>` | no body names the hash, plus 24h grace |
+| Attachment and inline-image bytes, sealed   | R2 `i10-content`, `<tenant_id>/sha256/<hash>` | no body names the hash, plus 24h grace |
+| Mailbox export archive, sealed              | R2 `i10-content`, `<tenant_id>/exports/<job>` | 7 days after the export finished       |
+| Mailbox import upload, plain                | R2 `i10-content`, `<tenant_id>/imports/<job>` | the import ends (see below)            |
 | Template skeletons (#167, #169)             | `core.content_templates`                      | no body uses it AND unseen 7 days      |
 | Tombstone (message id, tenant)              | `core.expired_messages`                       | 90 days after expiry                   |
 | Usage                                       | `core.meter_events`                           | never touched by retention             |
@@ -55,9 +57,35 @@ personal data for no reason.
    the 202.
 2. The worker sends from the row.
 3. `i10-content-store` (every 5 minutes) takes finished messages (sent, failed,
-   canceled), hashes each file, uploads it once per workspace, and rewrites the
-   entry as `{ filename, content_type, size, sha256 }`.
+   canceled), hashes each file, seals it, uploads it once per workspace, and
+   rewrites the entry as `{ filename, content_type, size, sha256 }`.
 4. A retry of a failed message restores the bytes from R2 in the worker.
+
+**Sealed, one key per file** (`content/objects.ts`). Each file is encrypted
+with its own random AES-256-GCM key. That key is wrapped by a master key from
+`OBJECT_KEYS` and kept on the file's row (`content_objects.sealed_key`). The
+workspace and the hash are bound in as associated data, so an object or a key
+copied to another workspace or hash does not open. The object in R2 has the
+type `application/octet-stream`. The real type is in the attachment entry
+(`content_type`) or in the data URI, and readers take it from there.
+
+- The object name is still the SHA-256 of the plain file. Dedup needs that.
+  It also means that someone who can list the bucket can test whether a
+  workspace stored a file they already have. They cannot read any file.
+- Without `OBJECT_KEYS`, nothing moves: attachments and data-URI images stay
+  in Postgres, and the job logs a warning each run. A stored file with no key,
+  a kid that is not in the ring, or bytes that do not open, fails the read
+  loudly. Nothing is ever stored in R2 in plain form.
+- To rotate `OBJECT_KEYS`, run the `rewrap-keys` job (encryption.md). It
+  changes only `sealed_key`, never R2.
+
+**Dedup with keys.** The second upload of a file reuses the object and its
+key: no second upload, no second key. The row and the upload are one
+transaction. Two first uploads of the same file at the same time: the second
+insert waits for the first transaction. If the first commits, the object is in
+R2 and the second reuses it. If the first fails, it rolls back, and the second
+inserts its own row and uploads under its own key. So every row that can be
+seen names the key of the object in R2.
 
 **Per workspace, never global.** A shared object would tell one workspace
 whether another had sent the same file.
@@ -71,7 +99,7 @@ counter to drift, and partition drops cannot skip a decrement.
 before rewriting the body; the sweep takes a row only under `FOR UPDATE SKIP
 LOCKED`, only past a 24h grace, deleting R2 then the row. A touched object is
 never taken; one the sweep took first has no row left, so the store uploads it
-again.
+again, sealed under a new key.
 
 **Bytes are exact.** No recompression, no cleaning (#188, #189).
 
@@ -100,7 +128,72 @@ what is sent changes.
 - Every reader restores after `restoreBodies`: the worker (a retry), `GET
 /emails/:id` and the console detail (both after their transaction, so no R2
   read holds a Postgres connection), and the risk passes. A body with
-  references and no configured store fails loudly.
+  references and no configured store or no `OBJECT_KEYS` fails loudly.
+
+## Mailbox export and import (#385)
+
+**Exports are sealed as they stream** (`mailboxes/sealed-stream.ts`). The
+worker writes tar, then gzip, then the seal, as one stream into a multipart
+upload. Each archive has its own random key, wrapped under `OBJECT_KEYS` and
+kept on the job row (`mailbox_jobs.sealed_key`; `object_key` is the R2 path).
+The archive is cut into 64 KiB chunks, and each chunk is sealed with
+AES-256-GCM. The nonce of each chunk holds its number and says whether it is
+the last one. So a chunk that is moved, dropped or repeated does not open, and
+an archive that is cut short fails at its end. Memory stays at one chunk.
+
+**The download opens it on the way out.** The route reads the object from R2
+as a stream, opens it chunk by chunk, and sends the plain `.tar.gz` with the
+same file name as before. `Content-Length` is the archive's own length. It is
+computed from the object's size, so it is correct before a byte is sent. The
+route does not support range requests, before or now: a broken download
+starts again. A cut or changed object ends the response with an error, so the
+client never saves a shorter archive.
+
+Without `OBJECT_KEYS`, export answers 501 and a worker fails an export job
+instead of writing a plain archive. A failed export leaves no object: the
+multipart upload is never completed, and its parts are R2's to expire. A
+finished export is deleted by the archive sweep 7 days after it completed.
+
+**Imports are plain until the job ends.** The customer uploads the archive
+straight to R2 with a presigned PUT, so we cannot seal it before it lands. It
+is deleted:
+
+- when the import finishes, and when it fails (the worker deletes it in both
+  paths; a delete that fails on a finished import leaves the job finished and
+  its key in place for the sweep);
+- when the uploaded file is over the size limit at start;
+- by the archive sweep, for a finished or failed import that still has one;
+- by the archive sweep, a day after the job last changed, for an upload that
+  was never started.
+
+**The archive sweep runs every hour, in `i10-retention`** (step 3c,
+`mailboxes/sweep.ts`), for every workspace at once. It finds rows through two
+SECURITY DEFINER functions, `core.mailbox_jobs_lost` and
+`core.mailbox_archives_due`, and writes each row under its own tenant. It
+deletes the object in R2 first, then clears `object_key`. A run that stops
+between the two simply does both again. Without a content store configured it
+leaves archives alone.
+
+**A lost job is failed.** A job whose worker is killed stays `running`, because
+groupmq fails it without calling our handler. The sweep fails a `running` job
+that has not changed for 3 hours, with the code `worker_lost`. A live job
+writes progress often (an export every 50 messages and every folder, an
+import every 25 messages), so it is never quiet for that long. This runs
+before the archive step, so a lost import's upload is deleted in the same run.
+The mailbox can then start a new job.
+
+**A deleted workspace's archives do not wait for expiry.** A soft-deleted
+workspace (`tenants.status = 'deleted'`) has its exports deleted on the next
+run, expired or not. Its uploads wait out the upload window first: the presigned
+PUT works for 6 hours, so an upload deleted sooner could still land after the
+sweep, with nothing left that names it. The job rows stay with the workspace.
+
+**A tenant row removed by hand leaves its jobs behind on purpose.**
+`mailbox_jobs` has no foreign key to `tenants`, so the rows outlive it and the
+sweep can still find the archives. It treats them like a deleted workspace's,
+then deletes each row once it has no object. A `pending` or `running` job of
+such a workspace is kept until it ends or is failed as lost, because it may
+still write an object.
 
 ## Templates: store once, forget when unused, come back on use
 
@@ -198,10 +291,17 @@ another message.
 - **Deleting one email is deleting its key** (crypto-shredding). Retention
   deletes the row and the key together, so the body is unreadable at once; the
   pack goes when no row points into it (`sweepPacks`, same grace as objects).
-- `CONTENT_KEYS` is `kid:base64,...`, current first. Rotate by putting a new
-  key first and keeping the old ones until what they wrapped has expired.
+- `CONTENT_KEYS` is `kid:base64,...`, current first. To rotate, put a new key
+  first, deploy, and run the `rewrap-body-keys` job. It wraps every body key
+  again under the new key, so the old key can go the same day. The steps are
+  in encryption.md. The job changes only `body_key`. It never reads or writes
+  R2: a record is encrypted with its body key, and that key does not change.
 - ⚠ Losing the master keys loses every packed body. Keep a copy outside
   Doppler. A deleted body key survives in Postgres backups until they rotate.
+- ⚠ A re-wrap does not reach backups. After a leak, a database backup taken
+  before the re-wrap still holds body keys wrapped under the leaked key, until
+  that backup expires. Whoever has that backup and the leaked key can open
+  those bodies.
 
 **Reading stays one lookup.** Lists read metadata only. Opening an email is one
 Postgres read and, for a packed body, one ranged GET of just that body's bytes,
@@ -223,8 +323,22 @@ R2 tokens scope per bucket, never per prefix, so content has its own buckets
 `prod_platform` is the CNPG backups key and must never be reused. Settings:
 `CONTENT_STORE_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`,
 all four or none. Unset, attachments stay inline and the product works as
-before. Bodies also need `CONTENT_KEYS` (in `prod_api` and `dev`); unset,
-bodies stay in Postgres.
+before. Bodies also need `CONTENT_KEYS`, and files and exports need
+`OBJECT_KEYS` (both in `prod_api` and `dev`). Without them, bodies and files
+stay in Postgres and export is off. That is allowed in development only: with
+`NODE_ENV=production` and the content store set, a missing `CONTENT_KEYS` or
+`OBJECT_KEYS` fails `loadEnv()`, so the check-env hook stops the deploy. The
+other keys (`SEAL_KEYS`, `TOKEN_KEYS`, `FEEDBACK_ID_KEY`) are in encryption.md.
+
+**Objects stored before sealing.** There are none in production. A development
+database that has rows in `core.content_objects` cannot apply the migration
+that adds `sealed_key` (the column is required). Delete those rows first. The
+objects they named were plain and are not read any more; the bodies that name
+them can no longer restore those files.
+
+**What this does not protect.** Someone who controls the running API or worker
+holds the keys and can read everything. Sealing protects the bucket, its
+backups and its listings.
 
 ## Not yet
 

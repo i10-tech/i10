@@ -1,4 +1,5 @@
-import type { StreamingObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { newDataKey, unwrapKey, wrapKey } from "../crypto/envelope.js"
 import {
   JmapAsError,
   type AuthorisedMailbox,
@@ -15,18 +16,25 @@ import {
   type ImportMessage,
 } from "./archive.js"
 import { ArchiveError } from "./bytes.js"
-import {
-  sweepMailboxArchives,
-  type MailboxJobPatch,
-  type MailboxJobStore,
-} from "./jobs.js"
+import type { MailboxJobPatch, MailboxJobStore } from "./jobs.js"
+import { EXPORT_KEY, sealStream } from "./sealed-stream.js"
 import { tarStream, type TarEntry } from "./tar.js"
 
 /**
  * Mailbox export and import, as they run in the worker (#385).
  *
- *   EXPORT  folders -> messages -> tar -> gzip -> a multipart write to R2
+ *   EXPORT  folders -> messages -> tar -> gzip -> seal -> a multipart write to R2
  *   IMPORT  R2 -> gunzip/unzip/untar -> messages -> Email/import, one at a time
+ *
+ * ⚠ AN EXPORT IS SEALED, AN IMPORT IS NOT. The export's key is wrapped under
+ * `OBJECT_KEYS` on its job row (sealed-stream.ts). An import is the customer's
+ * own upload, straight to R2 by a presigned PUT, so it is plain until the job
+ * ends and deletes it, or the hourly sweep does (sweep.ts).
+ *
+ * ⚠ A JOB WHOSE WORKER DIES STAYS `running` HERE. groupmq fails it in Redis
+ * without calling us (`maxAttempts: 1`); the sweep fails the row once it has
+ * gone quiet for longer than any live job can (`LOST_AFTER_MS` in sweep.ts),
+ * which is why every progress write below also keeps a job alive.
  *
  * ⚠ BOTH ARE PIPES, AND THE MEMORY BOUND IS WHAT THEY ARE FOR. Export hands each
  * message to the archive as a stream, so what is held at any moment is a few
@@ -45,7 +53,8 @@ import { tarStream, type TarEntry } from "./tar.js"
 
 export interface MigrationDeps {
   jobs: MailboxJobStore
-  store: StreamingObjectStore
+  /** Its `objectKeys` seal exports; without them an export fails. */
+  store: ContentStore
   jmap: JmapAsClient
   log?: {
     info: (o: object, m: string) => void
@@ -58,7 +67,7 @@ export interface MigrationDeps {
   batchPauseMs?: number
 }
 
-/** An export is kept this long, then its object is swept. */
+/** An export is kept this long, then the hourly sweep deletes its object (sweep.ts). */
 export const EXPORT_KEEP_MS = 7 * 24 * 60 * 60 * 1000
 
 const PAGE = 100
@@ -110,9 +119,6 @@ async function begin(jobData: MailboxJobData, deps: MigrationDeps) {
   // export or the import a second time.
   if (!job || job.status !== "pending") return null
   await deps.jobs.update(jobData.tenantId, jobData.jobId, { status: "running" })
-  await sweepMailboxArchives(deps.jobs, deps.store, jobData.tenantId).catch((error) =>
-    deps.log?.warn({ err: error }, "could not sweep expired mailbox archives"),
-  )
   return job
 }
 
@@ -208,9 +214,16 @@ export async function runMailboxExport(
   const { jobs, store, jmap } = deps
   const mailbox = { address: jobData.mailboxAddress }
   const key = exportKey(jobData.tenantId, jobData.jobId)
+  const ids = { tenantId: jobData.tenantId, jobId: jobData.jobId }
   const patch = (p: MailboxJobPatch) => jobs.update(jobData.tenantId, jobData.jobId, p)
 
   try {
+    // ⚠ NEVER PLAIN. The route does not queue an export without the keys; a
+    // worker without them fails the job instead of writing mail in the clear.
+    const ring = store.objectKeys
+    if (!ring)
+      throw new Error("OBJECT_KEYS is not set, so a mailbox cannot be exported")
+    const archiveKey = newDataKey()
     const folders = await listFolders(jmap, mailbox)
     await patch({
       totalFolders: folders.length,
@@ -307,9 +320,10 @@ export async function runMailboxExport(
     // by `end()`, which the sink calls on a clean close; an error anywhere in
     // the chain skips it, so a failed export never has a half-archive to
     // download. The orphaned parts are R2's to expire.
-    const writer = store.open(key, "application/gzip")
+    const writer = store.open(key, "application/octet-stream")
     await tarStream(entries())
       .pipeThrough(new CompressionStream("gzip"))
+      .pipeThrough(sealStream(archiveKey, ids))
       .pipeTo(
         new WritableStream<Uint8Array>({
           write: (chunk) => writer.write(chunk),
@@ -317,9 +331,15 @@ export async function runMailboxExport(
         }),
       )
 
+    // Wrapped under the ring as it is now, after what may have been hours.
+    const sealedKey = wrapKey(EXPORT_KEY, ring, ids, archiveKey)
+    if (!unwrapKey(EXPORT_KEY, ring, ids, sealedKey).equals(archiveKey)) {
+      throw new Error("a wrapped export key does not open to the original")
+    }
     await patch({
       status: "completed",
       objectKey: key,
+      sealedKey,
       processedFolders,
       processedMessages,
       totalMessages: processedMessages,
@@ -507,7 +527,6 @@ export async function runMailboxImport(
       processedMessages: processed,
       totalFolders: resolver.used.size,
       processedFolders: resolver.used.size,
-      objectKey: null,
       completedAt: new Date(),
       ...(skipped > 0
         ? {
@@ -516,7 +535,18 @@ export async function runMailboxImport(
           }
         : {}),
     })
-    await store.delete(archiveKey)
+    // ⚠ THE UPLOAD FIRST, THEN THE ROW, AND NEVER A FAILURE. A delete that does
+    // not go through leaves the key on a completed import, which the hourly
+    // sweep deletes; it must not turn an import that worked into a failed one.
+    await store
+      .delete(archiveKey)
+      .then(() => patch({ objectKey: null }))
+      .catch((error) =>
+        deps.log?.warn(
+          { err: error, jobId: jobData.jobId },
+          "could not delete an imported archive; the sweep will",
+        ),
+      )
   } catch (error) {
     await fail(jobData, deps, error)
     // Customer mail does not sit in the bucket after a job that cannot use it.

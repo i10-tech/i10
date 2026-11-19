@@ -41,6 +41,7 @@ metadata:
   namespace: i10-prod
   annotations:
     argocd.argoproj.io/hook: PreSync
+    # Wave 0 by default: check-env.yaml runs first, at wave -1.
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 2
@@ -55,7 +56,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          image: ghcr.io/i10-tech/i10-api:prod-46c034947fa8281c0067376a0cd8ab5dc6b8a794@sha256:b87d268c885f9076a7cc8001783e201b70a536aada47d8842ce473cba6896153
+          image: ghcr.io/i10-tech/i10-api:prod-816b3eb86ffb04b25d53a904c601fea1dc68da03@sha256:e5ed4d6d4b38b1f2c38606de3d480959467b304bc512ac8ba0ceb3938ef79cfa
           # ⚠ ALWAYS, BECAUSE THE TAG FLOATS. `prod-latest` is not the
           # literal `:latest`, so Kubernetes defaults it to IfNotPresent: a node
           # that has pulled the tag once keeps serving that layer forever while
@@ -110,6 +111,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: i10-api
+        app.kubernetes.io/part-of: i10-api
     spec:
       containers:
         - name: api
@@ -124,7 +126,7 @@ spec:
           # app still reading `prod-latest` long after its first build means
           # either it has never changed since this line was written, or its
           # path filter in build.yml does not match where its sources live.
-          image: ghcr.io/i10-tech/i10-api:prod-46c034947fa8281c0067376a0cd8ab5dc6b8a794@sha256:b87d268c885f9076a7cc8001783e201b70a536aada47d8842ce473cba6896153
+          image: ghcr.io/i10-tech/i10-api:prod-816b3eb86ffb04b25d53a904c601fea1dc68da03@sha256:e5ed4d6d4b38b1f2c38606de3d480959467b304bc512ac8ba0ceb3938ef79cfa
           # ⚠ ALWAYS, BECAUSE THE TAG FLOATS. `prod-latest` is not the
           # literal `:latest`, so Kubernetes defaults it to IfNotPresent: a node
           # that has pulled the tag once keeps serving that layer forever while
@@ -134,10 +136,22 @@ spec:
           imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 3001 }
+          # ⚠ envFrom AND env ARE COPIED INTO THE `api` CONTAINER OF
+          # check-env.yaml, which validates exactly this environment before a
+          # deploy. Change one, change the other: `bun run check-images` fails
+          # CI when they differ.
           envFrom:
             - secretRef: { name: i10-shared }
             - secretRef: { name: i10-api }
           env:
+            # Opens the wrapped keys in i10-api (apps/api/src/crypto/unlock.ts). A
+            # hand-made Secret, never in Doppler; optional, so plain keys still start.
+            - name: KEY_WRAP_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-key-wrap
+                  key: KEY_WRAP_KEYS
+                  optional: true
             # ⚠ `i10_api`, NOT THE `i10` OWNER THE MIGRATION JOB USES. Row
             # level security does not apply to a table's owner, so connecting as
             # `i10` would turn every tenant policy in the `core` schema into a

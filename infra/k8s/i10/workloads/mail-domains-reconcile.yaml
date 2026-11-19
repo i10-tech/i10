@@ -1,0 +1,94 @@
+# Keeps Stalwart's Domain objects in step with core.mailbox_domains(), every 15 minutes.
+#
+# ⚠ THE SAME IMAGE AND ANOTHER COMMAND. `bun dist/mail-domains-reconcile.js` runs
+# one pass and exits.
+#
+# ⚠ WHY THIS EXISTS: STALWART 1.0 ONLY ACCEPTS MAIL AND LOGINS FOR DOMAINS IT
+# HOLDS AS Domain OBJECTS, and plan.ndjson declares just i10.tech. A customer
+# domain that starts hosting mailboxes got `550 5.7.1 Relay not allowed` and
+# failed IMAP logins until somebody added it by hand (#405). This creates the
+# missing ones; removal also disables immediately from the API (`onRemoving`),
+# and this is what catches a removal that failed.
+#
+# ⚠ IT ONLY TOUCHES DOMAINS CARRYING ITS MARKER (description `i10-managed`) AND
+# ONLY EVER DISABLES, never destroys. i10.tech and anything added by hand are
+# left alone; a hand-added domain we want is reported as "adopt".
+#
+# ⚠ IT WRITES SINCE 2026-11-11. The first runs reported only; their plans were
+# empty (prod held just i10.tech, which it never touches), and the Stalwart key
+# was granted `sysDomainGet`, `sysDomainQuery`, `sysDomainCreate` and
+# `sysDomainUpdate` the same day (docs/decisions/metering.md). Remove the
+# MAIL_DOMAINS_RECONCILE_APPLY entry below to go back to reporting only.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: i10-mail-domains-reconcile
+  namespace: i10-prod
+spec:
+  # ⚠ THIS STRING IS ALSO IN apps/api/src/mail-domains-reconcile.ts, AND THEY MUST
+  # AGREE. Sentry decides a run is MISSING by comparing the clock against the
+  # schedule the job declares in its check-in.
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Kept longer than the successful ones: while it is reporting only, the log of
+  # what it would have done is the artefact.
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      # One attempt per slot. Every write is idempotent and the next slot is
+      # fifteen minutes away.
+      backoffLimit: 0
+      # ⚠ UNDER THE INTERVAL, so a hung pass is killed before the next is due and
+      # `Forbid` cannot turn one stuck pod into a reconcile that never runs again.
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: i10-api
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: reconcile
+              image: ghcr.io/i10-tech/i10-api:prod-816b3eb86ffb04b25d53a904c601fea1dc68da03@sha256:e5ed4d6d4b38b1f2c38606de3d480959467b304bc512ac8ba0ceb3938ef79cfa
+              imagePullPolicy: Always
+              command: ["bun", "dist/mail-domains-reconcile.js"]
+              envFrom:
+                # STALWART_URL and STALWART_API_TOKEN come from here, the same
+                # Doppler `prod_api` config billing-reconcile reads.
+                - secretRef: { name: i10-shared }
+                - secretRef: { name: i10-api }
+              env:
+                # Opens the wrapped keys in i10-api (apps/api/src/crypto/unlock.ts). A
+                # hand-made Secret, never in Doppler; optional, so plain keys still start.
+                - name: KEY_WRAP_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: i10-key-wrap
+                      key: KEY_WRAP_KEYS
+                      optional: true
+                - name: MAIL_DOMAINS_RECONCILE_APPLY
+                  value: "true"
+                # ⚠ `i10_api`, NOT THE OWNER. The desired set is read through the
+                # SECURITY DEFINER `core.mailbox_domains()`, which this role may
+                # execute; a role that could see every tenant's rows is not needed.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: i10-api-db-role, key: password }
+                - name: DATABASE_URL
+                  value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                capabilities: { drop: ["ALL"] }
+---

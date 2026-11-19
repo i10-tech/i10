@@ -215,7 +215,11 @@ export function TemplateSnapshot({
   return (
     <div
       ref={box}
-      className={cn("relative size-full overflow-hidden", !fallback && "bg-white", className)}
+      className={cn(
+        "relative size-full overflow-hidden",
+        !fallback && "bg-white",
+        className,
+      )}
     >
       {fallback && <div className="absolute inset-0">{fallback}</div>}
       {url ? (

@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "10307c24-3673-491f-b78c-f1a0f3ee1e20",
+  "prevIds": [
+    "9cfed8a3-4103-4d4b-8193-22540b42f976"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "meter_events",
+        "ingested_at"
+      ],
+      "writes": [
+        "s|col|core.meter_events.ingested_at",
+        "n|col|core.meter_events.ingested_at",
+        "e|col|core.meter_events.ingested_at"
+      ],
+      "reads": [
+        "n|tbl|core.meter_events",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_events",
+        "name": "ingested_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

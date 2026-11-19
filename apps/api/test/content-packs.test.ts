@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test"
 import { memoryStore, packKey, type ContentStore } from "../src/content/object-store.js"
-import { BodyCache, restoreContent, restorePacked } from "../src/content/packs.js"
-import { openBody, parseKeyring, sealBody } from "../src/content/seal.js"
+import { BodyCache, restorePacked } from "../src/content/packs.js"
+import { BODY_KEY, openBody, sealBody, type BodyIds } from "../src/content/seal.js"
+import { keyUnder as bodyKeyUnder, rewrapKey } from "../src/crypto/envelope.js"
+import { keyringFromEnv, type Keyring } from "../src/crypto/keyring.js"
+
+const rewrapBodyKey = (ring: Keyring, ids: BodyIds, wrapped: string) =>
+  rewrapKey(BODY_KEY, ring, ids, wrapped)
 
 /**
  * Sealing bodies and reading them back out of packs (#188). The database half
@@ -11,24 +16,9 @@ const key = () =>
   Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64")
 const K1 = key()
 const K2 = key()
-const keys = parseKeyring(`k1:${K1}`)
+const ring = (value: string) => keyringFromEnv("CONTENT_KEYS", value)
+const keys = ring(`k1:${K1}`)
 const ids = { tenantId: crypto.randomUUID(), messageId: crypto.randomUUID() }
-
-describe("parseKeyring", () => {
-  it("takes the first key as current and keeps the rest for reading", () => {
-    const ring = parseKeyring(`k2:${K2}, k1:${K1}`)
-    expect(ring.current).toBe("k2")
-    expect([...ring.keys.keys()]).toEqual(["k2", "k1"])
-  })
-
-  it("refuses short keys, bad ids, duplicates and nothing", () => {
-    expect(() => parseKeyring("k1:c2hvcnQ=")).toThrow("32 bytes")
-    expect(() => parseKeyring(`k 1:${K1}`)).toThrow("kid:base64")
-    expect(() => parseKeyring(`:${K1}`)).toThrow("kid:base64")
-    expect(() => parseKeyring(`k1:${K1},k1:${K2}`)).toThrow("twice")
-    expect(() => parseKeyring(" , ")).toThrow("no key")
-  })
-})
 
 describe("sealBody", () => {
   it("opens to exactly what was sealed, including nulls and every kind of text", () => {
@@ -87,12 +77,70 @@ describe("sealBody", () => {
 
   it("reads bodies wrapped with an older key after a rotation, and says which key is missing", () => {
     const old = sealBody(keys, ids, { html: "before", text: null })
-    const rotated = parseKeyring(`k2:${K2},k1:${K1}`)
+    const rotated = ring(`k2:${K2},k1:${K1}`)
     expect(openBody(rotated, ids, old.record, old.wrappedKey).html).toBe("before")
     const fresh = sealBody(rotated, ids, { html: "after", text: null })
     expect(() => openBody(keys, ids, fresh.record, fresh.wrappedKey)).toThrow(
       "wrapped with key k2",
     )
+  })
+})
+
+describe("rewrapBodyKey", () => {
+  const rotated = ring(`k2:${K2},k1:${K1}`)
+  const k2Only = ring(`k2:${K2}`)
+
+  it("moves a body key onto the current key, and the record opens as it was without the old key", () => {
+    const body = { html: "<p>before</p>", text: "before" }
+    const old = sealBody(keys, ids, body)
+    expect(bodyKeyUnder(old.wrappedKey)).toBe("k1")
+
+    const fresh = rewrapBodyKey(rotated, ids, old.wrappedKey)
+
+    expect(bodyKeyUnder(fresh)).toBe("k2")
+    expect(openBody(k2Only, ids, old.record, fresh)).toEqual(body)
+  })
+
+  it("will not move a key copied onto another message or another workspace", () => {
+    const old = sealBody(keys, ids, { html: "mine", text: null })
+    for (const other of [
+      { ...ids, messageId: crypto.randomUUID() },
+      { ...ids, tenantId: crypto.randomUUID() },
+    ]) {
+      expect(() => rewrapBodyKey(rotated, other, old.wrappedKey)).toThrow(
+        "does not open under key k1",
+      )
+    }
+  })
+
+  it("fails on a key it does not hold, and on a tampered or malformed value, with no key material", () => {
+    const old = sealBody(keys, ids, { html: "mine", text: null })
+    expect(() => rewrapBodyKey(k2Only, ids, old.wrappedKey)).toThrow(
+      "message body is wrapped with key k1, which is not configured",
+    )
+
+    const bad = Buffer.from(old.wrappedKey, "base64")
+    bad[bad.byteLength - 1] = bad[bad.byteLength - 1]! ^ 1
+    expect(() => rewrapBodyKey(rotated, ids, bad.toString("base64"))).toThrow(
+      /^message body key does not open under key k1$/,
+    )
+
+    expect(bodyKeyUnder("not a key")).toBeNull()
+    expect(() => rewrapBodyKey(rotated, ids, "not a key")).toThrow(
+      /^message body key is not well formed$/,
+    )
+  })
+
+  it("leaves a key already under the current kid as it is, once it opens", () => {
+    const current = sealBody(rotated, ids, { html: "after", text: null })
+    expect(rewrapBodyKey(rotated, ids, current.wrappedKey)).toBe(current.wrappedKey)
+    expect(() =>
+      rewrapBodyKey(
+        rotated,
+        { ...ids, messageId: crypto.randomUUID() },
+        current.wrappedKey,
+      ),
+    ).toThrow("does not open under key k2")
   })
 })
 
@@ -176,22 +224,7 @@ describe("restorePacked", () => {
     expect(again!.html).toBe("<p>hot</p>")
     expect(store.ranges).toBe(1)
   })
-
-  it("restores a packed body's inline images after the body itself", async () => {
-    const store = Object.assign(memoryStore(), { keys })
-    const logo = new Uint8Array(2_000).fill(7)
-    const sha = new Bun.CryptoHasher("sha256").update(logo).digest("hex")
-    store.objects.set(`${tenant}/sha256/${sha}`, logo)
-    const [row] = packed(store, tenant, [
-      { html: `<img src="data:image/png;base64,\u0003${sha}\u0003">`, text: null },
-    ])
-    const [back] = await restoreContent(store, tenant, [
-      { ...row!, inlineObjects: [sha] },
-    ])
-    expect(back!.html).toBe(
-      `<img src="data:image/png;base64,${Buffer.from(logo).toString("base64")}">`,
-    )
-  })
+  // Its inline images after it: test/content-db.test.ts, where the keys live.
 })
 
 describe("BodyCache", () => {

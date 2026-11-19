@@ -99,6 +99,53 @@ describe("what the customer delegates", () => {
       for (const ns of served) expect(asked.has(ns)).toBe(true)
     }
   })
+
+  it("lists apex MX and SRV as customer-published records when a delegated domain hosts mailboxes", () => {
+    const records = delegationRecordsFor("example.com", "send", NS, "verified", TOKEN, {
+      hostsMailboxes: true,
+      mailHost: "mail.i10.tech",
+    })
+    expect(records.filter((r) => r.type === "NS")).toHaveLength(6)
+    expect(records.filter((r) => r.record === "Receiving")).toEqual([
+      {
+        record: "Receiving",
+        name: "example.com",
+        type: "MX",
+        ttl: "60",
+        status: "verified",
+        value: "mail.i10.tech",
+        priority: 10,
+      },
+      {
+        record: "Receiving",
+        name: "_imaps._tcp.example.com",
+        type: "SRV",
+        ttl: "60",
+        status: "verified",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 993,
+      },
+      {
+        record: "Receiving",
+        name: "_submissions._tcp.example.com",
+        type: "SRV",
+        ttl: "60",
+        status: "verified",
+        value: "mail.i10.tech",
+        priority: 0,
+        weight: 1,
+        port: 465,
+      },
+    ])
+    // PowerDNS only serves send., _domainkey., and _dmarc. subzones.
+    expect(zones().map((z) => z.name)).toEqual([
+      "send.example.com",
+      "_domainkey.example.com",
+      "_dmarc.example.com",
+    ])
+  })
 })
 
 describe("the zones we then serve", () => {

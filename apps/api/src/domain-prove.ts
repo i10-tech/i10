@@ -1,3 +1,4 @@
+import "./openapi-first.js"
 /**
  * Tries again to prove the domains nobody has proved yet, then exits.
  *
@@ -37,12 +38,13 @@ import { powerDnsZones } from "./domains/powerdns.js"
 import { proveWaitingDomains } from "./domains/prove.js"
 import { domainStore } from "./domains/store.js"
 import { postgresMeter } from "./metering/service.js"
-import { secretBox } from "./webhooks/signing.js"
+import { sealerFromEnv } from "./crypto/sealer.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import { captureError, initObservability, withMonitor } from "./observability.js"
 
 const log = pino({ name: "i10-domain-prove" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 initObservability({
   dsn: env.SENTRY_DSN,
@@ -93,9 +95,9 @@ await withMonitor(
      * deployment without one cannot finish the job this exists to do, and a
      * silent success would make the check-in claim otherwise.
      */
-    const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
+    const secrets = sealerFromEnv(env)
     if (!secrets) {
-      log.warn({}, "no WEBHOOK_SECRET_KEY - nothing to prove")
+      log.warn({}, "no SEAL_KEYS - nothing to prove")
       await sql.end({ timeout: 5 })
       return
     }

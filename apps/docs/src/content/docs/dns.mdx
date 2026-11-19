@@ -42,7 +42,8 @@ send.yourdomain.com             TXT   "v=spf1 include:_spf.i10.tech ~all"
 Now SPF aligns as well as DKIM, and Gmail shows `mailed-by: yourdomain.com`.
 Google's bulk-sender requirements - which apply above 5,000 messages a day -
 ask for SPF **and** DKIM to exist and pass, so this is the setup to be on
-before volume, not after.
+before volume, not after. Google also asks you to keep your Gmail spam rate low;
+see [Gmail spam rate](/gmail-spam-rate) for how to watch it.
 
 <Aside type="note">
 You can send from your apex domain or any subdomain. DMARC's relaxed alignment

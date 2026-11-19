@@ -5,7 +5,6 @@ import type { SendEmail } from "@repo/contracts"
 import { resolveTemplateSend } from "@repo/templates"
 import { createApp } from "../src/app.js"
 import type { Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import type { ConsoleDeps } from "../src/routes/console.js"
 import { templateStore, type TemplateStore } from "../src/templates/store.js"
 
@@ -46,7 +45,7 @@ suite("console template routes", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    store = templateStore(drizzle(db, { schema }) as unknown as Database)
+    store = templateStore(drizzle({ client: db }) as unknown as Database)
     tenant = crypto.randomUUID()
     await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id)
                 values (${tenant}, ${`r-${tenant.slice(0, 8)}`}, 'R', ${`routes-${tenant}`})`

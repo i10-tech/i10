@@ -11,6 +11,15 @@ const base: NodeJS.ProcessEnv = {
   SES_CONFIGURATION_SET: "i10-events",
 }
 
+/** The keys production must hold, built from code rather than pasted. */
+const keyring = (kid: string, fill: number) =>
+  `${kid}:${Buffer.alloc(32, fill).toString("base64")}`
+const prodKeys = {
+  SEAL_KEYS: keyring("s1", 1),
+  TOKEN_KEYS: keyring("t1", 2),
+  FEEDBACK_ID_KEY: Buffer.alloc(32, 3).toString("hex"),
+}
+
 describe("reading a Postgres interval", () => {
   it("reads the forms the defaults use", () => {
     expect(intervalToMs("5 minutes")).toBe(300_000)
@@ -89,6 +98,7 @@ describe("production must name its environment", () => {
     for (const environment of ["production", "staging"]) {
       const env = loadEnv({
         ...base,
+        ...prodKeys,
         NODE_ENV: "production",
         EDGE_SECRET: "e".repeat(32),
         SENTRY_ENVIRONMENT: environment,
@@ -108,7 +118,12 @@ describe("production must name its environment", () => {
 })
 
 describe("production must hold the edge secret", () => {
-  const prod = { ...base, NODE_ENV: "production", SENTRY_ENVIRONMENT: "production" }
+  const prod = {
+    ...base,
+    ...prodKeys,
+    NODE_ENV: "production",
+    SENTRY_ENVIRONMENT: "production",
+  }
 
   it("refuses to boot without EDGE_SECRET, or with one under 32 characters", () => {
     expect(() => loadEnv(prod)).toThrow(/EDGE_SECRET/)
@@ -121,6 +136,112 @@ describe("production must hold the edge secret", () => {
     )
     expect(loadEnv(base).EDGE_SECRET).toBeUndefined()
     expect(loadEnv({ ...base, NODE_ENV: "test" }).EDGE_SECRET).toBeUndefined()
+  })
+})
+
+describe("production must hold the body and object keyrings", () => {
+  const store = {
+    CONTENT_STORE_ENDPOINT: "https://account.r2.example.com",
+    CONTENT_STORE_BUCKET: "content",
+    CONTENT_STORE_ACCESS_KEY_ID: "id",
+    CONTENT_STORE_SECRET_ACCESS_KEY: "s".repeat(8),
+  }
+  const prod = {
+    ...base,
+    ...prodKeys,
+    NODE_ENV: "production",
+    SENTRY_ENVIRONMENT: "production",
+    EDGE_SECRET: "e".repeat(32),
+  }
+  const bodyKeys = keyring("k1", 7)
+  const objectKeys = keyring("o1", 8)
+
+  it("refuses to boot with the content store set and CONTENT_KEYS missing", () => {
+    expect(() => loadEnv({ ...prod, ...store, OBJECT_KEYS: objectKeys })).toThrow(
+      /CONTENT_KEYS: is required/,
+    )
+  })
+
+  it("refuses to boot with the content store set and OBJECT_KEYS missing", () => {
+    expect(() => loadEnv({ ...prod, ...store, CONTENT_KEYS: bodyKeys })).toThrow(
+      /OBJECT_KEYS: is required/,
+    )
+  })
+
+  it("accepts both keyrings, and production with no content store at all", () => {
+    const env = loadEnv({
+      ...prod,
+      ...store,
+      CONTENT_KEYS: bodyKeys,
+      OBJECT_KEYS: objectKeys,
+    })
+    expect(env.CONTENT_KEYS).toBe(bodyKeys)
+    expect(env.OBJECT_KEYS).toBe(objectKeys)
+    expect(loadEnv(prod).OBJECT_KEYS).toBeUndefined()
+  })
+
+  it("refuses an OBJECT_KEYS that is not a keyring", () => {
+    expect(() =>
+      loadEnv({ ...base, OBJECT_KEYS: `o1:${Buffer.alloc(16, 1).toString("base64")}` }),
+    ).toThrow(/OBJECT_KEYS/)
+  })
+
+  it("leaves development and test without them alone", () => {
+    const dev = loadEnv({ ...base, ...store })
+    expect(dev.CONTENT_KEYS).toBeUndefined()
+    expect(dev.OBJECT_KEYS).toBeUndefined()
+    expect(loadEnv({ ...base, ...store, NODE_ENV: "test" }).OBJECT_KEYS).toBeUndefined()
+  })
+})
+
+/**
+ * ⚠ WITHOUT THESE, WEBHOOKS, SSO, DNS CONNECTIONS AND MAILBOX DOWNLOADS QUIETLY
+ * SWITCH OFF. Production must fail to boot instead.
+ */
+describe("production must hold the sealing and token keys", () => {
+  const prod = {
+    ...base,
+    ...prodKeys,
+    NODE_ENV: "production",
+    SENTRY_ENVIRONMENT: "production",
+    EDGE_SECRET: "e".repeat(32),
+  }
+
+  it("refuses to boot without each one", () => {
+    for (const name of ["SEAL_KEYS", "TOKEN_KEYS", "FEEDBACK_ID_KEY"] as const) {
+      expect(() => loadEnv({ ...prod, [name]: undefined })).toThrow(
+        new RegExp(`${name}: is required`),
+      )
+    }
+  })
+
+  it("refuses a malformed value, without printing it", () => {
+    const short = Buffer.alloc(16, 9).toString("base64")
+    let message = ""
+    try {
+      loadEnv({ ...prod, SEAL_KEYS: `s1:${short}`, FEEDBACK_ID_KEY: short })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toContain("SEAL_KEYS: key s1 is not 32 bytes")
+    expect(message).toContain("FEEDBACK_ID_KEY: must be 32 bytes")
+    expect(message).not.toContain(short)
+  })
+
+  it("says a wrapped value was never unlocked, rather than calling it malformed", () => {
+    const wrapped = "wrap1.local.w1.aaaa.bbbb.cccc"
+    for (const name of ["SEAL_KEYS", "FEEDBACK_ID_KEY"] as const) {
+      expect(() => loadEnv({ ...prod, [name]: wrapped })).toThrow(
+        `${name}: is still wrapped: unlockEnv() did not run`,
+      )
+    }
+  })
+
+  it("accepts them, and leaves development without them alone", () => {
+    expect(loadEnv(prod).SEAL_KEYS).toBe(prodKeys.SEAL_KEYS)
+    expect(loadEnv(base).SEAL_KEYS).toBeUndefined()
+    expect(loadEnv(base).TOKEN_KEYS).toBeUndefined()
+    expect(loadEnv(base).FEEDBACK_ID_KEY).toBeUndefined()
   })
 })
 

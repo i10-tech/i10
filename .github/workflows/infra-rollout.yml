@@ -1,0 +1,117 @@
+# Make Argo pick up an infra-only commit now, and say whether it landed.
+#
+# ⚠ THIS EXISTS BECAUSE BUILD IGNORES `infra/**` ON PURPOSE, AND ITS DEPLOY JOB
+# IS THE ONLY THING THAT NUDGES ARGO. Build has to skip infra paths (its own
+# deploy commit lives there; see the note on `paths-ignore` in build.yml), so a
+# merge that only changes manifests ran nothing at all: Argo found it at its own
+# three-minute poll, and CI never said whether it came up. #413 sat for exactly
+# that long, and its first real hook run was visible to nobody.
+#
+# ⚠ ONLY WHEN EVERY CHANGED FILE IS UNDER infra/. A commit that also touches app
+# code triggers Build, whose deploy commit lands after this one; waiting here
+# for THIS sha would then race a newer revision and fail on timing. Build's
+# verify step covers that case, so this one stands down.
+#
+# It pushes nothing, so it cannot loop, and Build's deploy commits carry
+# `[skip ci]`, which GitHub honours for this workflow too.
+name: Infra rollout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+  workflow_dispatch:
+
+# ⚠ CANCEL-IN-PROGRESS IS SAFE HERE AND NOT IN BUILD. This job only reads and
+# nudges; a newer infra commit supersedes the revision an older run waits for,
+# so finishing the older one could only fail on a sha Argo has moved past.
+concurrency:
+  group: infra-rollout-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify the rollout
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      HAS_TAILSCALE: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Is this commit infra-only?
+        id: scope
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # A manual run, or a push whose `before` is not in history, has no
+          # range to read; treat it as infra-only and verify.
+          if [[ -z "${BEFORE:-}" || "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "only=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          outside=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -v '^infra/' || true)
+          if [[ -n "$outside" ]]; then
+            echo "::notice::Changes outside infra/ - Build deploys and verifies this one."
+            echo "only=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "only=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The same join, tag and reasoning as Build's deploy job; see the notes on
+      # "Join the tailnet" and "Verify the rollout" in build.yml.
+      - name: Join the tailnet
+        if: ${{ steps.scope.outputs.only == 'true' && env.HAS_TAILSCALE == 'true' }}
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+          tags: tag:ci
+
+      # ⚠ THE BOX RUNS A HAND-INSTALLED COPY OF verify-rollout.sh, AND NOTHING
+      # REDEPLOYS IT. It drifted twice (2026-09-28 and the #241 fix, still not
+      # installed on 2026-11-08), and each time the gate's own staleness read as
+      # an application failure. A warning, not a failure: the old copy still
+      # nudges and still waits, it just checks less.
+      - name: Is the box's verify-rollout current?
+        if: ${{ steps.scope.outputs.only == 'true' && env.HAS_TAILSCALE == 'true' }}
+        env:
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST || secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER || 'i10-deploy' }}
+        run: |
+          set -euo pipefail
+          if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+              "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" "cat /usr/local/bin/i10-verify-rollout" \
+              | diff -q - infra/scripts/verify-rollout.sh >/dev/null; then
+            echo "The box runs the current verify-rollout.sh."
+          else
+            echo "::warning::psl-vps runs an outdated verify-rollout. Reinstall it: sudo install -m 755 infra/scripts/verify-rollout.sh /usr/local/bin/i10-verify-rollout"
+          fi
+
+      # ⚠ ONCE PER APPLICATION THAT AN infra/ COMMIT CAN CHANGE ON ITS OWN. The
+      # script gates on one app (`I10_APP`) and nudges the rest; i10-stalwart
+      # carries the PostSync apply hook (#412), whose failure only shows on that
+      # app's operation. The second run's §3 re-waits on rollouts that are
+      # already done, which costs seconds.
+      - name: Verify the rollout
+        if: ${{ steps.scope.outputs.only == 'true' && env.HAS_TAILSCALE == 'true' }}
+        env:
+          DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST || secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER || 'i10-deploy' }}
+        run: |
+          set -euo pipefail
+          for app in i10-workloads i10-stalwart; do
+            echo "── ${app}"
+            ssh -o BatchMode=yes \
+                -o StrictHostKeyChecking=accept-new \
+                -o ConnectTimeout=20 \
+                "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" \
+                "I10_APP=${app} /usr/local/bin/i10-verify-rollout ${GITHUB_SHA}"
+          done

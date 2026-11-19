@@ -103,6 +103,55 @@ export function nodeTxtLookup(timeoutMs: number = DEFAULT_TIMEOUT): TxtLookup {
   }
 }
 
+export interface MxRecord {
+  exchange: string
+  priority: number
+}
+
+/** Every MX record at a name. */
+export type MxLookup = (name: string) => Promise<MxRecord[]>
+
+/**
+ * ⚠ SAME DEDICATED-RESOLVER RULE AS `nodeTxtLookup`, for checking whether a
+ * domain's apex MX points at our inbound mail server (`mailHost`).
+ */
+export function nodeMxLookup(timeoutMs: number = DEFAULT_TIMEOUT): MxLookup {
+  return async (name) => {
+    try {
+      return await new Resolver({ timeout: timeoutMs, tries: 2 }).resolveMx(name)
+    } catch (error) {
+      const code = (error as { code?: string }).code
+      if (code && NOT_PUBLISHED.has(code)) return []
+      throw error
+    }
+  }
+}
+
+/**
+ * Whether any MX record at `domain` points at `mailHost`.
+ *
+ * ⚠ ANY MATCHING EXCHANGE, REGARDLESS OF PRIORITY, AND NEVER THROWS. A resolver
+ * timeout on the MX query must not abort a `verify` or `refresh` that already
+ * checked ownership and SES; an unreachable MX simply reads as `false` until
+ * the next check.
+ */
+export async function hasInboundMx(
+  domain: string,
+  mailHost: string,
+  lookup: MxLookup,
+): Promise<boolean> {
+  const target = mailHost.trim().toLowerCase().replace(/\.$/, "")
+  if (!target) return false
+  try {
+    const records = await lookup(domain)
+    return records.some(
+      (r) => r.exchange.trim().toLowerCase().replace(/\.$/, "") === target,
+    )
+  } catch {
+    return false
+  }
+}
+
 /**
  * The question asked of a delegated domain.
  *

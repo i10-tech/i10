@@ -8,6 +8,28 @@
 export default {
   extends: ["@commitlint/config-conventional"],
   rules: {
+    // config-conventional's types plus `infra`, for a change whose whole point
+    // is how something is deployed or operated (a hook Job, a manifest, a
+    // runbook script) rather than a feature or a fix. next-version.mjs bumps
+    // patch for every type but `feat`, so it versions like `chore`.
+    "type-enum": [
+      2,
+      "always",
+      [
+        "build",
+        "chore",
+        "ci",
+        "docs",
+        "feat",
+        "fix",
+        "infra",
+        "perf",
+        "refactor",
+        "revert",
+        "style",
+        "test",
+      ],
+    ],
     // The scopes that exist. An unlisted scope is a typo more often than a new
     // component, and a typo'd scope reads fine in a changelog while grouping
     // wrong. Add deliberately.

@@ -4,9 +4,13 @@ import {
   mailboxJobSchema,
   type MailboxJob,
 } from "@repo/contracts"
-import type { StreamingObjectStore } from "../content/object-store.js"
+import type { ContentStore } from "../content/object-store.js"
+import { unwrapKey } from "../crypto/envelope.js"
+import type { TokenKeys } from "../crypto/token-keys.js"
 import {
   signDownloadToken,
+  startMailboxExport,
+  UPLOAD_TTL_S,
   verifyDownloadToken,
   type MailboxAccessResult,
   type MailboxJobRow,
@@ -14,8 +18,9 @@ import {
 } from "../mailboxes/jobs.js"
 import { LIMITS } from "../mailboxes/archive.js"
 import { importKey } from "../mailboxes/migration.js"
+import { EXPORT_KEY, openStream, plainLength } from "../mailboxes/sealed-stream.js"
 import type { MailboxJobData } from "../queue/mailbox-queue.js"
-import { requireUser } from "../middleware/session.js"
+import { freshAuthRefusal, requireUser } from "../middleware/session.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 
 /**
@@ -32,21 +37,38 @@ import { errorResponse, notWired as notWiredFor } from "./shared.js"
  * (jobs.ts). A route that names a mailbox is a route that can read it, so every
  * one of these asks first, and a colleague who is none of those gets a 403.
  *
- * ⚠ THE ARCHIVE NEVER PASSES THROUGH THIS PROCESS. An import is a presigned
- * `PUT` straight to R2, then a second call to say it is there; an export is read
- * from R2 as a stream. Anything that read the archive here would hold it in an
- * API pod's memory - and Bun's own request limit (128 MB) would refuse it first.
+ * ⚠ STARTING AN EXPORT AND RESERVING AN IMPORT ASK FOR A FRESH SESSION, AFTER
+ * THE ACCESS CHECK ABOVE (`freshAuthRefusal`, the function behind the console's
+ * `requireFreshAuth`; these routes are not under /console, so the reader reaches
+ * them through `AppDeps.freshAuth`). An export copies every message out and an
+ * import writes into the mailbox, so a stolen cookie must not be enough - and a
+ * colleague who may not touch the mailbox is told 403 rather than asked to
+ * re-authenticate. Reads (status, download) never ask.
+ *
+ * ⚠ `import/{jobId}/start` DOES NOT, ON PURPOSE. It can only run the job that a
+ * fresh `POST .../import` reserved, and the archive for it may take hours to
+ * send: asking again after the upload would make the final click of a large
+ * migration fail on a session that was fresh when the person began. There is no
+ * cancel route today; one would be a mutation and belong behind the same step-up.
+ *
+ * ⚠ THE ARCHIVE IS NEVER HELD BY THIS PROCESS. An import is a presigned `PUT`
+ * straight to R2, then a second call to say it is there; an export is read
+ * from R2 as a stream and opened one 64 KiB chunk at a time on its way out
+ * (mailboxes/sealed-stream.ts). Anything that read the archive whole here would
+ * hold it in an API pod's memory - and Bun's own request limit (128 MB) would
+ * refuse it first.
  */
 
 export interface MailboxMigrationDeps {
   jobs: MailboxJobStore
-  store: StreamingObjectStore
+  /** Its `objectKeys` seal and open exports; without them export answers 501. */
+  store: ContentStore
   /** Queues the job under its mailbox's group. */
   enqueue: (data: MailboxJobData) => Promise<unknown>
   /** The decision of jobs.ts, bound to its database and admin check. */
   access: (userId: string, address: string) => Promise<MailboxAccessResult>
-  /** Verifies the session on the download route, which has no `requireUser`. */
-  tokenSecret: string
+  /** Signs the download link, since that route has no `requireUser`. */
+  tokens: TokenKeys
   now?: () => Date
 }
 
@@ -58,8 +80,6 @@ declare module "hono" {
 
 /** How long a download link works. The status route mints a fresh one each call. */
 const LINK_TTL_MS = 15 * 60_000
-/** How long the upload URL works: enough to send LIMITS.maxArchiveBytes on a slow line. */
-const UPLOAD_TTL_S = 6 * 60 * 60
 
 const MailboxJob = mailboxJobSchema.openapi("MailboxJob")
 const CreateMailboxImport = createMailboxImportSchema.openapi("CreateMailboxImport")
@@ -78,6 +98,16 @@ const forbidden = () =>
     "invalid_access",
     "Only the mailbox's owner or a workspace admin may do that.",
   )
+
+/**
+ * The step-up answer, handed back from a typed route.
+ *
+ * ⚠ CLERK'S HINT, NOT OUR ERROR SHAPE, so it cannot be `c.json(problem(...))`:
+ * the browser's `useReverification` looks for `clerk_error` in the body to open
+ * its dialog (see `freshAuthRefusal`). The OpenAPI handler types only the
+ * documented shapes, hence the cast; the 403 above describes it.
+ */
+const refusal = (response: Response): never => response as never
 
 const address = z.object({ address: z.string() })
 
@@ -125,7 +155,7 @@ const downloadUrl = (deps: MailboxMigrationDeps, job: MailboxJobRow, now: Date) 
   const token = signDownloadToken(
     { tenantId: job.tenantId, jobId: job.id },
     now.getTime() + LINK_TTL_MS,
-    deps.tokenSecret,
+    deps.tokens,
   )
   return `/mailboxes/${encodeURIComponent(job.mailboxAddress)}/export/download?token=${token}`
 }
@@ -150,7 +180,9 @@ const startExport = createRoute({
       content: { "application/json": { schema: MailboxJob } },
     },
     401: errorResponse("Not signed in."),
-    403: errorResponse("Not the mailbox's owner or a workspace admin."),
+    403: errorResponse(
+      "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
+    ),
     404: errorResponse("No such mailbox."),
     501: errorResponse("Mailbox export is not configured."),
   },
@@ -158,7 +190,7 @@ const startExport = createRoute({
 
 mailboxMigration.openapi(startExport, async (c) => {
   const deps = migration(c)
-  if (!deps) return c.json(notWired, 501)
+  if (!deps?.store.objectKeys) return c.json(notWired, 501)
 
   const mailbox = normal(c.req.valid("param").address)
   const { userId } = c.get("user")
@@ -168,26 +200,15 @@ mailboxMigration.openapi(startExport, async (c) => {
       ? c.json(notFound(), 404)
       : c.json(forbidden(), 403)
   }
+  const stale = await freshAuthRefusal(c)
+  if (stale) return refusal(stale)
   const tenantId = access.tenantId!
 
   // One at a time: a second request while one runs is the same request.
-  const current = await deps.jobs.latest(tenantId, mailbox, "export")
-  if (current && (current.status === "pending" || current.status === "running")) {
-    return c.json(formatJob(current), 202)
-  }
-
-  const job = await deps.jobs.insert({
+  const job = await startMailboxExport(deps, {
     tenantId,
-    mailboxAddress: mailbox,
-    type: "export",
+    address: mailbox,
     requestedBy: userId,
-    status: "pending",
-  })
-  await deps.enqueue({
-    jobId: job.id,
-    tenantId,
-    mailboxAddress: mailbox,
-    type: "export",
   })
   return c.json(formatJob(job), 202)
 })
@@ -265,7 +286,8 @@ const download = createRoute({
 
 mailboxMigration.openapi(download, async (c) => {
   const deps = migration(c)
-  if (!deps) return c.json(notWired, 501)
+  const ring = deps?.store.objectKeys
+  if (!deps || !ring) return c.json(notWired, 501)
 
   const mailbox = normal(c.req.valid("param").address)
   const now = (deps.now ?? (() => new Date()))()
@@ -273,7 +295,7 @@ mailboxMigration.openapi(download, async (c) => {
 
   let job: MailboxJobRow | null
   if (token) {
-    const link = verifyDownloadToken(token, deps.tokenSecret, now.getTime())
+    const link = verifyDownloadToken(token, deps.tokens, now.getTime())
     if (!link) {
       return c.json(
         problem(401, "invalid_access", "That download link is invalid or has expired."),
@@ -328,12 +350,28 @@ mailboxMigration.openapi(download, async (c) => {
     )
   }
 
-  return c.body(deps.store.read(job.objectKey), 200, {
-    "content-type": "application/gzip",
-    "content-length": String(size),
-    "content-disposition": `attachment; filename="${mailbox.replace(/[^a-z0-9@._-]/g, "_")}-export.tar.gz"`,
-    "cache-control": "no-store",
-  })
+  // ⚠ LOUD, BEFORE ANY BYTE IS SENT. A finished export without its key, or an
+  // object no sealed archive could be, is a fault to see, not a broken download.
+  const ids = { tenantId: job.tenantId, jobId: job.id }
+  if (!job.sealedKey) throw new Error(`mailbox export ${job.id} has no key`)
+  const length = plainLength(size)
+  if (length === null)
+    throw new Error(`mailbox export ${job.id} is not a sealed archive`)
+  const archiveKey = unwrapKey(EXPORT_KEY, ring, ids, job.sealedKey)
+
+  // ⚠ THE LENGTH OF THE ARCHIVE, NOT THE OBJECT: it follows from the object's
+  // size and the chunk size. No range requests, as before: a resumed download
+  // starts again.
+  return c.body(
+    deps.store.read(job.objectKey).pipeThrough(openStream(archiveKey, ids)),
+    200,
+    {
+      "content-type": "application/gzip",
+      "content-length": String(length),
+      "content-disposition": `attachment; filename="${mailbox.replace(/[^a-z0-9@._-]/g, "_")}-export.tar.gz"`,
+      "cache-control": "no-store",
+    },
+  )
 })
 
 // ── Import ──────────────────────────────────────────────────────────────────
@@ -364,7 +402,9 @@ const startUpload = createRoute({
       content: { "application/json": { schema: MailboxJob } },
     },
     401: errorResponse("Not signed in."),
-    403: errorResponse("Not the mailbox's owner or a workspace admin."),
+    403: errorResponse(
+      "Not the mailbox's owner or a workspace admin, or the session needs a fresh sign-in first.",
+    ),
     404: errorResponse("No such mailbox."),
     413: errorResponse("The archive is over the size limit."),
     422: errorResponse("The request is malformed."),
@@ -387,6 +427,8 @@ mailboxMigration.openapi(
         ? c.json(notFound(), 404)
         : c.json(forbidden(), 403)
     }
+    const stale = await freshAuthRefusal(c)
+    if (stale) return refusal(stale)
     if (size > LIMITS.maxArchiveBytes) {
       return c.json(
         problem(

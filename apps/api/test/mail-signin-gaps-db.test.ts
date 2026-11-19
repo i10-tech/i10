@@ -2,12 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { withTenant, type Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { directoryMailStore } from "../src/identity/mail-store.js"
 import { joinStore } from "../src/console/join.js"
 import { mirrorRequiredDomains } from "../src/identity/authd-mirror.js"
 import { identityStore } from "../src/identity/store.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 import { mailRevocation } from "../src/mailboxes/revoke.js"
 import { mailAccess } from "../src/mailboxes/store.js"
 import { raiseCredentialEpoch } from "../src/projection/credential-epoch.js"
@@ -58,7 +57,7 @@ suite("closing the mail sign-in gaps", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     sqlApi = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    db = drizzle(sqlApi, { schema }) as unknown as Database
+    db = drizzle({ client: sqlApi }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],
@@ -331,7 +330,7 @@ suite("closing the mail sign-in gaps", () => {
   // The same, through the entry points production uses: nothing here calls the
   // mirror itself, so a mutator that stopped calling it fails these.
   describe("5: and the real mutators move it", () => {
-    const store = () => identityStore(db, secretBox("ab".repeat(32)))
+    const store = () => identityStore(db, testSealer())
     const names = async (tenant: string) =>
       (
         await owner`select domain from authd.required_domains where tenant_id = ${tenant} order by domain`

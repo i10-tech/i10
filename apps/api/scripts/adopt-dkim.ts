@@ -40,17 +40,21 @@ import {
   PutEmailIdentityDkimSigningAttributesCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { createDb } from "../src/db/client.js"
 import { domains } from "../src/db/core.js"
 import { dkimRecordValue, generateDkimKeypair } from "../src/domains/dkim.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { sealerFromEnv } from "../src/crypto/sealer.js"
+import { unlockEnv } from "../src/crypto/unlock.js"
 
 const name = process.argv[2]?.trim().toLowerCase()
 const flip = process.argv.includes("--flip")
+const tenant = process.argv
+  .find((a) => a.startsWith("--tenant="))
+  ?.slice("--tenant=".length)
 
 if (!name) {
-  console.error("usage: adopt-dkim <domain> [--flip]")
+  console.error("usage: adopt-dkim <domain> [--flip] [--tenant=<tenant id>]")
   process.exit(1)
 }
 
@@ -69,22 +73,34 @@ if (!name) {
  * up the entire environment.
  */
 const url = process.env.MIGRATE_DATABASE_URL ?? process.env.DATABASE_URL
-const sealingKey = process.env.WEBHOOK_SECRET_KEY
+const secrets = sealerFromEnv({ SEAL_KEYS: (await unlockEnv(console)).SEAL_KEYS })
 const region = process.env.AWS_REGION ?? "eu-central-1"
 
 if (!url) {
   console.error("MIGRATE_DATABASE_URL (or DATABASE_URL) is required")
   process.exit(1)
 }
-if (!sealingKey) {
-  console.error("WEBHOOK_SECRET_KEY is required - the private key is sealed with it.")
+if (!secrets) {
+  console.error("SEAL_KEYS is required - the private key is sealed with it.")
   process.exit(1)
 }
 
 const { sql, db } = createDb(url)
-const secrets = secretBox(sealingKey)
 
-const [row] = await db.select().from(domains).where(eq(domains.name, name)).limit(1)
+// ⚠ A NAME IS NOT ONE ROW. Two workspaces can hold the same domain name (one
+// displaced by the other), so more than one match is refused, not guessed.
+const rows = await db
+  .select()
+  .from(domains)
+  .where(and(eq(domains.name, name), tenant ? eq(domains.tenantId, tenant) : undefined))
+
+if (rows.length > 1) {
+  console.error(
+    `${rows.length} workspaces have a core.domains row for ${name}. Pass --tenant=<id>, one of: ${rows.map((r) => r.tenantId).join(", ")}`,
+  )
+  process.exit(1)
+}
+const [row] = rows
 
 if (!row) {
   console.error(
@@ -92,6 +108,12 @@ if (!row) {
   )
   process.exit(1)
 }
+
+const dkimOfRow = {
+  purpose: "core.domains.dkim_private_key_sealed",
+  tenantId: row.tenantId,
+  rowId: row.id,
+} as const
 
 if (!flip) {
   // ⚠ REFUSES TO REGENERATE OVER A KEY THAT IS ALREADY THERE. Running phase 1
@@ -111,9 +133,9 @@ if (!flip) {
     .set({
       dkimSelector: keypair.selector,
       dkimPublicKey: keypair.publicKey,
-      dkimPrivateKeySealed: secrets.seal(keypair.privateKey),
+      dkimPrivateKeySealed: secrets.seal(dkimOfRow, keypair.privateKey),
     })
-    .where(eq(domains.name, name))
+    .where(eq(domains.id, row.id))
 
   console.log(
     `\nStored a new key for ${name}. SES is untouched and still signing as before.`,
@@ -158,7 +180,7 @@ await ses.send(
     SigningAttributesOrigin: "EXTERNAL",
     SigningAttributes: {
       DomainSigningSelector: row.dkimSelector,
-      DomainSigningPrivateKey: secrets.open(row.dkimPrivateKeySealed!),
+      DomainSigningPrivateKey: secrets.open(dkimOfRow, row.dkimPrivateKeySealed!),
     },
   }),
 )

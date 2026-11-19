@@ -1,0 +1,258 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "ed1a54dd-8fd5-485e-8532-9984f8935bdb",
+  "prevIds": [
+    "d83382cb-e900-4312-9899-bb853a1efad5"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "group_sent_copies"
+      ],
+      "writes": [
+        "s|tbl|authd.group_sent_copies",
+        "n|tbl|authd.group_sent_copies",
+        "e|tbl|authd.group_sent_copies",
+        "n|rel|authd.group_sent_copies",
+        "n|type|authd.group_sent_copies",
+        "n|rel|authd.group_sent_copies_group_name_message_id_pk"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "groups",
+        "tenant_id"
+      ],
+      "writes": [
+        "s|col|authd.groups.tenant_id",
+        "n|col|authd.groups.tenant_id",
+        "e|col|authd.groups.tenant_id"
+      ],
+      "reads": [
+        "n|tbl|authd.groups",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "groups",
+        "created_at"
+      ],
+      "writes": [
+        "s|col|authd.groups.created_at",
+        "n|col|authd.groups.created_at",
+        "e|col|authd.groups.created_at"
+      ],
+      "reads": [
+        "n|tbl|authd.groups",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "groups",
+        "groups_tenant_idx"
+      ],
+      "writes": [
+        "s|idx|authd.groups_tenant_idx",
+        "n|idx|authd.groups_tenant_idx",
+        "e|idx|authd.groups_tenant_idx",
+        "n|rel|authd.groups_tenant_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.groups",
+        "n|sch|authd",
+        "n|col|authd.groups.tenant_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "group_sent_copies"
+      ],
+      "writes": [
+        "s|fk|authd.group_sent_copies.group_sent_copies_group_name_groups_name_fk",
+        "n|fk|authd.group_sent_copies.group_sent_copies_group_name_groups_name_fk",
+        "e|fk|authd.group_sent_copies.group_sent_copies_group_name_groups_name_fk",
+        "n|con|authd.group_sent_copies.group_sent_copies_group_name_groups_name_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.group_sent_copies",
+        "n|sch|authd",
+        "n|tbl|authd.groups",
+        "n|sch|authd",
+        "n|col|authd.group_sent_copies.group_name",
+        "n|col|authd.groups.name",
+        "e|uniqueness|authd.groups.name"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "group_sent_copies",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "group_sent_copies",
+        "name": "group_name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "group_sent_copies",
+        "name": "message_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "group_sent_copies",
+        "name": "copied_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "groups",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "groups",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "groups",
+        "name": "groups_tenant_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "group_sent_copies",
+        "name": "group_sent_copies_group_name_groups_name_fk",
+        "nameExplicit": false,
+        "columns": [
+          "group_name"
+        ],
+        "schemaTo": "authd",
+        "tableTo": "groups",
+        "columnsTo": [
+          "name"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "group_sent_copies",
+        "name": "group_sent_copies_group_name_message_id_pk",
+        "columns": [
+          "group_name",
+          "message_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

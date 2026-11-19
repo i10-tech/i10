@@ -3,7 +3,6 @@ import { sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { assertRlsSubject, withTenant, type Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { identityStore } from "../src/identity/store.js"
 import { ssoPolicyStore } from "../src/identity/policy-store.js"
 import { hashSecret } from "../src/identity/model.js"
@@ -41,7 +40,7 @@ suite("#340 policy store", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],

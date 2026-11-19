@@ -32,6 +32,7 @@ const connection = (over: Partial<SsoConnection> = {}): SsoConnection => ({
 const data = (c: SsoConnection, abilities = owner): SsoConnectionData => ({
   connection: c,
   abilities,
+  mail: {},
   authOrigin: null,
   clerkEnabled: false,
 })

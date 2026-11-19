@@ -57,8 +57,12 @@ is proxied, and psl-vps advertises no routes (`AdvertiseRoutes: null`,
 checked 2026-11-05).
 
 A second resolver on the box is not possible either. PowerDNS holds
-`hostPort: 53` with no `hostIP`, so it already owns port 53 on every address
-the node has, including `100.127.102.63`. Tailscale's own DNS cannot serve a
+`hostPort: 53` on the tailnet addresses `100.127.102.63` and
+`fd7a:115c:a1e0::9932:663f` (each `hostPort` names its `hostIP`; see
+`infra/k8s/i10/powerdns/README.md`), so port 53 there is already taken.
+⚠ If the node's tailnet address ever changes, those two `hostIP` pairs in
+`powerdns/deployment.yaml` must change with it, or this view goes silent.
+Tailscale's own DNS cannot serve a
 custom record (tailscale/tailscale#1543; only Headscale has `extra_records`).
 
 So the resolver **is** PowerDNS, using its views feature (5.0+):

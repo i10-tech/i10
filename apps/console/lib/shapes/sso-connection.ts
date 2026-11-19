@@ -1,3 +1,4 @@
+import type { MailSignInInitial } from "@/components/sso/connection/mail-sign-in"
 import { defineShape } from "@/lib/shapes"
 import { scimSessionLimitNote } from "@/lib/sso-authorization"
 import { mfaNotes } from "@/lib/sso-runs"
@@ -13,6 +14,7 @@ export interface SsoConnectionData {
   abilities: SsoAbilities
   authOrigin: string | null
   clerkEnabled: boolean
+  mail: MailSignInInitial
 }
 
 export interface SsoConnectionShape {

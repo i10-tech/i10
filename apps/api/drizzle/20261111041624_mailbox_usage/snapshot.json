@@ -1,0 +1,196 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "0b17347a-8482-4cb3-bd12-c1e76a153c12",
+  "prevIds": [
+    "cce198e4-23a7-449d-8add-a9167fa253e9"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_usage"
+      ],
+      "writes": [
+        "s|tbl|core.mailbox_usage",
+        "n|tbl|core.mailbox_usage",
+        "e|tbl|core.mailbox_usage",
+        "n|rel|core.mailbox_usage",
+        "n|type|core.mailbox_usage",
+        "n|rel|core.mailbox_usage_tenant_id_address_pk"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_usage"
+      ],
+      "writes": [
+        "s|fk|core.mailbox_usage.mailbox_usage_tenant_id_tenants_id_fk",
+        "n|fk|core.mailbox_usage.mailbox_usage_tenant_id_tenants_id_fk",
+        "e|fk|core.mailbox_usage.mailbox_usage_tenant_id_tenants_id_fk",
+        "n|con|core.mailbox_usage.mailbox_usage_tenant_id_tenants_id_fk"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_usage",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.mailbox_usage.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_usage"
+      ],
+      "writes": [
+        "s|pol|core.mailbox_usage.mailbox_usage_workspace",
+        "n|pol|core.mailbox_usage.mailbox_usage_workspace",
+        "e|pol|core.mailbox_usage.mailbox_usage_workspace"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_usage",
+        "n|sch|core",
+        "e|rls|core.mailbox_usage"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "mailbox_usage",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "address",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "used_bytes",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "sampled_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "mailbox_usage_tenant_id_tenants_id_fk",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "mailbox_usage_tenant_id_address_pk",
+        "columns": [
+          "tenant_id",
+          "address"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "mailbox_usage_workspace",
+        "as": "PERMISSIVE",
+        "for": "ALL",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"mailbox_usage\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": "\"core\".\"mailbox_usage\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "entityType": "policies"
+      }
+    }
+  ]
+}

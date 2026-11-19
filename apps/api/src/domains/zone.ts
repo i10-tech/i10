@@ -1,5 +1,6 @@
 import type { DnsRecord, DomainStatus } from "@repo/contracts"
 import { dkimRecordValue } from "./dkim.js"
+import { DEFAULT_MAIL_HOST, receivingRecordsFor } from "./records.js"
 
 /**
  * Delegated subdomains: the customer points three names at us and we serve
@@ -283,11 +284,18 @@ export function delegatedZones({
 }
 
 /**
- * What a DELEGATING customer publishes: three NS record sets and nothing else.
+ * What a DELEGATING customer publishes: three NS record sets, plus receiving
+ * records in their parent zone when the domain hosts mailboxes.
  *
  * ⚠ SAME SHAPE AS THE MANUAL RECORDS, SO THE API DOES NOT FORK. A client
  * renders `records` and tells the customer to publish them; whether that is four
  * records or three delegations is our business, not theirs.
+ *
+ * ⚠ RECEIVING RECORDS STAY IN THE PARENT ZONE EVEN WHEN DELEGATED. PowerDNS
+ * only serves `send.`, `_domainkey.` and `_dmarc.`, so the apex MX and
+ * `_imaps._tcp` / `_submissions._tcp` SRV records cannot live in our delegated
+ * subzones - the customer adds them at their DNS provider (or our publisher
+ * writes them there when connected).
  */
 export function delegationRecordsFor(
   domain: string,
@@ -295,11 +303,12 @@ export function delegationRecordsFor(
   nameservers: readonly string[],
   status: DomainStatus,
   claim: string,
+  receiving?: { hostsMailboxes?: boolean; mailHost?: string },
 ): DnsRecord[] {
   const names = delegatedZoneNames(domain, returnPathLabel)
   const ours = delegatedNameservers(nameservers, claim)
   /*
-   * ⚠ SIX NS RECORDS AND NOTHING ELSE - THE CHALLENGE TXT RECORD IS GONE, and
+   * ⚠ SIX NS RECORDS FOR SENDING - THE CHALLENGE TXT RECORD IS GONE, and
    * its disappearance is the point rather than a simplification. It existed
    * only because every customer published the SAME two nameservers, so the
    * delegation said that somebody had delegated the name and nothing about who;
@@ -311,7 +320,7 @@ export function delegationRecordsFor(
    * DKIM record always did. One less record to publish, one less to get wrong,
    * and one less thing to explain.
    */
-  return Object.values(names).flatMap((zone) =>
+  const nsRecords = Object.values(names).flatMap((zone) =>
     ours.map((ns): DnsRecord => ({
       record: "NS",
       name: zone,
@@ -323,4 +332,11 @@ export function delegationRecordsFor(
       value: ns,
     })),
   )
+
+  return receiving?.hostsMailboxes
+    ? [
+        ...nsRecords,
+        ...receivingRecordsFor(domain, receiving.mailHost ?? DEFAULT_MAIL_HOST, status),
+      ]
+    : nsRecords
 }

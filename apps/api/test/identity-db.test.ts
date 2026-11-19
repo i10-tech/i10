@@ -3,10 +3,9 @@ import { sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { assertRlsSubject, type Database } from "../src/db/client.js"
-import * as schema from "../src/db/schema.js"
 import { identityStore } from "../src/identity/store.js"
 import { hashSecret } from "../src/identity/model.js"
-import { secretBox } from "../src/webhooks/signing.js"
+import { testSealer } from "./support/sealer.js"
 
 /**
  * The identity schema against a real database as `i10_api` (#337): every
@@ -30,13 +29,13 @@ const displaced = `old-${suffix}.test`
 let liveProof = ""
 let displacedProof = ""
 const ada = `user_ada_${suffix}`
-const box = secretBox("ab".repeat(32))
+const box = testSealer()
 
 suite("identity schema", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
     db = postgres(API_URL!, { max: 4, onnotice: () => {} })
-    database = drizzle(db, { schema }) as unknown as Database
+    database = drizzle({ client: db }) as unknown as Database
     for (const [id, name] of [
       [acme, "Acme"],
       [rival, "Rival"],
@@ -237,7 +236,7 @@ suite("identity schema", () => {
     })
     const [raw] =
       await owner`select pkce_verifier from identity.login_attempts where id = ${id}`
-    expect(String(raw!.pkce_verifier).startsWith("v1.")).toBe(true)
+    expect(String(raw!.pkce_verifier).startsWith("v2.")).toBe(true)
     const read = await store().attemptByState(hashSecret(state))
     expect(read).toMatchObject({
       id,
@@ -457,7 +456,7 @@ suite("identity schema", () => {
     expect(written?.config).toEqual({ oidc: { clientSecretSet: true } })
     const [row] =
       await owner`select secrets, config from identity.connections where id = ${connectionId}`
-    expect(String(row!.secrets)).toStartWith("v1.")
+    expect(String(row!.secrets)).toStartWith("v2.")
     expect(String(row!.secrets)).not.toContain("client-secret-at-rest")
     expect(await store().connectionSecrets(acme, connectionId)).toEqual({
       oidc: { clientSecret: "client-secret-at-rest" },

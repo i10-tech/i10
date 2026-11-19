@@ -1,7 +1,7 @@
+import "./openapi-first.js"
 import { createClerkClient } from "@clerk/backend"
 import { passwordAttempts } from "./console/password-check.js"
 import { codeCooldown } from "./console/code-cooldown.js"
-import { createHmac } from "node:crypto"
 import pino from "pino"
 import { createApp } from "./app.js"
 import { subscriptionOps } from "./billing/db.js"
@@ -16,6 +16,7 @@ import { keyLookup, keyStore } from "./auth/store.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { publishRoutingSettings } from "./domains/routing-settings.js"
 import { loadEnv } from "./env.js"
+import { unlockEnv } from "./crypto/unlock.js"
 import {
   captureError,
   captureMessage,
@@ -26,7 +27,14 @@ import { createSendQueue } from "./queue/send-queue.js"
 import { createWebhookQueue } from "./queue/webhook-queue.js"
 import { createInvitationQueue, invitationScheduler } from "./queue/invitation-queue.js"
 import { createMailboxQueue, enqueueMailboxJob } from "./queue/mailbox-queue.js"
-import { canAccessMailbox, mailboxJobStore } from "./mailboxes/jobs.js"
+import {
+  canAccessMailbox,
+  mailboxJobStore,
+  startMailboxExport,
+} from "./mailboxes/jobs.js"
+import { mailboxAliases } from "./mailboxes/aliases.js"
+import { mailboxAdminLifecycle } from "./mailboxes/lifecycle.js"
+import { mailboxLifecycleStore } from "./mailboxes/lifecycle-store.js"
 import { memberStore } from "./console/members-db.js"
 import { roleStore } from "./console/roles-db.js"
 import {
@@ -163,8 +171,18 @@ import {
   type ProvisionDeps,
 } from "./mailboxes/provision.js"
 import { createStalwartCaller } from "./mail/stalwart.js"
+import { disableDomain } from "./mail/stalwart-domains.js"
+import { mailboxHosting } from "./domains/mailbox-hosting.js"
 import { planAssignmentStore } from "./metering/postgres.js"
-import { mailboxDirectory, paymentHold } from "./mailboxes/store.js"
+import {
+  hostedDomainsOf,
+  mailboxDirectory,
+  managedMailLane,
+  paymentHold,
+} from "./mailboxes/store.js"
+import { mailboxCreationStore } from "./mailboxes/creation-mode.js"
+import { onMailJoinEvent } from "./mailboxes/on-join.js"
+import { consoleMailboxStore, consoleMailboxes } from "./mailboxes/console.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
 import { teamInboxesFor, teamMailFor } from "./team-inboxes/wire.js"
 import { onTeamInboxEvent } from "./team-inboxes/sync.js"
@@ -177,6 +195,8 @@ import { dnsInspector } from "./console/dns.js"
 import { delegationChecker } from "./console/delegation.js"
 import { dnsConnectionStore } from "./dns/connections.js"
 import { dnsOAuth } from "./dns/oauth.js"
+import { sealerFromEnv } from "./crypto/sealer.js"
+import { tokenKeysFromEnv } from "./crypto/token-keys.js"
 import { dnsPublisher } from "./dns/publish.js"
 import { credentialRenewal } from "./dns/renew.js"
 import { marketingStore } from "./console/marketing.js"
@@ -222,7 +242,6 @@ import { resilient } from "./send/metering.js"
 import { postgresEntitlements, postgresMetering } from "./metering/service.js"
 import { webhookEventOps } from "./webhooks/db.js"
 import { accountEventOps } from "./webhooks/stalwart-account-db.js"
-import { secretBox } from "./webhooks/signing.js"
 import { webhookEndpointStore } from "./webhooks/store.js"
 import { webhookHistory } from "./webhooks/history.js"
 import { fanOutAndEnqueue, runHealthEmails } from "./webhooks/health.js"
@@ -239,7 +258,7 @@ import { clerkResume } from "./devices/resume.js"
 import { clerkAuthAppIdentity } from "./routes/devices.js"
 
 const log = pino({ name: "i10-api" })
-const env = loadEnv()
+const env = loadEnv(await unlockEnv(log))
 
 // ⚠ BEFORE THE DATABASE, THE CLERK CLIENT AND EVERY OTHER DEPENDENCY, so that
 // the boot failures below are the first things it can report. A pod that dies
@@ -491,11 +510,18 @@ if (Boolean(env.DNS_OAUTH_BROKER_URL) !== Boolean(env.DNS_OAUTH_BROKER_SECRET)) 
 
 /**
  * ⚠ WEBHOOKS ARE ON OR OFF IN ONE PLACE, AND THE KEY IS WHAT DECIDES. Without
- * `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a customer's signing
- * secret, so the endpoint routes answer 501 and no SES event is ingested -
- * visible, rather than a silent downgrade to unsigned or plaintext.
+ * `SEAL_KEYS` there is nowhere safe to keep a customer's signing secret, so
+ * the endpoint routes answer 501 and no SES event is ingested - visible,
+ * rather than a silent downgrade to unsigned or plaintext.
  */
-const secrets = env.WEBHOOK_SECRET_KEY ? secretBox(env.WEBHOOK_SECRET_KEY) : null
+const secrets = sealerFromEnv(env)
+/**
+ * ⚠ NO FALLBACK KEY. Without `TOKEN_KEYS` the features that sign a token (DNS
+ * OAuth, mailbox download links) are off and their routes answer 501.
+ */
+const tokens = tokenKeysFromEnv(env.TOKEN_KEYS)
+if (!tokens)
+  log.warn({}, "TOKEN_KEYS unset - DNS connections and mailbox downloads are off")
 
 /**
  * Registration-time egress check for webhook endpoints: refuse a hostname that
@@ -532,7 +558,7 @@ const history = webhookHistory(
 
 log.info(
   { webhooks: Boolean(secrets) },
-  secrets ? "webhooks enabled" : "WEBHOOKS DISABLED - no WEBHOOK_SECRET_KEY",
+  secrets ? "webhooks enabled" : "WEBHOOKS DISABLED - no SEAL_KEYS",
 )
 
 /**
@@ -566,6 +592,42 @@ const mailAccessRevocation = mailRevocation({
   record: (tenantId, event) => identity.record(tenantId, event),
   log,
 })
+
+// The Stalwart registry, when this deployment can reach it. Without a URL and
+// token nothing here writes to it, and the mail-domains reconcile catches up.
+const stalwartCall =
+  env.STALWART_URL && env.STALWART_API_TOKEN
+    ? createStalwartCaller({ baseUrl: env.STALWART_URL, token: env.STALWART_API_TOKEN })
+    : null
+
+/**
+ * A removed domain stops being accepted by Stalwart at once, not at the next
+ * reconcile slot.
+ *
+ * ⚠ A FAILURE HERE MUST NOT BLOCK THE DELETE, unlike the revocation beside it.
+ * The mailboxes are already suspended by then, so mail access is closed whether
+ * or not Stalwart answers; refusing to delete a domain because the mail server
+ * is down would trap the customer, and the reconcile disables it on its next run.
+ *
+ * ⚠ ONLY A NAME NOBODY ELSE HOSTS, for the reason `domainGone` spells out:
+ * deleting one workspace's pending row says nothing about the workspace that
+ * actually hosts the name.
+ */
+const disableStalwartDomain = stalwartCall
+  ? async (tenantId: string, name: string) => {
+      try {
+        const host = await mailStore.hostedBy(name)
+        if (host !== null && host !== tenantId) return
+        await disableDomain(stalwartCall, name)
+      } catch (error) {
+        log.warn(
+          { err: error, tenantId, domain: name },
+          "could not disable the Stalwart domain; the reconcile will",
+        )
+        captureError(error, { phase: "stalwart-domain-disable", tenantId })
+      }
+    }
+  : null
 
 /**
  * ⚠ THE ONLY OBJECT IN THIS PROCESS THAT CAN MOVE A CUSTOMER BETWEEN PLANS, and
@@ -674,6 +736,7 @@ const domains = secrets
       dns: {
         spfInclude: env.MAIL_SPF_INCLUDE,
         nameservers: env.MAIL_NAMESERVERS,
+        mailHost: env.MAIL_HOSTNAME,
       },
       // ⚠ THE ZONES LIVE IN OUR OWN POSTGRES, so publishing one is a write in
       // the same transaction as everything else rather than a call to a
@@ -682,7 +745,11 @@ const domains = secrets
       zones: powerDnsZones(db),
       log,
       // ⚠ A REMOVED DOMAIN'S MAILBOXES STOP SIGNING IN, BEFORE ITS ROW GOES.
-      onRemoving: (tenantId, name) => mailAccessRevocation.domainGone(tenantId, name),
+      onRemoving: async (tenantId, name) => {
+        const revoked = await mailAccessRevocation.domainGone(tenantId, name)
+        await disableStalwartDomain?.(tenantId, name)
+        return revoked
+      },
       // ⚠ THE SAME BOX THE WEBHOOK SECRETS USE. Without a key there is nowhere
       // safe to keep a DKIM private key, so the routes answer 501 rather than
       // storing one in the clear - the same rule webhooks already follow.
@@ -1128,6 +1195,7 @@ const risk = riskSystem({
   ...(consoleUrl ? { consoleUrl } : {}),
   exempt: riskExempt,
   alert: (message, level, context) => captureMessage(message, level, context),
+  report: captureError,
   log,
 })
 const rescore = riskTrigger(risk.deps)
@@ -1317,26 +1385,13 @@ const mailboxDir = mailboxDirectory(db)
 const mailboxMigrationQueue = contentStore
   ? createMailboxQueue({ redis: queueRedis })
   : null
-const mailboxDownloadSecret = createHmac(
-  "sha256",
-  env.WEBHOOK_SECRET_KEY ?? env.CLERK_WEBHOOK_SECRET,
-)
-  .update("mailbox-download-tokens")
-  .digest("hex")
 
 // Splitting a workspace's mailbox storage across its inboxes (B3). Without a
 // Stalwart URL and token nothing is pushed and the reconcile does it later.
 const mailboxStorage = storageAllocations({
   store: allocationStore(db),
   assignments: planAssignmentStore(db),
-  ...(env.STALWART_URL && env.STALWART_API_TOKEN
-    ? {
-        stalwart: createStalwartCaller({
-          baseUrl: env.STALWART_URL,
-          token: env.STALWART_API_TOKEN,
-        }),
-      }
-    : {}),
+  ...(stalwartCall ? { stalwart: stalwartCall } : {}),
   log,
 })
 
@@ -1350,6 +1405,9 @@ const canAllocateStorage = async (userId: string, tenantId: string) => {
     teamDomains && (await teamDomains.can(tenantId, userId, "members:manage")),
   )
 }
+
+// Who creates mailboxes in a workspace: admins, members, or everyone on joining.
+const mailboxCreation = mailboxCreationStore(db)
 
 // Shared addresses (B8). The Sent copy runs in its own CronJob (team-sent.ts).
 const teamInboxService = teamInboxesFor({
@@ -1502,7 +1560,7 @@ const oidc =
       })
     : null
 if (oidc) engines.set("oidc", oidc)
-else log.warn({}, "OIDC SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
+else log.warn({}, "OIDC SSO DISABLED - it needs SEAL_KEYS and AUTH_ORIGINS")
 /*
  * The SAML engine (#339). The same needs as OIDC (our SP keys are sealed,
  * every URL an IdP is given is on the auth app), plus Redis for the
@@ -1542,7 +1600,7 @@ const saml =
       })
     : null
 if (saml) engines.set("saml", saml)
-else log.warn({}, "SAML SSO DISABLED - it needs WEBHOOK_SECRET_KEY and AUTH_ORIGINS")
+else log.warn({}, "SAML SSO DISABLED - it needs SEAL_KEYS and AUTH_ORIGINS")
 const managedDeps = { store: identity, clerk: identityClerk, log }
 const sweepQueue = createIdentitySweepQueue({ redis: queueRedis })
 const consoleFreshAuth = withSsoFreshness(
@@ -1602,8 +1660,20 @@ const mailboxProvisionDeps: ProvisionDeps = {
   capacity: postgresMeter(db),
   project: async (user) => projectClerkUser(db, user, env.MAIL_DOMAINS),
   featureId: MAILBOXES,
+  mailLane: managedMailLane(db, identity),
   storage: mailboxStorage,
   canAllocate: canAllocateStorage,
+  // ⚠ WIRED UNCONDITIONALLY: without it nothing enforces "who creates mailboxes".
+  creationMode: (tenantId) => mailboxCreation.get(tenantId),
+}
+const mailboxService = mailboxProvisioning(mailboxProvisionDeps)
+
+// Whether a person is a member of the workspace: a row in our roles table, or the
+// owner of a workspace with no organization (it has no membership rows).
+const isWorkspaceMember = async (tenantId: string, userId: string) => {
+  if ((await roleRows.roleOf(tenantId, userId)) !== null) return true
+  const tenant = await workspaceOwnership(db, tenantId)
+  return Boolean(tenant && !tenant.clerkOrgId && tenant.ownerClerkUserId === userId)
 }
 /*
  * Mail from the directory (#344): mailboxes, aliases and lists for the people
@@ -1626,6 +1696,33 @@ const mailDeps: DirectoryMailDeps = {
   log,
 }
 const mailLifecycle = mailboxLifecycle(mailDeps)
+
+/*
+ * An owner or admin's suspend, resume, delete and restore of one mailbox. The
+ * purge that ends a deletion runs in the retention CronJob (retention.ts), not here.
+ *
+ * ⚠ `startExport` IS NULL WITHOUT THE OBJECT STORE'S KEYS OR THE QUEUE, and then
+ * `export_then_delete` is refused up front: a deletion that waits for an export
+ * nothing can make would never be purged.
+ */
+const mailboxLifecycleAdmin = mailboxAdminLifecycle({
+  store: mailboxLifecycleStore(db),
+  mail: mailStore,
+  resume: mailDeps,
+  isAdmin: (tenantId, userId) => canAllocateStorage(userId, tenantId),
+  startExport:
+    contentStore?.objectKeys && mailboxMigrationQueue
+      ? (input) =>
+          startMailboxExport(
+            {
+              jobs: mailboxJobStore(db),
+              enqueue: (data) => enqueueMailboxJob(mailboxMigrationQueue, data),
+            },
+            input,
+          )
+      : null,
+  log,
+})
 const scimBaseUrl = (directoryId: string) => `${env.SCIM_BASE_URL}/${directoryId}`
 /*
  * Google Workspace directory sync (#343): domain-wide delegation with our own
@@ -2011,6 +2108,20 @@ const app = createApp({
         type,
         data,
       ),
+    // A new member gets a mailbox when the workspace's mode is `on_join`.
+    mailJoin: (type: string, data: unknown) =>
+      onMailJoinEvent(
+        {
+          tenantOf: (orgId: string) => members.store.tenantOf(orgId),
+          mode: (tenantId: string) => mailboxCreation.get(tenantId),
+          hostedDomains: hostedDomainsOf(db),
+          identity: mailboxProvisionDeps.identity,
+          provisioning: mailboxService,
+          log,
+        },
+        type,
+        data,
+      ),
     // Member limits, late acceptances and capacity alerts (#327).
     members: (type: string, data: unknown) => onClerkEvent(members, type, data),
     // Team inboxes follow the workspace (B8).
@@ -2049,6 +2160,7 @@ const app = createApp({
   },
   autoconfig: {
     hostedDomains: env.MAIL_DOMAINS,
+    db,
     mailHost: env.MAIL_HOSTNAME,
     // ⚠ NOT CONFIGURABLE, BECAUSE THEY ARE NOT OURS TO CHOOSE. These are the
     // two ports claimed with `hostPort` in the Stalwart StatefulSet and named
@@ -2206,6 +2318,9 @@ const app = createApp({
    * a 501 that would claim mailboxes are not a feature.
    */
   sessionAuth: sessions,
+  // ⚠ THE CONSOLE'S READER, SSO FRESHNESS INCLUDED: the mailbox export and import
+  // are session routes outside /console and ask for the same step-up.
+  freshAuth: consoleFreshAuth,
   ssoGate: gateReader(sessionIds, gateChecker, ssoStartUrl, enforcement, workspace),
   apiKeyNetwork: (tenantId: string, headers: Headers) =>
     workspace.admitApiKey(tenantId, headers),
@@ -2560,6 +2675,24 @@ const app = createApp({
     members,
     teamInboxes: teamInboxService,
     mailboxStorage,
+    mailboxAdmin: {
+      provisioning: mailboxService,
+      settings: mailboxCreation,
+      isAdmin: (tenantId: string, userId: string) =>
+        canAllocateStorage(userId, tenantId),
+      isMember: isWorkspaceMember,
+    },
+    mailboxLifecycle: mailboxLifecycleAdmin,
+    mailboxAliases: mailboxAliases({
+      db,
+      isAdmin: (tenantId, userId) => canAllocateStorage(userId, tenantId),
+    }),
+    mailboxes: consoleMailboxes({
+      store: consoleMailboxStore(db),
+      roles: roleRows,
+      pool: async (tenantId) => (await mailboxStorage.overview(tenantId)).pool,
+      identity,
+    }),
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
@@ -2654,11 +2787,12 @@ const app = createApp({
      */
     delegation: delegationChecker({}),
     /*
-     * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING KEY, which is
-     * why all of it arrives together or not at all. A credential that can
-     * rewrite a customer's MX records must not be stored in the clear, so
-     * without a box to seal it in the routes answer 501 - the same rule
-     * `domains` below follows for a DKIM private key.
+     * ⚠ THE WHOLE DNS-CONNECTION FEATURE HANGS OFF THE SEALING AND TOKEN KEYS,
+     * which is why all of it arrives together or not at all. A credential that
+     * can rewrite a customer's MX records must not be stored in the clear, and
+     * the OAuth `state` must not be signed with a guessable key, so without
+     * both the routes answer 501 - the same rule `domains` below follows for a
+     * DKIM private key.
      *
      * ⚠ AND THE THREE ARE BUILT ONCE, IN ONE SCOPE, BECAUSE THEY REFER TO EACH
      * OTHER. The publisher renews an expiring OAuth credential through the same
@@ -2666,23 +2800,13 @@ const app = createApp({
      * the routes read - so a second `dnsConnectionStore(db, secrets)` here, as
      * there used to be, is a second object claiming to be the same thing.
      */
-    ...(secrets
+    ...(secrets && tokens
       ? (() => {
-          const connections = dnsConnectionStore(db, secrets)
+          const connections = dnsConnectionStore(db, secrets, log)
           const oauth = dnsOAuth({
             apps: env.DNS_OAUTH_APPS,
             redirectBase: env.DNS_OAUTH_REDIRECT_BASE,
-            /*
-             * ⚠ DERIVED FROM THE SEALING KEY RATHER THAN BEING ITS OWN
-             * VARIABLE, and domain-separated so it is not the same value. It
-             * signs the OAuth `state`, which is what stops somebody attaching
-             * their DNS credential to another workspace - a real key, but not
-             * one an operator should have to remember to set separately from
-             * the key this feature already cannot run without.
-             */
-            stateSecret: createHmac("sha256", env.WEBHOOK_SECRET_KEY ?? "")
-              .update("dns-oauth-state")
-              .digest("hex"),
+            tokens,
             /*
              * ⚠ BOTH OR NEITHER, DECIDED HERE SO THE MODULE NEVER SEES A HALF
              * ONE. A URL without a secret would call an authenticated Worker
@@ -2737,6 +2861,20 @@ const app = createApp({
           domains,
         }
       : {}),
+    /*
+     * ⚠ THE HOSTING SWITCH SHARES THE STALWART CALLER, THE REVOCATION HUB AND THE
+     * METER WITH THE REST OF THIS FILE rather than building its own: the same
+     * Domain objects, the same logins and the same allowance are what the
+     * reconcile, the domain delete and the sending-domain limit already act on.
+     */
+    mailboxHosting: mailboxHosting({
+      db,
+      capacity: postgresMeter(db),
+      stalwart: stalwartCall,
+      revocation: mailAccessRevocation,
+      log,
+      report: (error, context) => captureError(error, context),
+    }),
     keys: { store: apiKeyStore, cache: redisKeyCache(cache) },
     ...(secrets
       ? { webhooks: webhookEndpointStore(db, secrets, endpointVetting) }
@@ -2775,7 +2913,7 @@ const app = createApp({
       : {}),
     log,
   },
-  mailboxes: mailboxProvisioning(mailboxProvisionDeps),
+  mailboxes: mailboxService,
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),
@@ -2805,6 +2943,10 @@ const app = createApp({
                 accounts: accountEventOps(db),
                 log,
                 secret: env.STALWART_WEBHOOK_SECRET,
+                // Encryption faults: logged always, emailed only with both.
+                ...(env.OPS_ALERT_EMAIL && systemSender
+                  ? { opsAlert: { to: env.OPS_ALERT_EMAIL, sender: systemSender } }
+                  : {}),
               },
             }
           : {}),
@@ -2827,7 +2969,7 @@ const app = createApp({
         },
       }
     : {}),
-  ...(contentStore && mailboxMigrationQueue
+  ...(contentStore && mailboxMigrationQueue && tokens
     ? {
         mailboxMigration: {
           jobs: mailboxJobStore(db),
@@ -2845,7 +2987,7 @@ const app = createApp({
                   }
                 : undefined,
             ),
-          tokenSecret: mailboxDownloadSecret,
+          tokens,
         },
       }
     : {}),

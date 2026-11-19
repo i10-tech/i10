@@ -8,6 +8,12 @@ polled, the image had not been pulled and nothing had started. An
 ImagePullBackOff, a missing secret or a container that crashlooped on a config
 error were all invisible to the pipeline.
 
+Two workflows call it. Build calls it after its deploy commit. **Infra rollout**
+(`.github/workflows/infra-rollout.yml`) calls it for a commit that changes only
+`infra/`, which Build ignores. It runs once each for `i10-workloads` and
+`i10-stalwart`, so a failed PostSync hook (#412) fails the run. It also warns
+when the box's installed copy differs from this file.
+
 ## Why SSH, and why over Tailscale
 
 `argocd-server` is a ClusterIP with no ingress, and the Kubernetes API is not

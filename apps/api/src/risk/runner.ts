@@ -1,34 +1,29 @@
 import { randomUUID } from "node:crypto"
 import { sql } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
-import { htmlToText } from "./fingerprint.js"
 import { act, type ActDeps } from "./act.js"
 import { decide } from "./decide.js"
 import { evaluate } from "./engine.js"
 import { loadFacts, type OwnerInfo } from "./facts.js"
-import {
-  ipinfoLookup,
-  layaClassify,
-  rdapRegistered,
-  refreshTorExits,
-  type Fetch,
-} from "./intel.js"
-import type { LabelStore, ModelRecord } from "./labels.js"
-import { features, predict } from "./model.js"
-import { registrable } from "./rules.js"
-import { bandRank, type Assessment, type Band } from "./types.js"
+import { ipinfoLookup, rdapRegistered, refreshTorExits, type Fetch } from "./intel.js"
+import type { LabelStore } from "./labels.js"
+import type { ContentJudge } from "./judge/judge.js"
+import { judgementStore } from "./judge/store.js"
+import { registrable, RULES } from "./rules.js"
+import { SNAPSHOT_RETENTION_DAYS, type SnapshotStore } from "./snapshot.js"
+import { bandRank, type Band, type Rule } from "./types.js"
 import type { Embedder } from "../content/embed.js"
 import { analyseContent } from "../content/job.js"
 import type { ContentStore } from "../content/object-store.js"
-import { restoreContent } from "../content/packs.js"
-import { restoreBodies } from "../content/restore.js"
-import { purgeVectors, storeBehaviour } from "../content/vectors.js"
+import { purgeVectors } from "../content/vectors.js"
 import {
   reviewTrusted,
   type Revocation,
   type TrustSource,
   type TrustedTemplateStore,
 } from "./trusted.js"
+import type { LinkChecker, LinkCounts } from "./link-check.js"
+import type { ProviderHealth } from "./provider-health.js"
 import type { WebRiskChecker } from "./webrisk.js"
 
 /**
@@ -59,6 +54,8 @@ export interface RiskLockRedis {
   ): Promise<unknown>
   eval(script: string, keys: number, ...args: string[]): Promise<unknown>
   sadd(key: string, ...members: string[]): Promise<number>
+  incr(key: string): Promise<number>
+  expire(key: string, seconds: number): Promise<unknown>
   spop(key: string, count: number): Promise<string[]>
   get(key: string): Promise<string | null>
   setex(key: string, seconds: number, value: string): Promise<unknown>
@@ -77,6 +74,10 @@ export interface RiskDeps {
   ownerInfo: (clerkUserId: string) => Promise<OwnerInfo | null>
   act: ActDeps
   labels: LabelStore
+  /** Where the facts behind each score are kept for replay (snapshot.ts). */
+  snapshots: SnapshotStore
+  /** The rules to score with: `RULES` with `RISK_SHADOW_RULES` applied (wire.ts). */
+  rules?: readonly Rule[]
   switches: RiskSwitches
   redis?: RiskLockRedis
   /**
@@ -87,17 +88,20 @@ export interface RiskDeps {
   /** The model name to compare vectors under, where no embedder is loaded (the API). */
   contentModel?: string
   /**
-   * Where data-URI images moved to (#168). The content passes and the sample
-   * the classifier reads restore them; null until any have moved.
+   * Where data-URI images moved to (#168). The content passes restore them;
+   * null until any have moved.
    */
   objects?: ContentStore | null
   /** Workspaces the score never touches: our own system tenant. */
   exempt?: ReadonlySet<string>
-  /** The active model, loaded once per run by the caller. */
-  model?: ModelRecord | null
-  laya?: { url: string; apiKey?: string }
-  /** Web Risk behind the daily budget (#222). Absent: links are never checked. */
+  /** The content judge (risk/judge). Absent: nothing is judged and `content` is null. */
+  judge?: ContentJudge
+  /** The link checkers the deployment runs (#222). Absent: links are never checked. */
+  links?: LinkChecker
+  /** Web Risk's own checker, only for its budget in the run summary. */
   webRisk?: WebRiskChecker
+  /** Where outside sources report whether they answer; absent: nothing is recorded. */
+  health?: ProviderHealth
   /** Boilerplate and approved templates, for the content job (#222). */
   trust?: TrustSource
   /** Approvals, judged by their results every run (#222). */
@@ -105,6 +109,8 @@ export interface RiskDeps {
   /** Tells a workspace its approval was taken away. */
   templateNotice?: (tenantId: string, revocation: Revocation) => Promise<void>
   fetch?: Fetch
+  /** Sends an error to Sentry: a rule that threw (`captureError` in the API and jobs). */
+  report?: (error: unknown, context: Record<string, unknown>) => void
   log?: {
     info?: (o: object, m: string) => void
     warn?: (o: object, m: string) => void
@@ -119,9 +125,12 @@ export interface ScoreResult {
   score?: number
   band?: Band
   actions?: string[]
+  /** Rules that threw and were left out of this score. */
+  ruleFailures?: number
 }
 
 const LOCK_SECONDS = 120
+export const JUDGEMENT_RETENTION_DAYS = 30
 const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`
 export const DIRTY_KEY = "risk:dirty"
 
@@ -173,36 +182,19 @@ async function scoreLocked(
     ...(deps.embedder || deps.contentModel
       ? { contentModel: deps.embedder?.model ?? deps.contentModel! }
       : {}),
+    ...(deps.judge ? { judgeModel: deps.judge.key } : {}),
   })
 
-  // ── Content classifier: only where there is already reason to look ──
-  if (
-    deps.laya &&
-    (bandRank(previous?.band ?? "low") >= 1 || facts.farm.peers.length > 0)
-  ) {
-    facts.content = await classifyContent(tenantId, deps).catch((error: unknown) => {
-      deps.log?.warn?.({ err: error, tenantId }, "content classifier unavailable")
-      return null
-    })
-  }
-
-  // ── The model: one explained rule, only when active ──
-  const feats = features(facts)
-  let modelScore: number | null = null
-  if (deps.model?.active) {
-    modelScore = predict(deps.model.weights, feats)
-    facts.model = { probability: modelScore, version: deps.model.version }
-  }
-
-  // ⚠ THE BEHAVIOUR POINT IS STORED FROM OBSERVATIONS, BEFORE ANY SCORE. It is
-  // what the NEXT workspace is compared with; the neighbours this one was just
-  // compared with came from the previous run's points. Nothing here reads a
-  // score.
-  await storeBehaviour(deps.db, tenantId, feats).catch((error: unknown) =>
-    deps.log?.warn?.({ err: error, tenantId }, "could not store the behaviour vector"),
+  // ⚠ `shadow` AND `cleared` ARE TAKEN OFF HERE, so the assessment `decide`
+  // receives carries neither even at run time.
+  const { failures, shadow, cleared, ...assessment } = evaluate(
+    facts,
+    deps.rules ?? RULES,
   )
-
-  const assessment: Assessment = evaluate(facts)
+  for (const f of failures) {
+    deps.log?.error?.({ err: f.error, tenantId, rule: f.rule }, "risk rule threw")
+    deps.report?.(f.error, { phase: "risk-rule", tenantId, rule: f.rule })
+  }
   const hold = await deps.act.holds.current(tenantId)
   const { bandSince, actions } = decide({
     now,
@@ -225,8 +217,9 @@ async function scoreLocked(
   await deps.act.assessments.save({
     tenantId,
     assessment,
+    shadow,
+    cleared,
     bandSince,
-    modelScore,
     previous: moveFrom,
     actions: [],
     trigger,
@@ -242,26 +235,33 @@ async function scoreLocked(
       .map((c) => `${c.rule}:${c.points}`)
       .join(" "),
   })
-  await deps.act.assessments.save({
+  const { event } = await deps.act.assessments.save({
     tenantId,
     assessment,
+    shadow,
+    cleared,
     bandSince,
-    modelScore,
     previous: moveFrom,
     actions: done,
     trigger,
     at: now,
   })
+  // A lost snapshot costs replay one row, never the score.
+  await deps.snapshots
+    .record({
+      tenantId,
+      at: now,
+      trigger,
+      evaluated: { ...assessment, shadow, cleared },
+      facts,
+      force: event,
+    })
+    .catch((error: unknown) => {
+      deps.log?.error?.({ err: error, tenantId }, "could not record a fact snapshot")
+      deps.report?.(error, { phase: "risk-snapshot", tenantId })
+    })
 
-  await autoLabels(
-    tenantId,
-    facts,
-    feats as unknown as Record<string, number>,
-    assessment,
-    previous,
-    deps,
-    now,
-  )
+  await autoLabels(tenantId, facts, assessment.band, previous, deps, now)
   deps.log?.info?.(
     {
       tenantId,
@@ -269,6 +269,7 @@ async function scoreLocked(
       band: assessment.band,
       trigger,
       actions: done,
+      ruleFailures: failures.length,
     },
     "risk scored",
   )
@@ -278,6 +279,7 @@ async function scoreLocked(
     score: assessment.score,
     band: assessment.band,
     actions: done,
+    ruleFailures: failures.length,
   }
 }
 
@@ -291,8 +293,7 @@ async function scoreLocked(
 async function autoLabels(
   tenantId: string,
   facts: Awaited<ReturnType<typeof loadFacts>>,
-  feats: Record<string, number>,
-  assessment: Assessment,
+  band: Band,
   previous: Awaited<ReturnType<ActDeps["assessments"]["current"]>>,
   deps: RiskDeps,
   now: Date,
@@ -316,12 +317,11 @@ async function autoLabels(
         tenantId,
         label: "abuse",
         source: "ses_aws_pause",
-        features: feats,
         setBy: "risk-score",
       })
     }
     const settledLow =
-      assessment.band === "low" &&
+      band === "low" &&
       previous?.band === "low" &&
       now.getTime() - previous.bandSince.getTime() >= 60 * DAY
     if (
@@ -334,78 +334,12 @@ async function autoLabels(
         tenantId,
         label: "legit",
         source: "tenure",
-        features: feats,
         setBy: "risk-score",
       })
     }
   } catch (error) {
     deps.log?.warn?.({ err: error, tenantId }, "could not record an automatic label")
   }
-}
-
-/** One recent message, classified, cached for six hours. */
-async function classifyContent(tenantId: string, deps: RiskDeps) {
-  const cacheKey = `risk:content:${tenantId}`
-  const cached = await deps.redis?.get(cacheKey).catch(() => null)
-  if (cached) {
-    const c = JSON.parse(cached) as { probability: number; at: string }
-    return { probability: c.probability, at: new Date(c.at) }
-  }
-  const rows = await withTenant(deps.db, tenantId, async (tx) => {
-    const raw = (await tx.execute(sql`
-      select m.id as message_id, m.subject, b.text, b.html, b.template_id, b.template_values,
-             b.inline_objects, b.pack_id, b.pack_offset, b.pack_length, b.body_key
-        from core.messages m join core.message_bodies b on b.message_id = m.id
-       where m.tenant_id = ${tenantId}::uuid
-         and m.created_at > now() - interval '24 hours'
-       order by m.created_at desc
-       limit 1
-    `)) as unknown as {
-      subject: string
-      text: string | null
-      html: string | null
-      template_id: string | null
-      template_values: unknown
-      message_id: string
-      inline_objects: string[] | null
-      pack_id: string | null
-      pack_offset: string | number | null
-      pack_length: number | null
-      body_key: string | null
-    }[]
-    // A compacted body reads like a full one (#171).
-    return restoreBodies(
-      tx,
-      raw.map((r) => ({
-        ...r,
-        templateId: r.template_id,
-        templateValues: r.template_values,
-      })),
-    )
-  })
-  // And a packed body (#188) and its images (#168) are back in place.
-  const [m] = await restoreContent(
-    deps.objects ?? null,
-    tenantId,
-    rows.slice(0, 1).map((r) => ({
-      ...r,
-      messageId: r.message_id,
-      inlineObjects: r.inline_objects,
-      packId: r.pack_id,
-      packOffset: r.pack_offset,
-      packLength: r.pack_length,
-      bodyKey: r.body_key,
-    })),
-  )
-  if (!m || !deps.laya) return null
-  const text = `${m.subject}\n\n${m.text ?? (m.html ? htmlToText(m.html) : "")}`
-  const probability = await layaClassify(deps.laya, text, deps.fetch)
-  if (probability === null) return null
-  const at = new Date()
-  await deps.redis
-    ?.setex(cacheKey, 6 * 3600, JSON.stringify({ probability, at }))
-    .catch(() => {})
-  return { probability, at }
 }
 
 // ─── The hourly run ──────────────────────────────────────────────────────────
@@ -425,18 +359,27 @@ export interface RunSummary {
   tor: number | null
   enriched: number
   purged: number
+  /** Fact snapshots older than SNAPSHOT_RETENTION_DAYS, deleted this run. */
+  snapshotsPurged: number
+  /** Content judgements older than JUDGEMENT_RETENTION_DAYS, deleted this run. */
+  judgementsPurged: number
   rdap: number
-  webRisk: number
+  linksChecked: number
+  /** Answers each link provider gave this run. */
+  links: Record<string, LinkCounts>
   /** Web Risk lookups counted against today's budget, after the run. */
   webRiskSpent: number | null
   unsafe: number
-  retrained: string | null
+  /** Rule evaluations that threw, across every workspace scored. */
+  ruleFailures: number
   /** Crediting and embedding; compaction runs in the content-store job (#171). */
   content: {
     scanned: number
     embedded: number
     /** Messages newly credited to an approved template (#222). */
     trusted: number
+    /** Distinct contents the content judge answered for. */
+    judged: number
   }
   /** Approvals taken away this run, for bounces, complaints or abuse (#222). */
   revoked: number
@@ -497,15 +440,19 @@ export async function runAll(
     tor: null,
     enriched: 0,
     purged: 0,
+    snapshotsPurged: 0,
+    judgementsPurged: 0,
     rdap: 0,
-    webRisk: 0,
+    linksChecked: 0,
+    links: {},
     webRiskSpent: null,
     unsafe: 0,
-    retrained: null,
+    ruleFailures: 0,
     content: {
       scanned: 0,
       embedded: 0,
       trusted: 0,
+      judged: 0,
     },
     revoked: 0,
   }
@@ -522,6 +469,20 @@ export async function runAll(
   if (deps.ipinfoToken)
     summary.enriched = await enrichIdentities(deps, deps.ipinfoToken)
   summary.purged = await purgeIdentities(deps, now)
+  summary.snapshotsPurged = await deps.snapshots
+    .purge(new Date(now.getTime() - SNAPSHOT_RETENTION_DAYS * 86_400_000))
+    .catch((error: unknown) => {
+      deps.log?.error?.({ err: error }, "could not purge fact snapshots")
+      deps.report?.(error, { phase: "risk-snapshot-purge" })
+      return 0
+    })
+  // A judgement is redone once it is a month old, if the content is still sent.
+  summary.judgementsPurged = await judgementStore(deps.db)
+    .purge(new Date(now.getTime() - JUDGEMENT_RETENTION_DAYS * 86_400_000))
+    .catch((error: unknown) => {
+      deps.log?.error?.({ err: error }, "could not purge content judgements")
+      return 0
+    })
 
   const ids = await candidates(deps, now)
   summary.candidates = ids.length
@@ -534,10 +495,11 @@ export async function runAll(
         const id = ids[cursor++]!
         try {
           summary.rdap += await refreshRdap(deps, id)
-          if (deps.webRisk) {
-            const r = await checkLinks(deps, id, deps.webRisk)
-            summary.webRisk += r.checked
+          if (deps.links) {
+            const r = await checkLinks(deps, id, deps.links)
+            summary.linksChecked += r.checked
             summary.unsafe += r.unsafe
+            summary.links = deps.links.stats()
           }
           await purgeContent(deps, id, now)
           // ⚠ CONTENT BEFORE THE SCORE, so this hour's vectors are the ones it
@@ -557,12 +519,22 @@ export async function runAll(
                       store.credit(id, counts),
                   }
                 : {}),
+              ...(deps.judge
+                ? {
+                    judge: {
+                      judge: deps.judge,
+                      judgements: judgementStore(deps.db),
+                      ...(deps.redis ? { seenRedis: deps.redis } : {}),
+                    },
+                  }
+                : {}),
               now,
               ...(deps.log ? { log: deps.log } : {}),
             })
             summary.content.scanned += c.scanned
             summary.content.embedded += c.embedded
             summary.content.trusted += c.trusted
+            summary.content.judged += c.judged
             await purgeVectors(deps.db, id, now)
           } catch (error) {
             deps.log?.warn?.({ err: error, tenantId: id }, "content pass failed")
@@ -574,6 +546,7 @@ export async function runAll(
           if (r.status === "locked") summary.locked++
           if (r.status === "scored") {
             summary.scored++
+            summary.ruleFailures += r.ruleFailures ?? 0
             if (r.band) summary.bands[r.band]++
             if (r.actions?.some((a) => a.startsWith("hold:canceled"))) summary.held++
           }
@@ -586,7 +559,6 @@ export async function runAll(
   )
   await Promise.all(workers)
 
-  summary.retrained = await maybeRetrain(deps, now)
   summary.webRiskSpent = deps.webRisk
     ? await deps.webRisk.spent().catch(() => null)
     : null
@@ -699,13 +671,13 @@ async function refreshRdap(deps: RiskDeps, tenantId: string): Promise<number> {
 }
 
 /**
- * Web Risk verdicts for this workspace's unchecked link hosts (last 7 days).
+ * Link verdicts for this workspace's unchecked link hosts (last 7 days).
  *
- * ⚠ THROUGH THE BUDGETED CHECKER (risk/webrisk.ts). A host it cannot answer
+ * ⚠ THROUGH THE BUDGETED CHECKER (risk/link-check.ts). A host it cannot answer
  * for - budget spent, quota refused, outage - stays unchecked and is asked
  * again next run; it is never recorded as clean.
  */
-async function checkLinks(deps: RiskDeps, tenantId: string, webRisk: WebRiskChecker) {
+async function checkLinks(deps: RiskDeps, tenantId: string, links: LinkChecker) {
   const rows = (await withTenant(deps.db, tenantId, (tx) =>
     tx.execute(sql`
       select distinct host from core.link_hosts
@@ -720,7 +692,7 @@ async function checkLinks(deps: RiskDeps, tenantId: string, webRisk: WebRiskChec
     // ⚠ A HOST'S VERDICT IS SHARED ACROSS WORKSPACES FOR A DAY, so a link
     // every customer sends (a CDN, a social network) costs one lookup, not one
     // per workspace, against the budget.
-    const verdict = await webRisk.lookup(host)
+    const verdict = await links.lookup(host)
     if (!verdict) continue
     await withTenant(deps.db, tenantId, (tx) =>
       tx.execute(sql`
@@ -745,25 +717,4 @@ async function purgeContent(deps: RiskDeps, tenantId: string, now: Date) {
       sql`delete from core.link_hosts where tenant_id = ${tenantId}::uuid and day < ${before}::date`,
     )
   })
-}
-
-/**
- * Retrains when there are labels the newest model has not seen, at most daily.
- *
- * ⚠ A RETRAIN THAT FAILS ITS EVALUATION IS SAVED INACTIVE, and the previous
- * active model keeps working - a worse model never replaces a better one.
- */
-async function maybeRetrain(deps: RiskDeps, now: Date): Promise<string | null> {
-  try {
-    const count = await deps.labels.count()
-    if (count === 0) return null
-    const latest = await deps.labels.model(false)
-    if (latest && latest.evaluation.labels >= count) return null
-    if (latest && now.getTime() - latest.trainedAt.getTime() < 86_400_000) return null
-    const r = await deps.labels.retrain()
-    return `v${r.version} ${r.active ? "active" : "inactive"}: ${r.evaluation.reason}`
-  } catch (error) {
-    deps.log?.warn?.({ err: error }, "model retrain failed")
-    return null
-  }
 }

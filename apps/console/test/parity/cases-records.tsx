@@ -104,6 +104,9 @@ function domainData(index: number, tag: string): DomainDetailData {
     keyImpact: [],
     transfer: null,
     ownEmails: [`${tag}@example.com`],
+    canManageMailboxes: true,
+    mailboxAccounts: [],
+    teamInboxes: [],
   }
 }
 

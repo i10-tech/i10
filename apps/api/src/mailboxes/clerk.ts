@@ -49,6 +49,66 @@ export function clerkIdentity(clerk: ClerkClient): MailboxIdentity {
   }
 }
 
+/** What the purge asks of Clerk: take a deleted mailbox's addresses off the person. */
+export interface MailboxAddressRemoval {
+  /**
+   * Removes each of `addresses` from the Clerk user, and says which it could not.
+   *
+   * ⚠ IDEMPOTENT: an address the user no longer has, or a user Clerk no longer
+   * has, is done, so a purge that crashed after this step repeats it harmlessly.
+   *
+   * ⚠ `kept` IS AN ADDRESS THAT IS THE PERSON'S ONLY SIGN-IN IDENTIFIER (somebody
+   * a company's SSO made, whose Clerk address IS the mailbox's). Clerk will not
+   * remove a user's last address and we will not delete the person, so it stays,
+   * and the caller records that it did.
+   */
+  remove(userId: string, addresses: readonly string[]): Promise<{ kept: string[] }>
+}
+
+export function clerkAddressRemoval(clerk: ClerkClient): MailboxAddressRemoval {
+  return {
+    async remove(userId, addresses) {
+      const wanted = new Set(addresses.map((a) => a.trim().toLowerCase()))
+      let user: User
+      try {
+        user = await clerk.users.getUser(userId)
+      } catch (error) {
+        if (notFound(error)) return { kept: [] }
+        throw error
+      }
+
+      const kept: string[] = []
+      for (const email of user.emailAddresses) {
+        const address = email.emailAddress.toLowerCase()
+        if (!wanted.has(address)) continue
+
+        if (email.id === user.primaryEmailAddressId) {
+          // ⚠ THE PRIMARY ADDRESS IS WHERE CLERK SENDS ITS OWN MAIL, so it moves to
+          // one of the person's other verified addresses first. Nothing but a
+          // verified one: a reset link must never go to a string somebody typed.
+          const other = user.emailAddresses.find(
+            (e) =>
+              !wanted.has(e.emailAddress.toLowerCase()) &&
+              e.verification?.status === "verified",
+          )
+          if (!other) {
+            kept.push(address)
+            continue
+          }
+          await clerk.users.updateUser(userId, { primaryEmailAddressID: other.id })
+        }
+
+        try {
+          await clerk.emailAddresses.deleteEmailAddress(email.id)
+        } catch (error) {
+          if (!notFound(error)) throw error
+        }
+      }
+      return { kept }
+    },
+  }
+}
+
 /**
  * The SDK resource, in the wire shape `projectUser` reads.
  *

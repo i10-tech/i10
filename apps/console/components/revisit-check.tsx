@@ -10,7 +10,13 @@ import { forgetOtherVisits, isShowing, noteVisit } from "@/lib/revisits"
  * cache: when the server's data has changed since, the page is refreshed in
  * place, so React updates only what changed. See lib/revisits.ts.
  */
-export function RevisitCheck({ version, rendered }: { version: string; rendered: string }) {
+export function RevisitCheck({
+  version,
+  rendered,
+}: {
+  version: string
+  rendered: string
+}) {
   const router = useRouter()
   const pathname = usePathname()
   const search = useSearchParams().toString()

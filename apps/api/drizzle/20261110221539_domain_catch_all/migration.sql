@@ -1,0 +1,1 @@
+ALTER TABLE "core"."domains" ADD COLUMN "catch_all_address" text;

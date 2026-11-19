@@ -21,6 +21,7 @@ import type { GithubSyncer } from "../../github/sync.js"
 import type { OnboardingStore } from "../../console/onboarding.js"
 import type { UsageStore } from "../../console/usage.js"
 import type { DomainStore } from "../../domains/store.js"
+import type { MailboxHosting } from "../../domains/mailbox-hosting.js"
 import type { DomainTransfers } from "../../domains/transfers.js"
 import type { KeyCache } from "../../auth/api-key.js"
 import type { KeyStore } from "../../auth/store.js"
@@ -43,6 +44,10 @@ import type { AccountDeps } from "../../console/account-deletion.js"
 import type { IdentityConsoleDeps } from "./identity.js"
 import type { TeamInboxes } from "../../team-inboxes/service.js"
 import type { StorageAllocations } from "../../mailboxes/allocation.js"
+import type { ConsoleMailboxes } from "../../mailboxes/console.js"
+import type { MailboxAdmin } from "../../mailboxes/creation-mode.js"
+import type { MailboxAliases } from "../../mailboxes/aliases.js"
+import type { MailboxAdminLifecycle } from "../../mailboxes/lifecycle.js"
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -262,6 +267,28 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   mailboxStorage?: StorageAllocations
   /**
+   * Workspace mailbox list and detail (B5). Owners and admins see every
+   * mailbox in the workspace; members see only their own. Optional; without it
+   * the routes answer 501.
+   */
+  mailboxes?: ConsoleMailboxes
+  /**
+   * An owner or admin creating a mailbox for a member, and the workspace's
+   * setting for who creates them. Optional; without it the routes answer 501.
+   */
+  mailboxAdmin?: MailboxAdmin
+  /**
+   * Suspending, resuming, deleting and restoring a mailbox. Optional; without it
+   * the routes answer 501.
+   */
+  mailboxLifecycle?: MailboxAdminLifecycle
+  /**
+   * The addresses that deliver to a mailbox (B8): an owner or admin adds and
+   * removes them, a member reads their own mailbox's. Optional; without it the
+   * routes answer 501.
+   */
+  mailboxAliases?: MailboxAliases
+  /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.
    */
@@ -286,6 +313,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
   }
   /** Optional for the same reason `AppDeps.domains` is - see createApp. */
   domains?: DomainStore
+  /**
+   * Switching mailbox hosting on and off for a domain, and its catch-all (#406).
+   * Optional like `domains`; without it the routes answer 501 and the domain
+   * reads carry no `mailboxes`.
+   */
+  mailboxHosting?: MailboxHosting
   /**
    * ⚠ THE CACHE IS NOT OPTIONAL IN PRACTICE, EVEN THOUGH THE TYPE ALLOWS IT.
    * Revoking a key is two acts - the row and the Redis entry - and without the
@@ -318,11 +351,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
   /**
    * Customers' credentials for their own DNS, and the machinery that uses them.
    *
-   * ⚠ ALL THREE ARE OPTIONAL TOGETHER, BECAUSE THEY DEPEND ON THE SEALING KEY.
-   * Without `WEBHOOK_SECRET_KEY` there is nowhere safe to keep a credential that
-   * can rewrite a customer's MX records, so the routes answer 501 rather than
-   * storing one in the clear - the same rule `core.domains` and the webhook
-   * secrets already follow.
+   * ⚠ ALL THREE ARE OPTIONAL TOGETHER, BECAUSE THEY DEPEND ON THE SEALING AND
+   * TOKEN KEYS. Without `SEAL_KEYS` there is nowhere safe to keep a credential
+   * that can rewrite a customer's MX records, and without `TOKEN_KEYS` nothing
+   * signs the OAuth state, so the routes answer 501 - the same rule
+   * `core.domains` and the webhook secrets already follow.
    */
   dnsConnections?: DnsConnectionStore
   dnsOAuth?: DnsOAuth

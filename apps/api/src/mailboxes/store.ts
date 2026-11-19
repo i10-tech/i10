@@ -1,10 +1,124 @@
+import { createHash } from "node:crypto"
 import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm"
 import { union } from "drizzle-orm/pg-core"
 import type { Mailbox } from "@repo/contracts"
 import type { Database } from "../db/client.js"
-import { accounts, aliases, groupMembers, groups } from "../db/schema.js"
+import {
+  accounts,
+  aliases,
+  authdManagedAccounts,
+  groupMembers,
+  groups,
+} from "../db/schema.js"
 import { directoryGroups } from "../db/identity.js"
-import type { MailboxDirectory } from "./provision.js"
+import { passthroughFor } from "../identity/ldap.js"
+import type { IdentityStore } from "../identity/ports.js"
+import type { MailboxDirectory, ManagedMailLaneCheck } from "./provision.js"
+
+/**
+ * Whether `userId` is a managed SSO account and whether its connection has a
+ * working mail sign-in lane on (#407).
+ *
+ * ⚠ READS THE SAME TABLES authd READS AT BIND TIME. `authd.managed_accounts`
+ * is what `services/authd/internal/passthrough` queries to decide whether an
+ * account is managed (refusing to ask Clerk if so, and refusing outright when
+ * `connection_id` is null), and `passthroughFor` is the exact function
+ * `POST /internal/authd/passthrough` calls to answer authd with the connection's
+ * live LDAP or OIDC mail lane. Using both here guarantees provisioning and bind
+ * agree on whether the person can sign in to mail.
+ */
+/**
+ * The list a purged mailbox's alias becomes when the mailbox was forwarded.
+ *
+ * ⚠ AN ID AND A HASH, NEVER THE ADDRESS ITSELF. Stalwart learns list names
+ * through authd's LDAP `cn`, and every list name it has seen so far is plain
+ * `kind-id`; an `@` or `:` in one is untested there. A Clerk id has no `-`, so
+ * `fwd-<id>-a` cannot prefix another person's lists.
+ */
+export const aliasListPrefix = (leaverId: string) => `fwd-${leaverId}-a`
+export const aliasListName = (leaverId: string, alias: string) =>
+  `${aliasListPrefix(leaverId)}${createHash("sha256").update(alias.toLowerCase()).digest("hex").slice(0, 12)}`
+
+export function managedMailLane(
+  db: Database,
+  store: Pick<
+    IdentityStore,
+    "connectionForStart" | "connectionSecrets" | "liveDomains"
+  >,
+): ManagedMailLaneCheck {
+  return async (userId) => {
+    const [managed] = await db
+      .select({ connectionId: authdManagedAccounts.connectionId })
+      .from(authdManagedAccounts)
+      .where(eq(authdManagedAccounts.clerkUserId, userId))
+      .limit(1)
+    if (!managed) return "unmanaged"
+    if (!managed.connectionId) return "off"
+    const answer = await passthroughFor(store, managed.connectionId)
+    return answer.enabled ? answer.lane : "off"
+  }
+}
+
+/**
+ * The domains a workspace hosts mailboxes on right now: verified and marked as
+ * hosting, through the same `core.mailbox_domains()` the projection uses, so
+ * "exactly one hosted domain" means what the projection means by hosted.
+ */
+export function hostedDomainsOf(db: Database) {
+  return async (tenantId: string): Promise<string[]> => {
+    const rows = (await db.execute(
+      sql`select lower(name) as name
+            from core.mailbox_domains()
+           where tenant_id = ${tenantId}::uuid`,
+    )) as unknown as { name: string }[]
+    return rows.map((r) => r.name)
+  }
+}
+
+/**
+ * Whether anything already receives mail at this address: a mailbox, an alias, or
+ * a list (a team inbox, a directory group, a deleted mailbox's forward).
+ *
+ * ⚠ ACCOUNTS, ALIASES *AND* LISTS. An address free in one table and taken in
+ * another is already receiving somebody's mail; checking only `accounts` would
+ * hand a stranger an address that currently delivers to a real person. The unique
+ * constraints would catch the first case and not the others, and only after we
+ * had written to Clerk.
+ *
+ * ⚠ ONE ROUND TRIP, NOT THREE SELECTS. The halves have to be answered against the
+ * same snapshot: asking sequentially leaves a window where an address is free in
+ * the first query and claimed as an alias before the second, which is exactly the
+ * race this check exists to lose safely.
+ *
+ * ⚠ A LIST'S ADDRESS IS THE THIRD HALF. A deleted mailbox that was set to forward
+ * keeps its address as a list (`fwd-<id>`, mailboxes/lifecycle.ts) whose only
+ * member is where its mail goes, so a new person who took that address would have
+ * their mail copied to somebody else. The same holds for each of its aliases,
+ * which become lists of their own (`aliasListName`) at the purge.
+ *
+ * Takes the reader so an alias being added can ask inside its own transaction.
+ */
+export async function addressHeld(
+  db: Pick<Database, "select">,
+  address: string,
+): Promise<boolean> {
+  const rows = await union(
+    db
+      .select({ address: accounts.email })
+      .from(accounts)
+      .where(eq(accounts.email, address)),
+    db
+      .select({ address: aliases.address })
+      .from(aliases)
+      .where(eq(aliases.address, address)),
+    db
+      .select({ address: sql<string>`${groups.email}`.as("address") })
+      .from(groups)
+      .where(eq(groups.email, address)),
+  ).limit(1)
+
+  return rows.length > 0
+}
 
 /**
  * The projection's rows, read and gated for provisioning.
@@ -52,24 +166,7 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
      * person. The unique constraints would catch the first case and not the
      * second, and only after we had written to Clerk.
      */
-    async addressTaken(address) {
-      // ⚠ ONE ROUND TRIP, NOT TWO SELECTS. The two halves have to be answered
-      // against the same snapshot: asking sequentially leaves a window where an
-      // address is free in the first query and claimed as an alias before the
-      // second, which is exactly the race this check exists to lose safely.
-      const rows = await union(
-        db
-          .select({ address: accounts.email })
-          .from(accounts)
-          .where(eq(accounts.email, address)),
-        db
-          .select({ address: aliases.address })
-          .from(aliases)
-          .where(eq(aliases.address, address)),
-      ).limit(1)
-
-      return rows.length > 0
-    },
+    addressTaken: (address) => addressHeld(db, address),
 
     async current(userId) {
       const [row] = await db
@@ -86,12 +183,22 @@ export function mailboxDirectory(db: Database): MailboxDirectory {
      * authd's every query filters on it, so a mailbox is invisible - no bind,
      * no delivery - until this runs. It is deliberately not part of the
      * projection's upsert, which must never touch it.
+     *
+     * ⚠ NEVER A MAILBOX IN ITS DELETION GRACE. The purge turns `active` off before
+     * it destroys the Stalwart account, so that nothing re-creates it; a directory
+     * push that provisioned the same person in that window would turn it back on.
+     * No row comes back, which `provisionForDirectory` reads as the person being gone.
      */
-    async activate(userId) {
+    async activate(userId, displayName) {
+      const name = displayName?.trim() || undefined
       const [row] = await db
         .update(accounts)
-        .set({ active: true, updatedAt: sql`now()` })
-        .where(eq(accounts.clerkUserId, userId))
+        .set({
+          active: true,
+          ...(name !== undefined ? { displayName: name } : {}),
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(accounts.clerkUserId, userId), isNull(accounts.deletingAt)))
         .returning()
 
       return row ? toMailbox(row) : null
@@ -135,7 +242,7 @@ const domainOfEmail = sql`lower(split_part(${accounts.email}, '@', 2))`
  * ⚠ BOTH SUBQUERIES ARE UNCORRELATED, so Postgres reads `core.mailbox_domains()`
  * once per statement and not once per account.
  */
-const inWorkspace = (tenantId: string) =>
+export const inWorkspace = (tenantId: string) =>
   or(
     sql`${domainOfEmail} in (
       select lower(name) from core.mailbox_domains() where tenant_id = ${tenantId}::uuid
@@ -231,6 +338,41 @@ export const mailAccess = {
       suspended: suspended.map((r) => r.id),
       aliases: gone.map((r) => r.address),
     }
+  },
+
+  /**
+   * Kills every cached password verification for the mailboxes on a domain that
+   * stopped hosting mail, by raising their `credential_epoch` (#406).
+   *
+   * ⚠ IT SUSPENDS NOTHING. The login is refused by authd's DOMAIN gate
+   * (`core.mailbox_domain_refused`, read in the same query as the account), not
+   * by a per-mailbox stamp, so `suspended_at` stays exactly as an admin left it
+   * and switching hosting back on needs no per-mailbox step. The epoch bump is
+   * what makes the return honest: a password cached before the domain went off
+   * is not honoured on the way back without asking the identity provider again.
+   *
+   * ⚠ THE SAME MEMBERSHIP RULE AS `suspendDomain`, and the caller has made the
+   * same check that no other workspace hosts the name. Returns who it reached.
+   */
+  async invalidateDomain(
+    db: Writer,
+    tenantId: string,
+    domain: string,
+    holdsName: boolean,
+  ): Promise<string[]> {
+    const name = domain.toLowerCase()
+    const mine = holdsName
+      ? or(eq(accounts.tenantId, tenantId), isNull(accounts.tenantId))
+      : eq(accounts.tenantId, tenantId)
+    const done = await db
+      .update(accounts)
+      .set({
+        credentialEpoch: sql`${accounts.credentialEpoch} + 1`,
+        updatedAt: sql`now()`,
+      })
+      .where(and(mine, sql`${domainOfEmail} = ${name}`))
+      .returning({ id: accounts.clerkUserId })
+    return done.map((r) => r.id)
   },
 
   /**
@@ -450,6 +592,10 @@ export const directoryMail = {
    * ⚠ NOT A DIRECTORY LIST (`directory_group_id` stays null): its address is
    * the leaver's own, which `mirrorGroup` would refuse as taken, and it is
    * removed with the plan (`dropRoutes`), not with a group.
+   *
+   * `alias` names one more address of the leaver that forwards to the same target
+   * (a purged mailbox's aliases): its list is `aliasListName(id, alias)`, one per address
+   * because a list has one address, and `dropRoutes` takes them with the rest.
    */
   async setRoute(
     tx: Tx,
@@ -458,9 +604,12 @@ export const directoryMail = {
       leaverId: string
       email: string | null
       targetId: string
+      alias?: string
     },
   ): Promise<void> {
-    const name = `${input.kind}-${input.leaverId}`
+    const name = input.alias
+      ? aliasListName(input.leaverId, input.alias)
+      : `${input.kind}-${input.leaverId}`
     await tx
       .insert(groups)
       .values({ name, email: input.email, description: input.kind })
@@ -476,9 +625,13 @@ export const directoryMail = {
   },
 
   async dropRoutes(tx: Tx, leaverId: string): Promise<void> {
-    await tx
-      .delete(groups)
-      .where(inArray(groups.name, [`fwd-${leaverId}`, `dlg-${leaverId}`]))
+    await tx.delete(groups).where(
+      or(
+        inArray(groups.name, [`fwd-${leaverId}`, `dlg-${leaverId}`]),
+        // `starts_with`, not LIKE: a Clerk id has underscores, which LIKE reads as wildcards.
+        sql`starts_with(${groups.name}, ${aliasListPrefix(leaverId)})`,
+      ),
+    )
   },
 
   async dropGroup(tx: Tx, directoryGroupId: string): Promise<void> {

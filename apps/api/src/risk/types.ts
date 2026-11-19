@@ -3,9 +3,9 @@
  *
  * ⚠ `Facts` IS EVERYTHING A RULE MAY READ, AND RULES READ NOTHING ELSE. Rules
  * are pure functions of it, which is what makes them testable against the
- * synthetic scenarios and what makes a score reproducible from the facts an
- * assessment recorded. A rule that queried the database itself would be a
- * rule nobody could replay.
+ * synthetic scenarios and what makes a score reproducible from the facts a
+ * snapshot recorded (snapshot.ts). A rule that queried the database itself
+ * would be a rule nobody could replay.
  */
 export type Band = "low" | "elevated" | "high" | "critical"
 export type Plan = "free" | "paid"
@@ -86,8 +86,6 @@ export interface FarmPeer {
 export interface IdentityFacts {
   firstSeen: Date | null
   firstCountry: string | null
-  latestCountry: string | null
-  latestTimezone: string | null
   countries: number
   torSeen: boolean
   hostingSeen: boolean
@@ -96,6 +94,11 @@ export interface IdentityFacts {
   heldDevicePeers: number
   subnetSignupPeers: number
   heldSubnetPeers: number
+  /** Opaque digests of the people counted above (`user:<digest>`), never their ids. */
+  devicePeerKeys: string[]
+  subnetSignupPeerKeys: string[]
+  /** The device and sign-up network peers who own a workspace confirmed abusive. */
+  heldPeerKeys: string[]
 }
 
 export interface Facts {
@@ -142,6 +145,8 @@ export interface Facts {
     failedOrDisplaced: number
     /** The newest registration among verified sending domains; null if unknown. */
     youngestRegisteredAt: Date | null
+    /** Verified sending domains registered in the last 30 days. */
+    young: string[]
     randomSubdomain: boolean
     parents: string[]
   }
@@ -150,7 +155,8 @@ export interface Facts {
     tier: "strict" | "normal"
     tierSource: "default" | "score" | "staff"
     tierChangedAt: Date | null
-    tierDemotions90d: number
+    /** Demotions to strict by staff in 90 days; the score's own never count. */
+    staffDemotions90d: number
     holds180d: number
     upheldHolds: number
   }
@@ -174,7 +180,8 @@ export interface Facts {
 
   links: { unsafe: { host: string; verdict: string; day: string }[] }
 
-  content: { probability: number; at: Date } | null
+  /** What the content judge made of the workspace's recent content (risk/judge). */
+  content: JudgedContent | null
 
   /** How fast the person behind this workspace, and people sharing their device or network, create things. */
   actor: {
@@ -194,6 +201,9 @@ export interface Facts {
     youngFreeSimilar: number
     taintedSimilar: number
     bestTaintedSimilarity: number | null
+    /** Opaque digests of the workspaces counted above (`peer:<digest>`), never their ids. */
+    youngFreePeerKeys: string[]
+    taintedPeerKeys: string[]
     /** Every neighbour hit at or above the threshold, across recent content. */
     neighbours: number
     medianSimilarity: number | null
@@ -203,20 +213,81 @@ export interface Facts {
     boilerplateNear: { name: string; similarity: number } | null
   } | null
 
-  /** Its nearest LABELLED neighbours by behaviour (pgvector). */
-  behaviour: {
-    labelled: number
-    abuse: number
-    legit: number
-    meanAbuseDistance: number | null
-    nearestDistance: number | null
-    medianDistance: number | null
-  } | null
-
   /** The workspace's own discovered templates: its normal mail. */
   templates: { established: number; recentMatchedShare: number | null } | null
 
-  model: { probability: number; version: number } | null
+  /**
+   * Staff decisions that may still clear a concern (decisions.ts).
+   *
+   * ⚠ IN THE FACTS, NOT QUERIED BY EVALUATION, so a snapshot replays its
+   * cleared contributions exactly. Absent from snapshots taken before decision
+   * memory existed, which replay as "no decisions".
+   */
+  decisions?: StaffDecision[]
+}
+
+/**
+ * How a person decided about a workspace: released a hold, pinned its band,
+ * upheld a hold, or held it themselves. Only the first two clear anything.
+ */
+export type DecisionKind = "release" | "pin" | "uphold" | "hold"
+
+/** What a decision recorded of a contribution, enough to tell whether the same evidence is back. */
+export interface Concern {
+  rule: string
+  points: number
+  keys?: string[]
+}
+
+/** A staff decision, as evaluation sees it. */
+export interface StaffDecision {
+  id: string
+  kind: DecisionKind
+  decidedAt: Date
+  expiresAt: Date
+  revokedAt: Date | null
+  /** The concerns staff cleared. Empty unless a release or a pin. */
+  covers: Concern[]
+}
+
+/**
+ * What the content judge found in a content, decided by the second model
+ * alone (risk/judge/verdict.ts). A content has at most one: phishing is
+ * reported only where identity is not.
+ */
+export type JudgeSignal = "identity" | "phishing"
+
+/** One signal across the workspace's judged content. */
+export interface JudgedSignal {
+  /** Distinct contents with this signal. */
+  contents: number
+  /** Their messages over the window. */
+  messages: number
+  /** Their exact fingerprints, sorted: the rules' `content:` keys. */
+  exacts: string[]
+}
+
+/**
+ * The workspace's content sent in the last 7 days that the judge has answered
+ * for, under one model.
+ *
+ * ⚠ CONTENT, NOT MESSAGES: each distinct content was judged once, however many
+ * times it went out. Approved templates and boilerplate are never judged.
+ */
+export interface JudgedContent {
+  /** The storage key: the model and the contract version (judge.ts). */
+  model: string
+  judged: number
+  messages: number
+  /** Judged contents whose text was cut to fit. */
+  truncated: number
+  /** Distinct contents the judge pass saw, judged, and left for a workspace's spent daily cap. */
+  days: { seen: number; judged: number; capped: number }
+  /** Judged contents the first model sent on to the second. */
+  screened: number
+  /** Of those, the ones the second model did not answer. They set no signal. */
+  undecided: number
+  signals: Record<JudgeSignal, JudgedSignal>
 }
 
 /** Recent content left out of the cross-workspace rules as trusted (#222). */
@@ -237,15 +308,12 @@ export interface TrustedCounts {
  */
 export interface SimilarityEvidence {
   signal: string
-  /** The embedder, `minhash-8x4` for fingerprints, `behaviour-v1` for behaviour. */
+  /** The embedder, or `minhash-8x4` for fingerprints. */
   model: string
   neighbours: number
   distinct_workspaces: number
   median_similarity: number | null
   best_similarity: number | null
-  /** Behaviour only: L2 distances between standardised feature vectors. */
-  median_distance?: number | null
-  nearest_distance?: number | null
   confirmed_abuse_neighbours: number
   known_template_matches: number
   boilerplate_matches: number
@@ -266,7 +334,19 @@ export interface Hit {
    * the release may hold the workspace again.
    */
   freshAt?: Date
+  /**
+   * The specific things this hit flagged (`host:evil.example`, `peer:<digest>`),
+   * so a cleared concern returns for a new one and not for the same one.
+   * Absent for a rule with nothing identifiable, such as a rate. Sorted.
+   */
+  keys?: string[]
 }
+
+/**
+ * `live` rules score and act. A `shadow` rule is evaluated and recorded, and
+ * moves nothing: not the score, the band, a floor or any action.
+ */
+export type RuleMode = "live" | "shadow"
 
 export interface Rule {
   id: string
@@ -275,6 +355,8 @@ export interface Rule {
   summary: string
   /** May this rule's evidence re-hold a workspace after a staff release? */
   fresh?: boolean
+  /** Live when absent. Promoting a shadow rule is a code change and a `RULESET_VERSION` bump. */
+  mode?: RuleMode
   evaluate(facts: Facts): Hit | null
 }
 
@@ -286,6 +368,47 @@ export interface Contribution {
   detail?: SimilarityEvidence
   floor?: Band
   freshAt?: string
+  keys?: string[]
+}
+
+/**
+ * A contribution a staff decision cleared: the same evidence a person already
+ * weighed (engine.ts, `clearedBy`).
+ *
+ * ⚠ NO `points` AND NO `floor`, LIKE `ShadowContribution`. It is recorded and
+ * shown, and worth zero: nothing that sums points, lifts a band or decides an
+ * action can be handed one.
+ */
+export interface ClearedContribution {
+  rule: string
+  category: Category
+  wouldAdd: number
+  wouldFloor?: Band
+  evidence: Hit["evidence"]
+  detail?: SimilarityEvidence
+  keys?: string[]
+  freshAt?: string
+  /** The decision that cleared it, when, and until when. */
+  clearedBy: string
+  decidedAt: string
+  expiresAt: string
+}
+
+/**
+ * What a shadow rule would have added had it been live.
+ *
+ * ⚠ NO `points` AND NO `floor`, SO IT IS NOT A `Contribution`. Nothing that
+ * sums points, lifts a band or decides an action can be handed one by mistake:
+ * the compiler refuses it. It never has `freshAt` either, since it may never
+ * re-hold anybody.
+ */
+export interface ShadowContribution {
+  rule: string
+  category: Category
+  wouldAdd: number
+  wouldFloor?: Band
+  evidence: Hit["evidence"]
+  detail?: SimilarityEvidence
 }
 
 export interface Assessment {

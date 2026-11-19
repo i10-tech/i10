@@ -78,8 +78,8 @@ kubectl -n i10-prod create secret generic doppler-token-i10-root \
   --from-literal=serviceToken='dp.st.prod.…'
 ```
 
-One per config: `root`, `api`, `console`, `auth`, `stalwart`, `bulwark`,
-`platform`. They live in `i10-prod` rather than `doppler-operator-system`
+One per config: `root`, `api`, `console`, `auth`, `stalwart`, `stalwart-keep`,
+`bulwark`, `platform`. They live in `i10-prod` rather than `doppler-operator-system`
 because a `tokenSecret` must share a namespace with the `DopplerSecret` naming
 it, and the `i10` AppProject cannot create objects outside `i10-*`. Following
 PSL's one-namespace convention would mean a PSL-repo commit per i10 workload.
@@ -143,6 +143,46 @@ reported nowhere, forever.
 refuses to start when `NODE_ENV` is production and it was left at its
 `development` fallback. Staging and production run the same image, so that
 value is the only thing distinguishing their events.
+
+## The key-wrap Secret: `i10-key-wrap`
+
+Doppler holds the API's encryption keys only in wrapped form. The key that
+unwraps them, `KEY_WRAP_KEYS`, is in the Secret `i10-key-wrap`. It is made by
+hand. It is in neither Doppler nor git, so a leaked Doppler config opens
+nothing. Every workload that gets `i10-api` reads it through `env` with
+`optional: true`, so plain keys still work without it. The design is in
+`docs/decisions/encryption.md`, "Wrapped keys".
+
+Create it once. The key goes through a pipe, so it is never printed and never
+in a command line:
+
+```bash
+printf 'k1:%s' "$(openssl rand -base64 32)" \
+  | kubectl -n i10-prod create secret generic i10-key-wrap \
+      --from-file=KEY_WRAP_KEYS=/dev/stdin
+```
+
+⚠ PUT IT ON THE PAPER COPY TOO, with the other keys. Without it, every wrapped
+value in Doppler is lost. Read it once, in a private terminal, only to write it
+down:
+
+```bash
+kubectl -n i10-prod get secret i10-key-wrap -o jsonpath='{.data.KEY_WRAP_KEYS}' | base64 -d; echo
+```
+
+To rotate, put a new key in front of the old one, then follow "How to rotate
+`KEY_WRAP_KEYS`" in the decision doc:
+
+```bash
+old="$(kubectl -n i10-prod get secret i10-key-wrap -o jsonpath='{.data.KEY_WRAP_KEYS}' | base64 -d)"
+printf 'k2:%s,%s' "$(openssl rand -base64 32)" "$old" \
+  | kubectl -n i10-prod create secret generic i10-key-wrap \
+      --from-file=KEY_WRAP_KEYS=/dev/stdin --dry-run=client -o yaml \
+  | kubectl apply -f -
+unset old
+```
+
+A pod reads the Secret when it starts. Restart the workloads after a change.
 
 ## Deploying
 
