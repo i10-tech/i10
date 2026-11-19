@@ -18,6 +18,7 @@ import {
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
+import { Bone } from "@repo/ui/components/bone/bone"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,11 +31,27 @@ import {
 } from "@repo/ui/components/i10/menu"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
+import { seedShape } from "@/components/list/remembered-shapes"
 import { FolderArt } from "@/components/templates/folder-art"
-import { TemplateThumbnail } from "@/components/template-thumbnail"
-import { formatRelative } from "@/lib/format"
+import { TemplateSnapshot } from "@/components/template-snapshot"
+import { templateDetailShape } from "@/lib/shapes/template-detail"
 import { STATUS_LABEL, hrefOf, isEditable, statusOf, titleOf } from "@/lib/templates"
 import type { TemplateFolder, TemplateSummary } from "@/lib/types"
+import { Time } from "@/components/time"
+
+export function seedTemplate(t: TemplateSummary) {
+  seedShape(templateDetailShape, t.id, {
+    source: t.source,
+    kind: t.kind,
+    versions: t.versions,
+    live: t.version > 0,
+    github: Boolean(t.github),
+    removed: Boolean(t.github?.removed),
+    folder: Boolean(t.folder_id),
+    titled: Boolean(t.title),
+    tab: "preview",
+  })
+}
 
 /**
  * The rename icon, in the menu's grey.
@@ -73,31 +90,122 @@ const SPRING = { type: "spring", stiffness: 500, damping: 38, mass: 0.6 } as con
  */
 export function TemplateCard({
   template,
-  folders,
-  imagesFrom,
-  selected,
-  selecting,
+  folders = [],
+  selected = false,
+  selecting = false,
   onSelect,
   onAction,
   onDragStart,
   onDragEnd,
-  dragging,
+  dragging = false,
+  loading = false,
 }: {
-  template: TemplateSummary
-  folders: TemplateFolder[]
-  imagesFrom: string | null
-  selected: boolean
+  template?: TemplateSummary
+  folders?: TemplateFolder[]
+  selected?: boolean
   /** Something is ticked, so every checkbox shows. */
-  selecting: boolean
-  onSelect: (event: { shiftKey: boolean; checked: boolean }) => void
-  onAction: (action: TemplateAction) => void
-  onDragStart: (event: React.DragEvent) => void
-  onDragEnd: () => void
-  dragging: boolean
+  selecting?: boolean
+  onSelect?: (event: { shiftKey: boolean; checked: boolean }) => void
+  onAction?: (action: TemplateAction) => void
+  onDragStart?: (event: React.DragEvent) => void
+  onDragEnd?: () => void
+  dragging?: boolean
+  loading?: boolean
 }) {
   const t = template
-  const status = statusOf(t)
+  const status = t ? statusOf(t) : "published"
   const [menu, setMenu] = React.useState(false)
+
+  // ⚠ THE CARD'S HOVER, NOT THE LINK'S. The tick and the menu sit beside the
+  // link, so `hover:` dropped the background while the pointer was on them;
+  // it also stays while the menu is open.
+  const linkClass = cn(
+    "block rounded-2xl p-1.5 outline-none",
+    "transition-[background-color,box-shadow] duration-(--duration-dismiss) ease-(--ease-quad-out)",
+    "group-hover/card:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
+    menu && "bg-muted/60",
+    selected &&
+      "bg-primary/[0.06] ring-2 ring-primary/70 group-hover/card:bg-primary/[0.08]",
+  )
+  // ⚠ ONE BODY FOR THE CARD AND ITS SKELETON; the pieces that need a template
+  // are inside their Bones, so a skeleton cannot drift from the card.
+  const body = (
+    <>
+      <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-muted ring-1 ring-border/60 ring-inset">
+        {/* ⚠ THE BONE IS THE PREVIEW'S BOX. The sheet inside is `absolute`;
+            while the bone sharpens, its filter makes it the sheet's containing
+            block, and a bone of no height drew the sheet as a strip. */}
+        <Bone
+          id="preview"
+          shape="box"
+          width="100%"
+          height="100%"
+          radius="var(--radius-xl)"
+          className="absolute inset-0"
+        >
+          {t && (
+            <motion.div className="absolute inset-x-[13%] top-[16%] -bottom-2 overflow-hidden rounded-t-lg shadow-[0_0_0_1px_rgb(0_0_0/0.06),0_8px_24px_-12px_rgb(0_0_0/0.25)]">
+              <TemplateSnapshot templateId={t.id} stamp={t.updated_at} lazy />
+            </motion.div>
+          )}
+        </Bone>
+      </div>
+      <div className="flex items-start gap-2 px-1.5 pt-2.5 pb-1">
+        <div className="min-w-0 flex-1">
+          <Bone id="title" lineHeight={20} width="72%">
+            {t && (
+              <p className="truncate text-sm font-medium" title={titleOf(t)}>
+                {titleOf(t)}
+              </p>
+            )}
+          </Bone>
+          <Bone id="name" lineHeight={16} width="48%" className="mt-1">
+            {t && (
+              <p
+                className="truncate font-mono text-xs text-muted-foreground"
+                title={t.name}
+              >
+                {t.name}
+              </p>
+            )}
+          </Bone>
+        </div>
+        <Bone
+          id="status"
+          shape="box"
+          width={64}
+          height={20}
+          radius={9999}
+          className="mt-0.5 shrink-0"
+          inline
+        >
+          {t && (
+            <>
+              <Badge
+                tone={status === "published" ? "info" : "neutral"}
+                className="mt-0.5 shrink-0"
+              >
+                {status === "changes" ? "Changes" : STATUS_LABEL[status]}
+              </Badge>
+              <p className="sr-only">
+                {STATUS_LABEL[status]}, edited <Time iso={t.updated_at} />
+              </p>
+            </>
+          )}
+        </Bone>
+      </div>
+    </>
+  )
+
+  if (loading || !t) {
+    return (
+      <div className="group/card relative">
+        <a aria-hidden tabIndex={-1} className={linkClass}>
+          {body}
+        </a>
+      </div>
+    )
+  }
 
   return (
     <motion.div
@@ -114,55 +222,26 @@ export function TemplateCard({
         draggable
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
-        className={cn(
-          "block rounded-2xl p-1.5 outline-none",
-          "transition-[background-color,box-shadow] duration-(--duration-dismiss) ease-(--ease-quad-out)",
-          "hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
-          selected &&
-            "bg-primary/[0.06] ring-2 ring-primary/70 hover:bg-primary/[0.08]",
-        )}
+        onPointerEnter={() => seedTemplate(t)}
+        onFocus={() => seedTemplate(t)}
+        className={linkClass}
+        data-navigates={selecting ? "false" : undefined}
         onClick={(event) => {
+          seedTemplate(t)
           // While picking, a click ticks rather than opens - Resend's grid
           // behaves the same once one card is ticked.
           if (selecting) {
             event.preventDefault()
-            onSelect({ shiftKey: event.shiftKey, checked: !selected })
+            onSelect?.({ shiftKey: event.shiftKey, checked: !selected })
           }
         }}
       >
-        <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-muted ring-1 ring-border/60 ring-inset">
-          <motion.div className="absolute inset-x-[13%] top-[16%] -bottom-2 overflow-hidden rounded-t-lg shadow-[0_0_0_1px_rgb(0_0_0/0.06),0_8px_24px_-12px_rgb(0_0_0/0.25)]">
-            <TemplateThumbnail
-              templateId={t.id}
-              stamp={t.updated_at}
-              imagesFrom={imagesFrom}
-              label={`${titleOf(t)} preview`}
-            />
-          </motion.div>
-        </div>
-        <div className="flex items-start gap-2 px-1.5 pt-2.5 pb-1">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium" title={titleOf(t)}>
-              {titleOf(t)}
-            </p>
-            <p
-              className="truncate font-mono text-xs text-muted-foreground"
-              title={t.name}
-            >
-              {t.name}
-            </p>
-          </div>
-          <Badge
-            tone={status === "published" ? "info" : "neutral"}
-            className="mt-0.5 shrink-0"
-          >
-            {status === "changes" ? "Changes" : STATUS_LABEL[status]}
-          </Badge>
-        </div>
+        {body}
       </Link>
 
-      {/* Tick, top left. */}
+      {/* Tick, top left. ⚠ SKIPPED BY test/skeleton-parity: it acts on a card a skeleton does not have. */}
       <div
+        data-skeleton="skip"
         className={cn(
           "absolute top-4 left-4 z-10 transition-opacity duration-(--duration-instant)",
           selected || selecting || menu
@@ -176,13 +255,14 @@ export function TemplateCard({
           className="size-5 rounded-md bg-background/90 shadow-sm backdrop-blur"
           onClick={(event) => {
             event.stopPropagation()
-            onSelect({ shiftKey: event.shiftKey, checked: !selected })
+            onSelect?.({ shiftKey: event.shiftKey, checked: !selected })
           }}
         />
       </div>
 
-      {/* Menu, top right. */}
+      {/* Menu, top right. Skipped for the same reason. */}
       <div
+        data-skeleton="skip"
         className={cn(
           "absolute top-3 right-3 z-10 transition-opacity duration-(--duration-instant)",
           menu
@@ -195,7 +275,7 @@ export function TemplateCard({
           folders={folders}
           open={menu}
           onOpenChange={setMenu}
-          onAction={onAction}
+          onAction={onAction ?? (() => {})}
           trigger={
             <Button
               variant="secondary"
@@ -207,10 +287,6 @@ export function TemplateCard({
           }
         />
       </div>
-
-      <p className="sr-only">
-        {STATUS_LABEL[status]}, edited {formatRelative(t.updated_at)}
-      </p>
     </motion.div>
   )
 }
@@ -247,7 +323,7 @@ export function TemplateMenu({
           View details
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href={hrefOf(t)}>
+          <Link href={hrefOf(t)} onPointerEnter={() => seedTemplate(t)}>
             {isEditable(t) ? <Pencil /> : <SquareArrowOutUpRight />}
             {isEditable(t) ? "Edit template" : "Open template"}
           </Link>
@@ -301,30 +377,108 @@ export function TemplateMenu({
  */
 export function FolderCard({
   folder,
-  selected,
-  selecting,
+  selected = false,
+  selecting = false,
   onSelect,
-  over,
+  over = false,
+  onDragStart,
+  onDragEnd,
   onDragOver,
   onDragLeave,
   onDrop,
   onRename,
   onDelete,
+  loading = false,
 }: {
-  folder: TemplateFolder
-  selected: boolean
+  folder?: TemplateFolder
+  selected?: boolean
   /** Something is ticked, so every checkbox shows and a click ticks. */
-  selecting: boolean
-  onSelect: (event: { shiftKey: boolean; checked: boolean }) => void
-  over: boolean
-  onDragOver: (event: React.DragEvent) => void
-  onDragLeave: () => void
-  onDrop: (event: React.DragEvent) => void
-  onRename: () => void
-  onDelete: () => void
+  selecting?: boolean
+  onSelect?: (event: { shiftKey: boolean; checked: boolean }) => void
+  over?: boolean
+  /**
+   * Given only when the folder is ticked along with templates: dragging it then
+   * carries them. A folder never moves, so otherwise it is not draggable and
+   * a press that moves does nothing (a link would drag its URL).
+   */
+  onDragStart?: (event: React.DragEvent) => void
+  onDragEnd?: () => void
+  onDragOver?: (event: React.DragEvent) => void
+  onDragLeave?: () => void
+  onDrop?: (event: React.DragEvent) => void
+  onRename?: () => void
+  onDelete?: () => void
+  loading?: boolean
 }) {
   const [hover, setHover] = React.useState(false)
   const [menu, setMenu] = React.useState(false)
+
+  // The card's hover, not the link's, as on a template.
+  const linkClass = cn(
+    "block rounded-2xl p-1.5 outline-none",
+    "transition-[background-color,box-shadow] duration-(--duration-dismiss) ease-(--ease-quad-out)",
+    "group-hover/card:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
+    menu && "bg-muted/60",
+    selected &&
+      "bg-primary/[0.06] ring-2 ring-primary/70 group-hover/card:bg-primary/[0.08]",
+    over && "bg-primary/[0.06] ring-2 ring-primary/70",
+  )
+  // ⚠ ONE BODY FOR THE CARD AND ITS SKELETON, as on a template. The same tile a
+  // template sits in, so a row of folders and templates lines up - name under name.
+  const body = (
+    <>
+      <div className="grid aspect-[4/3] place-items-center rounded-xl bg-muted/50 ring-1 ring-border/50 ring-inset">
+        <Bone
+          id="art"
+          shape="box"
+          width="100%"
+          height="100%"
+          radius="var(--radius-xl)"
+          className="size-full"
+        >
+          {folder && (
+            <div className="grid size-full items-end justify-items-center pb-[5%]">
+              <FolderArt
+                count={folder.templates}
+                raised={hover || menu}
+                over={over}
+                previews={folder.preview}
+              />
+            </div>
+          )}
+        </Bone>
+      </div>
+      <div className="px-1.5 pt-2.5 pb-1">
+        <Bone id="name" lineHeight={20} width="60%">
+          {folder && (
+            <p className="truncate text-sm font-medium" title={folder.name}>
+              {folder.name}
+            </p>
+          )}
+        </Bone>
+        <Bone id="count" lineHeight={16} width="35%" className="mt-1">
+          {folder && (
+            <p className="text-xs text-muted-foreground">
+              {folder.templates === 0
+                ? "Empty"
+                : `${folder.templates} template${folder.templates === 1 ? "" : "s"}`}
+            </p>
+          )}
+        </Bone>
+      </div>
+    </>
+  )
+
+  if (loading || !folder) {
+    return (
+      <div className="group/card relative">
+        <a aria-hidden tabIndex={-1} className={linkClass}>
+          {body}
+        </a>
+      </div>
+    )
+  }
+
   return (
     <motion.div
       layout
@@ -339,50 +493,29 @@ export function FolderCard({
     >
       <Link
         href={`/templates/folder/${encodeURIComponent(folder.id)}`}
+        draggable={Boolean(onDragStart)}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         onFocus={() => setHover(true)}
         onBlur={() => setHover(false)}
+        data-navigates={selecting ? "false" : undefined}
         onClick={(event) => {
           // While picking, a click ticks rather than opens, as on a template.
           if (selecting) {
             event.preventDefault()
-            onSelect({ shiftKey: event.shiftKey, checked: !selected })
+            onSelect?.({ shiftKey: event.shiftKey, checked: !selected })
           }
         }}
-        className={cn(
-          "block rounded-2xl p-1.5 outline-none",
-          "transition-[background-color,box-shadow] duration-(--duration-dismiss) ease-(--ease-quad-out)",
-          "hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
-          selected &&
-            "bg-primary/[0.06] ring-2 ring-primary/70 hover:bg-primary/[0.08]",
-          over && "bg-primary/[0.06] ring-2 ring-primary/70",
-        )}
+        className={linkClass}
       >
-        {/* The same tile a template sits in, so a row of folders and
-            templates lines up - name under name. */}
-        <div className="grid aspect-[4/3] place-items-center rounded-xl bg-muted/50 ring-1 ring-border/50 ring-inset">
-          <FolderArt
-            count={folder.templates}
-            raised={hover || menu}
-            over={over}
-            className="translate-y-[4%]"
-          />
-        </div>
-        <div className="px-1.5 pt-2.5 pb-1">
-          <p className="truncate text-sm font-medium" title={folder.name}>
-            {folder.name}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {folder.templates === 0
-              ? "Empty"
-              : `${folder.templates} template${folder.templates === 1 ? "" : "s"}`}
-          </p>
-        </div>
+        {body}
       </Link>
-      {/* Tick, top left - as on a template. */}
+      {/* Tick, top left - as on a template, and skipped by test/skeleton-parity for the same reason. */}
       <div
+        data-skeleton="skip"
         className={cn(
           "absolute top-4 left-4 z-10 transition-opacity duration-(--duration-instant)",
           selected || selecting || menu
@@ -396,11 +529,12 @@ export function FolderCard({
           className="size-5 rounded-md bg-background/90 shadow-sm backdrop-blur"
           onClick={(event) => {
             event.stopPropagation()
-            onSelect({ shiftKey: event.shiftKey, checked: !selected })
+            onSelect?.({ shiftKey: event.shiftKey, checked: !selected })
           }}
         />
       </div>
       <div
+        data-skeleton="skip"
         className={cn(
           "absolute top-3 right-3 z-10 transition-opacity duration-(--duration-instant)",
           menu

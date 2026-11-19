@@ -1783,18 +1783,6 @@ export async function getTemplate(id: string) {
   )
 }
 
-/** The draft filled as a test would be: what a list thumbnail shows. */
-export async function templateDraftPreview(id: string) {
-  return run(
-    () =>
-      api<TemplatePreview>(
-        `/console/templates/${encodeURIComponent(id)}/draft-preview`,
-      ),
-    [],
-    { refreshCaller: false },
-  )
-}
-
 export async function updateTemplate(
   id: string,
   patch: Record<string, unknown>,

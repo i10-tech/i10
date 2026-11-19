@@ -14,6 +14,7 @@ import {
   UserRound,
 } from "lucide-react"
 import { useTheme } from "next-themes"
+import { switchTheme, type ThemeChoice } from "@/lib/switch-theme"
 import { useClerk, useUser } from "@clerk/nextjs"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
 import { Badge } from "@repo/ui/components/badge/badge"
@@ -403,7 +404,7 @@ function AppearanceRow() {
               role="radio"
               aria-checked={selected}
               aria-label={option.label}
-              onClick={() => setTheme(option.value)}
+              onClick={() => switchTheme(option.value as ThemeChoice, setTheme)}
               className={cn(
                 "grid size-6 cursor-pointer place-items-center rounded-full transition-colors",
                 "duration-(--duration-instant) ease-(--ease-linear)",

@@ -7,10 +7,11 @@ import { RotateCcw } from "lucide-react"
 import { Button } from "@repo/ui/components/button/button"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
-import { EmailFrame } from "@/components/email-frame"
+import { TemplateEmailFrame } from "@/components/template-email-frame"
 import { previewTemplateVersion } from "@/lib/actions"
 import { nest } from "@/lib/template-variables"
 import type { TemplatePreview, TemplateVersionSummary } from "@/lib/types"
+import { Shimmer } from "@repo/ui/components/shimmer/shimmer"
 
 /**
  * A version as a send would produce it, with sample values somebody can edit.
@@ -160,14 +161,14 @@ export function TemplatePreviewPanel({
             </div>
             <TabsContent value="preview" className="m-0">
               {preview?.html ? (
-                <EmailFrame
+                <TemplateEmailFrame
                   imagesFrom={imagesFrom}
                   html={preview.html}
                   title={`v${number} preview`}
                   className="h-[36rem]"
                 />
               ) : (
-                <div className="h-[36rem] animate-pulse bg-muted/30" />
+                <Shimmer className="h-[36rem] bg-muted/30" />
               )}
             </TabsContent>
             <TabsContent value="text" className="m-0">

@@ -69,7 +69,7 @@ import { Swap } from "@repo/ui/components/i10/swap"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
-import { EmailFrame } from "@/components/email-frame"
+import { TemplateEmailFrame } from "@/components/template-email-frame"
 import { CodeEditor } from "@/components/template-editor/code-editor"
 import { FolderGlyph } from "@/components/templates/folder-art"
 import { LeaveDialog } from "@/components/template-editor/leave-dialog"
@@ -1535,7 +1535,7 @@ function LivePreview({
   return (
     <div className="pt-4 pb-8">
       {shown.trim() ? (
-        <EmailFrame
+        <TemplateEmailFrame
           html={shown}
           title="Preview"
           imagesFrom={imagesFrom}

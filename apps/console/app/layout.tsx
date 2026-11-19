@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
+import { ClerkEnabledProvider } from "@/lib/clerk-enabled"
 import { GeistMono } from "geist/font/mono"
 import { GeistSans } from "geist/font/sans"
 import { inter } from "./fonts"
@@ -50,7 +51,8 @@ export const viewport: Viewport = {
  */
 function Providers({ children }: { children: React.ReactNode }) {
   const publishableKey = process.env.CLERK_PUBLISHABLE_KEY
-  if (!publishableKey) return children
+  if (!publishableKey)
+    return <ClerkEnabledProvider enabled={false}>{children}</ClerkEnabledProvider>
 
   return (
     <ClerkProvider
@@ -92,7 +94,9 @@ function Providers({ children }: { children: React.ReactNode }) {
        * with no Clerk key gets a fallback that cannot prompt and therefore
        * cannot delete anything the API would have refused.
        */}
-      <StepUpProvider authOrigin={authOrigin()}>{children}</StepUpProvider>
+      <StepUpProvider authOrigin={authOrigin()}>
+        <ClerkEnabledProvider enabled>{children}</ClerkEnabledProvider>
+      </StepUpProvider>
     </ClerkProvider>
   )
 }
@@ -175,7 +179,7 @@ export default function RootLayout({
          * See @repo/ui/components/theme: the dark palette is a `.dark` class in
          * the token sheet and nothing was applying it.
          */}
-        <Theme>
+        <Theme disableTransitionOnChange={false}>
           {/*
            * ⚠ ONE TOOLTIP PROVIDER AT THE ROOT RATHER THAN ONE PER TOOLTIP.
            * Radix's provider is what makes the SECOND tooltip open instantly

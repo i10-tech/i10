@@ -223,11 +223,17 @@ suite("console template routes", () => {
       html: null,
       subject: null,
       text: null,
+      stamp: t.updated_at,
     })
     await call("PATCH", `/templates/${t.id}`, { html: "<p>Hello</p>" })
-    expect((await call("GET", `/templates/${t.id}/draft-preview`)).body.html).toBe(
-      "<p>Hello</p>",
+    const edited = (await call("GET", `/templates/${t.id}/draft-preview`)).body
+    expect(edited.html).toBe("<p>Hello</p>")
+    // The stamp is what the list shows, so a cached picture is keyed to the edit.
+    const listed = (await call("GET", "/templates")).body.data.find(
+      (x: { id: string }) => x.id === t.id,
     )
+    expect(edited.stamp).toBe(listed.updated_at)
+    expect(edited.stamp > t.updated_at).toBe(true)
   })
 
   it("duplicates, deletes several at once, and a published template sends with its defaults", async () => {

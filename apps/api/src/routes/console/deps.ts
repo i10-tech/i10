@@ -13,6 +13,8 @@ import type { SendEmail } from "@repo/contracts"
 import type { AcceptOutcome } from "../../send/accept.js"
 import type { Renderer } from "../../templates/renderer.js"
 import type { TemplateAssets } from "../../templates/assets.js"
+import type { AssetProxy } from "../../templates/asset-proxy.js"
+import type { Counter } from "../../identity/rate-limit.js"
 import type { GitHubApp } from "../../github/client.js"
 import type { GithubStore } from "../../github/store.js"
 import type { GithubSyncer } from "../../github/sync.js"
@@ -105,6 +107,16 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * settings, uploads answer 501 and the editor takes image addresses only.
    */
   templateAssets?: TemplateAssets
+  /**
+   * Fetches the remote images and fonts a template's thumbnail draws. Optional:
+   * the default is the guarded fetcher; tests inject one with a fake network.
+   */
+  templateAssetProxy?: AssetProxy
+  /**
+   * The Redis client behind the asset proxy's rate limits (the one the SSO
+   * limiter uses). Optional: without it the limits count per process.
+   */
+  templateAssetCounter?: Counter
   /**
    * Sends one email down the ordinary send path, as the workspace - what a
    * template's "Test email" uses. Optional; without it the route answers 501.

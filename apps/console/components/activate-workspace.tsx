@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { useAuth, useOrganizationList } from "@clerk/nextjs"
+import { setWorkspaceKey } from "@/lib/workspace-key"
 
 /**
  * Selecting the workspace somebody already belongs to.
@@ -59,6 +60,11 @@ export function ActivateWorkspace() {
    * retried in a loop against a Clerk that is refusing.
    */
   const attempted = useRef(false)
+
+  // The template previews the browser keeps are keyed by workspace.
+  useLayoutEffect(() => {
+    if (sessionLoaded) setWorkspaceKey(orgId)
+  }, [sessionLoaded, orgId])
 
   useEffect(() => {
     if (!sessionLoaded || !isLoaded) return

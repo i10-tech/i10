@@ -35,6 +35,9 @@
 
 import { ssoRoutes } from "@/lib/preview-sso"
 import { webhookRoutes } from "@/lib/preview-webhooks"
+import { cardNote } from "@/lib/shapes/billing"
+import { statusOf } from "@/lib/shapes/domains"
+import type { BillingState, DomainSummary, PlanSummary } from "@/lib/types"
 
 export const PREVIEW =
   process.env.NODE_ENV !== "production" && process.env.CONSOLE_PREVIEW === "1"
@@ -718,6 +721,11 @@ const TEMPLATE_FOLDERS = [
   id: `f01de700-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
   name,
   templates: TEMPLATES.filter((t) => t.folder === name).length,
+  // Newest edit first, three at most, as the API lists them.
+  preview: TEMPLATES.filter((t) => t.folder === name)
+    .sort((a, b) => a.updated_days - b.updated_days)
+    .slice(0, 3)
+    .map((t) => ({ id: t.id, updated_at: ago(t.updated_days) })),
   created_at: ago(30 - i),
   updated_at: ago(30 - i),
 }))
@@ -948,6 +956,100 @@ const ROUTES: [
    * explicitly, with a message that says why, is the honest option - and it
    * exercises the button's real error path, which is worth being able to see.
    */
+  /*
+   * ⚠ COUNTED FROM THE FIXTURES BELOW, SO THE FIRST-VISIT SKELETON IS THE ONE A
+   * REAL WORKSPACE GETS. Without it every list drew the fallback shape (eight
+   * rows, no filters) and then jumped to the fixtures' own (2026-11-09).
+   */
+  [
+    /^\/console\/shapes$/,
+    () => {
+      const lists = {
+        domains: "/console/domains",
+        apiKeys: "/console/api-keys",
+        emails: "/console/emails",
+        logs: "/console/requests",
+        suppressions: "/console/suppressions",
+        contacts: "/console/contacts",
+        segments: "/console/segments",
+        topics: "/console/topics",
+        broadcasts: "/console/broadcasts",
+        webhooks: "/console/webhook-endpoints",
+        templates: "/console/templates",
+        ssoConnections: "/console/identity/connections",
+        ssoDirectories: "/console/identity/directories",
+      }
+      const data: Record<string, number> = {}
+      for (const [key, path] of Object.entries(lists)) {
+        const rows = (previewFor(path) as { data?: unknown } | undefined)?.data
+        if (Array.isArray(rows)) data[key] = Math.min(rows.length, 10)
+      }
+      // The banner's two counts, and the status filters' distinct statuses, as
+      // the API counts them (displaced is its own domain status).
+      const endpoints = (
+        previewFor("/console/webhook-endpoints") as
+          { data?: { health: string; enabled: boolean }[] } | undefined
+      )?.data
+      if (Array.isArray(endpoints)) {
+        data.webhooksDisabled = Math.min(
+          endpoints.filter((e) => e.health === "disabled").length,
+          10,
+        )
+        data.webhooksFailing = Math.min(
+          endpoints.filter((e) => e.health === "failing" && e.enabled).length,
+          10,
+        )
+      }
+      const domainRows = (
+        previewFor("/console/domains") as { data?: DomainSummary[] } | undefined
+      )?.data
+      if (Array.isArray(domainRows))
+        data.domainStatuses = new Set(domainRows.map(statusOf)).size
+      const broadcastRows = (
+        previewFor("/console/broadcasts") as { data?: { status: string }[] } | undefined
+      )?.data
+      if (Array.isArray(broadcastRows))
+        data.broadcastStatuses = new Set(broadcastRows.map((b) => b.status)).size
+      // Templates: root ones only, folders apart, as the API counts them; then
+      // the GitHub panel's and the reviewed list's numbers.
+      const library = previewFor("/console/templates") as
+        { data?: { folder_id: string | null }[]; folders?: unknown[] } | undefined
+      if (library?.data)
+        data.templates = Math.min(
+          library.data.filter((t) => t.folder_id === null).length,
+          10,
+        )
+      if (library?.folders) data.templateFolders = Math.min(library.folders.length, 10)
+      const github = previewFor("/console/github") as
+        | { configured?: boolean; installations?: unknown[]; repositories?: unknown[] }
+        | undefined
+      if (github) {
+        data.githubConfigured = github.configured ? 1 : 0
+        data.githubInstallations = Math.min(github.installations?.length ?? 0, 10)
+        data.githubRepos = Math.min(github.repositories?.length ?? 0, 10)
+      }
+      const reviewed = previewFor("/console/trusted-templates") as
+        { data?: unknown[] } | undefined
+      data.trustedTemplates = Math.min(reviewed?.data?.length ?? 0, 10)
+      // The catalogue's size and its longest card, as the API counts them.
+      const plans = (
+        previewFor("/console/plans") as { data?: PlanSummary[] } | undefined
+      )?.data
+      if (Array.isArray(plans)) {
+        data.plans = Math.min(plans.length, 10)
+        data.planEntitlements = Math.min(
+          Math.max(0, ...plans.map((p) => p.entitlements.length)),
+          10,
+        )
+        const note = cardNote(BILLING as unknown as BillingState, plans)
+        if (note) {
+          data.planNoteCard = note.card
+          data.planNoteLines = note.lines
+        }
+      }
+      return { data }
+    },
+  ],
   [/^\/console\/billing\/checkout$/, () => PREVIEW_UNAVAILABLE],
   [/^\/console\/billing\/payment-method-session$/, () => PREVIEW_UNAVAILABLE],
   [
@@ -1726,6 +1828,7 @@ const ROUTES: [
         subject: t.subject,
         html: live ? fillFixture(live.html, live.variables) : t.html,
         text: null,
+        stamp: ago(t.updated_days),
       }
     },
   ],

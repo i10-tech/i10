@@ -9,7 +9,7 @@ import { ArrowRight, PenLine, Undo2 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { ConfirmDialog } from "@/components/confirm-dialog"
-import { EmailFrame } from "@/components/email-frame"
+import { TemplateEmailFrame } from "@/components/template-email-frame"
 import { versionOrigin } from "@/components/template-source"
 import { Time } from "@/components/time"
 import {
@@ -24,6 +24,7 @@ import type {
   TemplateVersionSummary,
 } from "@/lib/types"
 import { toastError } from "@/lib/toast"
+import { Shimmer } from "@repo/ui/components/shimmer/shimmer"
 
 /**
  * A template's versions: which one is live, what made each, and going back.
@@ -260,7 +261,7 @@ function VersionDiff({
       {error ? (
         <p className="text-sm text-destructive">{error}</p>
       ) : !pair ? (
-        <div className="h-40 animate-pulse rounded-lg bg-muted/30" />
+        <Shimmer className="h-40 rounded-lg bg-muted/30" />
       ) : from === to ? (
         <p className="text-sm text-muted-foreground">Pick two different versions.</p>
       ) : (
@@ -287,7 +288,7 @@ function VersionDiff({
                   v{n}
                 </figcaption>
                 {p?.html ? (
-                  <EmailFrame
+                  <TemplateEmailFrame
                     imagesFrom={imagesFrom}
                     html={p.html}
                     title={`v${n}`}

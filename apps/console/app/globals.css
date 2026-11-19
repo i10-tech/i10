@@ -21,3 +21,11 @@
     opacity: 0;
   }
 }
+
+/* Stills transitions for one theme switch; see lib/switch-theme.ts. */
+html.theme-still,
+html.theme-still *,
+html.theme-still *::before,
+html.theme-still *::after {
+  transition: none !important;
+}

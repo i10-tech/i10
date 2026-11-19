@@ -49,12 +49,18 @@ export const LOGOUT_PER_CONNECTION: Limit = { max: 600, windowSeconds: 60 }
 
 export type Verdict = { ok: true } | { ok: false; retryAfter: number }
 
-export function fixedWindow(redis: Counter | null, now: () => number = Date.now) {
+export const SSO_RATE_PREFIX = "sso:rate:"
+
+export function fixedWindow(
+  redis: Counter | null,
+  now: () => number = Date.now,
+  prefix: string = SSO_RATE_PREFIX,
+) {
   const local = new Map<string, { count: number; until: number }>()
   return async (key: string, limit: Limit): Promise<Verdict> => {
     const t = now()
     const window = Math.floor(t / (limit.windowSeconds * 1000))
-    const full = `sso:rate:${key}:${window}`
+    const full = `${prefix}${key}:${window}`
     const retryAfter = Math.max(
       1,
       Math.ceil(((window + 1) * limit.windowSeconds * 1000 - t) / 1000),

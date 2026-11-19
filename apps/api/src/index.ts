@@ -2432,6 +2432,7 @@ const app = createApp({
           },
         }
       : {}),
+    templateAssetCounter: cache,
     ...(templateAssetsBucket
       ? { templateAssets: templateAssetStore({ db, ...templateAssetsBucket }) }
       : {}),

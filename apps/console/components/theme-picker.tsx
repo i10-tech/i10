@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Monitor, Moon, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
+import { switchTheme, type ThemeChoice } from "@/lib/switch-theme"
 import { cn } from "cn"
 import { useMounted } from "@/lib/react"
 
@@ -34,7 +35,7 @@ export function ThemePicker() {
             type="button"
             role="radio"
             aria-checked={selected}
-            onClick={() => setTheme(option.value)}
+            onClick={() => switchTheme(option.value as ThemeChoice, setTheme)}
             className={cn(
               "flex w-28 cursor-pointer flex-col items-center gap-2 rounded-lg border p-3 transition-colors",
               "duration-(--duration-instant) ease-(--ease-linear)",

@@ -7,12 +7,14 @@ import { Breadcrumb } from "@repo/ui/components/breadcrumb/breadcrumb"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { Kbd } from "@repo/ui/components/i10/kbd"
 import { ThemeSwitch } from "@repo/ui/components/theme-switch/theme-switch"
+import { switchTheme } from "@/lib/switch-theme"
 import { useTheme } from "next-themes"
 import { useMounted } from "@/lib/react"
 import { OPEN_COMMAND_MENU } from "@/components/command-menu"
 import { useWorkspaceName } from "@/lib/workspace-name"
 import { useWorkspaceSwitch } from "@/lib/workspace-switch"
 import { buildBreadcrumbs } from "@/lib/breadcrumbs"
+import { useDestinationPathname } from "@/lib/pending-navigation"
 
 /**
  * The bar across the top of the content surface, as in Arc's app shell:
@@ -38,7 +40,11 @@ function useDocumentTitle(): string {
 }
 
 export function ShellBar({ workspace: fromServer }: { workspace: string }) {
-  const pathname = usePathname()
+  const committed = usePathname()
+  // The click's destination, so the crumbs change with the skeleton. Its title
+  // is not known yet: the document's is still the page being left.
+  const pathname = useDestinationPathname()
+  const going = pathname !== committed
   const { pending } = useWorkspaceSwitch()
   // Follows a rename at once. Arc's breadcrumb keys a crumb by its label, so
   // the new name runs its own crumb change: the old one leaves, the new one
@@ -48,8 +54,8 @@ export function ShellBar({ workspace: fromServer }: { workspace: string }) {
   const title = useDocumentTitle()
 
   const items = React.useMemo(
-    () => buildBreadcrumbs({ workspace, pathname, title }),
-    [pathname, title, workspace],
+    () => buildBreadcrumbs({ workspace, pathname, title: going ? "" : title }),
+    [pathname, title, workspace, going],
   )
 
   return (
@@ -78,9 +84,22 @@ export function ShellBar({ workspace: fromServer }: { workspace: string }) {
 
 /**
  * Arc's theme switch: the sun and moon trade places, and the page crossfades
- * through a view transition (skipped under reduced motion, and where the
- * browser has none). Light and dark only; System lives on the appearance page.
+ * through a view transition (skipped under reduced motion and where the
+ * browser has none), via lib/switch-theme.ts. Light and dark only; System
+ * lives on the appearance page.
+ *
+ * ⚠ SAFARI SWITCHES INSTANTLY (the user's call, 2026-11-19). Its view
+ * transition pictures leave out `backdrop-filter`, so the templates page's
+ * frosted folders could not survive a crossfade; pre-blurred stand-ins and
+ * lifting the folders out of the fade were both tried, and Safari draws a
+ * named element's new picture blank. switch-theme.ts still keeps the instant
+ * switch to one restyle.
  */
+const WEBKIT_ONLY =
+  typeof navigator !== "undefined" &&
+  /AppleWebKit/.test(navigator.userAgent) &&
+  !/\b(Chrome|Chromium)\//.test(navigator.userAgent)
+
 function AppearanceSwitch() {
   const { resolvedTheme, setTheme } = useTheme()
   const mounted = useMounted()
@@ -90,11 +109,7 @@ function AppearanceSwitch() {
       iconOnly
       variant="reveal"
       theme={resolvedTheme === "light" ? "light" : "dark"}
-      onThemeChange={(next) => {
-        const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        if (still || !document.startViewTransition) return setTheme(next)
-        document.startViewTransition(() => setTheme(next))
-      }}
+      onThemeChange={(next) => switchTheme(next, setTheme, { crossfade: !WEBKIT_ONLY })}
     />
   )
 }

@@ -8,14 +8,13 @@ import { Button } from "@repo/ui/components/button/button"
 import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { ConfirmDialog } from "@/components/confirm-dialog"
-import { EmailFrame } from "@/components/email-frame"
+import { TemplateEmailFrame } from "@/components/template-email-frame"
 import { Time } from "@/components/time"
 import {
   previewTemplateVersion,
   promoteTemplateVersion,
   restoreTemplateDraft,
 } from "@/lib/actions"
-import { formatRelative } from "@/lib/format"
 import { toastFailure } from "@/lib/toast"
 import type { TemplatePreview, TemplateRow, TemplateVersionSummary } from "@/lib/types"
 
@@ -112,7 +111,7 @@ export function VersionsPanel({
                         className="text-[11px] text-muted-foreground"
                         title={v.created_at}
                       >
-                        {formatRelative(v.created_at)}
+                        <Time iso={v.created_at} />
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
@@ -264,7 +263,7 @@ function VersionPreviewDialog({
         )}
         <div className="h-[60vh] overflow-hidden rounded-lg border bg-white">
           {preview?.html ? (
-            <EmailFrame
+            <TemplateEmailFrame
               html={preview.html}
               title={`v${shown?.number}`}
               imagesFrom={imagesFrom}
