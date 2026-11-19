@@ -13,7 +13,7 @@ import { RowMenu } from "@/components/list/row-menu"
 import { RotateSecretDialog } from "@/components/webhook-rotate-dialog"
 import { deleteWebhook, sendWebhookTest, updateWebhook } from "@/lib/actions"
 import { toastDone, toastError } from "@/lib/toast"
-import { endpointName } from "@/lib/webhooks"
+import { endpointName, type EndpointState } from "@/lib/webhooks"
 import type { WebhookEndpoint, WebhookEventType } from "@/lib/types"
 
 /**
@@ -25,9 +25,12 @@ import type { WebhookEndpoint, WebhookEventType } from "@/lib/types"
  */
 export function EndpointActions({
   endpoint,
+  state,
   catalog,
 }: {
-  endpoint: WebhookEndpoint
+  /** Absent while loading: the buttons are drawn from `state`, with nothing to act on. */
+  endpoint?: WebhookEndpoint
+  state: EndpointState
   catalog: WebhookEventType[]
 }) {
   const router = useRouter()
@@ -36,6 +39,7 @@ export function EndpointActions({
   const [deleting, setDeleting] = React.useState(false)
 
   const setEnabled = async (enabled: boolean) => {
+    if (!endpoint) return
     const result = await updateWebhook(endpoint.id, { enabled })
     if (!result.ok) {
       toastError(
@@ -49,30 +53,35 @@ export function EndpointActions({
     toastDone(enabled ? "Endpoint turned on" : "Endpoint paused")
   }
 
-  const off = !endpoint.enabled
+  const off = state === "paused" || state === "disabled"
 
   return (
     <>
       {off ? (
-        <Button size="sm" onClick={() => void setEnabled(true)}>
+        <Button size="sm" disabled={!endpoint} onClick={() => void setEnabled(true)}>
           <Play />
           <span className="hidden sm:inline">
-            {endpoint.health === "disabled" ? "Turn back on" : "Resume"}
+            {state === "disabled" ? "Turn back on" : "Resume"}
           </span>
         </Button>
       ) : (
         <Tooltip content="Send test event">
-          <Button size="sm" variant="secondary" onClick={() => setTesting(true)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!endpoint}
+            onClick={() => setTesting(true)}
+          >
             <FlaskConical />
             <span className="hidden sm:inline">Send test event</span>
           </Button>
         </Tooltip>
       )}
 
-      <RowMenu label={endpointName(endpoint)}>
+      <RowMenu label={endpoint ? endpointName(endpoint) : "endpoint"}>
         <DropdownMenuItem
           onSelect={() =>
-            void navigator.clipboard.writeText(endpoint.id).then(
+            void navigator.clipboard.writeText(endpoint?.id ?? "").then(
               () => toastDone("Endpoint ID copied"),
               () => toastError("Could not copy the ID"),
             )
@@ -81,13 +90,13 @@ export function EndpointActions({
           <Copy />
           Copy ID
         </DropdownMenuItem>
-        {endpoint.kind !== "polling" && (
+        {endpoint?.kind !== "polling" && (
           <DropdownMenuItem onSelect={() => setRotating(true)}>
             <KeyRound />
             Rotate signing secret
           </DropdownMenuItem>
         )}
-        {endpoint.enabled && (
+        {endpoint?.enabled && (
           <DropdownMenuItem onSelect={() => void setEnabled(false)}>
             <Pause />
             Pause endpoint
@@ -100,36 +109,42 @@ export function EndpointActions({
         </DropdownMenuItem>
       </RowMenu>
 
-      <TestEventDialog
-        endpoint={endpoint}
-        catalog={catalog}
-        open={testing}
-        onOpenChange={setTesting}
-      />
+      {endpoint && (
+        <>
+          <TestEventDialog
+            endpoint={endpoint}
+            catalog={catalog}
+            open={testing}
+            onOpenChange={setTesting}
+          />
 
-      <RotateSecretDialog
-        endpoint={rotating ? endpoint : null}
-        onOpenChange={(open) => !open && setRotating(false)}
-      />
+          <RotateSecretDialog
+            endpoint={rotating ? endpoint : null}
+            onOpenChange={(open) => !open && setRotating(false)}
+          />
 
-      <ConfirmDialog
-        open={deleting}
-        onOpenChange={setDeleting}
-        title="Delete this endpoint?"
-        description="Events stop being delivered to it immediately. Past deliveries stay in the log."
-        confirmLabel="Delete endpoint"
-        doneLabel="Deleted"
-        confirmWord={confirmWordFor([endpointName(endpoint)])}
-        onConfirm={async () => {
-          const result = await deleteWebhook(endpoint.id, { leaving: true })
-          if (!result.ok) {
-            toastError("Could not delete the endpoint", { description: result.error })
-            return false
-          }
-          router.push("/webhooks")
-          return true
-        }}
-      />
+          <ConfirmDialog
+            open={deleting}
+            onOpenChange={setDeleting}
+            title="Delete this endpoint?"
+            description="Events stop being delivered to it immediately. Past deliveries stay in the log."
+            confirmLabel="Delete endpoint"
+            doneLabel="Deleted"
+            confirmWord={confirmWordFor([endpointName(endpoint)])}
+            onConfirm={async () => {
+              const result = await deleteWebhook(endpoint.id, { leaving: true })
+              if (!result.ok) {
+                toastError("Could not delete the endpoint", {
+                  description: result.error,
+                })
+                return false
+              }
+              router.push("/webhooks")
+              return true
+            }}
+          />
+        </>
+      )}
     </>
   )
 }

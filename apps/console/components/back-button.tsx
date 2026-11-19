@@ -6,6 +6,7 @@ import { ArrowLeft } from "lucide-react"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { Kbd } from "@repo/ui/components/i10/kbd"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
+import { announceNavigation } from "@/lib/pending-navigation"
 
 /**
  * The arrow before a detail page's title: back to the list it came from, with
@@ -31,6 +32,7 @@ export function BackButton({ href, label }: { href: string; label: string }) {
         )
       )
         return
+      announceNavigation(href)
       router.push(href)
     }
     window.addEventListener("keydown", onKey)

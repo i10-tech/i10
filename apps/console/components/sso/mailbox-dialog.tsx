@@ -9,7 +9,6 @@ import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { ConfirmDialog } from "@/components/confirm-dialog"
-import { formatExact } from "@/lib/format"
 import { NEXT_LABEL, daysInRange, deletionDate } from "@/lib/mailbox"
 import { useResetOnOpen } from "@/lib/react"
 import { chooseMailboxNext } from "@/lib/sso-policy-actions"
@@ -17,6 +16,7 @@ import { toastDone } from "@/lib/toast"
 import type { MailboxNext, MailboxRow, Mailboxes, NextChoice } from "@/lib/sso-types"
 import type { Member } from "./members"
 import { useSsoCall } from "./shared"
+import { useExactTime } from "@/components/time"
 
 export const NEXT_HELP: Record<MailboxNext, string> = {
   keep: "The mailbox stays, suspended. Nothing is forwarded or deleted.",
@@ -38,6 +38,7 @@ export function NextDialog({
   onClose: () => void
   onChosen: () => Promise<void>
 }) {
+  const exact = useExactTime()
   const call = useSsoCall()
   const [next, setNext] = React.useState<MailboxNext>("keep")
   const [delegate, setDelegate] = React.useState("")
@@ -161,7 +162,7 @@ export function NextDialog({
         title="Delete this mailbox?"
         description={
           row && when
-            ? `${row.address} and all its mail will be deleted on ${formatExact(when.toISOString())}. Until then you can change your mind here.`
+            ? `${row.address} and all its mail will be deleted on ${exact(when.toISOString())}. Until then you can change your mind here.`
             : ""
         }
         confirmLabel="Delete on that date"

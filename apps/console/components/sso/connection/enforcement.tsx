@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bone, useBoneLoading } from "@repo/ui/components/bone/bone"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { ConfirmDialog } from "@/components/confirm-dialog"
@@ -14,6 +15,7 @@ import {
   connectionWriteNeedsStepUp,
   ENFORCEMENT_HELP,
   ENFORCEMENT_LABEL,
+  RowBone,
   useSsoCall,
 } from "../shared"
 
@@ -27,6 +29,7 @@ export function Enforcement({
   onChange: (connection: SsoConnection) => void
 }) {
   const call = useSsoCall()
+  const skeleton = useBoneLoading()
   const [pending, setPending] = React.useState<SsoEnforcement | null>(null)
   const [refusal, setRefusal] = React.useState<string | null>(null)
   const [passedAt, setPassedAt] = React.useState<string | null | undefined>(undefined)
@@ -73,7 +76,7 @@ export function Enforcement({
       <SettingsRow
         title="How people sign in"
         description={
-          <>
+          <Bone id="enforce-help" as="div" lines={2}>
             {ENFORCEMENT_HELP[connection.enforcement]}
             <Reveal show={required} spacing="pt-2">
               <span className="block text-xs">
@@ -86,21 +89,24 @@ export function Enforcement({
                 Only an owner can make a live connection required, or loosen it.
               </span>
             </Reveal>
-          </>
+          </Bone>
         }
         action={
-          <MorphSelect
-            label="How people sign in"
-            value={connection.enforcement}
-            disabled={ownerOnly && connection.enforcement !== "off"}
-            onValueChange={(v) => void choose(v as SsoEnforcement)}
-            items={(Object.keys(ENFORCEMENT_LABEL) as SsoEnforcement[]).map((m) => ({
-              value: m,
-              label: ENFORCEMENT_LABEL[m],
-              disabled: ownerOnly && (m === "required_domain" || m === "required_all"),
-            }))}
-            panelWidth={320}
-          />
+          <RowBone id="enforce" loading={skeleton} width={190} height={40}>
+            <MorphSelect
+              label="How people sign in"
+              value={connection.enforcement}
+              disabled={ownerOnly && connection.enforcement !== "off"}
+              onValueChange={(v) => void choose(v as SsoEnforcement)}
+              items={(Object.keys(ENFORCEMENT_LABEL) as SsoEnforcement[]).map((m) => ({
+                value: m,
+                label: ENFORCEMENT_LABEL[m],
+                disabled:
+                  ownerOnly && (m === "required_domain" || m === "required_all"),
+              }))}
+              panelWidth={320}
+            />
+          </RowBone>
         }
       />
 

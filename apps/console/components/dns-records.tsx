@@ -8,6 +8,7 @@ import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
 import { useCopy } from "@repo/ui/components/i10/use-copy"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Status } from "@/components/status"
 import type { DnsRecord } from "@/lib/types"
 import { toastDone } from "@/lib/toast"
@@ -88,13 +89,17 @@ function purposeOf(record: DnsRecord): string {
 
 export function DnsRecordsCard({
   records,
+  count,
   actions,
 }: {
   records: DnsRecord[]
+  count?: number
   /** Connect or publish, beside the title. */
   actions?: React.ReactNode
 }) {
   const { copy } = useCopy()
+  const loading = count !== undefined
+  const hasRecords = loading ? count > 0 : records.length > 0
 
   return (
     <section className="rounded-3xl border p-5 sm:p-6">
@@ -102,12 +107,13 @@ export function DnsRecordsCard({
         <h2 className="font-display text-xl font-medium tracking-tight">DNS Records</h2>
         <div className="flex items-center gap-2">
           {actions}
-          {records.length > 0 && (
+          {hasRecords && (
             <Tooltip content="Copy as zone file">
               <Button
                 variant="secondary"
                 size="sm"
                 aria-label="Copy as zone file"
+                disabled={loading}
                 onClick={() =>
                   void copy(zoneFile(records)).then(
                     (ok) => ok && toastDone("Zone file copied"),
@@ -121,12 +127,12 @@ export function DnsRecordsCard({
         </div>
       </div>
 
-      {records.length === 0 ? (
+      {!hasRecords ? (
         <div className="mt-6">
           <NoRecords />
         </div>
       ) : (
-        <DnsRecordGroups records={records} className="mt-2" />
+        <DnsRecordGroups records={records} count={count} className="mt-2" />
       )}
     </section>
   )
@@ -137,15 +143,52 @@ export function DnsRecordsCard({
  * same groups under its own heading.
  */
 export function DnsRecordGroups({
-  records,
+  records = [],
+  count,
   status = true,
   className,
 }: {
-  records: DnsRecord[]
+  records?: DnsRecord[]
+  count?: number
   /** Each record's status. Off before anything has been checked. */
   status?: boolean
   className?: string
 }) {
+  if (records.length === 0 && count !== undefined) {
+    if (count === 0) return null
+    const g1Count = Math.max(1, Math.min(2, Math.floor(count / 3)))
+    const g2Count = Math.max(1, Math.min(count - g1Count - 1, 2))
+    const g3Count = Math.max(1, count - g1Count - g2Count)
+    const counts = [g1Count, g2Count, g3Count]
+    const offsets = [0, g1Count, g1Count + g2Count]
+    return (
+      <div className={cn("divide-y", className)}>
+        {GROUPS.map((group, groupIndex) => {
+          const groupRows = counts[groupIndex] ?? 1
+          const start = offsets[groupIndex] ?? 0
+          return (
+            <div key={group.record} className="py-6 last:pb-0">
+              <h3 className="flex items-center gap-2 font-medium">
+                {group.title}
+                {group.note && (
+                  <span className="rounded-md bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                    {group.note}
+                  </span>
+                )}
+              </h3>
+              {group.record !== "other" && group.record !== group.title && (
+                <p className="mt-3 text-sm font-medium">{group.record}</p>
+              )}
+              <div className="mt-3">
+                <RecordsTable count={groupRows} rowOffset={start} status={status} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   const known = new Set(GROUPS.map((g) => g.record))
   const sorted = records.map((r) => ({ r, purpose: purposeOf(r) }))
   const groups = [
@@ -161,26 +204,31 @@ export function DnsRecordGroups({
     },
   ].filter((g) => g.rows.length > 0)
 
+  let rowOffset = 0
   return (
     <div className={cn("divide-y", className)}>
-      {groups.map((group) => (
-        <div key={group.record} className="py-6 last:pb-0">
-          <h3 className="flex items-center gap-2 font-medium">
-            {group.title}
-            {group.note && (
-              <span className="rounded-md bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
-                {group.note}
-              </span>
+      {groups.map((group) => {
+        const start = rowOffset
+        rowOffset += group.rows.length
+        return (
+          <div key={group.record} className="py-6 last:pb-0">
+            <h3 className="flex items-center gap-2 font-medium">
+              {group.title}
+              {group.note && (
+                <span className="rounded-md bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                  {group.note}
+                </span>
+              )}
+            </h3>
+            {group.record !== "other" && group.record !== group.title && (
+              <p className="mt-3 text-sm font-medium">{group.record}</p>
             )}
-          </h3>
-          {group.record !== "other" && group.record !== group.title && (
-            <p className="mt-3 text-sm font-medium">{group.record}</p>
-          )}
-          <div className="mt-3">
-            <RecordsTable records={group.rows} status={status} />
+            <div className="mt-3">
+              <RecordsTable records={group.rows} rowOffset={start} status={status} />
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -198,15 +246,21 @@ function NoRecords() {
  * ELLIPSIS THAT WOULD BE COPIED - see the note at the top of the file.
  */
 function RecordsTable({
-  records,
+  records = [],
+  count,
+  rowOffset = 0,
   framed = false,
   status = true,
 }: {
-  records: DnsRecord[]
+  records?: DnsRecord[]
+  count?: number
+  rowOffset?: number
   status?: boolean
   /** A bordered table (onboarding) rather than the card's open one. */
   framed?: boolean
 }) {
+  const loading = count !== undefined
+
   return (
     <div className="space-y-3">
       <div
@@ -237,120 +291,204 @@ function RecordsTable({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {records.map((record, index) => (
-              <tr key={`${record.type}-${record.name}-${index}`}>
-                {/*
-                 * ⚠ THE SECOND LINE IS DROPPED WHEN IT REPEATS THE FIRST. The
-                 * two fields answer different questions - `type` is the DNS
-                 * record type, `record` is what the record is FOR - and for a
-                 * manual domain they differ usefully: TXT over "DKIM", MX
-                 * over "SPF". For a delegated one every row is an NS record
-                 * whose purpose is the delegation, so both fields say "NS"
-                 * and the cell printed the same word twice, in two sizes,
-                 * which reads as a rendering fault rather than as two facts.
-                 */}
-                <Td>
-                  <span className="font-mono text-xs font-medium">{record.type}</span>
-                  {/* In the card the group heading already names it. */}
-                  {framed && record.record !== record.type && (
-                    <span className="mt-0.5 block text-2xs text-muted-foreground">
-                      {record.record}
-                    </span>
-                  )}
-                </Td>
-                <Td>
-                  <CopyValue value={record.name} label="name">
-                    <Shortened value={record.name} />
-                  </CopyValue>
-                </Td>
-                <Td>
-                  {/*
-                   * ⚠ `justify-start`, AND THE VALUE DOES NOT GROW. It used to
-                   * carry `flex-1`, which made the span eat the whole column and
-                   * stranded the copy button against the TTL header - a hand's
-                   * width away from `ns1.i10.tech`, and nowhere near the row it
-                   * belonged to. The Name column beside it has always put its
-                   * button directly after the text; the two columns disagreed on
-                   * screen. Sizing to content puts the button back beside the
-                   * value and lets a long DKIM key still push it to the edge,
-                   * which is the one case where the old layout looked right.
-                   */}
-                  <CopyValue value={record.value} label="value">
-                    {/*
-                     * ⚠ SHORTENED IN THE MIDDLE, NEVER AT THE END, AND NEVER
-                     * WHAT IS COPIED (2026-10-04). A click copies the whole
-                     * value whatever is shown; the `[...]` is drawn muted and
-                     * boxed so it cannot be mistaken for part of the record,
-                     * and the full value is the cell's tooltip. See `shorten`.
-                     */}
-                    {/*
-                     * ⚠ CLIPPED TO ITS OWN COLUMN (2026-10-04). Without
-                     * `truncate` a value wider than the column ran on over the
-                     * TTL, and the copy icon wrapped onto a line of its own
-                     * under the record - in set-up's narrower column it always
-                     * was. Shortened in the middle first, cut at the end only
-                     * if it still does not fit; the icon never shrinks.
-                     */}
-                    <span className="flex min-w-0 items-baseline whitespace-nowrap">
-                      {record.priority !== undefined && (
-                        <span className="shrink-0 pr-1 text-muted-foreground">
-                          {record.priority}
-                        </span>
+            {loading
+              ? Array.from({ length: count }, (_, index) => (
+                  <BoneScope key={index} id={`record-${rowOffset + index}`} unit>
+                    <tr>
+                      <Td>
+                        <Bone id="type" width={32} lineHeight={16} inline />
+                      </Td>
+                      <Td>
+                        <Bone id="name" width="70%" lineHeight={20} inline />
+                      </Td>
+                      <Td>
+                        <Bone id="value" width="85%" lineHeight={20} inline />
+                      </Td>
+                      <Td>
+                        <Bone id="ttl" width={28} lineHeight={16} inline />
+                      </Td>
+                      {status && (
+                        <Td>
+                          <Bone
+                            id="status"
+                            shape="box"
+                            width={64}
+                            height={20}
+                            radius={9999}
+                            inline
+                          />
+                        </Td>
                       )}
-                      <Shortened value={record.value} />
-                    </span>
-                  </CopyValue>
-                </Td>
-                <Td>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {record.ttl}
-                  </span>
-                </Td>
-                {status && (
-                  <Td>
-                    <Status
-                      status={record.status}
-                      variant={framed ? undefined : "pill"}
-                    />
-                  </Td>
-                )}
-              </tr>
-            ))}
+                    </tr>
+                  </BoneScope>
+                ))
+              : records.map((record, index) => (
+                  <BoneScope
+                    key={`${record.type}-${record.name}-${index}`}
+                    id={`record-${rowOffset + index}`}
+                    unit
+                  >
+                    <tr>
+                      {/*
+                       * ⚠ THE SECOND LINE IS DROPPED WHEN IT REPEATS THE FIRST. The
+                       * two fields answer different questions - `type` is the DNS
+                       * record type, `record` is what the record is FOR - and for a
+                       * manual domain they differ usefully: TXT over "DKIM", MX
+                       * over "SPF". For a delegated one every row is an NS record
+                       * whose purpose is the delegation, so both fields say "NS"
+                       * and the cell printed the same word twice, in two sizes,
+                       * which reads as a rendering fault rather than as two facts.
+                       */}
+                      <Td>
+                        <Bone id="type" width={32} lineHeight={16} inline>
+                          <span className="font-mono text-xs font-medium">
+                            {record.type}
+                          </span>
+                          {/* In the card the group heading already names it. */}
+                          {framed && record.record !== record.type && (
+                            <span className="mt-0.5 block text-2xs text-muted-foreground">
+                              {record.record}
+                            </span>
+                          )}
+                        </Bone>
+                      </Td>
+                      <Td>
+                        <Bone id="name" lineHeight={20}>
+                          <CopyValue value={record.name} label="name">
+                            <Shortened value={record.name} />
+                          </CopyValue>
+                        </Bone>
+                      </Td>
+                      <Td>
+                        {/*
+                         * ⚠ `justify-start`, AND THE VALUE DOES NOT GROW. It used to
+                         * carry `flex-1`, which made the span eat the whole column and
+                         * stranded the copy button against the TTL header - a hand's
+                         * width away from `ns1.i10.tech`, and nowhere near the row it
+                         * belonged to. The Name column beside it has always put its
+                         * button directly after the text; the two columns disagreed on
+                         * screen. Sizing to content puts the button back beside the
+                         * value and lets a long DKIM key still push it to the edge,
+                         * which is the one case where the old layout looked right.
+                         */}
+                        <Bone id="value" lineHeight={20}>
+                          <CopyValue value={record.value} label="value">
+                            {/*
+                             * ⚠ SHORTENED IN THE MIDDLE, NEVER AT THE END, AND NEVER
+                             * WHAT IS COPIED (2026-10-04). A click copies the whole
+                             * value whatever is shown; the `[...]` is drawn muted and
+                             * boxed so it cannot be mistaken for part of the record,
+                             * and the full value is the cell's tooltip. See `shorten`.
+                             */}
+                            {/*
+                             * ⚠ CLIPPED TO ITS OWN COLUMN (2026-10-04). Without
+                             * `truncate` a value wider than the column ran on over the
+                             * TTL, and the copy icon wrapped onto a line of its own
+                             * under the record - in set-up's narrower column it always
+                             * was. Shortened in the middle first, cut at the end only
+                             * if it still does not fit; the icon never shrinks.
+                             */}
+                            <span className="flex min-w-0 items-baseline whitespace-nowrap">
+                              {record.priority !== undefined && (
+                                <span className="shrink-0 pr-1 text-muted-foreground">
+                                  {record.priority}
+                                </span>
+                              )}
+                              <Shortened value={record.value} />
+                            </span>
+                          </CopyValue>
+                        </Bone>
+                      </Td>
+                      <Td>
+                        <Bone id="ttl" width={28} lineHeight={16} inline>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {record.ttl}
+                          </span>
+                        </Bone>
+                      </Td>
+                      {status && (
+                        <Td>
+                          <Bone
+                            id="status"
+                            shape="box"
+                            width={64}
+                            height={20}
+                            radius={9999}
+                            inline
+                          >
+                            <Status
+                              status={record.status}
+                              variant={framed ? undefined : "pill"}
+                            />
+                          </Bone>
+                        </Td>
+                      )}
+                    </tr>
+                  </BoneScope>
+                ))}
           </tbody>
         </table>
       </div>
 
       {/* The phone layout. Same data, one record per card. */}
       <ul className="space-y-2 md:hidden">
-        {records.map((record, index) => (
-          <li
-            key={`${record.type}-${record.name}-${index}`}
-            className="space-y-2 rounded-lg border p-3"
+        {(loading
+          ? Array.from({ length: count }, (): DnsRecord | undefined => undefined)
+          : records
+        ).map((record, index) => (
+          <BoneScope
+            key={record ? `${record.type}-${record.name}-${index}` : index}
+            id={`mobile-record-${rowOffset + index}`}
+            unit
           >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-xs font-medium">
-                {record.type}
-                {/* Same rule as the table: see the note there. */}
-                {record.record !== record.type && (
-                  <span className="ml-1.5 font-sans text-2xs text-muted-foreground">
-                    {record.record}
-                  </span>
+            <li className="space-y-2 rounded-lg border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <Bone id="type" width={32} lineHeight={16} inline>
+                  {record && (
+                    <span className="font-mono text-xs font-medium">
+                      {record.type}
+                      {/* Same rule as the table: see the note there. */}
+                      {record.record !== record.type && (
+                        <span className="ml-1.5 font-sans text-2xs text-muted-foreground">
+                          {record.record}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </Bone>
+                {status && (
+                  <Bone
+                    id="status"
+                    shape="box"
+                    width={64}
+                    height={20}
+                    radius={9999}
+                    inline
+                  >
+                    {record && <Status status={record.status} />}
+                  </Bone>
                 )}
-              </span>
-              {status && <Status status={record.status} />}
-            </div>
+              </div>
 
-            <Row label="Name" value={record.name} />
-            <Row
-              label="Value"
-              value={
-                record.priority === undefined
-                  ? record.value
-                  : `${record.priority} ${record.value}`
-              }
-            />
-            <p className="text-2xs text-muted-foreground">TTL {record.ttl}</p>
-          </li>
+              <Row label="Name" id="name" width="80%" value={record?.name} />
+              <Row
+                label="Value"
+                id="value"
+                width="90%"
+                value={
+                  record &&
+                  (record.priority === undefined
+                    ? record.value
+                    : `${record.priority} ${record.value}`)
+                }
+              />
+              <Bone id="ttl" width={50} lineHeight={12}>
+                {record && (
+                  <p className="text-2xs text-muted-foreground">TTL {record.ttl}</p>
+                )}
+              </Bone>
+            </li>
+          </BoneScope>
         ))}
       </ul>
     </div>
@@ -566,16 +704,30 @@ function CopyValue({
   )
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  id,
+  width,
+  value,
+}: {
+  label: string
+  id: string
+  width: string
+  value?: string
+}) {
   return (
     <div className="space-y-1">
       <p className="text-2xs text-muted-foreground">{label}</p>
-      <div className="flex items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2">
-        <span className="min-w-0 flex-1 overflow-x-auto font-mono text-2xs whitespace-nowrap select-all">
-          {value}
-        </span>
-        <CopyButton value={value} iconOnly variant="plain" />
-      </div>
+      <Bone id={id} as="div" width={width} lineHeight={16}>
+        {value !== undefined && (
+          <div className="flex items-center gap-1 rounded-md border bg-muted/40 py-1 pr-1 pl-2">
+            <span className="min-w-0 flex-1 overflow-x-auto font-mono text-2xs whitespace-nowrap select-all">
+              {value}
+            </span>
+            <CopyButton value={value} iconOnly variant="plain" />
+          </div>
+        )}
+      </Bone>
     </div>
   )
 }

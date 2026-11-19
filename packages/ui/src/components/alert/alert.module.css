@@ -2,6 +2,8 @@
 .alert { display: flex; align-items: start; gap: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--space-4); background: var(--surface); box-shadow: var(--shadow-resting); }
 .icon, .glyph { position: relative; display: grid; flex: 0 0 auto; place-items: center; }
 .icon { width: 18px; height: 18px; margin-top: 1px; }
+.iconCenter { align-items: center; }
+.iconCenter .icon { margin-top: 0; }
 .icon svg { display: block; }
 .copy { flex: 1; min-width: 0; }
 .content { position: relative; }

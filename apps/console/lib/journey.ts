@@ -432,3 +432,24 @@ export function domainNotice(
       return null
   }
 }
+
+/**
+ * Rows in a message's event log: the accepted step, a scheduled one if there is
+ * a time, then its events with opens and clicks folded to one row each (the
+ * same fold components/event-timeline draws).
+ */
+export function eventLogRows(
+  events: { type: string }[],
+  scheduledAt: string | null,
+): number {
+  const folded = new Set<string>()
+  let rows = 1 + (scheduledAt ? 1 : 0)
+  for (const { type } of events) {
+    if (type !== "opened" && type !== "clicked") rows += 1
+    else if (!folded.has(type)) {
+      folded.add(type)
+      rows += 1
+    }
+  }
+  return rows
+}

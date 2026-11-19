@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { Bone, useBoneLoading } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { Reveal } from "@repo/ui/components/i10/reveal"
@@ -30,6 +31,7 @@ export function DomainsRow({
   onChange: (connection: SsoConnection) => void
 }) {
   const call = useSsoCall()
+  const skeleton = useBoneLoading()
   const attempt = useSsoAttempt()
   const locked = isLocked(connection, abilities)
   const [open, setOpen] = React.useState(false)
@@ -38,7 +40,9 @@ export function DomainsRow({
   const [choice, setChoice] = React.useState<string | null>(null)
   const [refusal, setRefusal] = React.useState<string | null>(null)
 
+  // ⚠ NOT FOR A SKELETON: the choices are computed against a connection that is not there yet.
   React.useEffect(() => {
+    if (skeleton) return
     void Promise.all([teamAccessDomains(), ssoConnections()]).then(
       ([domainsResult, connectionsResult]) => {
         setOptions(
@@ -49,7 +53,7 @@ export function DomainsRow({
         setConnections(connectionsResult.ok ? connectionsResult.data.data : [])
       },
     )
-  }, [])
+  }, [skeleton])
 
   const choices = domainChoices(options ?? [], connections, connection)
 
@@ -116,7 +120,9 @@ export function DomainsRow({
       }
     >
       <div className="text-sm font-medium text-foreground">
-        {domainNames || "No domain yet"}
+        <Bone id="domain-names" width={160}>
+          {domainNames || "No domain yet"}
+        </Bone>
       </div>
 
       <Reveal show={open} spacing="pt-3" keepMounted>

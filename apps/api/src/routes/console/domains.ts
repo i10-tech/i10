@@ -859,7 +859,10 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
 const EMAILS_TTL_MS = 60_000
 const emailsCache = new Map<string, { at: number; emails: string[] }>()
 
-async function verifiedEmailsFor(d: ConsoleDeps, userId: string): Promise<string[]> {
+export async function verifiedEmailsFor(
+  d: ConsoleDeps,
+  userId: string,
+): Promise<string[]> {
   const hit = emailsCache.get(userId)
   if (hit && Date.now() - hit.at < EMAILS_TTL_MS) return hit.emails
   const { verifiedEmails } = await d.people!.get(userId)

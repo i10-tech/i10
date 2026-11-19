@@ -1,4 +1,4 @@
-import { tryApi } from "@/lib/api"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import type { TeamCapacity } from "@/lib/actions"
 import { CapacityAlert } from "@/components/capacity-alert"
 
@@ -14,11 +14,32 @@ import { CapacityAlert } from "@/components/capacity-alert"
  * and has not re-armed; the live count says it still applies. Dismissing it
  * hides that crossing only - the next one shows again.
  */
-export async function CapacityBanner() {
-  const result = await tryApi<{ data: TeamCapacity | null }>("/console/team/capacity")
-  if (!result.ok) return null
-  const capacity = result.data.data
-  if (!capacity?.alert || capacity.alert.level === 0 || capacity.personal) return null
+export function CapacityBanner({
+  capacity: capacityProp,
+  loading = false,
+}: {
+  capacity?: TeamCapacity | null
+  loading?: boolean
+} = {}) {
+  if (loading) {
+    return (
+      <BoneScope id="capacity-banner" loading={true}>
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <div className="flex items-start gap-3">
+            <Bone id="icon" shape="box" width={20} height={20} radius={4} inline />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Bone id="title" lineHeight={20} width={280} />
+              <Bone id="body" lines={2} lineHeight={18} width="85%" />
+            </div>
+          </div>
+        </div>
+      </BoneScope>
+    )
+  }
+
+  if (!capacityProp) return null
+  const capacity = capacityProp
+  if (!capacity.alert || capacity.alert.level === 0 || capacity.personal) return null
   const level =
     capacity.members >= capacity.limit
       ? 100

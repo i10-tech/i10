@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { KeyRound } from "lucide-react"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { StateButton } from "@repo/ui/components/i10/state-button"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
@@ -63,24 +64,62 @@ import type { WebhookEndpoint, WebhookEventType } from "@/lib/types"
  */
 export function EndpointSettings({
   endpoint,
+  kind,
   catalog,
+  loading = false,
 }: {
-  endpoint: WebhookEndpoint
+  endpoint?: WebhookEndpoint
+  /** The endpoint's kind, which decides the sections; the shape's while loading. */
+  kind: WebhookEndpoint["kind"]
   catalog: WebhookEventType[]
+  loading?: boolean
 }) {
+  const isLoading = loading || !endpoint
+  const shown = isLoading ? blank(kind) : endpoint
   return (
-    <div className="max-w-3xl">
-      <EndpointSection endpoint={endpoint} />
-      <EventsSection endpoint={endpoint} catalog={catalog} />
-      <FiltersSection endpoint={endpoint} />
-      {endpoint.kind !== "polling" && <DeliverySection endpoint={endpoint} />}
-      {endpoint.kind === "sqs" && <CredentialsSection endpoint={endpoint} />}
-      {endpoint.kind !== "polling" && <SigningSection endpoint={endpoint} />}
-      <StatusSection endpoint={endpoint} />
-      <DangerSection endpoint={endpoint} />
+    // ⚠ ONE SET OF SECTIONS FOR THE PAGE AND ITS SKELETON. While loading they are
+    // drawn from `blank(kind)`: the static copy is real, every value is a Bone,
+    // and `inert` keeps anyone from typing into a form that is about to be replaced.
+    <div className="max-w-3xl" inert={isLoading || undefined}>
+      <BoneScope id="settings" loading={isLoading}>
+        <EndpointSection endpoint={shown} />
+        <EventsSection endpoint={shown} catalog={catalog} loading={isLoading} />
+        <FiltersSection endpoint={shown} />
+        {kind !== "polling" && <DeliverySection endpoint={shown} />}
+        {kind === "sqs" && <CredentialsSection endpoint={shown} />}
+        {kind !== "polling" && <SigningSection endpoint={shown} loading={isLoading} />}
+        <StatusSection endpoint={shown} />
+        <DangerSection endpoint={shown} />
+      </BoneScope>
     </div>
   )
 }
+
+/** What the sections draw from while loading: the kind, and no data. */
+const blank = (kind: WebhookEndpoint["kind"]): WebhookEndpoint => ({
+  object: "webhook_endpoint",
+  id: "",
+  kind,
+  url: null,
+  events: [],
+  description: null,
+  enabled: true,
+  disabled_reason: null,
+  health: "healthy",
+  health_changed_at: null,
+  poll_cursor: null,
+  last_polled_at: null,
+  transformation: null,
+  aws_access_key_id: null,
+  created_at: "",
+  signature_scheme: "hmac_sha256",
+  rate_limit: null,
+  header_names: [],
+  filter_domains: null,
+  filter_tags: null,
+  public_key: null,
+  previous_secrets: [],
+})
 
 /** A section's save: the patch, the toast on refusal, the tick on success. */
 function useSave(id: string, failure: string) {
@@ -186,7 +225,16 @@ function EndpointSection({ endpoint }: { endpoint: WebhookEndpoint }) {
             <div className="space-y-1.5">
               <dt className="text-sm font-medium">Poll URL</dt>
               <dd className="space-y-1.5">
-                <CopyField value={pollUrl} />
+                <Bone
+                  id="poll-url"
+                  as="div"
+                  shape="box"
+                  width="100%"
+                  height={36}
+                  radius={8}
+                >
+                  <CopyField value={pollUrl} />
+                </Bone>
                 <p className="text-xs text-muted-foreground">
                   <code className="font-mono">GET</code> it with an API key. Pass the{" "}
                   <code className="font-mono">next_cursor</code> you get back as{" "}
@@ -199,17 +247,21 @@ function EndpointSection({ endpoint }: { endpoint: WebhookEndpoint }) {
               <div>
                 <dt className="text-xs text-muted-foreground">Acknowledged up to</dt>
                 <dd className="mt-0.5 font-mono text-sm">
-                  {endpoint.poll_cursor ?? "Nothing yet"}
+                  <Bone id="poll-cursor" width={140} lineHeight={20}>
+                    {endpoint.poll_cursor ?? "Nothing yet"}
+                  </Bone>
                 </dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Last polled</dt>
                 <dd className="mt-0.5 text-sm">
-                  {endpoint.last_polled_at ? (
-                    <Time iso={endpoint.last_polled_at} />
-                  ) : (
-                    "Never"
-                  )}
+                  <Bone id="last-polled" width={100} lineHeight={20}>
+                    {endpoint.last_polled_at ? (
+                      <Time iso={endpoint.last_polled_at} />
+                    ) : (
+                      "Never"
+                    )}
+                  </Bone>
                 </dd>
               </div>
             </div>
@@ -223,9 +275,11 @@ function EndpointSection({ endpoint }: { endpoint: WebhookEndpoint }) {
 function EventsSection({
   endpoint,
   catalog,
+  loading,
 }: {
   endpoint: WebhookEndpoint
   catalog: WebhookEventType[]
+  loading: boolean
 }) {
   const [events, setEvents] = useSyncedState(endpoint.events)
   const { outcome, save } = useSave(endpoint.id, "Could not save the events")
@@ -249,20 +303,32 @@ function EventsSection({
             void save({ events })
           }}
         >
-          {catalog.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              The event catalog could not be loaded. Reload to try again.
-            </p>
-          ) : (
-            <EventPicker catalog={catalog} value={events} onChange={setEvents} />
-          )}
+          <Bone
+            id="events-picker"
+            as="div"
+            shape="box"
+            width="100%"
+            height={120}
+            radius={8}
+          >
+            {catalog.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                The event catalog could not be loaded. Reload to try again.
+              </p>
+            ) : (
+              <EventPicker catalog={catalog} value={events} onChange={setEvents} />
+            )}
+          </Bone>
           <div className="flex items-center justify-end gap-3">
-            {events.length === 0 && (
+            {!loading && events.length === 0 && (
               <p className="text-xs text-warning">
                 Choose at least one: an endpoint subscribed to nothing is never called.
               </p>
             )}
-            <SaveButton outcome={outcome} disabled={!changed || events.length === 0} />
+            <SaveButton
+              outcome={outcome}
+              disabled={loading || !changed || events.length === 0}
+            />
           </div>
         </form>
       </SectionContent>
@@ -323,27 +389,45 @@ function FiltersSection({ endpoint }: { endpoint: WebhookEndpoint }) {
           }}
         >
           {/* Arc's TagInput: each domain a chip, added with Enter or a comma. */}
-          <TagInput
+          <Bone
             id="filter-domains"
-            label="Sending domains"
-            value={domains}
-            onValueChange={setDomains}
-            placeholder="acme.com"
-            description="Only mail sent from these domains. Press Enter or a comma after each."
-          />
+            as="div"
+            shape="box"
+            width="100%"
+            height={56}
+            radius={12}
+          >
+            <TagInput
+              id="filter-domains"
+              label="Sending domains"
+              value={domains}
+              onValueChange={setDomains}
+              placeholder="acme.com"
+              description="Only mail sent from these domains. Press Enter or a comma after each."
+            />
+          </Bone>
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium">Tags</legend>
             <p className="text-xs text-muted-foreground">
               Only messages that carry every one of these tags.
             </p>
-            <KeyValueRows
-              value={tags}
-              onChange={setTags}
-              nameLabel="Tag"
-              valueLabel="Value"
-              namePlaceholder="category"
-              valuePlaceholder="receipt"
-            />
+            <Bone
+              id="filter-tags"
+              as="div"
+              shape="box"
+              width="100%"
+              height={36}
+              radius={8}
+            >
+              <KeyValueRows
+                value={tags}
+                onChange={setTags}
+                nameLabel="Tag"
+                valueLabel="Value"
+                namePlaceholder="category"
+                valuePlaceholder="receipt"
+              />
+            </Bone>
           </fieldset>
           <div className="flex justify-end">
             <SaveButton outcome={outcome} disabled={!domainsChanged && !tagsChanged} />
@@ -435,21 +519,31 @@ function DeliverySection({ endpoint }: { endpoint: WebhookEndpoint }) {
           >
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium">Custom headers</span>
-              {!editing && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setHeaders(
-                      endpoint.header_names.map((name) => ({ name, value: "" })),
-                    )
-                    setEditing(true)
-                  }}
-                >
-                  {endpoint.header_names.length ? "Replace headers" : "Add headers"}
-                </Button>
-              )}
+              {/* The button's words follow whether headers exist, which is data. */}
+              <Bone
+                id="headers-action"
+                shape="box"
+                width={124}
+                height={32}
+                radius={8}
+                inline
+              >
+                {!editing && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setHeaders(
+                        endpoint.header_names.map((name) => ({ name, value: "" })),
+                      )
+                      setEditing(true)
+                    }}
+                  >
+                    {endpoint.header_names.length ? "Replace headers" : "Add headers"}
+                  </Button>
+                )}
+              </Bone>
             </div>
             <p className="text-xs text-muted-foreground">
               Sent on every request. Values cannot be read back, so changing any header
@@ -457,17 +551,19 @@ function DeliverySection({ endpoint }: { endpoint: WebhookEndpoint }) {
               reserved.
             </p>
             {!editing ? (
-              endpoint.header_names.length ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {endpoint.header_names.map((name) => (
-                    <Badge size="sm" key={name} tone="neutral">
-                      {name}: ••••
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">None set.</p>
-              )
+              <Bone id="headers" as="div" width={200} lineHeight={20}>
+                {endpoint.header_names.length ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {endpoint.header_names.map((name) => (
+                      <Badge size="sm" key={name} tone="neutral">
+                        {name}: ••••
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">None set.</p>
+                )}
+              </Bone>
             ) : (
               <div className="space-y-3">
                 <KeyValueRows
@@ -518,8 +614,10 @@ function CredentialsSection({ endpoint }: { endpoint: WebhookEndpoint }) {
       <SectionTitle>AWS credentials</SectionTitle>
       <SectionDescription>
         In use:{" "}
-        <span className="font-mono text-xs">{endpoint.aws_access_key_id ?? "-"}</span>.
-        The secret is sealed and never shown. New keys replace the old ones at once.
+        <Bone id="aws-key" width={160} lineHeight={20} inline>
+          <span className="font-mono text-xs">{endpoint.aws_access_key_id ?? "-"}</span>
+        </Bone>
+        . The secret is sealed and never shown. New keys replace the old ones at once.
       </SectionDescription>
       <SectionContent>
         <form
@@ -574,7 +672,13 @@ function CredentialsSection({ endpoint }: { endpoint: WebhookEndpoint }) {
   )
 }
 
-function SigningSection({ endpoint }: { endpoint: WebhookEndpoint }) {
+function SigningSection({
+  endpoint,
+  loading,
+}: {
+  endpoint: WebhookEndpoint
+  loading: boolean
+}) {
   const [rotating, setRotating] = React.useState(false)
   const revoke = useOutcome()
   return (
@@ -583,25 +687,38 @@ function SigningSection({ endpoint }: { endpoint: WebhookEndpoint }) {
         <div className="space-y-1">
           <SectionTitle className="m-0">Signing</SectionTitle>
           <SectionDescription>
-            {endpoint.signature_scheme === "ed25519"
-              ? "Ed25519 (v1a). Verify with the public key below; nothing you store can forge a webhook."
-              : "HMAC-SHA256 (v1) with the shared secret you were shown once. Rotate it if it is lost or may have leaked."}
+            <Bone id="scheme" width={420} lineHeight={20}>
+              {endpoint.signature_scheme === "ed25519"
+                ? "Ed25519 (v1a). Verify with the public key below; nothing you store can forge a webhook."
+                : "HMAC-SHA256 (v1) with the shared secret you were shown once. Rotate it if it is lost or may have leaked."}
+            </Bone>
           </SectionDescription>
         </div>
-        <Button size="sm" variant="secondary" onClick={() => setRotating(true)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={loading}
+          onClick={() => setRotating(true)}
+        >
           <KeyRound />
           Rotate secret
         </Button>
       </div>
       <SectionContent className="space-y-4">
-        {endpoint.public_key && (
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium">Public key</p>
-            <CopyField value={endpoint.public_key} />
-          </div>
-        )}
+        <Bone id="public-key" as="div" shape="box" width="100%" height={60} radius={8}>
+          {endpoint.public_key && (
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">Public key</p>
+              <CopyField value={endpoint.public_key} />
+            </div>
+          )}
+        </Bone>
+        {/* ⚠ SKIPPED BY test/skeleton-parity: a rotation still signing is one endpoint's news, and most have none. */}
         {endpoint.previous_secrets.length > 0 && (
-          <div className="space-y-2 rounded-xl border border-warning/25 bg-warning/5 p-3">
+          <div
+            className="space-y-2 rounded-xl border border-warning/25 bg-warning/5 p-3"
+            data-skeleton="skip"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">Previous secrets still signing</p>
               <StateButton
@@ -672,11 +789,13 @@ function StatusSection({ endpoint }: { endpoint: WebhookEndpoint }) {
               Send events to this endpoint
             </FieldLabel>
             <FieldDescription>
-              {endpoint.health === "disabled" && endpoint.disabled_reason
-                ? `i10 switched it off: ${endpoint.disabled_reason}`
-                : on
-                  ? "Off pauses it. Events that happen while it is paused can be sent afterwards from Replays."
-                  : "Paused. Turn it on to pick up again."}
+              <Bone id="status-note" width={360} lineHeight={20}>
+                {endpoint.health === "disabled" && endpoint.disabled_reason
+                  ? `i10 switched it off: ${endpoint.disabled_reason}`
+                  : on
+                    ? "Off pauses it. Events that happen while it is paused can be sent afterwards from Replays."
+                    : "Paused. Turn it on to pick up again."}
+              </Bone>
             </FieldDescription>
           </FieldContent>
           <Switch

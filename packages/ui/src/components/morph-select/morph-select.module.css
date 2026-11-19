@@ -24,6 +24,9 @@
 .lid .trigger:disabled { cursor: not-allowed; }
 /* An invisible copy that says how wide the closed trigger wants to be. It sits in flow until the first measurement lands, so the server render already has the right size. */
 .measure { position: static; visibility: hidden; pointer-events: none; width: max-content; max-width: min(20rem, calc(100vw - 2rem)); }
+.measureStack { display: grid; }
+.measureStack > .measureItem { grid-area: 1 / 1; }
+.measureItem { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
 .root[data-ready] .measure { position: absolute; top: 0; left: 0; }
 .root[data-align="end"][data-ready] .measure { right: 0; left: auto; }
 

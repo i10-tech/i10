@@ -1,6 +1,6 @@
 /**
  * Each list page's title and description, in one place: the page and its
- * loading skeleton (components/skeletons) both read them, so the skeleton
+ * loading view (lib/shapes) both read them, so the skeleton
  * shows the same words the page will and they cannot drift apart.
  */
 export const PAGE_COPY = {

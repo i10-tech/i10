@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { ConnectProgress, type ConnectView } from "@/components/connect-progress"
 import { DetailHero } from "@/components/detail-hero"
 import { DnsRecordsCard } from "@/components/dns-records"
@@ -62,12 +63,6 @@ export function useLiveDomain(): Live | null {
   return React.useContext(LiveDomain)
 }
 
-function useLive(): Live {
-  const live = React.useContext(LiveDomain)
-  if (!live) throw new Error("Live domain parts must sit inside DomainLiveProvider")
-  return live
-}
-
 /** What the page shows, as one string: which domain, its status and every record's. */
 function stateKey(domain: Domain | null): string {
   if (!domain) return ""
@@ -89,9 +84,11 @@ function stateKey(domain: Domain | null): string {
  */
 export function DomainLiveProvider({
   initial,
+  loading = false,
   children,
 }: {
   initial: Domain | null
+  loading?: boolean
   children: React.ReactNode
 }) {
   const [domain, setDomain] = React.useState(initial)
@@ -122,6 +119,7 @@ export function DomainLiveProvider({
   const router = useRouter()
   const [connect, setConnect] = React.useState<ConnectView | null>(null)
   React.useEffect(() => {
+    if (loading) return
     const returned = takeReturned()
     if (!returned) return
     void Promise.resolve()
@@ -168,7 +166,7 @@ export function DomainLiveProvider({
         }
         router.refresh()
       })
-  }, [router])
+  }, [router, loading])
 
   /*
    * ⚠ IT WATCHES RATHER THAN WAITING TO BE ASKED, UNTIL IT IS VERIFIED OR HAS
@@ -181,9 +179,12 @@ export function DomainLiveProvider({
    * back to its fastest schedule forever.
    */
   const watching =
-    domain !== null && domain.status !== "verified" && domain.status !== "failed"
+    !loading &&
+    domain !== null &&
+    domain.status !== "verified" &&
+    domain.status !== "failed"
   React.useEffect(() => {
-    if (!watching || !id) return
+    if (loading || !watching || !id) return
     const controller = new AbortController()
     void watchUntilVerified({
       domainId: id,
@@ -193,11 +194,11 @@ export function DomainLiveProvider({
       onTick: update,
     })
     return () => controller.abort()
-  }, [id, watching, update])
+  }, [id, watching, update, loading])
 
   const value = React.useMemo(
-    () => (domain ? { domain, update, connect } : null),
-    [domain, update, connect],
+    () => (domain && !loading ? { domain, update, connect } : null),
+    [domain, update, connect, loading],
   )
   return (
     <AdoptDomain.Provider value={update}>
@@ -210,17 +211,29 @@ export function DomainLiveProvider({
 export function LiveDomainHero(
   props: Omit<React.ComponentProps<typeof DetailHero>, "tone">,
 ) {
-  const { domain } = useLive()
+  const live = useLiveDomain()
+  const domain = live?.domain
   return (
     <DetailHero
       {...props}
-      tone={domain.displaced_at ? "danger" : describeStatus(domain.status).tone}
+      loading={props.loading ?? !domain}
+      tone={
+        domain
+          ? domain.displaced_at
+            ? "danger"
+            : describeStatus(domain.status).tone
+          : "neutral"
+      }
     />
   )
 }
 
 export function LiveDomainStatus() {
-  const { domain } = useLive()
+  const live = useLiveDomain()
+  const domain = live?.domain
+  if (!domain) {
+    return <Bone id="status" shape="box" width={76} height={20} radius={9999} inline />
+  }
   return (
     <Status
       status={domain.status}
@@ -241,36 +254,47 @@ export function LiveDomainJourney({
   quiet,
   publishedByUs,
   recordsBelow,
+  fallback,
   children,
 }: {
   quiet: boolean
   publishedByUs?: boolean
   recordsBelow?: boolean
+  /** What the notice is drawn from while the domain loads: the shape's status, delegation and `added`. */
+  fallback?: { status: string; delegated: boolean; added: boolean }
   /** Shown inside the card, under the events. */
   children?: React.ReactNode
 }) {
-  const { domain, connect } = useLive()
+  const live = useLiveDomain()
+  const domain = live?.domain
+  const connect = live?.connect ?? null
   // A connection in progress says what is happening itself, under the strip.
   const connecting = connect !== null && connect.phase !== "failed"
+  // ⚠ ONE NOTICE FOR THE PAGE AND ITS SKELETON: the status and whether the records
+  // were added decide it, and both are in the shape.
+  const notice = domain
+    ? domainNotice(domain.status, domain.delegated, {
+        // Records we wrote, or ones they told us they added: either
+        // way it is DNS being waited on, not them.
+        publishedByUs:
+          publishedByUs || connect !== null || Boolean(domain.records_added_at),
+        recordsBelow,
+      })
+    : fallback
+      ? domainNotice(fallback.status, fallback.delegated, {
+          publishedByUs: publishedByUs || fallback.added,
+          recordsBelow,
+        })
+      : null
   return (
     <Journey
       title="Domain events"
-      steps={domainJourney(domain)}
-      notice={
-        quiet || connecting
-          ? null
-          : domainNotice(domain.status, domain.delegated, {
-              // Records we wrote, or ones they told us they added: either
-              // way it is DNS being waited on, not them.
-              publishedByUs:
-                publishedByUs || connect !== null || Boolean(domain.records_added_at),
-              recordsBelow,
-            })
-      }
+      steps={domain ? domainJourney(domain) : 3}
+      notice={quiet || connecting ? null : notice}
       footer={
         <>
           <Reveal show={Boolean(connect)} spacing="">
-            {connect && (
+            {connect && domain && (
               <ConnectProgress view={connect} verified={domain.status === "verified"} />
             )}
           </Reveal>
@@ -281,14 +305,28 @@ export function LiveDomainJourney({
   )
 }
 
-export function LiveDomainRecords({ actions }: { actions?: React.ReactNode }) {
-  const { domain } = useLive()
+export function LiveDomainRecords({
+  actions,
+  count,
+}: {
+  actions?: React.ReactNode
+  count?: number
+}) {
+  const live = useLiveDomain()
+  const domain = live?.domain
+  if (!domain) {
+    return <DnsRecordsCard records={[]} count={count ?? 4} actions={actions} />
+  }
   return <DnsRecordsCard records={domain.records} actions={actions} />
 }
 
 /** Renders its children only while the domain is not yet verified. */
 export function WhileUnverified({ children }: { children: React.ReactNode }) {
-  const { domain } = useLive()
+  const live = useLiveDomain()
+  const domain = live?.domain
+  if (!domain) {
+    return <>{children}</>
+  }
   return (
     <Reveal show={domain.status !== "verified"} spacing="">
       {children}

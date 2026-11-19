@@ -35,7 +35,7 @@ export function TimelineStep({
   children,
 }: {
   index: number
-  title: string
+  title: React.ReactNode
   state: "waiting" | "open" | "done"
   summary?: React.ReactNode
   /** Beside a finished step's title, to change it. */

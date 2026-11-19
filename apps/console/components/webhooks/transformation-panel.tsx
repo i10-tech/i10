@@ -18,6 +18,7 @@ import {
   SectionTitle,
 } from "@repo/ui/components/i10/page"
 import { Switch } from "@repo/ui/components/i10/switch"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { CodeEditor } from "@/components/template-editor/code-editor"
 import { CodeBlock, HeaderList } from "@/components/webhooks/code-block"
 import { tryWebhookTransformation, updateWebhook } from "@/lib/actions"
@@ -46,7 +47,40 @@ import type { WebhookEndpoint, WebhookTransformationResult } from "@/lib/types"
  * ⚠ OFF KEEPS THE CODE. Turning a transformation off sends webhooks as they
  * are without losing what was written; removing it is a separate act.
  */
-export function TransformationPanel({ endpoint }: { endpoint: WebhookEndpoint }) {
+export function TransformationPanel({
+  endpoint,
+  loading = false,
+}: {
+  endpoint?: WebhookEndpoint
+  loading?: boolean
+}) {
+  if (loading || !endpoint) {
+    return (
+      <div className="space-y-6">
+        <Section className="space-y-4 pt-0">
+          <SectionTitle className="m-0">Transformation function</SectionTitle>
+          <SectionDescription>
+            Reshapes the payload before it is signed and sent. Written in JavaScript and
+            runs on every delivery.
+          </SectionDescription>
+          <SectionContent>
+            <Bone
+              id="transformation-editor"
+              shape="box"
+              width="100%"
+              height={320}
+              radius={8}
+            />
+          </SectionContent>
+        </Section>
+      </div>
+    )
+  }
+
+  return <TransformationPanelLoaded endpoint={endpoint} />
+}
+
+function TransformationPanelLoaded({ endpoint }: { endpoint: WebhookEndpoint }) {
   const saved = endpoint.transformation
   const [code, setCode] = React.useState(
     saved?.code ?? TRANSFORMATION_STARTERS[starterFor(endpoint.url)].code,

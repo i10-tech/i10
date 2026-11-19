@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
 import { CodeBlock } from "@repo/ui/components/code-block/code-block"
 import { CopyButton } from "@repo/ui/components/copy-button/copy-button"
@@ -39,10 +40,12 @@ export function EmailBodyTabs({
   html,
   text,
   headers,
+  loading = false,
 }: {
-  html: string | null
-  text: string | null
-  headers: Record<string, string> | null
+  html?: string | null
+  text?: string | null
+  headers?: Record<string, string> | null
+  loading?: boolean
 }) {
   /*
    * ⚠ THE DEFAULT TAB FOLLOWS WHAT EXISTS. A transactional API caller who sends
@@ -50,7 +53,9 @@ export function EmailBodyTabs({
    * was lost.
    */
   const initial = html ? "preview" : text ? "text" : "headers"
-  const [tab, setTab] = React.useState(initial)
+  const [chosen, setTab] = React.useState(initial)
+  // Loading, nothing is known yet: the preview, which is the tab a skeleton can hold.
+  const tab = loading ? "preview" : chosen
 
   const headerLines = React.useMemo(
     () =>
@@ -62,11 +67,12 @@ export function EmailBodyTabs({
     [headers],
   )
 
-  const copyable =
-    tab === "html"
-      ? html
+  const copyable = loading
+    ? null
+    : tab === "html"
+      ? (html ?? null)
       : tab === "text"
-        ? text
+        ? (text ?? null)
         : tab === "headers"
           ? headerLines
           : null
@@ -97,44 +103,65 @@ export function EmailBodyTabs({
         </div>
 
         <TabsContent value="preview" className="m-0">
-          {html ? (
-            // ⚠ SEE `EmailFrame`: sandboxed, with a CSP that keeps the
-            // sender's tracking pixels from firing every time somebody opens
-            // the log, and remote images one click away (#189).
-            <EmailFrame html={html} title="Email preview" className="h-[36rem]" />
-          ) : (
-            <Empty>This message had no HTML body.</Empty>
-          )}
+          <Body>
+            {html ? (
+              // ⚠ SEE `EmailFrame`: sandboxed, with a CSP that keeps the
+              // sender's tracking pixels from firing every time somebody opens
+              // the log, and remote images one click away (#189).
+              <EmailFrame html={html} title="Email preview" className="h-[36rem]" />
+            ) : (
+              <Empty>This message had no HTML body.</Empty>
+            )}
+          </Body>
         </TabsContent>
 
         <TabsContent value="html" className="m-0">
-          {html ? (
-            <Source>{html}</Source>
-          ) : (
-            <Empty>This message had no HTML body.</Empty>
-          )}
+          <Body>
+            {html ? (
+              <Source>{html}</Source>
+            ) : (
+              <Empty>This message had no HTML body.</Empty>
+            )}
+          </Body>
         </TabsContent>
 
         <TabsContent value="text" className="m-0">
-          {text ? (
-            <Source>{text}</Source>
-          ) : (
-            <Empty>
-              This message had no plain-text part. Most clients will render the HTML,
-              but a text alternative improves deliverability.
-            </Empty>
-          )}
+          <Body>
+            {text ? (
+              <Source>{text}</Source>
+            ) : (
+              <Empty>
+                This message had no plain-text part. Most clients will render the HTML,
+                but a text alternative improves deliverability.
+              </Empty>
+            )}
+          </Body>
         </TabsContent>
 
         <TabsContent value="headers" className="m-0">
-          {headers ? (
-            <Source>{headerLines}</Source>
-          ) : (
-            <Empty>No custom headers were set on this message.</Empty>
-          )}
+          <Body>
+            {headers ? (
+              <Source>{headerLines}</Source>
+            ) : (
+              <Empty>No custom headers were set on this message.</Empty>
+            )}
+          </Body>
         </TabsContent>
       </Tabs>
     </section>
+  )
+}
+
+/**
+ * ⚠ WHAT A TAB HOLDS IS THE MESSAGE'S, SO IT IS A BONE: the frame, the source or
+ * "no HTML body" are all data, and a skeleton draws the height of the preview.
+ * The same box for every tab, so the page is the same whichever opens first.
+ */
+function Body({ children }: { children: React.ReactNode }) {
+  return (
+    <Bone id="body" as="div" shape="box" width="100%" height={576} radius={0}>
+      {children}
+    </Bone>
   )
 }
 

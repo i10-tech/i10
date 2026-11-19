@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
 import { Reveal } from "@repo/ui/components/i10/reveal"
@@ -18,6 +19,7 @@ import {
   oidcSetup,
   samlSetup,
 } from "@/lib/sso-actions"
+import { NONE } from "@/lib/react"
 import { latestPass } from "@/lib/sso-runs"
 import { idpChoices } from "@/lib/sso-setup-choices"
 import { flowCovers, guideFor, type OidcGuide, type SamlGuide } from "@/lib/sso-guides"
@@ -52,6 +54,8 @@ export function SetupFlow({
   email,
   authOrigin,
   previewTest,
+  loading = false,
+  expected,
 }: {
   initial: {
     connection: SsoConnection
@@ -67,9 +71,16 @@ export function SetupFlow({
   email: string | null
   authOrigin: string | null
   previewTest: boolean
+  loading?: boolean
+  /**
+   * The shape's guess at where the flow stands while it loads: a connection
+   * being resumed, and the step it was on.
+   */
+  expected?: { hasConnection: boolean; step: SetupStep }
 }) {
   const router = useRouter()
-  const choices = React.useMemo(() => idpChoices(catalog.presets), [catalog.presets])
+  const presets = catalog?.presets ?? NONE
+  const choices = React.useMemo(() => idpChoices(presets), [presets])
   const [connection, setConnection] = React.useState(initial?.connection ?? null)
   const [setup, setSetup] = React.useState<OidcSetup | SamlSetup | null>(
     initial?.setup ?? null,
@@ -79,20 +90,6 @@ export function SetupFlow({
   const [switching, setSwitching] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [now] = React.useState(() => Date.now())
-
-  const pass = latestPass(runs, now)
-  const current = currentStep({
-    connection,
-    ready: setup?.ready ?? false,
-    passed: pass !== null,
-  })
-  const generic = connection?.provider === "generic"
-  const label = generic
-    ? "your provider"
-    : (choices.find((c) => c.idp === connection?.provider)?.label ??
-      connection?.name ??
-      "")
-  const mark = generic ? connection?.protocol : connection?.provider
 
   React.useEffect(() => {
     const result = new URLSearchParams(window.location.hash.slice(1)).get("sso_test")
@@ -107,6 +104,31 @@ export function SetupFlow({
       window.location.pathname + window.location.search,
     )
   }, [])
+
+  const onAttached = React.useCallback((domain: SsoDomain) => {
+    setConnection((c) => (c ? { ...c, domains: [...c.domains, domain] } : c))
+  }, [])
+
+  // ⚠ ONE FLOW FOR THE PAGE AND ITS SKELETON. Loading, it is drawn with no
+  // connection (or, when the shape says one is being resumed, with its name as a
+  // Bone), so the frame, the heading and the steps are the real ones.
+  const resuming = loading && expected?.hasConnection === true
+  const expects = connection !== null || resuming
+  const pass = latestPass(runs, now)
+  const current = resuming
+    ? expected.step
+    : currentStep({
+        connection,
+        ready: setup?.ready ?? false,
+        passed: pass !== null,
+      })
+  const generic = connection?.provider === "generic"
+  const label = generic
+    ? "your provider"
+    : (choices.find((c) => c.idp === connection?.provider)?.label ??
+      connection?.name ??
+      "")
+  const mark = generic ? connection?.protocol : connection?.provider
 
   async function pick(choice: ProviderPick) {
     const tile = choice.idp === "generic" ? `generic-${choice.protocol}` : choice.idp
@@ -214,10 +236,6 @@ export function SetupFlow({
     setConnection((c) => (c ? { ...c, ...answer, domains: c.domains } : answer))
   }
 
-  const onAttached = React.useCallback((domain: SsoDomain) => {
-    setConnection((c) => (c ? { ...c, domains: [...c.domains, domain] } : c))
-  }, [])
-
   async function onSaved(after: OidcSetup | SamlSetup): Promise<string | null> {
     if (!connection) return null
     setSetup(after)
@@ -244,11 +262,24 @@ export function SetupFlow({
     stepIsDone(step, current) ? "done" : current === step ? "open" : "waiting"
 
   const done = current === "done"
-  const heading = done
-    ? `${connection?.name} is connected`
-    : connection
-      ? `Connect ${label}`
-      : "Connect your identity provider"
+  const name = (id: string) => (
+    <Bone
+      id={id}
+      loading={resuming ? true : undefined}
+      width={72}
+      lineHeight={20}
+      inline
+    >
+      {resuming ? undefined : label}
+    </Bone>
+  )
+  const heading = done ? (
+    `${connection?.name} is connected`
+  ) : expects ? (
+    <>Connect {name("heading-name")}</>
+  ) : (
+    "Connect your identity provider"
+  )
   const others = catalog.data.filter((c) => c.id !== connection?.id)
 
   return (
@@ -263,7 +294,7 @@ export function SetupFlow({
 
       <header className="mt-4 flex items-center">
         <AnimatePresence initial={false}>
-          {connection && (
+          {expects && (
             <motion.span
               key="mark"
               // ⚠ THE SPACE BESIDE THE MARK MOVES WITH IT: a flex gap would stay until
@@ -274,7 +305,9 @@ export function SetupFlow({
               transition={motionTokens.spring.smooth}
               className="overflow-hidden"
             >
-              <IdpMark idp={mark ?? "oidc"} />
+              <Bone id="mark" shape="box" width={40} height={40} radius={12} inline>
+                {connection && <IdpMark idp={mark ?? "oidc"} />}
+              </Bone>
             </motion.span>
           )}
         </AnimatePresence>
@@ -308,11 +341,21 @@ export function SetupFlow({
             ) : undefined
           }
         >
-          <ProviderStep
-            choices={choices}
-            pending={pendingTile}
-            onPick={(c) => void pick(c)}
-          />
+          {/* The tiles are the catalogue's (it holds the presets), so they are one Bone. */}
+          <Bone
+            id="providers"
+            as="div"
+            shape="box"
+            width="100%"
+            height={260}
+            radius={16}
+          >
+            <ProviderStep
+              choices={choices}
+              pending={pendingTile}
+              onPick={(c) => void pick(c)}
+            />
+          </Bone>
         </TimelineStep>
 
         <TimelineStep
@@ -335,7 +378,7 @@ export function SetupFlow({
 
         <TimelineStep
           index={3}
-          title={connection ? `Connect ${label}` : "Connect it"}
+          title={expects ? <>Connect {name("step-name")}</> : "Connect it"}
           state={stateOf("connect")}
           summary={connectSummary(setup, label)}
         >

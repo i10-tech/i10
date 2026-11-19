@@ -25,8 +25,9 @@ import {
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import { AutoHeight } from "@repo/ui/components/i10/auto-height"
-import { formatExact } from "@/lib/format"
-import type { JourneyIcon, JourneyStep, JourneyTone } from "@/lib/journey"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
+import { useExactTime } from "@/components/time"
+import type { JourneyIcon, JourneyStep } from "@/lib/journey"
 import { useMounted } from "@/lib/react"
 
 const ICONS: Record<JourneyIcon, React.ComponentType<{ className?: string }>> = {
@@ -49,33 +50,18 @@ const ICONS: Record<JourneyIcon, React.ComponentType<{ className?: string }>> = 
   draft: FilePen,
 }
 
-/** The pill's colours and the icon's, per tone; each works on both themes. */
-const TONE: Record<JourneyTone, { pill: string; icon: string }> = {
-  neutral: {
-    pill: "bg-muted text-foreground/80",
-    icon: "text-foreground/80",
-  },
-  info: {
-    pill: "bg-info/12 text-info",
-    icon: "text-info",
-  },
-  success: {
-    pill: "bg-success/12 text-success",
-    icon: "text-success",
-  },
-  warning: {
-    pill: "bg-warning/14 text-warning",
-    icon: "text-warning",
-  },
-  danger: {
-    pill: "bg-danger/12 text-danger",
-    icon: "text-danger",
-  },
-  violet: {
-    pill: "bg-info/14 text-info",
-    icon: "text-info",
-  },
-}
+/**
+ * The pill's colours and the icon's, per tone; each works on both themes.
+ *
+ * ⚠ THE TONE IS AN ATTRIBUTE, NOT A CLASS. A step's tone and whether it has
+ * happened are data, and a skeleton cannot know them; as `data-tone` the class
+ * list is the same on every node, so test/skeleton-parity can tell a real
+ * difference from a colour. `pending` is a tone of its own: the dimmed one.
+ */
+const PILL =
+  "bg-muted text-foreground/80 data-[tone=pending]:bg-muted/60 data-[tone=pending]:text-muted-foreground/70 data-[tone=info]:bg-info/12 data-[tone=info]:text-info data-[tone=success]:bg-success/12 data-[tone=success]:text-success data-[tone=warning]:bg-warning/14 data-[tone=warning]:text-warning data-[tone=danger]:bg-danger/12 data-[tone=danger]:text-danger data-[tone=violet]:bg-info/14 data-[tone=violet]:text-info"
+const ICON =
+  "text-foreground/80 data-[tone=pending]:text-muted-foreground/40 data-[tone=info]:text-info data-[tone=success]:text-success data-[tone=warning]:text-warning data-[tone=danger]:text-danger data-[tone=violet]:text-info"
 
 const EASE = [0.22, 1, 0.36, 1] as const
 
@@ -137,13 +123,16 @@ export function Journey({
   footer,
 }: {
   title: string
-  steps: JourneyStep[]
+  steps: JourneyStep[] | number
   notice?: JourneyNotice | null
   /** Under the strip: what is happening to it right now (set-up's connection). */
   footer?: React.ReactNode
 }) {
   const reduce = useReducedMotion()
   const delay = (i: number) => (reduce ? 0 : 0.08 + i * 0.12)
+  const loading = typeof steps === "number"
+  const list: (JourneyStep | undefined)[] =
+    typeof steps === "number" ? Array.from({ length: steps }) : steps
 
   return (
     <section aria-label={title}>
@@ -207,27 +196,28 @@ export function Journey({
           className="pointer-events-none absolute inset-0 bg-border"
           style={DOTS}
         />
-        <ol className="relative flex min-w-max px-4 py-7 sm:px-8">
-          {steps.map((step, i) => {
-            const next = steps[i + 1]
-            return (
-              <li
-                key={`${step.key}-${i}`}
-                className="relative flex w-40 flex-1 flex-col items-center sm:w-44"
-              >
-                {next && (
-                  <Connector
-                    reached={next.state !== "pending"}
-                    current={next.state === "current"}
-                    delay={delay(i) + 0.1}
-                    reduce={reduce ?? false}
-                  />
-                )}
-                <Node step={step} delay={delay(i)} reduce={reduce ?? false} />
-              </li>
-            )
-          })}
-        </ol>
+        <BoneScope id="journey" loading={loading}>
+          <ol className="relative flex min-w-max px-4 py-7 sm:px-8">
+            {list.map((step, i) => {
+              const next = list[i + 1]
+              return (
+                <BoneScope key={step?.key ?? i} id={`step-${i}`} unit>
+                  <li className="relative flex w-40 flex-1 flex-col items-center sm:w-44">
+                    {(next !== undefined || i < list.length - 1) && (
+                      <Connector
+                        reached={Boolean(next && next.state !== "pending")}
+                        current={Boolean(next && next.state === "current")}
+                        delay={delay(i) + 0.1}
+                        reduce={reduce ?? false}
+                      />
+                    )}
+                    <Node step={step} delay={delay(i)} reduce={reduce ?? false} />
+                  </li>
+                </BoneScope>
+              )
+            })}
+          </ol>
+        </BoneScope>
       </div>
       {footer}
     </section>
@@ -268,7 +258,10 @@ function Connector({
        * motion; the spinner's tone still says the step is live.
        */}
       {current && !reduce && (
-        <div className="absolute inset-0 overflow-hidden rounded-full">
+        <div
+          data-skeleton="skip"
+          className="absolute inset-0 overflow-hidden rounded-full"
+        >
           {/*
            * ⚠ A CSS ANIMATION, NOT MOTION. It loops forever on a page left open
            * for an afternoon; the compositor runs it without waking React, and
@@ -280,8 +273,10 @@ function Connector({
           />
         </div>
       )}
+      {/* ⚠ SKIPPED BY test/skeleton-parity: how far the trip has got is data, drawn over the track. */}
       {reached && (
         <motion.div
+          data-skeleton="skip"
           className={cn(
             "absolute inset-0 origin-left rounded-full",
             current
@@ -302,14 +297,15 @@ function Node({
   delay,
   reduce,
 }: {
-  step: JourneyStep
+  step?: JourneyStep
   delay: number
   reduce: boolean
 }) {
-  const Icon = ICONS[step.icon]
-  const tone = TONE[step.tone]
-  const pending = step.state === "pending"
-  const current = step.state === "current"
+  const Icon = step ? ICONS[step.icon] : null
+  const pending = step ? step.state === "pending" : true
+  const current = step ? step.state === "current" : false
+  // `pending` is dimmed whatever the tone; a skeleton has no tone to give.
+  const tone = step ? (pending ? "pending" : step.tone) : "pending"
 
   /*
    * ⚠ THE NODE IS THE SAME ELEMENT WITH OR WITHOUT A TIME (2026-10-13). The
@@ -323,15 +319,18 @@ function Node({
   const label = (
     <div className="flex flex-col items-center">
       <span
+        data-tone={tone}
         className={cn(
           "mt-3 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap",
-          pending ? "bg-muted/60 text-muted-foreground/70" : tone.pill,
+          PILL,
         )}
       >
-        {step.label}
-        {step.count && step.count > 1 && (
-          <span className="tabular opacity-70">×{step.count}</span>
-        )}
+        <Bone id="label" width={64} lineHeight={16} inline>
+          {step?.label}
+          {step?.count && step.count > 1 && (
+            <span className="tabular opacity-70">×{step.count}</span>
+          )}
+        </Bone>
       </span>
       <StepTime step={step} />
     </div>
@@ -346,16 +345,15 @@ function Node({
     >
       <div className="relative">
         <div
+          data-tone={tone}
+          // ⚠ IT DOES NOT MOVE ON HOVER (2026-10-03). The tooltip is the
+          // answer to the pointer; a node that hops up is only motion.
+          // ⚠ A SOLID EDGE, DIMMED - NOT DASHED, for a step not yet reached
+          // (2026-10-03): a dashed ring read as a second dotted pattern on
+          // top of the dots behind it.
           className={cn(
-            // ⚠ IT DOES NOT MOVE ON HOVER (2026-10-03). The tooltip is the
-            // answer to the pointer; a node that hops up is only motion.
             "relative grid size-10 place-items-center rounded-xl border",
-            pending
-              ? // ⚠ A SOLID EDGE, DIMMED - NOT DASHED (2026-10-03). A dashed ring
-                // round a step not yet reached read as a second dotted pattern
-                // on top of the dots behind it.
-                "text-muted-foreground/40"
-              : tone.icon,
+            ICON,
           )}
         >
           {/*
@@ -363,19 +361,21 @@ function Node({
            * replaced a ring that pulsed outward from the node, which read as
            * an alert rather than as work going on.
            */}
-          {current ? (
-            <LoaderCircle className="size-[18px] motion-safe:animate-spin" />
-          ) : (
-            <Icon className="size-[18px]" />
-          )}
+          <Bone id="icon" shape="box" width={18} height={18} radius={4} inline>
+            {current ? (
+              <LoaderCircle className="size-[18px] motion-safe:animate-spin" />
+            ) : Icon ? (
+              <Icon className="size-[18px]" />
+            ) : null}
+          </Bone>
         </div>
       </div>
-      {step.at ? (
+      {step?.at ? (
         <Tooltip content={<ExactTime iso={step.at} />}>
           <div className="cursor-default">{label}</div>
         </Tooltip>
       ) : (
-        <div>{label}</div>
+        <div className="cursor-default">{label}</div>
       )}
     </motion.div>
   )
@@ -386,18 +386,23 @@ function Node({
  * UTC before - the server's render and the browser's must agree, or React
  * throws the server HTML away.
  */
-function StepTime({ step }: { step: JourneyStep }) {
+function StepTime({ step }: { step?: JourneyStep }) {
   const mounted = useMounted()
+  if (!step) {
+    return <Bone id="time" width={72} lineHeight={16} className="mt-1.5" />
+  }
   if (!step.at) {
     return (
-      <span
-        className={cn(
-          "mt-1.5 text-xs text-muted-foreground",
-          step.state === "pending" && "opacity-60",
-        )}
-      >
-        {step.note ?? (step.state === "current" ? "In progress" : "Not yet")}
-      </span>
+      <Bone id="time" width={72} lineHeight={16} className="mt-1.5">
+        <span
+          className={cn(
+            "text-xs text-muted-foreground",
+            step.state === "pending" && "opacity-60",
+          )}
+        >
+          {step.note ?? (step.state === "current" ? "In progress" : "Not yet")}
+        </span>
+      </Bone>
     )
   }
   const date = new Date(step.at)
@@ -414,16 +419,18 @@ function StepTime({ step }: { step: JourneyStep }) {
     timeZone: zone,
   })
   return (
-    <span className="tabular mt-1.5 flex flex-col text-xs leading-relaxed text-muted-foreground">
-      {step.note && <span>{step.note}</span>}
-      <time dateTime={step.at} className="whitespace-nowrap">
-        {day}, {time}
-      </time>
-    </span>
+    <Bone id="time" width={72} lineHeight={16} className="mt-1.5">
+      <span className="tabular flex flex-col text-xs leading-relaxed text-muted-foreground">
+        {step.note && <span>{step.note}</span>}
+        <time dateTime={step.at} className="whitespace-nowrap">
+          {day}, {time}
+        </time>
+      </span>
+    </Bone>
   )
 }
 
 function ExactTime({ iso }: { iso: string }) {
-  const mounted = useMounted()
-  return <span className="tabular">{mounted ? formatExact(iso) : iso}</span>
+  const exact = useExactTime()
+  return <span className="tabular">{exact(iso)}</span>
 }

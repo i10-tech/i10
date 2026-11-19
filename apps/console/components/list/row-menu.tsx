@@ -49,6 +49,8 @@ export function RowMenu({
           size="sm"
           className={visible ? "size-7" : rowMenuClass}
           aria-label={`Actions for ${label}`}
+          // ⚠ SKIPPED BY test/skeleton-parity: a skeleton row has nothing to act on.
+          data-skeleton="skip"
         >
           <MoreHorizontal />
         </Button>

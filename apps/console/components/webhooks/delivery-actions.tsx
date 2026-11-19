@@ -25,17 +25,21 @@ import type { WebhookDeliveryDetail } from "@/lib/types"
  */
 export function DeliveryActions({
   delivery,
+  status,
+  expunged,
   polling,
 }: {
-  delivery: WebhookDeliveryDetail
+  /** Absent while loading: the buttons are drawn from the shape, with nothing to act on. */
+  delivery?: WebhookDeliveryDetail
+  status: WebhookDeliveryDetail["status"]
+  expunged: boolean
   /** A polling endpoint's events are read again from an older cursor instead. */
   polling: boolean
 }) {
   const stepUp = useStepUp()
   const resend = useOutcome()
   const [expunging, setExpunging] = React.useState(false)
-  const pending = delivery.status === "pending"
-  const expunged = delivery.payload_expunged_at !== null
+  const pending = status === "pending"
   const why = pending
     ? "Still being attempted. Resend once it has finished."
     : expunged
@@ -49,9 +53,10 @@ export function DeliveryActions({
       onReset={resend.reset}
       pendingLabel="Resend"
       doneLabel="Sent"
-      disabled={why !== null}
+      disabled={!delivery || why !== null}
       onClick={() =>
         void resend.run(async () => {
+          if (!delivery) return false
           const r = await resendWebhookDelivery(delivery.id)
           if (!r.ok) {
             toastError("Could not resend it", { description: r.error })
@@ -78,7 +83,12 @@ export function DeliveryActions({
         resendButton
       )}
       {!expunged && !pending && (
-        <Button size="sm" variant="secondary" onClick={() => setExpunging(true)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!delivery}
+          onClick={() => setExpunging(true)}
+        >
           <Eraser />
           <span className="hidden sm:inline">Expunge payload</span>
         </Button>
@@ -92,7 +102,7 @@ export function DeliveryActions({
         confirmLabel="Expunge payload"
         doneLabel="Expunged"
         onConfirm={async () => {
-          if (!(await stepUp())) return false
+          if (!delivery || !(await stepUp())) return false
           const r = await expungeWebhookPayload(delivery.id)
           if (!r.ok) {
             toastError("Could not expunge the payload", { description: r.error })

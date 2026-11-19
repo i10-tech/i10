@@ -13,6 +13,7 @@ import {
   Settings2,
   Unplug,
 } from "lucide-react"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Button } from "@repo/ui/components/button/button"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
@@ -43,13 +44,24 @@ import { toastError } from "@/lib/toast"
  * background; while any is pending or running the page refreshes itself every
  * few seconds, and stops once they finish, or after two minutes.
  */
-export function GithubPanel({ state }: { state: GithubState }) {
+export function GithubPanel({
+  state,
+  loading = false,
+  shape,
+}: {
+  state?: GithubState
+  loading?: boolean
+  /** What a skeleton draws: whether an account is installed, and how many repositories. */
+  shape: { githubInstalled: boolean; githubRepos: number }
+}) {
   const router = useRouter()
-  const busy = state.repositories.some(
-    (r) =>
-      r.last_sync &&
-      (r.last_sync.status === "pending" || r.last_sync.status === "running"),
-  )
+  const busy = state
+    ? state.repositories.some(
+        (r) =>
+          r.last_sync &&
+          (r.last_sync.status === "pending" || r.last_sync.status === "running"),
+      )
+    : false
 
   React.useEffect(() => {
     if (!busy) return
@@ -61,53 +73,80 @@ export function GithubPanel({ state }: { state: GithubState }) {
     return () => clearInterval(timer)
   }, [busy, router])
 
-  if (!state.configured) return null
-  const installed = state.installations.length > 0
+  // ⚠ ONE BODY FOR THE PANEL AND ITS SKELETON. Structure comes from the shape
+  // while loading and from the state once loaded; the two agree because the
+  // shape was made from a state (lib/shapes/templates.ts).
+  const drawn = loading || !state
+  if (!drawn && !state.configured) return null
+  const installed = drawn ? shape.githubInstalled : state.installations.length > 0
+  const repoCount = drawn ? shape.githubRepos : state.repositories.length
 
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h2 className="flex items-center gap-2 text-sm font-medium">
-            <GitBranch className="size-4" />
-            GitHub
-          </h2>
-          <p className="max-w-prose text-xs text-muted-foreground">
-            Keep React Email templates in a repository. A push to its target branch goes
-            live; pushes to other branches are checked and reported on the commit.
+    <BoneScope id="github" loading={drawn} independent>
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="flex items-center gap-2 text-sm font-medium">
+              <GitBranch className="size-4" />
+              GitHub
+            </h2>
+            <p className="max-w-prose text-xs text-muted-foreground">
+              Keep React Email templates in a repository. A push to its target branch
+              goes live; pushes to other branches are checked and reported on the
+              commit.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {installed &&
+              (drawn ? (
+                <Button size="sm" variant="secondary" disabled>
+                  <Plus />
+                  Connect a repository
+                </Button>
+              ) : (
+                <ConnectRepositoryButton state={state} />
+              ))}
+            <InstallButton installed={installed} disabled={drawn} />
+          </div>
+        </div>
+
+        {installed && repoCount === 0 && (
+          <p className="rounded-lg border border-dashed px-4 py-6 text-center text-xs text-muted-foreground">
+            Installed on{" "}
+            <Bone id="accounts" width={120} lineHeight={16} inline>
+              {state?.installations.map((i) => i.account_login).join(", ")}
+            </Bone>
+            . Connect a repository to bring its templates in.
           </p>
-        </div>
-        <div className="flex gap-2">
-          {installed && <ConnectRepositoryButton state={state} />}
-          <InstallButton installed={installed} />
-        </div>
-      </div>
+        )}
 
-      {installed && state.repositories.length === 0 && (
-        <p className="rounded-lg border border-dashed px-4 py-6 text-center text-xs text-muted-foreground">
-          Installed on {state.installations.map((i) => i.account_login).join(", ")}.
-          Connect a repository to bring its templates in.
-        </p>
-      )}
-
-      {state.repositories.length > 0 && (
-        <ul className="divide-y overflow-hidden rounded-2xl border">
-          {state.repositories.map((r) => (
-            <RepositoryRow key={r.id} repo={r} />
-          ))}
-        </ul>
-      )}
-    </section>
+        {repoCount > 0 && (
+          <ul className="divide-y overflow-hidden rounded-2xl border">
+            {Array.from({ length: repoCount }, (_, i) => (
+              <BoneScope key={state?.repositories[i]?.id ?? i} id={`repo-${i}`} unit>
+                <RepositoryRow repo={state?.repositories[i]} />
+              </BoneScope>
+            ))}
+          </ul>
+        )}
+      </section>
+    </BoneScope>
   )
 }
 
-function InstallButton({ installed }: { installed: boolean }) {
+function InstallButton({
+  installed,
+  disabled = false,
+}: {
+  installed: boolean
+  disabled?: boolean
+}) {
   const [pending, setPending] = React.useState(false)
   return (
     <Button
       size="sm"
       variant={installed ? "ghost" : "secondary"}
-      disabled={pending}
+      disabled={pending || disabled}
       onClick={async () => {
         setPending(true)
         const result = await githubInstallUrl()
@@ -180,72 +219,96 @@ function SyncStatus({ repo }: { repo: GithubRepository }) {
   )
 }
 
-function RepositoryRow({ repo }: { repo: GithubRepository }) {
+function RepositoryRow({ repo }: { repo?: GithubRepository }) {
   const router = useRouter()
   const [editing, setEditing] = React.useState(false)
   const [disconnecting, setDisconnecting] = React.useState(false)
   const [syncing, setSyncing] = React.useState(false)
-  const problems = repo.last_sync?.problems ?? []
-  const refusals = (repo.last_sync?.outcomes ?? []).flatMap((o) =>
+  const problems = repo?.last_sync?.problems ?? []
+  const refusals = (repo?.last_sync?.outcomes ?? []).flatMap((o) =>
     o.outcome === "refused" ? o.problems.map((p) => `${o.path}: ${p}`) : [],
   )
 
   return (
     <li className="space-y-2 px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <a
-          href={`https://github.com/${repo.full_name}`}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono text-sm font-medium underline-offset-4 hover:underline"
-        >
-          {repo.full_name}
-        </a>
-        <span className="font-mono text-2xs text-muted-foreground">
-          {repo.target_branch} · /{repo.directory}
-        </span>
-        <span className="text-2xs text-muted-foreground">
-          {repo.templates} {repo.templates === 1 ? "template" : "templates"}
-        </span>
-        <div className="ml-auto flex items-center gap-1">
-          <SyncStatus repo={repo} />
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Sync now"
-            disabled={syncing || repo.removed}
-            onClick={async () => {
-              setSyncing(true)
-              const result = await syncGithubRepository(repo.id)
-              setSyncing(false)
-              if (!result.ok)
-                toastError("Could not sync", { description: result.error })
-              else router.refresh()
-            }}
-          >
-            <RefreshCw className={syncing ? "animate-spin" : undefined} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Branch and directory"
-            onClick={() => setEditing(true)}
-          >
-            <Settings2 />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Disconnect"
-            onClick={() => setDisconnecting(true)}
-          >
-            <Unplug />
-          </Button>
+        <Bone id="name" lineHeight={20} width={200}>
+          {repo && (
+            <a
+              href={`https://github.com/${repo.full_name}`}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-sm font-medium underline-offset-4 hover:underline"
+            >
+              {repo.full_name}
+            </a>
+          )}
+        </Bone>
+        <Bone id="branch" lineHeight={16} width={110}>
+          {repo && (
+            <span className="font-mono text-2xs text-muted-foreground">
+              {repo.target_branch} · /{repo.directory}
+            </span>
+          )}
+        </Bone>
+        <Bone id="templates" lineHeight={16} width={64}>
+          {repo && (
+            <span className="text-2xs text-muted-foreground">
+              {repo.templates} {repo.templates === 1 ? "template" : "templates"}
+            </span>
+          )}
+        </Bone>
+        {/* ⚠ `min-h-8` IS THE ROW OF SM BUTTONS THE SKELETON DOES NOT DRAW: they set this row's height, and without it a loading row is 12px short. */}
+        <div className="ml-auto flex min-h-8 items-center gap-1">
+          <Bone id="status" lineHeight={16} width={140}>
+            {repo && <SyncStatus repo={repo} />}
+          </Bone>
+          {/* ⚠ SKIPPED BY test/skeleton-parity: these act on a repository a skeleton does not have. */}
+          {repo && (
+            <span data-skeleton="skip" className="contents">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Sync now"
+                disabled={syncing || repo.removed}
+                onClick={async () => {
+                  setSyncing(true)
+                  const result = await syncGithubRepository(repo.id)
+                  setSyncing(false)
+                  if (!result.ok)
+                    toastError("Could not sync", { description: result.error })
+                  else router.refresh()
+                }}
+              >
+                <RefreshCw className={syncing ? "animate-spin" : undefined} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Branch and directory"
+                onClick={() => setEditing(true)}
+              >
+                <Settings2 />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Disconnect"
+                onClick={() => setDisconnecting(true)}
+              >
+                <Unplug />
+              </Button>
+            </span>
+          )}
         </div>
       </div>
 
+      {/* ⚠ SKIPPED BY test/skeleton-parity: a sync's problems exist only once a sync has reported, which a shape does not carry. */}
       {(problems.length > 0 || refusals.length > 0) && (
-        <ul className="space-y-0.5 rounded-md bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <ul
+          data-skeleton="skip"
+          className="space-y-0.5 rounded-md bg-destructive/5 px-3 py-2 text-xs text-destructive"
+        >
           {[...problems, ...refusals].slice(0, 6).map((p, i) => (
             <li key={i} className="break-words">
               {p}
@@ -254,23 +317,27 @@ function RepositoryRow({ repo }: { repo: GithubRepository }) {
         </ul>
       )}
 
-      <RepositorySettings repo={repo} open={editing} onOpenChange={setEditing} />
-      <ConfirmDialog
-        open={disconnecting}
-        onOpenChange={setDisconnecting}
-        title={`Disconnect ${repo.full_name}?`}
-        description="Its templates stay, with every version, and keep sending. They become uploads and stop following the repository; connecting it again picks them back up by path."
-        confirmLabel="Disconnect"
-        doneLabel="Disconnected"
-        onConfirm={async () => {
-          const result = await disconnectGithubRepository(repo.id)
-          if (!result.ok) {
-            toastError("Could not disconnect", { description: result.error })
-            return false
-          }
-          return true
-        }}
-      />
+      {repo && (
+        <>
+          <RepositorySettings repo={repo} open={editing} onOpenChange={setEditing} />
+          <ConfirmDialog
+            open={disconnecting}
+            onOpenChange={setDisconnecting}
+            title={`Disconnect ${repo.full_name}?`}
+            description="Its templates stay, with every version, and keep sending. They become uploads and stop following the repository; connecting it again picks them back up by path."
+            confirmLabel="Disconnect"
+            doneLabel="Disconnected"
+            onConfirm={async () => {
+              const result = await disconnectGithubRepository(repo.id)
+              if (!result.ok) {
+                toastError("Could not disconnect", { description: result.error })
+                return false
+              }
+              return true
+            }}
+          />
+        </>
+      )}
     </li>
   )
 }

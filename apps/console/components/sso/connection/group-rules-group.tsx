@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { NONE } from "@/lib/react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
@@ -42,7 +44,7 @@ export function GroupRulesGroup({
   const [group, setGroup] = React.useState("")
   const [role, setRole] = React.useState<"member" | "admin">("member")
 
-  const rules = data?.data ?? []
+  const rules = data?.data ?? NONE
   const nextPrecedence = rules.length
     ? Math.max(...rules.map((r) => r.precedence)) + 10
     : 10
@@ -89,9 +91,16 @@ export function GroupRulesGroup({
         }
       >
         <div className="text-sm font-medium text-foreground">
-          {rules.length === 0
-            ? "No group rules configured"
-            : `${rules.length} group rule${rules.length === 1 ? "" : "s"}`}
+          {/* ⚠ "NONE CONFIGURED" IS AN ANSWER, NOT A PLACEHOLDER: until the rules arrive, draw a bar. */}
+          <Bone id="rules" width={150} loading={!data && !failed}>
+            {!data
+              ? failed?.upgrade
+                ? "Not on your plan"
+                : "Could not load"
+              : rules.length === 0
+                ? "No group rules configured"
+                : `${rules.length} group rule${rules.length === 1 ? "" : "s"}`}
+          </Bone>
         </div>
 
         <Reveal show={open} spacing="pt-3" keepMounted>

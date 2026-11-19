@@ -11,7 +11,7 @@ import { useResetWhen } from "@/lib/react"
  *
  * ⚠ ONLY WHAT IS ON SCREEN CAN STAY TICKED. Narrowing the filter drops the
  * rows it hides from the selection, so the bar never acts on a row nobody can
- * see. (The domains list is where this started; see domains-list.tsx.)
+ * see. (The domains list is where this started; see domains-view.tsx.)
  */
 export function useListSelection<T>(rows: T[], idOf: (row: T) => string) {
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
@@ -70,6 +70,21 @@ export function useListSelection<T>(rows: T[], idOf: (row: T) => string) {
       />
     ),
   }
+}
+
+/**
+ * The box of a row that cannot be picked: the same box, greyed and not
+ * focusable, so the column lines up and the reason is one hover away.
+ */
+export function lockedBox(label: string, reason: string) {
+  return (
+    <Checkbox
+      checked={false}
+      disabled
+      title={reason}
+      aria-label={`${label} (${reason})`}
+    />
+  )
 }
 
 /**

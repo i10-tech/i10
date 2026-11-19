@@ -1,9 +1,13 @@
+"use client"
+
+import * as React from "react"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Status } from "@/components/status"
 import { Stat } from "@/components/stat"
 import { PanelError } from "@/components/panel-error"
-import { tryApi } from "@/lib/api"
-import { formatRate, formatRelative } from "@/lib/format"
+import { formatRate } from "@/lib/format"
 import type { SendingFinding, SendingHealth, SendingStatus } from "@/lib/types"
+import { Time } from "@/components/time"
 
 /**
  * What a finding type means, in the customer's words (#158).
@@ -45,60 +49,98 @@ const SUMMARY: Record<SendingStatus["health"], string> = {
  * SES line; they are shown so a list going stale is visible before it becomes
  * hard bounces.
  */
-export async function SendingHealthCard() {
-  const result = await tryApi<SendingHealth>("/console/sending-health")
-  if (!result.ok) {
-    return (
-      <PanelError
-        title="Could not load your sending health"
-        message={result.error.message}
-      />
-    )
+export function SendingHealthCard({
+  health,
+  error,
+  loading = false,
+  flagged = false,
+}: {
+  health?: SendingHealth
+  error?: string
+  loading?: boolean
+  /** Loading only: the shape says sending is flagged, so the body will list a finding. */
+  flagged?: boolean
+}) {
+  if (error) {
+    return <PanelError title="Could not load your sending health" message={error} />
   }
-  const h = result.data
+
+  const h = health
 
   return (
-    <section className="overflow-hidden rounded-2xl border">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-        <h2 className="text-sm font-medium">Sending health</h2>
-        <Status status={h.health} variant="pill" />
-      </header>
+    <BoneScope id="sending-health" loading={loading}>
+      <section className="overflow-hidden rounded-2xl border">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+          <h2 className="text-sm font-medium">Sending health</h2>
+          {/* 22, the pill's own height: a 20px bone left the card 2px short. */}
+          <Bone id="status" shape="box" width={76} height={22} radius={9999} inline>
+            {h && <Status status={h.health} variant="pill" />}
+          </Bone>
+        </header>
 
-      <div className="space-y-3 px-4 py-3">
-        <p className="text-sm text-muted-foreground">{SUMMARY[h.health]}</p>
-        {h.health === "paused" && h.cause ? (
-          <p className="text-sm">The reason given: {h.cause}</p>
-        ) : null}
-        {h.findings.length > 0 ? (
-          <ul className="space-y-2">
-            {h.findings.map((f) => (
-              <Finding key={`${f.type}:${f.impact}`} finding={f} />
-            ))}
-          </ul>
-        ) : null}
-      </div>
+        {/*
+         * ⚠ THE WHOLE BODY IS ONE BONE: whether there is a reason or findings is the data's.
+         *
+         * ⚠ ITS HEIGHT IS THE SHAPE'S BEST GUESS (2026-11-09). Healthy, the body
+         * is the one summary line; flagged (the overview's status banner), it is
+         * that line and a finding card, 90px: three 22px bars 12px apart. A flat
+         * two lines drew 40px for both and the page jumped 20 or 50px.
+         */}
+        <div className="px-4 py-3">
+          <Bone
+            id="summary"
+            lines={flagged ? 3 : 1}
+            lineHeight={flagged ? 22 : 20}
+            width="80%"
+            className="space-y-3"
+          >
+            {h && (
+              <>
+                <p className="text-sm text-muted-foreground">{SUMMARY[h.health]}</p>
+                {h.health === "paused" && h.cause ? (
+                  <p className="text-sm">The reason given: {h.cause}</p>
+                ) : null}
+                {h.findings.length > 0 ? (
+                  <ul className="space-y-2">
+                    {h.findings.map((f) => (
+                      <Finding key={`${f.type}:${f.impact}`} finding={f} />
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            )}
+          </Bone>
+        </div>
 
-      <div className="grid grid-cols-2 divide-x divide-y border-t md:grid-cols-4 md:divide-y-0">
-        <Stat label={`Sent, last ${h.window_days} days`} value={h.sends} />
-        <Stat
-          label="Bounce rate"
-          value={formatRate(h.hard_bounces, h.sends)}
-          sub={`${h.hard_bounces} hard bounces`}
-          tone={(h.bounce_rate ?? 0) >= 0.04 ? "danger" : undefined}
-        />
-        <Stat
-          label="Soft bounce rate"
-          value={formatRate(h.soft_bounces, h.sends)}
-          sub={`${h.soft_bounces} soft bounces`}
-        />
-        <Stat
-          label="Complaint rate"
-          value={formatRate(h.complaints, h.sends)}
-          sub={`${h.complaints} complaints`}
-          tone={(h.complaint_rate ?? 0) >= 0.0008 ? "danger" : undefined}
-        />
-      </div>
-    </section>
+        <div className="grid grid-cols-2 divide-x divide-y border-t md:grid-cols-4 md:divide-y-0">
+          <Stat
+            label={h ? `Sent, last ${h.window_days} days` : "Sent, last 7 days"}
+            value={h?.sends}
+            loading={loading}
+          />
+          <Stat
+            label="Bounce rate"
+            value={h ? formatRate(h.hard_bounces, h.sends) : undefined}
+            sub={h ? `${h.hard_bounces} hard bounces` : ""}
+            tone={(h?.bounce_rate ?? 0) >= 0.04 ? "danger" : undefined}
+            loading={loading}
+          />
+          <Stat
+            label="Soft bounce rate"
+            value={h ? formatRate(h.soft_bounces, h.sends) : undefined}
+            sub={h ? `${h.soft_bounces} soft bounces` : ""}
+            loading={loading}
+          />
+          <Stat
+            label="Complaint rate"
+            value={h ? formatRate(h.complaints, h.sends) : undefined}
+            sub={h ? `${h.complaints} complaints` : ""}
+            tone={(h?.complaint_rate ?? 0) >= 0.0008 ? "danger" : undefined}
+            loading={loading}
+          />
+        </div>
+      </section>
+    </BoneScope>
   )
 }
 
@@ -109,7 +151,7 @@ function Finding({ finding }: { finding: SendingFinding }) {
         <Status status={finding.impact} />
         <span className="text-sm font-medium">{findingReason(finding.type)}</span>
         <span className="text-xs text-muted-foreground">
-          {formatRelative(finding.opened_at)}
+          <Time iso={finding.opened_at} />
         </span>
       </div>
       {finding.description ? (

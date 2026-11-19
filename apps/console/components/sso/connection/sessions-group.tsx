@@ -1,8 +1,11 @@
 "use client"
 
 import * as React from "react"
+import { useBoneLoading } from "@repo/ui/components/bone/bone"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { changeSsoConnection, type ConnectionChange } from "@/lib/sso-actions"
+import { SCIM_SESSION_LIMIT_NOTE } from "@/lib/sso-authorization"
+import type { SsoConnectionShape } from "@/lib/shapes/sso-connection"
 import { toastDone } from "@/lib/toast"
 import type { SsoAbilities, SsoConnection } from "@/lib/sso-types"
 import { SettingsGroup, SettingsRow } from "../settings-card"
@@ -10,7 +13,7 @@ import {
   connectionWriteNeedsStepUp,
   isLocked,
   OwnerNote,
-  scimSessionLimitNote,
+  RowBone,
   useSsoCall,
 } from "../shared"
 
@@ -47,15 +50,17 @@ function withCurrent(
 export function SessionsGroup({
   connection,
   abilities,
+  shape,
   onChange,
 }: {
   connection: SsoConnection
   abilities: SsoAbilities
+  shape: SsoConnectionShape
   onChange: (connection: SsoConnection) => void
 }) {
   const call = useSsoCall()
+  const skeleton = useBoneLoading()
   const locked = isLocked(connection, abilities)
-  const sessionNote = scimSessionLimitNote(connection.directoryState)
 
   async function patch(change: ConnectionChange, done: string) {
     const result = await call(() => changeSsoConnection(connection.id, change), {
@@ -75,23 +80,25 @@ export function SessionsGroup({
         description="Sign out after this duration even if active."
         action={
           <div className="w-44">
-            <MorphSelect
-              label="Longest session"
-              hideLabel
-              disabled={locked}
-              value={
-                connection.maxSessionSeconds === null
-                  ? "none"
-                  : String(connection.maxSessionSeconds)
-              }
-              onValueChange={(v) =>
-                void patch(
-                  { maxSessionSeconds: v === "none" ? null : Number(v) },
-                  "Session length saved",
-                )
-              }
-              items={withCurrent(MAX_SESSION, connection.maxSessionSeconds)}
-            />
+            <RowBone id="longest" loading={skeleton} width={176} height={40}>
+              <MorphSelect
+                label="Longest session"
+                hideLabel
+                disabled={locked}
+                value={
+                  connection.maxSessionSeconds === null
+                    ? "none"
+                    : String(connection.maxSessionSeconds)
+                }
+                onValueChange={(v) =>
+                  void patch(
+                    { maxSessionSeconds: v === "none" ? null : Number(v) },
+                    "Session length saved",
+                  )
+                }
+                items={withCurrent(MAX_SESSION, connection.maxSessionSeconds)}
+              />
+            </RowBone>
           </div>
         }
       />
@@ -101,23 +108,25 @@ export function SessionsGroup({
         description="Sign out when inactive for this duration."
         action={
           <div className="w-44">
-            <MorphSelect
-              label="Sign out when idle"
-              hideLabel
-              disabled={locked}
-              value={
-                connection.idleTimeoutSeconds === null
-                  ? "none"
-                  : String(connection.idleTimeoutSeconds)
-              }
-              onValueChange={(v) =>
-                void patch(
-                  { idleTimeoutSeconds: v === "none" ? null : Number(v) },
-                  "Idle timeout saved",
-                )
-              }
-              items={withCurrent(IDLE, connection.idleTimeoutSeconds)}
-            />
+            <RowBone id="idle" loading={skeleton} width={176} height={40}>
+              <MorphSelect
+                label="Sign out when idle"
+                hideLabel
+                disabled={locked}
+                value={
+                  connection.idleTimeoutSeconds === null
+                    ? "none"
+                    : String(connection.idleTimeoutSeconds)
+                }
+                onValueChange={(v) =>
+                  void patch(
+                    { idleTimeoutSeconds: v === "none" ? null : Number(v) },
+                    "Idle timeout saved",
+                  )
+                }
+                items={withCurrent(IDLE, connection.idleTimeoutSeconds)}
+              />
+            </RowBone>
           </div>
         }
       />
@@ -130,7 +139,8 @@ export function SessionsGroup({
             the longest session limit, or when your directory deactivates someone.
           </p>
         )}
-        {sessionNote && <p>{sessionNote}</p>}
+        {/* ⚠ THE SHAPE SAYS WHETHER SCIM IS MISSING (the note is fixed copy), so the skeleton has the line too. */}
+        {shape.sessionNote && <p>{SCIM_SESSION_LIMIT_NOTE}</p>}
         <OwnerNote abilities={abilities} />
       </div>
     </SettingsGroup>

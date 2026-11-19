@@ -27,15 +27,21 @@ export function SettingsWorkspace({
   initialWorkspace?: Pick<TenantProfile, "id" | "name"> | null
   clerkEnabled?: boolean
 }) {
-  if (!clerkEnabled || !initialWorkspace) return null
+  if (!clerkEnabled) return null
 
-  return <ClerkSettingsWorkspace initialWorkspace={initialWorkspace} />
+  return <ClerkSettingsWorkspace initialWorkspace={initialWorkspace ?? null} />
 }
 
+/*
+ * ⚠ `initialWorkspace` IS THE SERVER'S ANSWER BEFORE CLERK HAS ONE, AND MAY BE
+ * ABSENT. The settings skeleton drawn at the click (components/section-frame)
+ * has no server answer; by then Clerk has loaded the organization, so the
+ * picker draws from that alone, as the layout's does a moment later.
+ */
 function ClerkSettingsWorkspace({
   initialWorkspace,
 }: {
-  initialWorkspace: Pick<TenantProfile, "id" | "name">
+  initialWorkspace: Pick<TenantProfile, "id" | "name"> | null
 }) {
   const { organization } = useOrganization()
   const { isLoaded, setActive, userMemberships } = useOrganizationList({
@@ -54,7 +60,7 @@ function ClerkSettingsWorkspace({
   const activeOrg = organization ?? initialWorkspace
 
   const items = memberships.map((m) => {
-    const org = m.organization.id === activeOrg.id ? activeOrg : m.organization
+    const org = m.organization.id === activeOrg?.id ? activeOrg : m.organization
     // Clerk's picture, its default without an upload, as the rail shows it.
     const imageUrl =
       "imageUrl" in org && typeof org.imageUrl === "string" ? org.imageUrl : undefined
@@ -66,7 +72,7 @@ function ClerkSettingsWorkspace({
   })
 
   async function choose(id: string) {
-    if (id === (pending?.id ?? activeOrg.id)) return
+    if (id === (pending?.id ?? activeOrg?.id)) return
     const targetOrg = memberships.find((m) => m.organization.id === id)?.organization
     const target = targetOrg
       ? {
@@ -104,7 +110,7 @@ function ClerkSettingsWorkspace({
    * placeholder first made one-workspace people watch a picker appear and
    * vanish. Already loaded on mount (a client navigation), it is simply there.
    */
-  const show = isLoaded && memberships.length >= 2
+  const show = isLoaded && memberships.length >= 2 && activeOrg !== null
 
   return (
     <AnimatePresence initial={false}>
@@ -133,7 +139,7 @@ function ClerkSettingsWorkspace({
             hideLabel
             align="end"
             items={items}
-            value={pending?.id ?? activeOrg.id}
+            value={pending?.id ?? activeOrg?.id ?? ""}
             disabled={busy || pending !== null}
             onValueChange={(id) => void choose(id)}
           />

@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { usePathname } from "next/navigation"
+import { usePendingNavigation } from "@/lib/pending-navigation"
+import { useRoutePathname } from "@/lib/target-route"
 import {
   PageActions,
   PageDescription,
@@ -22,7 +23,10 @@ import { SETTINGS_COPY } from "@/lib/page-copy"
  * moving between General, Team, Single sign-on, etc.
  */
 export function SettingsHeader({ actions }: { actions?: React.ReactNode }) {
-  const pathname = usePathname()
+  const current = useRoutePathname()
+  // The tab just clicked names the page at once, as its skeleton draws below.
+  const pending = usePendingNavigation()?.pathname
+  const pathname = pending && findSettingsItem(pending) ? pending : current
   const item = findSettingsItem(pathname)
   const label = item?.label ?? "Settings"
   const description = item ? SETTINGS_COPY[item.href] : undefined

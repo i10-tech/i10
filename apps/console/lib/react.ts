@@ -55,6 +55,12 @@ export function useSyncedState<T>(
  * effect in a render phase that React is allowed to run twice, throw away, or
  * replay. If it needs to do more than set local state, it belongs in an event
  * handler.
+ *
+ * ⚠ `token` IS COMPARED BY IDENTITY, SO IT MUST BE STABLE WHILE NOTHING CHANGES.
+ * `data?.rows ?? []` is a new array on every render, so every render is a
+ * "change": reset sets state, the render repeats, and React stops it with "Too
+ * many re-renders". A view drawn as its own skeleton has no data, which is
+ * exactly that case. Default to `NONE` below instead.
  */
 export function useResetWhen(token: unknown, reset: () => void): void {
   const [seen, setSeen] = React.useState(token)
@@ -134,3 +140,15 @@ export function useRetained<T>(value: T | null): T | null {
 
   return value ?? kept
 }
+
+/**
+ * The empty list a view uses while it has no data: one array, the same on every
+ * render.
+ *
+ * ⚠ USE IT INSTEAD OF `?? []` FOR DATA A VIEW MAY NOT HAVE YET. Each view also
+ * draws its own skeleton with no data, and a fresh `[]` per render is a new
+ * value to anything that compares by identity (`useResetWhen`, effect and memo
+ * dependencies), which loops. `never[]` accepts no pushes, so nothing can
+ * quietly fill it for every other caller.
+ */
+export const NONE: never[] = []

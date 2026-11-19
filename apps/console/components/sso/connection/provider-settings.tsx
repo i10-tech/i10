@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { oidcSetup, samlSetup } from "@/lib/sso-actions"
+import type { SsoConnectionShape } from "@/lib/shapes/sso-connection"
 import type { SsoAbilities, SsoConnection } from "@/lib/sso-types"
 import { Advanced } from "../settings-card"
 import { Loading, useRemote } from "../shared"
@@ -13,29 +14,43 @@ const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000
 export function ProviderSettings({
   connection,
   abilities,
+  shape,
 }: {
   connection: SsoConnection
   abilities: SsoAbilities
+  shape: SsoConnectionShape
 }) {
+  // ⚠ WHETHER IT OPENS BY ITSELF IS THE SHAPE'S (`failing`): the skeleton draws the
+  // row open or shut the way the page will, instead of the page opening it a beat later.
   return connection.protocol === "saml" ? (
-    <SamlProviderSection connection={connection} abilities={abilities} />
+    <SamlProviderSection
+      connection={connection}
+      abilities={abilities}
+      failing={shape.failing}
+    />
   ) : (
-    <OidcProviderSection connection={connection} abilities={abilities} />
+    <OidcProviderSection
+      connection={connection}
+      abilities={abilities}
+      failing={shape.failing}
+    />
   )
 }
 
 function OidcProviderSection({
   connection,
   abilities,
+  failing,
 }: {
   connection: SsoConnection
   abilities: SsoAbilities
+  failing: boolean
 }) {
   const { data, setData, failed } = useRemote(() => oidcSetup(connection.id))
   const [now] = React.useState(() => Date.now())
 
   let autoOpenMessage: string | null = null
-  if (connection.health?.failing) {
+  if (failing) {
     autoOpenMessage = "Opened because this connection is reporting sign-in failures."
   } else if (data?.secretExpiresAt) {
     const diff = new Date(data.secretExpiresAt).getTime() - now
@@ -79,15 +94,17 @@ function OidcProviderSection({
 function SamlProviderSection({
   connection,
   abilities,
+  failing,
 }: {
   connection: SsoConnection
   abilities: SsoAbilities
+  failing: boolean
 }) {
   const { data, setData, failed } = useRemote(() => samlSetup(connection.id))
   const [now] = React.useState(() => Date.now())
 
   let autoOpenMessage: string | null = null
-  if (connection.health?.failing) {
+  if (failing) {
     autoOpenMessage = "Opened because this connection is reporting sign-in failures."
   } else if (data?.certificates) {
     for (const cert of data.certificates) {

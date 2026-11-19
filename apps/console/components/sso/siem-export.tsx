@@ -18,7 +18,7 @@ import { removeSiem, saveSiem, siemSettings, testSiem } from "@/lib/sso-policy-a
 import { toastDone } from "@/lib/toast"
 import type { SiemSettingsAnswer, SiemTestResult, SsoAbilities } from "@/lib/sso-types"
 import { SettingsRow } from "./settings-card"
-import { Loading, ToggleRow, useRemote, useSsoCall } from "./shared"
+import { Loading, RowBone, ToggleRow, useRemote, useSsoCall } from "./shared"
 
 export function SiemExportPanel({
   abilities,
@@ -28,23 +28,29 @@ export function SiemExportPanel({
   initial?: SiemSettingsAnswer | null
 }) {
   const { data, setData, failed } = useRemote(siemSettings, initial)
-  if (!data) return <Loading failed={failed} />
+  if (!data && (failed?.upgrade || failed?.message)) return <Loading failed={failed} />
   return (
     <Form
-      key={JSON.stringify(data.settings)}
-      answer={data}
+      key={JSON.stringify(data?.settings)}
+      answer={data ?? NOT_LOADED}
+      loading={!data}
       abilities={abilities}
       onChanged={setData}
     />
   )
 }
 
+/** What the row is drawn from while it loads. */
+const NOT_LOADED: SiemSettingsAnswer = { configured: false, settings: null }
+
 function Form({
   answer,
+  loading,
   abilities,
   onChanged,
 }: {
   answer: SiemSettingsAnswer
+  loading: boolean
   abilities: SsoAbilities
   onChanged: (next: SiemSettingsAnswer) => void
 }) {
@@ -106,30 +112,32 @@ function Form({
       title="SIEM export"
       description="Send the identity audit log to a bucket of your own so your security tools can read it."
       action={
-        <div className="flex items-center gap-3">
-          {answer.configured ? (
-            <>
-              <Badge tone={view?.enabled ? "success" : "neutral"} size="sm">
-                {view?.enabled ? "On" : "Off"}
-              </Badge>
-              <Button variant="ghost" size="sm" onClick={() => setOpen(!open)}>
-                {open ? "Close" : "Edit"}
-              </Button>
-            </>
-          ) : (
-            <>
-              <span className="text-sm text-muted-foreground">Off</span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={locked}
-                onClick={() => setOpen(!open)}
-              >
-                {open ? "Cancel" : "Set up"}
-              </Button>
-            </>
-          )}
-        </div>
+        <RowBone id="siem" loading={loading} width={110}>
+          <div className="flex items-center gap-3">
+            {answer.configured ? (
+              <>
+                <Badge tone={view?.enabled ? "success" : "neutral"} size="sm">
+                  {view?.enabled ? "On" : "Off"}
+                </Badge>
+                <Button variant="ghost" size="sm" onClick={() => setOpen(!open)}>
+                  {open ? "Close" : "Edit"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <span className="text-sm text-muted-foreground">Off</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={locked}
+                  onClick={() => setOpen(!open)}
+                >
+                  {open ? "Cancel" : "Set up"}
+                </Button>
+              </>
+            )}
+          </div>
+        </RowBone>
       }
     >
       <Reveal show={open} spacing="pt-3">

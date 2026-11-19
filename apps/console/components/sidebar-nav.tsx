@@ -16,6 +16,7 @@ import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { StatusDot } from "@repo/ui/components/i10/status"
 import type { Attention } from "@/lib/types"
 import { readDomainAttention } from "@/lib/attention"
+import { useDestinationPathname } from "@/lib/pending-navigation"
 import { useResetWhen } from "@/lib/react"
 import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/nav"
 
@@ -45,28 +46,16 @@ import { inSettings, isActive, NAV, SETTINGS_NAV, type NavGroup } from "@/lib/na
 export function SidebarNav({
   groups,
   /**
-   * What makes this rail's highlight its own.
-   *
-   * ⚠ TWO RAILS EXIST AT ONCE - THE DESKTOP ONE AND THE MOBILE DRAWER - AND A
-   * SHARED `layoutId` WOULD MAKE THEM FIGHT. Motion matches the id globally, so
-   * two mounted highlights claiming the same one means it tries to morph a
-   * 240px rail's pill into a drawer's and back on every render. The scope is a
-   * prop rather than a `useId` because it has to be STABLE across navigations:
-   * a generated id changes when the tree remounts, and a highlight whose
-   * identity changed is a highlight that fades instead of travelling.
-   */
-  scope = "rail",
-  /**
    * What needs somebody to act, streamed in after the rail has rendered - see
    * `AttentionMark`. Null when it could not be read.
    */
   attention,
 }: {
   groups?: NavGroup[]
-  scope?: string
   attention?: Promise<Attention["domains"] | null>
 }) {
-  const pathname = usePathname()
+  // The click's destination, so the highlight lands with the skeleton.
+  const pathname = useDestinationPathname()
 
   /*
    * ⚠ THE RAIL SWAPS RATHER THAN THE PAGE GROWING A SECOND COLUMN. Settings
@@ -85,13 +74,30 @@ export function SidebarNav({
    */
   const settings = groups === undefined && inSettings(pathname)
   const shown = groups ?? (settings ? SETTINGS_NAV : NAV)
+  const nav = React.useRef<HTMLElement>(null)
+  const pill = useActivePill(nav, `${pathname}|${settings}`)
 
   return (
     <nav
-      className="flex flex-col gap-4 px-2 py-1"
+      ref={nav}
+      className="relative flex flex-col gap-4 px-2 py-1"
       aria-label={settings ? "Settings" : "Primary"}
       onKeyDown={moveFocus}
     >
+      {/*
+       * ⚠ ONE FILL FOR THE WHOLE RAIL, MOVED BY A CSS TRANSFORM, SO IT RUNS ON
+       * THE COMPOSITOR (2026-11-09). It used to be a `layoutId` span per row,
+       * driven frame by frame from JavaScript; the highlight now starts at the
+       * click, and the commit that follows holds the main thread for 100ms or
+       * more in dev, so the spring jumped 40px in one frame. A transform
+       * transition keeps moving while the page renders. Painted first, so the
+       * rows' labels sit above it.
+       */}
+      <span
+        ref={pill}
+        aria-hidden
+        className="pointer-events-none absolute top-0 left-0 rounded-[10px] bg-sidebar-accent opacity-0"
+      />
       {settings && (
         /*
          * ⚠ "Back to the dashboard" RATHER THAN A BARE ARROW. An arrow alone in a
@@ -168,14 +174,6 @@ export function SidebarNav({
                       : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
                   )}
                 >
-                  {active && (
-                    <motion.span
-                      layoutId={`${scope}-active`}
-                      aria-hidden
-                      className="absolute inset-0 -z-10 rounded-[10px] bg-sidebar-accent"
-                      transition={ACTIVE_SPRING}
-                    />
-                  )}
                   <NavIcon icon={Icon} active={active} />
                   <span className="truncate">{item.label}</span>
                   {item.href === "/domains" && attention && (
@@ -211,16 +209,39 @@ const MotionLink = motion.create(Link)
 const ICON_SPRING: Transition = { type: "spring", stiffness: 500, damping: 30 }
 
 /**
- * ⚠ SOFTER AND SLOWER THAN THE ICON'S, BECAUSE THIS ONE TRAVELS A REAL DISTANCE.
- * The icon nudges by a pixel; the highlight crosses up to four hundred of them
- * between "Overview" and "Settings", and a 500-stiffness spring over that
- * distance is a streak rather than a movement. `damping: 34` against
- * `stiffness: 380` lands it in about 300ms with no visible bounce at the end -
- * long enough to follow with the eye, short enough that it has finished before
- * the new page's content arrives.
+ * Places the rail's fill on the active row, and moves it there when that row
+ * changes. Returns the fill's ref.
+ *
+ * ⚠ ABOUT 300ms ON THE CONSOLE'S ENTER CURVE, as the spring it replaced: long
+ * enough to follow from "Overview" to "Settings", finished before the page's
+ * content arrives. The first placement, and the swap to the settings rail, land
+ * without travel: there is no previous row on screen to come from.
  */
-/** Arc's shared-highlight spring (motion-tokens `spring.morph`). */
-const ACTIVE_SPRING: Transition = motionTokens.spring.morph
+function useActivePill(nav: React.RefObject<HTMLElement | null>, key: string) {
+  const pill = React.useRef<HTMLSpanElement>(null)
+  const placed = React.useRef<string | null>(null)
+  React.useLayoutEffect(() => {
+    const el = pill.current
+    const row = nav.current?.querySelector<HTMLElement>('a[aria-current="page"]')
+    if (!el) return
+    if (!row) {
+      el.style.opacity = "0"
+      placed.current = null
+      return
+    }
+    const rail = placed.current?.split("|")[1]
+    const travel = placed.current !== null && rail === key.split("|")[1]
+    el.style.transition = travel
+      ? "transform 300ms var(--ease-enter), height 300ms var(--ease-enter)"
+      : "none"
+    el.style.width = `${row.offsetWidth}px`
+    el.style.height = `${row.offsetHeight}px`
+    el.style.transform = `translate(${row.offsetLeft}px, ${row.offsetTop}px)`
+    el.style.opacity = "1"
+    placed.current = key
+  }, [nav, key])
+  return pill
+}
 
 /**
  * ⚠ NOTHING ON HOVER, A PRESS ON TAP (2026-10-03). The icon used to grow and

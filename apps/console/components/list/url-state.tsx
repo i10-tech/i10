@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
+import { useRoutePathname, useRouteSearchParams } from "@/lib/target-route"
 import { cn } from "cn"
 
 /**
@@ -26,8 +27,8 @@ const UrlListContext = React.createContext<UrlListState | null>(null)
 
 function useOwnUrlState(): UrlListState {
   const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  const pathname = useRoutePathname()
+  const searchParams = useRouteSearchParams()
   const [pending, start] = React.useTransition()
   const commit = React.useCallback(
     (mutate: (params: URLSearchParams) => void) => {

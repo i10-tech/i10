@@ -13,24 +13,37 @@ import {
   Webhook,
 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge/badge"
+import { Bone, BoneRegion, BoneScope } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { DropdownMenuItem, DropdownMenuSeparator } from "@repo/ui/components/i10/menu"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
-import { ListCard, ListGrid, MotionBody, MotionRow } from "@/components/list/motion"
 import {
+  ListCard,
+  ListGrid,
+  MotionBody,
+  MotionRow,
+  StaticCard,
+  StaticGrid,
+} from "@/components/list/motion"
+import {
+  ListBody,
   ListCell,
   ListHead,
   ListHeader,
+  ListRow,
   ListTable,
   selectedRowClass,
 } from "@/components/list/table"
 import { BulkBar } from "@/components/list/bulk-bar"
 import { forEachPicked, useListSelection } from "@/components/list/selection"
+import { seedShape } from "@/components/list/remembered-shapes"
+import { webhookDetailShape } from "@/lib/shapes/webhook-detail"
 import {
   FilterSelect,
+  ListResults,
+  ListSearch,
   ListToolbar,
-  ResultsLine,
-  SearchField,
+  ListToolbarEnd,
   ViewToggle,
   useRememberedView,
 } from "@/components/list/toolbar"
@@ -60,6 +73,8 @@ import { RowMenu } from "@/components/list/row-menu"
 import Link from "next/link"
 import { cn } from "cn"
 
+const NAME_WIDTHS = ["62%", "48%", "72%", "55%"]
+
 /**
  * The endpoints, as cards rather than a table.
  *
@@ -80,20 +95,31 @@ import { cn } from "cn"
 export function WebhookList({
   endpoints,
   stats,
+  count = 3,
+  shapeView,
+  loading = false,
 }: {
-  endpoints: WebhookEndpoint[]
+  endpoints?: WebhookEndpoint[]
   /** The last 24 hours across the workspace; null when it could not be read. */
-  stats: WebhookStats | null
+  stats?: WebhookStats | null
+  count?: number
+  shapeView?: "grid" | "table"
+  loading?: boolean
 }) {
+  const isLoaded = !loading && endpoints !== undefined
   const [deleting, setDeleting] = React.useState<WebhookEndpoint | null>(null)
   const [rotating, setRotating] = React.useState<WebhookEndpoint | null>(null)
 
   const [query, setQuery] = React.useState("")
   const [state, setState] = React.useState("")
-  const [view, setView] = useRememberedView("webhooks", "grid")
+  const [view, setView] = useRememberedView("webhooks", shapeView ?? "grid")
+  // ⚠ THE CHOSEN VIEW IN BOTH MODES, as every other list (2026-11-18). The
+  // shape's view is only the server's guess when nothing was chosen; drawn
+  // from it while loading, the skeleton was a grid for a table chosen since.
+  const effectiveView = view
 
   const q = query.trim().toLowerCase()
-  const shown = endpoints.filter(
+  const shown = (endpoints ?? []).filter(
     (e) =>
       (!q ||
         endpointName(e).toLowerCase().includes(q) ||
@@ -106,7 +132,44 @@ export function WebhookList({
   const [bulkDeleting, setBulkDeleting] = React.useState<WebhookEndpoint[] | null>(null)
   const [bulkBusy, setBulkBusy] = React.useState(false)
 
-  if (endpoints.length === 0) {
+  const seedEndpoint = React.useCallback((e: WebhookEndpoint) => {
+    seedShape(webhookDetailShape, e.id, {
+      kind: e.kind,
+      tab: "overview",
+      state: endpointState(e),
+      notice:
+        e.health === "disabled"
+          ? "disabled"
+          : !e.enabled
+            ? "paused"
+            : e.health === "failing"
+              ? "failing"
+              : "none",
+      deliveries: 5,
+      replays: 0,
+      health: e.health === "healthy" ? 0 : 1,
+      described: Boolean(e.description),
+      events: 0,
+    })
+  }, [])
+
+  React.useEffect(() => {
+    for (const e of endpoints ?? []) {
+      seedEndpoint(e)
+    }
+  }, [endpoints, seedEndpoint])
+
+  if (isLoaded && endpoints.length === 0) {
+    return (
+      <EmptyState
+        icon={<Webhook />}
+        title="No endpoints yet"
+        description="Add one to receive delivery, bounce and complaint events as they happen: posted to your URL, sent to an SQS queue, or waiting for you to fetch."
+      />
+    )
+  }
+
+  if (!isLoaded && count === 0) {
     return (
       <EmptyState
         icon={<Webhook />}
@@ -231,150 +294,317 @@ export function WebhookList({
     </RowMenu>
   )
 
+  const rows: (WebhookEndpoint | undefined)[] = isLoaded
+    ? shown
+    : Array.from({ length: count }, () => undefined)
+  const Grid = isLoaded ? ListGrid : StaticGrid
+  const Body = isLoaded ? MotionBody : ListBody
+  const RowEl = isLoaded ? MotionRow : ListRow
+
   return (
     <>
       <ListToolbar>
-        <SearchField
+        <ListSearch
           value={query}
           onChange={setQuery}
           placeholder="Search endpoints or events"
           label="Search endpoints"
         />
-        <FilterSelect
-          value={state}
-          onValueChange={setState}
-          label="State"
-          allLabel="All endpoints"
-          options={(["healthy", "failing", "disabled", "paused"] as const).map(
-            (value) => ({ value, label: STATE_LABEL[value] }),
-          )}
+        <ListResults
+          count={shown.length}
+          query={query}
+          filtered={state !== ""}
+          noun={["endpoint", "endpoints"]}
+          onClear={clear}
         />
-        <ViewToggle value={view} onChange={setView} />
+        <ListToolbarEnd>
+          <FilterSelect
+            value={state}
+            onValueChange={setState}
+            label="State"
+            allLabel="All endpoints"
+            options={(["healthy", "failing", "disabled", "paused"] as const).map(
+              (value) => ({ value, label: STATE_LABEL[value] }),
+            )}
+          />
+          <ViewToggle value={effectiveView} onChange={setView} />
+        </ListToolbarEnd>
       </ListToolbar>
-      <ResultsLine
-        count={shown.length}
-        query={query}
-        filtered={state !== ""}
-        noun={["endpoint", "endpoints"]}
-        onClear={clear}
-      />
 
       <div className="pt-4">
-        {shown.length === 0 ? (
-          <EmptyState
-            icon={<SearchX />}
-            title="No endpoint matches"
-            description="Try another address or event, or clear the filters."
-            secondary={
-              <Button size="sm" variant="secondary" onClick={clear}>
-                Clear filters
-              </Button>
-            }
-          />
-        ) : view === "grid" ? (
-          <ListGrid className="lg:grid-cols-2 2xl:grid-cols-3">
-            {shown.map((endpoint) => (
-              <ListCard
-                key={endpoint.id}
-                id={endpoint.id}
-                href={`/webhooks/${endpoint.id}`}
-                menu={menu(endpoint)}
-                muted={!endpoint.enabled && endpoint.health !== "disabled"}
-                select={selection.rowBox(endpoint, `Select ${endpointName(endpoint)}`)}
-                selected={selection.isTicked(endpoint)}
-                selecting={picked.length > 0}
-              >
-                <div className="flex min-w-0 items-center gap-3 pr-20">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
-                    <KindIcon kind={endpoint.kind} />
-                  </span>
-                  <div className="min-w-0">
-                    <p
-                      className="truncate font-mono text-sm"
-                      title={endpointName(endpoint)}
+        <BoneRegion id="endpoints">
+          {isLoaded && shown.length === 0 ? (
+            <EmptyState
+              icon={<SearchX />}
+              title="No endpoint matches"
+              description="Try another address or event, or clear the filters."
+              secondary={
+                <Button size="sm" variant="secondary" onClick={clear}>
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : effectiveView === "grid" ? (
+            <Grid className="lg:grid-cols-2 2xl:grid-cols-3">
+              {rows.map((endpoint, i) => {
+                const body = (
+                  <>
+                    <div
+                      className="flex min-w-0 items-center gap-3 pr-20"
+                      onPointerEnter={() => {
+                        if (endpoint) seedEndpoint(endpoint)
+                      }}
                     >
-                      {endpointName(endpoint)}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {KIND_LABEL[endpoint.kind]}
-                      {endpoint.description && ` · ${endpoint.description}`}
-                    </p>
-                  </div>
-                </div>
-                <Events events={endpoint.events} />
-                <PreviousSecrets endpoint={endpoint} />
-                {endpoint.health === "disabled" && endpoint.disabled_reason && (
-                  <p className="text-xs text-danger">
-                    Switched off by i10: {endpoint.disabled_reason}
-                  </p>
-                )}
-                <div className="mt-auto flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <EndpointStatus state={endpointState(endpoint)} />
-                  <ErrorRate rate={rates.get(endpoint.id) ?? null} />
-                </div>
-              </ListCard>
-            ))}
-          </ListGrid>
-        ) : (
-          <ListTable>
-            <ListHeader>
-              <th className="w-10 py-2.5 pl-4">
-                {selection.headerBox("Select all endpoints")}
-              </th>
-              <ListHead className="pl-0">Endpoint</ListHead>
-              <ListHead className="w-[9rem]">Status</ListHead>
-              <ListHead className="hidden w-[7rem] sm:table-cell">Kind</ListHead>
-              <ListHead className="hidden md:table-cell">Events</ListHead>
-              <ListHead className="w-[7rem] text-right">Error rate</ListHead>
-              <ListHead className="w-12">
-                <span className="sr-only">Actions</span>
-              </ListHead>
-            </ListHeader>
-            <MotionBody>
-              {shown.map((endpoint) => (
-                <MotionRow
-                  key={endpoint.id}
-                  href={`/webhooks/${endpoint.id}`}
-                  className={cn(
-                    !endpoint.enabled && endpoint.health !== "disabled" && "opacity-60",
-                    selection.isTicked(endpoint) && selectedRowClass,
-                  )}
-                >
-                  <td className="w-10 py-3 pl-4">
-                    {selection.rowBox(endpoint, `Select ${endpointName(endpoint)}`)}
-                  </td>
-                  <ListCell className="max-w-0 pl-0">
-                    <Link
-                      href={`/webhooks/${endpoint.id}`}
-                      className="block truncate font-mono text-xs outline-none hover:underline focus-visible:underline"
-                      title={endpointName(endpoint)}
+                      <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-muted/50 text-muted-foreground transition-colors group-hover:text-foreground">
+                        <Bone
+                          id="kind-icon"
+                          shape="box"
+                          width={16}
+                          height={16}
+                          radius={4}
+                          inline
+                        >
+                          {endpoint && <KindIcon kind={endpoint.kind} />}
+                        </Bone>
+                      </span>
+                      <div className="min-w-0">
+                        <Bone
+                          id="name"
+                          width={NAME_WIDTHS[i % NAME_WIDTHS.length]}
+                          lineHeight={20}
+                          className="font-mono text-sm"
+                        >
+                          {endpoint && (
+                            <p
+                              className="truncate font-mono text-sm"
+                              title={endpointName(endpoint)}
+                            >
+                              {endpointName(endpoint)}
+                            </p>
+                          )}
+                        </Bone>
+                        <Bone
+                          id="desc"
+                          width={140}
+                          lineHeight={16}
+                          className="text-xs text-muted-foreground"
+                        >
+                          {endpoint && (
+                            <p className="truncate text-xs text-muted-foreground">
+                              {KIND_LABEL[endpoint.kind]}
+                              {endpoint.description && ` · ${endpoint.description}`}
+                            </p>
+                          )}
+                        </Bone>
+                      </div>
+                    </div>
+                    <Bone
+                      id="events"
+                      shape="box"
+                      width={180}
+                      height={22}
+                      radius={9999}
+                      inline
                     >
-                      {endpointName(endpoint)}
-                    </Link>
-                    {endpoint.description && (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {endpoint.description}
-                      </p>
+                      {endpoint && <Events events={endpoint.events} limit={2} />}
+                    </Bone>
+                    {/*
+                     * ⚠ ONE LINE, ALWAYS THERE (2026-11-19), so every card is one
+                     * height and the skeleton's is the same. It says one thing about
+                     * one endpoint (a switch-off, a rotation still signing); most have
+                     * neither, so the skeleton keeps it empty rather than draw a bar
+                     * that would be wrong more often than right.
+                     */}
+                    <div className="h-4 min-w-0">
+                      {endpoint && <CardNote endpoint={endpoint} />}
+                    </div>
+                    <div className="mt-auto flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <Bone
+                        id="status"
+                        shape="box"
+                        width={76}
+                        height={20}
+                        radius={9999}
+                        inline
+                      >
+                        {endpoint && <EndpointStatus state={endpointState(endpoint)} />}
+                      </Bone>
+                      <Bone id="error-rate" width={90} lineHeight={16} inline>
+                        {endpoint && (
+                          <ErrorRate rate={rates.get(endpoint.id) ?? null} />
+                        )}
+                      </Bone>
+                    </div>
+                  </>
+                )
+                return (
+                  <BoneScope key={endpoint?.id ?? i} id={`endpoint-${i}`} unit>
+                    {endpoint ? (
+                      <ListCard
+                        id={endpoint.id}
+                        href={`/webhooks/${endpoint.id}`}
+                        menu={menu(endpoint)}
+                        muted={!endpoint.enabled && endpoint.health !== "disabled"}
+                        select={selection.rowBox(
+                          endpoint,
+                          `Select ${endpointName(endpoint)}`,
+                        )}
+                        selected={selection.isTicked(endpoint)}
+                        selecting={picked.length > 0}
+                      >
+                        {body}
+                      </ListCard>
+                    ) : (
+                      <StaticCard>{body}</StaticCard>
                     )}
-                  </ListCell>
-                  <ListCell>
-                    <EndpointStatus state={endpointState(endpoint)} />
-                  </ListCell>
-                  <ListCell className="hidden text-xs text-muted-foreground sm:table-cell">
-                    {KIND_LABEL[endpoint.kind]}
-                  </ListCell>
-                  <ListCell className="hidden md:table-cell">
-                    <Events events={endpoint.events} compact />
-                  </ListCell>
-                  <ListCell className="text-right text-xs">
-                    <ErrorRate rate={rates.get(endpoint.id) ?? null} bare />
-                  </ListCell>
-                  <ListCell className="py-1.5 text-right">{menu(endpoint)}</ListCell>
-                </MotionRow>
-              ))}
-            </MotionBody>
-          </ListTable>
-        )}
+                  </BoneScope>
+                )
+              })}
+            </Grid>
+          ) : (
+            <ListTable>
+              <ListHeader>
+                <th className="w-[4.25rem] py-2.5 pl-4">
+                  <Bone
+                    id="all"
+                    shape="box"
+                    width={36}
+                    height={36}
+                    inset={9}
+                    radius={5}
+                    inline
+                  >
+                    {isLoaded && selection.headerBox("Select all endpoints")}
+                  </Bone>
+                </th>
+                <ListHead className="pl-0">Endpoint</ListHead>
+                {/* F = 384 (tick 68, Status 160, Error rate 96, actions 60): Kind 104 -> 708 -> md (832); Events 224 -> 932 -> xl (1056). */}
+                <ListHead className="w-[10rem]">Status</ListHead>
+                <ListHead hideBelow="md" className="w-[6.5rem]">
+                  Kind
+                </ListHead>
+                <ListHead hideBelow="xl" className="w-[14rem]">
+                  Events
+                </ListHead>
+                <ListHead className="w-[6rem] text-right">Error rate</ListHead>
+                <ListHead className="w-[3.75rem]">
+                  <span className="sr-only">Actions</span>
+                </ListHead>
+              </ListHeader>
+              <Body>
+                {rows.map((endpoint, i) => {
+                  const ticked = endpoint !== undefined && selection.isTicked(endpoint)
+                  const href = endpoint ? `/webhooks/${endpoint.id}` : undefined
+                  return (
+                    <BoneScope key={endpoint?.id ?? i} id={`endpoint-${i}`} unit>
+                      <RowEl
+                        clickable
+                        muted={
+                          endpoint !== undefined &&
+                          !endpoint.enabled &&
+                          endpoint.health !== "disabled"
+                        }
+                        {...(href ? { href } : {})}
+                        className={cn(ticked && selectedRowClass)}
+                        onClick={() => {
+                          if (endpoint) seedEndpoint(endpoint)
+                        }}
+                      >
+                        <td className="w-[4.25rem] py-3 pl-4">
+                          <Bone
+                            id="tick"
+                            shape="box"
+                            width={36}
+                            height={36}
+                            inset={9}
+                            radius={5}
+                            inline
+                          >
+                            {endpoint &&
+                              selection.rowBox(
+                                endpoint,
+                                `Select ${endpointName(endpoint)}`,
+                              )}
+                          </Bone>
+                        </td>
+                        <ListCell className="pl-0">
+                          <Bone
+                            id="name"
+                            width={NAME_WIDTHS[i % NAME_WIDTHS.length]}
+                            lineHeight={16}
+                          >
+                            {endpoint && (
+                              <>
+                                <Link
+                                  href={`/webhooks/${endpoint.id}`}
+                                  className="block truncate font-mono text-xs outline-none hover:underline focus-visible:underline"
+                                  title={endpointName(endpoint)}
+                                  onPointerEnter={() => seedEndpoint(endpoint)}
+                                >
+                                  {endpointName(endpoint)}
+                                </Link>
+                                {/* Optional, so inside the bone: a skeleton cannot know which rows have one. */}
+                                {endpoint.description && (
+                                  <p
+                                    className="truncate text-xs text-muted-foreground"
+                                    title={endpoint.description}
+                                  >
+                                    {endpoint.description}
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </Bone>
+                        </ListCell>
+                        <ListCell>
+                          <Bone
+                            id="status"
+                            shape="box"
+                            width={76}
+                            height={20}
+                            radius={9999}
+                            inline
+                          >
+                            {endpoint && (
+                              <EndpointStatus state={endpointState(endpoint)} />
+                            )}
+                          </Bone>
+                        </ListCell>
+                        <ListCell hideBelow="md" className="text-xs text-muted-foreground">
+                          <Bone id="kind" width={48} lineHeight={16}>
+                            {endpoint && KIND_LABEL[endpoint.kind]}
+                          </Bone>
+                        </ListCell>
+                        <ListCell hideBelow="xl">
+                          <Bone
+                            id="events"
+                            shape="box"
+                            width={120}
+                            height={20}
+                            radius={9999}
+                            inline
+                          >
+                            {endpoint && <Events events={endpoint.events} limit={1} />}
+                          </Bone>
+                        </ListCell>
+                        <ListCell className="text-right text-xs">
+                          <Bone id="error-rate" width={40} lineHeight={16} align="end">
+                            {endpoint && (
+                              <ErrorRate rate={rates.get(endpoint.id) ?? null} bare />
+                            )}
+                          </Bone>
+                        </ListCell>
+                        <ListCell className="py-1.5 text-right">
+                          {endpoint && menu(endpoint)}
+                        </ListCell>
+                      </RowEl>
+                    </BoneScope>
+                  )
+                })}
+              </Body>
+            </ListTable>
+          )}
+        </BoneRegion>
       </div>
 
       <BulkBar
@@ -527,28 +757,30 @@ function ErrorRate({ rate, bare = false }: { rate: number | null; bare?: boolean
 }
 
 /**
- * What an endpoint listens for. In a table row, the first two and a count -
- * the whole list is in the tooltip.
+ * What an endpoint listens for: the first `limit` and a count, on one line
+ * whose height never changes (a card's height must not depend on its events).
+ * The whole list is in the title and the count's tooltip.
  *
  * ⚠ AN ENDPOINT WITH NO EVENTS RECEIVES NOTHING, AND THAT IS WORTH SAYING OUT
  * LOUD. It is indistinguishable from a broken handler from the customer's side.
  */
-function Events({ events, compact = false }: { events: string[]; compact?: boolean }) {
+function Events({ events, limit }: { events: string[]; limit: number }) {
   if (events.length === 0) {
     return (
-      <span className="text-xs text-warning">
+      <span className="flex h-[22px] min-w-0 items-center truncate text-xs text-warning">
         Subscribed to no events - this endpoint is never called.
       </span>
     )
   }
-  const shown = compact ? events.slice(0, 2) : events
+  const shown = events.slice(0, limit)
   const rest = events.length - shown.length
   return (
-    // ⚠ ONE LINE IN A ROW. A wrapping list's minimum width is its widest
-    // chip, so beside a column that takes the free width it stacked the
-    // chips three high.
+    // ⚠ ONE LINE. A wrapping list's minimum width is its widest chip, so beside
+    // a column that takes the free width it stacked the chips three high; in a
+    // card it made every card a different height from its skeleton.
     <div
-      className={cn("flex items-center gap-1", compact ? "flex-nowrap" : "flex-wrap")}
+      className="flex h-[22px] min-w-0 flex-nowrap items-center gap-1"
+      title={events.join(", ")}
     >
       {shown.map((event) => (
         <Badge size="sm" key={event} tone="neutral">
@@ -556,14 +788,33 @@ function Events({ events, compact = false }: { events: string[]; compact?: boole
         </Badge>
       ))}
       {rest > 0 && (
-        <Tooltip content={events.slice(2).join(", ")}>
-          <Badge size="sm" tone="neutral">
+        <Tooltip content={events.slice(limit).join(", ")}>
+          <Badge size="sm" tone="neutral" className="shrink-0">
             +{rest}
           </Badge>
         </Tooltip>
       )}
     </div>
   )
+}
+
+/**
+ * A card's one line about its endpoint: a switch-off first, else a rotation
+ * still signing, else nothing.
+ *
+ * ⚠ SKIPPED BY test/skeleton-parity: it exists only for some endpoints, and its
+ * line is reserved in both trees by the card.
+ */
+function CardNote({ endpoint }: { endpoint: WebhookEndpoint }) {
+  if (endpoint.health === "disabled" && endpoint.disabled_reason) {
+    const text = `Switched off: ${endpoint.disabled_reason}`
+    return (
+      <p className="truncate text-xs text-danger" title={text} data-skeleton="skip">
+        {text}
+      </p>
+    )
+  }
+  return <PreviousSecrets endpoint={endpoint} />
 }
 
 /**
@@ -578,9 +829,9 @@ function PreviousSecrets({ endpoint }: { endpoint: WebhookEndpoint }) {
     .at(-1)
   if (!last) return null
   return (
-    <p className="flex items-center gap-1.5 text-xs text-warning">
-      <KeyRound className="size-3.5" />
-      <span>
+    <p className="flex min-w-0 items-center gap-1.5 text-xs text-warning" data-skeleton="skip">
+      <KeyRound className="size-3.5 shrink-0" />
+      <span className="truncate">
         {endpoint.previous_secrets.length === 1
           ? "A previous secret"
           : `${endpoint.previous_secrets.length} previous secrets`}{" "}

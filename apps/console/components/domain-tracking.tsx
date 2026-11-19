@@ -10,6 +10,7 @@ import {
 } from "@repo/ui/components/i10/field"
 import { Switch } from "@repo/ui/components/i10/switch"
 import { updateDomainTracking } from "@/lib/actions"
+import { useResetWhen } from "@/lib/react"
 import { toastError } from "@/lib/toast"
 
 type Setting = "open_tracking" | "click_tracking"
@@ -27,21 +28,30 @@ type Setting = "open_tracking" | "click_tracking"
  * somebody deciding whether they have a lawful basis for it needs to know.
  */
 export function DomainTracking({
-  id,
-  openTracking,
-  clickTracking,
+  id = "",
+  openTracking = false,
+  clickTracking = false,
+  loading = false,
 }: {
-  id: string
-  openTracking: boolean
-  clickTracking: boolean
+  id?: string
+  openTracking?: boolean
+  clickTracking?: boolean
+  loading?: boolean
 }) {
   const [values, setValues] = React.useState({
     open_tracking: openTracking,
     click_tracking: clickTracking,
   })
+  useResetWhen(`${openTracking}:${clickTracking}`, () =>
+    setValues({
+      open_tracking: openTracking,
+      click_tracking: clickTracking,
+    }),
+  )
   const [saving, setSaving] = React.useState<Setting | null>(null)
 
   async function change(setting: Setting, next: boolean) {
+    if (!id || loading) return
     const previous = values[setting]
     setValues((v) => ({ ...v, [setting]: next }))
     setSaving(setting)
@@ -66,7 +76,7 @@ export function DomainTracking({
         <Switch
           id="open-tracking"
           checked={values.open_tracking}
-          disabled={saving === "open_tracking"}
+          disabled={loading || saving === "open_tracking"}
           onCheckedChange={(next) => change("open_tracking", next)}
         />
       </Field>
@@ -81,7 +91,7 @@ export function DomainTracking({
         <Switch
           id="click-tracking"
           checked={values.click_tracking}
-          disabled={saving === "click_tracking"}
+          disabled={loading || saving === "click_tracking"}
           onCheckedChange={(next) => change("click_tracking", next)}
         />
       </Field>

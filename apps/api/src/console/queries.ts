@@ -3,19 +3,32 @@ import type { ContentStore } from "../content/object-store.js"
 import { restoreContent } from "../content/packs.js"
 import { restoreBodies } from "../content/restore.js"
 import { and, desc, eq, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm"
-import type { AnyPgColumn } from "drizzle-orm/pg-core"
+import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core"
 import { ts, withTenant, type Database } from "../db/client.js"
 import {
   apiKeys,
   apiRequests,
+  broadcasts,
+  contacts,
   domains,
+  githubInstallations,
+  githubRepositories,
   messageBodies,
   messageEvents,
   messages,
+  segments,
   suppressions,
+  templateFolders,
+  templates,
+  topics,
+  trustedTemplates,
   webhookDeliveries,
   webhookEndpoints,
 } from "../db/core.js"
+import {
+  connections as ssoConnections,
+  directories as ssoDirectories,
+} from "../db/identity.js"
 import { lastEvent, PRUNE_WINDOW_MS } from "../send/lookup.js"
 import { timestampFromUuidV7 } from "../ids.js"
 import { deliveryConditions, type DeliveryFilter } from "../webhooks/history.js"
@@ -220,6 +233,48 @@ export interface EmailRow {
   last_error: string | null
 }
 
+export const MAX_SKELETON_ROWS = 10
+export const SKELETON_LIMIT_PLUS_ONE = MAX_SKELETON_ROWS + 1
+
+export interface ShapeCounts {
+  domains?: number
+  transfers?: number
+  apiKeys?: number
+  emails?: number
+  logs?: number
+  suppressions?: number
+  contacts?: number
+  segments?: number
+  topics?: number
+  broadcasts?: number
+  webhooks?: number
+  /** Endpoints the attention banner names: switched off, and failing but still on. */
+  webhooksDisabled?: number
+  webhooksFailing?: number
+  /** Distinct statuses among domains (displaced counted apart), for the status filter. */
+  domainStatuses?: number
+  /** Distinct statuses among broadcasts, for the status filter. */
+  broadcastStatuses?: number
+  /** Root templates only; folders are counted in `templateFolders`. */
+  templates?: number
+  templateFolders?: number
+  /** Templates submitted for review. */
+  trustedTemplates?: number
+  githubInstallations?: number
+  githubRepos?: number
+  /** 1 when the GitHub app is wired on this deployment, else 0. */
+  githubConfigured?: number
+  /** SSO connections and directories, for /settings/sso's skeleton. */
+  ssoConnections?: number
+  ssoDirectories?: number
+  /** Plans on offer, and the most entitlements any one lists (billing). */
+  plans?: number
+  planEntitlements?: number
+  /** The plan card that carries a note under its button, and the note's lines. */
+  planNoteCard?: number
+  planNoteLines?: number
+}
+
 export interface ConsoleQueries {
   overview(tenantId: string, days: number): Promise<Overview>
   listEmails(tenantId: string, filters: EmailFilters): Promise<Page<EmailRow>>
@@ -227,6 +282,7 @@ export interface ConsoleQueries {
   listDeliveries(tenantId: string, opts: DeliveryFilters): Promise<Page<DeliveryRow>>
   listRequests(tenantId: string, opts: RequestFilters): Promise<Page<RequestRow>>
   recordRequest(input: RequestRecord): Promise<void>
+  countShapes(tenantId: string): Promise<Omit<ShapeCounts, "transfers">>
 }
 
 export interface EmailDetail extends EmailRow {
@@ -842,6 +898,87 @@ export function consoleQueries(
           country: input.country ? input.country.slice(0, 2).toUpperCase() : null,
         })
       })
+    },
+
+    /**
+     * Counts for every console list page in a single query under withTenant.
+     *
+     * ONE CONNECTION, ONE ROUND TRIP. Runs scalar subqueries capped at 11
+     * rows, matching each list page's unfiltered first page conditions.
+     * If the query fails, returns {} so all pages fall back gracefully.
+     */
+    async countShapes(tenantId) {
+      try {
+        const scalarSubquery = (table: PgTable & { tenantId: AnyPgColumn }) =>
+          sql<number>`(select count(*)::int from (select 1 from ${table} where ${table.tenantId} = ${tenantId} limit ${SKELETON_LIMIT_PLUS_ONE}) s)`
+
+        const [row] = await withTenant(db, tenantId, async (tx) => {
+          return tx
+            .select({
+              domains: scalarSubquery(domains),
+              apiKeys: scalarSubquery(apiKeys),
+              emails: scalarSubquery(messages),
+              logs: scalarSubquery(apiRequests),
+              suppressions: scalarSubquery(suppressions),
+              contacts: scalarSubquery(contacts),
+              segments: scalarSubquery(segments),
+              topics: scalarSubquery(topics),
+              broadcasts: scalarSubquery(broadcasts),
+              webhooks: scalarSubquery(webhookEndpoints),
+              // ⚠ THE BANNER'S OWN CONDITION (WebhookAttentionBanner): disabled
+              // outranks failing, and only an ENABLED failing endpoint counts.
+              webhooksDisabled: sql<number>`(select count(*)::int from (select 1 from ${webhookEndpoints} where ${webhookEndpoints.tenantId} = ${tenantId} and ${webhookEndpoints.health} = 'disabled' limit ${SKELETON_LIMIT_PLUS_ONE}) s)`,
+              webhooksFailing: sql<number>`(select count(*)::int from (select 1 from ${webhookEndpoints} where ${webhookEndpoints.tenantId} = ${tenantId} and ${webhookEndpoints.health} = 'failing' and ${webhookEndpoints.enabled} limit ${SKELETON_LIMIT_PLUS_ONE}) s)`,
+              // ⚠ THE PAGE'S STATUS RULE, DISPLACED INCLUDED (statusOf in
+              // lib/shapes/domains.ts): a displaced domain is its own status.
+              domainStatuses: sql<number>`(select count(distinct case when ${domains.displacedAt} is not null then 'displaced' else ${domains.status}::text end)::int from ${domains} where ${domains.tenantId} = ${tenantId})`,
+              broadcastStatuses: sql<number>`(select count(distinct ${broadcasts.status})::int from ${broadcasts} where ${broadcasts.tenantId} = ${tenantId})`,
+              // ⚠ ROOT TEMPLATES AND FOLDERS ARE COUNTED APART. The page draws a
+              // folder card and a template card differently, so one summed
+              // number drew the wrong cards for most workspaces.
+              templates: sql<number>`(select count(*)::int from (select 1 from ${templates} where ${templates.tenantId} = ${tenantId} and ${templates.folderId} is null limit ${SKELETON_LIMIT_PLUS_ONE}) s)`,
+              templateFolders: scalarSubquery(templateFolders),
+              trustedTemplates: scalarSubquery(trustedTemplates),
+              githubInstallations: scalarSubquery(githubInstallations),
+              githubRepos: scalarSubquery(githubRepositories),
+            })
+            .from(sql`(select 1) as _`)
+        })
+
+        if (!row) return {}
+        const cap = (n: unknown) =>
+          Math.min(Math.max(Number(n) || 0, 0), MAX_SKELETON_ROWS)
+        const counts: Omit<ShapeCounts, "transfers"> = Object.fromEntries(
+          Object.entries(row).map(([key, n]) => [key, cap(n)]),
+        )
+
+        /*
+         * ⚠ EACH SSO COUNT RUNS IN ITS OWN QUERY. They read the identity schema;
+         * if one read fails (a grant, a table a database predates) only that
+         * count is left out, and the SSO skeleton draws neutral rows for it
+         * rather than the other pages losing theirs.
+         */
+        await Promise.all(
+          (
+            [
+              ["ssoConnections", ssoConnections],
+              ["ssoDirectories", ssoDirectories],
+            ] as const
+          ).map(async ([key, table]) => {
+            try {
+              const [sso] = await withTenant(db, tenantId, async (tx) =>
+                tx.select({ n: scalarSubquery(table) }).from(sql`(select 1) as _`),
+              )
+              if (sso) counts[key] = cap(sso.n)
+            } catch {
+              // Omitted: unknown, never zero.
+            }
+          }),
+        )
+        return counts
+      } catch {
+        return {}
+      }
     },
   }
 }

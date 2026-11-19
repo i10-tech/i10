@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
+import { useRoutePathname, useRouteSearchParams } from "@/lib/target-route"
 import SegmentedControl from "@repo/ui/components/segmented-control/segmented-control"
 import { WINDOWS, type WindowValue } from "@/lib/webhooks"
 
@@ -16,8 +17,8 @@ import { WINDOWS, type WindowValue } from "@/lib/webhooks"
  */
 export function WindowPicker({ value }: { value: WindowValue }) {
   const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  const pathname = useRoutePathname()
+  const searchParams = useRouteSearchParams()
   const [pending, start] = useTransition()
   const [chosen, setChosen] = useState<WindowValue>(value)
   const [seen, setSeen] = useState(value)

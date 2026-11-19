@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
 import type { SsoConnection } from "@/lib/sso-types"
 import { Advanced } from "../settings-card"
@@ -12,9 +13,12 @@ export function UniversalLogoutRow({ connection }: { connection: SsoConnection }
     <Advanced
       label="Universal Logout URL"
       summary={
-        connection.universalLogoutUrl
-          ? "Configured for Okta"
-          : "Optional single sign-out for Okta"
+        // ⚠ WHETHER A URL IS SET IS DATA'S: a bone, not a guess at "optional".
+        <Bone id="logout-summary" inline width={150}>
+          {connection.universalLogoutUrl
+            ? "Configured for Okta"
+            : "Optional single sign-out for Okta"}
+        </Bone>
       }
     >
       <div className="space-y-2 pt-2">

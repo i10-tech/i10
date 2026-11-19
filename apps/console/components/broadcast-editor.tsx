@@ -5,6 +5,7 @@ import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { Save } from "lucide-react"
 import { StateButton } from "@repo/ui/components/i10/state-button"
 import { Input } from "@repo/ui/components/i10/input"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { Label } from "@repo/ui/components/i10/label"
 import { Swap } from "@repo/ui/components/i10/swap"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
@@ -29,16 +30,25 @@ import { toastError } from "@/lib/toast"
  * actually send makes the failure impossible.
  */
 export function BroadcastEditor({
-  broadcast,
-  segments,
-  topics,
-  domains,
+  broadcast: loaded,
+  segments = [],
+  topics = [],
+  domains = [],
+  status: statusProp,
+  loading: loadingProp = false,
 }: {
-  broadcast: BroadcastDetail
-  segments: SegmentRow[]
-  topics: TopicRow[]
-  domains: DomainSummary[]
+  broadcast?: BroadcastDetail
+  segments?: SegmentRow[]
+  topics?: TopicRow[]
+  domains?: DomainSummary[]
+  status?: string
+  loading?: boolean
 }) {
+  // ⚠ ONE FORM FOR THE PAGE AND ITS SKELETON. Loading, it is drawn from a blank
+  // broadcast with the shape's status: the labels, hints and buttons are real,
+  // and what a field holds or a select shows is a Bone.
+  const loading = loadingProp || !loaded
+  const broadcast = loaded ?? blankBroadcast(statusProp ?? "draft")
   const editable = broadcast.status === "draft" || broadcast.status === "scheduled"
 
   const [name, setName] = React.useState(broadcast.name)
@@ -67,14 +77,15 @@ export function BroadcastEditor({
    * fires on a form identical to what is stored - and people learn to ignore it.
    */
   const dirty =
-    name !== broadcast.name ||
-    subject !== broadcast.subject ||
-    previewText !== (broadcast.preview_text ?? "") ||
-    `${localPart}@${domain}` !== broadcast.from ||
-    segmentId !== (broadcast.segment_id ?? "") ||
-    topicId !== (broadcast.topic_id ?? "") ||
-    html !== (broadcast.html ?? "") ||
-    text !== (broadcast.text ?? "")
+    !loading &&
+    (name !== broadcast.name ||
+      subject !== broadcast.subject ||
+      previewText !== (broadcast.preview_text ?? "") ||
+      `${localPart}@${domain}` !== broadcast.from ||
+      segmentId !== (broadcast.segment_id ?? "") ||
+      topicId !== (broadcast.topic_id ?? "") ||
+      html !== (broadcast.html ?? "") ||
+      text !== (broadcast.text ?? ""))
 
   async function save() {
     if (saving.state === "pending" || !editable) return
@@ -120,19 +131,24 @@ export function BroadcastEditor({
         />
 
         <div className="space-y-2">
-          <MorphSelect
-            label="Send to"
-            value={segmentId || null}
-            onValueChange={setSegmentId}
-            disabled={!editable || segments.length === 0}
-            placeholder={segments.length === 0 ? "No segments yet" : "Choose a segment"}
-            items={segments.map((segment) => ({
-              value: segment.id,
-              label: segment.name,
-              meta: String(segment.contact_count),
-            }))}
-            className="w-full"
-          />
+          {/* A select shows the value it holds, which is data: the whole control is the bone. */}
+          <Bone id="segment" as="div" shape="box" width="100%" height={36} radius={12}>
+            <MorphSelect
+              label="Send to"
+              value={segmentId || null}
+              onValueChange={setSegmentId}
+              disabled={!editable || segments.length === 0}
+              placeholder={
+                segments.length === 0 ? "No segments yet" : "Choose a segment"
+              }
+              items={segments.map((segment) => ({
+                value: segment.id,
+                label: segment.name,
+                meta: String(segment.contact_count),
+              }))}
+              className="w-full"
+            />
+          </Bone>
         </div>
       </div>
 
@@ -150,20 +166,23 @@ export function BroadcastEditor({
           <span className="border-y bg-muted px-2 py-1.5 font-mono text-xs text-muted-foreground">
             @
           </span>
-          <MorphSelect
-            label="From address, domain"
-            hideLabel
-            value={domain || null}
-            onValueChange={setDomain}
-            disabled={!editable || verified.length === 0}
-            placeholder={
-              verified.length === 0 ? "No verified domain" : "Choose a domain"
-            }
-            items={verified.map((d) => ({ value: d.name, label: d.name }))}
-          />
+          <Bone id="domain" as="div" shape="box" width={180} height={36} radius={12}>
+            <MorphSelect
+              label="From address, domain"
+              hideLabel
+              value={domain || null}
+              onValueChange={setDomain}
+              disabled={!editable || verified.length === 0}
+              placeholder={
+                verified.length === 0 ? "No verified domain" : "Choose a domain"
+              }
+              items={verified.map((d) => ({ value: d.name, label: d.name }))}
+            />
+          </Bone>
         </div>
-        {verified.length === 0 && (
-          <p className="text-xs text-warning">
+        {/* ⚠ SKIPPED BY test/skeleton-parity: it exists only for a workspace with no verified domain. */}
+        {!loading && verified.length === 0 && (
+          <p className="text-xs text-warning" data-skeleton="skip">
             You have no verified domains, so this cannot be sent yet.
           </p>
         )}
@@ -188,21 +207,23 @@ export function BroadcastEditor({
       />
 
       <div className="space-y-2">
-        <MorphSelect
-          label="Topic"
-          value={topicId || null}
-          onValueChange={setTopicId}
-          disabled={!editable || topics.length === 0}
-          placeholder={
-            topics.length === 0 ? "No topics yet" : "No topic, send to everyone"
-          }
-          items={topics.map((topic) => ({
-            value: topic.id,
-            label: topic.name,
-            meta: String(topic.subscriber_count),
-          }))}
-          className="w-full"
-        />
+        <Bone id="topic" as="div" shape="box" width="100%" height={36} radius={12}>
+          <MorphSelect
+            label="Topic"
+            value={topicId || null}
+            onValueChange={setTopicId}
+            disabled={!editable || topics.length === 0}
+            placeholder={
+              topics.length === 0 ? "No topics yet" : "No topic, send to everyone"
+            }
+            items={topics.map((topic) => ({
+              value: topic.id,
+              label: topic.name,
+              meta: String(topic.subscriber_count),
+            }))}
+            className="w-full"
+          />
+        </Bone>
         <p className="text-xs text-muted-foreground">
           With a topic, we skip anyone who opted out of it. Without one, we send to
           every subscribed contact in the segment.
@@ -211,13 +232,15 @@ export function BroadcastEditor({
 
       <div className="space-y-2">
         <Label>Body</Label>
-        <HtmlEditor
-          html={html}
-          text={text}
-          onHtmlChange={setHtml}
-          onTextChange={setText}
-          disabled={!editable}
-        />
+        <Bone id="body" as="div" shape="box" width="100%" height={176} radius={10}>
+          <HtmlEditor
+            html={html}
+            text={text}
+            onHtmlChange={setHtml}
+            onTextChange={setText}
+            disabled={!editable}
+          />
+        </Bone>
         <p className="text-xs text-muted-foreground">
           Merge fields: <code className="font-mono">{"{{first_name}}"}</code>,{" "}
           <code className="font-mono">{"{{last_name}}"}</code>,{" "}
@@ -235,7 +258,7 @@ export function BroadcastEditor({
             onReset={saving.reset}
             pendingLabel="Save draft"
             doneLabel="Saved"
-            disabled={saving.state === "idle" && !dirty}
+            disabled={loading || (saving.state === "idle" && !dirty)}
           >
             <Save />
             Save draft
@@ -250,4 +273,27 @@ export function BroadcastEditor({
       )}
     </div>
   )
+}
+
+/** What the form is drawn from while loading: the status, and no data. */
+function blankBroadcast(status: string): BroadcastDetail {
+  return {
+    id: "",
+    segment_id: null,
+    segment_name: null,
+    topic_id: null,
+    name: "",
+    from: "",
+    reply_to: [],
+    subject: "",
+    preview_text: null,
+    html: null,
+    text: null,
+    status,
+    scheduled_at: null,
+    sent_at: null,
+    recipient_count: null,
+    created_at: "",
+    stats: { total: 0, delivered: 0, bounced: 0, complained: 0, failed: 0 },
+  }
 }

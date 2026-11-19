@@ -10,7 +10,7 @@ import { parseRanges, rangesToText, sameRanges } from "@/lib/ip-ranges"
 import { ipAllowlist, saveIpAllowlist } from "@/lib/sso-policy-actions"
 import { toastDone, toastFailure } from "@/lib/toast"
 import type { IpAllowlist, SsoAbilities } from "@/lib/sso-types"
-import { Loading, ToggleRow, useRemote, useSsoAttempt } from "./shared"
+import { Loading, RowBone, ToggleRow, useRemote, useSsoAttempt } from "./shared"
 import { SettingsRow } from "./settings-card"
 
 /**
@@ -31,16 +31,36 @@ export function IpAllowlistPanel({
   initial?: IpAllowlist | null
 }) {
   const { data, reload, failed } = useRemote(ipAllowlist, initial)
-  if (!data) return <Loading failed={failed} />
-  return <AllowlistRow list={data} abilities={abilities} reload={reload} />
+  if (!data && (failed?.upgrade || failed?.message)) return <Loading failed={failed} />
+  return (
+    <AllowlistRow
+      list={data ?? NOT_LOADED}
+      loading={!data}
+      abilities={abilities}
+      reload={reload}
+    />
+  )
+}
+
+/** What the row is drawn from while it loads. */
+const NOT_LOADED: IpAllowlist = {
+  console: false,
+  apiKeys: false,
+  ranges: [],
+  maxRanges: 0,
+  yourAddress: null,
+  yourAddressListed: false,
+  graceUntil: null,
 }
 
 function AllowlistRow({
   list,
+  loading,
   abilities,
   reload,
 }: {
   list: IpAllowlist
+  loading: boolean
   abilities: SsoAbilities
   reload: () => Promise<void>
 }) {
@@ -60,25 +80,32 @@ function AllowlistRow({
       title="IP allowlist"
       description="Limit the console and API keys to the networks you list."
       action={
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            {on
-              ? `${scope}, ${list.ranges.length} ${list.ranges.length === 1 ? "range" : "ranges"}`
-              : "Off"}
-          </span>
-          <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
-            {open ? "Close" : on ? "Edit" : "Set up"}
-          </Button>
-        </div>
+        <RowBone id="allowlist" loading={loading} width={200}>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">
+              {on
+                ? `${scope}, ${list.ranges.length} ${list.ranges.length === 1 ? "range" : "ranges"}`
+                : "Off"}
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
+              {open ? "Close" : on ? "Edit" : "Set up"}
+            </Button>
+          </div>
+        </RowBone>
       }
     >
       <Reveal show={open} spacing="" keepMounted>
-        <Form
-          key={`${list.console}:${list.apiKeys}:${list.ranges.join(",")}`}
-          list={list}
-          abilities={abilities}
-          reload={reload}
-        />
+        {/* ⚠ SKIPPED BY test/skeleton-parity: the editor is kept mounted while shut, and what it holds is the saved list. */}
+        <div className="contents" data-skeleton="skip">
+          {!loading && (
+            <Form
+              key={`${list.console}:${list.apiKeys}:${list.ranges.join(",")}`}
+              list={list}
+              abilities={abilities}
+              reload={reload}
+            />
+          )}
+        </div>
       </Reveal>
     </SettingsRow>
   )
