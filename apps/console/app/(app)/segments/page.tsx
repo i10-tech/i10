@@ -1,22 +1,10 @@
 import type { Metadata } from "next"
-import { RememberCount } from "@/components/list/remembered-counts"
-import { Layers } from "lucide-react"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageDescription,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { NewSegmentButton } from "@/components/new-segment"
-import { SegmentsList } from "@/components/marketing-lists"
-import { EmptyState } from "@/components/empty-state"
-import { PanelError } from "@/components/panel-error"
+import { cookies } from "next/headers"
+import { SegmentsView } from "@/components/segments-view"
 import { tryApi } from "@/lib/api"
+import { segmentsShape, type SegmentsData } from "@/lib/shapes/segments"
 import type { SegmentRow } from "@/lib/types"
-import { PAGE_COPY } from "@/lib/page-copy"
+import { viewCookie, type View } from "@/lib/views"
 
 export const metadata: Metadata = { title: "Segments" }
 
@@ -37,46 +25,16 @@ export const metadata: Metadata = { title: "Segments" }
  * auditable, and rules can be added later as something that WRITES membership.
  */
 export default async function SegmentsPage() {
-  const result = await tryApi<{ data: SegmentRow[] }>("/console/segments")
-  const hasRows = result.ok && result.data.data.length > 0
+  const [result, cookieStore] = await Promise.all([
+    tryApi<{ data: SegmentRow[] }>("/console/segments"),
+    cookies(),
+  ])
+  const view = (cookieStore.get(viewCookie("segments"))?.value as View) ?? "grid"
 
-  return (
-    <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>{PAGE_COPY.segments.title}</PageTitle>
-          {/*
-           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
-           * CARRIES THIS ACTION. Two buttons for one action, eight inches
-           * apart, reads as two different things - and the one in the header is
-           * the smaller and less explained of the two, so it wins attention it
-           * has not earned. The empty state's version says what will happen;
-           * this one just says a noun.
-           */}
-          {hasRows && (
-            <PageActions>
-              <NewSegmentButton />
-            </PageActions>
-          )}
-        </PageHeaderRow>
-        <PageDescription>{PAGE_COPY.segments.description}</PageDescription>
-      </PageHeader>
-
-      <PageBody>
-        {!result.ok ? (
-          <PanelError title="Could not load segments" message={result.error.message} />
-        ) : !hasRows ? (
-          <EmptyState
-            icon={<Layers />}
-            title="No segments yet"
-            description="Create one, add contacts to it, and point a broadcast at it."
-            secondary={<NewSegmentButton />}
-          />
-        ) : (
-          <SegmentsList segments={result.data.data} />
-        )}
-      </PageBody>
-      {result.ok && <RememberCount list="segments" count={result.data.data.length} />}
-    </Page>
-  )
+  const data: SegmentsData = {
+    segments: result.ok ? result.data.data : [],
+    view,
+    ...(result.ok ? {} : { error: result.error.message }),
+  }
+  return <SegmentsView shape={segmentsShape.of(data)} data={data} />
 }

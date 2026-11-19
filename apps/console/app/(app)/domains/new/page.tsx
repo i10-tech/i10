@@ -1,12 +1,10 @@
 import type { Metadata } from "next"
 import { cookies } from "next/headers"
-import { Globe } from "lucide-react"
-import { Page, PageBody, PageHeader } from "@repo/ui/components/i10/page"
-import { AddDomainForm } from "@/components/add-domain-form"
-import { DetailHero } from "@/components/detail-hero"
+import { NewDomainView } from "@/components/new-domain-view"
 import { ADD_DOMAIN_DRAFT_COOKIE, draftFor } from "@/lib/add-domain-draft"
 import { restoreDraft } from "@/lib/add-domain-restore"
 import { tryApi } from "@/lib/api"
+import { newDomainShape, type NewDomainData } from "@/lib/shapes/new-domain"
 import type { Me } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Add a domain" }
@@ -27,20 +25,10 @@ export default async function NewDomainPage() {
     draftFor((await cookies()).get(ADD_DOMAIN_DRAFT_COOKIE)?.value, tenantId),
   )
 
-  return (
-    <Page>
-      <PageHeader>
-        <DetailHero
-          crumbs={[{ label: "Domains", href: "/domains" }]}
-          icon={<Globe />}
-          title="Add domain"
-          description="Use a domain you own to send email from i10."
-        />
-      </PageHeader>
+  const data: NewDomainData = {
+    tenantId,
+    restored,
+  }
 
-      <PageBody className="pt-10">
-        <AddDomainForm tenantId={tenantId} restored={restored} />
-      </PageBody>
-    </Page>
-  )
+  return <NewDomainView shape={newDomainShape.of(data)} data={data} />
 }

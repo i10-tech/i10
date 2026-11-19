@@ -1,9 +1,7 @@
 import type { Metadata } from "next"
-import { ButtonLink } from "@repo/ui/components/i10/button-link"
-import { AcceptTransfer } from "@/components/accept-transfer"
-import { Wordmark } from "@/components/wordmark"
+import { TransferView } from "@/components/transfer-view"
 import { tryApi } from "@/lib/api"
-import { formatExact } from "@/lib/format"
+import { transferShape, type TransferData } from "@/lib/shapes/transfers"
 import type { IncomingTransfer } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Domain transfer" }
@@ -30,45 +28,13 @@ export default async function TransferPage({
   )
   const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
 
-  return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-12">
-      <div className="w-full max-w-md space-y-6">
-        <Wordmark />
+  const data: TransferData = {
+    id,
+    offer: result.ok ? result.data : null,
+    ok: result.ok,
+    clerkEnabled,
+    ...(result.ok ? {} : { error: result.error }),
+  }
 
-        {result.ok ? (
-          <div className="space-y-6 rounded-xl border p-6">
-            <div className="space-y-2">
-              <h1 className="text-lg font-medium">
-                {result.data.offered_by} wants to transfer{" "}
-                <span className="font-mono">{result.data.domain_name}</span> to you
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                From the {result.data.from_workspace} workspace. It arrives with its DNS
-                records and verification, so nothing changes at its DNS provider, and it
-                can send from the workspace you choose as soon as you accept. This offer
-                expires on {formatExact(result.data.expires_at)}.
-              </p>
-            </div>
-            <AcceptTransfer offer={result.data} clerkEnabled={clerkEnabled} />
-          </div>
-        ) : (
-          <div className="space-y-4 rounded-xl border p-6">
-            <h1 className="text-lg font-medium">
-              {result.error.name === "tenant_not_ready"
-                ? "Your workspace is still being created"
-                : "This transfer is not available"}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {result.error.name === "tenant_not_ready"
-                ? "This usually takes a moment. Reload the page in a few seconds."
-                : result.error.message}
-            </p>
-            <ButtonLink href="/domains" variant="secondary" size="sm">
-              Go to your domains
-            </ButtonLink>
-          </div>
-        )}
-      </div>
-    </main>
-  )
+  return <TransferView shape={transferShape.of(data)} data={data} />
 }

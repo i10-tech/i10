@@ -1,22 +1,9 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
-import { Page, PageBody, PageHeader } from "@repo/ui/components/i10/page"
-import { TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs/tabs"
-import { DetailHero, MetaGrid } from "@/components/detail-hero"
-import { DeliveriesTable } from "@/components/deliveries-table"
-import { UrlTabs } from "@/components/list/url-tabs"
-import { PanelError } from "@/components/panel-error"
-import { Time } from "@/components/time"
-import { EndpointStatus, KindIcon } from "@/components/webhook-list"
-import { EndpointActions } from "@/components/webhooks/endpoint-actions"
-import { EndpointNotice } from "@/components/webhooks/endpoint-notice"
-import { EndpointSettings } from "@/components/webhooks/endpoint-settings"
-import { HealthTimeline } from "@/components/webhooks/health-timeline"
-import { ReplaysPanel } from "@/components/webhooks/replays-panel"
-import { StatsPanel } from "@/components/webhooks/stats-panel"
-import { TransformationPanel } from "@/components/webhooks/transformation-panel"
+import { WebhookDetailView } from "@/components/webhook-detail-view"
 import { tryApi } from "@/lib/api"
 import { rangeStart } from "@/lib/range"
+import { webhookDetailShape, type WebhookDetailData } from "@/lib/shapes/webhook-detail"
 import type {
   DeliveryRow,
   Page as ApiPage,
@@ -26,25 +13,7 @@ import type {
   WebhookHealthEvent,
   WebhookReplay,
 } from "@/lib/types"
-import {
-  KIND_LABEL,
-  STATE_TONE,
-  endpointName,
-  endpointState,
-  shortName,
-  errorRate,
-  formatErrorRate,
-  windowFor,
-  windowQuery,
-} from "@/lib/webhooks"
-
-const TABS = [
-  "overview",
-  "deliveries",
-  "replays",
-  "transformation",
-  "settings",
-] as const
+import { endpointName, windowFor, windowQuery } from "@/lib/webhooks"
 
 export async function generateMetadata({
   params,
@@ -129,148 +98,22 @@ export default async function WebhookEndpointPage({
     tryApi<{ data: WebhookEventType[] }>("/console/webhook-event-types"),
   ])
 
-  const types = catalog.ok ? catalog.data.data : []
-  const last24 = day ?? stats
-  const rate = last24.ok
-    ? errorRate(last24.data.attempts, last24.data.failed_attempts)
-    : null
-  const state = endpointState(endpoint)
-  const tab = TABS.find((t) => t === query.tab)
+  const data: WebhookDetailData = {
+    endpoint,
+    stats: stats.ok ? stats.data : null,
+    dayStats: day && day.ok ? day.data : null,
+    health: health.ok ? health.data.data : [],
+    deliveries: deliveries.ok ? deliveries.data.data : [],
+    nextCursor: deliveries.ok ? deliveries.data.nextCursor : null,
+    replays: replays.ok ? replays.data.data : [],
+    catalog: catalog.ok ? catalog.data.data : [],
+    window: window.value,
+    tab: query.tab,
+    ...(stats.ok ? {} : { errorStats: stats.error.message }),
+    ...(health.ok ? {} : { errorHealth: health.error.message }),
+    ...(deliveries.ok ? {} : { errorDeliveries: deliveries.error.message }),
+    ...(replays.ok ? {} : { errorReplays: replays.error.message }),
+  }
 
-  return (
-    <Page>
-      <PageHeader>
-        <DetailHero
-          crumbs={[{ label: "Webhooks", href: "/webhooks" }]}
-          icon={<KindIcon kind={endpoint.kind} />}
-          tone={STATE_TONE[state]}
-          eyebrow={`${KIND_LABEL[endpoint.kind]} endpoint`}
-          title={
-            // ⚠ WITHOUT THE SCHEME: every endpoint is https, and on a phone those
-            // eight characters are most of what fits.
-            <span
-              className="font-mono text-lg sm:text-2xl"
-              title={endpointName(endpoint)}
-            >
-              {shortName(endpoint)}
-            </span>
-          }
-          subtitle={endpoint.description ?? undefined}
-          actions={<EndpointActions endpoint={endpoint} catalog={types} />}
-        />
-      </PageHeader>
-
-      <PageBody className="space-y-8">
-        <EndpointNotice
-          endpoint={endpoint}
-          failingSince={stats.ok ? stats.data.failing_since : null}
-        />
-
-        <MetaGrid
-          items={[
-            { label: "Status", value: <EndpointStatus state={state} /> },
-            {
-              label: "Error rate, 24h",
-              value: (
-                <span className="tabular">
-                  {formatErrorRate(rate)}
-                  {last24.ok && last24.data.attempts > 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      {" "}
-                      of {last24.data.attempts} attempts
-                    </span>
-                  )}
-                </span>
-              ),
-            },
-            {
-              label: "Last success",
-              value:
-                last24.ok && last24.data.last_success_at ? (
-                  <Time iso={last24.data.last_success_at} />
-                ) : (
-                  <span className="text-muted-foreground">None in 24 hours</span>
-                ),
-            },
-            { label: "Created", value: <Time iso={endpoint.created_at} /> },
-          ]}
-        />
-
-        <UrlTabs value={tab} fallback="overview">
-          <div className="-mx-4 mb-6 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:px-0">
-            <TabsList>
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
-              <TabsTrigger value="replays">Replays</TabsTrigger>
-              {endpoint.kind === "http" && (
-                <TabsTrigger value="transformation">Transformation</TabsTrigger>
-              )}
-              <TabsTrigger value="settings">Settings</TabsTrigger>
-            </TabsList>
-          </div>
-
-          <TabsContent value="overview" className="m-0 space-y-10">
-            {stats.ok ? (
-              <StatsPanel stats={stats.data} window={window.value} />
-            ) : (
-              <PanelError
-                title="Could not load the stats"
-                message={stats.error.message}
-              />
-            )}
-            {health.ok ? (
-              <HealthTimeline events={health.data.data} />
-            ) : (
-              <PanelError
-                title="Could not load the health history"
-                message={health.error.message}
-              />
-            )}
-          </TabsContent>
-
-          <TabsContent value="deliveries" className="m-0">
-            {deliveries.ok ? (
-              <DeliveriesTable
-                deliveries={deliveries.data.data}
-                nextCursor={deliveries.data.nextCursor}
-                endpoints={[endpoint]}
-                eventTypes={types.map((t) => t.type)}
-                showEndpoint={false}
-              />
-            ) : (
-              <PanelError
-                title="Could not load deliveries"
-                message={deliveries.error.message}
-              />
-            )}
-          </TabsContent>
-
-          <TabsContent value="replays" className="m-0">
-            {replays.ok ? (
-              <ReplaysPanel
-                endpoint={endpoint}
-                initial={replays.data.data}
-                eventTypes={endpoint.events}
-              />
-            ) : (
-              <PanelError
-                title="Could not load replays"
-                message={replays.error.message}
-              />
-            )}
-          </TabsContent>
-
-          {endpoint.kind === "http" && (
-            <TabsContent value="transformation" className="m-0">
-              <TransformationPanel endpoint={endpoint} />
-            </TabsContent>
-          )}
-
-          <TabsContent value="settings" className="m-0">
-            <EndpointSettings endpoint={endpoint} catalog={types} />
-          </TabsContent>
-        </UrlTabs>
-      </PageBody>
-    </Page>
-  )
+  return <WebhookDetailView shape={webhookDetailShape.of(data)} data={data} />
 }

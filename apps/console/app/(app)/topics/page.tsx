@@ -1,22 +1,10 @@
 import type { Metadata } from "next"
-import { RememberCount } from "@/components/list/remembered-counts"
-import { Tag } from "lucide-react"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageDescription,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { NewTopicButton } from "@/components/new-topic"
-import { TopicsList } from "@/components/marketing-lists"
-import { EmptyState } from "@/components/empty-state"
-import { PanelError } from "@/components/panel-error"
+import { cookies } from "next/headers"
+import { TopicsView } from "@/components/topics-view"
 import { tryApi } from "@/lib/api"
+import { topicsShape, type TopicsData } from "@/lib/shapes/topics"
 import type { TopicRow } from "@/lib/types"
-import { PAGE_COPY } from "@/lib/page-copy"
+import { viewCookie, type View } from "@/lib/views"
 
 export const metadata: Metadata = { title: "Topics" }
 
@@ -36,46 +24,16 @@ export const metadata: Metadata = { title: "Topics" }
  * everyone.
  */
 export default async function TopicsPage() {
-  const result = await tryApi<{ data: TopicRow[] }>("/console/topics")
-  const hasRows = result.ok && result.data.data.length > 0
+  const [result, cookieStore] = await Promise.all([
+    tryApi<{ data: TopicRow[] }>("/console/topics"),
+    cookies(),
+  ])
+  const view = (cookieStore.get(viewCookie("topics"))?.value as View) ?? "table"
 
-  return (
-    <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>{PAGE_COPY.topics.title}</PageTitle>
-          {/*
-           * ⚠ HIDDEN WHILE THE LIST IS EMPTY, BECAUSE THE EMPTY STATE ALREADY
-           * CARRIES THIS ACTION. Two buttons for one action, eight inches
-           * apart, reads as two different things - and the one in the header is
-           * the smaller and less explained of the two, so it wins attention it
-           * has not earned. The empty state's version says what will happen;
-           * this one just says a noun.
-           */}
-          {hasRows && (
-            <PageActions>
-              <NewTopicButton />
-            </PageActions>
-          )}
-        </PageHeaderRow>
-        <PageDescription>{PAGE_COPY.topics.description}</PageDescription>
-      </PageHeader>
-
-      <PageBody>
-        {!result.ok ? (
-          <PanelError title="Could not load topics" message={result.error.message} />
-        ) : !hasRows ? (
-          <EmptyState
-            icon={<Tag />}
-            title="No topics yet"
-            description="Without topics, unsubscribing is all-or-nothing. A couple of topics lets somebody keep the receipts and drop the newsletter."
-            secondary={<NewTopicButton />}
-          />
-        ) : (
-          <TopicsList topics={result.data.data} />
-        )}
-      </PageBody>
-      {result.ok && <RememberCount list="topics" count={result.data.data.length} />}
-    </Page>
-  )
+  const data: TopicsData = {
+    topics: result.ok ? result.data.data : [],
+    view,
+    ...(result.ok ? {} : { error: result.error.message }),
+  }
+  return <TopicsView shape={topicsShape.of(data)} data={data} />
 }

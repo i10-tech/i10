@@ -1,12 +1,13 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import { PanelError } from "@/components/panel-error"
-import { SetupFlow } from "@/components/sso/setup/setup-flow"
+import { SsoConnectView } from "@/components/sso-connect-view"
 import type { AccessDomain } from "@/lib/actions"
 import { tryApi } from "@/lib/api"
 import { PREVIEW } from "@/lib/preview"
 import { authOrigin, ssoAbilities } from "@/lib/sso-server"
 import { flowCovers } from "@/lib/sso-guides"
+import { ssoConnectShape, type SsoConnectData } from "@/lib/shapes/sso-connect"
 import type { OidcSetup, SamlSetup, SsoConnections, TestRun } from "@/lib/sso-types"
 import type { Me } from "@/lib/types"
 
@@ -47,7 +48,13 @@ export default async function ConnectPage({
     authOrigin: authOrigin(),
     previewTest: PREVIEW,
   }
-  if (!id) return <SetupFlow initial={null} {...shared} />
+  if (!id) {
+    const data: SsoConnectData = {
+      initial: null,
+      ...shared,
+    }
+    return <SsoConnectView shape={ssoConnectShape.of(data)} data={data} />
+  }
 
   const connection = catalog.data.data.find((c) => c.id === id)
   if (!connection) notFound()
@@ -66,10 +73,10 @@ export default async function ConnectPage({
     return (
       <PanelError title="Could not load the connection" message={setup.error.message} />
     )
-  return (
-    <SetupFlow
-      initial={{ connection, setup: setup.data, runs: runs.ok ? runs.data.data : [] }}
-      {...shared}
-    />
-  )
+
+  const data: SsoConnectData = {
+    initial: { connection, setup: setup.data, runs: runs.ok ? runs.data.data : [] },
+    ...shared,
+  }
+  return <SsoConnectView shape={ssoConnectShape.of(data)} data={data} />
 }

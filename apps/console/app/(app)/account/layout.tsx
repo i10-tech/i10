@@ -1,11 +1,4 @@
-import {
-  Page,
-  PageBody,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { SectionContent } from "@/components/page-frame"
+import { AccountShell } from "@/components/section-frame"
 
 /**
  * The account shell.
@@ -17,27 +10,12 @@ import { SectionContent } from "@/components/page-frame"
  * viewport, with no padding and no heading, while every neighbouring page had
  * both. It read as a broken stylesheet rather than a missing layout.
  *
- * ⚠ IT MIRRORS `settings/layout.tsx` RATHER THAN SHARING A COMPONENT WITH IT.
- * The two are six lines of chrome and one word of copy apart; a shared
- * `<SettingsShell>` taking a title prop is indirection that makes both harder
- * to read to save nothing. If a third one appears, that is the time.
+ * ⚠ THE FRAME IS `AccountShell`, shared with the skeleton drawn when the page
+ * is entered from elsewhere (components/section-frame) - the second user that
+ * made sharing it worth the indirection.
  */
 export default function AccountLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return (
-    <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>Account</PageTitle>
-        </PageHeaderRow>
-      </PageHeader>
-
-      <PageBody>
-        <div className="min-w-0 max-w-3xl">
-          <SectionContent>{children}</SectionContent>
-        </div>
-      </PageBody>
-    </Page>
-  )
+  return <AccountShell>{children}</AccountShell>
 }

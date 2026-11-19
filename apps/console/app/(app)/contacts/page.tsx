@@ -1,21 +1,8 @@
 import type { Metadata } from "next"
-import { RememberCount } from "@/components/list/remembered-counts"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageDescription,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { ContactsTable } from "@/components/contacts-table"
-import { ImportContactsButton } from "@/components/import-contacts"
-import { NewContactButton } from "@/components/new-contact"
-import { PanelError } from "@/components/panel-error"
+import { ContactsView } from "@/components/contacts-view"
 import { tryApi } from "@/lib/api"
+import { contactsShape, type ContactsData } from "@/lib/shapes/contacts"
 import type { ContactRow, Page as ApiPage, SegmentRow } from "@/lib/types"
-import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Contacts" }
 
@@ -52,40 +39,12 @@ export default async function ContactsPage({
     tryApi<{ data: SegmentRow[] }>("/console/segments"),
   ])
 
-  return (
-    <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>{PAGE_COPY.contacts.title}</PageTitle>
-          <PageActions>
-            <ImportContactsButton />
-            <NewContactButton />
-          </PageActions>
-        </PageHeaderRow>
-        <PageDescription>{PAGE_COPY.contacts.description}</PageDescription>
-      </PageHeader>
+  const data: ContactsData = {
+    contacts: contacts.ok ? contacts.data.data : [],
+    nextCursor: contacts.ok ? contacts.data.nextCursor : null,
+    segments: segments.ok ? segments.data.data : [],
+    ...(contacts.ok ? {} : { error: contacts.error.message }),
+  }
 
-      <PageBody width="full">
-        {!contacts.ok ? (
-          <PanelError
-            title="Could not load contacts"
-            message={contacts.error.message}
-          />
-        ) : (
-          <ContactsTable
-            contacts={contacts.data.data}
-            nextCursor={contacts.data.nextCursor}
-            segments={segments.ok ? segments.data.data : []}
-          />
-        )}
-      </PageBody>
-      {contacts.ok && (
-        <RememberCount
-          list="contacts"
-          count={contacts.data.data.length}
-          filtered={Object.values(params).some(Boolean)}
-        />
-      )}
-    </Page>
-  )
+  return <ContactsView shape={contactsShape.of(data)} data={data} />
 }

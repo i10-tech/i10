@@ -1,0 +1,29 @@
+/*
+ * One band of light crossing the page, left to right, then resting. Each
+ * element shows its own slice of the same band: its ::after is laid at the
+ * viewport's left edge (`--shimmer-x`, set by shimmer.tsx), and every element
+ * runs on the page's clock. The band moves by `transform` alone, so it runs on
+ * the compositor and keeps moving while the main thread swaps the page in.
+ */
+.shimmer { overflow: hidden; --shimmer-glint: oklch(100% 0 0 / 0.85); }
+/* The band's containing block, unless the element is already positioned. */
+:where(.shimmer) { position: relative; }
+.shimmer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--shimmer-x, 0px));
+  width: 40vw;
+  background: linear-gradient(90deg, transparent, var(--shimmer-glint) 50%, transparent);
+  transform: translateX(-40vw);
+  animation: shimmer-sweep 2.4s linear infinite;
+  pointer-events: none;
+}
+:global(:root[data-theme="dark"]) .shimmer { --shimmer-glint: oklch(100% 0 0 / 0.06); }
+/* About 1.4s across, then a 1s rest before the next pass. */
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-40vw); }
+  60%, 100% { transform: translateX(100vw); }
+}
+@media (prefers-reduced-motion: reduce) { .shimmer::after { content: none; } }

@@ -1,42 +1,6 @@
-import {
-  CardGridSkeleton,
-  PageSkeleton,
-  RememberedListSkeleton,
-  TableSkeleton,
-  ToolbarSkeleton,
-} from "@/components/skeletons"
-import { PAGE_COPY } from "@/lib/page-copy"
+import { TopicsLoading } from "@/components/topics-view"
 
-/** Loading topics: its real header and columns, placeholder rows. See components/skeletons. */
+/** Loading topics: the page's own view, drawn from the remembered shape. See lib/shapes. */
 export default function Loading() {
-  return (
-    <PageSkeleton
-      title={PAGE_COPY.topics.title}
-      description={PAGE_COPY.topics.description}
-      actions={["w-28"]}
-    >
-      <ToolbarSkeleton filters={1} view />
-      <RememberedListSkeleton
-        viewKey="topics"
-        fallback="table"
-        table={
-          <TableSkeleton
-            list="topics"
-            columns={[
-              { head: "Name" },
-              {
-                head: "Default",
-                className: "hidden w-[11rem] md:table-cell",
-                kind: "badge",
-              },
-              { head: "Visibility", className: "w-[8rem]", kind: "badge" },
-              { head: "Subscribers", className: "w-[9rem] text-right", kind: "number" },
-              { className: "w-12", kind: "menu" },
-            ]}
-          />
-        }
-        grid={<CardGridSkeleton list="topics" className="lg:grid-cols-3" lines={0} />}
-      />
-    </PageSkeleton>
-  )
+  return <TopicsLoading />
 }

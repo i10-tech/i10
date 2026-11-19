@@ -8,8 +8,11 @@
  *   snap     an element moved far more in one frame than in the frames around it
  *   pop-in   an element arrived at full size and full opacity in one frame
  *   pop-out  an element left at full size and full opacity in one frame
+ * With --all it prints every flag, not the first twelve per step.
  * With --frames it also saves about 30 screenshots a second of each measured step to
  * .motion/<flow>/<step>/, for looking at. Exit code 1 means something was flagged.
+ * With --state <file> it starts signed in, from a Playwright storage state saved after
+ * signing in, so a flow can run against the real dev server (https://dash.i10.localhost).
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -48,6 +51,9 @@ if (!file) throw new Error("Usage: bun scripts/motion/check.ts <flows.json>")
 const base = flag("base") ?? "http://localhost:3010"
 const only = flag("only")
 const saveFrames = args.includes("--frames")
+/** Print every flag rather than the first twelve per step. */
+const all = args.includes("--all")
+const state = flag("state")
 const JUMP = Number(flag("jump") ?? 5)
 const APPEAR = Number(flag("appear") ?? 14)
 const sampler = readFileSync(join(dirname(import.meta.path), "sampler.js"), "utf8")
@@ -109,6 +115,7 @@ for (const flow of flows) {
   const context = await browser.newContext({
     viewport: { width: flow.width ?? 1280, height: flow.height ?? 1700 },
     colorScheme: flow.scheme ?? "light",
+    ...(state ? { storageState: state, ignoreHTTPSErrors: true } : {}),
   })
   await context.addInitScript(sampler)
   const page = await context.newPage()
@@ -155,9 +162,11 @@ for (const flow of flows) {
     console.log(
       `  ${title}: ${report.frames} frames${saved ? `, ${saved.frames} saved` : ""}, ${issues.length ? `${issues.length} flagged` : "clean"}`,
     )
-    for (const i of issues.slice(0, 12))
+    const shown = all ? issues : issues.slice(0, 12)
+    for (const i of shown)
       console.log(`    ${i.kind} at ${i.t}ms ${i.name}: ${i.detail}`)
-    if (issues.length > 12) console.log(`    and ${issues.length - 12} more`)
+    if (issues.length > shown.length)
+      console.log(`    and ${issues.length - shown.length} more`)
   }
   await context.close()
 }

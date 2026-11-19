@@ -1,22 +1,8 @@
 import type { Metadata } from "next"
-import { RememberCount } from "@/components/list/remembered-counts"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageDescription,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { ApiKeysTable } from "@/components/api-keys-table"
-import { CreateApiKeyButton } from "@/components/create-api-key"
-import { ApiButton } from "@/components/list/api-button"
-import { PanelError } from "@/components/panel-error"
+import { ApiKeysView } from "@/components/api-keys-view"
 import { tryApi } from "@/lib/api"
-import { SNIPPETS } from "@/lib/snippets"
+import { apiKeysShape, type ApiKeysData } from "@/lib/shapes/api-keys"
 import type { ApiKeyRow, DomainSummary } from "@/lib/types"
-import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "API keys" }
 
@@ -58,34 +44,12 @@ export default async function ApiKeysPage({
   ])
   const scopeDomains = domains.ok ? domains.data.data : []
 
-  return (
-    <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>{PAGE_COPY.apiKeys.title}</PageTitle>
-          <PageActions>
-            {/*
-             * ⚠ `?new=1` OPENS THE DIALOG, SO THE COMMAND MENU CAN LINK TO IT.
-             * A dialog whose only trigger is a button on one page cannot be
-             * reached from ⌘K, from a doc, or from an onboarding step - all
-             * three of which want to say "create a key" and land somebody in
-             * the form rather than next to it.
-             */}
-            <ApiButton snippet={SNIPPETS.apiKeys} />
-            <CreateApiKeyButton autoOpen={params.new === "1"} domains={scopeDomains} />
-          </PageActions>
-        </PageHeaderRow>
-        <PageDescription>{PAGE_COPY.apiKeys.description}</PageDescription>
-      </PageHeader>
+  const data: ApiKeysData = {
+    keys: result.ok ? result.data.data : [],
+    domains: scopeDomains,
+    newKey: params.new === "1",
+    ...(result.ok ? {} : { error: result.error.message }),
+  }
 
-      <PageBody>
-        {!result.ok ? (
-          <PanelError title="Could not load your keys" message={result.error.message} />
-        ) : (
-          <ApiKeysTable keys={result.data.data} domains={scopeDomains} />
-        )}
-      </PageBody>
-      {result.ok && <RememberCount list="api-keys" count={result.data.data.length} />}
-    </Page>
-  )
+  return <ApiKeysView shape={apiKeysShape.of(data)} data={data} />
 }

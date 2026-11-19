@@ -1,6 +1,6 @@
-import { SectionsSkeleton } from "@/components/skeletons"
+import { AccountLoading } from "@/components/account-view"
 
-/** Loading a settings page inside its layout: sections of label, help and control. */
+/** Loading the account page: drawn from the remembered shape. See lib/shapes. */
 export default function Loading() {
-  return <SectionsSkeleton />
+  return <AccountLoading />
 }

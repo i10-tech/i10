@@ -1,0 +1,7 @@
+/* One line of a bone: as tall as the content's line, the bar centred in it. */
+.line { display: flex; align-items: center; min-width: 0; }
+/* Bars and ghosts also carry the shimmer (components/shimmer). */
+.bar { display: block; flex: none; background: var(--surface-muted); }
+/* The layer resolving bars are drawn in: above the page, never in the way. */
+.layer { position: fixed; inset: 0; z-index: 60; overflow: hidden; pointer-events: none; contain: strict; }
+.ghost { position: absolute; background: var(--surface-muted); pointer-events: none; }

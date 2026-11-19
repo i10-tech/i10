@@ -1,10 +1,11 @@
 import type { Metadata } from "next"
 import { notFound, redirect } from "next/navigation"
 import { PanelError } from "@/components/panel-error"
-import { ConnectionView } from "@/components/sso/connection/connection-view"
+import { SsoConnectionPageView } from "@/components/sso-connection-page-view"
 import { tryApi } from "@/lib/api"
 import { flowCovers } from "@/lib/sso-guides"
 import { authOrigin, ssoAbilities } from "@/lib/sso-server"
+import { ssoConnectionShape, type SsoConnectionData } from "@/lib/shapes/sso-connection"
 import type { SsoConnections } from "@/lib/sso-types"
 
 export const metadata: Metadata = { title: "SSO connection" }
@@ -40,12 +41,12 @@ export default async function SsoConnectionPage({
     redirect(`/settings/sso/connect?connection=${connection.id}`)
   }
 
-  return (
-    <ConnectionView
-      initial={connection}
-      abilities={who.abilities}
-      authOrigin={authOrigin()}
-      clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
-    />
-  )
+  const data: SsoConnectionData = {
+    connection,
+    abilities: who.abilities,
+    authOrigin: authOrigin(),
+    clerkEnabled: Boolean(process.env.CLERK_PUBLISHABLE_KEY),
+  }
+
+  return <SsoConnectionPageView shape={ssoConnectionShape.of(data)} data={data} />
 }

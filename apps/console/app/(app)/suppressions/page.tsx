@@ -1,24 +1,8 @@
 import type { Metadata } from "next"
-import { RememberCount } from "@/components/list/remembered-counts"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageDescription,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { Download } from "lucide-react"
-import { ButtonLink } from "@repo/ui/components/i10/button-link"
-import { AddSuppressionButton } from "@/components/add-suppression"
-import { ApiButton } from "@/components/list/api-button"
-import { SuppressionsTable } from "@/components/suppressions-table"
-import { PanelError } from "@/components/panel-error"
+import { SuppressionsView } from "@/components/suppressions-view"
 import { tryApi } from "@/lib/api"
-import { SNIPPETS } from "@/lib/snippets"
+import { suppressionsShape, type SuppressionsData } from "@/lib/shapes/suppressions"
 import type { Page as ApiPage, SuppressionRow } from "@/lib/types"
-import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Suppressions" }
 
@@ -54,57 +38,11 @@ export default async function SuppressionsPage({
     },
   })
 
-  return (
-    <Page>
-      <PageHeader>
-        {/*
-         * ⚠ WRAPS, UNLIKE MOST HEADERS: two actions beside the title do not fit
-         * a 375px screen, and the second one went off the edge.
-         */}
-        <PageHeaderRow className="flex-wrap gap-y-2">
-          <PageTitle>{PAGE_COPY.suppressions.title}</PageTitle>
-          <PageActions>
-            <ApiButton snippet={SNIPPETS.suppressions} />
-            {/*
-             * ⚠ A PLAIN ANCHOR, NOT A `Link`. The target is a file, and Next's
-             * client router would try to render a CSV as a page.
-             */}
-            <ButtonLink
-              href="/suppressions/export"
-              download
-              variant="secondary"
-              size="sm"
-              native
-            >
-              <Download />
-              Export CSV
-            </ButtonLink>
-            <AddSuppressionButton />
-          </PageActions>
-        </PageHeaderRow>
-        <PageDescription>{PAGE_COPY.suppressions.description}</PageDescription>
-      </PageHeader>
+  const data: SuppressionsData = {
+    rows: result.ok ? result.data.data : [],
+    nextCursor: result.ok ? result.data.nextCursor : null,
+    ...(result.ok ? {} : { error: result.error.message }),
+  }
 
-      <PageBody>
-        {!result.ok ? (
-          <PanelError
-            title="Could not load suppressions"
-            message={result.error.message}
-          />
-        ) : (
-          <SuppressionsTable
-            rows={result.data.data}
-            nextCursor={result.data.nextCursor}
-          />
-        )}
-      </PageBody>
-      {result.ok && (
-        <RememberCount
-          list="suppressions"
-          count={result.data.data.length}
-          filtered={Object.values(params).some(Boolean)}
-        />
-      )}
-    </Page>
-  )
+  return <SuppressionsView shape={suppressionsShape.of(data)} data={data} />
 }

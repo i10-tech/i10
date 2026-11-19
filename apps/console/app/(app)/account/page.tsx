@@ -1,13 +1,8 @@
 import type { Metadata } from "next"
-import {
-  Section,
-  SectionContent,
-  SectionDescription,
-  SectionTitle,
-} from "@repo/ui/components/i10/page"
-import { AccountPanel } from "@/components/account/account-panel"
+import { AccountView } from "@/components/account-view"
 import { accountSettings } from "@/lib/clerk-environment"
 import { tryApi } from "@/lib/api"
+import { accountShape, type AccountData } from "@/lib/shapes/account"
 import type { Me } from "@/lib/types"
 
 export const metadata: Metadata = { title: "Profile" }
@@ -31,19 +26,15 @@ export default async function AccountPage({
 }) {
   // See settings/team: Clerk's components need their provider, and the provider
   // is only mounted when a publishable key exists.
-  if (!process.env.CLERK_PUBLISHABLE_KEY) {
-    return (
-      <div>
-        <Section className="pt-0">
-          <SectionTitle>Your account</SectionTitle>
-          <SectionDescription>
-            Your profile, password, two-factor authentication and active sessions are
-            managed by Clerk, which is not configured in this environment. Set{" "}
-            <code>CLERK_PUBLISHABLE_KEY</code> to see the real panel here.
-          </SectionDescription>
-        </Section>
-      </div>
-    )
+  const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
+
+  if (!clerkEnabled) {
+    const noClerkData: AccountData = {
+      settings: { providers: [], passkeys: false, minLength: 8 },
+      billing: null,
+      clerkEnabled: false,
+    }
+    return <AccountView shape={accountShape.of(noClerkData)} data={noClerkData} />
   }
 
   /*
@@ -59,27 +50,12 @@ export default async function AccountPage({
     searchParams,
   ])
 
-  return (
-    <div>
-      <Section className="pt-0">
-        <SectionTitle>Your account</SectionTitle>
-        <SectionDescription>
-          Your name, sign-in methods, two-factor authentication and the devices you are
-          signed in on. This is your account across every workspace you belong to.
-        </SectionDescription>
-        <SectionContent className="space-y-4">
-          {/*
-           * ⚠ OURS SINCE 2026-10-12, NOT CLERK'S `<UserProfile />`. Same rows,
-           * same actions, our fields and motion - see components/account.
-           * Clerk's original is at /reference/clerk/user-profile.
-           */}
-          <AccountPanel
-            settings={settings}
-            billing={me.ok ? me.data.billing : null}
-            tab={params.tab}
-          />
-        </SectionContent>
-      </Section>
-    </div>
-  )
+  const data: AccountData = {
+    settings,
+    billing: me.ok ? me.data.billing : null,
+    tab: params.tab,
+    clerkEnabled: true,
+  }
+
+  return <AccountView shape={accountShape.of(data)} data={data} />
 }

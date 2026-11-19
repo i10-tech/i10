@@ -1,11 +1,5 @@
 import type { Metadata } from "next"
-import {
-  Section,
-  SectionContent,
-  SectionDescription,
-  SectionTitle,
-} from "@repo/ui/components/i10/page"
-import { UnsubscribePageSettings } from "@/components/unsubscribe-settings"
+import { UnsubscribePageView } from "@/components/unsubscribe-page-view"
 
 export const metadata: Metadata = { title: "Unsubscribe page" }
 
@@ -18,18 +12,5 @@ export const metadata: Metadata = { title: "Unsubscribe page" }
  * complaints instead of unsubscribes - which is far more expensive.
  */
 export default function UnsubscribePageSettingsPage() {
-  return (
-    <div>
-      <Section className="pt-0">
-        <SectionTitle>Appearance</SectionTitle>
-        <SectionDescription>
-          Shown to your recipients when they follow an unsubscribe link. Applies to
-          every broadcast from this workspace.
-        </SectionDescription>
-        <SectionContent>
-          <UnsubscribePageSettings />
-        </SectionContent>
-      </Section>
-    </div>
-  )
+  return <UnsubscribePageView shape={{}} data={{}} />
 }

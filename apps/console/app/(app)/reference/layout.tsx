@@ -5,7 +5,7 @@ import {
   PageHeaderRow,
   PageTitle,
 } from "@repo/ui/components/i10/page"
-import { SectionContent } from "@/components/page-frame"
+import { SectionContent } from "@/components/section-frame"
 
 /**
  * The frame for the unlisted Clerk reference pages (2026-10-12).
