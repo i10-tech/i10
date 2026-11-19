@@ -32,6 +32,20 @@ import { useMounted } from "@/lib/react"
  * React compares; a `title` that differs mismatches exactly as text does, and
  * that was the easiest half of this bug to miss.
  */
+const utcExact = (iso: string) => formatUtc(iso, "exact")
+
+/**
+ * `formatExact` for a time inside a sentence ("Renews Dec 4, 2026, 09:00:00"),
+ * where a <Time> cannot go: the same rule, the UTC form until mounted.
+ *
+ * ⚠ THE ONLY WAY TO FORMAT AN EXACT TIME OUTSIDE THIS FILE (2026-11-18). A raw
+ * `formatExact` in markup is a hydration mismatch by hours in production, where
+ * the server is UTC; test/relative-time-guard.test.ts fails on one.
+ */
+export function useExactTime(): (iso: string) => string {
+  return useMounted() ? formatExact : utcExact
+}
+
 export function Time({
   iso,
   mode = "relative",
@@ -44,11 +58,20 @@ export function Time({
 }) {
   const mounted = useMounted()
 
-  const text = mounted
-    ? mode === "relative"
+  /*
+   * ⚠ RELATIVE TIME IS RELATIVE IN BOTH PASSES (2026-11-09). "26 minutes ago"
+   * does not depend on a time zone, and server and browser clocks agree to the
+   * minute almost always; the UTC fallback ("Nov 9") flipped to the relative
+   * form on every reload. The rare minute boundary between the passes is let
+   * through by `suppressHydrationWarning` and corrected by the mount render.
+   * Exact time still waits for mount: it does depend on the zone.
+   */
+  const text =
+    mode === "relative"
       ? formatRelative(iso)
-      : formatExact(iso)
-    : formatUtc(iso, mode)
+      : mounted
+        ? formatExact(iso)
+        : formatUtc(iso, mode)
 
   return (
     <time
@@ -56,6 +79,7 @@ export function Time({
       // FORM IS ON SCREEN. It is what a screen reader and anything scraping the
       // page should get, and it is identical in both passes.
       dateTime={iso}
+      suppressHydrationWarning
       title={mounted ? formatExact(iso) : formatUtc(iso, "exact")}
       className={className}
     >

@@ -5,6 +5,7 @@ import { CodeBlock } from "@repo/ui/components/code-block/code-block"
 import { cn } from "cn"
 import { templateVersion } from "@/lib/actions"
 import type { TemplateVersionDetail } from "@/lib/types"
+import { Shimmer } from "@repo/ui/components/shimmer/shimmer"
 
 /**
  * The files a React Email version was made from: its entry and everything it
@@ -40,7 +41,7 @@ export function TemplateFiles({
   }, [templateId, number])
 
   if (error) return <p className="text-sm text-destructive">{error}</p>
-  if (!version) return <div className="h-64 animate-pulse rounded-lg bg-muted/30" />
+  if (!version) return <Shimmer className="h-64 rounded-lg bg-muted/30" />
 
   const entry = version.path ?? "template.tsx"
   const files: Record<string, string> = {

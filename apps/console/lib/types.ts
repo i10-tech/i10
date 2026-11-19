@@ -711,6 +711,8 @@ export interface TemplateFolder {
   name: string
   /** How many templates are filed in it. */
   templates: number
+  /** Up to three of them, newest edit first: the papers drawn on the folder. */
+  preview: { id: string; updated_at: string }[]
   created_at: string
   updated_at: string
 }

@@ -16,6 +16,8 @@ export interface AlertProps extends HTMLAttributes<HTMLDivElement> {
   open?: boolean;
   /** Shows a dismiss button. An uncontrolled alert collapses first, then calls this. */
   onDismiss?: () => void;
+  /** Where the icon sits against the content. `start` aligns it with the title; `center` centers it on the whole alert. */
+  iconAlign?: "start" | "center";
 }
 type AlertBoxProps = Omit<AlertProps, "open"> & { reduce: boolean | null; animateIcon?: boolean };
 
@@ -66,13 +68,13 @@ function HeightFrame({ className, reduce, morphKey, children }: { className?: st
   </motion.div>;
 }
 
-function AlertBox({ tone = "info", title, children, className, reduce, onDismiss, animateIcon = false, ...props }: AlertBoxProps) {
+function AlertBox({ tone = "info", title, children, className, reduce, onDismiss, animateIcon = false, iconAlign = "start", ...props }: AlertBoxProps) {
   const Icon = icons[tone];
   const text = typeof children === "string" || typeof children === "number" ? String(children) : null;
   const hasDetails = children !== undefined && children !== null && children !== false && children !== "";
   const enter: Transition = reduce ? { duration: motionTokens.duration.instant } : { duration: motionTokens.duration.standard, ease: [...motionTokens.ease.enter] };
   const swap: MotionProps = { initial: reduce ? { opacity: 0 } : textIn, animate: shown, exit: reduce ? fadeOut : textOut, transition: enter };
-  return <div {...props} className={[styles.alert, styles[tone], className].filter(Boolean).join(" ")} role={tone === "danger" ? "alert" : "status"}>
+  return <div {...props} className={[styles.alert, styles[tone], iconAlign === "center" && styles.iconCenter, className].filter(Boolean).join(" ")} role={tone === "danger" ? "alert" : "status"}>
     {/* A new tone morphs its icon in place; a newly shown alert gives the icon a small settle. */}
     <motion.span className={styles.icon} initial={animateIcon && !reduce ? iconIn : false} animate={shown} transition={motionTokens.spring.snappy}>
       <AnimatePresence mode="popLayout" initial={false}><Swap key={tone} className={styles.glyph} initial={reduce ? { opacity: 0 } : iconIn} animate={shown} exit={reduce ? fadeOut : { ...iconIn, transition: exitFast }} transition={reduce ? enter : motionTokens.spring.snappy}><Icon width={18} height={18} aria-hidden="true"/></Swap></AnimatePresence>

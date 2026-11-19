@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge/badge"
+import { Bone, BoneRegion, BoneScope } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
 import {
@@ -28,8 +29,9 @@ import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { cn } from "cn"
 import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { BulkBar } from "@/components/list/bulk-bar"
-import { MarqueeBox, useMarquee } from "@/components/list/marquee"
+import { useMarquee } from "@/components/list/marquee"
 import {
+  ListCell,
   ListHead,
   ListHeader,
   ListTable,
@@ -40,8 +42,10 @@ import {
 } from "@/components/list/table"
 import {
   FilterSelect,
+  ListResults,
+  ListSearch,
   ListToolbar,
-  SearchField,
+  ListToolbarEnd,
   ViewToggle,
   useRememberedView,
 } from "@/components/list/toolbar"
@@ -51,11 +55,12 @@ import {
   RenameIcon,
   TemplateCard,
   TemplateMenu,
+  seedTemplate,
   type TemplateAction,
 } from "@/components/templates/cards"
 import { TemplateDetailsDialog } from "@/components/templates/details-dialog"
 import { FolderArt } from "@/components/templates/folder-art"
-import { TemplateThumbnail } from "@/components/template-thumbnail"
+import { TemplateSnapshot } from "@/components/template-snapshot"
 import { NameDialog } from "@/components/templates/name-dialog"
 import { NewFolderDialog, NewTemplateMenu } from "@/components/templates/new-menu"
 import {
@@ -67,7 +72,6 @@ import {
   renameTemplateFolder,
   updateTemplate,
 } from "@/lib/actions"
-import { formatRelative } from "@/lib/format"
 import {
   STATUS_LABEL,
   hrefOf,
@@ -80,6 +84,7 @@ import {
 import { toastDone, toastFailure } from "@/lib/toast"
 import type { TemplateFolder, TemplateSummary } from "@/lib/types"
 import { RowMenu } from "@/components/list/row-menu"
+import { Time } from "@/components/time"
 
 type StatusFilter = "all" | TemplateStatus
 
@@ -105,22 +110,35 @@ type Dialog =
  * ⚠ SEARCH LOOKS EVERYWHERE, NOT ONLY IN THE FOLDER ON SCREEN. Somebody
  * typing a name wants that template, wherever they filed it.
  */
+// ⚠ ONE EMPTY LIST, NOT A NEW ONE PER RENDER. The optimistic layer below resets
+// when the list it was given changes identity; a fresh `[]` on every loading
+// render reset it on every render, and React stopped the loop with an error.
+const NO_TEMPLATES: TemplateSummary[] = []
+const NO_FOLDERS: TemplateFolder[] = []
+
 export function TemplateLibrary({
-  templates,
-  folders,
+  templates = NO_TEMPLATES,
+  folders = NO_FOLDERS,
   folderId,
-  imagesFrom,
+  loading = false,
+  shape,
 }: {
-  templates: TemplateSummary[]
-  folders: TemplateFolder[]
+  templates?: TemplateSummary[]
+  folders?: TemplateFolder[]
   /** The folder being shown, or null for "All templates". */
   folderId: string | null
-  imagesFrom: string | null
+  loading?: boolean
+  shape?: {
+    templates: number
+    folders?: number
+    view?: "grid" | "table"
+  }
 }) {
   const router = useRouter()
   const [query, setQuery] = React.useState("")
   const [status, setStatus] = React.useState<StatusFilter>("all")
-  const [view, chooseView] = useRememberedView("templates", "grid")
+  const viewKey = folderId ? `templates-${folderId}` : "templates"
+  const [view, chooseView] = useRememberedView(viewKey, shape?.view ?? "grid")
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set())
   const [anchor, setAnchor] = React.useState<string | null>(null)
   const [dialog, setDialog] = React.useState<Dialog>(null)
@@ -195,9 +213,16 @@ export function TemplateLibrary({
   )
   const pickedIn: string | null | undefined =
     pickedFolders.size === 1 ? [...pickedFolders][0] : undefined
-  // Drag a box over empty space to select, as on a desktop.
-  const area = React.useRef<HTMLDivElement>(null)
-  const band = useMarquee({ root: area, selected, onChange: setSelected })
+  // Drag a box over empty space to select, as on a desktop. It listens on the
+  // whole library, not only the grid, so the padding and what is left below
+  // the last row start one too.
+  const library = React.useRef<HTMLDivElement>(null)
+  useMarquee({ root: library, selected, onChange: setSelected })
+
+  const clearFilters = () => {
+    setQuery("")
+    setStatus("all")
+  }
 
   const clearSelection = React.useCallback(() => {
     setSelected(new Set())
@@ -295,6 +320,7 @@ export function TemplateLibrary({
   // ── Dragging ───────────────────────────────────────────────────────────
   function startDrag(id: string, event: React.DragEvent) {
     const ids = selected.has(id) ? pickedTemplates : [id]
+    if (ids.length === 0) return event.preventDefault()
     setDragIds(ids)
     event.dataTransfer.effectAllowed = "move"
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids))
@@ -303,13 +329,25 @@ export function TemplateLibrary({
     const ghost = document.createElement("div")
     ghost.textContent =
       ids.length === 1
-        ? titleOf(all.find((t) => t.id === id)!)
+        ? titleOf(all.find((t) => t.id === ids[0])!)
         : `${ids.length} templates`
     ghost.style.cssText =
       "position:fixed;top:-1000px;padding:6px 10px;border-radius:9999px;font:500 12px/1 system-ui,sans-serif;background:#111;color:#fff;box-shadow:0 6px 20px rgb(0 0 0/.25)"
     document.body.appendChild(ghost)
     event.dataTransfer.setDragImage(ghost, 12, 12)
     requestAnimationFrame(() => ghost.remove())
+  }
+  // A folder is a drag handle only while it is ticked with templates.
+  const folderDrag = (f: TemplateFolder) =>
+    pickedTemplates.length > 0 && selected.has(folderKey(f.id))
+      ? {
+          onDragStart: (e: React.DragEvent) => startDrag(folderKey(f.id), e),
+          onDragEnd: endDrag,
+        }
+      : undefined
+  const endDrag = () => {
+    setDragIds(null)
+    setOver(null)
   }
   const dropTarget = (key: string, to: string | null) => ({
     over: over === key,
@@ -360,39 +398,58 @@ export function TemplateLibrary({
     }
   }
 
-  const empty = templates.length === 0 && folders.length === 0
-  const nothingShown = shownTemplates.length === 0 && shownFolders.length === 0
+  const skeletonEmpty =
+    loading && (shape?.templates ?? 0) === 0 && (shape?.folders ?? 0) === 0
+  // ⚠ A FOLDER'S EMPTY SKELETON IS THE FOLDER'S EMPTY STATE, not the library's: the
+  // two say different things and have different art.
+  const skeletonEmptyFolder = skeletonEmpty && folderId !== null
+  const empty =
+    (!loading && templates.length === 0 && folders.length === 0) ||
+    (skeletonEmpty && !skeletonEmptyFolder)
+  const nothingShown =
+    (!loading && shownTemplates.length === 0 && shownFolders.length === 0) ||
+    skeletonEmptyFolder
 
   return (
-    <div className="relative">
+    <div ref={library} className="relative">
       {/* Toolbar */}
       <ListToolbar>
-        <SearchField
+        <ListSearch
           value={query}
           onChange={setQuery}
           placeholder={folder ? "Search all templates" : "Search templates"}
           label="Search templates"
         />
-        <FilterSelect
-          value={status === "all" ? "" : status}
-          onValueChange={(v) => setStatus((v || "all") as StatusFilter)}
-          label="Filter by status"
-          allLabel="All statuses"
-          className="w-48"
-          options={[
-            { value: "published", label: "Published" },
-            { value: "draft", label: "Draft" },
-            { value: "changes", label: "Unpublished changes" },
-          ]}
+        <ListResults
+          count={shownTemplates.length + shownFolders.length}
+          noun={["template", "templates"]}
+          query={query}
+          filtered={status !== "all"}
+          onClear={clearFilters}
         />
-        <ViewToggle value={view} onChange={chooseView} />
+        <ListToolbarEnd>
+          <FilterSelect
+            value={status === "all" ? "" : status}
+            onValueChange={(v) => setStatus((v || "all") as StatusFilter)}
+            label="Filter by status"
+            allLabel="All statuses"
+            options={[
+              { value: "published", label: "Published" },
+              { value: "draft", label: "Draft" },
+              { value: "changes", label: "Unpublished changes" },
+            ]}
+          />
+          <ViewToggle value={view} onChange={chooseView} />
+        </ListToolbarEnd>
       </ListToolbar>
 
-      {/* Where we are */}
+      {/* Where we are. Only inside a folder: a search from the top says what it
+          found in the toolbar, so starting one must not push the page down. */}
       <AnimatePresence initial={false}>
-        {(folderId || searching) && (
+        {folderId && (
           <motion.nav
             aria-label="Breadcrumb"
+            data-no-marquee
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
@@ -419,56 +476,69 @@ export function TemplateLibrary({
                   All templates
                 </Link>
               </li>
-              {folder && !searching && (
+              {(folder || (loading && folderId)) && !searching && (
                 <>
                   <ChevronRight
                     className="size-3.5 text-muted-foreground"
                     aria-hidden
                   />
-                  <li className="font-medium">{folder.name}</li>
-                  <li>
-                    <DropdownMenu modal={false}>
-                      <Tooltip content="Folder actions">
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            aria-label="Folder actions"
-                          >
-                            <MoreHorizontal />
-                          </Button>
-                        </DropdownMenuTrigger>
-                      </Tooltip>
-                      <DropdownMenuContent align="start">
-                        <DropdownMenuItem
-                          onSelect={() => setDialog({ kind: "rename-folder", folder })}
-                        >
-                          <RenameIcon />
-                          Rename folder
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => setDialog({ kind: "delete-folder", folder })}
-                        >
-                          <Trash2 />
-                          Delete folder
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                  <li className="font-medium">
+                    <Bone id="folder-name" lineHeight={20} width={100} inline>
+                      {folder?.name}
+                    </Bone>
                   </li>
-                </>
-              )}
-              {searching && (
-                <>
-                  <ChevronRight
-                    className="size-3.5 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <li className="text-muted-foreground">
-                    {shownTemplates.length + shownFolders.length} result
-                    {shownTemplates.length + shownFolders.length === 1 ? "" : "s"} for “
-                    {query.trim()}”
+                  {/*
+                   * ⚠ THE MENU'S BUTTON IS THERE WHILE THE FOLDER LOADS, DIMMED
+                   * (2026-11-18). It came with the folder: the 32px button is taller
+                   * than the name's line, so the breadcrumb grew and every template
+                   * under it jumped down as the folder arrived. SKIPPED BY
+                   * test/skeleton-parity: only the loaded one carries the menu.
+                   */}
+                  <li data-skeleton="skip">
+                    {!folder ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        aria-label="Folder actions"
+                        disabled
+                      >
+                        <MoreHorizontal />
+                      </Button>
+                    ) : (
+                      <DropdownMenu modal={false}>
+                        <Tooltip content="Folder actions">
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              aria-label="Folder actions"
+                            >
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </Tooltip>
+                        <DropdownMenuContent align="start">
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              setDialog({ kind: "rename-folder", folder })
+                            }
+                          >
+                            <RenameIcon />
+                            Rename folder
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() =>
+                              setDialog({ kind: "delete-folder", folder })
+                            }
+                          >
+                            <Trash2 />
+                            Delete folder
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </li>
                 </>
               )}
@@ -477,105 +547,146 @@ export function TemplateLibrary({
         )}
       </AnimatePresence>
 
-      {/* What is here - and the space a selection box is drawn in. */}
-      <div ref={area} className="min-h-[60vh] pt-6 pb-24">
-        <AnimatePresence mode="wait" initial={false}>
-          {empty ? (
-            <motion.div key="empty-library" {...SWAP}>
-              <EmptyLibrary />
-            </motion.div>
-          ) : nothingShown ? (
-            folderId && !searching && status === "all" ? (
-              <motion.div key="empty-folder" {...SWAP}>
-                <EmptyFolder folderId={folderId} />
+      {/* What is here - and empty space the selection box starts from. */}
+      <div className="min-h-[60vh] pt-6 pb-24">
+        <BoneRegion id="library">
+          <AnimatePresence mode="wait" initial={false}>
+            {empty ? (
+              <motion.div key="empty-library" {...SWAP}>
+                <EmptyLibrary />
               </motion.div>
+            ) : nothingShown ? (
+              folderId && !searching && status === "all" ? (
+                <motion.div key="empty-folder" {...SWAP}>
+                  <EmptyFolder folderId={folderId} />
+                </motion.div>
+              ) : (
+                <motion.p
+                  key="nothing-shown"
+                  {...SWAP}
+                  className="rounded-2xl border border-dashed px-4 py-16 text-center text-sm text-muted-foreground"
+                >
+                  {searching
+                    ? `No template matches “${query.trim()}”.`
+                    : `No ${STATUS_LABEL[status as TemplateStatus].toLowerCase()} templates here.`}
+                </motion.p>
+              )
+            ) : view === "grid" ? (
+              loading ? (
+                <div key="grid-loading">
+                  <ul className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                    {Array.from({ length: shape?.folders ?? 0 }, (_, i) => (
+                      <BoneScope key={`f-${i}`} id={`folder-${i}`} unit>
+                        <li>
+                          <FolderCard
+                            loading
+                            selected={false}
+                            selecting={false}
+                            over={false}
+                            onSelect={() => {}}
+                            onDragOver={() => {}}
+                            onDragLeave={() => {}}
+                            onDrop={() => {}}
+                            onRename={() => {}}
+                            onDelete={() => {}}
+                          />
+                        </li>
+                      </BoneScope>
+                    ))}
+                    {Array.from({ length: shape?.templates ?? 0 }, (_, i) => (
+                      <BoneScope key={`t-${i}`} id={`tpl-${i}`} unit>
+                        <li>
+                          <TemplateCard
+                            loading
+                            selected={false}
+                            selecting={false}
+                            dragging={false}
+                          />
+                        </li>
+                      </BoneScope>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <motion.div key="grid" {...SWAP}>
+                  <LayoutGroup>
+                    <ul className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                      <AnimatePresence mode="popLayout" initial={false}>
+                        {shownFolders.map((f, i) => (
+                          <BoneScope key={`f-${f.id}`} id={`folder-${i}`} unit>
+                            <li data-select-key={folderKey(f.id)}>
+                              <FolderCard
+                                folder={f}
+                                selected={selected.has(folderKey(f.id))}
+                                selecting={selecting}
+                                onSelect={(e) => select(folderKey(f.id), e)}
+                                {...dropTarget(f.id, f.id)}
+                                {...folderDrag(f)}
+                                onRename={() =>
+                                  setDialog({ kind: "rename-folder", folder: f })
+                                }
+                                onDelete={() =>
+                                  setDialog({ kind: "delete-folder", folder: f })
+                                }
+                              />
+                            </li>
+                          </BoneScope>
+                        ))}
+                        {shownTemplates.map((t, i) => (
+                          <BoneScope key={t.id} id={`tpl-${i}`} unit>
+                            <li data-select-key={t.id}>
+                              <TemplateCard
+                                template={t}
+                                folders={liveFolders}
+                                selected={selected.has(t.id)}
+                                selecting={selecting}
+                                onSelect={(e) => select(t.id, e)}
+                                onAction={(a) => void act(t, a)}
+                                onDragStart={(e) => startDrag(t.id, e)}
+                                onDragEnd={endDrag}
+                                dragging={dragIds?.includes(t.id) ?? false}
+                              />
+                            </li>
+                          </BoneScope>
+                        ))}
+                      </AnimatePresence>
+                    </ul>
+                  </LayoutGroup>
+                </motion.div>
+              )
             ) : (
-              <motion.p
-                key="nothing-shown"
-                {...SWAP}
-                className="rounded-2xl border border-dashed px-4 py-16 text-center text-sm text-muted-foreground"
-              >
-                {searching
-                  ? `No template matches “${query.trim()}”.`
-                  : `No ${STATUS_LABEL[status as TemplateStatus].toLowerCase()} templates here.`}
-              </motion.p>
-            )
-          ) : view === "grid" ? (
-            <motion.div key="grid" {...SWAP}>
-              <LayoutGroup>
-                <ul className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    {shownFolders.map((f) => (
-                      <li key={`f-${f.id}`} data-select-key={folderKey(f.id)}>
-                        <FolderCard
-                          folder={f}
-                          selected={selected.has(folderKey(f.id))}
-                          selecting={selecting}
-                          onSelect={(e) => select(folderKey(f.id), e)}
-                          {...dropTarget(f.id, f.id)}
-                          onRename={() =>
-                            setDialog({ kind: "rename-folder", folder: f })
-                          }
-                          onDelete={() =>
-                            setDialog({ kind: "delete-folder", folder: f })
-                          }
-                        />
-                      </li>
-                    ))}
-                    {shownTemplates.map((t) => (
-                      <li key={t.id} data-select-key={t.id}>
-                        <TemplateCard
-                          template={t}
-                          folders={liveFolders}
-                          imagesFrom={imagesFrom}
-                          selected={selected.has(t.id)}
-                          selecting={selecting}
-                          onSelect={(e) => select(t.id, e)}
-                          onAction={(a) => void act(t, a)}
-                          onDragStart={(e) => startDrag(t.id, e)}
-                          onDragEnd={() => {
-                            setDragIds(null)
-                            setOver(null)
-                          }}
-                          dragging={dragIds?.includes(t.id) ?? false}
-                        />
-                      </li>
-                    ))}
-                  </AnimatePresence>
-                </ul>
-              </LayoutGroup>
-            </motion.div>
-          ) : (
-            <motion.div key="table" {...SWAP}>
-              <TemplateTable
-                folders={shownFolders}
-                allFolders={liveFolders}
-                imagesFrom={imagesFrom}
-                templates={shownTemplates}
-                selected={selected}
-                selecting={selecting}
-                onSelect={select}
-                onSelectAll={(checked) =>
-                  setSelected(checked ? new Set(visibleIds) : new Set())
-                }
-                onAction={(t, a) => void act(t, a)}
-                dropTarget={dropTarget}
-                onDragStart={startDrag}
-                onDragEnd={() => {
-                  setDragIds(null)
-                  setOver(null)
-                }}
-                onFolderRename={(f) => setDialog({ kind: "rename-folder", folder: f })}
-                onFolderDelete={(f) => setDialog({ kind: "delete-folder", folder: f })}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <motion.div key="table" {...SWAP}>
+                <TemplateTable
+                  folders={shownFolders}
+                  allFolders={liveFolders}
+                  templates={shownTemplates}
+                  selected={selected}
+                  selecting={selecting}
+                  onSelect={select}
+                  onSelectAll={(checked) =>
+                    setSelected(checked ? new Set(visibleIds) : new Set())
+                  }
+                  onAction={(t, a) => void act(t, a)}
+                  dropTarget={dropTarget}
+                  onDragStart={startDrag}
+                  onDragEnd={endDrag}
+                  folderDrag={folderDrag}
+                  onFolderRename={(f) =>
+                    setDialog({ kind: "rename-folder", folder: f })
+                  }
+                  onFolderDelete={(f) =>
+                    setDialog({ kind: "delete-folder", folder: f })
+                  }
+                  loading={loading}
+                  shape={shape}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </BoneRegion>
       </div>
 
       {/* The bar for what is ticked */}
-      <MarqueeBox box={band} />
-
       <BulkBar count={picked.length} onClear={clearSelection} label="Selected">
         {/* Folders do not nest, so only templates move. */}
         {pickedTemplates.length > 0 && (
@@ -719,7 +830,6 @@ function EmptyFolder({ folderId }: { folderId: string }) {
 
 /** The same library as rows: denser, for many templates. */
 function TemplateTable({
-  imagesFrom,
   folders,
   allFolders,
   templates,
@@ -731,12 +841,14 @@ function TemplateTable({
   dropTarget,
   onDragStart,
   onDragEnd,
+  folderDrag,
   onFolderRename,
   onFolderDelete,
+  loading = false,
+  shape,
 }: {
   folders: TemplateFolder[]
   allFolders: TemplateFolder[]
-  imagesFrom: string | null
   templates: TemplateSummary[]
   selected: Set<string>
   selecting: boolean
@@ -754,8 +866,13 @@ function TemplateTable({
   }
   onDragStart: (id: string, e: React.DragEvent) => void
   onDragEnd: () => void
+  folderDrag: (
+    f: TemplateFolder,
+  ) => { onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void } | undefined
   onFolderRename: (f: TemplateFolder) => void
   onFolderDelete: (f: TemplateFolder) => void
+  loading?: boolean
+  shape?: { templates: number; folders?: number }
 }) {
   const router = useRouter()
   const allTicked =
@@ -763,229 +880,392 @@ function TemplateTable({
     templates.every((t) => selected.has(t.id)) &&
     folders.every((f) => selected.has(folderKey(f.id)))
   const [hoverFolder, setHoverFolder] = React.useState<string | null>(null)
+  // Rows to draw: the data's, or as many placeholders as the shape remembers.
+  const folderRows: (TemplateFolder | undefined)[] = loading
+    ? Array.from({ length: shape?.folders ?? 0 }, () => undefined)
+    : folders
+  const templateRows: (TemplateSummary | undefined)[] = loading
+    ? Array.from({ length: shape?.templates ?? 0 }, () => undefined)
+    : templates
   return (
     // Arc's table, like every other list: the same frame, heads and rows.
     <ListTable>
       <ListHeader>
-        <th className="w-10 py-2.5 pl-4">
-          <Checkbox
-            checked={allTicked ? true : selecting ? "indeterminate" : false}
-            onCheckedChange={(c) => onSelectAll(c === true)}
-            aria-label="Select all"
-          />
+        <th className="w-[4.25rem] py-2.5 pl-4">
+          <Bone id="all" shape="box" width={36} height={36} inset={9} radius={5} inline>
+            <Checkbox
+              checked={allTicked ? true : selecting ? "indeterminate" : false}
+              disabled={loading}
+              onCheckedChange={(c) => onSelectAll(c === true)}
+              aria-label="Select all"
+            />
+          </Bone>
         </th>
         <ListHead className="pl-0">Name</ListHead>
-        <ListHead className="hidden w-[11rem] md:table-cell">Status</ListHead>
-        <ListHead className="hidden w-[8rem] lg:table-cell">Version</ListHead>
-        <ListHead className="w-[9rem]">Edited</ListHead>
-        <ListHead className="w-12">
+        <ListHead hideBelow="sm" className="w-[6.5rem]">
+          Status
+        </ListHead>
+        <ListHead hideBelow="sm" className="w-[6rem]">
+          Version
+        </ListHead>
+        <ListHead className="w-[7rem]">Edited</ListHead>
+        <ListHead className="w-[3.75rem]">
           <span className="sr-only">Actions</span>
         </ListHead>
       </ListHeader>
       <tbody>
         <AnimatePresence initial={false}>
-          {folders.map((f) => {
-            const drop = dropTarget(f.id, f.id)
-            return (
-              <motion.tr
-                key={`f-${f.id}`}
-                data-select-key={folderKey(f.id)}
-                layout
-                exit={{
-                  opacity: 0,
-                  transition: {
-                    duration: motionTokens.duration.instant,
-                    ease: [...motionTokens.ease.exit],
-                  },
-                }}
-                transition={motionTokens.spring.responsive}
-                onDragOver={drop.onDragOver}
-                onDragLeave={drop.onDragLeave}
-                onDrop={drop.onDrop}
-                onClick={(e) => {
-                  // Only a click in the row: a dialog or menu opened from it
-                  // bubbles its clicks here through React (see MotionRow).
-                  if (!e.currentTarget.contains(e.target as Node)) return
-                  // While picking, a click ticks rather than opens.
-                  if (selecting)
-                    onSelect(folderKey(f.id), {
-                      shiftKey: e.shiftKey,
-                      checked: !selected.has(folderKey(f.id)),
-                    })
-                  else router.push(`/templates/folder/${encodeURIComponent(f.id)}`)
-                }}
-                onPointerEnter={() => setHoverFolder(f.id)}
-                onPointerLeave={() => setHoverFolder((h) => (h === f.id ? null : h))}
-                className={cn(
-                  rowClass,
-                  "cursor-pointer",
-                  selected.has(folderKey(f.id)) && selectedRowClass,
-                  drop.over &&
-                    "bg-primary/[0.06] outline-2 -outline-offset-2 outline-primary/60",
-                )}
-              >
+          {folderRows.map((f, i) => {
+            const drop = f ? dropTarget(f.id, f.id) : undefined
+            const cells = (
+              <>
                 <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
-                  <Checkbox
-                    checked={selected.has(folderKey(f.id))}
-                    onClick={(e) =>
-                      onSelect(folderKey(f.id), {
-                        shiftKey: e.shiftKey,
-                        checked: !selected.has(folderKey(f.id)),
-                      })
-                    }
-                    aria-label={`Select ${f.name}`}
-                  />
+                  <Bone
+                    id="tick"
+                    shape="box"
+                    width={36}
+                    height={36}
+                    inset={9}
+                    radius={5}
+                    inline
+                  >
+                    {f && (
+                      <Checkbox
+                        checked={selected.has(folderKey(f.id))}
+                        onClick={(e) =>
+                          onSelect(folderKey(f.id), {
+                            shiftKey: e.shiftKey,
+                            checked: !selected.has(folderKey(f.id)),
+                          })
+                        }
+                        aria-label={`Select ${f.name}`}
+                      />
+                    )}
+                  </Bone>
                 </td>
                 <td className="max-w-0 pl-0">
                   <div className="flex items-center gap-3">
-                    {/* The grid's folder, small: papers for what is inside,
-                          lifting on hover and when a template is dragged on. */}
-                    {/* ⚠ THE GRID'S FOLDER, DRAWN AT ITS FULL 160px AND SCALED
-                          DOWN - not drawn small. Its edges, highlight, shadows
-                          and corners are fixed sizes, so a folder drawn at 44px
-                          wore them four times as heavy; scaled, every part
-                          shrinks together and it is the same picture. */}
-                    <div className="relative h-[35px] w-[44px] shrink-0">
-                      <div className="absolute top-0 left-0 w-[160px] origin-top-left scale-[0.275]">
-                        <FolderArt
-                          count={f.templates}
-                          raised={hoverFolder === f.id || drop.over}
-                          over={drop.over}
-                          className="w-full"
-                        />
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{f.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {f.templates === 0
-                          ? "Empty"
-                          : `${f.templates} template${f.templates === 1 ? "" : "s"}`}
-                      </p>
+                    <Bone
+                      id="icon"
+                      shape="box"
+                      width={44}
+                      height={35}
+                      radius={6}
+                      inline
+                    >
+                      {f && (
+                        <RowTile>
+                          {/* ⚠ THE GRID'S FOLDER, DRAWN AT ITS FULL 160px AND SCALED
+                              DOWN, not drawn small: the art is fluid, but its
+                              borders and shadows are fixed sizes, so a folder
+                              drawn small wore them too heavy. Scaled, every part
+                              shrinks together. 160 * 0.225 = 36px wide. It lifts
+                              on hover and when a template is dragged on. */}
+                          <div className="relative h-[30px] w-[36px]">
+                            <div className="absolute top-0 left-0 w-[160px] origin-top-left scale-[0.225]">
+                              <FolderArt
+                                count={f.templates}
+                                raised={hoverFolder === f.id || Boolean(drop?.over)}
+                                over={Boolean(drop?.over)}
+                                previews={f.preview}
+                                className="w-full"
+                              />
+                            </div>
+                          </div>
+                        </RowTile>
+                      )}
+                    </Bone>
+                    <div className="min-w-0 flex-1">
+                      <Bone id="name" lineHeight={20} width={120}>
+                        {f && <p className="truncate font-medium">{f.name}</p>}
+                      </Bone>
+                      <Bone id="count" lineHeight={16} width={60} className="mt-0.5">
+                        {f && (
+                          <p className="text-xs text-muted-foreground">
+                            {f.templates === 0
+                              ? "Empty"
+                              : `${f.templates} template${f.templates === 1 ? "" : "s"}`}
+                          </p>
+                        )}
+                      </Bone>
                     </div>
                   </div>
                 </td>
-                <td className="hidden md:table-cell" />
-                <td className="hidden lg:table-cell" />
-                <td className="text-xs text-muted-foreground" title={f.updated_at}>
-                  {formatRelative(f.updated_at)}
-                </td>
+                <ListCell hideBelow="sm" className="text-muted-foreground">
+                  -
+                </ListCell>
+                <ListCell hideBelow="sm" className="text-muted-foreground">
+                  -
+                </ListCell>
+                <ListCell
+                  className="text-xs text-muted-foreground"
+                  title={f?.updated_at}
+                >
+                  <Bone id="date" lineHeight={16} width={60}>
+                    {f && <Time iso={f.updated_at} />}
+                  </Bone>
+                </ListCell>
                 <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
-                  <RowMenu label={f.name}>
-                    <DropdownMenuItem onSelect={() => onFolderRename(f)}>
-                      <RenameIcon />
-                      Rename folder
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={() => onFolderDelete(f)}
-                    >
-                      <Trash2 />
-                      Delete folder
-                    </DropdownMenuItem>
-                  </RowMenu>
-                </td>
-              </motion.tr>
-            )
-          })}
-          {templates.map((t) => {
-            const status = statusOf(t)
-            const ticked = selected.has(t.id)
-            return (
-              <motion.tr
-                key={t.id}
-                data-select-key={t.id}
-                layout
-                exit={{
-                  opacity: 0,
-                  transition: {
-                    duration: motionTokens.duration.instant,
-                    ease: [...motionTokens.ease.exit],
-                  },
-                }}
-                transition={motionTokens.spring.responsive}
-                draggable
-                onDragStart={(e) => onDragStart(t.id, e as unknown as React.DragEvent)}
-                onDragEnd={onDragEnd}
-                onMouseDown={(e) => e.shiftKey && e.preventDefault()}
-                onClick={(e) => {
-                  // Only a click in the row - see the folder row above.
-                  if (!e.currentTarget.contains(e.target as Node)) return
-                  if (selecting)
-                    onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
-                  else router.push(hrefOf(t))
-                }}
-                className={cn(rowClass, "cursor-pointer", ticked && selectedRowClass)}
-              >
-                <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
-                  <Checkbox
-                    checked={ticked}
-                    onClick={(e) =>
-                      onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
-                    }
-                    aria-label={`Select ${titleOf(t)}`}
-                  />
-                </td>
-                <td className="max-w-0 pl-0">
-                  <Link
-                    href={hrefOf(t)}
-                    className="flex min-w-0 items-center gap-3 outline-none"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <RowTile>
-                      <div className="absolute inset-x-[14%] top-[18%] -bottom-1 overflow-hidden rounded-t-[3px] shadow-[0_0_0_1px_rgb(0_0_0/0.06)]">
-                        <TemplateThumbnail
-                          templateId={t.id}
-                          stamp={t.updated_at}
-                          imagesFrom={imagesFrom}
-                          label={`${titleOf(t)} preview`}
-                        />
-                      </div>
-                    </RowTile>
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{titleOf(t)}</p>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        {t.name}
-                      </p>
-                    </div>
-                  </Link>
-                </td>
-                <td className="hidden md:table-cell">
-                  <Badge tone={status === "published" ? "info" : "neutral"}>
-                    {STATUS_LABEL[status]}
-                  </Badge>
-                </td>
-                <td className="tabular hidden font-mono text-xs text-muted-foreground lg:table-cell">
-                  {t.version > 0 ? `v${t.version}` : "-"}
-                  {!isEditable(t) && (
-                    <span className="ml-2 capitalize">{t.source}</span>
+                  {f && (
+                    <RowMenu label={f.name}>
+                      <DropdownMenuItem onSelect={() => onFolderRename(f)}>
+                        <RenameIcon />
+                        Rename folder
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() => onFolderDelete(f)}
+                      >
+                        <Trash2 />
+                        Delete folder
+                      </DropdownMenuItem>
+                    </RowMenu>
                   )}
                 </td>
-                <td
-                  className="text-xs whitespace-nowrap text-muted-foreground"
-                  title={t.updated_at}
-                >
-                  {formatRelative(t.updated_at)}
-                </td>
-                <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
-                  <TemplateMenu
-                    template={t}
-                    folders={allFolders}
-                    onAction={(a) => onAction(t, a)}
-                    trigger={
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={rowMenuClass}
-                        aria-label={`Actions for ${titleOf(t)}`}
-                      >
-                        <MoreHorizontal />
-                      </Button>
+              </>
+            )
+            return (
+              <BoneScope key={f ? `f-${f.id}` : `f-${i}`} id={`folder-${i}`} unit>
+                {f && drop ? (
+                  <motion.tr
+                    data-select-key={folderKey(f.id)}
+                    layout
+                    exit={{
+                      opacity: 0,
+                      transition: {
+                        duration: motionTokens.duration.instant,
+                        ease: [...motionTokens.ease.exit],
+                      },
+                    }}
+                    transition={motionTokens.spring.responsive}
+                    draggable={Boolean(folderDrag(f))}
+                    onDragStart={(e) =>
+                      folderDrag(f)?.onDragStart(e as unknown as React.DragEvent)
                     }
-                  />
+                    onDragEnd={onDragEnd}
+                    onDragOver={drop.onDragOver}
+                    onDragLeave={drop.onDragLeave}
+                    onDrop={drop.onDrop}
+                    onClick={(e) => {
+                      // Only a click in the row: a dialog or menu opened from it
+                      // bubbles its clicks here through React (see MotionRow).
+                      if (!e.currentTarget.contains(e.target as Node)) return
+                      // While picking, a click ticks rather than opens.
+                      if (selecting)
+                        onSelect(folderKey(f.id), {
+                          shiftKey: e.shiftKey,
+                          checked: !selected.has(folderKey(f.id)),
+                        })
+                      else router.push(`/templates/folder/${encodeURIComponent(f.id)}`)
+                    }}
+                    onPointerEnter={() => setHoverFolder(f.id)}
+                    onPointerLeave={() =>
+                      setHoverFolder((h) => (h === f.id ? null : h))
+                    }
+                    className={cn(
+                      rowClass,
+                      "cursor-pointer",
+                      selected.has(folderKey(f.id)) && selectedRowClass,
+                      drop.over &&
+                        "bg-primary/[0.06] outline-2 -outline-offset-2 outline-primary/60",
+                    )}
+                  >
+                    {cells}
+                  </motion.tr>
+                ) : (
+                  <tr className={cn(rowClass, "cursor-pointer")}>{cells}</tr>
+                )}
+              </BoneScope>
+            )
+          })}
+          {templateRows.map((t, i) => {
+            const ticked = t ? selected.has(t.id) : false
+            const status = t ? statusOf(t) : "published"
+            const cells = (
+              <>
+                <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
+                  <Bone
+                    id="tick"
+                    shape="box"
+                    width={36}
+                    height={36}
+                    inset={9}
+                    radius={5}
+                    inline
+                  >
+                    {t && (
+                      <Checkbox
+                        checked={ticked}
+                        onClick={(e) =>
+                          onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
+                        }
+                        aria-label={`Select ${titleOf(t)}`}
+                      />
+                    )}
+                  </Bone>
                 </td>
-              </motion.tr>
+                <td className="max-w-0 pl-0">
+                  {(() => {
+                    const inner = (
+                      <>
+                        <Bone
+                          id="thumb"
+                          shape="box"
+                          width={44}
+                          height={35}
+                          radius={4}
+                          inline
+                        >
+                          {t && (
+                            <RowTile>
+                              <div className="absolute inset-x-[14%] top-[18%] -bottom-1 overflow-hidden rounded-t-[3px] shadow-[0_0_0_1px_rgb(0_0_0/0.06)]">
+                                <TemplateSnapshot
+                                  templateId={t.id}
+                                  stamp={t.updated_at}
+                                  lazy
+                                />
+                              </div>
+                            </RowTile>
+                          )}
+                        </Bone>
+                        <div className="min-w-0 flex-1">
+                          <Bone id="title" lineHeight={20} width={140}>
+                            {t && <p className="truncate font-medium">{titleOf(t)}</p>}
+                          </Bone>
+                          <Bone id="name" lineHeight={16} width={90} className="mt-0.5">
+                            {t && (
+                              <p className="truncate font-mono text-xs text-muted-foreground">
+                                {t.name}
+                              </p>
+                            )}
+                          </Bone>
+                        </div>
+                      </>
+                    )
+                    const linkClass = "flex min-w-0 items-center gap-3 outline-none"
+                    return t ? (
+                      <Link
+                        href={hrefOf(t)}
+                        className={linkClass}
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerEnter={() => seedTemplate(t)}
+                        onFocus={() => seedTemplate(t)}
+                      >
+                        {inner}
+                      </Link>
+                    ) : (
+                      <a aria-hidden tabIndex={-1} className={linkClass}>
+                        {inner}
+                      </a>
+                    )
+                  })()}
+                </td>
+                <ListCell hideBelow="sm">
+                  <Bone
+                    id="status"
+                    shape="box"
+                    width={64}
+                    height={20}
+                    radius={9999}
+                    inline
+                  >
+                    {t && (
+                      <Badge tone={status === "published" ? "info" : "neutral"}>
+                        {STATUS_LABEL[status]}
+                      </Badge>
+                    )}
+                  </Bone>
+                </ListCell>
+                <ListCell
+                  hideBelow="sm"
+                  className="tabular font-mono text-xs text-muted-foreground"
+                  title={t ? versionLabel(t) : undefined}
+                >
+                  <Bone id="version" lineHeight={16} width={40}>
+                    {t && (
+                      <>
+                        {t.version > 0 ? `v${t.version}` : "-"}
+                        {!isEditable(t) && (
+                          <span className="ml-2 capitalize">{t.source}</span>
+                        )}
+                      </>
+                    )}
+                  </Bone>
+                </ListCell>
+                <ListCell
+                  className="text-xs text-muted-foreground"
+                  title={t?.updated_at}
+                >
+                  <Bone id="date" lineHeight={16} width={60}>
+                    {t && <Time iso={t.updated_at} />}
+                  </Bone>
+                </ListCell>
+                <td className="pr-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  {t && (
+                    <TemplateMenu
+                      template={t}
+                      folders={allFolders}
+                      onAction={(a) => onAction(t, a)}
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={rowMenuClass}
+                          // ⚠ SKIPPED BY test/skeleton-parity: a skeleton row has nothing to act on.
+                          data-skeleton="skip"
+                          aria-label={`Actions for ${titleOf(t)}`}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      }
+                    />
+                  )}
+                </td>
+              </>
+            )
+            return (
+              <BoneScope key={t ? t.id : `t-${i}`} id={`tpl-${i}`} unit>
+                {t ? (
+                  <motion.tr
+                    data-select-key={t.id}
+                    layout
+                    exit={{
+                      opacity: 0,
+                      transition: {
+                        duration: motionTokens.duration.instant,
+                        ease: [...motionTokens.ease.exit],
+                      },
+                    }}
+                    transition={motionTokens.spring.responsive}
+                    draggable
+                    onDragStart={(e) =>
+                      onDragStart(t.id, e as unknown as React.DragEvent)
+                    }
+                    onDragEnd={onDragEnd}
+                    onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+                    onPointerEnter={() => seedTemplate(t)}
+                    onFocus={() => seedTemplate(t)}
+                    onClick={(e) => {
+                      seedTemplate(t)
+                      // Only a click in the row - see the folder row above.
+                      if (!e.currentTarget.contains(e.target as Node)) return
+                      if (selecting)
+                        onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
+                      else router.push(hrefOf(t))
+                    }}
+                    className={cn(
+                      rowClass,
+                      "cursor-pointer",
+                      ticked && selectedRowClass,
+                    )}
+                  >
+                    {cells}
+                  </motion.tr>
+                ) : (
+                  <tr className={cn(rowClass, "cursor-pointer")}>{cells}</tr>
+                )}
+              </BoneScope>
             )
           })}
         </AnimatePresence>
@@ -1187,6 +1467,12 @@ function RowTile({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   )
+}
+
+/** "v3", plus where a read-only template comes from. */
+function versionLabel(t: TemplateSummary): string {
+  const v = t.version > 0 ? `v${t.version}` : "-"
+  return isEditable(t) ? v : `${v} ${t.source}`
 }
 
 /** A folder's place in the selection, beside template ids. */

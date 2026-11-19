@@ -1,10 +1,11 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
-import { MailboxDetail } from "@/components/mailbox-detail"
+import { MailboxDetailView } from "@/components/mailbox-detail"
 import { tryApi } from "@/lib/api"
 import type { MailboxAliasList } from "@/lib/mailbox-aliases"
 import { transferSnapshot, type MailboxJob } from "@/lib/mailbox-transfer"
 import type { ConsoleMailbox, StoragePool } from "@/lib/mailbox-view"
+import { mailboxDetailShape, type MailboxDetailData } from "@/lib/shapes/mailbox-detail"
 import type { DomainSummary, Me } from "@/lib/types"
 
 /** The address as the person typed it, however the framework hands the segment over. */
@@ -97,20 +98,19 @@ export default async function MailboxPage({
   const isAdmin =
     me.ok && me.data.access?.permissions.includes("members:manage") === true
 
-  return (
-    <MailboxDetail
-      mailbox={result.data}
-      others={
-        isAdmin && list.ok
-          ? list.data.data.filter((m) => m.address !== result.data.address)
-          : NO_MAILBOXES
-      }
-      pool={isAdmin && list.ok ? list.data.pool : null}
-      aliases={aliases.ok ? aliases.data : null}
-      domains={isAdmin && domains.ok ? hostedDomains(domains.data.data) : NO_DOMAINS}
-      transfer={transferSnapshot(exported, imported)}
-      isAdmin={isAdmin}
-      renderedAt={new Date().toISOString()}
-    />
-  )
+  const data: MailboxDetailData = {
+    mailbox: result.data,
+    others:
+      isAdmin && list.ok
+        ? list.data.data.filter((m) => m.address !== result.data.address)
+        : NO_MAILBOXES,
+    pool: isAdmin && list.ok ? list.data.pool : null,
+    aliases: aliases.ok ? aliases.data : null,
+    domains: isAdmin && domains.ok ? hostedDomains(domains.data.data) : NO_DOMAINS,
+    transfer: transferSnapshot(exported, imported),
+    isAdmin,
+    renderedAt: new Date().toISOString(),
+  }
+
+  return <MailboxDetailView shape={mailboxDetailShape.of(data)} data={data} />
 }

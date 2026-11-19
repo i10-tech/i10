@@ -3,6 +3,8 @@
 import * as React from "react"
 import { Button } from "@repo/ui/components/button/button"
 import { Reveal } from "@repo/ui/components/i10/reveal"
+import { BoneScope } from "@repo/ui/components/bone/bone"
+import { NONE } from "@/lib/react"
 import { ssoDirectories } from "@/lib/sso-actions"
 import type { SsoAbilities, SsoDirectories, SsoDirectory } from "@/lib/sso-types"
 import { DeprovisionedKeysPanel } from "./deprovisioned-keys"
@@ -26,17 +28,24 @@ const MARKS = ["okta", "entra", "google"]
 export function DirectoriesPanel({
   abilities,
   initial,
+  loading = false,
+  skeletonCount = 0,
 }: {
   abilities: SsoAbilities
   initial?: SsoDirectories | null
+  loading?: boolean
+  skeletonCount?: number
 }) {
   const call = useSsoCall()
   const { data, setData, failed, reload } = useRemote(ssoDirectories, initial)
   const [adding, setAdding] = React.useState(false)
 
-  if (!data) return <Loading failed={failed} />
+  if (!loading && !data) return <Loading failed={failed} />
 
-  const directories = data.data
+  // ⚠ ONE LIST FOR THE PAGE AND ITS SKELETON: the shape says how many rows.
+  const directories: (SsoDirectory | undefined)[] = loading
+    ? Array.from({ length: skeletonCount }, () => undefined)
+    : (data?.data ?? NONE)
 
   if (directories.length === 0) {
     return (
@@ -63,6 +72,62 @@ export function DirectoriesPanel({
           </div>
         </Reveal>
         <Reveal show={adding} spacing="">
+          {data && !loading && (
+            <AddDirectoryFlow
+              data={data}
+              call={call}
+              onDone={async () => {
+                await reload()
+                setAdding(false)
+              }}
+              onCancel={() => setAdding(false)}
+            />
+          )}
+        </Reveal>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
+        {directories.map((d, i) => (
+          <BoneScope key={d?.id ?? i} id={`dir-${i}`} unit>
+            <DirectoryRow
+              directory={d}
+              abilities={abilities}
+              onChange={(next: SsoDirectory) => {
+                if (!data) return
+                setData({
+                  ...data,
+                  data: data.data.map((x) => (x.id === next.id ? next : x)),
+                })
+              }}
+              reload={reload}
+              call={call}
+            />
+          </BoneScope>
+        ))}
+      </ul>
+
+      {/* ⚠ SKIPPED BY test/skeleton-parity: it shows only below the workspace's directory limit, which is the data's. */}
+      {!loading &&
+        data &&
+        abilities.owner &&
+        directories.length < data.max &&
+        !adding && (
+          <Button
+            variant="secondary"
+            size="sm"
+            data-skeleton="skip"
+            onClick={() => setAdding(true)}
+          >
+            Add a directory
+          </Button>
+        )}
+
+      <Reveal show={adding}>
+        {data && !loading && (
           <AddDirectoryFlow
             data={data}
             call={call}
@@ -72,47 +137,7 @@ export function DirectoriesPanel({
             }}
             onCancel={() => setAdding(false)}
           />
-        </Reveal>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
-        {directories.map((d) => (
-          <DirectoryRow
-            key={d.id}
-            directory={d}
-            abilities={abilities}
-            onChange={(next: SsoDirectory) =>
-              setData({
-                ...data,
-                data: directories.map((x) => (x.id === next.id ? next : x)),
-              })
-            }
-            reload={reload}
-            call={call}
-          />
-        ))}
-      </ul>
-
-      {abilities.owner && directories.length < data.max && !adding && (
-        <Button variant="secondary" size="sm" onClick={() => setAdding(true)}>
-          Add a directory
-        </Button>
-      )}
-
-      <Reveal show={adding}>
-        <AddDirectoryFlow
-          data={data}
-          call={call}
-          onDone={async () => {
-            await reload()
-            setAdding(false)
-          }}
-          onCancel={() => setAdding(false)}
-        />
+        )}
       </Reveal>
 
       <div className="pt-2">

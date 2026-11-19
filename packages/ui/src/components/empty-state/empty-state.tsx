@@ -1,6 +1,6 @@
 "use client";
 
-import { isValidElement, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { isValidElement, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useIsPresent, useMotionValue, useReducedMotion, type AnimationPlaybackControls, type HTMLMotionProps, type MotionProps, type TargetAndTransition, type Transition } from "motion/react";
 import { Folder } from "lucide-react";
 import { motionTokens } from "../lib/motion-tokens";
@@ -69,14 +69,32 @@ function HeightFrame({ reduce, morphKey, children }: { reduce: boolean | null; m
   </motion.div>;
 }
 
+/*
+ * i10: AN EMPTY STATE MOUNTING WHILE THE SAME ONE IS ON SCREEN DOES NOT SETTLE IN
+ * AGAIN. A console page arrives as up to three instances (the skeleton at the
+ * click, loading.tsx, the page), and an empty page draws the same empty state
+ * in each: the icon dimmed and rescaled at every swap (2026-11-09). The one it
+ * replaces is still mounted while the new one renders.
+ */
+const onScreen = new Map<string, number>();
+function useSettled(key: string): boolean {
+  const [still] = useState(() => (onScreen.get(key) ?? 0) > 0);
+  useLayoutEffect(() => {
+    onScreen.set(key, (onScreen.get(key) ?? 0) + 1);
+    return () => { const n = (onScreen.get(key) ?? 1) - 1; if (n > 0) onScreen.set(key, n); else onScreen.delete(key); };
+  }, [key]);
+  return still;
+}
+
 export function EmptyState({ title, description, action, icon, className, label }: EmptyStateProps) {
   const reduce = useReducedMotion();
+  const settled = useSettled(`${title}\n${description}`);
   const glyph = icon ?? <Folder width={24} height={24} strokeWidth={1.5} />;
   const enter: Transition = reduce ? { duration: motionTokens.duration.instant } : { duration: motionTokens.duration.standard, ease: [...motionTokens.ease.enter] };
   const swap: MotionProps = { initial: reduce ? { opacity: 0 } : textIn, animate: shown, exit: reduce ? fadeOut : textOut, transition: enter };
   // The result of an action morphs in place: the icon crossfades and the copy rises in while the old copy leaves.
   return <section className={[styles.root, className].filter(Boolean).join(" ")} aria-label={label}>
-    <div className={styles.icon} aria-hidden="true"><AnimatePresence mode="popLayout" initial={false}><Swap key={iconKey(glyph)} className={styles.glyph} initial={reduce ? { opacity: 0 } : iconIn} animate={shown} exit={reduce ? fadeOut : { ...iconIn, transition: exitFast }} transition={reduce ? enter : motionTokens.spring.snappy}>{glyph}</Swap></AnimatePresence></div>
+    <div className={styles.icon} style={settled ? { animation: "none" } : undefined} aria-hidden="true"><AnimatePresence mode="popLayout" initial={false}><Swap key={iconKey(glyph)} className={styles.glyph} initial={reduce ? { opacity: 0 } : iconIn} animate={shown} exit={reduce ? fadeOut : { ...iconIn, transition: exitFast }} transition={reduce ? enter : motionTokens.spring.snappy}>{glyph}</Swap></AnimatePresence></div>
     <HeightFrame reduce={reduce} morphKey={`${title}\n${description}`}>
       <h3><AnimatePresence mode="popLayout" initial={false}><Swap key={title} className={styles.line} {...swap}>{title}</Swap></AnimatePresence></h3>
       <p><AnimatePresence mode="popLayout" initial={false}><Swap key={description} className={styles.line} {...swap}>{description}</Swap></AnimatePresence></p>

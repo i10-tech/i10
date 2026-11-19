@@ -149,6 +149,33 @@ export function mfaCapabilityNote(
   return null
 }
 
+/**
+ * Every note under the Require MFA toggle, in order.
+ *
+ * ⚠ THE PAGE'S SHAPE COUNTS THESE (`mfaNotes` in lib/shapes/sso-connection), so
+ * the skeleton draws as many bars as the page has lines. One list keeps the two
+ * from disagreeing.
+ */
+export function mfaNotes(
+  connection: Pick<SsoConnection, "mfaRequired" | "capabilities">,
+): { tone: "warning" | "muted"; text: string }[] {
+  const caps = connection.capabilities
+  const notes: { tone: "warning" | "muted"; text: string }[] = []
+  const mfa = mfaCapabilityNote(connection)
+  if (mfa) notes.push(mfa)
+  if (caps?.canProveFreshAuth === "with_setting" && caps.freshAuthSetting)
+    notes.push({
+      tone: "muted",
+      text: `For step-up re-verification: ${caps.freshAuthSetting}`,
+    })
+  if (caps?.canProveFreshAuth === "no")
+    notes.push({
+      tone: "muted",
+      text: `${caps.label} cannot prove a fresh sign-in, so step-up prompts use i10's own verification.`,
+    })
+  return notes
+}
+
 /** The newest passed run within the day, if any. */
 export function latestPass(runs: TestRun[], now: number): TestRun | null {
   return (

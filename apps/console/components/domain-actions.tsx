@@ -7,6 +7,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@repo/ui/components/i10
 import { DeleteDomainDialog } from "@/components/delete-domain-dialog"
 import { toastDone, toastError } from "@/lib/toast"
 import { RowMenu } from "@/components/list/row-menu"
+import { announceNavigation } from "@/lib/pending-navigation"
 
 /**
  * Deleting a domain without opening it first.
@@ -44,7 +45,12 @@ export function DomainActions({
   return (
     <>
       <RowMenu label={name}>
-        <DropdownMenuItem onSelect={() => router.push(`/domains/${id}`)}>
+        <DropdownMenuItem
+          onSelect={() => {
+            announceNavigation(`/domains/${id}`)
+            router.push(`/domains/${id}`)
+          }}
+        >
           <SquareArrowOutUpRight />
           Open
         </DropdownMenuItem>

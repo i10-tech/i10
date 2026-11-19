@@ -1,11 +1,10 @@
-import { SkeletonBlock } from "@repo/ui/components/i10/skeleton-block"
-import { DetailSkeleton } from "@/components/skeletons"
+"use client"
 
-/** Loading a record: its name, the facts row, its tabs and the first panel. */
+import { useRecordShape } from "@/components/list/remembered-shapes"
+import { broadcastShape } from "@/lib/shapes/broadcast"
+import { BroadcastView } from "@/components/broadcast-view"
+
+/** Loading a broadcast record: its own view drawn from the seeded or fallback shape. */
 export default function Loading() {
-  return (
-    <DetailSkeleton tabs={[]}>
-      <SkeletonBlock className="h-72 w-full rounded-[var(--radius-panel)] opacity-70" />
-    </DetailSkeleton>
-  )
+  return <BroadcastView shape={useRecordShape(broadcastShape)} />
 }

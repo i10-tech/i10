@@ -1,0 +1,299 @@
+[
+  {
+    "name": "skeleton-rail-lists",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/mailboxes",
+        "window": false
+      },
+      {
+        "do": "wait",
+        "ms": 4000
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Emails",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Logs",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Contacts",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Segments",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Topics",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Broadcasts",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Templates",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Domains",
+        "window": 3500,
+        "exact": false
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Suppressions",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "API keys",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Webhooks",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Overview",
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      }
+    ]
+  },
+  {
+    "name": "skeleton-rail-settings",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/settings",
+        "window": false
+      },
+      {
+        "do": "wait",
+        "ms": 4000
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Team",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Single sign-on",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Security",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Open log",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Billing",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Usage",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "Unsubscribe page",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      },
+      {
+        "do": "click",
+        "role": "link",
+        "name": "General",
+        "exact": false,
+        "window": 3500
+      },
+      {
+        "do": "wait",
+        "ms": 800
+      }
+    ]
+  },
+  {
+    "name": "skeleton-load-domain-detail",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/domains/1f7a1c00-0000-4000-8000-000000000001",
+        "window": 3500
+      }
+    ]
+  },
+  {
+    "name": "skeleton-load-email-detail",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/emails/0199c010-0000-7000-8000-000000000010",
+        "window": 3500
+      }
+    ]
+  },
+  {
+    "name": "skeleton-load-webhook-detail",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/webhooks/5f7a1c00-0000-4000-8000-000000000001",
+        "window": 3500
+      }
+    ]
+  },
+  {
+    "name": "skeleton-load-domain-new",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/domains/new",
+        "window": 3500
+      }
+    ]
+  },
+  {
+    "name": "skeleton-load-account",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/account",
+        "window": 3500
+      }
+    ]
+  },
+  {
+    "name": "skeleton-load-editor",
+    "steps": [
+      {
+        "do": "goto",
+        "url": "/templates/bf7a1c00-0000-4000-8000-000000000001/editor",
+        "window": 3500
+      }
+    ]
+  }
+]

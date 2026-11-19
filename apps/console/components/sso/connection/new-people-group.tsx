@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bone, useBoneLoading } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { Switch } from "@repo/ui/components/i10/switch"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
@@ -13,7 +14,8 @@ import {
   relinkRequests,
   type ConnectionChange,
 } from "@/lib/sso-actions"
-import { mfaCapabilityNote } from "@/lib/sso-runs"
+import type { SsoConnectionShape } from "@/lib/shapes/sso-connection"
+import { mfaNotes } from "@/lib/sso-runs"
 import { toastDone } from "@/lib/toast"
 import type { SsoAbilities, SsoConnection } from "@/lib/sso-types"
 import { SettingsGroup, SettingsRow } from "../settings-card"
@@ -22,6 +24,7 @@ import {
   isLocked,
   Loading,
   OwnerNote,
+  RowBone,
   ToggleRow,
   useRemote,
   useSsoCall,
@@ -35,18 +38,21 @@ const RELINK_HELP: Record<SsoConnection["relink"], string> = {
 export function NewPeopleGroup({
   connection,
   abilities,
+  shape,
   onChange,
 }: {
   connection: SsoConnection
   abilities: SsoAbilities
+  shape: SsoConnectionShape
   onChange: (connection: SsoConnection) => void
 }) {
   const call = useSsoCall()
+  const skeleton = useBoneLoading()
   const locked = isLocked(connection, abilities)
   const live = connection.status === "active" || connection.status === "disabled"
   const caps = connection.capabilities
   const mfaBlocked = caps?.canProveMfa === "no"
-  const mfaNote = mfaCapabilityNote(connection)
+  const notes = mfaNotes(connection)
 
   const [loginsOpen, setLoginsOpen] = React.useState(false)
   const {
@@ -90,14 +96,16 @@ export function NewPeopleGroup({
         title="Create accounts at first sign-in (JIT)"
         description="Anyone your provider names at this connection's domains becomes a member the first time they sign in."
         action={
-          <Switch
-            checked={connection.jitEnabled}
-            disabled={locked && !connection.jitEnabled}
-            onCheckedChange={(v) =>
-              void patch({ jitEnabled: v }, v ? "JIT on" : "JIT off")
-            }
-            aria-label="Create accounts at first sign-in"
-          />
+          <RowBone id="jit" loading={skeleton} width={40} height={24}>
+            <Switch
+              checked={connection.jitEnabled}
+              disabled={locked && !connection.jitEnabled}
+              onCheckedChange={(v) =>
+                void patch({ jitEnabled: v }, v ? "JIT on" : "JIT off")
+              }
+              aria-label="Create accounts at first sign-in"
+            />
+          </RowBone>
         }
       />
 
@@ -105,44 +113,47 @@ export function NewPeopleGroup({
         title="Require MFA at your provider"
         description="Refuse a sign-in your provider did not prove with a second factor."
         action={
-          <Switch
-            checked={connection.mfaRequired}
-            disabled={
-              (live && !abilities.owner && connection.mfaRequired) ||
-              (mfaBlocked && !connection.mfaRequired)
-            }
-            onCheckedChange={(v) =>
-              void patch(
-                { mfaRequired: v },
-                v ? "MFA required" : "MFA no longer required",
-              )
-            }
-            aria-label="Require MFA at your provider"
-          />
+          <RowBone id="mfa" loading={skeleton} width={40} height={24}>
+            <Switch
+              checked={connection.mfaRequired}
+              disabled={
+                (live && !abilities.owner && connection.mfaRequired) ||
+                (mfaBlocked && !connection.mfaRequired)
+              }
+              onCheckedChange={(v) =>
+                void patch(
+                  { mfaRequired: v },
+                  v ? "MFA required" : "MFA no longer required",
+                )
+              }
+              aria-label="Require MFA at your provider"
+            />
+          </RowBone>
         }
       >
         <div className="space-y-1">
-          {mfaNote && (
-            <p
-              className={
-                mfaNote.tone === "warning"
-                  ? "text-xs text-destructive"
-                  : "text-xs text-muted-foreground"
-              }
+          {/* ⚠ HOW MANY NOTES IS THE SHAPE'S (`mfaNotes`), what they say is the data's. */}
+          {shape.mfaNotes > 0 && (
+            <Bone
+              id="mfa-notes"
+              as="div"
+              lines={shape.mfaNotes}
+              lineHeight={16}
+              className="space-y-1"
             >
-              {mfaNote.text}
-            </p>
-          )}
-          {caps?.canProveFreshAuth === "with_setting" && caps.freshAuthSetting && (
-            <p className="text-xs text-muted-foreground">
-              For step-up re-verification: {caps.freshAuthSetting}
-            </p>
-          )}
-          {caps?.canProveFreshAuth === "no" && (
-            <p className="text-xs text-muted-foreground">
-              {caps.label} cannot prove a fresh sign-in, so step-up prompts use
-              i10&apos;s own verification.
-            </p>
+              {notes.map((note) => (
+                <p
+                  key={note.text}
+                  className={
+                    note.tone === "warning"
+                      ? "text-xs text-destructive"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {note.text}
+                </p>
+              ))}
+            </Bone>
           )}
         </div>
       </SettingsRow>
@@ -162,12 +173,14 @@ export function NewPeopleGroup({
         }
       >
         <div className="text-sm font-medium text-foreground">
-          {connection.relink === "ask" ? "Ask an owner" : "Relink automatically"}
-          {pendingCount > 0 && (
-            <span className="ml-2 text-xs text-muted-foreground">
-              ({pendingCount} waiting)
-            </span>
-          )}
+          <Bone id="relink" width={140}>
+            {connection.relink === "ask" ? "Ask an owner" : "Relink automatically"}
+            {pendingCount > 0 && (
+              <span className="ml-2 text-xs text-muted-foreground">
+                ({pendingCount} waiting)
+              </span>
+            )}
+          </Bone>
         </div>
 
         <Reveal show={loginsOpen} spacing="pt-3" keepMounted>

@@ -3,6 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
@@ -109,11 +110,18 @@ export function Header({
   let chipLabel = "On"
   let chipTone: BadgeTone = "success"
   let sentence: React.ReactNode = `People at ${domains} can choose ${providerName} at sign-in.`
-  let nextAction: React.ReactNode = testHref ? (
-    <ButtonLink href={testHref} size="sm" native>
-      Test sign-in
-    </ButtonLink>
-  ) : null
+  // ⚠ THE LIVE STATE'S BUTTON IS A BONE: it needs the browser's origin (after mount),
+  // so the skeleton holds its place and the page fills it, rather than the line
+  // growing a button a moment after the rest has settled.
+  let nextAction: React.ReactNode = (
+    <Bone id="test-signin" shape="box" width={96} height={32} radius={8} inline>
+      {testHref && (
+        <ButtonLink href={testHref} size="sm" native>
+          Test sign-in
+        </ButtonLink>
+      )}
+    </Bone>
+  )
 
   if (connection.status === "disabled") {
     chipLabel = "Off"
@@ -243,7 +251,11 @@ export function Header({
             </form>
           ) : (
             <div className="flex items-center gap-2">
-              <h2 className="truncate text-lg font-medium">{connection.name}</h2>
+              <h2 className="truncate text-lg font-medium">
+                <Bone id="name" width={160} lineHeight={28}>
+                  {connection.name}
+                </Bone>
+              </h2>
               <Button
                 variant="ghost"
                 size="sm"
@@ -266,14 +278,22 @@ export function Header({
         tone={chipTone}
         sentence={sentence}
         action={nextAction}
+        // ⚠ ONLY A LIVE CONNECTION'S STATE IS DATA'S: health, enforcement and
+        // domains pick its chip and sentence. Draft, testing and off read the same
+        // for everyone, so they stay real text in the skeleton.
+        boneId={connection.status === "active" ? "state" : undefined}
       />
 
-      {connection.status !== "draft" && authOrigin && (
+      {connection.status !== "draft" && (
         <div className="pt-1">
-          <CopyField
-            label="Team sign-in link"
-            value={`${authOrigin}/sso/${connection.id}`}
-          />
+          <Bone id="team-link" as="div" shape="box" height={38} radius={8}>
+            {authOrigin && (
+              <CopyField
+                label="Team sign-in link"
+                value={`${authOrigin}/sso/${connection.id}`}
+              />
+            )}
+          </Bone>
         </div>
       )}
 

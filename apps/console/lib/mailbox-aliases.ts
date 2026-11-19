@@ -85,6 +85,30 @@ export function addAliasBlock(input: {
   return null
 }
 
+/**
+ * The note under the aliases list, for whoever may add: why Add alias is closed,
+ * or how near the limit the mailbox is. At most one of the two; both null for a
+ * member and where the list could not be read.
+ */
+export function aliasNotes(input: {
+  mailbox: Pick<ConsoleMailbox, "status">
+  list: MailboxAliasList | null
+  domains: readonly string[]
+  isAdmin: boolean
+}): { block: string | null; countLine: string | null } {
+  const { list } = input
+  if (!input.isAdmin || !list) return { block: null, countLine: null }
+  const added = consoleAliasCount(list.data)
+  const block = addAliasBlock({
+    status: input.mailbox.status,
+    added,
+    limit: list.limit,
+    domains: input.domains,
+  })
+  // ⚠ NOT WHILE THE REASON IS SHOWN: at the limit the reason already says it.
+  return { block, countLine: block ? null : aliasCountLine(added, list.limit) }
+}
+
 /** The longest local part RFC 5321 allows. Same as the API's. */
 export const MAX_ALIAS_LOCAL_PART = 64
 

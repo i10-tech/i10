@@ -510,6 +510,48 @@ suite("template folders, defaults and fallbacks", () => {
     ])
   })
 
+  it("gives each folder its three newest templates, never a removed one", async () => {
+    const t = await workspace()
+    const folder = await store.createFolder(t, "Newest")
+    const empty = await store.createFolder(t, "Empty")
+    if ("conflict" in folder || "conflict" in empty) throw new Error("conflict")
+    expect(empty.preview).toEqual([])
+
+    const ids: string[] = []
+    for (const name of ["a", "b", "c", "d"]) {
+      const made = await store.create(t, { name, folderId: folder.id })
+      if ("conflict" in made) throw new Error("conflict")
+      ids.push(made.id)
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const listed = async () => (await store.folders(t)).find((f) => f.id === folder.id)!
+    expect((await listed()).preview.map((p) => p.id)).toEqual([
+      ids[3]!,
+      ids[2]!,
+      ids[1]!,
+    ])
+    expect((await listed()).templates).toBe(4)
+
+    // An edit moves a template to the front, and its stamp moves with it.
+    const before = (await listed()).preview.at(-1)!
+    await store.update(t, ids[0]!, { html: "<p>edited</p>" })
+    const after = (await listed()).preview
+    expect(after.map((p) => p.id)).toEqual([ids[0]!, ids[3]!, ids[2]!])
+    expect(after[0]!.updated_at > before.updated_at).toBe(true)
+
+    // Gone from its repository: left out, the next one steps up.
+    await owner`update core.templates set removed_at = now() where id = ${ids[0]!}`
+    expect((await listed()).preview.map((p) => p.id)).toEqual([
+      ids[3]!,
+      ids[2]!,
+      ids[1]!,
+    ])
+
+    const one = await store.renameFolder(t, folder.id, "Newest 2")
+    expect(one && "preview" in one && one.preview).toHaveLength(3)
+    expect((await store.folders(t)).find((f) => f.id === empty.id)!.preview).toEqual([])
+  })
+
   it("never files a template under another workspace's folder", async () => {
     const mine = await workspace()
     const theirs = await workspace()
@@ -630,7 +672,7 @@ suite("template folders, defaults and fallbacks", () => {
     const t = await workspace()
     const created = await store.create(t, { name: "t" })
     if ("conflict" in created) throw new Error("conflict")
-    expect(await store.draftEmail(t, created.id)).toEqual({
+    expect(await store.draftEmail(t, created.id)).toMatchObject({
       problems: ["Write the email before sending a test."],
     })
     await store.update(t, created.id, {

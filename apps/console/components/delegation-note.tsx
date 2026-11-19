@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Clock, Info } from "lucide-react"
 import { cn } from "cn"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { HandoverSettling } from "@/components/handover-settling"
 import type { DelegationReport, ZoneFinding } from "@/lib/types"
 
@@ -28,13 +29,31 @@ import type { DelegationReport, ZoneFinding } from "@/lib/types"
 export function DelegationNote({
   domainId,
   report,
-  status,
+  status = "",
+  loading = false,
 }: {
   /** Keys the grace clock, so a reload continues it - see `HandoverSettling`. */
-  domainId: string
-  report: DelegationReport
-  status: string
+  domainId?: string
+  report?: DelegationReport
+  status?: string
+  loading?: boolean
 }) {
+  if (loading || !report) {
+    return (
+      <div className="rounded-2xl border px-4 py-3.5 sm:px-5">
+        <div className="flex items-start gap-3">
+          <Bone id="note-icon" shape="circle" width={16} height={16} inline />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Bone id="note-title" width={180} lineHeight={20} />
+            <Bone id="note-body" lines={2} lineHeight={18} width="100%" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!domainId) return null
+
   if (!report.nameserversAnswering) {
     return (
       <Note

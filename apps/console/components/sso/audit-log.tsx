@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { ChevronRight } from "lucide-react"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
@@ -33,17 +34,29 @@ export function AuditLog({
   limit,
   nextLimit,
   clerkEnabled,
+  loading = false,
+  filtered = false,
+  skeletonRows = 5,
 }: {
   events: IdentityEvent[]
   user: string | null
   limit: number
   nextLimit: number | null
   clerkEnabled: boolean
+  loading?: boolean
+  /** Whether the list is filtered by person, which the shape knows before the data. */
+  filtered?: boolean
+  skeletonRows?: number
 }) {
   const router = useRouter()
   const [members, setMembers] = React.useState<Member[] | null>(null)
   const [typed, setTyped] = React.useState(user ?? "")
   const name = (id: string | null) => (id ? memberLabel(members, id) : "-")
+  const isFiltered = loading ? filtered : Boolean(user)
+  // ⚠ ONE LIST FOR THE PAGE AND ITS SKELETON: the same rows, each piece a Bone.
+  const rows: (IdentityEvent | undefined)[] = loading
+    ? Array.from({ length: skeletonRows }, () => undefined)
+    : events
 
   const go = (next: { user?: string | null; limit?: number }) => {
     const q = new URLSearchParams()
@@ -74,6 +87,7 @@ export function AuditLog({
             <FloatingInput
               label="Person's user id"
               hint="Starts with user_. Press Enter to filter."
+              disabled={loading}
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => {
@@ -82,7 +96,7 @@ export function AuditLog({
             />
           )}
         </div>
-        {user && (
+        {isFiltered && (
           <Button
             variant="ghost"
             size="sm"
@@ -96,25 +110,33 @@ export function AuditLog({
         )}
       </div>
 
-      {events.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {user ? "Nothing recorded for this person." : "Nothing recorded yet."}
+          {isFiltered ? "Nothing recorded for this person." : "Nothing recorded yet."}
         </p>
       ) : (
         <ul className="divide-y rounded-lg border">
-          {events.map((event) => (
-            <Row key={event.id} event={event} name={name} />
+          {rows.map((event, i) => (
+            <BoneScope key={event?.id ?? i} id={`event-${i}`} unit>
+              <Row event={event} name={name} />
+            </BoneScope>
           ))}
         </ul>
       )}
 
-      {nextLimit !== null && events.length >= limit && (
-        <Button variant="secondary" size="sm" onClick={() => go({ limit: nextLimit })}>
+      {/* ⚠ SKIPPED BY test/skeleton-parity: paging appears only when a full page of events came back. */}
+      {!loading && nextLimit !== null && events.length >= limit && (
+        <Button
+          variant="secondary"
+          size="sm"
+          data-skeleton="skip"
+          onClick={() => go({ limit: nextLimit })}
+        >
           Show {nextLimit}
         </Button>
       )}
-      {nextLimit === null && events.length >= limit && (
-        <p className="text-xs text-muted-foreground">
+      {!loading && nextLimit === null && events.length >= limit && (
+        <p className="text-xs text-muted-foreground" data-skeleton="skip">
           Showing the newest {limit} events. Filter by person to look further back.
         </p>
       )}
@@ -126,12 +148,12 @@ function Row({
   event,
   name,
 }: {
-  event: IdentityEvent
+  event?: IdentityEvent
   name: (id: string | null) => string
 }) {
   const [open, setOpen] = React.useState(false)
   const id = React.useId()
-  const hasData = Object.keys(event.data).length > 0
+  const hasData = event !== undefined && Object.keys(event.data).length > 0
   return (
     <li className="px-3 py-2 text-sm">
       <div className="flex items-start gap-3">
@@ -150,18 +172,26 @@ function Row({
           <span className="sr-only">{open ? "Hide data" : "Show data"}</span>
         </button>
         <div className="min-w-0 flex-1">
-          <p className="font-medium">{typeLabel(event.type)}</p>
-          <p className="text-xs break-words text-muted-foreground">
-            By {name(event.actorUserId)}
-            {event.subjectUserId ? ` - for ${name(event.subjectUserId)}` : ""}
-            {event.reason ? ` - ${event.reason.replaceAll("_", " ")}` : ""}
-          </p>
+          <Bone id="type" as="div" width={140} lineHeight={18}>
+            {event && <p className="font-medium">{typeLabel(event.type)}</p>}
+          </Bone>
+          <Bone id="actor" as="div" width={180} lineHeight={16}>
+            {event && (
+              <p className="text-xs break-words text-muted-foreground">
+                By {name(event.actorUserId)}
+                {event.subjectUserId ? ` - for ${name(event.subjectUserId)}` : ""}
+                {event.reason ? ` - ${event.reason.replaceAll("_", " ")}` : ""}
+              </p>
+            )}
+          </Bone>
         </div>
         <span className="shrink-0 text-xs text-muted-foreground">
-          <Time iso={event.createdAt} />
+          <Bone id="time" width={80} lineHeight={16} align="end">
+            {event && <Time iso={event.createdAt} />}
+          </Bone>
         </span>
       </div>
-      {open && hasData && (
+      {open && event && hasData && (
         <pre
           id={id}
           className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/50 p-3 font-mono text-xs"

@@ -1,37 +1,16 @@
 "use client"
 
-import * as React from "react"
-import { TextReveal } from "../text-reveal/text-reveal"
-
 /**
- * A page title's one entrance, played once per arrival.
+ * A console page's title: real text, still, from the first frame.
  *
- * ⚠ A LOADING SKELETON THAT SHOWS THE REAL TITLE PLAYS THE REVEAL ITSELF, AND
- * THE PAGE THAT REPLACES IT THEN SHOWS THE TITLE STILL. Both used to reveal:
- * the words rose in with the skeleton, and rose in again when the page
- * arrived a moment later - the header "showing twice" on every navigation.
- * The skeleton records the title it revealed; the page's title, mounting
- * over the same words, skips its entrance. A page that arrives without a
- * skeleton in between (a cached navigation) still reveals as before.
+ * ⚠ NO REVEAL (2026-11-09). One arrival mounts the title up to three times:
+ * the skeleton drawn at the click, the route's loading.tsx about 100ms later,
+ * then the page. Each played the letter reveal, so the header rose in, jumped
+ * from half drawn to whole at the first swap, and rose in again at the next.
+ * Static copy is real text the moment the page lands (docs/decisions/
+ * skeletons.md, section 3); the motion belongs to the data.
  */
-let revealedByPlaceholder: string | null = null
-
-/** The title as a loading skeleton shows it: revealed, and remembered. */
-export function PlaceholderTitle({
-  text,
-  className,
-}: {
-  text: string
-  className?: string
-}) {
-  React.useEffect(() => {
-    revealedByPlaceholder = text
-  }, [text])
-  return <TextReveal as="h1" text={text} className={className} />
-}
-
-/** The page's own title: revealed, unless its skeleton already did. */
-export function RevealedTitle({
+function Title({
   text,
   className,
   id,
@@ -40,15 +19,23 @@ export function RevealedTitle({
   className?: string
   id?: string
 }) {
-  const [still] = React.useState(() => revealedByPlaceholder === text)
-  React.useEffect(() => {
-    revealedByPlaceholder = null
-  }, [])
-  if (still)
-    return (
-      <h1 data-slot="page-title" id={id} className={className}>
-        {text}
-      </h1>
-    )
-  return <TextReveal as="h1" text={text} className={className} id={id} />
+  return (
+    <h1 data-slot="page-title" id={id} className={className}>
+      {text}
+    </h1>
+  )
+}
+
+/** The title as a view draws it in both modes. */
+export function PlaceholderTitle(props: { text: string; className?: string }) {
+  return <Title {...props} />
+}
+
+/** The title `PageTitle` draws for plain text. */
+export function RevealedTitle(props: {
+  text: string
+  className?: string
+  id?: string
+}) {
+  return <Title {...props} />
 }

@@ -1,6 +1,6 @@
-import { ConnectionSkeleton } from "@/components/sso/connection/connection-skeleton"
+import { SsoConnectionLoading } from "@/components/sso-connection-page-view"
 
-/** A connection's page loading inside the settings layout: its own sections, in order. */
+/** Loading the SSO connection detail page: drawn from the seeded or remembered shape. */
 export default function Loading() {
-  return <ConnectionSkeleton />
+  return <SsoConnectionLoading />
 }

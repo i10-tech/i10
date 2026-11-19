@@ -53,6 +53,10 @@ export interface MorphSelectProps {
   maxListHeight?: number;
   /** Which edge of the trigger stays put while the surface grows. */
   align?: "start" | "end";
+  /**
+   * How wide the closed trigger is. "fit" springs to the chosen label. "widest" holds the width of the longest option, so picking one never moves what sits beside the trigger. A number is a fixed width in px, padding included, for options that arrive with data: a longer label ellipsizes, and the open list is still at least that wide. Defaults to "fit".
+   */
+  triggerWidth?: "fit" | "widest" | number;
   /** Adds a hidden input for native form submission. */
   name?: string;
   disabled?: boolean;
@@ -77,6 +81,8 @@ const NARROW = physical(.42, 0);
 /** The lifted label travels a touch faster than the surface folds, so the closing edge never catches it. */
 const FLY = physical(.3, .06);
 const OPEN_RADIUS = 22;
+/** The options fade in over this long, from the first frame. The surface takes about .4s to grow and is half grown around .12s, so the list is readable by then; a delay left it empty. */
+const LIST_IN = motionTokens.duration.instant;
 const TYPEAHEAD_RESET = 600, PAGE = 8;
 
 const subscribe = () => () => {};
@@ -111,15 +117,18 @@ const valueVariants: Variants = {
 };
 const valueFade: Variants = { enter: { opacity: 0 }, rest: { opacity: 1, x: 0, y: 0, filter: "blur(0px)" }, exit: { opacity: 0, transition: { duration: .1 } } };
 
-/** The closed trigger's width, rounded up. offsetWidth rounds to the nearest pixel, and half a pixel short is enough to ellipsize the label. */
+/**
+ * The closed trigger's width, exact. offsetWidth rounds to the nearest pixel, and half a pixel short is enough to ellipsize the label.
+ * ⚠ NOT ROUNDED UP: the server's HTML draws the trigger at its natural width, fractions included, and a rounded width jumped it by up to a pixel when the script measured it (seen on /domains, 150.31px to 151px).
+ */
 const triggerWidth = (node: HTMLElement) => {
   const exact = node.getBoundingClientRect().width, rounded = node.offsetWidth;
   // Under a scaled ancestor the rect is scaled too, so fall back to the layout width with a pixel of slack.
-  return Math.abs(exact - rounded) <= .5 ? Math.ceil(exact - .01) : rounded + 1;
+  return Math.abs(exact - rounded) <= .5 ? exact : rounded + 1;
 };
 
 export function MorphSelect({ label, hideLabel = false, items, value, defaultValue = null, onValueChange, placeholder = "Select", searchable = "auto", searchPlaceholder,
-  panelWidth = 272, maxListHeight = 296, align = "start", name, disabled = false, className }: MorphSelectProps) {
+  panelWidth = 272, maxListHeight = 296, align = "start", triggerWidth: triggerMode = "fit", name, disabled = false, className }: MorphSelectProps) {
   const reduced = useReducedFlag();
   const uid = useId();
   const labelId = `${uid}-label`, listId = `${uid}-list`, optionId = (index: number) => `${uid}-option-${index}`;
@@ -377,7 +386,13 @@ export function MorphSelect({ label, hideLabel = false, items, value, defaultVal
 
     <motion.div className={styles.anchor} style={{ width: anchorW }}>
       {/* Sizes the closed trigger. It holds the chosen label with the trigger's own padding, so the width spring has a target before anything moves. */}
-      <span ref={measureRef} className={`${styles.trigger} ${styles.measure}`} aria-hidden="true">{renderValue(selectedOption)}</span>
+      <span ref={measureRef} className={`${styles.trigger} ${styles.measure}`} aria-hidden="true"
+        style={typeof triggerMode === "number" ? { width: triggerMode, maxWidth: triggerMode } : undefined}>
+        {/* Every option in one grid cell: the cell is as wide as the widest, with no script. ⚠ SKIPPED BY apps/console test/skeleton-parity, like the list below: options that come from data are not there while a page loads. */}
+        {triggerMode === "widest" && all.length > 0
+          ? <span className={styles.measureStack} data-skeleton="skip">{all.map(option => <span key={option.value} className={styles.measureItem}>{renderValue(option)}</span>)}</span>
+          : renderValue(selectedOption)}
+      </span>
 
       <motion.div className={styles.shape} style={{ width: shapeW, height: shapeH, borderRadius: radius }}>
         <div className={styles.lid}>
@@ -396,9 +411,10 @@ export function MorphSelect({ label, hideLabel = false, items, value, defaultVal
             </span>
           </button>
 
-          {canSearch && <motion.div className={styles.searchRow} inert={!showSearch || undefined} initial={false}
+          {/* ⚠ SKIPPED BY apps/console test/skeleton-parity: the search field exists only above eight options, and a loading page does not have them. */}
+          {canSearch && <motion.div className={styles.searchRow} data-skeleton="skip" inert={!showSearch || undefined} initial={false}
             animate={showSearch ? { opacity: 1, filter: "blur(0px)" } : { opacity: 0, filter: reduced ? "blur(0px)" : `blur(${blur.subtle}px)` }}
-            transition={showSearch ? { duration: .18, ease: enter, delay: reduced ? 0 : .04 } : { duration: .1, ease: standard }}>
+            transition={showSearch ? { duration: LIST_IN, ease: enter } : { duration: .1, ease: standard }}>
             <Search className={styles.searchIcon} size={16} strokeWidth={1.75} aria-hidden="true" />
             <input ref={inputRef} className={styles.input} type="text" role="combobox" aria-label={`Search ${label.toLowerCase()}`} aria-expanded={open} aria-controls={listId} aria-autocomplete="list"
               aria-activedescendant={open && current !== null ? optionId(indexOf.get(current) ?? 0) : undefined}
@@ -419,10 +435,11 @@ export function MorphSelect({ label, hideLabel = false, items, value, defaultVal
           </motion.span>
         </div>
 
-        <motion.div ref={listFaceRef} className={styles.listFace}
+        {/* ⚠ SKIPPED BY apps/console test/skeleton-parity: the options are a closed popover, and a loading page cannot know which values its data has. */}
+        <motion.div ref={listFaceRef} className={styles.listFace} data-skeleton="skip"
           inert={!open || undefined} aria-hidden={!open || undefined} initial={false}
           animate={open ? { opacity: 1, y: 0, filter: "blur(0px)" } : { opacity: 0, y: reduced ? 0 : -6, filter: reduced ? "blur(0px)" : `blur(${blur.subtle}px)` }}
-          transition={open ? { y: GROW, opacity: { duration: .2, ease: enter, delay: reduced ? 0 : .04 }, filter: { duration: .22, ease: enter, delay: .04 } } : { duration: .1, ease: standard }}>
+          transition={open ? { y: GROW, opacity: { duration: LIST_IN, ease: enter }, filter: { duration: LIST_IN, ease: enter } } : { duration: .1, ease: standard }}>
           <div ref={scrollRef} className={styles.scroll}>
             {/* A mouse leaving the list hands the highlight back to the chosen option, where it opened; a hover must not outlive the pointer (2026-11-04). */}
             <div id={listId} className={styles.options} role="listbox" aria-labelledby={labelId}

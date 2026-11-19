@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Plus } from "lucide-react"
 import { Alert } from "@repo/ui/components/alert/alert"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
 import { DialogFooter } from "@repo/ui/components/i10/dialog-footer"
@@ -19,21 +20,20 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import { PanelError } from "@/components/panel-error"
 import { addMailboxAlias, removeMailboxAlias } from "@/lib/actions"
 import {
-  addAliasBlock,
-  ALIAS_LIMIT,
   aliasAddress,
-  aliasCountLine,
   aliasLocalProblem,
+  aliasNotes,
   aliasRefusal,
   aliasRefusalTitle,
   aliasSourceNote,
-  consoleAliasCount,
   defaultAliasDomain,
   MAX_ALIAS_LOCAL_PART,
   NO_ALIASES,
+  type MailboxAlias,
   type MailboxAliasList,
 } from "@/lib/mailbox-aliases"
 import type { ConsoleMailbox } from "@/lib/mailbox-view"
+import type { MailboxDetailShape } from "@/lib/shapes/mailbox-detail"
 import { useOutcome } from "@/lib/outcome"
 import { useResetOnOpen } from "@/lib/react"
 import { useStepUp } from "@/lib/step-up"
@@ -41,9 +41,23 @@ import { toastDone } from "@/lib/toast"
 
 const ADD_BLOCK_ID = "mailbox-alias-add-block"
 
+/** What the section reads once the page has it. */
+export interface MailboxAliasesData {
+  mailbox: ConsoleMailbox
+  /** Null where the list could not be read: the section says so, the page still renders. */
+  list: MailboxAliasList | null
+  /** The domains this workspace hosts mailboxes on. Admins only. */
+  domains: readonly string[]
+  isAdmin: boolean
+}
+
+/** Alias rows are drawn at these widths, so the bars are not one length. */
+const ADDRESS_WIDTHS = ["62%", "48%", "70%", "54%"]
+
 /**
  * The other addresses that deliver to one mailbox: who added each, and for an
- * owner or admin the two things that can be done about it.
+ * owner or admin the two things that can be done about it. Part of the mailbox
+ * page's view, so with no `data` it draws the section's skeleton from the shape.
  *
  * ⚠ THE LIST IS THE PAGE'S, NOT THIS COMPONENT'S. It arrives as a prop from the
  * server render, and an add or a remove is a server action whose response already
@@ -57,39 +71,41 @@ const ADD_BLOCK_ID = "mailbox-alias-add-block"
  * ⚠ ONLY AN ALIAS AN ADMIN ADDED CAN BE REMOVED HERE, and the others say why in
  * their own line instead of offering a button the API would refuse. Clerk's and a
  * directory's would be put straight back by the next sync, so the removal would look
- * done and not be.
+ * done and not be. Which rows have the button is the data's, so a skeleton draws
+ * none.
  *
  * ⚠ REMOVING STAYS OPEN DURING A DELETION GRACE, ADDING DOES NOT: the API's rule
  * (`mailbox_deleting`), said before the click as the reason beside the disabled
  * button rather than after it as a refusal.
  */
 export function MailboxAliases({
-  mailbox,
-  list,
-  domains,
-  isAdmin,
+  shape,
+  data,
 }: {
-  mailbox: ConsoleMailbox
-  /** Null where the list could not be read: the section says so, the page still renders. */
-  list: MailboxAliasList | null
-  /** The domains this workspace hosts mailboxes on. Admins only. */
-  domains: readonly string[]
-  isAdmin: boolean
+  shape: MailboxDetailShape
+  data?: MailboxAliasesData
 }) {
   const [adding, setAdding] = React.useState(false)
   const [removal, setRemoval] = React.useState<{ alias: string; open: boolean } | null>(
     null,
   )
 
-  const aliases = list ? list.data : NO_ALIASES
-  const limit = list ? list.limit : ALIAS_LIMIT
-  const added = consoleAliasCount(aliases)
-  const block =
-    isAdmin && list
-      ? addAliasBlock({ status: mailbox.status, added, limit, domains })
-      : null
-  // ⚠ NOT WHILE THE REASON IS SHOWN: at the limit the reason already says it.
-  const countLine = isAdmin && list && !block ? aliasCountLine(added, limit) : null
+  const mailbox = data?.mailbox
+  const isAdmin = data?.isAdmin ?? false
+  const aliases = data?.list ? data.list.data : NO_ALIASES
+  const { block, countLine } = data
+    ? aliasNotes({
+        mailbox: data.mailbox,
+        list: data.list,
+        domains: data.domains,
+        isAdmin: data.isAdmin,
+      })
+    : { block: null, countLine: null }
+
+  // Rows to draw: the data's, or as many placeholders as the shape remembers.
+  const rows: readonly (MailboxAlias | undefined)[] = data
+    ? aliases
+    : Array.from({ length: shape.aliasRows }, () => undefined)
 
   return (
     <Section>
@@ -100,7 +116,7 @@ export function MailboxAliases({
             Mail sent to any of these addresses arrives in this mailbox.
           </SectionDescription>
         </div>
-        {isAdmin && list && (
+        {shape.aliasAdd && (
           <Button
             variant="secondary"
             size="sm"
@@ -115,73 +131,93 @@ export function MailboxAliases({
         )}
       </div>
       <SectionContent>
-        {!list ? (
+        {shape.aliases === "error" ? (
           <PanelError
             title="Could not load the aliases"
             message="Reload the page to try again."
           />
-        ) : aliases.length === 0 ? (
+        ) : shape.aliases === "empty" ? (
           <div className="rounded-2xl border bg-card px-4 py-6">
             <p className="text-sm text-muted-foreground">
-              {isAdmin
+              {shape.admin
                 ? "No aliases yet. Add one to receive mail at another address."
                 : "No aliases yet."}
             </p>
           </div>
         ) : (
           <ul className="divide-y rounded-2xl border bg-card">
-            {aliases.map((alias) => (
-              <li
-                key={alias.address}
-                className="flex items-center justify-between gap-4 px-4 py-3"
-              >
-                <div className="min-w-0 space-y-0.5">
-                  <p className="truncate font-mono text-sm">{alias.address}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {aliasSourceNote(alias.source)}
-                  </p>
-                </div>
-                {isAdmin && alias.source === "console" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0"
-                    aria-label={`Remove ${alias.address}`}
-                    onClick={() => setRemoval({ alias: alias.address, open: true })}
-                  >
-                    Remove
-                  </Button>
-                )}
-              </li>
-            ))}
+            {rows.map((alias, i) => {
+              return (
+                <BoneScope key={alias?.address ?? i} id={`alias-${i}`} unit>
+                  <li className="flex items-center justify-between gap-4 px-4 py-3">
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <p className="truncate font-mono text-sm">
+                        <Bone
+                          id="address"
+                          width={ADDRESS_WIDTHS[i % ADDRESS_WIDTHS.length]}
+                        >
+                          {alias?.address}
+                        </Bone>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        <Bone id="source" lineHeight={16} width={120}>
+                          {alias && aliasSourceNote(alias.source)}
+                        </Bone>
+                      </p>
+                    </div>
+                    {/* Which aliases can be removed is the data's, so a skeleton draws no button. */}
+                    {alias && isAdmin && alias.source === "console" && (
+                      <span data-skeleton="skip" className="contents">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="shrink-0"
+                          aria-label={`Remove ${alias.address}`}
+                          onClick={() =>
+                            setRemoval({ alias: alias.address, open: true })
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </span>
+                    )}
+                  </li>
+                </BoneScope>
+              )
+            })}
           </ul>
         )}
 
-        {(block || countLine) && (
+        {shape.aliasNote && (
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-            {block && <p id={ADD_BLOCK_ID}>{block}</p>}
-            {countLine && <p>{countLine}</p>}
+            <Bone id="note" as="div" lineHeight={16} width="80%">
+              {block && <p id={ADD_BLOCK_ID}>{block}</p>}
+              {countLine && <p>{countLine}</p>}
+            </Bone>
           </div>
         )}
       </SectionContent>
 
-      {isAdmin && (
-        <AddAliasDialog
-          mailbox={mailbox}
-          domains={domains}
-          open={adding}
-          onOpenChange={setAdding}
-        />
-      )}
-      {/* ⚠ CLOSING KEEPS THE REQUEST, so the dialog plays its exit with its content. */}
-      {isAdmin && removal && (
-        <RemoveAliasDialog
-          mailbox={mailbox.address}
-          alias={removal.alias}
-          open={removal.open}
-          onOpenChange={(open) => setRemoval((r) => (r ? { ...r, open } : r))}
-        />
-      )}
+      {/* The dialogs are closed until somebody asks, so a skeleton has none. */}
+      <span data-skeleton="skip" className="contents">
+        {mailbox && isAdmin && data && (
+          <AddAliasDialog
+            mailbox={mailbox}
+            domains={data.domains}
+            open={adding}
+            onOpenChange={setAdding}
+          />
+        )}
+        {/* ⚠ CLOSING KEEPS THE REQUEST, so the dialog plays its exit with its content. */}
+        {mailbox && isAdmin && removal && (
+          <RemoveAliasDialog
+            mailbox={mailbox.address}
+            alias={removal.alias}
+            open={removal.open}
+            onOpenChange={(open) => setRemoval((r) => (r ? { ...r, open } : r))}
+          />
+        )}
+      </span>
     </Section>
   )
 }

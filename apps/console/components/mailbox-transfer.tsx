@@ -4,6 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Download, FileUp, RotateCw, X } from "lucide-react"
 import { Alert } from "@repo/ui/components/alert/alert"
+import { Bone, useBoneLoading } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import {
@@ -28,7 +29,9 @@ import {
   uploadLine,
   uploadPercent,
   EXPORT_KEEP_MS,
+  type ExportView,
   type ImportFlow,
+  type ImportView,
   type MailboxJob,
   type TransferSnapshot,
 } from "@/lib/mailbox-transfer"
@@ -37,6 +40,7 @@ import {
   readMailboxImport,
   startMailboxExport,
 } from "@/lib/mailbox-transfer-actions"
+import type { MailboxDetailShape } from "@/lib/shapes/mailbox-detail"
 import { useStepUp } from "@/lib/step-up"
 import { toastDone } from "@/lib/toast"
 import { useJobPoll } from "@/lib/use-job-poll"
@@ -66,23 +70,51 @@ const KEEP_DAYS = EXPORT_KEEP_MS / 86_400_000
  * leaving a disabled button unexplained.
  */
 export function MailboxTransfer({
-  address,
-  deleting,
-  snapshot,
+  shape,
+  data,
 }: {
-  address: string
-  deleting: boolean
-  snapshot: TransferSnapshot
+  shape: MailboxDetailShape
+  data?: {
+    address: string
+    deleting: boolean
+    snapshot: TransferSnapshot
+  }
 }) {
-  if (snapshot.state === "forbidden") return null
-  return <TransferSection address={address} deleting={deleting} snapshot={snapshot} />
+  if (shape.transfer === "hidden") return null
+  if (!data) return <TransferFrame {...DRAWN} shape={shape} deleting={shape.deleting} />
+  if (data.snapshot.state === "forbidden") return null
+  return (
+    <TransferSection
+      shape={shape}
+      address={data.address}
+      deleting={data.deleting}
+      snapshot={data.snapshot}
+    />
+  )
+}
+
+/** What a skeleton draws the section with: no job, no upload, nothing to press. */
+const DRAWN = {
+  address: "",
+  deleting: false,
+  exported: null,
+  imported: null,
+  exportRefusal: null,
+  starting: false,
+  flow: { phase: "idle" } as ImportFlow,
+  onStart: () => {},
+  onChoose: () => {},
+  onRetry: () => {},
+  onCancel: () => {},
 }
 
 function TransferSection({
+  shape,
   address,
   deleting,
   snapshot,
 }: {
+  shape: MailboxDetailShape
   address: string
   deleting: boolean
   snapshot: Exclude<TransferSnapshot, { state: "forbidden" }>
@@ -149,7 +181,69 @@ function TransferSection({
     }
   }
 
-  if (snapshot.state === "unavailable") {
+  return (
+    <TransferFrame
+      shape={shape}
+      address={address}
+      deleting={deleting}
+      exported={exported}
+      imported={imported}
+      exportRefusal={exportRefusal}
+      starting={starting}
+      flow={imp.flow}
+      onStart={startExport}
+      onChoose={() => setImporting(true)}
+      onRetry={imp.retry}
+      onCancel={imp.cancel}
+      dialog={
+        <MailboxImportDialog
+          open={importing}
+          onOpenChange={setImporting}
+          address={address}
+          onBegin={imp.begin}
+        />
+      }
+    />
+  )
+}
+
+/**
+ * The section as the page and its skeleton both draw it: the heading, then the
+ * two cards, or the one sentence where this deployment cannot move mail.
+ *
+ * ⚠ THE SHAPE DECIDES WHICH, so a skeleton and the loaded page agree: whether the
+ * jobs could be read, and what each card is in (`exportKind`, `importKind`).
+ */
+function TransferFrame({
+  shape,
+  address,
+  deleting,
+  exported,
+  imported,
+  exportRefusal,
+  starting,
+  flow,
+  onStart,
+  onChoose,
+  onRetry,
+  onCancel,
+  dialog,
+}: {
+  shape: MailboxDetailShape
+  address: string
+  deleting: boolean
+  exported: MailboxJob | null
+  imported: MailboxJob | null
+  exportRefusal: string | null
+  starting: boolean
+  flow: ImportFlow
+  onStart: () => void
+  onChoose: () => void
+  onRetry: () => void
+  onCancel: () => void
+  dialog?: React.ReactNode
+}) {
+  if (shape.transfer === "unavailable") {
     return (
       <Section id={TRANSFER_SECTION_ID} className="scroll-mt-6">
         <SectionHeading />
@@ -166,7 +260,7 @@ function TransferSection({
     <Section id={TRANSFER_SECTION_ID} className="scroll-mt-6">
       <SectionHeading />
       <SectionContent className="space-y-3">
-        {snapshot.state === "unreadable" && (
+        {shape.transfer === "unreadable" && (
           <Alert tone="warning" title="Could not check for earlier exports or imports">
             Reload the page to see them. You can still start a new one.
           </Alert>
@@ -175,28 +269,30 @@ function TransferSection({
         <ExportCard
           address={address}
           deleting={deleting}
+          kind={shape.exportKind}
           job={exported}
           refusal={exportRefusal}
           starting={starting}
-          onStart={startExport}
+          onStart={onStart}
         />
 
         <ImportCard
           deleting={deleting}
+          kind={shape.importKind}
           job={imported}
-          flow={imp.flow}
-          onChoose={() => setImporting(true)}
-          onRetry={imp.retry}
-          onCancel={imp.cancel}
+          flow={flow}
+          onChoose={onChoose}
+          onRetry={onRetry}
+          onCancel={onCancel}
         />
       </SectionContent>
 
-      <MailboxImportDialog
-        open={importing}
-        onOpenChange={setImporting}
-        address={address}
-        onBegin={imp.begin}
-      />
+      {/* The dialog is closed until somebody asks, so a skeleton has none. */}
+      {dialog && (
+        <span data-skeleton="skip" className="contents">
+          {dialog}
+        </span>
+      )}
     </Section>
   )
 }
@@ -270,10 +366,16 @@ function RunProgress({ label, percent }: { label: string; percent: number | null
  * ⚠ THE SAME START AS THE DELETION BANNER'S "Start export again" (the API's
  * `retryExport` and this card's `POST .../export` both end in `startMailboxExport`),
  * so a failed export of a mailbox being deleted offers it under the banner's name.
+ *
+ * ⚠ LOADING, THE KIND IS THE SHAPE'S; LOADED, IT IS THE JOB'S, which a poll can
+ * move from running to ready while the page stays open. What the job says (the
+ * buttons it needs, the sentences) is one bone each, so a skeleton and the page
+ * differ only inside them.
  */
 function ExportCard({
   address,
   deleting,
+  kind: shapeKind,
   job,
   refusal,
   starting,
@@ -281,12 +383,15 @@ function ExportCard({
 }: {
   address: string
   deleting: boolean
+  kind: ExportView["kind"]
   job: MailboxJob | null
   refusal: string | null
   starting: boolean
   onStart: () => void
 }) {
+  const loading = useBoneLoading()
   const view = exportView(job)
+  const kind = loading ? shapeKind : view.kind
   const running = view.kind === "running"
 
   const again = (label: string, secondary = true) => (
@@ -296,19 +401,24 @@ function ExportCard({
       loading={starting}
       onClick={onStart}
     >
-      {view.kind === "failed" && <RotateCw aria-hidden="true" />}
+      {kind === "failed" && <RotateCw aria-hidden="true" />}
       {label}
     </Button>
   )
 
-  return (
-    <TransferCard
-      title="Export mail"
-      description={`Download all the mail in this mailbox as one file, to keep as a backup or take elsewhere. We keep the file for ${KEEP_DAYS} days.`}
-      action={
-        view.kind === "none" ? (
-          again("Export mail")
-        ) : view.kind === "ready" ? (
+  const action =
+    kind === "none" ? (
+      again("Export mail")
+    ) : kind === "running" ? undefined : (
+      <Bone
+        id="export-action"
+        shape="box"
+        width={kind === "ready" ? 216 : 124}
+        height={32}
+        radius={8}
+        inline
+      >
+        {kind === "ready" ? (
           <>
             <ButtonLink
               native
@@ -321,13 +431,16 @@ function ExportCard({
             </ButtonLink>
             {again("Export again")}
           </>
-        ) : view.kind === "expired" ? (
+        ) : kind === "expired" ? (
           again("Export again")
-        ) : view.kind === "failed" ? (
+        ) : (
           again(deleting ? "Start export again" : "Try again")
-        ) : undefined
-      }
-    >
+        )}
+      </Bone>
+    )
+
+  const body = (
+    <>
       <Announce
         text={
           running
@@ -339,7 +452,9 @@ function ExportCard({
                 : ""
         }
       />
-      {running && <RunProgress label={view.line} percent={view.percent} />}
+      {view.kind === "running" && (
+        <RunProgress label={view.line} percent={view.percent} />
+      )}
       {view.kind === "ready" && (
         <p className="text-sm">
           Your export is ready.
@@ -368,12 +483,29 @@ function ExportCard({
           {refusal}
         </Alert>
       )}
+    </>
+  )
+
+  return (
+    <TransferCard
+      title="Export mail"
+      description={`Download all the mail in this mailbox as one file, to keep as a backup or take elsewhere. We keep the file for ${KEEP_DAYS} days.`}
+      action={action}
+    >
+      {kind === "none" ? (
+        body
+      ) : (
+        <Bone id="export-body" as="div" lines={2}>
+          {body}
+        </Bone>
+      )}
     </TransferCard>
   )
 }
 
 function ImportCard({
   deleting,
+  kind: shapeKind,
   job,
   flow,
   onChoose,
@@ -381,19 +513,27 @@ function ImportCard({
   onCancel,
 }: {
   deleting: boolean
+  kind: ImportView["kind"]
   job: MailboxJob | null
   flow: ImportFlow
   onChoose: () => void
   onRetry: () => void
   onCancel: () => void
 }) {
+  const loading = useBoneLoading()
   const view = importView(job)
+  const kind = loading ? shapeKind : view.kind
   const busy = isBusy(flow)
   const running = view.kind === "running"
   const blocked = deleting || busy || running
   const reason = deleting
     ? "This mailbox is being deleted, so mail can no longer be imported into it."
     : null
+  // What the job says, once there is a job to say it: one bone, so a skeleton and
+  // the page differ only inside it. Spoken from inside it, so the words are its too.
+  const told =
+    flow.phase === "idle" &&
+    (kind === "running" || kind === "done" || kind === "failed")
 
   return (
     <TransferCard
@@ -429,7 +569,7 @@ function ImportCard({
         )
       }
     >
-      <Announce text={importAnnouncement(flow, view)} />
+      <Announce text={told ? "" : importAnnouncement(flow, view)} />
 
       {reason && (
         <p id="mailbox-import-blocked" className="text-sm text-muted-foreground">
@@ -468,32 +608,37 @@ function ImportCard({
         </Alert>
       )}
 
-      {flow.phase === "idle" && view.kind === "unfinished" && (
+      {flow.phase === "idle" && kind === "unfinished" && (
         <Alert tone="warning" title="An import was started but its file never arrived">
           The upload may have been interrupted. Choose the file again to import it.
         </Alert>
       )}
-      {flow.phase === "idle" && view.kind === "running" && (
-        <div className="space-y-2">
-          <RunProgress label={view.line} percent={view.percent} />
-          <p className="text-xs text-muted-foreground">
-            {view.folders ? `${view.folders}. ` : ""}
-            You can leave this page: the import carries on, and it shows here when you
-            come back.
-          </p>
-        </div>
-      )}
-      {flow.phase === "idle" && view.kind === "done" && (
-        <Alert tone="success" title="Import finished">
-          {view.headline}
-          {view.note ? ` ${view.note}` : ""}
-        </Alert>
-      )}
-      {flow.phase === "idle" && view.kind === "failed" && (
-        <Alert tone="danger" title={view.title}>
-          {view.advice}
-          {view.detail ? ` Details: ${view.detail}` : ""}
-        </Alert>
+      {told && (
+        <Bone id="import-body" as="div" lines={2}>
+          <Announce text={importAnnouncement(flow, view)} />
+          {view.kind === "running" && (
+            <div className="space-y-2">
+              <RunProgress label={view.line} percent={view.percent} />
+              <p className="text-xs text-muted-foreground">
+                {view.folders ? `${view.folders}. ` : ""}
+                You can leave this page: the import carries on, and it shows here when
+                you come back.
+              </p>
+            </div>
+          )}
+          {view.kind === "done" && (
+            <Alert tone="success" title="Import finished">
+              {view.headline}
+              {view.note ? ` ${view.note}` : ""}
+            </Alert>
+          )}
+          {view.kind === "failed" && (
+            <Alert tone="danger" title={view.title}>
+              {view.advice}
+              {view.detail ? ` Details: ${view.detail}` : ""}
+            </Alert>
+          )}
+        </Bone>
       )}
     </TransferCard>
   )

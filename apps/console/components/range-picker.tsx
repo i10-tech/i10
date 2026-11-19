@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
+import { useRoutePathname, useRouteSearchParams } from "@/lib/target-route"
 import SegmentedControl from "@repo/ui/components/segmented-control/segmented-control"
 
 const OPTIONS = [7, 14, 30, 90] as const
@@ -13,8 +14,8 @@ const OPTIONS = [7, 14, 30, 90] as const
  */
 export function RangePicker({ value }: { value: number }) {
   const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  const pathname = useRoutePathname()
+  const searchParams = useRouteSearchParams()
   const [pending, start] = useTransition()
   const [chosen, setChosen] = useState(value)
   const [seen, setSeen] = useState(value)

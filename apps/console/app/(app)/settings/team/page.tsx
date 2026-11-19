@@ -1,11 +1,6 @@
 import type { Metadata } from "next"
-import { TeamPanel } from "@/components/team-panel"
-import {
-  Section,
-  SectionContent,
-  SectionDescription,
-  SectionTitle,
-} from "@repo/ui/components/i10/page"
+import { TeamView } from "@/components/team-view"
+import type { TeamData } from "@/lib/shapes/team"
 
 export const metadata: Metadata = { title: "Team" }
 
@@ -21,39 +16,8 @@ export const metadata: Metadata = { title: "Team" }
  * /reference/clerk/organization-profile.
  */
 export default async function TeamSettingsPage() {
-  /*
-   * ⚠ CLERK'S HOOKS THROW OUTSIDE A PROVIDER, AND THE PROVIDER IS ONLY
-   * MOUNTED WHEN A KEY EXISTS - see app/layout.tsx. This branch is for local
-   * review with no identity provider running; every real deployment takes the
-   * other one.
-   */
-  if (!process.env.CLERK_PUBLISHABLE_KEY) {
-    return (
-      <div>
-        <Section className="pt-0">
-          <SectionTitle>Members</SectionTitle>
-          <SectionDescription>
-            Membership, roles and invitations live in Clerk, which is not configured in
-            this environment. Set <code>CLERK_PUBLISHABLE_KEY</code> to see the real
-            panel here.
-          </SectionDescription>
-        </Section>
-      </div>
-    )
-  }
+  const clerkEnabled = Boolean(process.env.CLERK_PUBLISHABLE_KEY)
+  const data: TeamData = { clerkEnabled }
 
-  return (
-    <div>
-      <Section className="pt-0">
-        <SectionTitle>Members</SectionTitle>
-        <SectionDescription>
-          Everyone here shares this workspace: its domains, its keys, its contacts and
-          its bill. Invitations are sent by email.
-        </SectionDescription>
-        <SectionContent>
-          <TeamPanel />
-        </SectionContent>
-      </Section>
-    </div>
-  )
+  return <TeamView data={data} />
 }

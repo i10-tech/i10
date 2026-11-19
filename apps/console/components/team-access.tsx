@@ -28,7 +28,6 @@ import {
   dismissAccessSuggestion,
   removeAccessDomain,
   saveAccessRules,
-  teamExclusions,
   verifyAccessDomain,
   type AccessDomain,
   type AccessMode,
@@ -80,15 +79,13 @@ export function AccessDomains({
   onChange,
 }: {
   /** `false` when the API could not say. */
-  state: AccessState | false | null
+  state: AccessState | false
   /** What a rule may give (#335): member or admin, never owner. */
   roles: { value: JoinRole; label: string }[]
   onChange: () => void
 }) {
   const [adding, setAdding] = React.useState(false)
 
-  if (state === null)
-    return <p className="pt-1.5 text-sm text-muted-foreground">Loading domains…</p>
   if (state === false)
     return (
       <p className="pt-1.5 text-sm text-muted-foreground">
@@ -665,14 +662,14 @@ function RulesEditor({
  * signing up again changes nothing. "Allow" takes them off; "Allow and
  * invite" also sends an invitation.
  */
-export function Exclusions({ version }: { version: number }) {
-  const [list, setList] = React.useState<Exclusion[] | null>(null)
+export function Exclusions({
+  list,
+  setList,
+}: {
+  list: Exclusion[]
+  setList: React.Dispatch<React.SetStateAction<Exclusion[] | undefined>>
+}) {
   const [busy, setBusy] = React.useState<string | null>(null)
-
-  const load = React.useCallback(() => {
-    void teamExclusions().then((result) => setList(result.ok ? result.data.data : []))
-  }, [])
-  React.useEffect(load, [load, version])
 
   async function allow(entry: Exclusion, invite: boolean) {
     setBusy(entry.email)
@@ -685,8 +682,6 @@ export function Exclusions({ version }: { version: number }) {
     toastDone(invite ? `Invited ${entry.email}` : `${entry.email} can join again`)
     setList((rows) => (rows ?? []).filter((r) => r.email !== entry.email))
   }
-
-  if (!list) return <p className="pt-1.5 text-sm text-muted-foreground">Loading…</p>
 
   return (
     <MotionList>

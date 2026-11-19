@@ -129,6 +129,10 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
    * behaviour for a mode with no database.
    */
   if (PREVIEW) {
+    // A fixture answers at once, so a page's skeleton never shows; set
+    // CONSOLE_PREVIEW_DELAY_MS to watch it (docs/decisions/skeletons.md).
+    const delay = Number(process.env.CONSOLE_PREVIEW_DELAY_MS)
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     const fixture = previewFor(
       path,
       options.query,

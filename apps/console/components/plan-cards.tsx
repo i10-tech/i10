@@ -5,15 +5,17 @@ import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Check } from "lucide-react"
 import { Button } from "@repo/ui/components/button/button"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { cn } from "cn"
 import { changePlan, resumeSubscription, startCheckout } from "@/lib/actions"
 import { openPolarCheckout, untilCheckoutReadable } from "@/lib/polar-embed"
 import { hasLiveSubscription, onPaidPlan } from "@/lib/billing"
-import { formatBytes, formatExact, formatNumber } from "@/lib/format"
+import { formatBytes, formatNumber } from "@/lib/format"
 import type { BillingState, PlanSummary } from "@/lib/types"
 import { ARRIVAL, setArrival } from "@/lib/arrival"
 import { toastDone, toastError, toastNote } from "@/lib/toast"
+import { useExactTime } from "@/components/time"
 
 /**
  * The plan picker.
@@ -63,6 +65,12 @@ function describeEntitlement(entitlement: PlanSummary["entitlements"][number]): 
   return `${amount} ${label}${period}`
 }
 
+// ⚠ THE LOADED LIST IS `space-y-1.5` OF `text-xs` (16px) LINES, SO N ROWS ARE
+// 22N - 6 PX HIGH. The skeleton's lines are as tall as that divided by N, or
+// the cards are shorter loading than loaded and everything below them jumps.
+const FALLBACK_ENTITLEMENTS = 4
+const entitlementLineHeight = (rows: number) => 22 - 6 / rows
+
 /** `pending` while a cancellation is being called off. Not a plan id. */
 const RESUMING = "\u0000resuming"
 
@@ -74,6 +82,10 @@ export function PlanCards({
   onCheckout,
   onCancelled,
   onResumed,
+  loading = false,
+  skeletonCount = 3,
+  skeletonEntitlements = null,
+  skeletonNote = null,
 }: {
   plans: PlanSummary[]
   /**
@@ -136,7 +148,22 @@ export function PlanCards({
   onCancelled?: () => void
   /** The mirror of `onCancelled`, for a cancellation called off. */
   onResumed?: () => void
+  loading?: boolean
+  skeletonCount?: number
+  /**
+   * The most entitlement rows a card lists (the billing shape's). The cards in a
+   * row share the tallest one's height, so the skeleton draws that many; null
+   * draws FALLBACK_ENTITLEMENTS.
+   */
+  skeletonEntitlements?: number | null
+  /**
+   * The one card that carries a note under its button (a scheduled move, an
+   * ending subscription), and how many lines it runs. The note is a Reveal that
+   * only the loaded cards have, and the row is as tall as it makes its card.
+   */
+  skeletonNote?: { card: number; lines: number } | null
 }) {
+  const exact = useExactTime()
   const router = useRouter()
   const pathname = usePathname()
   const { resolvedTheme } = useTheme()
@@ -194,7 +221,7 @@ export function PlanCards({
 
   const endingAt =
     cancelling && billing.subscription?.current_period_end
-      ? formatExact(billing.subscription.current_period_end)
+      ? exact(billing.subscription.current_period_end)
       : null
 
   /*
@@ -205,7 +232,7 @@ export function PlanCards({
    */
   const scheduledPlanId = billing.subscription?.scheduled_plan_id ?? null
   const scheduledAt = billing.subscription?.scheduled_at
-    ? formatExact(billing.subscription.scheduled_at)
+    ? exact(billing.subscription.scheduled_at)
     : null
 
   const current = plans.find((plan) => plan.id === currentPlanId) ?? null
@@ -527,7 +554,16 @@ export function PlanCards({
     window.location.assign(result.data.url)
   }
 
-  if (plans.length === 0) {
+  // ⚠ ONE LIST OF CARDS FOR THE PAGE AND ITS SKELETON. A card's words come from the
+  // catalogue and its button from the workspace's state, so each is a Bone while
+  // loading; the frame, the "Current" mark's place and the three notes under the
+  // button (shut) are the same elements either way.
+  const entitlementRows = Math.max(1, skeletonEntitlements ?? FALLBACK_ENTITLEMENTS)
+  const rows: (PlanSummary | undefined)[] = loading
+    ? Array.from({ length: skeletonCount ?? 3 }, () => undefined)
+    : plans
+
+  if (rows.length === 0) {
     return (
       <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
         No plans are published for this workspace.
@@ -537,15 +573,17 @@ export function PlanCards({
 
   return (
     <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {plans.map((plan) => {
-        const isCurrent = plan.id === currentPlanId
+      {rows.map((plan, index) => {
+        const isCurrent = plan !== undefined && plan.id === currentPlanId
         // ⚠ RANK, NOT PRICE OR NAME. `core.plans.rank` exists precisely so an
         // upgrade can be told from a downgrade without parsing a plan id - see
         // migration 0025, which added it because an in-progress upgrade was
         // being read as a downgrade and deferring a charge.
-        const isUpgrade = current !== null && plan.rank > current.rank
-        const isDowngrade = current !== null && plan.rank < current.rank
-        const leaving = leavingPaidPlan(plan)
+        const isUpgrade =
+          plan !== undefined && current !== null && plan.rank > current.rank
+        const isDowngrade =
+          plan !== undefined && current !== null && plan.rank < current.rank
+        const leaving = plan !== undefined && leavingPaidPlan(plan)
         /*
          * ⚠ THE PAID CARD THEY ARE LEAVING IS WHERE THE WAY BACK BELONGS.
          * The free card already says "Ending" with the date; the card for the
@@ -575,147 +613,188 @@ export function PlanCards({
          */
         const justBought =
           !resumable &&
-          (subscribed === plan.id ||
+          (subscribed === plan?.id ||
             (onKeep !== undefined && isCurrent && onPaidPlan(billing)))
-        const scheduled = scheduledPlanId !== null && plan.id === scheduledPlanId
+        const scheduled =
+          plan !== undefined && scheduledPlanId !== null && plan.id === scheduledPlanId
 
         return (
-          <li
-            key={plan.id}
-            className={cn(
-              "flex flex-col rounded-lg border p-4",
-              isCurrent && "border-foreground/40 bg-muted/30",
-            )}
-          >
-            <div className="flex items-baseline justify-between gap-2">
-              <h3 className="text-sm font-medium">{plan.name}</h3>
-              {isCurrent && (
-                <span className="text-2xs text-muted-foreground">Current</span>
-              )}
-            </div>
+          <BoneScope key={plan?.id ?? index} id={`plan-${index}`} unit>
+            <li
+              data-current={isCurrent || undefined}
+              className="flex flex-col rounded-lg border p-4 data-[current]:border-foreground/40 data-[current]:bg-muted/30"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <Bone id="name" width={80} lineHeight={20}>
+                  {plan && <h3 className="text-sm font-medium">{plan.name}</h3>}
+                </Bone>
+                {/* ⚠ SKIPPED BY test/skeleton-parity: which plan is the workspace's is its own data. */}
+                {isCurrent && (
+                  <span className="text-2xs text-muted-foreground" data-skeleton="skip">
+                    Current
+                  </span>
+                )}
+              </div>
 
-            <ul className="mt-3 flex-1 space-y-1.5">
-              {plan.entitlements.map((entitlement) => (
-                <li
-                  key={entitlement.featureId}
-                  className="flex items-start gap-1.5 text-xs text-muted-foreground"
-                >
-                  <Check
+              <Bone
+                id="ents"
+                as="div"
+                lines={entitlementRows}
+                lineHeight={entitlementLineHeight(entitlementRows)}
+                width="60%"
+                className="mt-3 flex-1"
+              >
+                {plan && (
+                  <ul className="space-y-1.5">
+                    {plan.entitlements.map((entitlement) => (
+                      <li
+                        key={entitlement.featureId}
+                        className="flex items-start gap-1.5 text-xs text-muted-foreground"
+                      >
+                        <Check
+                          className={cn(
+                            "mt-0.5 size-3 shrink-0",
+                            entitlement.allowance === 0
+                              ? "text-muted-foreground/40"
+                              : "text-success",
+                          )}
+                        />
+                        {describeEntitlement(entitlement)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Bone>
+
+              <Bone
+                id="btn"
+                as="div"
+                shape="box"
+                width="100%"
+                height={36}
+                radius={8}
+                className="mt-4"
+              >
+                {plan && (
+                  <Button
+                    loading={pending === plan.id || (resumable && pending === RESUMING)}
+                    /*
+                     * ⚠ "Subscribed" IS NOT DISABLED-LOOKING, THOUGH IT IS
+                     * DISABLED. A confirmation at half opacity reads as a control
+                     * that is unavailable rather than as a thing that happened -
+                     * and this is the one moment in the flow somebody most wants
+                     * to be told it worked. The opacity is restored and the
+                     * surface takes the success colour the tick already carries.
+                     */
                     className={cn(
-                      "mt-0.5 size-3 shrink-0",
-                      entitlement.allowance === 0
-                        ? "text-muted-foreground/40"
-                        : "text-success",
+                      "w-full",
+                      justBought &&
+                        "border-success/30 bg-success/10 text-success disabled:opacity-100",
                     )}
+                    variant={
+                      isCurrent
+                        ? "secondary"
+                        : leaving && confirming?.id === plan.id
+                          ? "danger"
+                          : isUpgrade
+                            ? "primary"
+                            : "secondary"
+                    }
+                    // ⚠ ALREADY-CANCELLING DISABLES THE FREE CARD RATHER THAN HIDING
+                    // IT. There is nothing left to ask for - the subscription ends on
+                    // its own - and a live button would send a second cancel that
+                    // Polar treats as a no-op, which reads as the first one having
+                    // failed.
+                    disabled={
+                      justBought ||
+                      (isCurrent && onKeep === undefined && !resumable) ||
+                      pending !== null ||
+                      (leaving && endingAt !== null) ||
+                      scheduled
+                    }
+                    onClick={() => {
+                      if (resumable) return void resume()
+                      if (isCurrent && onKeep) return onKeep()
+                      return void choose(plan)
+                    }}
+                  >
+                    {label({
+                      /*
+                       * ⚠ RESUMING OUTRANKS "Continue on Pro", because the two say
+                       * opposite things about the same card. While a cancellation
+                       * is pending, "Continue on Pro" would be a button that ends
+                       * the plan anyway at the period boundary.
+                       */
+                      keepLabel: justBought
+                        ? "Subscribed"
+                        : resumable
+                          ? "Keep subscription"
+                          : isCurrent && onKeep
+                            ? `Continue on ${plan.name}`
+                            : null,
+                      isCurrent,
+                      isUpgrade,
+                      isDowngrade,
+                      leaving,
+                      ending: endingAt !== null,
+                      scheduled,
+                      confirming: confirming?.id === plan.id,
+                    })}
+                    {/* ⚠ AFTER THE WORD AND CENTRED WITH IT, as one group. */}
+                    {justBought && <Check className="text-success" />}
+                  </Button>
+                )}
+              </Bone>
+
+              {/* ⚠ SKIPPED BY test/skeleton-parity: these notes are about the one card the workspace is moving to or from, and a skeleton does not know which. */}
+              <div className="contents" data-skeleton="skip">
+                {/* ⚠ THE ROOM THE NOTE BELOW WILL TAKE, drawn on its card (pt-2, 16px lines). */}
+                {loading && skeletonNote?.card === index && (
+                  <Bone
+                    id="note"
+                    as="div"
+                    lines={skeletonNote.lines}
+                    lineHeight={16}
+                    className="mt-2"
                   />
-                  {describeEntitlement(entitlement)}
-                </li>
-              ))}
-            </ul>
+                )}
+                {/*
+                 * ⚠ THE DATE IS THE MESSAGE, EXACTLY AS IT IS FOR A CANCELLATION.
+                 * "Scheduled" on its own invites the question this is supposed to
+                 * answer - when, and what happens in the meantime.
+                 */}
+                <Reveal show={Boolean(scheduled)} spacing="pt-2">
+                  <p className="text-xs text-muted-foreground">
+                    You move here{" "}
+                    {scheduledAt ? `on ${scheduledAt}` : "at the end of this period"}.
+                    Your {current?.name ?? "current"} allowance continues until then.
+                  </p>
+                </Reveal>
 
-            <Button
-              loading={pending === plan.id || (resumable && pending === RESUMING)}
-              /*
-               * ⚠ "Subscribed" IS NOT DISABLED-LOOKING, THOUGH IT IS
-               * DISABLED. A confirmation at half opacity reads as a control
-               * that is unavailable rather than as a thing that happened -
-               * and this is the one moment in the flow somebody most wants
-               * to be told it worked. The opacity is restored and the
-               * surface takes the success colour the tick already carries.
-               */
-              className={cn(
-                "mt-4 w-full",
-                justBought &&
-                  "border-success/30 bg-success/10 text-success disabled:opacity-100",
-              )}
-              variant={
-                isCurrent
-                  ? "secondary"
-                  : leaving && confirming?.id === plan.id
-                    ? "danger"
-                    : isUpgrade
-                      ? "primary"
-                      : "secondary"
-              }
-              // ⚠ ALREADY-CANCELLING DISABLES THE FREE CARD RATHER THAN HIDING
-              // IT. There is nothing left to ask for - the subscription ends on
-              // its own - and a live button would send a second cancel that
-              // Polar treats as a no-op, which reads as the first one having
-              // failed.
-              disabled={
-                justBought ||
-                (isCurrent && onKeep === undefined && !resumable) ||
-                pending !== null ||
-                (leaving && endingAt !== null) ||
-                scheduled
-              }
-              onClick={() => {
-                if (resumable) return void resume()
-                if (isCurrent && onKeep) return onKeep()
-                return void choose(plan)
-              }}
-            >
-              {label({
-                /*
-                 * ⚠ RESUMING OUTRANKS "Continue on Pro", because the two say
-                 * opposite things about the same card. While a cancellation
-                 * is pending, "Continue on Pro" would be a button that ends
-                 * the plan anyway at the period boundary.
-                 */
-                keepLabel: justBought
-                  ? "Subscribed"
-                  : resumable
-                    ? "Keep subscription"
-                    : isCurrent && onKeep
-                      ? `Continue on ${plan.name}`
-                      : null,
-                isCurrent,
-                isUpgrade,
-                isDowngrade,
-                leaving,
-                ending: endingAt !== null,
-                scheduled,
-                confirming: confirming?.id === plan.id,
-              })}
-              {/* ⚠ AFTER THE WORD AND CENTRED WITH IT, as one group. */}
-              {justBought && <Check className="text-success" />}
-            </Button>
+                {/*
+                 * ⚠ THE CONSEQUENCE IS SPELLED OUT UNDER THE BUTTON THAT CAUSES IT,
+                 * not in a dialog that covers the plan being left. The two facts
+                 * somebody needs are that sending continues and when it stops, and
+                 * both are short enough to sit here.
+                 */}
+                <Reveal
+                  show={Boolean(leaving && confirming?.id === plan?.id)}
+                  spacing="pt-2"
+                >
+                  <p className="text-xs text-muted-foreground">
+                    Your {current?.name} allowance continues until the end of the period
+                    you have paid for. Press again to confirm, or pick another plan.
+                  </p>
+                </Reveal>
 
-            {/*
-             * ⚠ THE DATE IS THE MESSAGE, EXACTLY AS IT IS FOR A CANCELLATION.
-             * "Scheduled" on its own invites the question this is supposed to
-             * answer - when, and what happens in the meantime.
-             */}
-            <Reveal show={Boolean(scheduled)} spacing="pt-2">
-              <p className="text-xs text-muted-foreground">
-                You move here{" "}
-                {scheduledAt ? `on ${scheduledAt}` : "at the end of this period"}. Your{" "}
-                {current?.name ?? "current"} allowance continues until then.
-              </p>
-            </Reveal>
-
-            {/*
-             * ⚠ THE CONSEQUENCE IS SPELLED OUT UNDER THE BUTTON THAT CAUSES IT,
-             * not in a dialog that covers the plan being left. The two facts
-             * somebody needs are that sending continues and when it stops, and
-             * both are short enough to sit here.
-             */}
-            <Reveal
-              show={Boolean(leaving && confirming?.id === plan.id)}
-              spacing="pt-2"
-            >
-              <p className="text-xs text-muted-foreground">
-                Your {current?.name} allowance continues until the end of the period you
-                have paid for. Press again to confirm, or pick another plan.
-              </p>
-            </Reveal>
-
-            <Reveal show={Boolean(leaving && endingAt !== null)} spacing="pt-2">
-              <p className="text-xs text-muted-foreground">
-                Your subscription already ends on {endingAt}. You move here then.
-              </p>
-            </Reveal>
-          </li>
+                <Reveal show={Boolean(leaving && endingAt !== null)} spacing="pt-2">
+                  <p className="text-xs text-muted-foreground">
+                    Your subscription already ends on {endingAt}. You move here then.
+                  </p>
+                </Reveal>
+              </div>
+            </li>
+          </BoneScope>
         )
       })}
     </ul>

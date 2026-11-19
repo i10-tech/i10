@@ -49,7 +49,13 @@ import { toastDone, toastError } from "@/lib/toast"
  * unverifiable before it gets there; it is the first thing to check on the
  * first real deployment. See docs/decisions/console.md §7.
  */
-export function PaymentMethodButton({ hasSubscription }: { hasSubscription: boolean }) {
+export function PaymentMethodButton({
+  hasSubscription,
+  loading = false,
+}: {
+  hasSubscription: boolean
+  loading?: boolean
+}) {
   const router = useRouter()
   const { resolvedTheme } = useTheme()
   const [pending, setPending] = React.useState(false)
@@ -153,7 +159,7 @@ export function PaymentMethodButton({ hasSubscription }: { hasSubscription: bool
       variant="secondary"
       size="sm"
       onClick={open}
-      disabled={pending}
+      disabled={pending || loading}
     >
       <CreditCard />
       Update payment method

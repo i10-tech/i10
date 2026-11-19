@@ -2,6 +2,9 @@ import Link from "next/link"
 import { ChevronRight } from "lucide-react"
 import { Badge, type BadgeTone } from "@repo/ui/components/badge/badge"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
+import { seedShape } from "@/components/list/remembered-shapes"
+import { connectionShape, ssoConnectionShape } from "@/lib/shapes/sso-connection"
 import { healthLabel, type HealthState } from "@/lib/connection-health"
 import { flowCovers } from "@/lib/sso-guides"
 import type { SsoAbilities, SsoConnection, SsoConnections } from "@/lib/sso-types"
@@ -32,38 +35,87 @@ function stateOf(c: SsoConnection): { label: string; tone: BadgeTone; title?: st
   }
 }
 
-function Row({ connection }: { connection: SsoConnection }) {
-  const state = stateOf(connection)
-  const setup = connection.status === "draft" || connection.status === "testing"
+function Row({
+  connection,
+  abilities,
+}: {
+  /** Absent while loading: the same row, drawn with a bar for each piece. */
+  connection?: SsoConnection
+  abilities: SsoAbilities
+}) {
+  const state = connection ? stateOf(connection) : null
+  const setup =
+    connection !== undefined &&
+    (connection.status === "draft" || connection.status === "testing")
+
+  function onSeed() {
+    if (!connection) return
+    seedShape(ssoConnectionShape, connection.id, connectionShape(connection, abilities))
+  }
+
+  const body = (
+    <>
+      <Bone id="mark" shape="box" width={36} height={36} radius={8} inline>
+        {connection && (
+          <IdpMark
+            idp={
+              connection.provider === "generic"
+                ? connection.protocol
+                : connection.provider
+            }
+            className="size-9"
+          />
+        )}
+      </Bone>
+      <span className="min-w-0 flex-1">
+        <Bone id="name" width={140} lineHeight={20}>
+          {connection && (
+            <span className="block truncate font-medium">{connection.name}</span>
+          )}
+        </Bone>
+        <Bone id="domains" width={180} lineHeight={20}>
+          {connection && (
+            <span className="block truncate text-muted-foreground">
+              {connection.domains.map((d) => d.name).join(", ") || "No domain yet"}
+            </span>
+          )}
+        </Bone>
+      </span>
+      <Bone id="status" shape="box" width={60} height={22} radius={4} inline>
+        {state && (
+          <Badge tone={state.tone} size="sm" title={state.title}>
+            {state.label}
+          </Badge>
+        )}
+      </Bone>
+      <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+    </>
+  )
+  const classes =
+    "flex items-center gap-3 px-4 py-3 text-sm transition-colors duration-150 hover:bg-muted/50"
+
   return (
     <li>
-      <Link
-        href={
-          setup && flowCovers(connection.provider, connection.protocol)
-            ? `/settings/sso/connect?connection=${connection.id}`
-            : `/settings/sso/${connection.id}`
-        }
-        className="flex items-center gap-3 px-4 py-3 text-sm transition-colors duration-150 hover:bg-muted/50"
-      >
-        <IdpMark
-          idp={
-            connection.provider === "generic"
-              ? connection.protocol
-              : connection.provider
+      {connection ? (
+        <Link
+          href={
+            setup && flowCovers(connection.provider, connection.protocol)
+              ? `/settings/sso/connect?connection=${connection.id}`
+              : `/settings/sso/${connection.id}`
           }
-          className="size-9"
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium">{connection.name}</span>
-          <span className="block truncate text-muted-foreground">
-            {connection.domains.map((d) => d.name).join(", ") || "No domain yet"}
-          </span>
-        </span>
-        <Badge tone={state.tone} size="sm" title={state.title}>
-          {state.label}
-        </Badge>
-        <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
-      </Link>
+          onMouseEnter={onSeed}
+          onFocus={onSeed}
+          onClick={onSeed}
+          className={classes}
+        >
+          {body}
+        </Link>
+      ) : (
+        // ⚠ THE SAME ELEMENT, WITH NOWHERE TO GO YET.
+        <a aria-hidden tabIndex={-1} className={classes}>
+          {body}
+        </a>
+      )}
     </li>
   )
 }
@@ -71,11 +123,18 @@ function Row({ connection }: { connection: SsoConnection }) {
 export function SsoHome({
   catalog,
   abilities,
+  loading = false,
+  skeletonCount = 1,
 }: {
   catalog: SsoConnections
   abilities: SsoAbilities
+  loading?: boolean
+  skeletonCount?: number
 }) {
-  const connections = catalog.data
+  // ⚠ ONE LIST FOR THE PAGE AND ITS SKELETON: the shape says how many rows.
+  const connections: (SsoConnection | undefined)[] = loading
+    ? Array.from({ length: skeletonCount }, () => undefined)
+    : catalog.data
   if (connections.length === 0) {
     return (
       <div className="flex flex-col items-start gap-4 rounded-2xl border border-border p-5 sm:flex-row sm:items-center">
@@ -101,8 +160,10 @@ export function SsoHome({
   return (
     <div className="space-y-3">
       <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
-        {connections.map((c) => (
-          <Row key={c.id} connection={c} />
+        {connections.map((c, i) => (
+          <BoneScope key={c?.id ?? i} id={`conn-${i}`} unit>
+            <Row connection={c} abilities={abilities} />
+          </BoneScope>
         ))}
       </ul>
       {abilities.manage && (

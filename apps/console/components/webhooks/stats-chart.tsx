@@ -3,6 +3,7 @@
 import * as React from "react"
 import { LineChart } from "@repo/ui/components/line-chart/line-chart"
 import { EmptyState } from "@repo/ui/components/empty-state/empty-state"
+import { Bone } from "@repo/ui/components/bone/bone"
 import type { WebhookStatsBucket } from "@/lib/types"
 
 const COUNTS = [
@@ -35,29 +36,36 @@ function label(iso: string, bucket: "hour" | "day", span: number): string {
 
 export function StatsCharts({
   series,
-  bucket,
+  bucket = "hour",
+  loading = false,
 }: {
-  series: WebhookStatsBucket[]
-  bucket: "hour" | "day"
+  series?: WebhookStatsBucket[]
+  bucket?: "hour" | "day"
+  loading?: boolean
 }) {
-  const data = React.useMemo(
-    () =>
-      series.map((s) => {
-        const text = label(s.start, bucket, series.length)
-        return {
-          key: s.start,
-          label: text,
-          axisLabel: text,
-          values: {
-            delivered: s.delivered,
-            pending: s.pending,
-            failed: s.failed,
-            rate: s.attempts === 0 ? 0 : (s.failed_attempts / s.attempts) * 100,
-          },
-        }
-      }),
-    [series, bucket],
-  )
+  const isLoaded = !loading && series !== undefined
+
+  const data = React.useMemo(() => {
+    if (!series) return []
+    return series.map((s) => {
+      const text = label(s.start, bucket, series.length)
+      return {
+        key: s.start,
+        label: text,
+        axisLabel: text,
+        values: {
+          delivered: s.delivered,
+          pending: s.pending,
+          failed: s.failed,
+          rate: s.attempts === 0 ? 0 : (s.failed_attempts / s.attempts) * 100,
+        },
+      }
+    })
+  }, [series, bucket])
+
+  if (!isLoaded) {
+    return <Bone id="stats-chart" shape="box" width="100%" height={412} radius={8} />
+  }
 
   const empty = series.every(
     (s) => s.delivered + s.failed + s.pending + s.attempts === 0,
@@ -72,25 +80,27 @@ export function StatsCharts({
   }
 
   return (
-    <div className="grid gap-8">
-      <LineChart
-        label="Deliveries, by when they were created"
-        data={data}
-        series={COUNTS}
-        height={220}
-        categoryLabel={bucket === "hour" ? "Hour" : "Day"}
-        formatValue={(value) => Math.round(value).toLocaleString("en-US")}
-      />
-      <LineChart
-        label="Error rate"
-        data={data}
-        series={RATE}
-        unit="%"
-        height={160}
-        categoryLabel={bucket === "hour" ? "Hour" : "Day"}
-        formatValue={(value) => `${value.toFixed(1)}`}
-        formatTick={(value) => `${Math.round(value)}%`}
-      />
-    </div>
+    <Bone id="stats-chart" shape="box" width="100%" height={412} radius={8}>
+      <div className="grid gap-8">
+        <LineChart
+          label="Deliveries, by when they were created"
+          data={data}
+          series={COUNTS}
+          height={220}
+          categoryLabel={bucket === "hour" ? "Hour" : "Day"}
+          formatValue={(value) => Math.round(value).toLocaleString("en-US")}
+        />
+        <LineChart
+          label="Error rate"
+          data={data}
+          series={RATE}
+          unit="%"
+          height={160}
+          categoryLabel={bucket === "hour" ? "Hour" : "Day"}
+          formatValue={(value) => `${value.toFixed(1)}`}
+          formatTick={(value) => `${Math.round(value)}%`}
+        />
+      </div>
+    </Bone>
   )
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { and, count, desc, eq, inArray, ne, sql } from "drizzle-orm"
+import { and, count, desc, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm"
 import {
   buildProps,
   canonicalFileSet,
@@ -53,7 +53,17 @@ export interface TemplateFolder {
   name: string
   /** How many templates are filed in it. */
   templates: number
+  /**
+   * Up to three of its templates, most recently edited first, for the papers
+   * drawn on the folder. `updated_at` is the stamp a picture is cached under.
+   */
+  preview: FolderPreview[]
   created_at: string
+  updated_at: string
+}
+
+export interface FolderPreview {
+  id: string
   updated_at: string
 }
 
@@ -291,7 +301,13 @@ export interface TemplateStore {
     tenantId: string,
     id: string,
   ): Promise<
-    (Preview & { from: string | null; reply_to: string[] | null }) | Problems | null
+    | (Preview & {
+        from: string | null
+        reply_to: string[] | null
+        stamp: string | null
+      })
+    | (Problems & { stamp: string | null })
+    | null
   >
   delete(tenantId: string, id: string): Promise<boolean>
   /** What the send path reads. See `resolveTemplateSend` in @repo/templates. */
@@ -306,6 +322,9 @@ export interface TemplateStore {
  * TEMPLATE's id, so every folder counted zero.
  */
 const FOLDER_COUNT = sql<number>`(select count(*)::int from "core"."templates" t where t.folder_id = "core"."template_folders"."id")`
+
+/** The papers a folder draws. */
+const FOLDER_PREVIEWS = 3
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -550,6 +569,45 @@ export function templateStore(
     return name
   }
 
+  /**
+   * The newest templates of each folder, in one query for all of them.
+   *
+   * ⚠ REMOVED ONES ARE LEFT OUT (gone from their repository, so the list
+   * strikes them through), and `inArray` is what expands the ids: a plain
+   * `${ids}` becomes a row, not an array.
+   */
+  const previewsOf = async (
+    tx: Tx,
+    folderIds: string[],
+  ): Promise<Map<string, FolderPreview[]>> => {
+    const byFolder = new Map<string, FolderPreview[]>()
+    if (folderIds.length === 0) return byFolder
+    const ranked = tx
+      .select({
+        id: templates.id,
+        folderId: templates.folderId,
+        updatedAt: templates.updatedAt,
+        place:
+          sql<number>`row_number() over (partition by ${templates.folderId} order by ${templates.updatedAt} desc, ${templates.id} desc)`.as(
+            "place",
+          ),
+      })
+      .from(templates)
+      .where(and(inArray(templates.folderId, folderIds), isNull(templates.removedAt)))
+      .as("ranked")
+    const rows = await tx
+      .select()
+      .from(ranked)
+      .where(lte(ranked.place, FOLDER_PREVIEWS))
+      .orderBy(ranked.folderId, ranked.place)
+    for (const r of rows) {
+      const list = byFolder.get(r.folderId!) ?? []
+      list.push({ id: r.id, updated_at: r.updatedAt.toISOString() })
+      byFolder.set(r.folderId!, list)
+    }
+    return byFolder
+  }
+
   const folderOf = async (tx: Tx, id: string): Promise<TemplateFolder | null> => {
     const [row] = await tx
       .select({
@@ -561,7 +619,8 @@ export function templateStore(
       })
       .from(templateFolders)
       .where(eq(templateFolders.id, id))
-    return row ? toFolder(row) : null
+    if (!row) return null
+    return toFolder(row, (await previewsOf(tx, [row.id])).get(row.id) ?? [])
   }
 
   /**
@@ -753,7 +812,11 @@ export function templateStore(
           .from(templateFolders)
           .orderBy(templateFolders.name)
           .limit(LIST_CAP)
-        return rows.map(toFolder)
+        const previews = await previewsOf(
+          tx,
+          rows.map((r) => r.id),
+        )
+        return rows.map((r) => toFolder(r, previews.get(r.id) ?? []))
       })
     },
 
@@ -1307,7 +1370,12 @@ export function templateStore(
 
     async draftEmail(tenantId, id) {
       if (!UUID.test(id)) return null
-      return withTenant(db, tenantId, async (tx) => {
+      // ⚠ THE STAMP IS THE TEMPLATE'S `updated_at`, READ IN THE SAME
+      // TRANSACTION AS THE DRAFT, so a picture is cached under the very edit it
+      // shows. A shared template has none: its content changes with a deploy,
+      // not with a row, so it is never cached for long.
+      let stamp: string | null = null
+      const made = await withTenant(db, tenantId, async (tx) => {
         const which = await addressed(tx, id)
         if ("shared" in which) {
           const v = which.shared.version
@@ -1326,6 +1394,7 @@ export function templateStore(
           .where(eq(templates.id, id))
           .limit(1)
         if (!draft) return null
+        stamp = draft.updatedAt.toISOString()
         const defaults = { from: draft.from, reply_to: draft.replyTo }
 
         if (draft.kind === "tsx") {
@@ -1350,24 +1419,24 @@ export function templateStore(
         if (!draft.html && !draft.text) {
           return { problems: ["Write the email before sending a test."] }
         }
-        const made = skeletonFromHtml({
+        const parsed = skeletonFromHtml({
           html:
             draft.html === null ? null : withPreviewText(draft.html, draft.previewText),
           text: draft.text,
           nonce: newNonce(),
         })
-        if (!made.ok) return { problems: made.problems }
+        if (!parsed.ok) return { problems: parsed.problems }
         const variables = withDeclared(
-          withSubjectVariables(made.skeleton.variables, draft.subject),
+          withSubjectVariables(parsed.skeleton.variables, draft.subject),
           draft.variables ?? [],
         )
         const samples = buildProps(variables, (x) => x.fallback ?? `{{{ ${x.path} }}}`)
         const filled = fill(
           {
-            html: draft.html === null ? null : made.skeleton.html,
-            text: draft.text === null ? null : made.skeleton.text,
+            html: draft.html === null ? null : parsed.skeleton.html,
+            text: draft.text === null ? null : parsed.skeleton.text,
             subject: draft.subject,
-            nonce: made.skeleton.nonce,
+            nonce: parsed.skeleton.nonce,
             variables,
           },
           samples,
@@ -1376,6 +1445,7 @@ export function templateStore(
           ? { ...filled.filled, ...defaults }
           : { problems: ["The template's variables could not be filled."] }
       })
+      return made === null ? null : { ...made, stamp }
     },
 
     async delete(tenantId, id) {
@@ -1480,17 +1550,21 @@ export function slugOf(title: string): string {
     .slice(0, 80)
 }
 
-function toFolder(row: {
-  id: string
-  name: string
-  templates: number
-  createdAt: Date
-  updatedAt: Date
-}): TemplateFolder {
+function toFolder(
+  row: {
+    id: string
+    name: string
+    templates: number
+    createdAt: Date
+    updatedAt: Date
+  },
+  preview: FolderPreview[],
+): TemplateFolder {
   return {
     id: row.id,
     name: row.name,
     templates: row.templates,
+    preview,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   }

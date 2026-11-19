@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Badge, type BadgeTone } from "@repo/ui/components/badge/badge"
+import { Bone, useBoneLoading } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
 import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
@@ -106,10 +107,17 @@ export function useSsoAttempt() {
   )
 }
 
-/** A value read once on mount through an action, with a way to set it from a write's answer. */
+/**
+ * A value read once on mount through an action, with a way to set it from a write's answer.
+ *
+ * ⚠ NO READ WHILE A SKELETON IS DRAWN. A panel inside a loading scope belongs to a
+ * stand-in connection with no real id; reading for it would ask the API about
+ * nothing. The page that replaces the skeleton mounts its own panels and reads then.
+ */
 export function useRemote<T>(load: () => Promise<ActionResult<T>>, initial?: T | null) {
   const [data, setData] = React.useState<T | null>(initial ?? null)
   const [failed, setFailed] = React.useState<RemoteFailure | null>(null)
+  const skeleton = useBoneLoading()
   const loader = React.useRef(load)
   React.useEffect(() => {
     loader.current = load
@@ -124,10 +132,10 @@ export function useRemote<T>(load: () => Promise<ActionResult<T>>, initial?: T |
   }, [])
 
   React.useEffect(() => {
-    if (initial === undefined) {
+    if (initial === undefined && !skeleton) {
       void reload()
     }
-  }, [reload, initial])
+  }, [reload, initial, skeleton])
 
   return { data, setData, failed, reload }
 }
@@ -235,10 +243,50 @@ export function ShownOnce({
  */
 export function Loading({ failed }: { failed: RemoteFailure | null }) {
   if (failed?.upgrade) return <UpgradePrompt feature={failed.upgrade.feature} />
+  if (failed?.message) {
+    return <p className="py-2 text-sm text-muted-foreground">{failed.message}</p>
+  }
   return (
-    <p className="py-2 text-sm text-muted-foreground">
-      {failed?.message ?? "Loading…"}
-    </p>
+    <div className="py-2">
+      <Bone id="sso-loading" width={160} lineHeight={20} inline />
+    </div>
+  )
+}
+
+/**
+ * The control side of a settings row while its data loads: a bar the size of
+ * the control, and the control itself once there is data.
+ *
+ * ⚠ THE ROW'S TITLE AND DESCRIPTION STAY REAL; only what the data decides is a
+ * Bone. `loading` is the panel's own (no data yet), not the scope's, because these
+ * panels also load themselves outside a skeleton.
+ */
+export function RowBone({
+  id,
+  loading,
+  width,
+  height = 32,
+  children,
+}: {
+  id: string
+  loading: boolean
+  width: number
+  height?: number
+  children?: React.ReactNode
+}) {
+  return (
+    <Bone
+      id={id}
+      loading={loading}
+      as="div"
+      shape="box"
+      width={width}
+      height={height}
+      radius={8}
+      inline
+    >
+      {children}
+    </Bone>
   )
 }
 

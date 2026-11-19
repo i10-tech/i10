@@ -2,10 +2,28 @@
 
 import * as React from "react"
 import { ChevronRight } from "lucide-react"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { StatusDot, describeStatus } from "@/components/status"
 import { JsonViewer } from "@repo/ui/components/json-viewer/json-viewer"
 import { cn } from "cn"
 import { Time } from "@/components/time"
+
+interface Step {
+  type: string
+  /*
+   * ⚠ A NODE RATHER THAN A STRING, SO THAT A TIMESTAMP INSIDE A LABEL CAN GO
+   * THROUGH `<Time>`. The scheduled step used to interpolate `formatExact`
+   * here, which formats in the RUNTIME'S TIME ZONE - UTC in the server
+   * container, something else in the reader's browser. This is a client
+   * component, so both passes run and disagree by hours, and React answers a
+   * hydration mismatch by throwing away the server HTML for the subtree and
+   * re-rendering it. See components/time.tsx.
+   */
+  label: React.ReactNode
+  occurred_at: string
+  payload: unknown
+  synthetic: boolean
+}
 
 /**
  * What happened to one message, in order.
@@ -26,13 +44,17 @@ import { Time } from "@/components/time"
  * through `JSON.stringify` into a `<pre>` and never near `innerHTML`.
  */
 export function EventTimeline({
-  events,
-  createdAt,
-  scheduledAt,
+  events = [],
+  createdAt = "",
+  scheduledAt = null,
+  stepsCount = 3,
+  loading = false,
 }: {
-  events: { type: string; occurred_at: string; payload: unknown }[]
-  createdAt: string
-  scheduledAt: string | null
+  events?: { type: string; occurred_at: string; payload: unknown }[]
+  createdAt?: string
+  scheduledAt?: string | null
+  stepsCount?: number
+  loading?: boolean
 }) {
   const [open, setOpen] = React.useState<number | null>(null)
 
@@ -44,22 +66,7 @@ export function EventTimeline({
    * the timeline for a queued message is completely empty, which reads as the
    * request having been lost.
    */
-  const steps: {
-    type: string
-    /*
-     * ⚠ A NODE RATHER THAN A STRING, SO THAT A TIMESTAMP INSIDE A LABEL CAN GO
-     * THROUGH `<Time>`. The scheduled step used to interpolate `formatExact`
-     * here, which formats in the RUNTIME'S TIME ZONE - UTC in the server
-     * container, something else in the reader's browser. This is a client
-     * component, so both passes run and disagree by hours, and React answers a
-     * hydration mismatch by throwing away the server HTML for the subtree and
-     * re-rendering it. See components/time.tsx.
-     */
-    label: React.ReactNode
-    occurred_at: string
-    payload: unknown
-    synthetic: boolean
-  }[] = [
+  const steps: Step[] = [
     {
       type: "accepted",
       label: "Accepted by i10",
@@ -94,72 +101,113 @@ export function EventTimeline({
     })),
   ]
 
+  // ⚠ ONE LIST FOR THE PAGE AND ITS SKELETON. Loading draws `stepsCount` rows with
+  // a bar for each piece; the rows past the first need `payload` to know whether
+  // they open, which is data, so the chevron is skipped.
+  const rows: (Step | undefined)[] = loading
+    ? Array.from({ length: Math.max(1, stepsCount) }, () => undefined)
+    : steps
+
   return (
     <ol className="space-y-0">
-      {steps.map((step, index) => {
-        const described = describeStatus(step.type)
-        const last = index === steps.length - 1
-        const expandable = step.payload !== null && step.payload !== undefined
+      {rows.map((step, index) => {
+        const described = step ? describeStatus(step.type) : null
+        const last = index === rows.length - 1
+        const expandable = step
+          ? step.payload !== null && step.payload !== undefined
+          : false
 
         return (
-          <li key={`${step.type}-${step.occurred_at}-${index}`} className="relative">
-            {/*
-             * ⚠ THE CONNECTOR IS AN ABSOLUTELY POSITIONED RULE, NOT A BORDER ON
-             * THE LIST ITEM. A left border would run the full height of the
-             * last item too, leaving a line dangling below the final dot - the
-             * detail that makes a hand-built timeline look unfinished.
-             */}
-            {!last && (
-              <span
-                aria-hidden="true"
-                className="absolute top-4 bottom-0 left-[3px] w-px bg-border"
-              />
-            )}
-
-            <div className="flex gap-3 pb-4 last:pb-0">
-              <StatusDot tone={described.tone} className="mt-1.5 shrink-0" />
-
-              <div className="min-w-0 flex-1">
-                <button
-                  type="button"
-                  disabled={!expandable}
-                  onClick={() => setOpen(open === index ? null : index)}
-                  className={cn(
-                    "flex w-full items-start gap-1 text-left",
-                    expandable && "cursor-pointer",
-                  )}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm leading-tight">{step.label}</span>
-                    <Time
-                      iso={step.occurred_at}
-                      className="block text-xs text-muted-foreground"
-                    />
-                  </span>
-                  {expandable && (
-                    <ChevronRight
-                      className={cn(
-                        "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
-                        "duration-(--duration-instant) ease-(--ease-linear)",
-                        open === index && "rotate-90",
-                      )}
-                    />
-                  )}
-                </button>
-
-                {open === index && expandable && (
-                  <JsonViewer
-                    data={step.payload}
-                    label={`${step.label ?? "Event"} payload`}
-                    rootName="payload"
-                    maxHeight={256}
-                    searchable={false}
-                    className="mt-2"
+          <BoneScope
+            key={step ? `${step.type}-${step.occurred_at}-${index}` : index}
+            id={`row-${index}`}
+            unit
+          >
+            <li className="relative">
+              {
+                /*
+                 * ⚠ THE CONNECTOR IS AN ABSOLUTELY POSITIONED RULE, NOT A BORDER ON
+                 * THE LIST ITEM. A left border would run the full height of the
+                 * last item too, leaving a line dangling below the final dot - the
+                 * detail that makes a hand-built timeline look unfinished.
+                 */
+                !last && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-4 bottom-0 left-[3px] w-px bg-border"
                   />
-                )}
+                )
+              }
+
+              <div className="flex gap-3 pb-4 last:pb-0">
+                <Bone
+                  id="dot"
+                  shape="box"
+                  width={8}
+                  height={8}
+                  radius={9999}
+                  inline
+                  className="mt-1.5 shrink-0"
+                >
+                  {described && <StatusDot tone={described.tone} />}
+                </Bone>
+
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    disabled={!expandable}
+                    data-expandable={expandable || undefined}
+                    onClick={() => setOpen(open === index ? null : index)}
+                    className="flex w-full items-start gap-1 text-left data-[expandable]:cursor-pointer"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <Bone
+                        id="label"
+                        lineHeight={16}
+                        width={index % 2 === 0 ? "70%" : "50%"}
+                      >
+                        {step && (
+                          <span className="block text-sm leading-tight">
+                            {step.label}
+                          </span>
+                        )}
+                      </Bone>
+                      <Bone id="time" lineHeight={14} width={80}>
+                        {step && (
+                          <Time
+                            iso={step.occurred_at}
+                            className="block text-xs text-muted-foreground"
+                          />
+                        )}
+                      </Bone>
+                    </span>
+                    {/* ⚠ SKIPPED BY test/skeleton-parity: only events that carry a payload open, and a skeleton has none. */}
+                    {expandable && (
+                      <ChevronRight
+                        data-skeleton="skip"
+                        className={cn(
+                          "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
+                          "duration-(--duration-instant) ease-(--ease-linear)",
+                          open === index && "rotate-90",
+                        )}
+                      />
+                    )}
+                  </button>
+
+                  {step && open === index && expandable && (
+                    <JsonViewer
+                      data={step.payload}
+                      label={`${step.label ?? "Event"} payload`}
+                      rootName="payload"
+                      maxHeight={256}
+                      searchable={false}
+                      className="mt-2"
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          </li>
+            </li>
+          </BoneScope>
         )
       })}
     </ol>

@@ -24,9 +24,12 @@ import { toastDone } from "@/lib/toast"
 import type { Bounds, SessionPolicy, SsoAbilities } from "@/lib/sso-types"
 import { InlineError } from "./setup/inline-error"
 import { SettingsRow } from "./settings-card"
-import { Loading, useRemote, useSsoCall } from "./shared"
+import { Loading, RowBone, useRemote, useSsoCall } from "./shared"
 
 const OWNER_ONLY = "Only an owner can change this. Ask an owner."
+
+/** What a limit row is drawn from while it loads. */
+const NO_BOUNDS: Bounds = { min: 0, max: 0 }
 
 function formatDuration(
   seconds: number | null,
@@ -47,9 +50,11 @@ export function SessionPolicyPanel({
 }) {
   const call = useSsoCall()
   const { data, setData, failed } = useRemote(sessionPolicy, initial)
-  if (!data) return <Loading failed={failed} />
+  // A refusal or an error says so; plain waiting draws the rows with bars in them.
+  if (!data && (failed?.upgrade || failed?.message)) return <Loading failed={failed} />
 
   const update = (patch: Partial<SessionPolicy>) => {
+    if (!data) return
     setData({ ...data, ...patch })
     toastDone("Session policy saved")
   }
@@ -57,15 +62,18 @@ export function SessionPolicyPanel({
   return (
     <>
       <SessionLimitRow
-        key={`max:${data.maxSessionSeconds}`}
+        key={`max:${data?.maxSessionSeconds}`}
+        id="longest-session"
+        loading={!data}
         title="Longest session"
         description="Everyone is signed out this long after they signed in, however active they are."
-        currentSeconds={data.maxSessionSeconds}
-        bounds={data.bounds.maxSessionSeconds}
+        currentSeconds={data?.maxSessionSeconds ?? null}
+        bounds={data?.bounds.maxSessionSeconds ?? NO_BOUNDS}
         fallback={{ value: 7, unit: "days" }}
         saveLabel="Save longest session"
         abilities={abilities}
         onSave={async (seconds) => {
+          if (!data) return false
           const saved = await call(
             () =>
               saveSessionPolicy({
@@ -82,16 +90,19 @@ export function SessionPolicyPanel({
         }}
       />
       <SessionLimitRow
-        key={`idle:${data.idleTimeoutSeconds}`}
+        key={`idle:${data?.idleTimeoutSeconds}`}
+        id="idle-timeout"
+        loading={!data}
         title="Sign out when idle"
         description="Everyone is signed out after this long without using the console."
-        currentSeconds={data.idleTimeoutSeconds}
-        bounds={data.bounds.idleTimeoutSeconds}
+        currentSeconds={data?.idleTimeoutSeconds ?? null}
+        bounds={data?.bounds.idleTimeoutSeconds ?? NO_BOUNDS}
         fallback={{ value: 1, unit: "hours" }}
         note="An SSO connection can set shorter limits of its own for the people who sign in through it. The shorter one applies."
         saveLabel="Save idle timeout"
         abilities={abilities}
         onSave={async (seconds) => {
+          if (!data) return false
           const saved = await call(
             () =>
               saveSessionPolicy({
@@ -112,6 +123,8 @@ export function SessionPolicyPanel({
 }
 
 function SessionLimitRow({
+  id,
+  loading,
   title,
   description,
   currentSeconds,
@@ -122,6 +135,8 @@ function SessionLimitRow({
   abilities,
   onSave,
 }: {
+  id: string
+  loading: boolean
   title: string
   description: string
   currentSeconds: number | null
@@ -159,12 +174,14 @@ function SessionLimitRow({
       title={title}
       description={description}
       action={
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">{currentText}</span>
-          <Button variant="ghost" size="sm" onClick={() => setEditing(!editing)}>
-            {editing ? "Cancel" : "Edit"}
-          </Button>
-        </div>
+        <RowBone id={id} loading={loading} width={150}>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">{currentText}</span>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(!editing)}>
+              {editing ? "Cancel" : "Edit"}
+            </Button>
+          </div>
+        </RowBone>
       }
     >
       <Reveal show={editing} spacing="pt-3">
@@ -269,34 +286,38 @@ export function SecondFactorPanel({
   const { data, setData, failed } = useRemote(secondFactorPolicy, initial)
   const id = React.useId()
 
-  if (!data) return <Loading failed={failed} />
+  if (!data && (failed?.upgrade || failed?.message)) return <Loading failed={failed} />
 
   return (
     <SettingsRow
       title="Second factor"
       description="Require a second step at sign-in from members who do not use SSO."
       action={
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            {data.required ? "Required" : "Optional"}
-          </span>
-          <Switch
-            id={id}
-            checked={data.required}
-            disabled={!abilities.owner}
-            onCheckedChange={async (required) => {
-              const saved = await call(() => saveSecondFactorPolicy(required), {
-                title: "Could not save that",
-              })
-              if (saved) {
-                setData(saved)
-                toastDone(
-                  saved.required ? "Second factor required" : "Second factor optional",
-                )
-              }
-            }}
-          />
-        </div>
+        <RowBone id="second-factor" loading={!data} width={120}>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">
+              {data?.required ? "Required" : "Optional"}
+            </span>
+            <Switch
+              id={id}
+              checked={data?.required ?? false}
+              disabled={!abilities.owner}
+              onCheckedChange={async (required) => {
+                const saved = await call(() => saveSecondFactorPolicy(required), {
+                  title: "Could not save that",
+                })
+                if (saved) {
+                  setData(saved)
+                  toastDone(
+                    saved.required
+                      ? "Second factor required"
+                      : "Second factor optional",
+                  )
+                }
+              }}
+            />
+          </div>
+        </RowBone>
       }
     >
       <div className="space-y-1">

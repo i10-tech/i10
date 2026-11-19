@@ -7,6 +7,7 @@ import { cn } from "cn"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { Badge, type BadgeTone } from "@repo/ui/components/badge/badge"
+import { Bone } from "@repo/ui/components/bone/bone"
 
 /**
  * The pieces every settled SSO screen is built from, so no screen invents its
@@ -61,24 +62,60 @@ export function SettingsRow({
   )
 }
 
-/** Where something stands: one chip, one sentence, at most one button. */
+/**
+ * Where something stands: one chip, one sentence, at most one button.
+ *
+ * ⚠ `boneId` IS FOR A STATE THAT DATA DECIDES. The chip and the sentence become
+ * bones (`loading` is the scope's unless the caller says its own), while the
+ * line around them stays real, so a skeleton shows the line and not a guess at
+ * the state. Without it the line renders as it always did.
+ */
 export function StatusLine({
   label,
   tone,
   sentence,
   action,
+  boneId,
+  loading,
 }: {
   label: string
   tone: BadgeTone
   sentence: React.ReactNode
   action?: React.ReactNode
+  boneId?: string
+  loading?: boolean
 }) {
+  const chip = (
+    <Badge tone={tone} size="sm">
+      {label}
+    </Badge>
+  )
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Badge tone={tone} size="sm">
-        {label}
-      </Badge>
-      <p className="min-w-0 flex-1 text-sm text-muted-foreground">{sentence}</p>
+      {boneId ? (
+        <Bone
+          id={`${boneId}-chip`}
+          loading={loading}
+          shape="box"
+          width={64}
+          height={22}
+          radius={6}
+          inline
+        >
+          {chip}
+        </Bone>
+      ) : (
+        chip
+      )}
+      <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+        {boneId ? (
+          <Bone id={`${boneId}-sentence`} loading={loading} width="80%">
+            {sentence}
+          </Bone>
+        ) : (
+          sentence
+        )}
+      </p>
       {action}
     </div>
   )
@@ -92,7 +129,7 @@ export function Advanced({
   children,
 }: {
   label?: string
-  summary?: string
+  summary?: React.ReactNode
   defaultOpen?: boolean
   children: React.ReactNode
 }) {

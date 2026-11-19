@@ -4,7 +4,9 @@ import { usePathname } from "next/navigation"
 import { useEffect, useRef } from "react"
 import { cn } from "cn"
 import { PageTransition } from "@repo/ui/components/i10/page-transition"
+import { frameKey, SkeletonFor, usePendingSkeleton } from "@/components/section-frame"
 import { forgetDraft } from "@/lib/add-domain-draft"
+import { useNavigationIntent } from "@/lib/pending-navigation"
 import { useWorkspaceSwitch } from "@/lib/workspace-switch"
 
 /**
@@ -32,6 +34,14 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
   const pane = useRef<HTMLElement>(null)
   const { pending } = useWorkspaceSwitch()
   const stale = pending !== null
+  useNavigationIntent()
+  /*
+   * ⚠ THE DESTINATION'S OWN SKELETON FROM THE CLICK, KEYED AS THAT PAGE. The
+   * transition enters it as the new page, so when Next commits, the same frame
+   * keeps standing and only its contents change: skeleton to content, the swap
+   * the bones resolve across (lib/pending-navigation.ts says why).
+   */
+  const going = usePendingSkeleton("frame")
 
   /*
    * ⚠ NAVIGATION HAS TO PUT US BACK AT THE TOP BY HAND NOW. Next resets
@@ -48,9 +58,11 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
    * page's own enter animation, and it animates the OUTGOING scroll position
    * across content that has already been replaced.
    */
+  // From the skeleton at the click, when there is one: that is the new page arriving.
+  const shown = going?.pathname ?? pathname
   useEffect(() => {
     pane.current?.scrollTo({ top: 0, behavior: "instant" })
-  }, [pathname])
+  }, [shown])
 
   /*
    * ⚠ ARRIVING ANYWHERE BUT THE ADD-DOMAIN FLOW ENDS IT. Its draft survives a
@@ -90,29 +102,10 @@ export function PageFrame({ children }: { children: React.ReactNode }) {
         aria-busy={stale ? true : undefined}
         inert={stale ? true : undefined}
       >
-        <PageTransition pathname={frameKey(pathname)}>{children}</PageTransition>
+        <PageTransition pathname={frameKey(shown)}>
+          {going ? <SkeletonFor pending={going} framed /> : children}
+        </PageTransition>
       </div>
     </main>
   )
-}
-
-/**
- * ⚠ SECTIONS WHOSE LAYOUT DRAWS THE HEADER, SO IT MUST NOT RE-ENTER INSIDE
- * THEM. Keyed on the full pathname, `/settings/sso/connect` to `/settings/sso`
- * remounted the whole layout: "Settings" rose and faded in again although it
- * never changed, and the workspace picker beside it remounted and redrew. Inside
- * these the frame holds still and `SectionContent` animates only the body.
- */
-const SHARED_HEADER = ["/settings", "/account", "/reference"]
-
-function frameKey(pathname: string) {
-  return (
-    SHARED_HEADER.find((s) => pathname === s || pathname.startsWith(`${s}/`)) ??
-    pathname
-  )
-}
-
-/** The body of a section in `SHARED_HEADER`, arriving per page under its header. */
-export function SectionContent({ children }: { children: React.ReactNode }) {
-  return <PageTransition pathname={usePathname()}>{children}</PageTransition>
 }

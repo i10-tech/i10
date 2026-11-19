@@ -1,0 +1,58 @@
+import type { Metadata } from "next"
+import { DomainsView } from "@/components/domains-view"
+import { tryApi } from "@/lib/api"
+import { domainsShape, type DomainsData } from "@/lib/shapes/domains"
+import type { ApiKeyRow, DomainSummary, TransferOffer } from "@/lib/types"
+
+export const metadata: Metadata = { title: "Domains" }
+
+/**
+ * Every domain this workspace can send from.
+ *
+ * ⚠ `delegated` IS A COLUMN RATHER THAN A DETAIL, BECAUSE IT CHANGES WHAT THE
+ * CUSTOMER IS RESPONSIBLE FOR. A delegated domain's SPF, DKIM, DMARC and MX are
+ * ours to keep correct forever; a manually configured one breaks the day
+ * somebody tidies up their DNS. Knowing which is which at a glance is the
+ * difference between a five-minute debug and an afternoon.
+ */
+export default async function DomainsPage() {
+  /*
+   * ⚠ THE KEYS ARE FETCHED FOR THE DELETE DIALOG, AND A FAILURE HERE HIDES THE
+   * QUESTION RATHER THAN THE PAGE - the same rule the domain page follows. The
+   * domain still deletes; what is lost is the offer to tidy up the keys that
+   * only worked for it.
+   */
+  const [result, keys, incoming] = await Promise.all([
+    tryApi<{ data: DomainSummary[] }>("/console/domains"),
+    tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
+    // ⚠ A FAILURE HIDES THE OFFERS, NOT THE PAGE. They are still in the email
+    // and still here on the next load.
+    tryApi<{ data: TransferOffer[] }>("/console/transfers"),
+  ])
+
+  /*
+   * ⚠ ONLY THE LIVE ONES, AND ONLY THE ONES RESTRICTED TO ONE DOMAIN. An
+   * unrestricted key works perfectly well for every other domain, so offering
+   * to revoke it would be offering to break something unrelated; a revoked key
+   * is already dead and naming it would be noise in a dialog that has to be
+   * read. Grouped by name once, here, rather than filtered per row.
+   */
+  const scopedKeys = new Map<string, { id: string; name: string }[]>()
+  for (const key of keys.ok ? keys.data.data : []) {
+    // ⚠ ONLY KEYS LIMITED TO EXACTLY ONE DOMAIN. Those are the ones deleting
+    // that domain leaves able to send from nothing; a key with others keeps them.
+    if (key.revoked_at !== null || key.domains.length !== 1) continue
+    const only = key.domains[0]!
+    const held = scopedKeys.get(only) ?? []
+    held.push({ id: key.id, name: key.name })
+    scopedKeys.set(only, held)
+  }
+
+  const data: DomainsData = {
+    domains: result.ok ? result.data.data : [],
+    scopedKeys: Object.fromEntries(scopedKeys),
+    offers: incoming.ok ? incoming.data.data : [],
+    ...(result.ok ? {} : { error: result.error.message }),
+  }
+  return <DomainsView shape={domainsShape.of(data)} data={data} />
+}

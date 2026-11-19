@@ -1,7 +1,8 @@
 "use client"
 
 import { useTransition } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
+import { useRoutePathname, useRouteSearchParams } from "@/lib/target-route"
 import { Button } from "@repo/ui/components/button/button"
 
 /**
@@ -18,16 +19,26 @@ import { Button } from "@repo/ui/components/button/button"
  * ⚠ AND `useTransition` IS WHAT STOPS IT FEELING BROKEN. Without it the button
  * does nothing visible for however long the query takes, so people press it
  * twice. The pending state disables it and shows the spinner.
+ *
+ * ⚠ `hasMore` IS THE SHAPE'S, FOR A SKELETON. Loading there is no cursor to
+ * read, but the page will have a button, and the skeleton draws it inert.
  */
-export function LoadMore({ cursor }: { cursor: string | null }) {
+export function LoadMore({
+  cursor,
+  hasMore = Boolean(cursor),
+}: {
+  cursor: string | null | undefined
+  hasMore?: boolean
+}) {
   const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
+  const pathname = useRoutePathname()
+  const searchParams = useRouteSearchParams()
   const [pending, start] = useTransition()
 
-  if (!cursor) return null
+  if (!hasMore) return null
 
   function next() {
+    if (!cursor) return
     const params = new URLSearchParams(searchParams.toString())
     params.set("cursor", cursor!)
     start(() => {
@@ -45,7 +56,7 @@ export function LoadMore({ cursor }: { cursor: string | null }) {
         variant="secondary"
         size="sm"
         onClick={next}
-        disabled={pending}
+        disabled={pending || !cursor}
       >
         Load more
       </Button>

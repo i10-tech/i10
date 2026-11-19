@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ConnectProviderButton } from "@/components/connect-provider-button"
@@ -32,6 +33,7 @@ export function PublishRecords({
   connection,
   providerSlug,
   providerName,
+  loading = false,
 }: {
   domainId: string
   /** Typed to confirm removing the records in the way. */
@@ -41,6 +43,7 @@ export function PublishRecords({
   /** The registry slug. Required: it is what the API matches an adapter on. */
   providerSlug: string
   providerName: string
+  loading?: boolean
 }) {
   const [pending, setPending] = React.useState(false)
   const [conflicts, setConflicts] = React.useState<ConflictingRecord[] | null>(null)
@@ -50,7 +53,7 @@ export function PublishRecords({
 
   /** Whether it published. The confirm dialog closes only on `true`. */
   async function publish(replaceConflicts: boolean): Promise<boolean> {
-    if (pending || !connection) return false
+    if (loading || pending || !connection) return false
     setPending(true)
 
     const result = await publishDnsRecords({
@@ -99,15 +102,37 @@ export function PublishRecords({
     return true
   }
 
+  if (loading) {
+    return (
+      <Bone
+        id="publish-records"
+        shape="box"
+        width={136}
+        height={32}
+        radius={9999}
+        inline
+      />
+    )
+  }
+
   if (!connection) {
     return (
-      <ConnectProviderButton
-        slug={providerSlug}
-        providerName={providerName}
-        // ⚠ "CONNECT" UNTIL IT IS CONNECTED, THEN "PUBLISH RECORDS"
-        // (2026-10-03) - the same two words as the add-domain flow.
-        className="rounded-full"
-      />
+      <Bone
+        id="publish-records"
+        shape="box"
+        width={136}
+        height={32}
+        radius={9999}
+        inline
+      >
+        <ConnectProviderButton
+          slug={providerSlug}
+          providerName={providerName}
+          // ⚠ "CONNECT" UNTIL IT IS CONNECTED, THEN "PUBLISH RECORDS"
+          // (2026-10-03) - the same two words as the add-domain flow.
+          className="rounded-full"
+        />
+      </Bone>
     )
   }
 
@@ -118,16 +143,25 @@ export function PublishRecords({
        * provider is connected, so this writes the records now; the mark says
        * where they will go.
        */}
-      <Button
-        loading={pending}
-        variant="secondary"
-        size="sm"
-        onClick={() => publish(false)}
-        disabled={pending}
+      <Bone
+        id="publish-records"
+        shape="box"
+        width={136}
+        height={32}
+        radius={9999}
+        inline
       >
-        <ProviderMark slug={providerSlug} name={providerName} />
-        Publish records
-      </Button>
+        <Button
+          loading={pending}
+          variant="secondary"
+          size="sm"
+          onClick={() => publish(false)}
+          disabled={pending}
+        >
+          <ProviderMark slug={providerSlug} name={providerName} />
+          Publish records
+        </Button>
+      </Bone>
 
       {/*
        * ⚠ THE SAME CONFIRMATION AS EVERY OTHER DESTRUCTIVE ACTION: THE NAME

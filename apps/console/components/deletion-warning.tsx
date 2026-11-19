@@ -1,6 +1,6 @@
 import { Alert } from "@repo/ui/components/alert/alert"
-import { formatExact } from "@/lib/format"
 import type { BillingState } from "@/lib/types"
+import { useExactTime } from "@/components/time"
 
 /**
  * What deleting actually does to the bill, said before the button that does it.
@@ -34,6 +34,7 @@ export function DeletionWarning({
   /** Whose deletion this sits next to. The consequences differ. */
   scope: "account" | "workspace"
 }) {
+  const exact = useExactTime()
   const paid = billing?.subscription ?? null
   const endsAt = paid?.current_period_end
 
@@ -51,7 +52,7 @@ export function DeletionWarning({
           Your {billing?.plan?.name ?? "paid"} subscription is cancelled the moment this
           workspace is deleted - not at the end of the period.{" "}
           {endsAt
-            ? `You lose the time you have already paid for, through to ${formatExact(endsAt)}, and it is not refunded.`
+            ? `You lose the time you have already paid for, through to ${exact(endsAt)}, and it is not refunded.`
             : "You lose the remainder of the period you have already paid for, and it is not refunded."}{" "}
           Sending, mailboxes and allowances stop at the same moment.
         </span>
@@ -72,8 +73,8 @@ export function DeletionWarning({
         <span className="block not-first:mt-1.5">
           To stop being charged without losing any of this, cancel the subscription on
           the billing page instead - it runs to{" "}
-          {endsAt ? formatExact(endsAt) : "the end of the period"} and then drops to the
-          free allowance.
+          {endsAt ? exact(endsAt) : "the end of the period"} and then drops to the free
+          allowance.
         </span>
       )}
 

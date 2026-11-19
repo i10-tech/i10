@@ -1,9 +1,13 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
-import { TeamInboxDetail } from "@/components/team-inbox-detail"
+import { TeamInboxDetailView } from "@/components/team-inbox-detail"
 import { tryApi } from "@/lib/api"
 import type { ConsoleMailbox } from "@/lib/mailbox-view"
 import { candidatesFrom, type TeamInbox } from "@/lib/team-inbox"
+import {
+  teamInboxDetailShape,
+  type TeamInboxDetailData,
+} from "@/lib/shapes/team-inbox-detail"
 import type { Me } from "@/lib/types"
 
 /** The address as the person typed it, however the framework hands the segment over. */
@@ -62,13 +66,13 @@ export default async function TeamInboxPage({
   const isAdmin =
     me.ok && me.data.access?.permissions.includes("members:manage") === true
 
-  return (
-    <TeamInboxDetail
-      inbox={result.data}
-      candidates={candidatesFrom(
-        isAdmin && mailboxes.ok ? mailboxes.data.data : NO_MAILBOXES,
-      )}
-      isAdmin={isAdmin}
-    />
-  )
+  const data: TeamInboxDetailData = {
+    inbox: result.data,
+    candidates: candidatesFrom(
+      isAdmin && mailboxes.ok ? mailboxes.data.data : NO_MAILBOXES,
+    ),
+    isAdmin,
+  }
+
+  return <TeamInboxDetailView shape={teamInboxDetailShape.of(data)} data={data} />
 }

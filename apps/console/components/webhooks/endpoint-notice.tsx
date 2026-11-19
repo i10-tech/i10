@@ -1,5 +1,6 @@
 import { Alert } from "@repo/ui/components/alert/alert"
 import { Time } from "@/components/time"
+import type { WebhookNoticeState } from "@/lib/shapes/webhook-detail"
 import type { WebhookEndpoint } from "@/lib/types"
 
 /**
@@ -12,20 +13,33 @@ import type { WebhookEndpoint } from "@/lib/types"
 export function EndpointNotice({
   endpoint,
   failingSince,
+  notice: noticeProp,
 }: {
-  endpoint: WebhookEndpoint
-  failingSince: string | null
+  endpoint?: WebhookEndpoint
+  failingSince?: string | null
+  notice?: WebhookNoticeState
 }) {
-  if (endpoint.health === "disabled") {
+  const loading = endpoint === undefined
+  const activeNotice: WebhookNoticeState = loading
+    ? (noticeProp ?? "none")
+    : endpoint.health === "disabled"
+      ? "disabled"
+      : !endpoint.enabled
+        ? "paused"
+        : endpoint.health === "failing"
+          ? "failing"
+          : "none"
+
+  if (activeNotice === "disabled") {
     return (
       <Alert tone="danger" title="i10 switched this endpoint off">
-        {endpoint.disabled_reason && (
+        {endpoint?.disabled_reason && (
           <span className="block not-first:mt-1.5">{endpoint.disabled_reason}</span>
         )}
         <span className="block not-first:mt-1.5">
           Nothing is sent to it until you turn it back on. Fix the receiver first, then
           turn it on and recover what failed from the Replays tab.
-          {endpoint.health_changed_at && (
+          {endpoint?.health_changed_at && (
             <>
               {" "}
               Switched off <Time iso={endpoint.health_changed_at} mode="exact" />.
@@ -36,7 +50,7 @@ export function EndpointNotice({
     )
   }
 
-  if (!endpoint.enabled) {
+  if (activeNotice === "paused") {
     return (
       <Alert tone="info" title="Paused">
         <span className="block not-first:mt-1.5">
@@ -47,8 +61,8 @@ export function EndpointNotice({
     )
   }
 
-  if (endpoint.health === "failing") {
-    const since = failingSince ?? endpoint.health_changed_at
+  if (activeNotice === "failing") {
+    const since = failingSince ?? endpoint?.health_changed_at
     return (
       <Alert tone="warning" title="This endpoint is failing">
         <span className="block not-first:mt-1.5">

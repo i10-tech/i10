@@ -115,7 +115,7 @@ export function BulkBar({
                   aria-label={label}
                 >
                   <span className="tabular pr-1 font-medium">
-                    <SlotText value={shown} duration={0.5} /> selected
+                    <SlotText value={shown} duration={0.5} spins={0} /> selected
                     {note && (
                       <span className="font-normal text-muted-foreground"> {note}</span>
                     )}

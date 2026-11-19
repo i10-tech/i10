@@ -1,22 +1,9 @@
 import type { Metadata } from "next"
-import { RememberCount } from "@/components/list/remembered-counts"
-import {
-  Page,
-  PageActions,
-  PageBody,
-  PageDescription,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { ApiButton } from "@/components/list/api-button"
-import { LogsTable } from "@/components/logs-table"
-import { PanelError } from "@/components/panel-error"
+import { LogsView } from "@/components/logs-view"
 import { tryApi } from "@/lib/api"
+import { logsShape, type LogsData } from "@/lib/shapes/logs"
 import { rangeStart } from "@/lib/range"
-import { SNIPPETS } from "@/lib/snippets"
 import type { ApiKeyRow, Page as ApiPage, RequestRow } from "@/lib/types"
-import { PAGE_COPY } from "@/lib/page-copy"
 
 export const metadata: Metadata = { title: "Logs" }
 
@@ -66,41 +53,12 @@ export default async function LogsPage({
     tryApi<{ data: ApiKeyRow[] }>("/console/api-keys"),
   ])
 
-  return (
-    <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>{PAGE_COPY.logs.title}</PageTitle>
-          <PageActions>
-            <ApiButton snippet={SNIPPETS.logs} />
-          </PageActions>
-        </PageHeaderRow>
-        <PageDescription>{PAGE_COPY.logs.description}</PageDescription>
-      </PageHeader>
+  const data: LogsData = {
+    rows: result.ok ? result.data.data : [],
+    nextCursor: result.ok ? result.data.nextCursor : null,
+    apiKeys: keys.ok ? keys.data.data.map((k) => ({ id: k.id, name: k.name })) : [],
+    ...(result.ok ? {} : { error: result.error.message }),
+  }
 
-      <PageBody width="full">
-        {!result.ok ? (
-          <PanelError
-            title="Could not load the request log"
-            message={result.error.message}
-          />
-        ) : (
-          <LogsTable
-            rows={result.data.data}
-            nextCursor={result.data.nextCursor}
-            apiKeys={
-              keys.ok ? keys.data.data.map((k) => ({ id: k.id, name: k.name })) : []
-            }
-          />
-        )}
-      </PageBody>
-      {result.ok && (
-        <RememberCount
-          list="logs"
-          count={result.data.data.length}
-          filtered={Object.values(params).some(Boolean)}
-        />
-      )}
-    </Page>
-  )
+  return <LogsView shape={logsShape.of(data)} data={data} />
 }

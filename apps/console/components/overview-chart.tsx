@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { LineChart } from "@repo/ui/components/line-chart/line-chart"
 import { EmptyState } from "@repo/ui/components/empty-state/empty-state"
 import { formatDay } from "@/lib/format"
@@ -25,10 +26,16 @@ const SERIES = [
   { key: "failed", label: "Failed", color: "var(--danger)", dashed: true, area: false },
 ]
 
-export function OverviewChart({ series }: { series: DailyStat[] }) {
+export function OverviewChart({
+  series,
+  loading = false,
+}: {
+  series?: DailyStat[]
+  loading?: boolean
+}) {
   const data = React.useMemo(
     () =>
-      series.map((d) => ({
+      series?.map((d) => ({
         key: d.date,
         label: formatDay(d.date),
         axisLabel: formatDay(d.date),
@@ -39,32 +46,41 @@ export function OverviewChart({ series }: { series: DailyStat[] }) {
           delayed: d.delayed,
           failed: d.failed,
         },
-      })),
+      })) ?? [],
     [series],
   )
 
   const empty = React.useMemo(
-    () => series.every((d) => d.sent + d.delivered + d.bounced + d.failed === 0),
+    () =>
+      !series || series.every((d) => d.sent + d.delivered + d.bounced + d.failed === 0),
     [series],
   )
 
-  if (empty) {
-    return (
-      <EmptyState
-        title="No mail in this window"
-        description="Delivery, bounces and complaints appear here once you start sending."
-      />
-    )
-  }
-
+  // ⚠ EVERY STATE IS INSIDE THE ONE BONE, the empty one too: whether a window
+  // has any mail is the data's, and a shape does not carry it.
+  //
+  // ⚠ 314, NOT THE CHART'S 240: LineChart's `height` is its plot alone; its
+  // legend and axis make the figure 314px, so a 240px bone made the section
+  // (and everything under it) jump 74px when the data arrived (2026-11-09).
+  const drawn = !loading && series !== undefined
   return (
-    <LineChart
-      label="Delivery"
-      data={data}
-      series={SERIES}
-      height={240}
-      formatValue={(value) => Math.round(value).toLocaleString("en-US")}
-      defaultHiddenSeries={["delayed"]}
-    />
+    <Bone id="chart" shape="box" width="100%" height={314} radius={8} loading={!drawn}>
+      {drawn &&
+        (empty ? (
+          <EmptyState
+            title="No mail in this window"
+            description="Delivery, bounces and complaints appear here once you start sending."
+          />
+        ) : (
+          <LineChart
+            label="Delivery"
+            data={data}
+            series={SERIES}
+            height={240}
+            formatValue={(value) => Math.round(value).toLocaleString("en-US")}
+            defaultHiddenSeries={["delayed"]}
+          />
+        ))}
+    </Bone>
   )
 }

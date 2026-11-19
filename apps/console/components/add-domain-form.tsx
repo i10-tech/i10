@@ -29,7 +29,7 @@ import { useAdoptDomain } from "@/components/domain-live"
 import { rememberLeaving } from "@/lib/dns-connect"
 import { activateDomain } from "@/lib/domain-activation"
 import { domainProblem, isDomainMalformed, refusesTheName } from "@/lib/domain-check"
-import { useRetained } from "@/lib/react"
+import { useResetWhen, useRetained } from "@/lib/react"
 import { SWAP } from "@/components/list/table"
 import { toastDone, toastError, toastFailure, toastPending } from "@/lib/toast"
 import {
@@ -120,6 +120,8 @@ export interface AddDomainExits {
 export function AddDomainSteps({
   tenantId,
   restored: handed = null,
+  loading = false,
+  stepOverride,
   draft = "page",
   phase = "active",
   trailing = false,
@@ -130,6 +132,8 @@ export function AddDomainSteps({
 }: {
   tenantId: string
   restored?: RestoredDraft | null
+  loading?: boolean
+  stepOverride?: Step
   /** Which cookie remembers the answers across a reload - see lib/add-domain-draft. */
   draft?: DraftScope
   /**
@@ -165,7 +169,12 @@ export function AddDomainSteps({
   const router = useRouter()
   const reduce = useReducedMotion() ?? false
 
-  const [step, setStep] = React.useState<Step>(restored?.step ?? "domain")
+  const [step, setStep] = React.useState<Step>(
+    stepOverride ?? restored?.step ?? "domain",
+  )
+  useResetWhen(stepOverride, () => {
+    if (stepOverride) setStep(stepOverride)
+  })
   /** The row, once the second step has made it. The flow cannot go back after. */
   const [created, setCreated] = React.useState<Domain | null>(restored?.created ?? null)
   const [checking, setChecking] = React.useState(false)
@@ -287,6 +296,7 @@ export function AddDomainSteps({
    * and a stale response is dropped.
    */
   React.useEffect(() => {
+    if (loading) return
     let alive = true
     void dnsConnections().then((result) => {
       if (alive && result.ok) setConnections(result.data.data)
@@ -294,7 +304,7 @@ export function AddDomainSteps({
     return () => {
       alive = false
     }
-  }, [])
+  }, [loading])
 
   const request = React.useRef(0)
 
@@ -382,7 +392,7 @@ export function AddDomainSteps({
    */
   const left = React.useRef(false)
   React.useEffect(() => {
-    if (left.current) return
+    if (left.current || loading) return
     rememberDraft(
       tenantId,
       {
@@ -395,7 +405,7 @@ export function AddDomainSteps({
       },
       draft,
     )
-  }, [tenantId, name, returnPath, chosenMode, advanced, step, created, draft])
+  }, [tenantId, name, returnPath, chosenMode, advanced, step, created, draft, loading])
 
   function forget() {
     left.current = true
@@ -905,15 +915,23 @@ export function AddDomainSteps({
 export function AddDomainForm({
   tenantId,
   restored = null,
+  loading = false,
+  stepOverride,
 }: {
   tenantId: string
   restored?: RestoredDraft | null
+  loading?: boolean
+  stepOverride?: Step
 }) {
   const router = useRouter()
   const reduce = useReducedMotion() ?? false
+  const activeStep = stepOverride ?? restored?.step ?? "domain"
   const [preview, setPreview] = React.useState({
     name: restored?.name ?? "",
-    naming: (restored?.step ?? "domain") === "domain",
+    naming: activeStep === "domain",
+  })
+  useResetWhen(activeStep, () => {
+    setPreview((p) => ({ ...p, naming: activeStep === "domain" }))
   })
   const exits = React.useMemo<AddDomainExits>(
     () => ({
@@ -931,6 +949,8 @@ export function AddDomainForm({
           <AddDomainSteps
             tenantId={tenantId}
             restored={restored}
+            loading={loading}
+            stepOverride={stepOverride}
             exits={exits}
             onPreview={setPreview}
           />
@@ -967,15 +987,7 @@ export function AddDomainForm({
 function RecordsPlaceholder() {
   return (
     <div aria-hidden className="space-y-6 py-2">
-      {[2, 1].map((rows, group) => (
-        <div key={group} className="space-y-3">
-          <div className="h-4 w-36 animate-pulse rounded-full bg-muted" />
-          <div className="h-9 rounded-xl bg-muted/50" />
-          {Array.from({ length: rows }, (_, i) => (
-            <div key={i} className="h-8 animate-pulse rounded-lg bg-muted/30" />
-          ))}
-        </div>
-      ))}
+      <DnsRecordGroups count={3} />
     </div>
   )
 }

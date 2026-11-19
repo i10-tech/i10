@@ -13,7 +13,6 @@ import { Button } from "@repo/ui/components/button/button"
 import { DropdownMenuItem } from "@repo/ui/components/i10/menu"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
-import { Skeleton } from "@repo/ui/components/skeleton/skeleton"
 import { TagInput } from "@repo/ui/components/tag-input/tag-input"
 import { emailProblem } from "@repo/ui/checks"
 import {
@@ -37,6 +36,7 @@ import {
   sendInvitations,
   teamAccessDomains,
   teamCapacity,
+  teamExclusions,
   teamInvitations,
   teamJoinRequests,
   teamJoins,
@@ -67,6 +67,14 @@ import { announceWorkspacesChanged } from "@/lib/workspace-name"
 import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { useStepUp } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
+import { RememberShape } from "@/components/list/remembered-shapes"
+import { TeamSkeleton } from "@/components/team-skeleton"
+import {
+  teamShape,
+  MAX_TEAM_MEMBERS,
+  MAX_TEAM_ROWS,
+  type TeamShape,
+} from "@/lib/shapes/team"
 
 /**
  * The team panel, ours (2026-10-12) - what Clerk's `<OrganizationProfile />`
@@ -83,21 +91,21 @@ import { toastDone, toastError } from "@/lib/toast"
  * about everybody; the roles and the reader's permissions come from
  * `/console/team/roles`, and the API checks them again on every write.
  */
-export function TeamPanel() {
+export function TeamPanel({
+  shape,
+  loading = false,
+}: {
+  shape: TeamShape
+  loading?: boolean
+}) {
   const { isLoaded, organization, membership } = useOrganization()
 
-  if (!isLoaded) {
-    return (
-      <div className="space-y-3">
-        <Skeleton label="Loading members" avatar lines={2} />
-      </div>
-    )
-  }
+  if (loading || !isLoaded) return <TeamSkeleton shape={shape} />
   if (!organization || !membership) return <CreateWorkspace />
   if (organization.publicMetadata?.kind === "personal") {
     return <PersonalWorkspace organization={organization} />
   }
-  return <Team organization={organization} />
+  return <Team organization={organization} shape={shape} />
 }
 
 /**
@@ -159,85 +167,165 @@ function PersonalWorkspace({ organization }: { organization: OrganizationResourc
 /** The roles an access rule may give: never owner. */
 const RULE_ROLES = roleItems<JoinRole>(["member", "admin"])
 
-function Team({ organization }: { organization: OrganizationResource }) {
+/**
+ * One read, kept on screen while it is read again: `value` is `undefined`
+ * only until the first answer, and a failed read answers with its fallback, so
+ * the page never waits on one that will not come.
+ */
+function useRead<T>(
+  read: () => Promise<T>,
+  { enabled = true, key = 0 as unknown } = {},
+) {
+  const [value, set] = React.useState<T | undefined>(undefined)
+  const load = React.useCallback(() => void read().then(set), [read])
+  React.useEffect(() => {
+    if (enabled) load()
+  }, [enabled, load, key])
+  return { value, set, load }
+}
+
+const readRoles = () => teamRoles().then((result) => (result.ok ? result.data : null))
+const readCapacity = () =>
+  teamCapacity().then((result) => (result.ok ? (result.data.data ?? null) : null))
+const readAccess = () =>
+  teamAccessDomains().then((result): AccessState | false =>
+    result.ok
+      ? {
+          domains: result.data.data,
+          verified: result.data.verified ?? [],
+          suggested: result.data.suggested ?? [],
+        }
+      : false,
+  )
+/** How each member got in through an access domain (#326), by user id. */
+const readJoins = () =>
+  teamJoins().then((result): Record<string, JoinRecord> =>
+    result.ok ? Object.fromEntries(result.data.data.map((j) => [j.user_id, j])) : {},
+  )
+const readInvitations = () =>
+  teamInvitations().then((result) => (result.ok ? result.data.data : []))
+const readRequests = () =>
+  teamJoinRequests().then((result) => (result.ok ? result.data.data : []))
+const readExclusions = () =>
+  teamExclusions().then((result) => (result.ok ? result.data.data : []))
+
+/**
+ * ⚠ ONE LOADING STATE FOR THE WHOLE PAGE (2026-11-09). The members come from
+ * Clerk and everything else from six reads of ours, and each block used to
+ * draw its own "Loading…" and then its content, pushing every block below it
+ * down in turn - 400px and more, six times in two seconds. Now every read is
+ * started at once and the page stays a skeleton (components/team-skeleton.tsx,
+ * drawn from the shape remembered for this workspace) until the last one has
+ * answered; then it is the page, in one frame, where the skeleton said.
+ *
+ * The invitations, requests and removed list are only for managers, whom the
+ * roles read names - and the roles are one of the reads. So they start on the
+ * remembered answer and, if the roles say otherwise, stop.
+ */
+function Team({
+  organization,
+  shape,
+}: {
+  organization: OrganizationResource
+  shape: TeamShape
+}) {
+  const [invitesVersion, setInvitesVersion] = React.useState(0)
+  // Removing somebody adds them to a list; the lists block reloads.
+  const [listsVersion, setListsVersion] = React.useState(0)
+
   /*
    * ⚠ ONE READ OF THE ROLES FOR THE WHOLE PAGE (#335): every member's, and
    * the reader's own permissions, which decide every block below. Re-read
    * after a role changes, and when the workspace does.
    */
-  const [roles, setRoles] = React.useState<TeamRoles | null>(null)
-  const loadRoles = React.useCallback(() => {
-    void teamRoles().then((result) => setRoles(result.ok ? result.data : null))
-  }, [])
-  React.useEffect(loadRoles, [loadRoles, organization.id])
+  const roles = useRead(readRoles, { key: organization.id })
   const permitted = (permission: string) =>
-    roles?.me.permissions.includes(permission) ?? false
+    roles.value?.me.permissions.includes(permission) ?? false
   const manage = permitted("members:manage")
   const domains = permitted("access_domains:manage")
-
-  // Invitations are listed beside the members; sending one refreshes both.
-  const [invitesVersion, setInvitesVersion] = React.useState(0)
+  const expectManage = roles.value === undefined ? shape.canManage : manage
 
   /*
    * ⚠ ONE READ OF THE WORKSPACE'S SEATS FOR THE WHOLE PAGE (#327): the
    * invitation form warns on the last spot and refuses past it, and Accept
    * says what would make room. Re-read after anything that moves a seat.
    */
-  const [capacity, setCapacity] = React.useState<TeamCapacity | null>(null)
-  const loadCapacity = React.useCallback(() => {
-    void teamCapacity().then((result) =>
-      setCapacity(result.ok ? (result.data.data ?? null) : null),
-    )
-  }, [])
-  React.useEffect(loadCapacity, [loadCapacity])
-  // Removing somebody adds them to a list; the lists block reloads.
-  const [listsVersion, setListsVersion] = React.useState(0)
-
+  const capacity = useRead(readCapacity)
   /*
    * ⚠ ONE READ OF THE ACCESS DOMAINS FOR THE WHOLE PAGE (#326): the access
    * block shows them, and the remove dialog needs them to say whether
    * auto-join covers the person being removed.
    */
-  const [access, setAccess] = React.useState<AccessState | false | null>(null)
-  const loadAccess = React.useCallback(() => {
-    void teamAccessDomains().then((result) =>
-      setAccess(
-        result.ok
-          ? {
-              domains: result.data.data,
-              verified: result.data.verified ?? [],
-              suggested: result.data.suggested ?? [],
-            }
-          : false,
-      ),
-    )
-  }, [])
-  React.useEffect(loadAccess, [loadAccess])
+  const access = useRead(readAccess)
+  const joins = useRead(readJoins)
+  const invitations = useRead(readInvitations, {
+    enabled: expectManage,
+    key: invitesVersion,
+  })
+  const requests = useRead(readRequests, { enabled: expectManage })
+  const exclusions = useRead(readExclusions, {
+    enabled: expectManage,
+    key: listsVersion,
+  })
+  /*
+   * ⚠ CLERK'S OWN PAGINATED LIST, WITH `keepPreviousData` (2026-10-12) - the
+   * hook `<OrganizationProfile />` read. Fetching by hand re-ran whenever
+   * Clerk handed back a fresh organization object, and a refetch that failed
+   * set the list to empty: the members vanished a couple of seconds in.
+   * Refreshing now keeps what is on screen until the new page has arrived.
+   */
+  const { memberships } = useOrganization({
+    memberships: { pageSize: 50, keepPreviousData: true },
+  })
+
+  const ready =
+    roles.value !== undefined &&
+    capacity.value !== undefined &&
+    access.value !== undefined &&
+    joins.value !== undefined &&
+    (memberships?.data !== undefined || Boolean(memberships?.isError)) &&
+    (!manage ||
+      (invitations.value !== undefined &&
+        requests.value !== undefined &&
+        exclusions.value !== undefined))
+  if (!ready) return <TeamSkeleton shape={shape} />
+
+  const loadedRoles = roles.value ?? null
+  const members = memberships?.data ?? []
+  const pending = invitations.value ?? []
+  const asked = requests.value ?? []
+  const state = access.value ?? false
+  const accessDomains = state ? state.domains : []
+  const seats = capacity.value ?? null
 
   return (
     <div>
       <ProfileBlock title="Members">
         <ProfileRow label="Members">
           <Members
+            members={members}
+            joins={joins.value ?? {}}
             manage={manage}
-            roles={roles}
-            onRolesChanged={loadRoles}
-            access={access ? access.domains : []}
+            roles={loadedRoles}
+            onRolesChanged={roles.load}
+            access={accessDomains}
+            reload={() => void memberships?.revalidate?.()}
             onRemoved={() => {
               setListsVersion((v) => v + 1)
-              loadCapacity()
+              capacity.load()
             }}
           />
         </ProfileRow>
         {manage && (
           <ProfileRow label="Invitations">
             <Invitations
-              invitable={roles?.me.invitable ?? []}
-              capacity={capacity}
-              version={invitesVersion}
+              invitable={loadedRoles?.me.invitable ?? []}
+              capacity={seats}
+              pending={pending}
+              setPending={invitations.set}
               onChanged={() => {
                 setInvitesVersion((v) => v + 1)
-                loadCapacity()
+                capacity.load()
               }}
             />
           </ProfileRow>
@@ -246,8 +334,11 @@ function Team({ organization }: { organization: OrganizationResource }) {
           <ProfileRow label="Requests">
             <Requests
               organization={organization}
-              capacity={capacity}
-              onAccepted={loadCapacity}
+              capacity={seats}
+              requests={asked}
+              setRequests={requests.set}
+              refreshMembers={() => void memberships?.revalidate?.()}
+              onAccepted={capacity.load}
               onBlocked={() => setListsVersion((v) => v + 1)}
             />
           </ProfileRow>
@@ -256,14 +347,14 @@ function Team({ organization }: { organization: OrganizationResource }) {
       {domains && (
         <ProfileBlock title="Team access">
           <ProfileRow label="Domains">
-            <AccessDomains state={access} roles={RULE_ROLES} onChange={loadAccess} />
+            <AccessDomains state={state} roles={RULE_ROLES} onChange={access.load} />
           </ProfileRow>
         </ProfileBlock>
       )}
       {manage && (
         <ProfileBlock title="Removed and blocked">
           <ProfileRow label="People">
-            <Exclusions version={listsVersion} />
+            <Exclusions list={exclusions.value ?? []} setList={exclusions.set} />
           </ProfileRow>
         </ProfileBlock>
       )}
@@ -272,6 +363,27 @@ function Team({ organization }: { organization: OrganizationResource }) {
           <Leave organization={organization} />
         </ProfileRow>
       </ProfileBlock>
+      <RememberShape
+        def={teamShape}
+        shape={{
+          members: Math.min(members.length, MAX_TEAM_MEMBERS),
+          canManage: manage,
+          capacity: seats !== null,
+          invitable: seats !== null && !seats.personal,
+          invites: Math.min(pending.length, MAX_TEAM_ROWS),
+          requests: Math.min(asked.length, MAX_TEAM_ROWS),
+          waiting: Math.min(asked.filter((r) => r.full).length, MAX_TEAM_ROWS),
+          full: Boolean(seats?.full),
+          accessDomains: domains,
+          domains: Math.min(accessDomains.length, MAX_TEAM_ROWS),
+          proofs: Math.min(
+            accessDomains.filter((d) => d.status !== "verified").length,
+            MAX_TEAM_ROWS,
+          ),
+          suggestions: Math.min(state ? state.suggested.length : 0, MAX_TEAM_ROWS),
+          removed: Math.min((exclusions.value ?? []).length, MAX_TEAM_ROWS),
+        }}
+      />
     </div>
   )
 }
@@ -297,16 +409,22 @@ function who(data: OrganizationMembershipResource["publicUserData"]) {
  * give, from `/console/team/roles`. Somebody we hold no role for is a member.
  */
 function Members({
+  members,
+  joins,
   manage,
   roles,
   onRolesChanged,
   access,
+  reload,
   onRemoved,
 }: {
+  members: OrganizationMembershipResource[]
+  joins: Record<string, JoinRecord>
   manage: boolean
   roles: TeamRoles | null
   onRolesChanged: () => void
   access: AccessDomain[]
+  reload: () => void
   onRemoved: () => void
 }) {
   const [removing, setRemoving] = React.useState<{
@@ -314,17 +432,6 @@ function Members({
     block: boolean
   } | null>(null)
   const stepUp = useStepUp()
-  /** How each member got in through an access domain (#326), by user id. */
-  const [joins, setJoins] = React.useState<Record<string, JoinRecord>>({})
-  React.useEffect(() => {
-    void teamJoins().then((result) =>
-      setJoins(
-        result.ok
-          ? Object.fromEntries(result.data.data.map((j) => [j.user_id, j]))
-          : {},
-      ),
-    )
-  }, [])
   const { user } = useUser()
   const roleOf = React.useMemo(
     () => new Map((roles?.data ?? []).map((r) => [r.user_id, r.role])),
@@ -332,30 +439,6 @@ function Members({
   )
   const grantable = roles?.me.grantable ?? []
   const pickable = roleItems(grantable)
-  /*
-   * ⚠ CLERK'S OWN PAGINATED LIST, WITH `keepPreviousData` (2026-10-12) - the
-   * hook `<OrganizationProfile />` read. Fetching by hand re-ran whenever
-   * Clerk handed back a fresh organization object, and a refetch that failed
-   * set the list to empty: the members vanished a couple of seconds in.
-   * Refreshing now keeps what is on screen until the new page has arrived.
-   */
-  const { memberships } = useOrganization({
-    memberships: { pageSize: 50, keepPreviousData: true },
-  })
-  /*
-   * ⚠ WHAT IS ON SCREEN STAYS WHILE ANOTHER WORKSPACE LOADS (2026-10-13).
-   * Switching workspace showed "Loading members…" and drew the list again, so
-   * the reader - first in both lists - was taken out and put back. The
-   * previous page is kept until the next one arrives, and rows are keyed by
-   * person, so whoever is in both stays where they are.
-   */
-  const members =
-    memberships?.data && memberships.data.length > 0
-      ? memberships.data
-      : memberships?.isLoading
-        ? null
-        : (memberships?.data ?? [])
-  const load = () => void memberships?.revalidate?.()
 
   async function changeRole(userId: string, from: WorkspaceRole, to: WorkspaceRole) {
     if (to === from) return
@@ -380,9 +463,6 @@ function Members({
     // Your own role too: the pickers hang on our answer, re-read at once.
     onRolesChanged()
   }
-
-  if (!members)
-    return <p className="pt-1.5 text-sm text-muted-foreground">Loading members…</p>
 
   return (
     <div>
@@ -490,7 +570,7 @@ function Members({
             toastError("Could not remove that member", { description: result.error })
             return false
           }
-          load()
+          reload()
           onRemoved()
           return true
         }}
@@ -543,16 +623,17 @@ function removeCopy(
 function Invitations({
   invitable,
   capacity,
-  version,
+  pending,
+  setPending,
   onChanged,
 }: {
   /** What the reader may invite as (#335): member or admin, never owner. */
   invitable: JoinRole[]
   capacity: TeamCapacity | null
-  version: number
+  pending: PendingInvitation[]
+  setPending: React.Dispatch<React.SetStateAction<PendingInvitation[] | undefined>>
   onChanged: () => void
 }) {
-  const [pending, setPending] = React.useState<PendingInvitation[] | null>(null)
   const [open, setOpen] = React.useState(false)
   const [emails, setEmails] = React.useState<string[]>([])
   const [role, setRole] = React.useState<JoinRole | null>(null)
@@ -562,13 +643,6 @@ function Invitations({
   const [error, setError] = React.useState<string | null>(null)
   const [withdrawing, setWithdrawing] = React.useState<PendingInvitation | null>(null)
   const follow = useFollowOpen<HTMLFormElement>(open)
-
-  const load = React.useCallback(() => {
-    void teamInvitations().then((result) =>
-      setPending(result.ok ? result.data.data : []),
-    )
-  }, [])
-  React.useEffect(load, [load, version])
 
   const chosenRole =
     role ?? roles.find((r) => r.value === "member")?.value ?? roles[0]?.value ?? null
@@ -650,14 +724,14 @@ function Invitations({
         </p>
       )}
       <MotionList>
-        {pending && pending.length === 0 && !open ? (
+        {pending.length === 0 && !open ? (
           <MotionItem key="empty">
             <p className="pt-1.5 text-sm text-muted-foreground">
               No pending invitations.
             </p>
           </MotionItem>
         ) : (
-          (pending ?? []).map((invitation) => (
+          pending.map((invitation) => (
             <MotionItem key={invitation.id}>
               <div className="flex items-center justify-between gap-3">
                 <span className="min-w-0">
@@ -802,24 +876,21 @@ function Invitations({
 function Requests({
   organization,
   capacity,
+  requests,
+  setRequests,
+  refreshMembers,
   onAccepted,
   onBlocked,
 }: {
   organization: OrganizationResource
   capacity: TeamCapacity | null
+  requests: JoinRequest[]
+  setRequests: React.Dispatch<React.SetStateAction<JoinRequest[] | undefined>>
+  refreshMembers: () => void
   onAccepted: () => void
   onBlocked: () => void
 }) {
   const [busy, setBusy] = React.useState<string | null>(null)
-  const [requests, setRequests] = React.useState<JoinRequest[] | null>(null)
-  const { memberships } = useOrganization({ memberships: { pageSize: 50 } })
-
-  const load = React.useCallback(() => {
-    void teamJoinRequests().then((result) =>
-      setRequests(result.ok ? result.data.data : []),
-    )
-  }, [])
-  React.useEffect(load, [load])
 
   const full = capacity?.full ?? false
   const room = roomText(capacity?.reasons ?? [])
@@ -842,7 +913,7 @@ function Requests({
       toastDone(`${request.email} joined`, {
         description: "We emailed them to say they're in.",
       })
-      void memberships?.revalidate?.()
+      refreshMembers()
       void organization.reload()
       onAccepted()
     }
@@ -851,9 +922,6 @@ function Requests({
       onBlocked()
     }
   }
-
-  if (!requests)
-    return <p className="pt-1.5 text-sm text-muted-foreground">Loading requests…</p>
 
   return (
     <div className="flex flex-col gap-2">

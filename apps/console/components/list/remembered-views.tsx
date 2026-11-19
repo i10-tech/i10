@@ -2,10 +2,9 @@
 
 import * as React from "react"
 
-export type View = "grid" | "table"
+import type { View } from "@/lib/views"
 
-/** The cookie a list page's chosen view is kept in, so the server knows it. */
-export const viewCookie = (key: string) => `i10-view-${key}`
+export { viewCookie, type View } from "@/lib/views"
 
 /**
  * The views list pages were left in, read from cookies by the app layout.

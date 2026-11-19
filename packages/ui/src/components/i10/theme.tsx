@@ -27,7 +27,19 @@ import { ThemeProvider } from "next-themes"
  * transition somewhere; without this, switching theme animates the entire page
  * through an intermediate mud for a few hundred milliseconds.
  */
-export function Theme({ children }: { children: React.ReactNode }) {
+export function Theme({
+  children,
+  disableTransitionOnChange = true,
+}: {
+  children: React.ReactNode
+  /**
+   * False where the app switches theme through its own helper that stills
+   * transitions in the same pass as the change (the console's
+   * lib/switch-theme.ts). next-themes' own way costs two extra full restyles,
+   * which WebKit takes ~100-180ms each to do.
+   */
+  disableTransitionOnChange?: boolean
+}) {
   return (
     <ThemeProvider
       /* The class drives Tailwind's `dark:`; `data-theme` drives Arc's tokens. */
@@ -40,7 +52,7 @@ export function Theme({ children }: { children: React.ReactNode }) {
        */
       defaultTheme="dark"
       enableSystem
-      disableTransitionOnChange
+      disableTransitionOnChange={disableTransitionOnChange}
       /*
        * ⚠ `text/plain` IN THE BROWSER, SO REACT STOPS REPORTING THE SCRIPT AS
        * AN ERROR. next-themes renders its no-flash script from a client

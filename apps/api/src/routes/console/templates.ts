@@ -5,6 +5,8 @@ import type { DeclaredVariable, TemplatePatch } from "../../templates/store.js"
 import { addressOf, domainOf } from "../../send/address.js"
 import type { CompileInput } from "../../templates/renderer.js"
 import { uploadTemplates } from "../../templates/upload.js"
+import { createAssetProxy, RATE_PREFIX } from "../../templates/asset-proxy.js"
+import { fixedWindow } from "../../identity/rate-limit.js"
 import type { ConsoleDeps } from "./deps.js"
 import {
   asIdArray,
@@ -56,6 +58,54 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
       return { problem: "Folder names are at most 100 characters." }
     return { name }
   }
+
+  const assetProxy =
+    d.templateAssetProxy ??
+    createAssetProxy({
+      limiter: fixedWindow(d.templateAssetCounter ?? null, Date.now, RATE_PREFIX),
+    })
+
+  /**
+   * A remote image, font or stylesheet a template's email names, fetched for
+   * the console's thumbnails (see templates/asset-proxy.ts). Behind the
+   * console session like every route here.
+   */
+  app.get("/template-assets/proxy", async (c) => {
+    const as = c.req.query("as")
+    const result = await assetProxy.fetch(
+      c.req.query("u") ?? "",
+      as === "css" ? "css" : undefined,
+      c.get("auth").tenantId,
+    )
+    if (!result.ok && result.status === 429) {
+      c.header("Retry-After", String(result.retryAfter))
+      c.header("Cache-Control", "no-store")
+      return c.json(
+        {
+          statusCode: 429,
+          name: "rate_limit_exceeded" as const,
+          message: result.message,
+        },
+        429,
+      )
+    }
+    if (!result.ok) {
+      return c.json(
+        {
+          statusCode: result.status,
+          name: "validation_error" as const,
+          message: result.message,
+        },
+        result.status,
+      )
+    }
+    return c.body(result.body, 200, {
+      "Content-Type": result.type,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'",
+      "Cache-Control": "private, max-age=604800",
+    })
+  })
 
   app.get("/templates", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
@@ -454,8 +504,14 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
       c.req.param("id"),
     )
     if (!email) return c.json(notFound("No template with that id."), 404)
-    if ("problems" in email) return c.json({ html: null, subject: null, text: null })
-    return c.json({ html: email.html, subject: email.subject, text: email.text })
+    if ("problems" in email)
+      return c.json({ html: null, subject: null, text: null, stamp: email.stamp })
+    return c.json({
+      html: email.html,
+      subject: email.subject,
+      text: email.text,
+      stamp: email.stamp,
+    })
   })
 
   app.delete("/templates/:id", async (c) => {

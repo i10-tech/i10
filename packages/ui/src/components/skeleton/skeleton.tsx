@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, type AnimationPlaybackControls } from "motion/react";
 import { motionTokens } from "../lib/motion-tokens";
 import styles from "./skeleton.module.css";
+import { shimmerClass, shimmerRef } from "../shimmer/shimmer";
 
 export interface SkeletonProps {
   label?: string;
@@ -17,24 +18,31 @@ export interface SkeletonProps {
 }
 
 /** Follows its content height. After `morphKey` changes, the height springs from the old size to the new one and then returns to auto, so passive reflows (a resize, a font swap) follow instantly. It clips only while moving, so focus rings stay visible at rest. */
-function HeightFrame({ className, busy, reduce, children }: { className?: string; busy: boolean; reduce: boolean | null; children: ReactNode }) {
+export function HeightFrame({ className, busy, reduce, mountHeight, children }: { className?: string; busy: boolean; reduce: boolean | null; /** Read once on mount: a height to ease in from, when this frame replaces another (see bone). */ mountHeight?: () => number | undefined; children: ReactNode }) {
   const frame = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const height = useMotionValue<number | "auto">("auto");
   const changedAt = useRef(0);
+  const last = useRef<number>(undefined);
   useLayoutEffect(() => { changedAt.current = performance.now(); }, [busy]);
+  useLayoutEffect(() => {
+    const from = mountHeight?.();
+    if (from === undefined || reduce) return;
+    last.current = from;
+    if (frame.current) Object.assign(frame.current.style, { overflow: "hidden", height: `${from}px` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const node = content.current;
     if (!node || typeof ResizeObserver === "undefined") return;
-    let last: number | undefined;
     let controls: AnimationPlaybackControls | undefined;
     const settle = () => { height.jump("auto"); if (frame.current) Object.assign(frame.current.style, { overflow: "", height: "auto" }); };
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
       const next = entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight;
       const current = height.get();
-      const from = typeof current === "number" ? current : last;
-      last = next;
+      const from = typeof current === "number" ? current : last.current;
+      last.current = next;
       controls?.stop();
       if (reduce || from === undefined || from === next || performance.now() - changedAt.current > 120) return settle();
       // Pin the old height before this frame paints, then spring to the new one.
@@ -52,10 +60,9 @@ function HeightFrame({ className, busy, reduce, children }: { className?: string
 export function Skeleton({ label = "Loading content", lines = 3, avatar = false, className, children, loading = true }: SkeletonProps) {
   const reduce = useReducedMotion();
   const count = Math.min(Math.max(Math.floor(lines), 1), 6);
-  // Each block pulses a beat after the one above it, so the wait reads as one calm wave.
   const placeholder = (extra?: string) => <div className={[styles.root, extra].filter(Boolean).join(" ")} role="status" aria-label={label} aria-busy="true">
-    {avatar && <span className={styles.avatar} aria-hidden="true" />}
-    <span className={styles.lines} aria-hidden="true">{Array.from({ length: count }, (_, index) => <span className={styles.line} style={{ "--index": index + (avatar ? 1 : 0) } as CSSProperties} key={index} />)}</span>
+    {avatar && <span ref={shimmerRef} className={`${styles.avatar} ${shimmerClass}`} aria-hidden="true" />}
+    <span className={styles.lines} aria-hidden="true">{Array.from({ length: count }, (_, index) => <span ref={shimmerRef} className={`${styles.line} ${shimmerClass}`} key={index} />)}</span>
   </div>;
   if (children === undefined) return placeholder(className);
   return <HeightFrame className={className} busy={loading} reduce={reduce}>

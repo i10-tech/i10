@@ -3,15 +3,16 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { ArrowRightLeft, Trash2 } from "lucide-react"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { DeleteDomainDialog } from "@/components/delete-domain-dialog"
 import { TransferDomainDialog } from "@/components/transfer-domain-dialog"
 import { cancelTransfer, domainMoveTargets } from "@/lib/actions"
 import { MoveDomainDialog } from "@/components/move-domain-dialog"
-import { formatExact } from "@/lib/format"
 import type { TransferOffer } from "@/lib/types"
 import type { KeyImpact } from "@/components/transfer-domain-dialog"
 import { toastDone, toastError } from "@/lib/toast"
+import { useExactTime } from "@/components/time"
 
 /**
  * ⚠ IT IS A ZONE AT THE FOOT OF THE PAGE, NOT A ✕✕✕ MENU IN THE HEADER, AND
@@ -35,15 +36,16 @@ import { toastDone, toastError } from "@/lib/toast"
  * being copied into the row menu. See delete-domain-dialog.tsx.
  */
 export function DomainDangerZone({
-  id,
-  name,
+  id = "",
+  name = "",
   scopedKeys = [],
   keyImpact = [],
   ownEmails = [],
   offer = null,
+  loading = false,
 }: {
-  id: string
-  name: string
+  id?: string
+  name?: string
   /** The live keys that can ONLY send from this domain. Filtered by the page. */
   scopedKeys?: { id: string; name: string }[]
   /** Every live key whose scope includes this domain, and what it would keep. */
@@ -52,7 +54,9 @@ export function DomainDangerZone({
   ownEmails?: string[]
   /** The open transfer offer for this domain, if one has been made. */
   offer?: TransferOffer | null
+  loading?: boolean
 }) {
+  const exact = useExactTime()
   const router = useRouter()
   const [confirming, setConfirming] = React.useState(false)
   const [transferring, setTransferring] = React.useState(false)
@@ -61,13 +65,15 @@ export function DomainDangerZone({
   /** The other workspaces this person is in; the move row shows only with one. */
   const [targets, setTargets] = React.useState<{ id: string; name: string }[]>([])
   React.useEffect(() => {
+    if (loading || !id) return
     void domainMoveTargets(id).then((result) => {
       // An answer without a list (the local preview's fake API) means none.
       if (result.ok && Array.isArray(result.data?.data)) setTargets(result.data.data)
     })
-  }, [id])
+  }, [id, loading])
 
   async function withdraw() {
+    if (loading || !id) return
     setWithdrawing(true)
     const result = await cancelTransfer(id)
     setWithdrawing(false)
@@ -78,6 +84,12 @@ export function DomainDangerZone({
     toastDone("Offer withdrawn")
     router.refresh()
   }
+
+  const nameEl = (
+    <Bone id="domain-name" width={110} inline>
+      {name ? <span className="font-mono text-foreground">{name}</span> : null}
+    </Bone>
+  )
 
   return (
     <>
@@ -110,7 +122,7 @@ export function DomainDangerZone({
                     {offer.recipient_email}
                   </span>
                   . It keeps sending from here until they accept; the offer expires on{" "}
-                  {formatExact(offer.expires_at)}.
+                  {exact(offer.expires_at)}.
                 </p>
               </div>
               <Button
@@ -118,7 +130,7 @@ export function DomainDangerZone({
                 size="sm"
                 className="shrink-0 self-start sm:self-auto"
                 onClick={withdraw}
-                disabled={withdrawing}
+                disabled={loading || withdrawing}
               >
                 Withdraw offer
               </Button>
@@ -128,10 +140,9 @@ export function DomainDangerZone({
               <div className="space-y-1">
                 <p className="text-sm font-medium">Transfer this domain</p>
                 <p className="text-sm text-muted-foreground">
-                  Offer <span className="font-mono text-foreground">{name}</span> to
-                  someone by email - in this workspace or any other. Its records and
-                  verification go with it, so your DNS does not change; it stops sending
-                  from here once they accept.
+                  Offer {nameEl} to someone by email - in this workspace or any other.
+                  Its records and verification go with it, so your DNS does not change;
+                  it stops sending from here once they accept.
                 </p>
               </div>
               <Button
@@ -139,6 +150,7 @@ export function DomainDangerZone({
                 size="sm"
                 className="shrink-0 self-start sm:self-auto"
                 onClick={() => setTransferring(true)}
+                disabled={loading}
               >
                 <ArrowRightLeft aria-hidden="true" />
                 Transfer
@@ -156,7 +168,7 @@ export function DomainDangerZone({
             <div className="space-y-1">
               <p className="text-sm font-medium">Move to another workspace</p>
               <p className="text-sm text-muted-foreground">
-                Move <span className="font-mono text-foreground">{name}</span> into{" "}
+                Move {nameEl} into{" "}
                 {targets.length === 1
                   ? targets[0]!.name
                   : "another workspace you are in"}
@@ -169,6 +181,7 @@ export function DomainDangerZone({
               size="sm"
               className="shrink-0 self-start sm:self-auto"
               onClick={() => setMoving(true)}
+              disabled={loading}
             >
               <ArrowRightLeft aria-hidden="true" />
               Move
@@ -180,10 +193,9 @@ export function DomainDangerZone({
           <div className="space-y-1">
             <p className="text-sm font-medium">Delete this domain</p>
             <p className="text-sm text-muted-foreground">
-              Mail can no longer be sent from{" "}
-              <span className="font-mono text-foreground">{name}</span>, and its DNS
-              records stop being served if it was delegated. Messages already sent keep
-              their history. This cannot be undone.
+              Mail can no longer be sent from {nameEl}, and its DNS records stop being
+              served if it was delegated. Messages already sent keep their history. This
+              cannot be undone.
             </p>
           </div>
           <Button
@@ -191,6 +203,7 @@ export function DomainDangerZone({
             size="sm"
             className="shrink-0 self-start sm:self-auto"
             onClick={() => setConfirming(true)}
+            disabled={loading}
           >
             <Trash2 aria-hidden="true" />
             Delete domain
@@ -198,39 +211,43 @@ export function DomainDangerZone({
         </div>
       </div>
 
-      <TransferDomainDialog
-        id={id}
-        name={name}
-        keys={keyImpact}
-        ownEmails={ownEmails}
-        open={transferring}
-        onOpenChange={setTransferring}
-        // ⚠ THE PAGE STAYS. Nothing has moved yet; it re-reads to show the
-        // pending offer in place of the button.
-        onOffered={() => router.refresh()}
-      />
+      {id && name && !loading && (
+        <>
+          <TransferDomainDialog
+            id={id}
+            name={name}
+            keys={keyImpact}
+            ownEmails={ownEmails}
+            open={transferring}
+            onOpenChange={setTransferring}
+            // ⚠ THE PAGE STAYS. Nothing has moved yet; it re-reads to show the
+            // pending offer in place of the button.
+            onOffered={() => router.refresh()}
+          />
 
-      <MoveDomainDialog
-        id={id}
-        name={name}
-        targets={targets}
-        keys={keyImpact}
-        open={moving}
-        onOpenChange={setMoving}
-        // ⚠ THE PAGE HAS TO LEAVE, as after a delete: the domain is not here now.
-        onMoved={() => router.push("/domains")}
-      />
+          <MoveDomainDialog
+            id={id}
+            name={name}
+            targets={targets}
+            keys={keyImpact}
+            open={moving}
+            onOpenChange={setMoving}
+            // ⚠ THE PAGE HAS TO LEAVE, as after a delete: the domain is not here now.
+            onMoved={() => router.push("/domains")}
+          />
 
-      <DeleteDomainDialog
-        id={id}
-        name={name}
-        scopedKeys={scopedKeys}
-        open={confirming}
-        onOpenChange={setConfirming}
-        // ⚠ THE PAGE HAS TO LEAVE. It is a page about a domain that no longer
-        // exists; refreshing it in place would render its own 404.
-        onDeleted={() => router.push("/domains")}
-      />
+          <DeleteDomainDialog
+            id={id}
+            name={name}
+            scopedKeys={scopedKeys}
+            open={confirming}
+            onOpenChange={setConfirming}
+            // ⚠ THE PAGE HAS TO LEAVE. It is a page about a domain that no longer
+            // exists; refreshing it in place would render its own 404.
+            onDeleted={() => router.push("/domains")}
+          />
+        </>
+      )}
     </>
   )
 }

@@ -5,6 +5,7 @@ import { useOrganizationList } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { TextMorph } from "@repo/ui/components/text-morph/text-morph"
 import { MotionItem, MotionList, clerkReason } from "@/components/account/shared"
@@ -55,7 +56,13 @@ function parse(raw: string): string[] {
  * card somebody has read; the switcher still lists it, and a new suggestion
  * arrives as a new card.
  */
-export function JoinSuggestions({ className }: { className?: string }) {
+export function JoinSuggestions({
+  className,
+  loading = false,
+}: {
+  className?: string
+  loading?: boolean
+}) {
   const router = useRouter()
   // Invitations are Clerk's; suggestions are ours (see lib/join-suggestions).
   const { isLoaded, setActive, userInvitations } = useOrganizationList({
@@ -68,6 +75,42 @@ export function JoinSuggestions({ className }: { className?: string }) {
   const [busy, setBusy] = React.useState<string | null>(null)
   // Joined at once, but the workspace was full: a request was filed instead.
   const [full, setFull] = React.useState<string[]>([])
+
+  if (loading) {
+    return (
+      <div className={className}>
+        <BoneScope id="join-suggestions" loading={true}>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4">
+            <span className="flex min-w-0 items-center gap-3">
+              <Bone id="avatar" shape="box" width={32} height={32} radius={8} inline />
+              <span className="min-w-0 space-y-1">
+                <Bone id="name" lineHeight={20} width={180} />
+                <Bone id="desc" lineHeight={16} width={260} />
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1">
+              <Bone
+                id="btn-ghost"
+                shape="box"
+                width={64}
+                height={32}
+                radius={6}
+                inline
+              />
+              <Bone
+                id="btn-action"
+                shape="box"
+                width={80}
+                height={32}
+                radius={6}
+                inline
+              />
+            </span>
+          </div>
+        </BoneScope>
+      </div>
+    )
+  }
 
   if (!isLoaded || suggestions.list === null) return null
 

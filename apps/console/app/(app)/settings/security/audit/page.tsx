@@ -1,15 +1,8 @@
 import type { Metadata } from "next"
-import Link from "next/link"
-import { ArrowLeft } from "lucide-react"
-import {
-  Section,
-  SectionContent,
-  SectionDescription,
-  SectionTitle,
-} from "@repo/ui/components/i10/page"
+import { SecurityAuditView } from "@/components/security-audit-view"
 import { PanelError } from "@/components/panel-error"
-import { AuditLog } from "@/components/sso/audit-log"
 import { tryApi } from "@/lib/api"
+import { securityAuditShape, type SecurityAuditData } from "@/lib/shapes/security-audit"
 import { ssoAbilities } from "@/lib/sso-server"
 import type { IdentityEvent } from "@/lib/sso-types"
 
@@ -36,50 +29,56 @@ export default async function AuditPage({
   if (!who.ok)
     return <PanelError title="Could not load your workspace" message={who.message} />
 
-  const events = who.abilities.manage
-    ? await tryApi<{ data: IdentityEvent[] }>("/console/identity/events", {
-        query: { limit, user },
-      })
-    : null
+  if (!who.abilities.manage) {
+    const unauthorizedData: SecurityAuditData = {
+      canManage: false,
+      available: true,
+      events: [],
+      user: user ?? null,
+      limit,
+      nextLimit: null,
+      clerkEnabled: Boolean(process.env.CLERK_PUBLISHABLE_KEY),
+    }
+    return (
+      <SecurityAuditView
+        shape={securityAuditShape.of(unauthorizedData)}
+        data={unauthorizedData}
+      />
+    )
+  }
 
-  return (
-    <Section className="pt-0">
-      <Link
-        href="/settings/security"
-        className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" aria-hidden /> Security
-      </Link>
-      <SectionTitle>Identity audit log</SectionTitle>
-      <SectionDescription>
-        Who changed sign-in settings, directories, sessions and mailboxes, and when.
-      </SectionDescription>
-      <SectionContent>
-        {!events ? (
-          <p className="text-sm text-muted-foreground">
-            Only a workspace admin or owner can see the audit log.
-          </p>
-        ) : !events.ok ? (
-          events.error.statusCode === 501 ? (
-            <p className="text-sm text-muted-foreground">
-              The identity audit log is not available on this deployment.
-            </p>
-          ) : (
-            <PanelError
-              title="Could not load the audit log"
-              message={events.error.message}
-            />
-          )
-        ) : (
-          <AuditLog
-            events={events.data.data}
-            user={user ?? null}
-            limit={limit}
-            nextLimit={STEPS[STEPS.indexOf(limit) + 1] ?? null}
-            clerkEnabled={Boolean(process.env.CLERK_PUBLISHABLE_KEY)}
-          />
-        )}
-      </SectionContent>
-    </Section>
-  )
+  const events = await tryApi<{ data: IdentityEvent[] }>("/console/identity/events", {
+    query: { limit, user },
+  })
+
+  if (!events.ok && events.error.statusCode === 501) {
+    const unavailableData: SecurityAuditData = {
+      canManage: true,
+      available: false,
+      events: [],
+      user: user ?? null,
+      limit,
+      nextLimit: null,
+      clerkEnabled: Boolean(process.env.CLERK_PUBLISHABLE_KEY),
+    }
+    return (
+      <SecurityAuditView
+        shape={securityAuditShape.of(unavailableData)}
+        data={unavailableData}
+      />
+    )
+  }
+
+  const data: SecurityAuditData = {
+    canManage: true,
+    available: true,
+    events: events.ok ? events.data.data : [],
+    user: user ?? null,
+    limit,
+    nextLimit: STEPS[STEPS.indexOf(limit) + 1] ?? null,
+    clerkEnabled: Boolean(process.env.CLERK_PUBLISHABLE_KEY),
+    ...(events.ok ? {} : { error: events.error.message }),
+  }
+
+  return <SecurityAuditView shape={securityAuditShape.of(data)} data={data} />
 }

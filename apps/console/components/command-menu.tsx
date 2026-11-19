@@ -4,12 +4,14 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { ExternalLink, Moon, Plus, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
+import { switchTheme } from "@/lib/switch-theme"
 import { Dialog, DialogContent } from "@repo/ui/components/dialog/dialog"
 import {
   CommandPalette,
   type CommandItem,
 } from "@repo/ui/components/command-palette/command-palette"
 import { allDestinations } from "@/lib/nav"
+import { announceNavigation } from "@/lib/pending-navigation"
 
 /**
  * ⌘K.
@@ -72,6 +74,7 @@ export function CommandMenu() {
       // focus trap occasionally survives it - the new page renders and the
       // keyboard still belongs to a dialog that is no longer visible.
       setOpen(false)
+      announceNavigation(href)
       router.push(href)
     },
     [router],
@@ -150,7 +153,7 @@ export function CommandMenu() {
           onClose={() => setOpen(false)}
           onSelect={(item) => {
             if (item.id === "theme") {
-              setTheme(dark ? "light" : "dark")
+              switchTheme(dark ? "light" : "dark", setTheme)
               setOpen(false)
             } else if (item.id === "docs") {
               window.open("https://docs.i10.tech", "_blank", "noopener,noreferrer")

@@ -30,7 +30,9 @@ export function HttpsPrefix({ show }: { show: boolean }) {
   return (
     <AnimatePresence>
       {show && (
+        // ⚠ SKIPPED BY test/skeleton-parity: it shows only once the field has an address (or focus), and a skeleton's is empty.
         <motion.span
+          data-skeleton="skip"
           key="https"
           initial={{ opacity: 0, x: 4 }}
           animate={{ opacity: 1, x: 0, transition: { delay: 0.1, duration: 0.18 } }}

@@ -3,6 +3,7 @@
 import * as React from "react"
 import { CodeBlock as ArcCodeBlock } from "@repo/ui/components/code-block/code-block"
 import { JsonViewer } from "@repo/ui/components/json-viewer/json-viewer"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { cn } from "cn"
 
 /**
@@ -25,13 +26,16 @@ export function CodeBlock({
   label,
   className,
   empty = "Empty",
+  loading = false,
 }: {
   value: string
   label: string
   className?: string
   empty?: string
+  loading?: boolean
 }) {
   const parsed = React.useMemo(() => {
+    if (loading) return undefined
     const text = value.trim()
     if (!text.startsWith("{") && !text.startsWith("[")) return undefined
     try {
@@ -39,23 +43,39 @@ export function CodeBlock({
     } catch {
       return undefined
     }
-  }, [value])
+  }, [value, loading])
 
-  if (!value) {
-    return (
-      <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
-        {empty}
-      </p>
-    )
-  }
+  // ⚠ THE WHOLE BLOCK IS THE BONE, empty state included: what it holds (a viewer, a
+  // code block, "Empty") is the data's, and a skeleton cannot know which.
   return (
-    <div className={cn("min-w-0", className)}>
-      {parsed ? (
-        <JsonViewer data={parsed.data} label={label} rootName={label} maxHeight={384} />
+    <Bone
+      id={`code-${label}`}
+      as="div"
+      shape="box"
+      width="100%"
+      height={160}
+      radius={8}
+      loading={loading || undefined}
+    >
+      {!value ? (
+        <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          {empty}
+        </p>
       ) : (
-        <ArcCodeBlock code={value} filename={label} language="text" maxLines={24} />
+        <div className={cn("min-w-0", className)}>
+          {parsed ? (
+            <JsonViewer
+              data={parsed.data}
+              label={label}
+              rootName={label}
+              maxHeight={384}
+            />
+          ) : (
+            <ArcCodeBlock code={value} filename={label} language="text" maxLines={24} />
+          )}
+        </div>
       )}
-    </div>
+    </Bone>
   )
 }
 

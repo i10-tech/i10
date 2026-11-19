@@ -24,6 +24,7 @@ import { useJoinSuggestions } from "@/lib/join-suggestions"
 import { teamRoles } from "@/lib/actions"
 import { roleLabel } from "@/lib/roles"
 import type { TenantProfile, WorkspaceRole } from "@/lib/types"
+import { announceNavigation } from "@/lib/pending-navigation"
 
 /**
  * The workspace switcher, ours (2026-10-12) - what Clerk's
@@ -192,7 +193,12 @@ export function WorkspaceSwitcher({
                   </span>
                 </span>
               </div>
-              <DropdownMenuItem onSelect={() => router.push("/settings")}>
+              <DropdownMenuItem
+                onSelect={() => {
+                  announceNavigation("/settings")
+                  router.push("/settings")
+                }}
+              >
                 <Settings aria-hidden />
                 Manage
               </DropdownMenuItem>

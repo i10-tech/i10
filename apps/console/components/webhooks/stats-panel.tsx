@@ -1,3 +1,4 @@
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Section, SectionContent, SectionTitle } from "@repo/ui/components/i10/page"
 import { Stat, StatRow } from "@/components/stat"
 import { ListCell, ListHead, ListHeader, ListTable } from "@/components/list/table"
@@ -25,14 +26,24 @@ import type { WebhookEndpointStats } from "@/lib/types"
 export function StatsPanel({
   stats,
   window,
+  events = 0,
+  loading = false,
 }: {
-  stats: WebhookEndpointStats
+  stats?: WebhookEndpointStats | null
   window: WindowValue
+  /** Rows of the by-event table to draw while loading (the shape's). */
+  events?: number
+  loading?: boolean
 }) {
-  const rate = errorRate(stats.attempts, stats.failed_attempts)
-  const byType = [...stats.by_event_type].sort(
-    (a, b) => b.failed - a.failed || b.delivered - a.delivered,
-  )
+  const isLoaded = !loading && stats !== null && stats !== undefined
+  const rate = isLoaded ? errorRate(stats.attempts, stats.failed_attempts) : null
+  const byType = isLoaded
+    ? [...stats.by_event_type].sort(
+        (a, b) => b.failed - a.failed || b.delivered - a.delivered,
+      )
+    : []
+  const eventRows: (WebhookEndpointStats["by_event_type"][number] | undefined)[] =
+    isLoaded ? byType : Array.from({ length: events }, () => undefined)
 
   return (
     <Section className="space-y-5 pt-0">
@@ -41,33 +52,49 @@ export function StatsPanel({
         <WindowPicker value={window} />
       </div>
 
-      <StatRow>
-        <Stat label="Delivered" value={stats.delivered} />
+      <StatRow loading={!isLoaded}>
+        <Stat label="Delivered" value={isLoaded ? stats.delivered : undefined} />
         <Stat
           label="Failed"
-          value={stats.failed}
-          tone={stats.failed > 0 ? "danger" : undefined}
+          value={isLoaded ? stats.failed : undefined}
+          tone={isLoaded && stats.failed > 0 ? "danger" : undefined}
         />
-        <Stat label="Retrying" value={stats.pending} />
+        <Stat label="Retrying" value={isLoaded ? stats.pending : undefined} />
         <Stat
           label="Error rate"
-          value={formatErrorRate(rate)}
-          tone={rateTone(rate)}
-          sub={`${formatNumber(stats.failed_attempts)} of ${formatNumber(stats.attempts)} attempts`}
+          value={isLoaded ? formatErrorRate(rate) : undefined}
+          tone={isLoaded ? rateTone(rate) : undefined}
+          sub={
+            isLoaded
+              ? `${formatNumber(stats.failed_attempts)} of ${formatNumber(stats.attempts)} attempts`
+              : ""
+          }
         />
         <Stat
           label="p50 response"
-          value={stats.p50_ms === null ? "-" : formatDuration(Math.round(stats.p50_ms))}
+          value={
+            isLoaded
+              ? stats.p50_ms === null
+                ? "-"
+                : formatDuration(Math.round(stats.p50_ms))
+              : undefined
+          }
         />
         <Stat
           label="p95 response"
-          value={stats.p95_ms === null ? "-" : formatDuration(Math.round(stats.p95_ms))}
+          value={
+            isLoaded
+              ? stats.p95_ms === null
+                ? "-"
+                : formatDuration(Math.round(stats.p95_ms))
+              : undefined
+          }
         />
       </StatRow>
 
-      <StatsCharts series={stats.series} bucket={stats.bucket} />
+      <StatsCharts series={stats?.series} bucket={stats?.bucket} loading={!isLoaded} />
 
-      {byType.length > 0 && (
+      {eventRows.length > 0 && (
         <SectionContent className="space-y-2">
           <h3 className="text-sm font-medium">By event</h3>
           <ListTable>
@@ -75,30 +102,57 @@ export function StatsPanel({
               <ListHead>Event</ListHead>
               <ListHead className="w-[7rem] text-right">Delivered</ListHead>
               <ListHead className="w-[7rem] text-right">Failed</ListHead>
-              <ListHead className="hidden w-[7rem] text-right sm:table-cell">
+              {/* F = 224 (Delivered 112, Failed 112), Event keeps 220: Retrying 112 -> 556 -> sm (704). */}
+              <ListHead hideBelow="sm" className="w-[7rem] text-right">
                 Retrying
               </ListHead>
             </ListHeader>
             <tbody className="divide-y">
-              {byType.map((row) => (
-                <tr key={row.event_type}>
-                  <ListCell className="font-mono text-xs">{row.event_type}</ListCell>
-                  <ListCell className="tabular text-right text-xs">
-                    {formatNumber(row.delivered)}
-                  </ListCell>
-                  <ListCell
-                    className={
-                      row.failed > 0
-                        ? "tabular text-right text-xs text-danger"
-                        : "tabular text-right text-xs text-muted-foreground"
-                    }
-                  >
-                    {formatNumber(row.failed)}
-                  </ListCell>
-                  <ListCell className="tabular hidden text-right text-xs text-muted-foreground sm:table-cell">
-                    {formatNumber(row.pending)}
-                  </ListCell>
-                </tr>
+              {eventRows.map((row, i) => (
+                <BoneScope
+                  key={row?.event_type ?? i}
+                  id={`event-${i}`}
+                  unit
+                  loading={!isLoaded}
+                >
+                  <tr>
+                    <ListCell className="font-mono text-xs">
+                      <Bone id="event" width={140} lineHeight={16}>
+                        {row && (
+                          <span className="block truncate" title={row.event_type}>
+                            {row.event_type}
+                          </span>
+                        )}
+                      </Bone>
+                    </ListCell>
+                    <ListCell className="tabular text-right text-xs">
+                      <Bone id="delivered" width={32} lineHeight={16} align="end">
+                        {row && formatNumber(row.delivered)}
+                      </Bone>
+                    </ListCell>
+                    <ListCell className="tabular text-right text-xs">
+                      <Bone id="failed" width={32} lineHeight={16} align="end">
+                        {row && (
+                          <span
+                            className={
+                              row.failed > 0 ? "text-danger" : "text-muted-foreground"
+                            }
+                          >
+                            {formatNumber(row.failed)}
+                          </span>
+                        )}
+                      </Bone>
+                    </ListCell>
+                    <ListCell
+                      hideBelow="sm"
+                      className="tabular text-right text-xs text-muted-foreground"
+                    >
+                      <Bone id="retrying" width={32} lineHeight={16} align="end">
+                        {row && formatNumber(row.pending)}
+                      </Bone>
+                    </ListCell>
+                  </tr>
+                </BoneScope>
               ))}
             </tbody>
           </ListTable>

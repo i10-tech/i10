@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test"
 
 /**
  * ⚠ THESE PIN WHICH CALL THE WATCH MAKES, BECAUSE THAT WAS THE BUG. It used to
@@ -17,6 +17,13 @@ const reply = (kind: "verify" | "refresh") => {
   return Promise.resolve({ ok: true, data: { id: "dom_1", status } })
 }
 
+// ⚠ MODULE MOCKS OUTLIVE THE FILE THAT MAKES THEM in one `bun test` run, so the
+// real module is kept and put back below. Left mocked, every later file that
+// imports lib/actions (test/skeleton-parity renders the views) is linked against
+// these four exports and dies on the first other name it asks for.
+mock.module("server-only", () => ({}))
+const realActions = await import("@/lib/actions")
+
 mock.module("@/lib/actions", () => ({
   verifyDomain: () => reply("verify"),
   verifyDomainQuietly: () => reply("verify"),
@@ -25,6 +32,10 @@ mock.module("@/lib/actions", () => ({
 }))
 
 const { watchUntilVerified } = await import("@/lib/domain-activation")
+
+afterAll(() => {
+  mock.module("@/lib/actions", () => ({ ...realActions }))
+})
 
 const fast = [0, 0, 0, 0]
 

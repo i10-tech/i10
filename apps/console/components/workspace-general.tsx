@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useClerk, useOrganization } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
+import { Bone } from "@repo/ui/components/bone/bone"
 import { Avatar } from "@repo/ui/components/avatar/avatar"
 import { Button } from "@repo/ui/components/button/button"
 import { CopyField } from "@repo/ui/components/i10/copy-field"
@@ -19,11 +20,11 @@ import {
   renameWorkspace,
   setWorkspaceLogo,
 } from "@/lib/actions"
-import { formatExact } from "@/lib/format"
 import { useStepUp } from "@/lib/step-up"
 import { toastDone, toastError } from "@/lib/toast"
 import type { BillingState, Me } from "@/lib/types"
 import { announceWorkspaceName, announceWorkspacesChanged } from "@/lib/workspace-name"
+import { useExactTime } from "@/components/time"
 
 /**
  * General settings, drawn like the account page (2026-10-12): the same
@@ -39,11 +40,14 @@ export function WorkspaceGeneral({
   tenant,
   billing,
   access,
+  loading = false,
 }: {
   tenant: { id: string; slug: string; name: string; created_at: string } | null
   billing: BillingState | null
   access: Me["access"]
+  loading?: boolean
 }) {
+  const exact = useExactTime()
   const { organization } = useOrganization()
   const canEdit = access?.permissions.includes("workspace:manage") ?? false
   const canDelete = access?.permissions.includes("workspace:delete") ?? false
@@ -60,21 +64,40 @@ export function WorkspaceGeneral({
            * the active organization, it starts over with the new one, from
            * Clerk's copy, which the switch updates before the server does.
            */}
-          <WorkspaceProfile
-            key={organization?.id ?? tenant?.id}
-            current={organization?.name ?? tenant?.name ?? ""}
-            editable={canEdit}
-          />
+          {loading ? (
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex min-w-0 items-center gap-3">
+                <Bone
+                  id="profile-avatar"
+                  shape="circle"
+                  width={40}
+                  height={40}
+                  inline
+                />
+                <Bone id="profile-name" width={140} lineHeight={20} inline />
+              </span>
+            </div>
+          ) : (
+            <WorkspaceProfile
+              key={organization?.id ?? tenant?.id}
+              current={organization?.name ?? tenant?.name ?? ""}
+              editable={canEdit}
+            />
+          )}
         </ProfileRow>
         <ProfileRow label="Identifiers">
           <div className="grid max-w-md gap-4">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Workspace ID</p>
-              <CopyField value={tenant?.id ?? "-"} label="Copy workspace ID" />
+              <Bone id="wid" width={220} lineHeight={36}>
+                <CopyField value={tenant?.id ?? "-"} label="Copy workspace ID" />
+              </Bone>
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Slug</p>
-              <CopyField value={tenant?.slug ?? "-"} label="Copy slug" />
+              <Bone id="slug" width={160} lineHeight={36}>
+                <CopyField value={tenant?.slug ?? "-"} label="Copy slug" />
+              </Bone>
             </div>
             <p className="text-xs text-muted-foreground">
               Quote the workspace ID if you ever contact support - it is what we look
@@ -83,13 +106,15 @@ export function WorkspaceGeneral({
           </div>
         </ProfileRow>
         <ProfileRow label="Created">
-          <p className="pt-1.5 text-sm text-muted-foreground">
-            {tenant ? formatExact(tenant.created_at) : "-"}
-          </p>
+          <Bone id="created" width={120} lineHeight={20}>
+            <p className="pt-1.5 text-sm text-muted-foreground">
+              {tenant ? exact(tenant.created_at) : "-"}
+            </p>
+          </Bone>
         </ProfileRow>
       </ProfileBlock>
 
-      {canDelete && organization && (
+      {!loading && canDelete && organization && (
         <ProfileBlock title="Danger zone">
           <ProfileRow label="Delete workspace">
             <DeleteWorkspace name={organization.name} billing={billing} />

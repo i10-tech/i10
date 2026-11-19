@@ -1,14 +1,7 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
-import { ButtonLink } from "@repo/ui/components/i10/button-link"
-import {
-  Page,
-  PageBody,
-  PageHeader,
-  PageHeaderRow,
-  PageTitle,
-} from "@repo/ui/components/i10/page"
-import { PanelError } from "@/components/panel-error"
+import { GithubSetupView } from "@/components/github-setup-view"
+import { githubSetupShape, type GithubSetupData } from "@/lib/shapes/github-setup"
 import { tryApi } from "@/lib/api"
 
 export const metadata: Metadata = { title: "Connecting GitHub" }
@@ -29,7 +22,7 @@ export default async function GithubSetupPage({
 }) {
   const { installation_id, code, state, setup_action } = await searchParams
 
-  let error: string
+  let error: string | undefined
   if (setup_action === "request") {
     error =
       "The installation was requested from an owner of that GitHub account. Once they approve it, connect GitHub again."
@@ -45,19 +38,6 @@ export default async function GithubSetupPage({
     error = result.error.message
   }
 
-  return (
-    <Page>
-      <PageHeader>
-        <PageHeaderRow>
-          <PageTitle>Connecting GitHub</PageTitle>
-        </PageHeaderRow>
-      </PageHeader>
-      <PageBody className="max-w-xl space-y-4">
-        <PanelError title="GitHub is not connected" message={error} />
-        <ButtonLink href="/templates" variant="secondary" size="sm">
-          Back to templates
-        </ButtonLink>
-      </PageBody>
-    </Page>
-  )
+  const data: GithubSetupData = { error }
+  return <GithubSetupView shape={githubSetupShape.of(data)} data={data} />
 }

@@ -1,10 +1,7 @@
 import Link from "next/link"
-import { cache } from "react"
-import { AlertTriangle, ChevronRight, ShieldCheck } from "lucide-react"
-import { cn } from "cn"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Alert } from "@repo/ui/components/alert/alert"
 import { findingReason } from "@/components/sending-health"
-import { tryApi } from "@/lib/api"
 import type { SendingStatus } from "@/lib/types"
 
 /**
@@ -36,10 +33,49 @@ import type { SendingStatus } from "@/lib/types"
  * and lifts when a person looks. The banner names the category, never the
  * threshold, and says how to reach that person.
  */
-export async function SendingStatusBanner() {
-  const result = await readStatus()
-  if (!result.ok) return null
-  const { status, cause, health, findings, hold } = result.data
+export function SendingStatusBanner({
+  status: statusProp,
+  loading = false,
+}: {
+  status?: SendingStatus | null
+  loading?: boolean
+} = {}) {
+  if (loading) {
+    return (
+      <BoneScope id="sending-status-banner" loading={true}>
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <div className="flex items-start gap-3">
+            <Bone id="icon" shape="box" width={20} height={20} radius={4} inline />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Bone id="title" lineHeight={20} width={240} />
+              {/* Three 20px lines and the gaps between the alert's blocks:
+                  the banner's measured height, so nothing below it moves. */}
+              <Bone id="body" lines={3} lineHeight={21} width="90%" />
+            </div>
+          </div>
+        </div>
+      </BoneScope>
+    )
+  }
+
+  const alert = statusProp ? bannerFor(statusProp) : null
+  if (!alert) return null
+  /*
+   * ⚠ THE LOADED BANNER IS THE SKELETON'S `body` BONE (2026-11-09). Its bars
+   * used to fade over text that was already there; claimed, they stretch into
+   * the banner while it sharpens in, like every other block on the page.
+   */
+  return (
+    <BoneScope id="sending-status-banner" loading={false}>
+      <Bone id="body" as="div" lines={2}>
+        {alert}
+      </Bone>
+    </BoneScope>
+  )
+}
+
+function bannerFor(statusProp: SendingStatus): React.ReactNode {
+  const { status, cause, health, findings, hold } = statusProp
   if (status === "enabled" && health === "healthy") return null
 
   if (health === "held" && hold) {
@@ -150,55 +186,5 @@ export async function SendingStatusBanner() {
         </span>
       </Alert>
     </div>
-  )
-}
-
-/**
- * ⚠ ONE READ PER REQUEST. The rail's notice, the mobile notice and the
- * overview's banner all ask; `cache` makes that one call to the API.
- */
-const readStatus = cache(() => tryApi<SendingStatus>("/console/sending-status"))
-
-/**
- * The one-line version, for the rail: what is wrong in four words, and a way
- * to the overview where the banner says the rest.
- */
-export async function SendingStatusNotice({ className }: { className?: string }) {
-  const result = await readStatus()
-  if (!result.ok) return null
-  const { status, health, hold } = result.data
-  if (status === "enabled" && health === "healthy") return null
-
-  const notice =
-    health === "held" && hold
-      ? { tone: "danger", title: "Sending on hold" }
-      : status === "enabled" && health === "at_risk"
-        ? { tone: "warning", title: "Sending at risk" }
-        : status === "reinstated"
-          ? { tone: "neutral", title: "Sending resumed" }
-          : { tone: "danger", title: "Sending paused" }
-
-  return (
-    <Link
-      href="/"
-      className={cn(
-        "group flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-medium",
-        "transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        notice.tone === "danger" &&
-          "border-danger/30 bg-danger/8 text-danger hover:bg-danger/12",
-        notice.tone === "warning" &&
-          "border-warning/30 bg-warning/8 text-warning hover:bg-warning/12",
-        notice.tone === "neutral" && "bg-muted/50 text-foreground hover:bg-muted",
-        className,
-      )}
-    >
-      {notice.tone === "neutral" ? (
-        <ShieldCheck className="size-3.5 shrink-0" />
-      ) : (
-        <AlertTriangle className="size-3.5 shrink-0" />
-      )}
-      <span className="min-w-0 flex-1 truncate">{notice.title}</span>
-      <ChevronRight className="size-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100" />
-    </Link>
   )
 }

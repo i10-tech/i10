@@ -2,11 +2,12 @@
 
 import {
   ListToolbar,
-  UrlClearFilters,
+  ListToolbarEnd,
   UrlFilterMulti,
   UrlFilterSelect,
+  UrlListResults,
+  UrlListSearch,
   UrlRangeSelect,
-  UrlSearchField,
 } from "@/components/list/toolbar"
 import { StatusDot, describeStatus } from "@/components/status"
 
@@ -62,47 +63,58 @@ const STATUSES = [
 export function EmailFilters({
   domains,
   apiKeys,
+  showDomains,
+  showKeys,
 }: {
   domains: { id: string; name: string }[]
   apiKeys: { id: string; name: string }[]
+  // ⚠ FROM THE SHAPE, NOT THE LISTS: a skeleton has no lists, and must still
+  // draw the filters the page will have.
+  showDomains: boolean
+  showKeys: boolean
 }) {
   return (
     <ListToolbar>
-      <UrlSearchField placeholder="Search subject or address" label="Search emails" />
-      <UrlRangeSelect />
-      <UrlFilterMulti
-        param="status"
-        label="Delivery state"
-        allLabel="All statuses"
-        noun="statuses"
-        options={STATUSES.map((status) => {
-          const described = describeStatus(status)
-          return {
-            value: status,
-            label: described.label,
-            icon: <StatusDot tone={described.tone} />,
-          }
-        })}
-      />
-      {domains.length > 1 && (
-        <UrlFilterSelect
-          param="domain_id"
-          label="Domain"
-          allLabel="All domains"
-          options={domains.map((d) => ({ value: d.id, label: d.name }))}
-        />
-      )}
-      {apiKeys.length > 0 && (
-        <UrlFilterSelect
-          param="api_key_id"
-          label="API key"
-          allLabel="All API keys"
-          options={apiKeys.map((k) => ({ value: k.id, label: k.name }))}
-        />
-      )}
-      <UrlClearFilters
+      <UrlListSearch placeholder="Search subject or address" label="Search emails" />
+      {/* No count: the log is a page of a cursor, so only Clear. */}
+      <UrlListResults
         params={["search", "days", "status", "domain_id", "api_key_id", "broadcast_id"]}
       />
+      <ListToolbarEnd>
+        <UrlRangeSelect />
+        <UrlFilterMulti
+          param="status"
+          label="Delivery state"
+          allLabel="All statuses"
+          noun="statuses"
+          options={STATUSES.map((status) => {
+            const described = describeStatus(status)
+            return {
+              value: status,
+              label: described.label,
+              icon: <StatusDot tone={described.tone} />,
+            }
+          })}
+        />
+        {showDomains && (
+          <UrlFilterSelect
+            param="domain_id"
+            label="Domain"
+            allLabel="All domains"
+            triggerWidth={176}
+            options={domains.map((d) => ({ value: d.id, label: d.name }))}
+          />
+        )}
+        {showKeys && (
+          <UrlFilterSelect
+            param="api_key_id"
+            label="API key"
+            allLabel="All API keys"
+            triggerWidth={176}
+            options={apiKeys.map((k) => ({ value: k.id, label: k.name }))}
+          />
+        )}
+      </ListToolbarEnd>
     </ListToolbar>
   )
 }

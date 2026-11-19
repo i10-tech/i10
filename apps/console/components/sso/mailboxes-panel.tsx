@@ -7,8 +7,7 @@ import { FloatingInput } from "@repo/ui/components/i10/floating-field"
 import { RadioCards } from "@repo/ui/components/radio-cards/radio-cards"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { ConfirmDialog } from "@/components/confirm-dialog"
-import { Time } from "@/components/time"
-import { formatExact } from "@/lib/format"
+import { Time, useExactTime } from "@/components/time"
 import {
   LEAVER_HELP,
   LEAVER_LABEL,
@@ -174,6 +173,7 @@ function LeaverDefault({
   abilities: SsoAbilities
   onSaved: (leavers: Mailboxes["leavers"]) => void
 }) {
+  const exact = useExactTime()
   const call = useSsoCall()
   const [action, setAction] = React.useState<LeaverAction>(data.leavers.action)
   const [days, setDays] = React.useState(String(data.leavers.days ?? 30))
@@ -262,7 +262,7 @@ function LeaverDefault({
         title="Delete leavers' mailboxes by default?"
         description={
           when
-            ? `Anyone switched off by a directory will have their mailbox and mail deleted ${count} days later (first possible deletion: ${formatExact(when.toISOString())}). You can still pick a different next step for a single mailbox.`
+            ? `Anyone switched off by a directory will have their mailbox and mail deleted ${count} days later (first possible deletion: ${exact(when.toISOString())}). You can still pick a different next step for a single mailbox.`
             : ""
         }
         confirmLabel="Save deletion default"

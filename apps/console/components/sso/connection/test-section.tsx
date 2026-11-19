@@ -4,6 +4,7 @@ import * as React from "react"
 import { ChevronDown } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { Badge, type BadgeTone } from "@repo/ui/components/badge/badge"
+import { Bone, useBoneLoading } from "@repo/ui/components/bone/bone"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
 import { Reveal } from "@repo/ui/components/i10/reveal"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
@@ -26,8 +27,12 @@ export function TestSection({
   const { data, failed, reload } = useRemote(() => ssoTestRuns(connection.id))
   const [now] = React.useState(() => Date.now())
   const mounted = useMounted()
+  const skeleton = useBoneLoading()
 
+  // ⚠ THE RETURN-FROM-TEST HASH IS ONE-SHOT: a skeleton painted first must leave it
+  // for the page, or the toast and the reload go to a stand-in that is about to unmount.
   React.useEffect(() => {
+    if (skeleton) return
     const result = new URLSearchParams(window.location.hash.slice(1)).get("sso_test")
     if (!result) return
     window.history.replaceState(
@@ -38,7 +43,7 @@ export function TestSection({
     if (result === "passed") toastDone("Test sign-in passed")
     else toastError("Test sign-in failed", "Open the run below to see why.")
     void reload()
-  }, [reload])
+  }, [reload, skeleton])
 
   const runs = data?.data ?? null
   const pass = runs ? latestPass(runs, now) : null
@@ -70,6 +75,11 @@ export function TestSection({
     chipLabel = "Failed"
     chipTone = "danger"
     sentence = <>Latest test failed: {wouldDo(latest)}</>
+  } else if (!runs && failed) {
+    chipLabel = "Unknown"
+    sentence = failed.upgrade
+      ? "Test runs are not on your plan."
+      : (failed.message ?? "Could not read the test runs.")
   }
 
   return (
@@ -78,12 +88,19 @@ export function TestSection({
         label={chipLabel}
         tone={chipTone}
         sentence={sentence}
+        // ⚠ UNTIL THE RUNS ARRIVE THE STATE IS UNKNOWN, NOT "NOT TESTED": a passed
+        // connection would say it had never been tried.
+        boneId="run-state"
+        loading={!runs && !failed}
         action={
-          href ? (
-            <ButtonLink href={href} size="sm" native>
-              Start a test
-            </ButtonLink>
-          ) : undefined
+          // The button needs the browser's origin, so it fills in after mount.
+          <Bone id="start" shape="box" width={96} height={32} radius={8} inline>
+            {href && (
+              <ButtonLink href={href} size="sm" native>
+                Start a test
+              </ButtonLink>
+            )}
+          </Bone>
         }
       />
 

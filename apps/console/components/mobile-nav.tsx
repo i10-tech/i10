@@ -86,7 +86,7 @@ export function MobileNav({
              * into the other across the screen every time either re-rendered.
              */}
             <div className="flex-1">
-              <SidebarNav scope="drawer" attention={attention} />
+              <SidebarNav attention={attention} />
             </div>
             <div className="border-t pt-2">
               <AccountBar

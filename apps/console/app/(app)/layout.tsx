@@ -4,10 +4,13 @@ import { Suspense } from "react"
 import { SkeletonBlock as Skeleton } from "@repo/ui/components/i10/skeleton-block"
 import { PageFrame } from "@/components/page-frame"
 import { RememberedViewsProvider, type View } from "@/components/list/remembered-views"
-import { RememberedCountsProvider } from "@/components/list/remembered-counts"
-import { parseCounts } from "@/lib/list-counts"
+import { RememberedShapesProvider } from "@/components/list/remembered-shapes"
+import { mergeShapes, parseShapes, type ShapeCounts } from "@/lib/shapes"
+import { atRisk } from "@/lib/shapes/overview"
+import { billingCounts } from "@/lib/shapes/billing"
+import { PAGE_SHAPES } from "@/lib/shapes/registry"
 import { Rail } from "@/components/rail"
-import { SendingStatusNotice } from "@/components/sending-status-banner"
+import { readStatus, SendingStatusNotice } from "@/components/sending-status-notice"
 import { ClientContext } from "@/components/client-context"
 import { OnboardingGate } from "@/components/onboarding-gate"
 import { SidebarNav } from "@/components/sidebar-nav"
@@ -61,7 +64,15 @@ export default async function AppLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   // Clerk's own copy of the person and the workspace picture, read alongside -
   // for the rail's first paint only. See lib/clerk-identity.ts.
-  const [me, identity] = await Promise.all([tryApi<Me>("/console/me"), clerkIdentity()])
+  const [me, identity, shapeCounts, sending] = await Promise.all([
+    tryApi<Me>("/console/me"),
+    clerkIdentity(),
+    // ⚠ A FAILURE HERE ONLY COSTS THE FIRST VISIT ITS EXACT SKELETON: pages
+    // fall back to the remembered cookie, then to their default.
+    tryApi<{ data: ShapeCounts }>("/console/shapes"),
+    // The same cached read the rail's notice and the overview make.
+    readStatus(),
+  ])
 
   /*
    * ⚠ `tenant_not_ready` IS NOT AN ERROR AND MUST NOT RENDER AS ONE. It means
@@ -180,10 +191,28 @@ export default async function AppLayout({
       .map((c) => [c.name.slice("i10-view-".length), c.value as View]),
   )
 
-  // How many rows each list had last time, in this workspace: loading pages
-  // draw that many, or the empty state. See components/list/remembered-counts.
+  // The shape each page had last time, in this workspace (lib/shapes); where a
+  // page has none yet, the counts above stand in, so a first visit is exact too.
   const tenantId = me.data.tenant?.id ?? ""
-  const counts = parseCounts((await cookies()).getAll(), tenantId)
+  const shapes = mergeShapes(
+    parseShapes((await cookies()).getAll(), tenantId),
+    {
+      ...(shapeCounts.ok
+        ? {
+            ...shapeCounts.data.data,
+            // ⚠ THE OVERVIEW'S BANNER, KNOWN BEFORE ITS FIRST VISIT. Without it a
+            // workspace at risk saw the skeleton without the banner, then every
+            // card pushed down by it when the page landed (2026-11-09).
+            ...(sending.ok ? { sendingAtRisk: atRisk(sending.data) ? 1 : 0 } : {}),
+          }
+        : null),
+      // ⚠ THE PLAN AND SUBSCRIPTION COME FROM /console/me, WHICH THIS LAYOUT HAS
+      // ALREADY: without them the billing skeleton said "No paid subscription"
+      // to a Pro workspace until the page landed.
+      ...billingCounts(me.data.billing),
+    },
+    PAGE_SHAPES,
+  )
 
   // See WorkspaceBar: Clerk's hooks throw outside a provider, and the provider
   // is only mounted when a key exists.
@@ -349,13 +378,16 @@ export default async function AppLayout({
             <div className="hidden lg:block">
               <ShellBar workspace={me.data.tenant?.name ?? "Workspace"} />
             </div>
-            <PageFrame>
-              <RememberedViewsProvider views={views}>
-                <RememberedCountsProvider tenantId={tenantId} counts={counts}>
-                  {children}
-                </RememberedCountsProvider>
-              </RememberedViewsProvider>
-            </PageFrame>
+            {/*
+             * ⚠ THE PROVIDERS ARE OUTSIDE THE FRAME so the skeleton PageFrame
+             * draws at a click, in place of the page, reads the same shapes and
+             * views the page will (components/section-frame).
+             */}
+            <RememberedViewsProvider views={views}>
+              <RememberedShapesProvider tenantId={tenantId} shapes={shapes}>
+                <PageFrame>{children}</PageFrame>
+              </RememberedShapesProvider>
+            </RememberedViewsProvider>
           </div>
         </div>
 

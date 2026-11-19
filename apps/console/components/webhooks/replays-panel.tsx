@@ -3,6 +3,7 @@
 import * as React from "react"
 import { MorphSelect } from "@repo/ui/components/morph-select/morph-select"
 import { History, RotateCcw, Send, SkipForward } from "lucide-react"
+import { Bone, BoneScope } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
 import { Checkbox } from "@repo/ui/components/checkbox/checkbox"
 import { Input } from "@repo/ui/components/i10/input"
@@ -81,13 +82,18 @@ const MODES: Record<
 
 export function ReplaysPanel({
   endpoint,
-  initial,
-  eventTypes,
+  initial = [],
+  eventTypes = [],
+  count = 0,
+  loading = false,
 }: {
-  endpoint: WebhookEndpoint
-  initial: WebhookReplay[]
-  eventTypes: string[]
+  endpoint?: WebhookEndpoint
+  initial?: WebhookReplay[]
+  eventTypes?: string[]
+  count?: number
+  loading?: boolean
 }) {
+  const isLoaded = !loading && endpoint !== undefined
   const [replays, setReplays] = React.useState(initial)
   const [mode, setMode] = React.useState<ReplayMode | null>(null)
 
@@ -109,7 +115,7 @@ export function ReplaysPanel({
   const activeKey = active.map((r) => r.id).join(",")
 
   React.useEffect(() => {
-    if (!activeKey) return
+    if (!isLoaded || !endpoint || !activeKey) return
     const ids = activeKey.split(",")
     let cancelled = false
     const timer = setInterval(async () => {
@@ -128,10 +134,13 @@ export function ReplaysPanel({
       cancelled = true
       clearInterval(timer)
     }
-  }, [activeKey, endpoint.id])
+  }, [activeKey, endpoint, isLoaded])
 
-  const off = !endpoint.enabled
-  const polling = endpoint.kind === "polling"
+  const rows: (WebhookReplay | undefined)[] = isLoaded
+    ? replays
+    : Array.from({ length: count }, () => undefined)
+  const off = isLoaded ? !endpoint.enabled : false
+  const polling = isLoaded ? endpoint.kind === "polling" : false
 
   return (
     <div className="space-y-8">
@@ -157,7 +166,7 @@ export function ReplaysPanel({
                   key={m}
                   variant={m === "recover" ? "primary" : "secondary"}
                   size="sm"
-                  disabled={off}
+                  disabled={off || !isLoaded}
                   onClick={() => setMode(m)}
                 >
                   {MODES[m].icon}
@@ -171,7 +180,7 @@ export function ReplaysPanel({
       <Section>
         <SectionTitle>Replays</SectionTitle>
         <SectionContent>
-          {replays.length === 0 ? (
+          {rows.length === 0 ? (
             <EmptyState
               icon={<Send />}
               title="No replays yet"
@@ -179,15 +188,17 @@ export function ReplaysPanel({
             />
           ) : (
             <ul className="divide-y overflow-hidden rounded-xl border">
-              {replays.map((replay) => (
-                <ReplayRow key={replay.id} replay={replay} />
+              {rows.map((replay, i) => (
+                <BoneScope key={replay?.id ?? i} id={`replay-${i}`} unit>
+                  <ReplayRow replay={replay} />
+                </BoneScope>
               ))}
             </ul>
           )}
         </SectionContent>
       </Section>
 
-      {mode && (
+      {mode && endpoint && (
         <StartReplayDialog
           endpointId={endpoint.id}
           mode={mode}
@@ -205,59 +216,79 @@ export function ReplaysPanel({
   )
 }
 
-function ReplayRow({ replay }: { replay: WebhookReplay }) {
-  const running = replay.status === "queued" || replay.status === "running"
+function ReplayRow({ replay }: { replay?: WebhookReplay }) {
+  const running = replay?.status === "queued" || replay?.status === "running"
   const what =
-    replay.kind === "replay_missing"
+    replay?.kind === "replay_missing"
       ? "Missing events"
-      : replay.filter.statuses?.length === 1 && replay.filter.statuses[0] === "failed"
+      : replay?.filter.statuses?.length === 1 && replay.filter.statuses[0] === "failed"
         ? "Failed deliveries"
-        : replay.filter.statuses?.includes("delivered")
+        : replay?.filter.statuses?.includes("delivered")
           ? "Delivered and failed deliveries"
           : "Deliveries"
   /*
    * ⚠ NO PERCENTAGE: the API counts what it has looked at and what it has
    * sent, not a total up front, so the counts below are the progress.
+   *
+   * ⚠ WHETHER IT IS RUNNING, AND WHETHER IT FAILED, ARE DATA: they sit inside the
+   * progress bone, which a skeleton can draw but cannot size.
    */
   return (
     <li className="space-y-2 px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <div className="min-w-0">
-          <p className="text-sm font-medium">
-            {what}
-            {replay.filter.event_type && (
-              <span className="ml-1.5 font-mono text-xs text-muted-foreground">
-                {replay.filter.event_type}
-              </span>
+          <Bone id="what" width={140} lineHeight={20}>
+            {replay && (
+              <p className="text-sm font-medium">
+                {what}
+                {replay.filter.event_type && (
+                  <span className="ml-1.5 font-mono text-xs text-muted-foreground">
+                    {replay.filter.event_type}
+                  </span>
+                )}
+              </p>
             )}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            <Time iso={replay.filter.since} mode="exact" /> to{" "}
-            <Time iso={replay.filter.until} mode="exact" />
-          </p>
+          </Bone>
+          <Bone id="time" width={200} lineHeight={16}>
+            {replay && (
+              <p className="text-xs text-muted-foreground">
+                <Time iso={replay.filter.since} mode="exact" /> to{" "}
+                <Time iso={replay.filter.until} mode="exact" />
+              </p>
+            )}
+          </Bone>
         </div>
-        <Status status={replay.status} />
+        <Bone id="status" shape="box" width={76} height={20} radius={9999} inline>
+          {replay && <Status status={replay.status} />}
+        </Bone>
       </div>
-      {running && <Running />}
-      <p className="tabular text-xs text-muted-foreground">
-        {formatNumber(replay.queued)} sent of {formatNumber(replay.examined)} looked at
-        {replay.finished_at ? (
-          <>
-            {" "}
-            · finished <Time iso={replay.finished_at} />
-          </>
-        ) : (
-          <>
-            {" "}
-            · started <Time iso={replay.created_at} />
-          </>
+      <Bone id="progress" as="div" width={180} lineHeight={16}>
+        {replay && (
+          <div className="space-y-2">
+            {running && <Running />}
+            <p className="tabular text-xs text-muted-foreground">
+              {formatNumber(replay.queued)} sent of {formatNumber(replay.examined)}{" "}
+              looked at
+              {replay.finished_at ? (
+                <>
+                  {" "}
+                  · finished <Time iso={replay.finished_at} />
+                </>
+              ) : (
+                <>
+                  {" "}
+                  · started <Time iso={replay.created_at} />
+                </>
+              )}
+            </p>
+            {replay.error && (
+              <p className="rounded-md border border-danger/25 bg-danger/5 px-2 py-1 font-mono text-2xs text-danger">
+                {replay.error}
+              </p>
+            )}
+          </div>
         )}
-      </p>
-      {replay.error && (
-        <p className="rounded-md border border-danger/25 bg-danger/5 px-2 py-1 font-mono text-2xs text-danger">
-          {replay.error}
-        </p>
-      )}
+      </Bone>
     </li>
   )
 }

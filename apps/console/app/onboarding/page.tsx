@@ -1,29 +1,24 @@
 import type { Metadata } from "next"
 import { cookies } from "next/headers"
 import { currentUser } from "@clerk/nextjs/server"
-import Link from "next/link"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
-import { Onboarding } from "@/components/onboarding/onboarding"
+import { OnboardingView } from "@/components/onboarding-view"
 import { Wordmark } from "@/components/wordmark"
-import { JoinSuggestions } from "@/components/join-suggestions"
-import { Arrivals } from "@/components/arrivals"
 import { tryApi } from "@/lib/api"
 import { DRAFT_COOKIES, draftFor } from "@/lib/add-domain-draft"
 import { restoreDraft } from "@/lib/add-domain-restore"
 import { ONBOARDING_STEP_COOKIE, stepFor } from "@/lib/onboarding-step"
+import { onboardingShape, type OnboardingData } from "@/lib/shapes/onboarding"
 import type {
   BillingState,
   Domain,
   DomainSummary,
   Me,
-  OnboardingState,
   PlanSummary,
   TransferOffer,
 } from "@/lib/types"
-import { ArrivalQuery } from "@/components/arrival-query"
 import { ARRIVAL } from "@/lib/arrival"
 import { readArrival } from "@/lib/arrival-server"
-import { OPEN_RAIL_ON_CURRENT } from "@/lib/step-rail"
 
 export const metadata: Metadata = { title: "Set up" }
 
@@ -117,7 +112,7 @@ export default async function OnboardingPage({
             ? "Your workspace is still being created. Give it a moment and reload."
             : me.error.message}
         </p>
-        <ButtonLink href="/onboarding" variant="secondary">
+        <ButtonLink href="/onboarding" variant="secondary" size="sm">
           Try again
         </ButtonLink>
       </main>
@@ -152,132 +147,36 @@ export default async function OnboardingPage({
     draftFor(jar.get(DRAFT_COOKIES.onboarding.name)?.value, tenantOf?.id ?? ""),
   )
 
-  return (
-    /*
-     * ⚠ EXACTLY ONE SCREEN TALL, AND IT DOES NOT SCROLL (2026-10-03). The steps
-     * scroll inside their own column and the stage beside them stays put -
-     * an overscroll at either end no longer drags the stage or the header.
-     */
-    <main className="flex h-dvh flex-col overflow-hidden">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b px-6">
-        <Link href="/" className="flex items-center">
-          <Wordmark />
-        </Link>
-        {/*
-         * ⚠ "Skip to the dashboard" RATHER THAN A CLOSE ICON. An × in the corner
-         * of a set-up flow reads as "cancel", and people hesitate over whether
-         * cancelling loses the domain they just added. Words say what happens.
-         *
-         * ⚠ AND IT POINTS AT `/onboarding/skip`, NOT AT `/`. The console layout
-         * redirects here while `should_onboard` is true, so a link straight to
-         * `/` was bounced back to this page - the button appeared to do nothing
-         * at all. The route records the choice for this browser and then sends
-         * them on. See lib/onboarding-skip.ts.
-         *
-         * ⚠ IT IS A PLAIN `<a>`, AND THAT IS THE WHOLE OF THE THIRD VERSION OF
-         * THIS BUG. `next/link` does not navigate - it fetches the destination
-         * as an RSC payload and swaps the tree client-side. `/onboarding/skip`
-         * is a ROUTE HANDLER: it has no RSC payload, it answers a 307 with a
-         * `Set-Cookie`, and the router has nothing it can do with that. So the
-         * click fired `GET /onboarding/skip?_rsc=…`, the router discarded the
-         * answer, the URL never changed and the cookie was never kept - the
-         * button did nothing, again, for the third distinct reason, having twice
-         * been fixed for doing nothing.
-         *
-         * A real anchor is a real navigation: the browser follows the redirect
-         * and applies the cookie on the way through. `next/link` is for pages;
-         * this is not one.
-         */}
-        {noWorkspace ? null : creating ? (
-          // Nothing exists yet, so leaving is simply going back.
-          <ButtonLink href="/" variant="ghost" size="sm">
-            Cancel
-          </ButtonLink>
-        ) : (
-          <ButtonLink href="/onboarding/skip" variant="ghost" size="sm" native>
-            Skip to the dashboard
-          </ButtonLink>
-        )}
-      </header>
+  const resumeStep = creating
+    ? "workspace"
+    : stepFor(jar.get(ONBOARDING_STEP_COOKIE)?.value, tenantOf?.id ?? "")
 
-      <ArrivalQuery names={[ARRIVAL.checkout, ARRIVAL.published]} />
-      {/*
-       * ⚠ FIRST, ABOVE SET-UP (2026-10-12). Somebody who signed up with an
-       * @acme.com address may be setting up a workspace they do not need:
-       * Acme's is already here, one request away.
-       */}
-      {/*
-       * ⚠ "You joined Acme" COMES BEFORE EVERYTHING (#326): somebody auto-joined
-       * at sign-up has a workspace already, and only needs to be told.
-       */}
-      {noWorkspace && (
-        <Arrivals className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
-      )}
-      {process.env.CLERK_PUBLISHABLE_KEY && (
-        <JoinSuggestions className="mx-auto w-full max-w-2xl shrink-0 px-6 pt-6" />
-      )}
-      <Onboarding
-        creating={creating}
-        state={
-          creating
-            ? {
-                ...(me.ok ? me.data.onboarding : NO_ONBOARDING),
-                step: "workspace",
-                completed_at: null,
-                facts: {
-                  has_domain: false,
-                  has_verified_domain: false,
-                  has_api_key: false,
-                },
-              }
-            : me.ok
-              ? me.data.onboarding
-              : NO_ONBOARDING
-        }
-        workspaceName={creating ? "" : (tenantOf?.name ?? "")}
-        tenantId={creating ? "" : (tenantOf?.id ?? "")}
-        domains={creating ? [] : list}
-        focus={!creating && focus?.ok ? focus.data : null}
-        domainDraft={creating ? null : domainDraft}
-        offers={offers.ok ? offers.data.data : []}
-        userEmail={
-          me.ok
-            ? me.data.user.email
-            : (person?.primaryEmailAddress?.emailAddress ?? null)
-        }
-        firstName={person?.firstName ?? null}
-        plans={plans.ok ? plans.data.data : []}
-        billing={billing}
-        checkoutId={checkoutId}
-        // Somebody who joined a workspace its owner already named and set up.
-        joined={
-          !creating &&
-          me.ok &&
-          me.data.access !== null &&
-          me.data.access.role !== "owner"
-        }
-        // ⚠ HOW THEY LAND ON THE STEP THEY LEFT FROM - a reload, or a return
-        // from checkout, would otherwise re-derive from the facts and put
-        // somebody who paid on the last step back on "Verify". From a cookie,
-        // not `?step=`; see lib/onboarding-step.ts.
-        resumeStep={
-          creating
-            ? "workspace"
-            : stepFor(jar.get(ONBOARDING_STEP_COOKIE)?.value, tenantOf?.id ?? "")
-        }
-        // ⚠ ONLY THIS WORKSPACE'S DOMAINS COUNT. The cookie is the browser's,
-        // not the account's, so it carries the ids the DNS callback published
-        // and the list above - scoped by the API to whoever is signed in - is
-        // what decides which of them are news here. See the callback handler.
-        justPublished={
-          creating ? 0 : ownPublished(published, domains.ok ? domains.data.data : [])
-        }
-      />
-      {/* Opens a resumed flow on its step before the first paint. */}
-      {/* eslint-disable-next-line react/no-danger -- static script, no user data */}
-      <script dangerouslySetInnerHTML={{ __html: OPEN_RAIL_ON_CURRENT }} />
-    </main>
-  )
+  const justPublished = creating
+    ? 0
+    : ownPublished(published, domains.ok ? domains.data.data : [])
+
+  const data: OnboardingData = {
+    me: me.ok ? me.data : null,
+    tenantOf,
+    billing,
+    domains: creating ? [] : list,
+    focus: !creating && focus?.ok ? focus.data : null,
+    domainDraft: creating ? null : domainDraft,
+    offers: offers.ok ? offers.data.data : [],
+    userEmail: me.ok
+      ? me.data.user.email
+      : (person?.primaryEmailAddress?.emailAddress ?? null),
+    firstName: person?.firstName ?? null,
+    plans: plans.ok ? plans.data.data : [],
+    checkoutId,
+    resumeStep: resumeStep ?? "workspace",
+    justPublished,
+    creating,
+    noWorkspace,
+    clerkOn,
+  }
+
+  return <OnboardingView shape={onboardingShape.of(data)} data={data} />
 }
 
 /** Billing for a workspace that does not exist yet: nothing. */
@@ -287,16 +186,6 @@ const NO_BILLING: BillingState = {
   anchor: null,
   overage_enabled: false,
   storage_bytes: null,
-}
-
-/** Set-up state for a workspace that does not exist yet: the very start. */
-const NO_ONBOARDING: OnboardingState = {
-  step: "workspace",
-  completed_at: null,
-  last_onboarded_plan: null,
-  use_case: null,
-  should_onboard: true,
-  facts: { has_domain: false, has_verified_domain: false, has_api_key: false },
 }
 
 /**
