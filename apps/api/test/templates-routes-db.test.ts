@@ -137,6 +137,88 @@ suite("console template routes", () => {
     expect(after).toMatchObject({ status: 200, body: { folder_id: null } })
   })
 
+  it("nests folders and moves folders with templates, with the contract's errors", async () => {
+    const outer = (await call("POST", "/template-folders", { name: "Outer" })).body
+    const inner = await call("POST", "/template-folders", {
+      name: "Inner",
+      parent_id: outer.id,
+    })
+    expect(inner).toMatchObject({
+      status: 201,
+      body: { parent_id: outer.id, folders: 0 },
+    })
+    expect(
+      (
+        await call("POST", "/template-folders", {
+          name: "Inner",
+          parent_id: outer.id,
+        })
+      ).status,
+    ).toBe(409)
+    expect(
+      (
+        await call("POST", "/template-folders", {
+          name: "Lost",
+          parent_id: crypto.randomUUID(),
+        })
+      ).status,
+    ).toBe(404)
+
+    const listed = (await call("GET", "/templates")).body.folders as {
+      id: string
+      parent_id: string | null
+      folders: number
+    }[]
+    expect(listed.find((f) => f.id === outer.id)).toMatchObject({
+      parent_id: null,
+      folders: 1,
+    })
+
+    const empty = await call("POST", "/templates/move", { folder_id: null })
+    expect(empty.status).toBe(422)
+
+    const cycle = await call("POST", "/templates/move", {
+      folder_ids: [outer.id],
+      folder_id: inner.body.id,
+    })
+    expect(cycle).toMatchObject({
+      status: 422,
+      body: { name: "template_folder_cycle" },
+    })
+
+    const t = await call("POST", "/templates", { name: "nested-one" })
+    const moved = await call("POST", "/templates/move", {
+      ids: [t.body.id],
+      folder_ids: [inner.body.id],
+      folder_id: null,
+    })
+    expect(moved).toMatchObject({ status: 200, body: { moved: 1, moved_folders: 1 } })
+
+    const clash = await call("POST", "/templates/move", {
+      folder_ids: [inner.body.id],
+      folder_id: outer.id,
+    })
+    expect(clash.status).toBe(200)
+    const dup = (await call("POST", "/template-folders", { name: "Inner" })).body
+    const blocked = await call("POST", "/templates/move", {
+      folder_ids: [dup.id],
+      folder_id: outer.id,
+    })
+    expect(blocked).toMatchObject({
+      status: 409,
+      body: { name: "template_folder_already_exists" },
+    })
+    expect(blocked.body.message).toContain("Inner")
+    expect(
+      (
+        await call("POST", "/templates/move", {
+          folder_ids: [crypto.randomUUID()],
+          folder_id: null,
+        })
+      ).status,
+    ).toBe(404)
+  })
+
   it("checks every draft field: a sender on a verified domain, reply-to, variables, the alias", async () => {
     const t = (await call("POST", "/templates", { name: "receipt" })).body
     const patch = (body: unknown) => call("PATCH", `/templates/${t.id}`, body)

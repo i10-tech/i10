@@ -45,6 +45,23 @@ async function workspace() {
   return id
 }
 
+/** A folder made through the store, or a thrown error naming why not. */
+async function folderIn(t: string, name: string, parent: string | null = null) {
+  const made = await store.createFolder(t, name, parent)
+  if (made === null) throw new Error("no such parent")
+  if ("conflict" in made) throw new Error("conflict")
+  return made
+}
+
+const into = (
+  folderId: string | null,
+  what: { templates?: string[]; folders?: string[] },
+) => ({
+  templateIds: what.templates ?? [],
+  folderIds: what.folders ?? [],
+  folderId,
+})
+
 suite("templates", () => {
   beforeAll(() => {
     owner = postgres(URL!, { max: 2, onnotice: () => {} })
@@ -483,9 +500,13 @@ suite("template folders, defaults and fallbacks", () => {
 
   it("files templates in folders, moves them, and keeps them when a folder goes", async () => {
     const t = await workspace()
-    const folder = await store.createFolder(t, "Onboarding")
-    if ("conflict" in folder) throw new Error("conflict")
-    expect(folder).toMatchObject({ name: "Onboarding", templates: 0 })
+    const folder = await folderIn(t, "Onboarding")
+    expect(folder).toMatchObject({
+      name: "Onboarding",
+      templates: 0,
+      folders: 0,
+      parent_id: null,
+    })
     expect(await store.createFolder(t, "Onboarding")).toEqual({ conflict: true })
 
     const a = await store.create(t, { name: "a", folderId: folder.id })
@@ -494,9 +515,14 @@ suite("template folders, defaults and fallbacks", () => {
     expect(a.folder_id).toBe(folder.id)
     expect(b.folder_id).toBeNull()
 
-    expect(await store.move(t, [b.id], folder.id)).toBe(1)
+    expect(await store.move(t, into(folder.id, { templates: [b.id] }))).toEqual({
+      moved: 1,
+      movedFolders: 0,
+    })
     expect((await store.folders(t))[0]).toMatchObject({ templates: 2 })
-    expect(await store.move(t, [a.id], null)).toBe(1)
+    expect(await store.move(t, into(null, { templates: [a.id] }))).toMatchObject({
+      moved: 1,
+    })
 
     const renamed = await store.renameFolder(t, folder.id, "Welcome")
     expect(renamed && "name" in renamed && renamed.name).toBe("Welcome")
@@ -510,11 +536,171 @@ suite("template folders, defaults and fallbacks", () => {
     ])
   })
 
+  const tree = async (t: string) =>
+    Object.fromEntries(
+      (await store.folders(t)).map((f) => [f.name, f.parent_id] as const),
+    )
+
+  it("nests folders: a name is unique per parent, and counts are direct only", async () => {
+    const t = await workspace()
+    const a = await folderIn(t, "a")
+    const b = await folderIn(t, "b")
+    const authInA = await folderIn(t, "auth", a.id)
+    const authInB = await folderIn(t, "auth", b.id)
+    expect(authInA.parent_id).toBe(a.id)
+    expect(authInB.parent_id).toBe(b.id)
+    expect(await store.createFolder(t, "auth", a.id)).toEqual({ conflict: true })
+    expect(await store.createFolder(t, "a")).toEqual({ conflict: true })
+
+    const made = await store.create(t, { name: "deep", folderId: authInA.id })
+    if ("conflict" in made) throw new Error("conflict")
+    const listed = Object.fromEntries((await store.folders(t)).map((f) => [f.id, f]))
+    expect(listed[a.id]).toMatchObject({ templates: 0, folders: 1 })
+    expect(listed[authInA.id]).toMatchObject({ templates: 1, folders: 0 })
+
+    const renamed = await store.renameFolder(t, authInB.id, "auth")
+    expect(renamed).toMatchObject({ name: "auth" })
+    await folderIn(t, "billing", b.id)
+    expect(await store.renameFolder(t, authInB.id, "billing")).toEqual({
+      conflict: true,
+    })
+  })
+
+  it("moves templates and folders together, and treats what is already there as a no-op", async () => {
+    const t = await workspace()
+    const dest = await folderIn(t, "dest")
+    const x = await folderIn(t, "x")
+    const y = await folderIn(t, "y", dest.id)
+    const tpl = await store.create(t, { name: "one" })
+    if ("conflict" in tpl) throw new Error("conflict")
+
+    const result = await store.move(
+      t,
+      into(dest.id, { templates: [tpl.id], folders: [x.id, y.id] }),
+    )
+    expect(result).toEqual({ moved: 1, movedFolders: 1 })
+    expect(await tree(t)).toMatchObject({ x: dest.id, y: dest.id })
+    expect((await store.get(t, tpl.id))?.folder_id).toBe(dest.id)
+
+    expect(await store.move(t, into(null, { folders: [x.id] }))).toEqual({
+      moved: 0,
+      movedFolders: 1,
+    })
+    expect((await tree(t)).x).toBeNull()
+  })
+
+  it("refuses a cycle, into itself or into a descendant, and moves nothing", async () => {
+    const t = await workspace()
+    const a = await folderIn(t, "a")
+    const b = await folderIn(t, "b", a.id)
+    const c = await folderIn(t, "c", b.id)
+    const other = await folderIn(t, "other")
+    const tpl = await store.create(t, { name: "stay" })
+    if ("conflict" in tpl) throw new Error("conflict")
+
+    expect(await store.move(t, into(a.id, { folders: [a.id] }))).toEqual({
+      cycle: true,
+    })
+    expect(
+      await store.move(
+        t,
+        into(c.id, { templates: [tpl.id], folders: [other.id, a.id] }),
+      ),
+    ).toEqual({ cycle: true })
+    expect(await tree(t)).toEqual({ a: null, b: a.id, c: b.id, other: null })
+    expect((await store.get(t, tpl.id))?.folder_id).toBeNull()
+  })
+
+  it("a refused move leaves no copy of a shared template behind", async () => {
+    const t = await workspace()
+    const a = await folderIn(t, "a")
+    const b = await folderIn(t, "b", a.id)
+    const shared = (await store.list(t)).find((x) => x.shared)
+    if (!shared) throw new Error("no shared template listed")
+    const own = async () => (await store.list(t)).filter((x) => !x.shared).length
+    const before = await own()
+
+    expect(
+      await store.move(t, into(b.id, { templates: [shared.id], folders: [a.id] })),
+    ).toEqual({ cycle: true })
+    expect(await own()).toBe(before)
+  })
+
+  it("refuses a name clash on move, naming the folder, and moves nothing", async () => {
+    const t = await workspace()
+    const dest = await folderIn(t, "dest")
+    await folderIn(t, "auth", dest.id)
+    const one = await folderIn(t, "auth")
+    const p = await folderIn(t, "p")
+    const q = await folderIn(t, "q")
+    const twinP = await folderIn(t, "twin", p.id)
+    const twinQ = await folderIn(t, "twin", q.id)
+    const free = await folderIn(t, "free")
+    const tpl = await store.create(t, { name: "stay" })
+    if ("conflict" in tpl) throw new Error("conflict")
+
+    expect(
+      await store.move(
+        t,
+        into(dest.id, { templates: [tpl.id], folders: [free.id, one.id] }),
+      ),
+    ).toEqual({ conflict: { name: "auth" } })
+    expect(await store.move(t, into(null, { folders: [twinP.id, twinQ.id] }))).toEqual({
+      conflict: { name: "twin" },
+    })
+    expect((await tree(t)).free).toBeNull()
+    expect((await store.get(t, tpl.id))?.folder_id).toBeNull()
+  })
+
+  it("serialises opposite moves, so two at once never form a cycle", async () => {
+    const t = await workspace()
+    for (let round = 0; round < 12; round++) {
+      const a = await folderIn(t, `a${round}`)
+      const b = await folderIn(t, `b${round}`)
+      const results = await Promise.all([
+        store.move(t, into(b.id, { folders: [a.id] })),
+        store.move(t, into(a.id, { folders: [b.id] })),
+      ])
+      expect(results.filter((r) => "movedFolders" in r)).toHaveLength(1)
+      expect(results.filter((r) => "cycle" in r)).toHaveLength(1)
+    }
+  })
+
+  it("deletes a folder by lifting its templates and subfolders to its parent, renaming a clash", async () => {
+    const t = await workspace()
+    const top = await folderIn(t, "top")
+    await folderIn(t, "auth", top.id)
+    await folderIn(t, "auth 2", top.id)
+    const wrap = await folderIn(t, "wrap", top.id)
+    const lifted = await folderIn(t, "auth", wrap.id)
+    const namesake = await folderIn(t, "wrap", wrap.id)
+    const tpl = await store.create(t, { name: "kept", folderId: wrap.id })
+    if ("conflict" in tpl) throw new Error("conflict")
+
+    expect(await store.deleteFolder(t, wrap.id)).toBe(true)
+
+    const after = await store.folders(t)
+    expect(after.find((f) => f.id === wrap.id)).toBeUndefined()
+    expect(after.find((f) => f.id === lifted.id)).toMatchObject({
+      name: "auth 3",
+      parent_id: top.id,
+    })
+    expect(after.find((f) => f.id === namesake.id)).toMatchObject({
+      name: "wrap",
+      parent_id: top.id,
+    })
+    expect((await store.get(t, tpl.id))?.folder_id).toBe(top.id)
+
+    // A top-level folder's contents land at the top level.
+    expect(await store.deleteFolder(t, top.id)).toBe(true)
+    expect((await store.get(t, tpl.id))?.folder_id).toBeNull()
+    expect((await tree(t))["auth 3"]).toBeNull()
+  })
+
   it("gives each folder its three newest templates, never a removed one", async () => {
     const t = await workspace()
-    const folder = await store.createFolder(t, "Newest")
-    const empty = await store.createFolder(t, "Empty")
-    if ("conflict" in folder || "conflict" in empty) throw new Error("conflict")
+    const folder = await folderIn(t, "Newest")
+    const empty = await folderIn(t, "Empty")
     expect(empty.preview).toEqual([])
 
     const ids: string[] = []
@@ -555,12 +741,17 @@ suite("template folders, defaults and fallbacks", () => {
   it("never files a template under another workspace's folder", async () => {
     const mine = await workspace()
     const theirs = await workspace()
-    const foreign = await store.createFolder(theirs, "Private")
-    if ("conflict" in foreign) throw new Error("conflict")
+    const foreign = await folderIn(theirs, "Private")
     const t = await store.create(mine, { name: "x" })
     if ("conflict" in t) throw new Error("conflict")
 
-    expect(await store.move(mine, [t.id], foreign.id)).toBeNull()
+    expect(await store.move(mine, into(foreign.id, { templates: [t.id] }))).toEqual({
+      notFound: true,
+    })
+    expect(await store.createFolder(mine, "Child", foreign.id)).toBeNull()
+    expect(await store.move(mine, into(null, { folders: [foreign.id] }))).toEqual({
+      notFound: true,
+    })
     expect(await store.update(mine, t.id, { folderId: foreign.id })).toEqual({
       problem: "No folder with that id.",
     })

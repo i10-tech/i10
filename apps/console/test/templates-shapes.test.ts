@@ -63,7 +63,19 @@ describe("templates shapes", () => {
       {
         id: "f1",
         name: "Onboarding",
+        parent_id: null,
         templates: 1,
+        folders: 1,
+        preview: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        id: "f1a",
+        name: "Welcome series",
+        parent_id: "f1",
+        templates: 0,
+        folders: 0,
         preview: [],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -102,7 +114,7 @@ describe("templates shapes", () => {
       })
       expect(shape).toEqual({
         templates: 1, // only root templates (folder_id === null)
-        folders: 1,
+        folders: 1, // only top-level folders: "Welcome series" is inside Onboarding
         view: "table",
         github: true,
         githubInstalled: false,
@@ -202,7 +214,9 @@ describe("templates shapes", () => {
         folder: {
           id: "f1",
           name: "Receipts",
+          parent_id: null,
           templates: 2,
+          folders: 0,
           preview: [],
           created_at: "",
           updated_at: "",
@@ -267,12 +281,45 @@ describe("templates shapes", () => {
       })
       expect(shape).toEqual({
         templates: 2,
+        folders: 0,
+        depth: 0,
+        view: "grid",
+      })
+    })
+
+    test("counts the folders directly inside, and how many are above", () => {
+      const f = (id: string, parent_id: string | null) => ({
+        id,
+        name: id,
+        parent_id,
+        templates: 0,
+        folders: 0,
+        preview: [],
+        created_at: "",
+        updated_at: "",
+      })
+      const folders = [f("a", null), f("b", "a"), f("c", "b"), f("d", "b"), f("e", "a")]
+      const shape = templateFolderShape("b").of({
+        folderId: "b",
+        folder: folders[1]!,
+        templates: [],
+        folders,
+        view: "table",
+      })
+      expect(shape).toEqual({ templates: 0, folders: 2, depth: 1, view: "table" })
+    })
+
+    test("a cookie from before folders nested still parses, as a flat folder", () => {
+      expect(folderDef.parse({ templates: 4, view: "grid" })).toEqual({
+        templates: 4,
+        folders: 0,
+        depth: 0,
         view: "grid",
       })
     })
 
     test("round-trips through cookie for folder", () => {
-      const shape = { templates: 5, view: "table" as const }
+      const shape = { templates: 5, folders: 2, depth: 3, view: "table" as const }
       const cookies = [
         { name: "i10-shape-templates-f1", value: encodeShape("t1", shape) },
       ]

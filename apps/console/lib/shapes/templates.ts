@@ -20,7 +20,7 @@ export interface TemplatesData {
 export interface TemplatesShape {
   /** Number of root templates to draw, capped; 0 is empty. */
   templates: number
-  /** Number of folders to draw, capped. */
+  /** Number of top-level folders to draw, capped. */
   folders: number
   /** Grid vs table layout. */
   view: "grid" | "table"
@@ -75,7 +75,10 @@ export const templatesShape = defineShape<TemplatesShape, TemplatesData>({
       templates.filter((t) => t.folder_id === null).length,
       MAX_SKELETON_ROWS,
     ),
-    folders: Math.min(folders.length, MAX_SKELETON_ROWS),
+    folders: Math.min(
+      folders.filter((f) => f.parent_id === null).length,
+      MAX_SKELETON_ROWS,
+    ),
     view: view ?? "grid",
     github: github?.configured === true,
     githubInstalled: (github?.installations.length ?? 0) > 0,

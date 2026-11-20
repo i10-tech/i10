@@ -65,7 +65,7 @@ export async function loadTemplateFolder(
   return {
     folderId: id,
     folder,
-    templates: result.data.data.filter((t) => t.folder_id === id),
+    templates: result.data.data,
     folders,
     assetsOrigin: result.data.assets_origin ?? null,
     view: view === "table" ? "table" : "grid",

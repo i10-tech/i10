@@ -5,7 +5,6 @@ import Link from "next/link"
 import { motion } from "motion/react"
 import {
   Copy,
-  FolderInput,
   FolderMinus,
   FolderPlus,
   Info,
@@ -24,18 +23,17 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@repo/ui/components/i10/menu"
 import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { cn } from "cn"
 import { seedShape } from "@/components/list/remembered-shapes"
 import { FolderArt } from "@/components/templates/folder-art"
+import { MoveSubmenu } from "@/components/templates/move-items"
 import { TemplateSnapshot } from "@/components/template-snapshot"
 import { templateDetailShape } from "@/lib/shapes/template-detail"
 import { STATUS_LABEL, hrefOf, isEditable, statusOf, titleOf } from "@/lib/templates"
+import { contentsOf, moveTargets, type MoveTarget } from "@/lib/template-tree"
 import type { TemplateFolder, TemplateSummary } from "@/lib/types"
 import { Time } from "@/components/time"
 
@@ -64,9 +62,6 @@ export function RenameIcon() {
   return <TextCursorInput className="text-muted-foreground" />
 }
 
-/** The MIME type a dragged template travels as. */
-export const DRAG_TYPE = "application/x-i10-templates"
-
 export type TemplateAction =
   | "details"
   | "rename"
@@ -85,8 +80,9 @@ const SPRING = { type: "spring", stiffness: 500, damping: 38, mass: 0.6 } as con
  * ⚠ THE WHOLE CARD IS THE LINK, AND THE CHECKBOX AND MENU SIT ABOVE IT. They
  * stop the click from reaching the link, so ticking a card never opens it.
  *
- * ⚠ DRAGGABLE ONTO A FOLDER. A selection drags as a whole: dragging one of
- * three ticked cards moves all three, as a file manager does.
+ * ⚠ LIFTED BY THE LIST'S GESTURE, NOT BY THE BROWSER. Nothing here is
+ * `draggable`: components/list/gesture reads `data-select-key` on the item
+ * around it, and `dragging` dims the card while it is carried.
  */
 export function TemplateCard({
   template,
@@ -95,8 +91,6 @@ export function TemplateCard({
   selecting = false,
   onSelect,
   onAction,
-  onDragStart,
-  onDragEnd,
   dragging = false,
   loading = false,
 }: {
@@ -107,8 +101,7 @@ export function TemplateCard({
   selecting?: boolean
   onSelect?: (event: { shiftKey: boolean; checked: boolean }) => void
   onAction?: (action: TemplateAction) => void
-  onDragStart?: (event: React.DragEvent) => void
-  onDragEnd?: () => void
+  /** Carried by a gesture: dimmed where it sits. */
   dragging?: boolean
   loading?: boolean
 }) {
@@ -144,7 +137,10 @@ export function TemplateCard({
           className="absolute inset-0"
         >
           {t && (
-            <motion.div className="absolute inset-x-[13%] top-[16%] -bottom-2 overflow-hidden rounded-t-lg shadow-[0_0_0_1px_rgb(0_0_0/0.06),0_8px_24px_-12px_rgb(0_0_0/0.25)]">
+            <motion.div
+              data-drag-art
+              className="absolute inset-x-[13%] top-[16%] -bottom-2 overflow-hidden rounded-t-lg shadow-[0_0_0_1px_rgb(0_0_0/0.06),0_8px_24px_-12px_rgb(0_0_0/0.25)]"
+            >
               <TemplateSnapshot templateId={t.id} stamp={t.updated_at} lazy />
             </motion.div>
           )}
@@ -219,9 +215,6 @@ export function TemplateCard({
     >
       <Link
         href={hrefOf(t)}
-        draggable
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
         onPointerEnter={() => seedTemplate(t)}
         onFocus={() => seedTemplate(t)}
         className={linkClass}
@@ -252,7 +245,7 @@ export function TemplateCard({
         <Checkbox
           checked={selected}
           aria-label={`Select ${titleOf(t)}`}
-          className="size-5 rounded-md bg-background/90 shadow-sm backdrop-blur"
+          className="size-5 touch-none rounded-md bg-background/90 shadow-sm backdrop-blur"
           onClick={(event) => {
             event.stopPropagation()
             onSelect?.({ shiftKey: event.shiftKey, checked: !selected })
@@ -313,7 +306,7 @@ export function TemplateMenu({
   align?: "start" | "end"
 }) {
   const t = template
-  const others = folders.filter((f) => f.id !== t.folder_id)
+  const targets = moveTargets(folders, { folderIds: [], homes: [t.folder_id] })
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange} modal={false}>
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
@@ -341,21 +334,7 @@ export function TemplateMenu({
           <FolderPlus />
           Create folder
         </DropdownMenuItem>
-        {others.length > 0 && (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <FolderInput />
-              Move to folder
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-72 w-48 overflow-y-auto">
-              {others.map((f) => (
-                <DropdownMenuItem key={f.id} onSelect={() => onAction({ move: f.id })}>
-                  <span className="truncate">{f.name}</span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        )}
+        <MoveSubmenu targets={targets} onMove={(to) => onAction({ move: to })} />
         {t.folder_id && (
           <DropdownMenuItem onSelect={() => onAction("remove-from-folder")}>
             <FolderMinus />
@@ -373,7 +352,8 @@ export function TemplateMenu({
 }
 
 /**
- * A folder in the grid. Opens on click; takes templates dropped on it.
+ * A folder in the grid. Opens on click; takes what is dropped on it, and is
+ * itself lifted by the list's gesture, so it can be moved into another folder.
  */
 export function FolderCard({
   folder,
@@ -381,11 +361,9 @@ export function FolderCard({
   selecting = false,
   onSelect,
   over = false,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
+  dragging = false,
+  targets = [],
+  onMove,
   onRename,
   onDelete,
   loading = false,
@@ -395,17 +373,13 @@ export function FolderCard({
   /** Something is ticked, so every checkbox shows and a click ticks. */
   selecting?: boolean
   onSelect?: (event: { shiftKey: boolean; checked: boolean }) => void
+  /** A gesture has something over it: it swells and takes the ring. */
   over?: boolean
-  /**
-   * Given only when the folder is ticked along with templates: dragging it then
-   * carries them. A folder never moves, so otherwise it is not draggable and
-   * a press that moves does nothing (a link would drag its URL).
-   */
-  onDragStart?: (event: React.DragEvent) => void
-  onDragEnd?: () => void
-  onDragOver?: (event: React.DragEvent) => void
-  onDragLeave?: () => void
-  onDrop?: (event: React.DragEvent) => void
+  /** Carried by a gesture: dimmed where it sits. */
+  dragging?: boolean
+  /** Where it may be moved: `lib/template-tree.moveTargets`. */
+  targets?: MoveTarget[]
+  onMove?: (to: string | null) => void
   onRename?: () => void
   onDelete?: () => void
   loading?: boolean
@@ -421,7 +395,7 @@ export function FolderCard({
     menu && "bg-muted/60",
     selected &&
       "bg-primary/[0.06] ring-2 ring-primary/70 group-hover/card:bg-primary/[0.08]",
-    over && "bg-primary/[0.06] ring-2 ring-primary/70",
+    over && "bg-primary/10 ring-2 ring-primary/60",
   )
   // ⚠ ONE BODY FOR THE CARD AND ITS SKELETON, as on a template. The same tile a
   // template sits in, so a row of folders and templates lines up - name under name.
@@ -438,12 +412,15 @@ export function FolderCard({
         >
           {folder && (
             <div className="grid size-full items-end justify-items-center pb-[5%]">
-              <FolderArt
-                count={folder.templates}
-                raised={hover || menu}
-                over={over}
-                previews={folder.preview}
-              />
+              <div data-drag-art className="w-[60%]">
+                <FolderArt
+                  count={folder.templates}
+                  raised={hover || menu}
+                  over={over}
+                  previews={folder.preview}
+                  className="w-full"
+                />
+              </div>
             </div>
           )}
         </Bone>
@@ -458,11 +435,7 @@ export function FolderCard({
         </Bone>
         <Bone id="count" lineHeight={16} width="35%" className="mt-1">
           {folder && (
-            <p className="text-xs text-muted-foreground">
-              {folder.templates === 0
-                ? "Empty"
-                : `${folder.templates} template${folder.templates === 1 ? "" : "s"}`}
-            </p>
+            <p className="text-xs text-muted-foreground">{contentsOf(folder)}</p>
           )}
         </Bone>
       </div>
@@ -483,7 +456,10 @@ export function FolderCard({
     <motion.div
       layout
       initial={{ opacity: 0, scale: 0.97 }}
-      animate={{ opacity: 1, scale: 1 }}
+      animate={{
+        opacity: dragging ? 0.45 : 1,
+        scale: over ? 1.03 : dragging ? 0.97 : 1,
+      }}
       exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.15 } }}
       transition={SPRING}
       className="group/card relative"
@@ -493,12 +469,6 @@ export function FolderCard({
     >
       <Link
         href={`/templates/folder/${encodeURIComponent(folder.id)}`}
-        draggable={Boolean(onDragStart)}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
         onFocus={() => setHover(true)}
         onBlur={() => setHover(false)}
         data-navigates={selecting ? "false" : undefined}
@@ -526,7 +496,7 @@ export function FolderCard({
         <Checkbox
           checked={selected}
           aria-label={`Select ${folder.name}`}
-          className="size-5 rounded-md bg-background/90 shadow-sm backdrop-blur"
+          className="size-5 touch-none rounded-md bg-background/90 shadow-sm backdrop-blur"
           onClick={(event) => {
             event.stopPropagation()
             onSelect?.({ shiftKey: event.shiftKey, checked: !selected })
@@ -554,7 +524,7 @@ export function FolderCard({
               </Button>
             </DropdownMenuTrigger>
           </Tooltip>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem asChild>
               <Link href={`/templates/folder/${encodeURIComponent(folder.id)}`}>
                 <SquareArrowOutUpRight />
@@ -565,6 +535,7 @@ export function FolderCard({
               <RenameIcon />
               Rename folder
             </DropdownMenuItem>
+            <MoveSubmenu targets={targets} onMove={(to) => onMove?.(to)} />
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>
               <Trash2 />

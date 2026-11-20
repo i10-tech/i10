@@ -3457,8 +3457,16 @@ export const templateSource = core.enum("template_source", [
  * filling it is exactly how people organise. A row also gives a folder an id
  * the URL can carry and a name that can change without touching its templates.
  *
- * ⚠ FLAT. One level, like Resend's; an upload's `transactional/auth` directory
- * becomes a folder named exactly that.
+ * ⚠ NESTED THROUGH `parent_id`, NULL FOR THE TOP LEVEL. A name is unique per
+ * parent, so `auth` may exist under two folders but not twice under one. An
+ * upload's `transactional/auth` directory is still ONE top-level folder named
+ * exactly that; it is never split into a path.
+ *
+ * ⚠ NULLS NOT DISTINCT, OR THE TOP LEVEL ALLOWS DUPLICATES. A plain unique
+ * index treats two null parents as different, so `auth` could be made twice at
+ * the top. Cycles are not a constraint the database can state; the store
+ * refuses them, under a per-workspace lock (see `move` in
+ * templates/store.ts).
  */
 export const templateFolders = core.table(
   "template_folders",
@@ -3469,12 +3477,22 @@ export const templateFolders = core.table(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * The folder this one sits in; null for the top level.
+     *
+     * ⚠ NO ACTION, NOT SET NULL. The store moves a deleted folder's children up
+     * itself, renaming on a clash; a SET NULL would send them to the top level
+     * and could trip the unique name.
+     */
+    parentId: uuid("parent_id").references((): AnyPgColumn => templateFolders.id),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("template_folders_tenant_name_uq").on(t.tenantId, t.name),
+    unique("template_folders_tenant_parent_name_uq")
+      .on(t.tenantId, t.parentId, t.name)
+      .nullsNotDistinct(),
     // Inline rather than `tenantPolicy`, which is declared further down.
     pgPolicy("template_folders_tenant", {
       for: "all",

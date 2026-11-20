@@ -87,6 +87,9 @@ suite("console shapes db queries", () => {
     const [folderA] = await owner`insert into core.template_folders (tenant_id, name)
                                   values (${tenantA}, 'Transactional')
                                   returning id`
+    // a folder inside it: drawn on its parent's page, so the top level ignores it
+    await owner`insert into core.template_folders (tenant_id, name, parent_id)
+                values (${tenantA}, 'Auth', ${folderA!.id})`
     // top-level template (folder_id is null)
     await owner`insert into core.templates (tenant_id, name, folder_id, kind, source)
                 values (${tenantA}, 'top1', null, 'html', 'upload')`
@@ -187,6 +190,7 @@ suite("console shapes db queries", () => {
     expect(counts.broadcastStatuses).toBe(2)
     // templates: 1 top-level, apart from the folder. The one filed in a folder is IGNORED, and tenantB is IGNORED.
     expect(counts.templates).toBe(1)
+    // template folders: the top-level one; the folder inside it is IGNORED.
     expect(counts.templateFolders).toBe(1)
     expect(counts.trustedTemplates).toBe(2)
     expect(counts.githubInstallations).toBe(1)
