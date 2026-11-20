@@ -16,7 +16,7 @@ import { ResendButton } from "../_components/resend-button"
 import { PasswordRules as PasswordChecklist } from "@repo/ui/components/i10/password-rules"
 import { PasswordInput } from "@repo/ui/components/i10/password-input"
 import { StepHeading } from "../_components/step-heading"
-import { messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { isAddressRefused, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
 import { freshenAfterSignUp } from "../_lib/devices"
 import { PasskeyCue } from "@repo/ui/components/i10/passkey-cue"
 import { finalizeWithoutLeaving, holdSince, leaveFor } from "../_lib/finish"
@@ -117,6 +117,7 @@ const SEGMENT: Record<Stage, Stage> = {
 export function SignUpForm({
   afterAuthUrl,
   onSignIn,
+  onAddressRefused,
   redirectRaw,
   providers,
   abilities,
@@ -126,6 +127,8 @@ export function SignUpForm({
   afterAuthUrl: string
   /** "Already have an account? Sign in" - back to the email box, in place. */
   onSignIn: () => void
+  /** Clerk refused the address at "Create account": back to the email box with `reason`. */
+  onAddressRefused: (email: string, reason: string) => void
   redirectRaw?: string
   providers: SsoProvider[]
   /** What this Clerk instance can actually finish. See _lib/environment.ts. */
@@ -414,6 +417,17 @@ export function SignUpForm({
       })
 
       if (created.error) {
+        /*
+         * ⚠ A REFUSED ADDRESS GOES BACK TO THE EMAIL STEP, NOT INTO A TOAST
+         * HERE. Only Clerk knows its disposable list, so this is the first
+         * moment anybody can say no to one - and a toast on the password
+         * screen left the person to work out that the address, typed three
+         * screens ago, was the problem. See `isAddressRefused`.
+         */
+        if (isAddressRefused(created.error)) {
+          onAddressRefused(email.trim(), messageFor(created.error))
+          return
+        }
         toast.error(messageFor(created.error))
         setBusy(null)
         return

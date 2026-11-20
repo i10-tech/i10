@@ -12,12 +12,8 @@ import { emailProblem } from "@repo/ui/checks"
 import { StepStage } from "@repo/ui/components/i10/step-stage"
 import { PasswordInput } from "@repo/ui/components/i10/password-input"
 import { OAuthButtons, useSsoStart } from "../_components/oauth-buttons"
-import {
-  isPasswordNotAllowed,
-  isUnknownIdentifier,
-  messageFor,
-  TRANSPORT_FAILURE,
-} from "../_lib/errors"
+import { isPasswordNotAllowed, messageFor, TRANSPORT_FAILURE } from "../_lib/errors"
+import { identify } from "../_lib/identify"
 import { passkeyFailure, passkeyReference } from "../_lib/passkey"
 import { finalizeAndLeave } from "../_lib/finish"
 import { stepBack, useStepHistory } from "../_lib/step-history"
@@ -102,6 +98,8 @@ export function SignInForm({
   redirectRaw,
   providers,
   onUnknownIdentifier,
+  blockSubaddresses = false,
+  refusal = null,
   savedAccounts = 0,
 }: {
   afterAuthUrl: string
@@ -122,6 +120,10 @@ export function SignInForm({
    * was one box for both doors.
    */
   onUnknownIdentifier?: (identifier: string) => void
+  /** `block_email_subaddresses` on the Clerk instance. See _lib/identify.ts. */
+  blockSubaddresses?: boolean
+  /** An address the sign-up was refused for, shown under the box it goes back into. */
+  refusal?: { email: string; reason: string } | null
   /** Saved-account cards to hold room for while they load. */
   savedAccounts?: number
 }) {
@@ -165,7 +167,21 @@ export function SignInForm({
     "signin.stage",
     "identifier",
   )
-  const [identifier, setIdentifier] = useResumable("signin.identifier", "")
+  // A refused address comes back into the box it was typed in.
+  const [identifier, setIdentifier] = useResumable(
+    "signin.identifier",
+    refusal?.email ?? "",
+  )
+  /**
+   * The address a sign-up would be refused for, and why. Shown under the box
+   * while it still holds that address; editing it away clears the red, and
+   * the field's own submit guard stops the same address being sent again.
+   */
+  const [refused, setRefused] = useState(refusal)
+  const refusedHere =
+    refused && refused.email.toLowerCase() === identifier.trim().toLowerCase()
+      ? refused.reason
+      : undefined
   /**
    * The company SSO the address belongs to, from home realm discovery (#340).
    * `required`: the only way on is "Continue with <name> SSO". `available`: it
@@ -523,30 +539,41 @@ export function SignInForm({
         setBusy(null)
         return
       }
-      const { error } = await signIn.create({ identifier: value })
-      if (error) {
-        /*
-         * ⚠ "NO SUCH ACCOUNT" IS THE OTHER ANSWER, NOT AN ERROR. On a page with
-         * one box serving both doors, an unknown address is how somebody says
-         * they are new - and a red toast telling them so, on a form that then
-         * sits there unchanged, is the interface refusing to do the obvious
-         * next thing.
-         */
-        // An unknown address at an SSO domain is offered its company's sign-in
-        // before a sign-up: JIT may create the account there.
-        if (found?.mode === "available" && isUnknownIdentifier(error)) {
-          setIdentifier(value)
-          setDirection("forward")
-          setStage("sso")
-          setBusy(null)
-          return
-        }
-        if (onUnknownIdentifier && isUnknownIdentifier(error)) {
-          onUnknownIdentifier(value)
-          setBusy(null)
-          return
-        }
-        toast.error(messageFor(error))
+      /*
+       * ⚠ "NO SUCH ACCOUNT" IS THE OTHER ANSWER, NOT AN ERROR. On a page with
+       * one box serving both doors, an unknown address is how somebody says
+       * they are new - and a red toast telling them so, on a form that then
+       * sits there unchanged, is the interface refusing to do the obvious
+       * next thing. An unknown address at an SSO domain is offered its
+       * company's sign-in before a sign-up: JIT may create the account there.
+       * One Clerk would refuse a sign-up for stops here instead - see
+       * _lib/identify.ts for the order.
+       */
+      const next = await identify(value, {
+        find: async (address) => (await signIn.create({ identifier: address })).error,
+        ssoAvailable: found?.mode === "available",
+        blockSubaddresses,
+      })
+      if (next.to === "refused") {
+        setIdentifier(value)
+        setRefused({ email: value, reason: next.reason })
+        setBusy(null)
+        return
+      }
+      if (next.to === "sso") {
+        setIdentifier(value)
+        setDirection("forward")
+        setStage("sso")
+        setBusy(null)
+        return
+      }
+      if (next.to === "sign-up" && onUnknownIdentifier) {
+        onUnknownIdentifier(value)
+        setBusy(null)
+        return
+      }
+      if (next.to !== "account") {
+        toast.error(messageFor(next.error))
         setBusy(null)
         return
       }
@@ -988,6 +1015,7 @@ export function SignInForm({
                   onChange={(event) => setIdentifier(event.target.value)}
                   check={emailProblem}
                   required="Enter your email address."
+                  refused={refusedHere}
                   // See the sign-up form: a validation message is drawn into the
                   // gap FieldGroup already leaves, not given a row of its own.
                   reserveHint={false}

@@ -64,6 +64,7 @@ export interface ClerkEnvironment {
     social?: Record<string, SocialEntry>
     attributes?: Record<string, AttributeEntry>
     password_settings?: PasswordSettings
+    restrictions?: { block_email_subaddresses?: { enabled?: boolean } }
   }
 }
 
@@ -168,6 +169,19 @@ export async function passwordRules(): Promise<PasswordRules> {
     requireUppercase: settings.require_uppercase === true,
     requireLowercase: settings.require_lowercase === true,
   }
+}
+
+/**
+ * Whether Clerk refuses a sign-up for a second address on an inbox that
+ * already has an account (see `inboxBase` in _lib/identify.ts).
+ *
+ * ⚠ `false` WHEN THE ENVIRONMENT CANNOT BE READ. The email step then skips its
+ * early check, and Clerk still refuses at "Create account", which sends the
+ * person back to the email step with Clerk's reason.
+ */
+export async function blocksEmailSubaddresses(): Promise<boolean> {
+  const restrictions = (await clerkEnvironment())?.user_settings?.restrictions
+  return restrictions?.block_email_subaddresses?.enabled === true
 }
 
 /**
