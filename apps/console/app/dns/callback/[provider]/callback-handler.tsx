@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
 import { TextShimmer } from "@repo/ui/components/text-shimmer/text-shimmer"
 import { ButtonLink } from "@repo/ui/components/i10/button-link"
-import { handOverPath, runDnsConnect } from "@/lib/dns-connect"
+import {
+  handOverPath,
+  providerLabel,
+  runDnsConnect,
+  stageProblem,
+  type DomainResult,
+} from "@/lib/dns-connect"
 import { ARRIVAL, setArrival } from "@/lib/arrival"
 
 /**
@@ -47,26 +53,19 @@ export function CallbackHandler({
   const [message, setMessage] = React.useState<string | null>(
     providerError ?? (code && state ? null : "That link is missing its authorisation."),
   )
-  const [published, setPublished] = React.useState(0)
   /**
-   * ⚠ RECORDS SOMEBODY ELSE'S RECORDS ARE IN THE WAY, AND STOPS. Publishing a
-   * delegation shadows anything already at those names - a DMARC record is the
-   * usual one - and removing it is never ours to decide unprompted. The API
-   * answers 409 without writing, and this reports it rather than retrying with
-   * `replace_conflicts`, which would be deciding by hand what the dialog on the
-   * domain page exists to ask.
-   */
-  const [blocked, setBlocked] = React.useState<string[]>([])
-  /**
-   * Records written, but the check that follows them did not answer.
+   * How each unfinished domain ended, one line each.
    *
-   * ⚠ IT IS A SEPARATE LIST BECAUSE IT USED TO BE SILENTLY FOLDED INTO
-   * SUCCESS. A verify that answered 500 still counted as published, so this
-   * screen said "we proved the domains are yours" - two claims, one measured
-   * and one invented - and the person had no reason to look any further. The
-   * failing call stayed invisible until they pressed Verify by hand.
+   * ⚠ ONE LINE PER DOMAIN, NOT ONE VERDICT FOR THE RUN. This screen used to pick
+   * a single sentence by priority, so a refused domain hid a published one, and
+   * "we proved the domains are yours" was said whenever anything was written -
+   * including after a check that did not answer.
+   *
+   * ⚠ AND IT STILL NEVER REMOVES ANYBODY'S RECORDS. A domain with records in the
+   * way ends `blocked`, and the domain page's dialog is what asks.
    */
-  const [unchecked, setUnchecked] = React.useState<string[]>([])
+  const [results, setResults] = React.useState<DomainResult[]>([])
+  const providerName = providerLabel(provider)
 
   React.useEffect(() => {
     if (started.current) return
@@ -91,8 +90,8 @@ export function CallbackHandler({
         provider,
         code,
         state,
-        onPhase: (next) => {
-          if (next === "checking") setPhase("publishing")
+        onDomain: (_, stage) => {
+          if (stage.kind === "publishing") setPhase("publishing")
         },
       })
       if (!outcome.ok) {
@@ -101,15 +100,16 @@ export function CallbackHandler({
         return
       }
 
-      setPublished(outcome.publishedIds.length)
-      setBlocked(outcome.blocked)
-      setUnchecked(outcome.unchecked)
+      setResults(outcome.results)
       router.refresh()
 
       const returnTo = outcome.returnTo
-      if (returnTo && outcome.blocked.length === 0 && outcome.unchecked.length === 0) {
+      const clean = outcome.results.every(
+        (r) => r.stage.kind === "published" && r.stage.checked,
+      )
+      if (returnTo && clean) {
         const [path = "/"] = returnTo.split("?")
-        setArrival(ARRIVAL.published, outcome.publishedIds.join(","), path)
+        setArrival(ARRIVAL.published, outcome.results.map((r) => r.id).join(","), path)
         router.replace(returnTo)
         return
       }
@@ -124,7 +124,7 @@ export function CallbackHandler({
         <>
           <TextShimmer as="p" className="text-sm text-muted-foreground">
             {phase === "working"
-              ? `Finishing the connection with ${provider}`
+              ? `Finishing the connection with ${providerName}`
               : "Publishing your records and checking them"}
           </TextShimmer>
         </>
@@ -132,38 +132,34 @@ export function CallbackHandler({
 
       {phase === "done" && (
         <>
-          <CheckCircle2 className="size-8 text-success" />
+          {results.some((r) => r.stage.kind !== "published") ? (
+            <AlertTriangle className="size-8 text-warning" />
+          ) : (
+            <CheckCircle2 className="size-8 text-success" />
+          )}
           <div>
             <p className="text-sm font-medium">
-              {published > 0 ? "Connected and published" : "Connected"}
+              {results.some((r) => r.stage.kind === "published")
+                ? "Connected and published"
+                : "Connected"}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {blocked.length > 0 ? (
-                <>
-                  We published what we could, but {blocked.join(", ")} already{" "}
-                  {blocked.length === 1 ? "has records" : "have records"} at the names
-                  we need. Open {blocked.length === 1 ? "it" : "them"} to choose whether
-                  to replace {blocked.length === 1 ? "them" : "those"}.
-                </>
-              ) : unchecked.length > 0 ? (
-                <>
-                  We added the records at {provider}, but the check that follows them
-                  did not answer for {unchecked.join(", ")}. The records are in place -
-                  open the domain and press Verify, and tell us if that keeps failing.
-                </>
-              ) : published > 0 ? (
-                <>
-                  We added the records at {provider} and proved the domains are yours.
-                  Amazon&rsquo;s own check is the last step and usually lands within a
-                  few minutes - the domain pages update themselves.
-                </>
+            <div className="mt-1 space-y-1 text-sm text-muted-foreground">
+              {results.length === 0 ? (
+                <p>
+                  We can publish records for domains hosted at {providerName}. Add a
+                  domain and we will do the rest.
+                </p>
               ) : (
-                <>
-                  We can publish records for domains hosted at {provider}. Add a domain
-                  and we will do the rest.
-                </>
+                results.map((r) => (
+                  <p key={r.id}>
+                    {stageProblem(r.stage, r.name, providerName) ??
+                      (r.stage.kind === "published" && r.stage.checked
+                        ? `We added the records for ${r.name} at ${providerName}. Verification usually follows within a few minutes - the domain page updates itself.`
+                        : `We added the records for ${r.name} at ${providerName}, but the check that follows did not answer. Open the domain and press Verify, and tell us if that keeps failing.`)}
+                  </p>
+                ))
               )}
-            </p>
+            </div>
           </div>
           <ButtonLink href="/domains">Back to domains</ButtonLink>
         </>

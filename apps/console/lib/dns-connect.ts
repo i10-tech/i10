@@ -1,6 +1,6 @@
 "use client"
 
-import { finishDnsConnect, listDomains } from "@/lib/actions"
+import { finishDnsConnect } from "@/lib/actions"
 import { activateDomain } from "@/lib/domain-activation"
 import type { Domain } from "@/lib/types"
 
@@ -19,20 +19,78 @@ import type { Domain } from "@/lib/types"
  * finds it, and nothing about the code ever reaches a URL or a cookie.
  */
 
-export type ConnectPhase = "connecting" | "publishing" | "checking" | "done" | "failed"
+/** Where the connection itself is. `done` is the whole run finishing. */
+export type ConnectPhase = "connecting" | "connected" | "done" | "failed"
+
+/**
+ * Where one domain is: on its way, or how it ended.
+ *
+ * ⚠ ONE VALUE PER DOMAIN, BECAUSE "THE RUN IS DONE" SAYS NOTHING ABOUT ANY OF
+ * THEM. The run used to report one phase for everything, and a page showed
+ * "Publishing your records" ticked for a domain whose records the provider
+ * had refused - the run had finished, so every row read as passed.
+ */
+export type DomainStage =
+  | { kind: "publishing" }
+  | { kind: "checking" }
+  /** Written. `checked` is whether the check that followed answered. */
+  | { kind: "published"; checked: boolean }
+  /** Records already at the names we need. Nothing was written. */
+  | { kind: "blocked" }
+  /** The connection holds no zone for this domain. Nothing was attempted. */
+  | { kind: "unreachable"; zones: string[] }
+  /** Refused. `reason` is what the API said, or our catch-all when it said nothing. */
+  | { kind: "failed"; reason: string }
+
+export type FinalStage = Exclude<
+  DomainStage,
+  { kind: "publishing" } | { kind: "checking" }
+>
+
+export interface DomainResult {
+  id: string
+  name: string
+  stage: FinalStage
+}
 
 export interface ConnectOutcome {
   ok: boolean
   error?: string
   returnTo: string | null
-  /** Domains whose records we wrote. */
-  publishedIds: string[]
-  /** Domains with existing records in the way. */
-  blocked: string[]
-  /** Published, but the check after it did not answer. */
-  unchecked: string[]
+  results: DomainResult[]
   /** The last answer about each published domain, to show without a refetch. */
   domains: Domain[]
+}
+
+export const PUBLISH_FAILED =
+  "Something went wrong while publishing your records. Try again, or add the records by hand from the domain page."
+
+const CONNECT_FAILED = "The connection could not be finished. Try connecting again."
+
+/**
+ * The sentence for a domain that ended without its records, or null when they
+ * were written.
+ */
+export function stageProblem(
+  stage: FinalStage,
+  domainName: string,
+  providerName: string,
+): string | null {
+  switch (stage.kind) {
+    case "published":
+      return null
+    case "blocked":
+      return `${domainName} already has records at the names we need, so we published nothing. Press Publish records on the domain page to see them and choose whether to replace them.`
+    case "unreachable":
+      return (
+        `This ${providerName} connection cannot see ${domainName}, so we published nothing. ` +
+        (stage.zones.length > 0
+          ? `It reaches ${stage.zones.join(", ")}.`
+          : "It reaches no zones at all.")
+      )
+    case "failed":
+      return stage.reason
+  }
 }
 
 const LEAVING = "i10.dns-connect.leaving"
@@ -119,53 +177,83 @@ export async function runDnsConnect({
   code,
   state,
   onPhase,
+  onDomain,
 }: {
   provider: string
   code: string
   state: string
   onPhase?: (phase: ConnectPhase) => void
+  onDomain?: (domainId: string, stage: DomainStage) => void
 }): Promise<ConnectOutcome> {
-  const empty = { publishedIds: [], blocked: [], unchecked: [], domains: [] }
   onPhase?.("connecting")
   const connected = await finishDnsConnect({ provider, code, state })
   if (!connected.ok) {
     const detail =
       typeof connected.body?.detail === "string" ? connected.body.detail : null
+    const error = connected.error || CONNECT_FAILED
     onPhase?.("failed")
     return {
       ok: false,
-      error: detail ? `${connected.error} (${detail})` : connected.error,
+      error: detail ? `${error} (${detail})` : error,
       returnTo: null,
-      ...empty,
+      results: [],
+      domains: [],
     }
   }
-
-  onPhase?.("publishing")
-  const listed = await listDomains()
-  const pending = listed.ok
-    ? listed.data.data.filter((domain) => domain.status !== "verified")
-    : []
+  /*
+   * ⚠ CHECKED, NOT ASSUMED: THE API IS A SEPARATE DEPLOY. One that predates
+   * `pending` answers without it, and reading it as "nothing to publish" would
+   * say "Connected" over domains nobody touched.
+   */
+  if (!Array.isArray(connected.data.pending)) {
+    onPhase?.("failed")
+    return {
+      ok: false,
+      error: CONNECT_FAILED,
+      returnTo: null,
+      results: [],
+      domains: [],
+    }
+  }
+  onPhase?.("connected")
 
   const outcome: ConnectOutcome = {
     ok: true,
     returnTo: connected.data.return_to ?? null,
-    ...empty,
+    results: [],
+    domains: [],
   }
-  for (const domain of pending) {
+  const settle = (domain: { id: string; name: string }, stage: FinalStage) => {
+    outcome.results.push({ id: domain.id, name: domain.name, stage })
+    onDomain?.(domain.id, stage)
+  }
+
+  for (const domain of connected.data.pending) {
+    if (domain.zone === null) {
+      settle(domain, { kind: "unreachable", zones: connected.data.zones })
+      continue
+    }
     const activation = await activateDomain({
       domainId: domain.id,
       provider,
-      onStage: (stage) => onPhase?.(stage),
+      onStage: (stage) => onDomain?.(domain.id, { kind: stage }),
     })
-    if (activation.kind === "conflicts") {
-      outcome.blocked.push(domain.name)
-      continue
+    switch (activation.kind) {
+      case "conflicts":
+        settle(domain, { kind: "blocked" })
+        break
+      case "failed":
+        settle(domain, { kind: "failed", reason: activation.reason || PUBLISH_FAILED })
+        break
+      case "verified":
+        outcome.domains.push(activation.domain)
+        settle(domain, { kind: "published", checked: true })
+        break
+      case "published":
+        if (activation.domain) outcome.domains.push(activation.domain)
+        settle(domain, { kind: "published", checked: activation.checked })
+        break
     }
-    if (activation.kind === "failed") continue
-    outcome.publishedIds.push(domain.id)
-    if (activation.domain) outcome.domains.push(activation.domain)
-    if (activation.kind === "published" && !activation.checked)
-      outcome.unchecked.push(domain.name)
   }
   onPhase?.("done")
   return outcome

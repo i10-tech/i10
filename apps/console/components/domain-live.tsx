@@ -4,6 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Bone } from "@repo/ui/components/bone/bone"
 import { ConnectProgress, type ConnectView } from "@/components/connect-progress"
+import { DelegationNote } from "@/components/delegation-note"
 import { DetailHero } from "@/components/detail-hero"
 import { DnsRecordsCard } from "@/components/dns-records"
 import { Journey } from "@/components/journey"
@@ -118,19 +119,18 @@ export function DomainLiveProvider({
    */
   const router = useRouter()
   const [connect, setConnect] = React.useState<ConnectView | null>(null)
+  // ⚠ READ WHEN EACH STAGE ARRIVES, NOT WHEN THE RUN STARTS: set-up can adopt
+  // its domain while the run is under way.
+  const idRef = React.useRef(id)
+  React.useEffect(() => {
+    idRef.current = id
+  }, [id])
   React.useEffect(() => {
     if (loading) return
     const returned = takeReturned()
     if (!returned) return
     void Promise.resolve()
-      .then(() =>
-        setConnect({
-          name: returned.name,
-          phase: "connecting",
-          blocked: [],
-          unchecked: [],
-        }),
-      )
+      .then(() => setConnect({ name: returned.name, phase: "connecting", stage: null }))
       .then(() =>
         runDnsConnect({
           provider: returned.provider,
@@ -140,6 +140,10 @@ export function DomainLiveProvider({
             if (phase === "done" || phase === "failed") return
             setConnect((view) => (view ? { ...view, phase } : view))
           },
+          onDomain: (domainId, stage) => {
+            if (domainId !== idRef.current) return
+            setConnect((view) => (view ? { ...view, stage } : view))
+          },
         }),
       )
       .then((outcome) => {
@@ -148,9 +152,7 @@ export function DomainLiveProvider({
             ? {
                 ...view,
                 phase: outcome.ok ? "done" : "failed",
-                error: outcome.error,
-                blocked: outcome.blocked,
-                unchecked: outcome.unchecked,
+                ...(outcome.error ? { error: outcome.error } : {}),
               }
             : view,
         )
@@ -276,8 +278,7 @@ export function LiveDomainJourney({
     ? domainNotice(domain.status, domain.delegated, {
         // Records we wrote, or ones they told us they added: either
         // way it is DNS being waited on, not them.
-        publishedByUs:
-          publishedByUs || connect !== null || Boolean(domain.records_added_at),
+        publishedByUs: publishedByUs || recordsAdded(domain, connect),
         recordsBelow,
       })
     : fallback
@@ -295,12 +296,45 @@ export function LiveDomainJourney({
         <>
           <Reveal show={Boolean(connect)} spacing="">
             {connect && domain && (
-              <ConnectProgress view={connect} verified={domain.status === "verified"} />
+              <ConnectProgress
+                view={connect}
+                domainName={domain.name}
+                verified={domain.status === "verified"}
+              />
             )}
           </Reveal>
           {children}
         </>
       }
+    />
+  )
+}
+
+/**
+ * Whether this domain's records are known to be in place: they said so, a
+ * publish stored it, or the connection on this page just wrote them.
+ */
+function recordsAdded(domain: Domain, connect: ConnectView | null): boolean {
+  return Boolean(domain.records_added_at) || connect?.stage?.kind === "published"
+}
+
+/**
+ * The delegation diagnosis, told whether the records were added.
+ *
+ * ⚠ SILENT WHILE A CONNECTION IS STILL WORKING. The progress card says what is
+ * happening; the note could only guess, and its guess was "waiting for the
+ * records to appear" while they were being refused.
+ */
+export function LiveDelegationNote(
+  props: Omit<React.ComponentProps<typeof DelegationNote>, "added">,
+) {
+  const live = useLiveDomain()
+  const connect = live?.connect ?? null
+  if (connect?.phase === "connecting" || connect?.phase === "connected") return null
+  return (
+    <DelegationNote
+      {...props}
+      added={live?.domain ? recordsAdded(live.domain, connect) : false}
     />
   )
 }

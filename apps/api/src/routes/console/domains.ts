@@ -407,6 +407,10 @@ export function mountDomains(app: Hono, d: ConsoleDeps): void {
 
     switch (result.status) {
       case "published":
+        // ⚠ THE SAME FACT AS "I'VE ADDED THE RECORDS", AND STORED THE SAME WAY.
+        // Without it the page could not tell records we wrote from records
+        // nobody wrote, and said "waiting for them to appear" to both.
+        await d.domains.markRecordsAdded(tenantId, domain.id)
         return c.json({ status: "published", ...result.outcome })
 
       case "needs_confirmation":

@@ -189,7 +189,11 @@ export interface DomainStore {
     dns_checked_at: string | null
     records_added_at: string | null
   } | null>
-  /** "I've added the records" was pressed - see `records_added_at`. The first press stays. */
+  /**
+   * The records were added: "I've added the records" was pressed, or we
+   * published them at a connected provider - see `records_added_at`. The first
+   * time stays.
+   */
   markRecordsAdded(tenantId: string, id: string): Promise<void>
 }
 

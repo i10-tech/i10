@@ -714,10 +714,16 @@ export async function finishDnsConnect(input: {
 }) {
   return run(
     () =>
-      api<import("@/lib/types").DnsConnection & { return_to?: string }>(
-        `/console/dns/callback/${encodeURIComponent(input.provider)}`,
-        { method: "POST", body: { code: input.code, state: input.state } },
-      ),
+      api<
+        import("@/lib/types").DnsConnection & {
+          /** Every unverified domain, with the zone this connection reaches for it. */
+          pending: { id: string; name: string; zone: string | null }[]
+          return_to?: string
+        }
+      >(`/console/dns/callback/${encodeURIComponent(input.provider)}`, {
+        method: "POST",
+        body: { code: input.code, state: input.state },
+      }),
     ["/domains", "/settings"],
   )
 }

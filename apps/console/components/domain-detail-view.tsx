@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/ta
 import { MetaGrid } from "@/components/detail-hero"
 import {
   DomainLiveProvider,
+  LiveDelegationNote,
   LiveDomainHero,
   LiveDomainJourney,
   LiveDomainRecords,
@@ -29,7 +30,6 @@ import { Time, useExactTime } from "@/components/time"
 import { DomainDangerZone } from "@/components/domain-danger-zone"
 import { DomainTracking } from "@/components/domain-tracking"
 import { DomainMailboxes } from "@/components/domain-mailboxes"
-import { DelegationNote } from "@/components/delegation-note"
 import { PublishRecords } from "@/components/publish-records"
 import { RememberShape, useRecordShape } from "@/components/list/remembered-shapes"
 import {
@@ -190,7 +190,7 @@ export function DomainDetailView({
               <TabsContent value="records" className="m-0 space-y-6">
                 <BoneScope id="records-tab" independent>
                   {shape.delegation && (
-                    <DelegationNote
+                    <LiveDelegationNote
                       domainId={domain?.id}
                       report={data?.delegation ?? undefined}
                       status={shape.status}
