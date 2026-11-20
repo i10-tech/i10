@@ -1,7 +1,11 @@
 import type { Metadata } from "next"
 import { cookies, headers } from "next/headers"
 import { ssoProviders } from "../_lib/providers"
-import { passwordRules, signUpAbilities } from "../_lib/environment"
+import {
+  blocksEmailSubaddresses,
+  passwordRules,
+  signUpAbilities,
+} from "../_lib/environment"
 import { afterAuthUrl } from "../_lib/redirect"
 import { SAVED_COUNT_COOKIE, savedCount } from "../_lib/remembered-cookie"
 import { AuthFlow } from "../_components/auth-flow"
@@ -47,7 +51,7 @@ export default async function Page({
     typeof raw === "string" ? `?redirect_url=${encodeURIComponent(raw)}` : ""
 
   /*
-   * ⚠ ALL THREE READ THE SAME CLERK ENVIRONMENT DOCUMENT AND COST ONE REQUEST.
+   * ⚠ ALL FOUR READ THE SAME CLERK ENVIRONMENT DOCUMENT AND COST ONE REQUEST.
    * Next dedupes identical `fetch`es within a render pass - see
    * _lib/environment.ts, which owns the fetch and its cache.
    *
@@ -58,10 +62,11 @@ export default async function Page({
    * form that renders and then corrects its own password hint, which is the
    * exact bug `passwordRules` exists to prevent.
    */
-  const [providers, abilities, password] = await Promise.all([
+  const [providers, abilities, password, blockSubaddresses] = await Promise.all([
     ssoProviders((await headers()).get("user-agent")),
     signUpAbilities(),
     passwordRules(),
+    blocksEmailSubaddresses(),
   ])
 
   return (
@@ -83,6 +88,7 @@ export default async function Page({
             providers={providers}
             abilities={abilities}
             password={password}
+            blockSubaddresses={blockSubaddresses}
             // Room for the saved-account cards before they load - see
             // _lib/remembered-cookie.ts.
             savedAccounts={savedCount((await cookies()).get(SAVED_COUNT_COOKIE)?.value)}

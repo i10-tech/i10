@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { StepStage } from "@repo/ui/components/i10/step-stage"
 import type { SsoProvider } from "../_lib/providers"
 import { forgetFlow, useResumable } from "../_lib/resume"
@@ -42,6 +43,7 @@ export function AuthFlow({
   providers,
   abilities,
   password,
+  blockSubaddresses,
   savedAccounts = 0,
 }: {
   afterAuthUrl: string
@@ -51,9 +53,20 @@ export function AuthFlow({
   providers: SsoProvider[]
   abilities: SignUpAbilities
   password: PasswordRules
+  /** `block_email_subaddresses` on the Clerk instance. See _lib/identify.ts. */
+  blockSubaddresses: boolean
   /** How many saved-account cards to hold room for while they load. */
   savedAccounts?: number
 }) {
+  /*
+   * ⚠ AN ADDRESS CLERK REFUSED AT "CREATE ACCOUNT", CARRIED BACK TO THE EMAIL
+   * BOX. A disposable domain cannot be known before then (Clerk does not
+   * publish its list), so the sign-up form hands the refusal up and this puts
+   * the person back where the address is typed, with Clerk's reason under it.
+   * Cleared on the way into sign-up, so it never outlives the attempt.
+   */
+  const [refusal, setRefusal] = useState<{ email: string; reason: string } | null>(null)
+
   /*
    * ⚠ `null` UNTIL THE LOOKUP ANSWERS, AND THE ADDRESS IS THE STATE. Holding a
    * mode flag beside the email would be two facts that can disagree; the
@@ -113,6 +126,11 @@ export function AuthFlow({
             forgetFlow()
             stepBack("flow", branch, () => setNewAccount(null))
           }}
+          onAddressRefused={(email, reason) => {
+            forgetFlow()
+            setRefusal({ email, reason })
+            stepBack("flow", branch, () => setNewAccount(null))
+          }}
         />
       ) : (
         <SignInForm
@@ -121,7 +139,12 @@ export function AuthFlow({
           mfaHref={mfaHref}
           redirectRaw={redirectRaw}
           providers={providers}
-          onUnknownIdentifier={setNewAccount}
+          onUnknownIdentifier={(address) => {
+            setRefusal(null)
+            setNewAccount(address)
+          }}
+          blockSubaddresses={blockSubaddresses}
+          refusal={refusal}
           savedAccounts={savedAccounts}
         />
       )}

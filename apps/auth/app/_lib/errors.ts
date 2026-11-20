@@ -42,6 +42,7 @@ interface FieldFailure {
   code: string
   message: string
   longMessage?: string
+  meta?: { paramName?: string }
 }
 
 function fieldFailures(error: FlowError): FieldFailure[] {
@@ -102,6 +103,28 @@ export function isUnknownIdentifier(error: FlowError): boolean {
  */
 export function isPasswordNotAllowed(error: FlowError): boolean {
   return hasCode(error, "strategy_for_user_invalid")
+}
+
+/**
+ * Clerk refusing the email address of a sign-up, as opposed to its password.
+ *
+ * ⚠ TWO SHAPES, BOTH SEEN ON THE DEV INSTANCE ON 2026-11-20. A disposable
+ * domain is `form_email_address_blocked` with `paramName: "email_address"`. A
+ * second address for an inbox that already has an account (see `inboxBase`)
+ * is `not_allowed_access` with no `paramName` at all - the same code the
+ * allowlist and blocklist answer with, which are also about the address.
+ *
+ * ⚠ `form_identifier_exists` IS LEFT OUT ON PURPOSE. That address has an
+ * account, so the email step should sign it in, and marking it refused there
+ * would block the one submit that works.
+ */
+export function isAddressRefused(error: FlowError): boolean {
+  return fieldFailures(error).some(
+    (entry) =>
+      entry.code === "not_allowed_access" ||
+      (entry.meta?.paramName === "email_address" &&
+        entry.code !== "form_identifier_exists"),
+  )
 }
 
 /**
