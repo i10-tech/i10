@@ -51,8 +51,12 @@ export type { DeclaredVariable }
 export interface TemplateFolder {
   id: string
   name: string
-  /** How many templates are filed in it. */
+  /** The folder it sits in; null for the top level. */
+  parent_id: string | null
+  /** How many templates are filed DIRECTLY in it, not in a subfolder. */
   templates: number
+  /** How many subfolders sit directly in it. */
+  folders: number
   /**
    * Up to three of its templates, most recently edited first, for the papers
    * drawn on the folder. `updated_at` is the stamp a picture is cached under.
@@ -209,27 +213,50 @@ export interface TemplatePatch {
   design?: Record<string, unknown> | null
 }
 
+export interface MoveInput {
+  /** Templates to file; ids that are not uuids are ignored. */
+  templateIds: string[]
+  /** Folders to file; an id that is not one of this workspace's refuses the move. */
+  folderIds: string[]
+  /** The destination folder, or null for the top level. */
+  folderId: string | null
+}
+
+export type MoveResult =
+  | { moved: number; movedFolders: number }
+  /** The destination or a listed folder is not this workspace's. */
+  | { notFound: true }
+  /** The destination is one of the moved folders, or inside one. */
+  | { cycle: true }
+  /** A moved folder's name is taken in the destination, or two moved folders share it. */
+  | { conflict: { name: string } }
+
 export interface TemplateStore {
   list(tenantId: string): Promise<TemplateSummary[]>
   folders(tenantId: string): Promise<TemplateFolder[]>
+  /** A folder under `parentId`, or at the top level. Null when the parent is not this workspace's. */
   createFolder(
     tenantId: string,
     name: string,
-  ): Promise<TemplateFolder | { conflict: true }>
+    parentId?: string | null,
+  ): Promise<TemplateFolder | { conflict: true } | null>
+  /** Renames a folder; the name must be free within its own parent. */
   renameFolder(
     tenantId: string,
     id: string,
     name: string,
   ): Promise<TemplateFolder | { conflict: true } | null>
   /**
-   * Deletes a folder. Its templates move to the top level; none is deleted.
+   * Deletes a folder. Nothing in it is deleted: its templates and subfolders
+   * move to its parent, and a subfolder whose name is taken there becomes
+   * `name 2`, `name 3`.
    */
   deleteFolder(tenantId: string, id: string): Promise<boolean>
   /**
-   * Files templates in a folder, or at the top level for null. The number
-   * moved; null when the folder is not this workspace's.
+   * Files templates and folders in a folder, or at the top level for null, in
+   * one transaction: all of it or none of it.
    */
-  move(tenantId: string, ids: string[], folderId: string | null): Promise<number | null>
+  move(tenantId: string, input: MoveInput): Promise<MoveResult>
   /** A copy of the template's draft and live version, named `<name>-copy`. */
   duplicate(tenantId: string, id: string): Promise<TemplateRow | null>
   /** The ids actually deleted. */
@@ -315,13 +342,26 @@ export interface TemplateStore {
 }
 
 /**
- * How many templates a folder holds.
+ * How many templates a folder holds directly.
  *
  * ⚠ THE OUTER TABLE IS NAMED IN FULL. Drizzle writes a column of a one-table
  * select unqualified, and an unqualified `"id"` inside this subquery is the
  * TEMPLATE's id, so every folder counted zero.
  */
 const FOLDER_COUNT = sql<number>`(select count(*)::int from "core"."templates" t where t.folder_id = "core"."template_folders"."id")`
+
+/** How many subfolders sit directly in a folder. Named in full for the same reason. */
+const FOLDER_CHILDREN = sql<number>`(select count(*)::int from "core"."template_folders" c where c.parent_id = "core"."template_folders"."id")`
+
+const FOLDER_COLUMNS = {
+  id: templateFolders.id,
+  name: templateFolders.name,
+  parentId: templateFolders.parentId,
+  createdAt: templateFolders.createdAt,
+  updatedAt: templateFolders.updatedAt,
+  templates: FOLDER_COUNT,
+  folders: FOLDER_CHILDREN,
+}
 
 /** The papers a folder draws. */
 const FOLDER_PREVIEWS = 3
@@ -526,7 +566,10 @@ export function templateStore(
     return row?.id ?? null
   }
 
-  /** The folder of that name, made if there is none. Null for no name. */
+  /**
+   * The TOP-LEVEL folder of that name, made if there is none. Null for no name.
+   * An upload's `transactional/auth` is one folder of exactly that name.
+   */
   const folderNamed = async (
     tx: Tx,
     tenantId: string,
@@ -536,13 +579,33 @@ export function templateStore(
     if (!clean) return null
     await tx
       .insert(templateFolders)
-      .values({ tenantId, name: clean })
-      .onConflictDoNothing({ target: [templateFolders.tenantId, templateFolders.name] })
+      .values({ tenantId, parentId: null, name: clean })
+      .onConflictDoNothing({
+        target: [
+          templateFolders.tenantId,
+          templateFolders.parentId,
+          templateFolders.name,
+        ],
+      })
     const [row] = await tx
       .select({ id: templateFolders.id })
       .from(templateFolders)
-      .where(eq(templateFolders.name, clean))
+      .where(and(eq(templateFolders.name, clean), isNull(templateFolders.parentId)))
     return row?.id ?? null
+  }
+
+  /**
+   * Serialises the workspace's folder moves, deletes and nested creates until
+   * the transaction ends.
+   *
+   * ⚠ WITHOUT IT TWO MOVES FORM A CYCLE. A into B and B into A each pass the
+   * cycle check against the tree as it was, and both commit. The lock makes the
+   * second one check against the first's result.
+   */
+  const lockFolderTree = async (tx: Tx, tenantId: string) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`template-folders:${tenantId}`}, 0))`,
+    )
   }
 
   /**
@@ -610,13 +673,7 @@ export function templateStore(
 
   const folderOf = async (tx: Tx, id: string): Promise<TemplateFolder | null> => {
     const [row] = await tx
-      .select({
-        id: templateFolders.id,
-        name: templateFolders.name,
-        createdAt: templateFolders.createdAt,
-        updatedAt: templateFolders.updatedAt,
-        templates: FOLDER_COUNT,
-      })
+      .select(FOLDER_COLUMNS)
       .from(templateFolders)
       .where(eq(templateFolders.id, id))
     if (!row) return null
@@ -802,13 +859,7 @@ export function templateStore(
     async folders(tenantId) {
       return withTenant(db, tenantId, async (tx) => {
         const rows = await tx
-          .select({
-            id: templateFolders.id,
-            name: templateFolders.name,
-            createdAt: templateFolders.createdAt,
-            updatedAt: templateFolders.updatedAt,
-            templates: FOLDER_COUNT,
-          })
+          .select(FOLDER_COLUMNS)
           .from(templateFolders)
           .orderBy(templateFolders.name)
           .limit(LIST_CAP)
@@ -820,13 +871,20 @@ export function templateStore(
       })
     },
 
-    async createFolder(tenantId, name) {
+    async createFolder(tenantId, name, parentId = null) {
       return withTenant(db, tenantId, async (tx) => {
+        if (parentId !== null) await lockFolderTree(tx, tenantId)
+        const parent = await ownFolder(tx, parentId)
+        if (parentId !== null && parent === null) return null
         const [row] = await tx
           .insert(templateFolders)
-          .values({ tenantId, name: name.trim() })
+          .values({ tenantId, parentId: parent, name: name.trim() })
           .onConflictDoNothing({
-            target: [templateFolders.tenantId, templateFolders.name],
+            target: [
+              templateFolders.tenantId,
+              templateFolders.parentId,
+              templateFolders.name,
+            ],
           })
           .returning({ id: templateFolders.id })
         return row ? (await folderOf(tx, row.id))! : { conflict: true as const }
@@ -837,12 +895,16 @@ export function templateStore(
       if (!UUID.test(id)) return null
       return withTenant(db, tenantId, async (tx) => {
         try {
-          const [row] = await tx
-            .update(templateFolders)
-            .set({ name: name.trim(), updatedAt: new Date() })
-            .where(eq(templateFolders.id, id))
-            .returning({ id: templateFolders.id })
-          return row ? folderOf(tx, row.id) : null
+          // ⚠ A SAVEPOINT, OR THE CLASH POISONS THE TRANSACTION. Catching the
+          // unique violation outside one still fails the commit with it.
+          const [row] = await tx.transaction((sp) =>
+            sp
+              .update(templateFolders)
+              .set({ name: name.trim(), updatedAt: new Date() })
+              .where(eq(templateFolders.id, id))
+              .returning({ id: templateFolders.id }),
+          )
+          return row ? await folderOf(tx, row.id) : null
         } catch (error) {
           if (isUniqueViolation(error)) return { conflict: true as const }
           throw error
@@ -853,39 +915,147 @@ export function templateStore(
     async deleteFolder(tenantId, id) {
       if (!UUID.test(id)) return false
       return withTenant(db, tenantId, async (tx) => {
-        // Its templates move to the top level by the foreign key's SET NULL.
-        const deleted = await tx
-          .delete(templateFolders)
+        await lockFolderTree(tx, tenantId)
+        const [folder] = await tx
+          .select({ parentId: templateFolders.parentId })
+          .from(templateFolders)
           .where(eq(templateFolders.id, id))
-          .returning({ id: templateFolders.id })
-        return deleted.length > 0
+        if (!folder) return false
+        const parent = folder.parentId
+
+        // ⚠ THE FOLDER STEPS ASIDE FIRST. Its children cannot be re-parented
+        // until it is gone, and its own name still holds a slot in the parent
+        // that one of them may share. Renaming it to its id frees the slot
+        // while the row still exists to be referenced.
+        await tx
+          .update(templateFolders)
+          .set({ name: id })
+          .where(eq(templateFolders.id, id))
+
+        const parentFilter =
+          parent === null
+            ? isNull(templateFolders.parentId)
+            : eq(templateFolders.parentId, parent)
+        const taken = new Set(
+          (
+            await tx
+              .select({ name: templateFolders.name })
+              .from(templateFolders)
+              .where(parentFilter)
+          ).map((r) => r.name),
+        )
+        const children = await tx
+          .select({ id: templateFolders.id, name: templateFolders.name })
+          .from(templateFolders)
+          .where(eq(templateFolders.parentId, id))
+          .orderBy(templateFolders.createdAt, templateFolders.name)
+        for (const child of children) {
+          const name = freeFolderName(child.name, taken)
+          taken.add(name)
+          await tx
+            .update(templateFolders)
+            .set({ parentId: parent, name, updatedAt: new Date() })
+            .where(eq(templateFolders.id, child.id))
+        }
+        await tx
+          .update(templates)
+          .set({ folderId: parent, updatedAt: new Date() })
+          .where(eq(templates.folderId, id))
+        await tx.delete(templateFolders).where(eq(templateFolders.id, id))
+        return true
       })
     },
 
-    async move(tenantId, ids, folderId) {
-      // ⚠ FILING A SHARED TEMPLATE IS AN EDIT OF IT: the workspace gets its
-      // own copy, and the copy is what moves. A folder is this workspace's.
-      if (ids.some((id) => sharedById(id))) {
-        ids = await withTenant(db, tenantId, async (tx) =>
-          Promise.all(
-            ids.map(async (id) => {
-              const shared = sharedById(id)
-              return shared ? fork(tx, tenantId, shared) : id
-            }),
-          ),
-        )
-      }
-      const valid = ids.filter((id) => UUID.test(id))
+    async move(tenantId, input) {
       return withTenant(db, tenantId, async (tx) => {
-        const target = await ownFolder(tx, folderId)
-        if (folderId !== null && target === null) return null
-        if (valid.length === 0) return 0
-        const moved = await tx
-          .update(templates)
-          .set({ folderId: target, updatedAt: new Date() })
-          .where(inArray(templates.id, valid))
-          .returning({ id: templates.id })
-        return moved.length
+        await lockFolderTree(tx, tenantId)
+
+        // ⚠ EVERY REFUSAL COMES BEFORE THE FIRST WRITE. A refusal is returned,
+        // not thrown, so the transaction still commits: a write made before it
+        // (a fork of a shared template, say) would be kept.
+        const destination = await ownFolder(tx, input.folderId)
+        if (input.folderId !== null && destination === null) return { notFound: true }
+
+        const wanted = [...new Set(input.folderIds)]
+        if (wanted.some((id) => !UUID.test(id))) return { notFound: true }
+        const folders =
+          wanted.length === 0
+            ? []
+            : await tx
+                .select({
+                  id: templateFolders.id,
+                  name: templateFolders.name,
+                  parentId: templateFolders.parentId,
+                })
+                .from(templateFolders)
+                .where(inArray(templateFolders.id, wanted))
+        if (folders.length !== wanted.length) return { notFound: true }
+
+        if (destination !== null && folders.length > 0) {
+          const lineage = (await tx.execute(sql`
+            with recursive up as (
+              select id, parent_id from ${templateFolders} where id = ${destination}
+              union
+              select f.id, f.parent_id from ${templateFolders} f join up on f.id = up.parent_id
+            )
+            select id from up
+          `)) as unknown as { id: string }[]
+          const moving = new Set(wanted)
+          if (lineage.some((r) => moving.has(r.id))) return { cycle: true }
+        }
+
+        // Folders already in the destination stay put and count as no-ops.
+        const going = folders.filter((f) => f.parentId !== destination)
+        if (going.length > 0) {
+          const parentFilter =
+            destination === null
+              ? isNull(templateFolders.parentId)
+              : eq(templateFolders.parentId, destination)
+          const there = new Set(
+            (
+              await tx
+                .select({ name: templateFolders.name })
+                .from(templateFolders)
+                .where(parentFilter)
+            ).map((r) => r.name),
+          )
+          for (const folder of going) {
+            if (there.has(folder.name)) return { conflict: { name: folder.name } }
+            there.add(folder.name)
+          }
+        }
+
+        // ⚠ FILING A SHARED TEMPLATE IS AN EDIT OF IT: the workspace gets its
+        // own copy, and the copy is what moves.
+        const templateIds = await Promise.all(
+          input.templateIds.map(async (id) => {
+            const shared = sharedById(id)
+            return shared ? fork(tx, tenantId, shared) : id
+          }),
+        )
+        const valid = templateIds.filter((id) => UUID.test(id))
+
+        if (going.length > 0) {
+          await tx
+            .update(templateFolders)
+            .set({ parentId: destination, updatedAt: new Date() })
+            .where(
+              inArray(
+                templateFolders.id,
+                going.map((f) => f.id),
+              ),
+            )
+        }
+
+        const moved =
+          valid.length === 0
+            ? []
+            : await tx
+                .update(templates)
+                .set({ folderId: destination, updatedAt: new Date() })
+                .where(inArray(templates.id, valid))
+                .returning({ id: templates.id })
+        return { moved: moved.length, movedFolders: going.length }
       })
     },
 
@@ -1550,11 +1720,22 @@ export function slugOf(title: string): string {
     .slice(0, 80)
 }
 
+/** `name`, or `name 2`, `name 3`… - the first one not in `taken`, as Finder names a copy. */
+function freeFolderName(name: string, taken: Set<string>): string {
+  if (!taken.has(name)) return name
+  for (let n = 2; ; n++) {
+    const candidate = `${name} ${n}`
+    if (!taken.has(candidate)) return candidate
+  }
+}
+
 function toFolder(
   row: {
     id: string
     name: string
+    parentId: string | null
     templates: number
+    folders: number
     createdAt: Date
     updatedAt: Date
   },
@@ -1563,7 +1744,9 @@ function toFolder(
   return {
     id: row.id,
     name: row.name,
+    parent_id: row.parentId,
     templates: row.templates,
+    folders: row.folders,
     preview,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),

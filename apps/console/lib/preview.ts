@@ -623,7 +623,7 @@ const TEMPLATES: {
   {
     id: "bf7a1c00-0000-4000-8000-000000000001",
     name: "password-reset",
-    folder: "transactional/auth",
+    folder: "transactional/security",
     kind: "html",
     source: "managed",
     subject: "Reset your password",
@@ -788,25 +788,184 @@ Receipt.PreviewProps = { order: { id: "A-1042", total: "$42.00" } }
   },
 ]
 
-/** The fixture folders: one per distinct folder label above, plus an empty one. */
-const TEMPLATE_FOLDERS = [
-  ...new Set(TEMPLATES.map((t) => t.folder).filter((f): f is string => f !== null)),
-  "drafts",
-].map((name, i) => ({
-  id: `f01de700-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
-  name,
-  templates: TEMPLATES.filter((t) => t.folder === name).length,
-  // Newest edit first, three at most, as the API lists them.
-  preview: TEMPLATES.filter((t) => t.folder === name)
-    .sort((a, b) => a.updated_days - b.updated_days)
-    .slice(0, 3)
-    .map((t) => ({ id: t.id, updated_at: ago(t.updated_days) })),
-  created_at: ago(30 - i),
-  updated_at: ago(30 - i),
-}))
+/*
+ * ⚠ THE FOLDERS NEST, AND THE FAKE SERVER KEEPS THEM. Paths below are the tree:
+ * `transactional` holds only folders, `security` is two levels down, and
+ * `archive/2025/q1` is five, deep enough for the breadcrumb to fold. Moves,
+ * creates and deletes change these rows for the life of the dev server (a
+ * restart puts the fixture back), with the real API's refusals: 404 unknown
+ * folder, 422 `template_folder_cycle`, 409 `template_folder_already_exists`.
+ */
+type FolderRow = {
+  id: string
+  name: string
+  parent_id: string | null
+  created_at: string
+  updated_at: string
+}
 
-const folderIdOf = (name: string | null) =>
-  TEMPLATE_FOLDERS.find((f) => f.name === name)?.id ?? null
+const FOLDER_PATHS = [
+  "auth",
+  "billing",
+  "lifecycle",
+  "drafts",
+  "transactional",
+  "transactional/security",
+  "transactional/security/archive",
+  "transactional/security/archive/2025",
+  "transactional/security/archive/2025/q1",
+  "transactional/receipts",
+]
+const folderIdAt = (i: number) =>
+  `f01de700-0000-4000-8000-${String(i + 1).padStart(12, "0")}`
+
+const folderRows: FolderRow[] = FOLDER_PATHS.map((path, i) => {
+  const parts = path.split("/")
+  const parent =
+    parts.length > 1 ? FOLDER_PATHS.indexOf(parts.slice(0, -1).join("/")) : -1
+  return {
+    id: folderIdAt(i),
+    name: parts[parts.length - 1]!,
+    parent_id: parent >= 0 ? folderIdAt(parent) : null,
+    created_at: ago(30 - i),
+    updated_at: ago(30 - i),
+  }
+})
+let nextFolder = FOLDER_PATHS.length
+
+/** Where each template is filed now: a folder's id, or null. */
+const templateHome = new Map<string, string | null>(
+  TEMPLATES.map((t) => [
+    t.id,
+    t.folder === null ? null : folderIdAt(FOLDER_PATHS.indexOf(t.folder)),
+  ]),
+)
+
+/** The folders as the API lists them: counts and the newest three papers, worked out per read. */
+function templateFolders() {
+  return folderRows.map((f) => {
+    const inside = TEMPLATES.filter((t) => templateHome.get(t.id) === f.id)
+    return {
+      ...f,
+      templates: inside.length,
+      folders: folderRows.filter((c) => c.parent_id === f.id).length,
+      // Newest edit first, three at most, as the API lists them.
+      preview: [...inside]
+        .sort((a, b) => a.updated_days - b.updated_days)
+        .slice(0, 3)
+        .map((t) => ({ id: t.id, updated_at: ago(t.updated_days) })),
+    }
+  })
+}
+
+const refusal = (status: number, name: string, message: string) =>
+  new ApiRequestError(status, { statusCode: status, name, message })
+
+const taken = (
+  parent: string | null,
+  name: string,
+  except: ReadonlySet<string> = new Set(),
+) =>
+  folderRows.some(
+    (f) =>
+      f.parent_id === parent &&
+      !except.has(f.id) &&
+      f.name.toLowerCase() === name.trim().toLowerCase(),
+  )
+
+const nameTaken = () =>
+  refusal(
+    409,
+    "template_folder_already_exists",
+    "A folder with that name is already there.",
+  )
+
+function createFolder(body: { name?: string; parent_id?: string | null }) {
+  const parent = body.parent_id ?? null
+  if (parent !== null && !folderRows.some((f) => f.id === parent))
+    throw refusal(404, "not_found", "Not found.")
+  const name = (body.name ?? "").trim()
+  if (taken(parent, name)) throw nameTaken()
+  const row: FolderRow = {
+    id: folderIdAt(nextFolder++),
+    name,
+    parent_id: parent,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  folderRows.push(row)
+  return templateFolders().find((f) => f.id === row.id)!
+}
+
+function renameFolder(id: string, name: string) {
+  const row = folderRows.find((f) => f.id === id)
+  if (!row) return PREVIEW_NOT_FOUND
+  if (taken(row.parent_id, name, new Set([id]))) throw nameTaken()
+  row.name = name.trim()
+  row.updated_at = new Date().toISOString()
+  return templateFolders().find((f) => f.id === id)!
+}
+
+/** Its templates and folders go to its parent; a subfolder whose name clashes there becomes `name 2`. */
+function deleteFolder(id: string) {
+  const row = folderRows.find((f) => f.id === id)
+  if (!row) return PREVIEW_NOT_FOUND
+  for (const [tid, home] of templateHome)
+    if (home === id) templateHome.set(tid, row.parent_id)
+  for (const child of folderRows.filter((f) => f.parent_id === id)) {
+    let name = child.name
+    for (let n = 2; taken(row.parent_id, name); n++) name = `${child.name} ${n}`
+    child.name = name
+    child.parent_id = row.parent_id
+  }
+  folderRows.splice(folderRows.indexOf(row), 1)
+  return { deleted: true }
+}
+
+/** Every folder inside `id`, at any depth. */
+function inside(id: string): Set<string> {
+  const found = new Set<string>()
+  const queue = [id]
+  while (queue.length > 0) {
+    const at = queue.pop()!
+    for (const f of folderRows)
+      if (f.parent_id === at && !found.has(f.id)) {
+        found.add(f.id)
+        queue.push(f.id)
+      }
+  }
+  return found
+}
+
+/** All of it or none: checked first, applied after. */
+function moveToFolder(body: {
+  ids?: string[]
+  folder_ids?: string[]
+  folder_id?: string | null
+}) {
+  const to = body.folder_id ?? null
+  const templateIds = body.ids ?? []
+  const folderIds = body.folder_ids ?? []
+  if (to !== null && !folderRows.some((f) => f.id === to))
+    throw refusal(404, "not_found", "Not found.")
+  if (folderIds.some((id) => !folderRows.some((f) => f.id === id)))
+    throw refusal(404, "not_found", "Not found.")
+  if (to !== null && folderIds.some((id) => id === to || inside(id).has(to)))
+    throw refusal(422, "template_folder_cycle", "A folder cannot be moved into itself.")
+  const moving = folderRows.filter(
+    (f) => folderIds.includes(f.id) && f.parent_id !== to,
+  )
+  const names = moving.map((f) => f.name.toLowerCase())
+  if (
+    moving.some((f) => taken(to, f.name, new Set(folderIds))) ||
+    new Set(names).size !== names.length
+  )
+    throw nameTaken()
+  const movingTemplates = templateIds.filter((id) => templateHome.get(id) !== to)
+  for (const id of movingTemplates) templateHome.set(id, to)
+  for (const f of moving) f.parent_id = to
+  return { moved: movingTemplates.length, moved_folders: moving.length }
+}
 
 function summary(full: (typeof TEMPLATES)[number]) {
   const live = full.versions.find((v) => v.number === full.live)
@@ -817,7 +976,7 @@ function summary(full: (typeof TEMPLATES)[number]) {
       .split("-")
       .map((w, i) => (i === 0 ? w[0]!.toUpperCase() + w.slice(1) : w))
       .join(" "),
-    folder_id: folderIdOf(full.folder),
+    folder_id: templateHome.get(full.id) ?? null,
     from: full.source === "managed" ? "Acme <hello@acme.com>" : null,
     reply_to: null,
     preview_text: null,
@@ -1088,13 +1247,21 @@ const ROUTES: [
       // Templates: root ones only, folders apart, as the API counts them; then
       // the GitHub panel's and the reviewed list's numbers.
       const library = previewFor("/console/templates") as
-        { data?: { folder_id: string | null }[]; folders?: unknown[] } | undefined
+        | {
+            data?: { folder_id: string | null }[]
+            folders?: { parent_id: string | null }[]
+          }
+        | undefined
       if (library?.data)
         data.templates = Math.min(
           library.data.filter((t) => t.folder_id === null).length,
           10,
         )
-      if (library?.folders) data.templateFolders = Math.min(library.folders.length, 10)
+      if (library?.folders)
+        data.templateFolders = Math.min(
+          library.folders.filter((f) => f.parent_id === null).length,
+          10,
+        )
       const github = previewFor("/console/github") as
         | { configured?: boolean; installations?: unknown[]; repositories?: unknown[] }
         | undefined
@@ -1975,12 +2142,25 @@ const ROUTES: [
     }),
   ],
   [/^\/console\/templates\/upload$/, () => ({ data: TEMPLATE_UPLOAD, problems: [] })],
-  [/^\/console\/templates\/move$/, () => ({ moved: 1 })],
+  [
+    /^\/console\/templates\/move$/,
+    (_m, _q, _method, body) =>
+      moveToFolder((body ?? {}) as Parameters<typeof moveToFolder>[0]),
+  ],
   [/^\/console\/templates\/delete$/, () => ({ deleted: [] })],
-  [/^\/console\/template-folders$/, () => TEMPLATE_FOLDERS[0]],
+  [
+    /^\/console\/template-folders$/,
+    (_m, _q, _method, body) =>
+      createFolder((body ?? {}) as Parameters<typeof createFolder>[0]),
+  ],
   [
     /^\/console\/template-folders\/([^/]+)$/,
-    (m) => TEMPLATE_FOLDERS.find((f) => f.id === m[1]) ?? PREVIEW_NOT_FOUND,
+    (m, _q, method, body) => {
+      if (method === "DELETE") return deleteFolder(m[1]!)
+      if (method === "PATCH")
+        return renameFolder(m[1]!, ((body ?? {}) as { name?: string }).name ?? "")
+      return templateFolders().find((f) => f.id === m[1]) ?? PREVIEW_NOT_FOUND
+    },
   ],
   [
     /^\/console\/templates\/([^/]+)\/duplicate$/,
@@ -2045,7 +2225,7 @@ const ROUTES: [
     (_m, _q, method) =>
       method === "POST"
         ? templateDetailFixture("bf7a1c00-0000-4000-8000-00000000000a")
-        : { data: TEMPLATES.map((t) => summary(t)), folders: TEMPLATE_FOLDERS },
+        : { data: TEMPLATES.map((t) => summary(t)), folders: templateFolders() },
   ],
 ]
 

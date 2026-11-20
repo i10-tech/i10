@@ -255,7 +255,7 @@ export interface ShapeCounts {
   domainStatuses?: number
   /** Distinct statuses among broadcasts, for the status filter. */
   broadcastStatuses?: number
-  /** Root templates only; folders are counted in `templateFolders`. */
+  /** Root templates only; root folders are counted in `templateFolders`. */
   templates?: number
   templateFolders?: number
   /** Templates submitted for review. */
@@ -935,9 +935,10 @@ export function consoleQueries(
               broadcastStatuses: sql<number>`(select count(distinct ${broadcasts.status})::int from ${broadcasts} where ${broadcasts.tenantId} = ${tenantId})`,
               // ⚠ ROOT TEMPLATES AND FOLDERS ARE COUNTED APART. The page draws a
               // folder card and a template card differently, so one summed
-              // number drew the wrong cards for most workspaces.
+              // number drew the wrong cards for most workspaces. Both are the
+              // TOP level's: a nested folder is drawn only on its parent's page.
               templates: sql<number>`(select count(*)::int from (select 1 from ${templates} where ${templates.tenantId} = ${tenantId} and ${templates.folderId} is null limit ${SKELETON_LIMIT_PLUS_ONE}) s)`,
-              templateFolders: scalarSubquery(templateFolders),
+              templateFolders: sql<number>`(select count(*)::int from (select 1 from ${templateFolders} where ${templateFolders.tenantId} = ${tenantId} and ${templateFolders.parentId} is null limit ${SKELETON_LIMIT_PLUS_ONE}) s)`,
               trustedTemplates: scalarSubquery(trustedTemplates),
               githubInstallations: scalarSubquery(githubInstallations),
               githubRepos: scalarSubquery(githubRepositories),

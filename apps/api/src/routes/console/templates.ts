@@ -46,10 +46,12 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
     return Number.isInteger(n) && n > 0 ? n : null
   }
 
-  const folderConflict = () => ({
+  const folderConflict = (name?: string) => ({
     statusCode: 409 as const,
     name: "template_folder_already_exists" as const,
-    message: "A folder with that name already exists.",
+    message: name
+      ? `A folder named "${name}" already exists there.`
+      : "A folder with that name already exists.",
   })
   const folderName = (raw: unknown) => {
     const name = typeof raw === "string" ? raw.trim() : ""
@@ -126,9 +128,16 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
 
   app.post("/template-folders", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
-    const read = folderName((await readJson(c))?.name)
+    const body = await readJson(c)
+    const read = folderName(body?.name)
     if (read.problem !== undefined) return c.json(validation(read.problem), 422)
-    const created = await d.templates.createFolder(c.get("auth").tenantId, read.name)
+    const parentId = asNullableString(body?.parent_id)
+    const created = await d.templates.createFolder(
+      c.get("auth").tenantId,
+      read.name,
+      parentId,
+    )
+    if (created === null) return c.json(notFound("No folder with that id."), 404)
     return "conflict" in created ? c.json(folderConflict(), 409) : c.json(created, 201)
   })
 
@@ -145,7 +154,7 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
     return "conflict" in renamed ? c.json(folderConflict(), 409) : c.json(renamed)
   })
 
-  /** Deletes a folder; its templates move to the top level, none is deleted. */
+  /** Deletes a folder; its templates and subfolders move to its parent, none is deleted. */
   app.delete("/template-folders/:id", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
     const ok = await d.templates.deleteFolder(c.get("auth").tenantId, c.req.param("id"))
@@ -154,17 +163,38 @@ export function mountTemplates(app: Hono, d: ConsoleDeps): void {
       : c.json(notFound("No folder with that id."), 404)
   })
 
-  /** Files templates in a folder, or at the top level with `folder_id: null`. */
+  /**
+   * Files templates and folders in a folder, or at the top level with
+   * `folder_id: null`, all together or not at all.
+   */
   app.post("/templates/move", async (c) => {
     if (!d.templates) return c.json(notWired("Templates"), 501)
     const body = await readJson(c)
-    const ids = asIdArray(body?.ids)
-    if (ids.length === 0) return c.json(validation("`ids` lists the templates."), 422)
-    const folderId = typeof body?.folder_id === "string" ? body.folder_id : null
-    const moved = await d.templates.move(c.get("auth").tenantId, ids, folderId)
-    return moved === null
-      ? c.json(notFound("No folder with that id."), 404)
-      : c.json({ moved })
+    const templateIds = asIdArray(body?.ids)
+    // Not filtered: a folder id that is no folder of this workspace is a 404.
+    const folderIds = Array.isArray(body?.folder_ids)
+      ? body.folder_ids.filter((v: unknown): v is string => typeof v === "string")
+      : []
+    if (templateIds.length === 0 && folderIds.length === 0)
+      return c.json(validation("`ids` or `folder_ids` lists what to move."), 422)
+    const result = await d.templates.move(c.get("auth").tenantId, {
+      templateIds,
+      folderIds,
+      folderId: asNullableString(body?.folder_id),
+    })
+    if ("notFound" in result) return c.json(notFound("No folder with that id."), 404)
+    if ("cycle" in result)
+      return c.json(
+        {
+          statusCode: 422 as const,
+          name: "template_folder_cycle" as const,
+          message:
+            "A folder cannot be moved into itself or into one of its subfolders.",
+        },
+        422,
+      )
+    if ("conflict" in result) return c.json(folderConflict(result.conflict.name), 409)
+    return c.json({ moved: result.moved, moved_folders: result.movedFolders })
   })
 
   /** Deletes several templates; the answer lists the ids actually deleted. */

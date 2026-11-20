@@ -1,0 +1,156 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "ce023e44-0f94-41b7-b26e-88d5d064c079",
+  "prevIds": [
+    "122d7a65-d4fe-4610-90d6-d37b5d3b7c8d"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "template_folders",
+        "template_folders_tenant_name_uq"
+      ],
+      "writes": [
+        "s|idx|core.template_folders_tenant_name_uq",
+        "n|idx|core.template_folders_tenant_name_uq",
+        "e|idx|core.template_folders_tenant_name_uq",
+        "n|rel|core.template_folders_tenant_name_uq"
+      ],
+      "reads": [
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "e|col|core.template_folders.tenant_id",
+        "e|col|core.template_folders.name"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|core.template_folders.name.tenant_id"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "core",
+        "template_folders",
+        "parent_id"
+      ],
+      "writes": [
+        "s|col|core.template_folders.parent_id",
+        "n|col|core.template_folders.parent_id",
+        "e|col|core.template_folders.parent_id"
+      ],
+      "reads": [
+        "n|tbl|core.template_folders",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "add_unique",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_folders"
+      ],
+      "writes": [
+        "s|uq|core.template_folders.template_folders_tenant_parent_name_uq",
+        "n|uq|core.template_folders.template_folders_tenant_parent_name_uq",
+        "e|uq|core.template_folders.template_folders_tenant_parent_name_uq",
+        "n|con|core.template_folders.template_folders_tenant_parent_name_uq",
+        "n|rel|core.template_folders_tenant_parent_name_uq"
+      ],
+      "reads": [
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "n|col|core.template_folders.tenant_id",
+        "n|col|core.template_folders.parent_id",
+        "n|col|core.template_folders.name"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "template_folders"
+      ],
+      "writes": [
+        "s|fk|core.template_folders.template_folders_parent_id_template_folders_id_fkey",
+        "n|fk|core.template_folders.template_folders_parent_id_template_folders_id_fkey",
+        "e|fk|core.template_folders.template_folders_parent_id_template_folders_id_fkey",
+        "n|con|core.template_folders.template_folders_parent_id_template_folders_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "n|tbl|core.template_folders",
+        "n|sch|core",
+        "n|col|core.template_folders.parent_id",
+        "n|col|core.template_folders.id",
+        "e|uniqueness|core.template_folders.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "parent_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "template_folders_parent_id_template_folders_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "parent_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "template_folders",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "NO ACTION",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "template_folders",
+        "name": "template_folders_tenant_parent_name_uq",
+        "nameExplicit": true,
+        "columns": [
+          "tenant_id",
+          "parent_id",
+          "name"
+        ],
+        "nullsNotDistinct": true,
+        "entityType": "uniques"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"core\",\"template_folders_tenant_name_uq\"]"
+    }
+  ]
+}

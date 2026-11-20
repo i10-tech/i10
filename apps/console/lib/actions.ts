@@ -1940,12 +1940,16 @@ export async function createTemplate(input: {
   )
 }
 
-export async function createTemplateFolder(name: string) {
+/** A new folder; `parentId` puts it inside another, null at the top level. */
+export async function createTemplateFolder(
+  name: string,
+  parentId: string | null = null,
+) {
   return run(
     () =>
       api<TemplateFolder>("/console/template-folders", {
         method: "POST",
-        body: { name },
+        body: parentId ? { name, parent_id: parentId } : { name },
       }),
     TEMPLATE_LISTS,
   )
@@ -1973,13 +1977,25 @@ export async function deleteTemplateFolder(id: string) {
   )
 }
 
-/** Files templates in a folder; `null` is the top level. */
-export async function moveTemplates(ids: string[], folderId: string | null) {
+/**
+ * Files templates and folders in a folder together, or all or none of them;
+ * `null` is the top level. The API answers 404 for an unknown folder, 422
+ * `template_folder_cycle` for a folder moved into itself, and 409
+ * `template_folder_already_exists` for a name already taken there.
+ */
+export async function moveToFolder(
+  items: { templateIds: string[]; folderIds: string[] },
+  folderId: string | null,
+) {
   return run(
     () =>
-      api<{ moved: number }>("/console/templates/move", {
+      api<{ moved: number; moved_folders: number }>("/console/templates/move", {
         method: "POST",
-        body: { ids, folder_id: folderId },
+        body: {
+          ...(items.templateIds.length > 0 ? { ids: items.templateIds } : {}),
+          ...(items.folderIds.length > 0 ? { folder_ids: items.folderIds } : {}),
+          folder_id: folderId,
+        },
       }),
     TEMPLATE_LISTS,
   )

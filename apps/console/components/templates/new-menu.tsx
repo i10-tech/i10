@@ -20,6 +20,8 @@ import { toastFailure } from "@/lib/toast"
 /**
  * "New": a template, a folder, or files - Resend's menu, plus our upload.
  *
+ * ⚠ A FOLDER IS MADE INSIDE THE ONE ON SCREEN, like a template.
+ *
  * ⚠ A TEMPLATE OPENS THE EDITOR AT ONCE, with no dialog first. Resend's
  * "New -> Template" does the same: naming something you have not written yet
  * is a question nobody can answer well, and the editor's title is one click
@@ -75,7 +77,11 @@ export function NewTemplateMenu({ folderId = null }: { folderId?: string | null 
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <NewFolderDialog open={folderOpen} onOpenChange={setFolderOpen} />
+      <NewFolderDialog
+        open={folderOpen}
+        onOpenChange={setFolderOpen}
+        parentId={folderId}
+      />
       <UploadTemplatesDialog open={uploadOpen} onOpenChange={setUploadOpen} />
       <NewShortcuts
         onTemplate={() => void newTemplate()}
@@ -137,14 +143,16 @@ function NewShortcuts({
   return null
 }
 
-/** "Create folder": a name, then the folder opens. */
+/** "Create folder": a name, then the folder is made inside `parentId` (the top level when null). */
 export function NewFolderDialog({
   open,
   onOpenChange,
+  parentId,
   onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  parentId: string | null
   onCreated?: (id: string) => void
 }) {
   return (
@@ -156,7 +164,7 @@ export function NewFolderDialog({
       placeholder="e.g. Onboarding"
       submitLabel="Create folder"
       doneLabel="Created"
-      onSubmit={(name) => createTemplateFolder(name)}
+      onSubmit={(name) => createTemplateFolder(name, parentId)}
       onSuccess={(folder) => {
         onOpenChange(false)
         onCreated?.(folder.id)

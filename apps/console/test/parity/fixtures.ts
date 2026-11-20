@@ -190,7 +190,9 @@ export function folder(tag: string, i: number) {
   return {
     id: `fol_${tag}${i}`,
     name: `${tag} folder ${i}`,
+    parent_id: null as string | null,
     templates: 2,
+    folders: 0,
     preview: [0, 1].map((n) => ({ id: `tpl_${tag}${n}`, updated_at: iso(n) })),
     created_at: iso(i + 5),
     updated_at: iso(i + 1),

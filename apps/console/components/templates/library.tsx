@@ -4,13 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, LayoutGroup, motion } from "motion/react"
-import {
-  ChevronRight,
-  FolderInput,
-  FolderPlus,
-  MoreHorizontal,
-  Trash2,
-} from "lucide-react"
+import { FolderInput, FolderPlus, MoreHorizontal, Trash2 } from "lucide-react"
 import { Badge } from "@repo/ui/components/badge/badge"
 import { Bone, BoneRegion, BoneScope } from "@repo/ui/components/bone/bone"
 import { Button } from "@repo/ui/components/button/button"
@@ -24,12 +18,11 @@ import {
   DropdownMenuTrigger,
 } from "@repo/ui/components/i10/menu"
 import { Kbd } from "@repo/ui/components/i10/kbd"
-import { Tooltip } from "@repo/ui/components/tooltip/tooltip"
 import { motionTokens } from "@repo/ui/components/lib/motion-tokens"
 import { cn } from "cn"
 import { ConfirmDialog, confirmWordFor } from "@/components/confirm-dialog"
 import { BulkBar } from "@/components/list/bulk-bar"
-import { useMarquee } from "@/components/list/marquee"
+import { useGesture } from "@/components/list/gesture/use-gesture"
 import {
   ListCell,
   ListHead,
@@ -50,7 +43,6 @@ import {
   useRememberedView,
 } from "@/components/list/toolbar"
 import {
-  DRAG_TYPE,
   FolderCard,
   RenameIcon,
   TemplateCard,
@@ -58,20 +50,32 @@ import {
   seedTemplate,
   type TemplateAction,
 } from "@/components/templates/cards"
+import { Breadcrumb } from "@/components/templates/breadcrumb"
 import { TemplateDetailsDialog } from "@/components/templates/details-dialog"
 import { FolderArt } from "@/components/templates/folder-art"
 import { TemplateSnapshot } from "@/components/template-snapshot"
 import { NameDialog } from "@/components/templates/name-dialog"
+import { MoveItems, MoveSubmenu } from "@/components/templates/move-items"
 import { NewFolderDialog, NewTemplateMenu } from "@/components/templates/new-menu"
 import {
   deleteTemplate,
   deleteTemplateFolder,
   deleteTemplates,
   duplicateTemplate,
-  moveTemplates,
+  moveToFolder,
   renameTemplateFolder,
   updateTemplate,
 } from "@/lib/actions"
+import {
+  blockedFor,
+  contentsOf,
+  countNoun,
+  folderKey,
+  folderOfKey,
+  isFolderKey,
+  moveTargets,
+  pathTo,
+} from "@/lib/template-tree"
 import {
   STATUS_LABEL,
   hrefOf,
@@ -92,7 +96,7 @@ type Dialog =
   | { kind: "details"; template: TemplateSummary }
   | { kind: "rename"; template: TemplateSummary }
   | { kind: "delete"; ids: string[]; folderIds?: string[] }
-  | { kind: "new-folder"; moveIds: string[] }
+  | { kind: "new-folder"; moveKeys: string[] }
   | { kind: "rename-folder"; folder: TemplateFolder }
   | { kind: "delete-folder"; folder: TemplateFolder }
   | null
@@ -100,7 +104,7 @@ type Dialog =
 /**
  * The templates page, Resend's way: folders and templates as cards (or rows),
  * search, a status filter, ticking several to move or delete them together,
- * and dragging templates into folders.
+ * and dragging templates and folders into folders, which nest.
  *
  * ⚠ WHAT MOVES ON SCREEN MOVES AT ONCE, AND THE SERVER CATCHES UP. A move or a
  * delete is applied to this list the moment it is asked for, and the action's
@@ -108,7 +112,11 @@ type Dialog =
  * goes back and says why.
  *
  * ⚠ SEARCH LOOKS EVERYWHERE, NOT ONLY IN THE FOLDER ON SCREEN. Somebody
- * typing a name wants that template, wherever they filed it.
+ * typing a name wants that template, wherever they filed it, and a folder by
+ * its name at any depth.
+ *
+ * ⚠ THE FOLDERS COME FLAT AND THE TREE IS BUILT HERE (lib/template-tree): a
+ * page shows the folders whose `parent_id` is the folder on screen.
  */
 // ⚠ ONE EMPTY LIST, NOT A NEW ONE PER RENDER. The optimistic layer below resets
 // when the list it was given changes identity; a fresh `[]` on every loading
@@ -131,6 +139,8 @@ export function TemplateLibrary({
   shape?: {
     templates: number
     folders?: number
+    /** How many folders are above this one. */
+    depth?: number
     view?: "grid" | "table"
   }
 }) {
@@ -142,42 +152,49 @@ export function TemplateLibrary({
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set())
   const [anchor, setAnchor] = React.useState<string | null>(null)
   const [dialog, setDialog] = React.useState<Dialog>(null)
-  const [dragIds, setDragIds] = React.useState<string[] | null>(null)
+  // What a gesture has lifted right now (dimmed), as selection keys, and the
+  // drop target it is over: a folder's id, or `root` for "All templates".
+  const [lifted, setLifted] = React.useState<Set<string> | null>(null)
   const [over, setOver] = React.useState<string | null>(null)
 
   // ⚠ OPTIMISTIC LAYER: moves and deletions asked for and not yet reflected
   // in the server's list. Cleared whenever a new list arrives.
-  const [moved, setMoved] = React.useState<Map<string, string | null>>(() => new Map())
-  const [gone, setGone] = React.useState<Set<string>>(() => new Set())
+  const [layer, setLayer] = React.useState(freshLayer)
   // A new list from the server already shows what was asked for; the layer
   // goes. Adjusted during render, not in an effect - see lib/react.ts.
   const [seen, setSeen] = React.useState({ templates, folders })
   if (seen.templates !== templates || seen.folders !== folders) {
     setSeen({ templates, folders })
-    setMoved(new Map())
-    setGone(new Set())
+    setLayer(freshLayer())
   }
 
   const all = React.useMemo(
     () =>
       templates
-        .filter((t) => !gone.has(t.id))
+        .filter((t) => !layer.gone.has(t.id))
         .map((t) =>
-          moved.has(t.id) ? { ...t, folder_id: moved.get(t.id) ?? null } : t,
+          layer.templates.has(t.id)
+            ? { ...t, folder_id: layer.templates.get(t.id) ?? null }
+            : t,
         ),
-    [templates, moved, gone],
+    [templates, layer],
   )
-  const liveFolders = React.useMemo(
-    () =>
-      folders
-        .filter((f) => !gone.has(f.id))
-        .map((f) => ({
-          ...f,
-          templates: all.filter((t) => t.folder_id === f.id).length,
-        })),
-    [folders, all, gone],
-  )
+  const liveFolders = React.useMemo(() => {
+    const placed = folders
+      .filter((f) => !layer.gone.has(f.id))
+      .map((f) =>
+        layer.folders.has(f.id)
+          ? { ...f, parent_id: layer.folders.get(f.id) ?? null }
+          : f,
+      )
+    return placed.map((f) => ({
+      ...f,
+      templates: all.filter((t) => t.folder_id === f.id).length,
+      folders: placed.filter((c) => c.parent_id === f.id).length,
+    }))
+  }, [folders, all, layer])
   const folder = folderId ? (liveFolders.find((f) => f.id === folderId) ?? null) : null
+  const trail = folderId ? pathTo(liveFolders, folderId) : []
   const searching = query.trim() !== ""
 
   const shownTemplates = all.filter(
@@ -185,19 +202,21 @@ export function TemplateLibrary({
       (searching ? matches(t, query) : t.folder_id === folderId) &&
       (status === "all" || statusOf(t) === status),
   )
+  const needle = query.trim().toLowerCase()
   const shownFolders =
-    folderId !== null || status !== "all"
+    status !== "all"
       ? []
-      : liveFolders.filter(
-          (f) =>
-            !searching || f.name.toLowerCase().includes(query.trim().toLowerCase()),
+      : liveFolders.filter((f) =>
+          searching
+            ? f.id !== folderId && f.name.toLowerCase().includes(needle)
+            : f.parent_id === folderId,
         )
 
   // Selection only ever holds what is on screen.
   //
   // ⚠ FOLDERS ARE IN IT TOO, AS `folder:<id>`, so a range, ⌘A and the
-  // select-all box cover both, in the order they are shown. What acts on
-  // templates alone - moving, dragging - takes `pickedTemplates`.
+  // select-all box cover both, in the order they are shown. Moving and
+  // dragging take them together; `pickedFolderIds` is the folders alone.
   const visibleIds = [
     ...shownFolders.map((f) => folderKey(f.id)),
     ...shownTemplates.map((t) => t.id),
@@ -206,18 +225,16 @@ export function TemplateLibrary({
   const pickedTemplates = picked.filter((id) => !isFolderKey(id))
   const pickedFolderIds = picked.filter(isFolderKey).map(folderOfKey)
   const selecting = picked.length > 0
-  // Where every ticked template already is, if they share one place; that
-  // place is not offered as somewhere to move them.
-  const pickedFolders = new Set(
-    pickedTemplates.map((id) => all.find((t) => t.id === id)?.folder_id ?? null),
-  )
-  const pickedIn: string | null | undefined =
-    pickedFolders.size === 1 ? [...pickedFolders][0] : undefined
-  // Drag a box over empty space to select, as on a desktop. It listens on the
-  // whole library, not only the grid, so the padding and what is left below
-  // the last row start one too.
+  /** Where an item is now: its folder, or null at the top level. */
+  const homeOf = (key: string): string | null =>
+    isFolderKey(key)
+      ? (liveFolders.find((f) => f.id === folderOfKey(key))?.parent_id ?? null)
+      : (all.find((t) => t.id === key)?.folder_id ?? null)
+  // One pointer gesture for the whole page below its header, not only the
+  // grid, so the toolbar's empty space, the margins and what is left below the
+  // last row start one too: a box on empty space, a sweep from a checkbox, a
+  // lift of templates and folders onto a folder.
   const library = React.useRef<HTMLDivElement>(null)
-  useMarquee({ root: library, selected, onChange: setSelected })
 
   const clearFilters = () => {
     setQuery("")
@@ -270,25 +287,29 @@ export function TemplateLibrary({
   })
 
   // ── Moving ─────────────────────────────────────────────────────────────
-  async function move(ids: string[], to: string | null, { quiet = false } = {}) {
-    const from = new Map(
-      ids.map((id) => [id, all.find((t) => t.id === id)?.folder_id ?? null]),
-    )
-    const real = ids.filter((id) => from.get(id) !== to)
+  // ⚠ THE UNDO TOAST CALLS THE LATEST `move`, not the one it was made in: that
+  // one still sees the list from before the move, finds every item "already
+  // home" and does nothing.
+  const moveLatest = React.useRef(move)
+  React.useEffect(() => {
+    moveLatest.current = move
+  })
+
+  async function move(keys: string[], to: string | null, { quiet = false } = {}) {
+    const from = new Map(keys.map((key) => [key, homeOf(key)]))
+    const real = keys.filter((key) => from.get(key) !== to)
     if (real.length === 0) return
-    setMoved((prev) => {
-      const next = new Map(prev)
-      for (const id of real) next.set(id, to)
-      return next
-    })
+    setLayer((prev) => placed(prev, real, to))
     clearSelection()
-    const result = await moveTemplates(real, to)
+    const result = await moveToFolder(
+      {
+        templateIds: real.filter((k) => !isFolderKey(k)),
+        folderIds: real.filter(isFolderKey).map(folderOfKey),
+      },
+      to,
+    )
     if (!result.ok) {
-      setMoved((prev) => {
-        const next = new Map(prev)
-        for (const id of real) next.delete(id)
-        return next
-      })
+      setLayer((prev) => unplaced(prev, real))
       toastFailure(result)
       return
     }
@@ -296,80 +317,54 @@ export function TemplateLibrary({
     const where = to
       ? `"${liveFolders.find((f) => f.id === to)?.name ?? "folder"}"`
       : "All templates"
-    toastDone(
+    const folderCount = real.filter(isFolderKey).length
+    const what =
       real.length === 1
-        ? `Template moved to ${where}`
-        : `${real.length} templates moved to ${where}`,
-      {
-        action: {
-          label: "Undo",
-          onClick: () => {
-            // Each goes back to where it came from, which may differ.
-            const groups = new Map<string | null, string[]>()
-            for (const id of real) {
-              const back = from.get(id) ?? null
-              groups.set(back, [...(groups.get(back) ?? []), id])
-            }
-            for (const [back, group] of groups) void move(group, back, { quiet: true })
-          },
+        ? folderCount === 1
+          ? "Folder"
+          : "Template"
+        : countNoun({ templates: real.length - folderCount, folders: folderCount })
+    toastDone(`${what} moved to ${where}`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          // Each goes back to where it came from, which may differ.
+          const groups = new Map<string | null, string[]>()
+          for (const key of real) {
+            const back = from.get(key) ?? null
+            groups.set(back, [...(groups.get(back) ?? []), key])
+          }
+          for (const [back, group] of groups)
+            void moveLatest.current(group, back, { quiet: true })
         },
       },
-    )
+    })
   }
 
   // ── Dragging ───────────────────────────────────────────────────────────
-  function startDrag(id: string, event: React.DragEvent) {
-    const ids = selected.has(id) ? pickedTemplates : [id]
-    if (ids.length === 0) return event.preventDefault()
-    setDragIds(ids)
-    event.dataTransfer.effectAllowed = "move"
-    event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids))
-    event.dataTransfer.setData("text/plain", ids.join(","))
-    // A small chip as the drag image rather than a ghost of the whole card.
-    const ghost = document.createElement("div")
-    ghost.textContent =
-      ids.length === 1
-        ? titleOf(all.find((t) => t.id === ids[0])!)
-        : `${ids.length} templates`
-    ghost.style.cssText =
-      "position:fixed;top:-1000px;padding:6px 10px;border-radius:9999px;font:500 12px/1 system-ui,sans-serif;background:#111;color:#fff;box-shadow:0 6px 20px rgb(0 0 0/.25)"
-    document.body.appendChild(ghost)
-    event.dataTransfer.setDragImage(ghost, 12, 12)
-    requestAnimationFrame(() => ghost.remove())
-  }
-  // A folder is a drag handle only while it is ticked with templates.
-  const folderDrag = (f: TemplateFolder) =>
-    pickedTemplates.length > 0 && selected.has(folderKey(f.id))
-      ? {
-          onDragStart: (e: React.DragEvent) => startDrag(folderKey(f.id), e),
-          onDragEnd: endDrag,
-        }
-      : undefined
-  const endDrag = () => {
-    setDragIds(null)
-    setOver(null)
-  }
-  const dropTarget = (key: string, to: string | null) => ({
-    over: over === key,
-    onDragOver: (event: React.DragEvent) => {
-      if (!event.dataTransfer.types.includes(DRAG_TYPE)) return
-      event.preventDefault()
-      event.dataTransfer.dropEffect = "move"
-      if (over !== key) setOver(key)
-    },
-    onDragLeave: () => setOver((o) => (o === key ? null : o)),
-    onDrop: (event: React.DragEvent) => {
-      event.preventDefault()
-      setOver(null)
-      let ids: string[] = []
-      try {
-        ids = JSON.parse(event.dataTransfer.getData(DRAG_TYPE)) as string[]
-      } catch {
-        return
+  useGesture({
+    root: library,
+    selected,
+    carryFor: (origin, how) => {
+      const keys = how === "selection" ? picked : [origin]
+      if (keys.length === 0) return null
+      return {
+        keys,
+        homes: keys.map(homeOf),
+        blocked: blockedFor(liveFolders, keys.filter(isFolderKey).map(folderOfKey)),
       }
-      setDragIds(null)
-      void move(ids, to)
     },
+    // As Finder does: the card you grabbed by name, and the count beside it.
+    titleFor: (key) =>
+      isFolderKey(key)
+        ? (liveFolders.find((f) => f.id === folderOfKey(key))?.name ?? "Folder")
+        : titleOf(
+            all.find((t) => t.id === key) ?? ({ name: "Template" } as TemplateSummary),
+          ),
+    onSelect: setSelected,
+    onLift: setLifted,
+    onOver: setOver,
+    onDrop: (keys, to) => void move(keys, to),
   })
 
   // ── One template's menu ────────────────────────────────────────────────
@@ -383,9 +378,12 @@ export function TemplateLibrary({
       case "delete":
         return setDialog({ kind: "delete", ids: [template.id] })
       case "new-folder":
-        return setDialog({ kind: "new-folder", moveIds: [template.id] })
-      case "remove-from-folder":
-        return void move([template.id], null)
+        return setDialog({ kind: "new-folder", moveKeys: [template.id] })
+      case "remove-from-folder": {
+        // One level up, as Finder moves a file out: not all the way to the top.
+        const parent = liveFolders.find((f) => f.id === template.folder_id)?.parent_id
+        return void move([template.id], parent ?? null)
+      }
       case "duplicate": {
         const result = await duplicateTemplate(template.id)
         if (!result.ok) return toastFailure(result)
@@ -443,109 +441,17 @@ export function TemplateLibrary({
         </ListToolbarEnd>
       </ListToolbar>
 
-      {/* Where we are. Only inside a folder: a search from the top says what it
-          found in the toolbar, so starting one must not push the page down. */}
-      <AnimatePresence initial={false}>
-        {folderId && (
-          <motion.nav
-            aria-label="Breadcrumb"
-            data-no-marquee
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            // ⚠ A 4px BLEED ROUND THE CLIPPING BOX (2026-10-04). It clips for the
-            // height animation, and the drop target's ring sits 2px outside
-            // "All templates" - so dragging a template onto it drew the ring
-            // with its left edge cut off. Pulled out and padded back by the
-            // same amount, nothing moves and the ring has room.
-            className="-mx-1 overflow-hidden px-1 pb-1"
-          >
-            <ol className="flex items-center gap-1.5 pt-5 text-sm">
-              <li>
-                <Link
-                  href="/templates"
-                  {...omitOver(dropTarget("root", null))}
-                  className={cn(
-                    "rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:text-foreground",
-                    over === "root" &&
-                      "bg-primary/10 text-foreground ring-2 ring-primary/60",
-                  )}
-                  onClick={() => setQuery("")}
-                >
-                  All templates
-                </Link>
-              </li>
-              {(folder || (loading && folderId)) && !searching && (
-                <>
-                  <ChevronRight
-                    className="size-3.5 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <li className="font-medium">
-                    <Bone id="folder-name" lineHeight={20} width={100} inline>
-                      {folder?.name}
-                    </Bone>
-                  </li>
-                  {/*
-                   * ⚠ THE MENU'S BUTTON IS THERE WHILE THE FOLDER LOADS, DIMMED
-                   * (2026-11-18). It came with the folder: the 32px button is taller
-                   * than the name's line, so the breadcrumb grew and every template
-                   * under it jumped down as the folder arrived. SKIPPED BY
-                   * test/skeleton-parity: only the loaded one carries the menu.
-                   */}
-                  <li data-skeleton="skip">
-                    {!folder ? (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        aria-label="Folder actions"
-                        disabled
-                      >
-                        <MoreHorizontal />
-                      </Button>
-                    ) : (
-                      <DropdownMenu modal={false}>
-                        <Tooltip content="Folder actions">
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              aria-label="Folder actions"
-                            >
-                              <MoreHorizontal />
-                            </Button>
-                          </DropdownMenuTrigger>
-                        </Tooltip>
-                        <DropdownMenuContent align="start">
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              setDialog({ kind: "rename-folder", folder })
-                            }
-                          >
-                            <RenameIcon />
-                            Rename folder
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() =>
-                              setDialog({ kind: "delete-folder", folder })
-                            }
-                          >
-                            <Trash2 />
-                            Delete folder
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                  </li>
-                </>
-              )}
-            </ol>
-          </motion.nav>
-        )}
-      </AnimatePresence>
+      <Breadcrumb
+        folderId={folderId}
+        trail={trail}
+        depth={shape?.depth ?? 0}
+        loading={loading}
+        searching={searching}
+        over={over}
+        onRoot={() => setQuery("")}
+        onRename={(f) => setDialog({ kind: "rename-folder", folder: f })}
+        onDelete={(f) => setDialog({ kind: "delete-folder", folder: f })}
+      />
 
       {/* What is here - and empty space the selection box starts from. */}
       <div className="min-h-[60vh] pt-6 pb-24">
@@ -584,9 +490,6 @@ export function TemplateLibrary({
                             selecting={false}
                             over={false}
                             onSelect={() => {}}
-                            onDragOver={() => {}}
-                            onDragLeave={() => {}}
-                            onDrop={() => {}}
                             onRename={() => {}}
                             onDelete={() => {}}
                           />
@@ -614,14 +517,19 @@ export function TemplateLibrary({
                       <AnimatePresence mode="popLayout" initial={false}>
                         {shownFolders.map((f, i) => (
                           <BoneScope key={`f-${f.id}`} id={`folder-${i}`} unit>
-                            <li data-select-key={folderKey(f.id)}>
+                            <li data-select-key={folderKey(f.id)} data-drop-to={f.id}>
                               <FolderCard
                                 folder={f}
                                 selected={selected.has(folderKey(f.id))}
                                 selecting={selecting}
                                 onSelect={(e) => select(folderKey(f.id), e)}
-                                {...dropTarget(f.id, f.id)}
-                                {...folderDrag(f)}
+                                over={over === f.id}
+                                dragging={lifted?.has(folderKey(f.id)) ?? false}
+                                targets={moveTargets(liveFolders, {
+                                  folderIds: [f.id],
+                                  homes: [f.parent_id],
+                                })}
+                                onMove={(to) => void move([folderKey(f.id)], to)}
                                 onRename={() =>
                                   setDialog({ kind: "rename-folder", folder: f })
                                 }
@@ -642,9 +550,7 @@ export function TemplateLibrary({
                                 selecting={selecting}
                                 onSelect={(e) => select(t.id, e)}
                                 onAction={(a) => void act(t, a)}
-                                onDragStart={(e) => startDrag(t.id, e)}
-                                onDragEnd={endDrag}
-                                dragging={dragIds?.includes(t.id) ?? false}
+                                dragging={lifted?.has(t.id) ?? false}
                               />
                             </li>
                           </BoneScope>
@@ -667,10 +573,9 @@ export function TemplateLibrary({
                     setSelected(checked ? new Set(visibleIds) : new Set())
                   }
                   onAction={(t, a) => void act(t, a)}
-                  dropTarget={dropTarget}
-                  onDragStart={startDrag}
-                  onDragEnd={endDrag}
-                  folderDrag={folderDrag}
+                  over={over}
+                  lifted={lifted}
+                  onFolderMove={(f, to) => void move([folderKey(f.id)], to)}
                   onFolderRename={(f) =>
                     setDialog({ kind: "rename-folder", folder: f })
                   }
@@ -688,50 +593,37 @@ export function TemplateLibrary({
 
       {/* The bar for what is ticked */}
       <BulkBar count={picked.length} onClear={clearSelection} label="Selected">
-        {/* Folders do not nest, so only templates move. */}
-        {pickedTemplates.length > 0 && (
-          <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
-                <FolderInput />
-                Move
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              side="top"
-              align="center"
-              className="max-h-80 w-52 overflow-y-auto"
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <FolderInput />
+              Move
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="top"
+            align="center"
+            className="max-h-80 w-56 overflow-y-auto"
+          >
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Move to
+            </DropdownMenuLabel>
+            <MoveItems
+              targets={moveTargets(liveFolders, {
+                folderIds: pickedFolderIds,
+                homes: picked.map(homeOf),
+              })}
+              onMove={(to) => void move(picked, to)}
+            />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => setDialog({ kind: "new-folder", moveKeys: picked })}
             >
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                Move to
-              </DropdownMenuLabel>
-              <DropdownMenuItem
-                disabled={pickedIn === null}
-                onSelect={() => void move(pickedTemplates, null)}
-              >
-                All templates
-              </DropdownMenuItem>
-              {liveFolders.map((f) => (
-                <DropdownMenuItem
-                  key={f.id}
-                  disabled={pickedIn === f.id}
-                  onSelect={() => void move(pickedTemplates, f.id)}
-                >
-                  <span className="truncate">{f.name}</span>
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() =>
-                  setDialog({ kind: "new-folder", moveIds: pickedTemplates })
-                }
-              >
-                <FolderPlus />
-                New folder…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+              <FolderPlus />
+              New folder…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           variant="danger"
           size="sm"
@@ -754,31 +646,25 @@ export function TemplateLibrary({
         setDialog={setDialog}
         templates={all}
         folders={liveFolders}
+        folderId={folderId}
         onDeleted={(ids) => {
-          setGone((prev) => new Set([...prev, ...ids]))
+          setLayer((prev) => ({ ...prev, gone: new Set([...prev.gone, ...ids]) }))
           clearSelection()
         }}
-        onMoveInto={(ids, to) => void move(ids, to)}
+        onMoveInto={(keys, to) => void move(keys, to)}
         onFolderDeleted={(f) => {
           clearSelection()
-          setGone((prev) => new Set([...prev, f.id]))
-          setMoved((prev) => {
-            const next = new Map(prev)
-            for (const t of all) if (t.folder_id === f.id) next.set(t.id, null)
-            return next
-          })
-          if (folderId === f.id) router.push("/templates")
+          setLayer((prev) => withoutFolder(prev, f.id, templates, folders))
+          if (folderId === f.id)
+            router.push(
+              f.parent_id
+                ? `/templates/folder/${encodeURIComponent(f.parent_id)}`
+                : "/templates",
+            )
         }}
       />
     </div>
   )
-}
-
-/** The drop handlers without the `over` flag, for elements that style themselves. */
-function omitOver<T extends { over: boolean }>(target: T): Omit<T, "over"> {
-  const rest: Partial<T> = { ...target }
-  delete rest.over
-  return rest as Omit<T, "over">
 }
 
 function EmptyLibrary() {
@@ -838,10 +724,9 @@ function TemplateTable({
   onSelect,
   onSelectAll,
   onAction,
-  dropTarget,
-  onDragStart,
-  onDragEnd,
-  folderDrag,
+  over,
+  lifted,
+  onFolderMove,
   onFolderRename,
   onFolderDelete,
   loading = false,
@@ -855,20 +740,11 @@ function TemplateTable({
   onSelect: (id: string, e: { shiftKey: boolean; checked: boolean }) => void
   onSelectAll: (checked: boolean) => void
   onAction: (t: TemplateSummary, a: TemplateAction) => void
-  dropTarget: (
-    key: string,
-    to: string | null,
-  ) => {
-    over: boolean
-    onDragOver: (e: React.DragEvent) => void
-    onDragLeave: () => void
-    onDrop: (e: React.DragEvent) => void
-  }
-  onDragStart: (id: string, e: React.DragEvent) => void
-  onDragEnd: () => void
-  folderDrag: (
-    f: TemplateFolder,
-  ) => { onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void } | undefined
+  /** The drop target a gesture is over: a folder's id, or `root`. */
+  over: string | null
+  /** Rows a gesture has lifted, as selection keys, dimmed in place. */
+  lifted: Set<string> | null
+  onFolderMove: (f: TemplateFolder, to: string | null) => void
   onFolderRename: (f: TemplateFolder) => void
   onFolderDelete: (f: TemplateFolder) => void
   loading?: boolean
@@ -916,7 +792,7 @@ function TemplateTable({
       <tbody>
         <AnimatePresence initial={false}>
           {folderRows.map((f, i) => {
-            const drop = f ? dropTarget(f.id, f.id) : undefined
+            const dropOver = f ? over === f.id : false
             const cells = (
               <>
                 <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
@@ -931,6 +807,7 @@ function TemplateTable({
                   >
                     {f && (
                       <Checkbox
+                        className="touch-none"
                         checked={selected.has(folderKey(f.id))}
                         onClick={(e) =>
                           onSelect(folderKey(f.id), {
@@ -963,13 +840,15 @@ function TemplateTable({
                               on hover and when a template is dragged on. */}
                           <div className="relative h-[30px] w-[36px]">
                             <div className="absolute top-0 left-0 w-[160px] origin-top-left scale-[0.225]">
-                              <FolderArt
-                                count={f.templates}
-                                raised={hoverFolder === f.id || Boolean(drop?.over)}
-                                over={Boolean(drop?.over)}
-                                previews={f.preview}
-                                className="w-full"
-                              />
+                              <div data-drag-art>
+                                <FolderArt
+                                  count={f.templates}
+                                  raised={hoverFolder === f.id || dropOver}
+                                  over={dropOver}
+                                  previews={f.preview}
+                                  className="w-full"
+                                />
+                              </div>
                             </div>
                           </div>
                         </RowTile>
@@ -982,9 +861,7 @@ function TemplateTable({
                       <Bone id="count" lineHeight={16} width={60} className="mt-0.5">
                         {f && (
                           <p className="text-xs text-muted-foreground">
-                            {f.templates === 0
-                              ? "Empty"
-                              : `${f.templates} template${f.templates === 1 ? "" : "s"}`}
+                            {contentsOf(f)}
                           </p>
                         )}
                       </Bone>
@@ -1012,6 +889,13 @@ function TemplateTable({
                         <RenameIcon />
                         Rename folder
                       </DropdownMenuItem>
+                      <MoveSubmenu
+                        targets={moveTargets(allFolders, {
+                          folderIds: [f.id],
+                          homes: [f.parent_id],
+                        })}
+                        onMove={(to) => onFolderMove(f, to)}
+                      />
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         variant="destructive"
@@ -1027,9 +911,10 @@ function TemplateTable({
             )
             return (
               <BoneScope key={f ? `f-${f.id}` : `f-${i}`} id={`folder-${i}`} unit>
-                {f && drop ? (
+                {f ? (
                   <motion.tr
                     data-select-key={folderKey(f.id)}
+                    data-drop-to={f.id}
                     layout
                     exit={{
                       opacity: 0,
@@ -1039,14 +924,6 @@ function TemplateTable({
                       },
                     }}
                     transition={motionTokens.spring.responsive}
-                    draggable={Boolean(folderDrag(f))}
-                    onDragStart={(e) =>
-                      folderDrag(f)?.onDragStart(e as unknown as React.DragEvent)
-                    }
-                    onDragEnd={onDragEnd}
-                    onDragOver={drop.onDragOver}
-                    onDragLeave={drop.onDragLeave}
-                    onDrop={drop.onDrop}
                     onClick={(e) => {
                       // Only a click in the row: a dialog or menu opened from it
                       // bubbles its clicks here through React (see MotionRow).
@@ -1067,7 +944,8 @@ function TemplateTable({
                       rowClass,
                       "cursor-pointer",
                       selected.has(folderKey(f.id)) && selectedRowClass,
-                      drop.over &&
+                      lifted?.has(folderKey(f.id)) && "opacity-45",
+                      dropOver &&
                         "bg-primary/[0.06] outline-2 -outline-offset-2 outline-primary/60",
                     )}
                   >
@@ -1096,6 +974,7 @@ function TemplateTable({
                   >
                     {t && (
                       <Checkbox
+                        className="touch-none"
                         checked={ticked}
                         onClick={(e) =>
                           onSelect(t.id, { shiftKey: e.shiftKey, checked: !ticked })
@@ -1119,7 +998,10 @@ function TemplateTable({
                         >
                           {t && (
                             <RowTile>
-                              <div className="absolute inset-x-[14%] top-[18%] -bottom-1 overflow-hidden rounded-t-[3px] shadow-[0_0_0_1px_rgb(0_0_0/0.06)]">
+                              <div
+                                data-drag-art
+                                className="absolute inset-x-[14%] top-[18%] -bottom-1 overflow-hidden rounded-t-[3px] shadow-[0_0_0_1px_rgb(0_0_0/0.06)]"
+                              >
                                 <TemplateSnapshot
                                   templateId={t.id}
                                   stamp={t.updated_at}
@@ -1238,11 +1120,6 @@ function TemplateTable({
                       },
                     }}
                     transition={motionTokens.spring.responsive}
-                    draggable
-                    onDragStart={(e) =>
-                      onDragStart(t.id, e as unknown as React.DragEvent)
-                    }
-                    onDragEnd={onDragEnd}
                     onMouseDown={(e) => e.shiftKey && e.preventDefault()}
                     onPointerEnter={() => seedTemplate(t)}
                     onFocus={() => seedTemplate(t)}
@@ -1258,6 +1135,7 @@ function TemplateTable({
                       rowClass,
                       "cursor-pointer",
                       ticked && selectedRowClass,
+                      lifted?.has(t.id) && "opacity-45",
                     )}
                   >
                     {cells}
@@ -1280,6 +1158,7 @@ function LibraryDialogs({
   setDialog,
   templates,
   folders,
+  folderId,
   onDeleted,
   onMoveInto,
   onFolderDeleted,
@@ -1288,8 +1167,10 @@ function LibraryDialogs({
   setDialog: (d: Dialog) => void
   templates: TemplateSummary[]
   folders: TemplateFolder[]
+  /** The folder on screen; a new folder is made inside it. */
+  folderId: string | null
   onDeleted: (ids: string[]) => void
-  onMoveInto: (ids: string[], to: string) => void
+  onMoveInto: (keys: string[], to: string) => void
   onFolderDeleted: (f: TemplateFolder) => void
 }) {
   // ⚠ THE LAST DIALOG STAYS RENDERED WHILE IT ANIMATES OUT, so its title
@@ -1316,14 +1197,26 @@ function LibraryDialogs({
   ]
     .filter(Boolean)
     .join(" and ")
-  // Templates in a deleted folder that are not themselves being deleted.
+  // What a deleted folder's contents become: templates and folders inside a
+  // deleted folder that are not themselves being deleted.
+  const deletedFolderIds = d?.kind === "delete" ? (d.folderIds ?? []) : []
   const rehomed = templates.filter(
     (t) =>
       t.folder_id &&
       d?.kind === "delete" &&
-      d.folderIds?.includes(t.folder_id) &&
+      deletedFolderIds.includes(t.folder_id) &&
       !d.ids.includes(t.id),
   ).length
+  const rehomedFolders = folders.filter(
+    (f) =>
+      f.parent_id &&
+      deletedFolderIds.includes(f.parent_id) &&
+      !deletedFolderIds.includes(f.id),
+  ).length
+  const whereTo = (f: TemplateFolder) =>
+    f.parent_id
+      ? `"${folders.find((p) => p.id === f.parent_id)?.name ?? "its parent"}"`
+      : "All templates"
 
   return (
     <>
@@ -1353,9 +1246,10 @@ function LibraryDialogs({
       <NewFolderDialog
         open={dialog?.kind === "new-folder"}
         onOpenChange={close}
+        parentId={folderId}
         onCreated={(id) => {
-          if (d?.kind === "new-folder" && d.moveIds.length > 0)
-            onMoveInto(d.moveIds, id)
+          if (d?.kind === "new-folder" && d.moveKeys.length > 0)
+            onMoveInto(d.moveKeys, id)
         }}
       />
       {d?.kind === "rename-folder" && (
@@ -1379,9 +1273,11 @@ function LibraryDialogs({
             : "Delete folder?"
         }
         description={
-          d?.kind === "delete-folder" && d.folder.templates > 0
-            ? `Its ${d.folder.templates} template${d.folder.templates === 1 ? "" : "s"} move to All templates. No template is deleted.`
-            : "The folder is empty."
+          d?.kind === "delete-folder"
+            ? d.folder.templates + d.folder.folders > 0
+              ? `Its ${contentsOf(d.folder).replace(", ", " and ")} move to ${whereTo(d.folder)}. Nothing else is deleted.`
+              : "The folder is empty."
+            : ""
         }
         confirmLabel="Delete folder"
         doneLabel="Deleted"
@@ -1407,10 +1303,10 @@ function LibraryDialogs({
             : deleting.length > 0
               ? `Any send naming one of these templates will start failing: ${deleting.map((t) => t.name).join(", ")}.`
               : null,
-          // ⚠ A FOLDER IS DELETED, ITS TEMPLATES ARE NOT - they move to All
-          // templates, as when one folder is deleted on its own.
-          rehomed > 0
-            ? `${plural(rehomed, "template")} in ${deletingFolders.length === 1 ? "that folder moves" : "those folders move"} to All templates.`
+          // ⚠ A FOLDER IS DELETED, ITS CONTENTS ARE NOT - they move up to its
+          // parent, as when one folder is deleted on its own.
+          rehomed + rehomedFolders > 0
+            ? `${countNoun({ templates: rehomed, folders: rehomedFolders })} inside ${deletingFolders.length === 1 ? "that folder move" : "those folders move"} up a level.`
             : deletingFolders.length > 0 && deleting.length === 0
               ? `${deletingFolders.length === 1 ? "It is" : "They are"} empty.`
               : null,
@@ -1475,13 +1371,75 @@ function versionLabel(t: TemplateSummary): string {
   return isEditable(t) ? v : `${v} ${t.source}`
 }
 
-/** A folder's place in the selection, beside template ids. */
-function folderKey(id: string): string {
-  return `folder:${id}`
+/**
+ * The optimistic layer: where templates and folders have been put, and what has
+ * been deleted, before the server's list says so.
+ */
+type Layer = {
+  templates: Map<string, string | null>
+  folders: Map<string, string | null>
+  gone: Set<string>
 }
-function isFolderKey(key: string): boolean {
-  return key.startsWith("folder:")
+const freshLayer = (): Layer => ({
+  templates: new Map(),
+  folders: new Map(),
+  gone: new Set(),
+})
+
+/** `keys` put in `to`, each a template id or `folder:<id>`. */
+function placed(layer: Layer, keys: string[], to: string | null): Layer {
+  const next = {
+    ...layer,
+    templates: new Map(layer.templates),
+    folders: new Map(layer.folders),
+  }
+  for (const key of keys) {
+    if (isFolderKey(key)) next.folders.set(folderOfKey(key), to)
+    else next.templates.set(key, to)
+  }
+  return next
 }
-function folderOfKey(key: string): string {
-  return key.slice("folder:".length)
+
+/** A move taken back, because the server refused it. */
+function unplaced(layer: Layer, keys: string[]): Layer {
+  const next = {
+    ...layer,
+    templates: new Map(layer.templates),
+    folders: new Map(layer.folders),
+  }
+  for (const key of keys) {
+    if (isFolderKey(key)) next.folders.delete(folderOfKey(key))
+    else next.templates.delete(key)
+  }
+  return next
+}
+
+/**
+ * A folder deleted: it goes, and what was inside it moves to ITS parent, as the
+ * API does.
+ */
+function withoutFolder(
+  layer: Layer,
+  id: string,
+  templates: TemplateSummary[],
+  folders: TemplateFolder[],
+): Layer {
+  const parent = layer.folders.has(id)
+    ? (layer.folders.get(id) ?? null)
+    : (folders.find((f) => f.id === id)?.parent_id ?? null)
+  const next = {
+    ...layer,
+    templates: new Map(layer.templates),
+    folders: new Map(layer.folders),
+    gone: new Set(layer.gone).add(id),
+  }
+  for (const t of templates) {
+    const at = next.templates.has(t.id) ? next.templates.get(t.id) : t.folder_id
+    if (at === id) next.templates.set(t.id, parent)
+  }
+  for (const f of folders) {
+    const at = next.folders.has(f.id) ? next.folders.get(f.id) : f.parent_id
+    if (at === id) next.folders.set(f.id, parent)
+  }
+  return next
 }

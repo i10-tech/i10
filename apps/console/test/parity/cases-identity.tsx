@@ -279,8 +279,63 @@ export const IDENTITY_VIEWS = [
           view: "table",
         }),
       },
+      {
+        name: "subfolders and templates (grid)",
+        fixture: (tag): TemplateFolderData => nested(tag, "f1", 0, "grid"),
+      },
+      {
+        name: "subfolders and templates (table)",
+        fixture: (tag): TemplateFolderData => nested(tag, "f1", 0, "table"),
+      },
+      {
+        name: "only subfolders (grid)",
+        fixture: (tag): TemplateFolderData => ({
+          ...nested(tag, "f1", 0, "grid"),
+          templates: [],
+        }),
+      },
+      {
+        name: "two levels deep (table)",
+        fixture: (tag): TemplateFolderData => nested(tag, "f1", 2, "table"),
+      },
+      {
+        name: "six levels deep, the path folded (grid)",
+        fixture: (tag): TemplateFolderData => nested(tag, "f1", 5, "grid"),
+      },
     ],
   }),
 ]
+
+/**
+ * A folder page with `above` folders over it, two subfolders and three
+ * templates inside it. The folders above it are a chain, each inside the last.
+ */
+function nested(
+  tag: string,
+  id: string,
+  above: number,
+  view: "grid" | "table",
+): TemplateFolderData {
+  const chain = rows(above, (i) => ({
+    ...folder(tag, 10 + i),
+    id: `up${i}`,
+    parent_id: i === 0 ? null : `up${i - 1}`,
+    folders: 1,
+  }))
+  const here = {
+    ...folder(tag, 0),
+    id,
+    parent_id: above === 0 ? null : `up${above - 1}`,
+    folders: 2,
+  }
+  const subs = rows(2, (i) => ({ ...folder(tag, 20 + i), parent_id: id }))
+  return {
+    folderId: id,
+    folder: here,
+    templates: rows(3, (i) => template(tag, i, { folder_id: id })),
+    folders: [...chain, here, ...subs],
+    view,
+  }
+}
 
 export { iso }
