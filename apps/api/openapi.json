@@ -9260,7 +9260,7 @@
             }
           },
           "403": {
-            "description": "The plan does not include another domain.",
+            "description": "The plan does not include another domain, or the key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9333,6 +9333,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "501": {
             "description": "Domains are not configured.",
             "content": {
@@ -9381,6 +9391,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9464,6 +9484,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No domain with that id.",
             "content": {
@@ -9539,6 +9569,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No domain with that id.",
             "content": {
@@ -9598,6 +9638,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
