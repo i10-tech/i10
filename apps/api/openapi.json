@@ -4892,7 +4892,7 @@
             }
           },
           "404": {
-            "description": "No such message for this API key's tenant.",
+            "description": "No such message for this API key's tenant, or the key is restricted to other domains than the message's `from` address.",
             "content": {
               "application/json": {
                 "schema": {

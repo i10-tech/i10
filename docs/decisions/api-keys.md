@@ -221,6 +221,9 @@ Empty means unrestricted. A key restricted to domains sends only from those
 domains, matched exactly, so a subdomain is a separate domain. These routes
 refuse it with `403 restricted_api_key`: `/domains`, the webhook routes,
 `/suppressions`, `/trusted-templates`, and writes to `/api-keys`.
+`GET /emails/{id}` confines it instead: it reads only mail whose `from` it may
+send from, and anything else is the unknown-id 404, so it cannot confirm that
+another domain's message exists.
 
 ⚠ **`/domains` refuses rather than confines.** A restricted key is a sending key,
 as Resend's `sending_access` keys are, and those cannot manage domains either.
