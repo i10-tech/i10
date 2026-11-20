@@ -18,6 +18,7 @@ stays, so a gap here is not a gap in i10.
 | `src/policy.ts`  | Pure pass/deny decision: path rules, `_method`, bodies, managed |
 | `src/managed.ts` | The managed-account lookup (our API, #337) and its cache        |
 | `src/forward.ts` | Clerk's proxy contract: headers in, `Set-Cookie`/`Location` out |
+| `src/cache.ts`   | What is kept at our edge, for how long, and the stored copy     |
 | `src/gateway.ts` | One request end to end, with everything side-effecting injected |
 | `src/log.ts`     | The one structured line per request                             |
 | `src/config.ts`  | The Worker's variables and secret, validated                    |
@@ -99,14 +100,65 @@ uncompressed).
 `UPSTREAM_TIMEOUT_MS`, the answer is 503 with `Retry-After: 5`,
 `X-Clerk-Gateway: unavailable` and `service_unavailable`. Never a 401: clerk-js
 ends the session on an unauthenticated token refresh, and an outage must not
-sign anyone out. Clerk's own 5xx pass through unchanged. An unconfigured
-gateway (no secret, or a key from the other instance) answers 503 to
-everything.
+sign anyone out. Clerk's own 5xx pass through unchanged, except for
+`GET /v1/environment` when a recent copy is in the edge cache (below). An
+unconfigured gateway (no secret, or a key from the other instance) answers 503
+to everything.
+
+**Edge cache.** Three of Clerk's answers are kept in `caches.default` (the
+zone's cache, per Cloudflare data center), so a page load does not wait on
+Clerk for them. Everything else, `/v1/client` included, goes to Clerk every
+time. The rules are in `src/cache.ts`:
+
+| What                                       | Kept for                   | Stale if Clerk fails | Why it is safe                                                                                                                     |
+| ------------------------------------------ | -------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `/npm/<pkg>@<tag or range>/...` (the 307)  | 5 minutes                  | never                | The target is an exact version, which stays valid; at worst a browser moves to a new clerk-js 5 minutes late                       |
+| `/npm/<pkg>@<x.y.z>/...`                   | Clerk's `max-age` (1 year) | never                | Only a 200 Clerk marks `public` and `immutable`                                                                                    |
+| `GET /v1/environment`, our origins or none | 60 seconds                 | up to 10 minutes     | Instance config: the body was the same with and without a session (checked 2026-11-20); the apps keep it 5 minutes server-side too |
+
+- **No `Set-Cookie` is ever stored.** The environment answer sets
+  `__client_uat` to the requesting browser's session timestamp, so a hit
+  carries no `Set-Cookie` at all; `/v1/client`, never cached, sets the same
+  cookies on every load. `x-country` (Clerk's guess from the requester's IP) is
+  not stored either.
+- **The key** is the path Clerk is asked for, so `clerk.i10.tech/...` and
+  `i10.tech/__clerk/...` share one entry, plus, for the environment, the
+  `Origin` (Clerk's CORS varies by it) and the whole query string. The
+  environment is cached only for an origin in `ALLOWED_ORIGINS` or no origin
+  (the apps' server-side reads), and never with `Authorization`.
+- **One decoded copy.** The runtime has already decoded Clerk's body; the
+  stored copy has no `Content-Encoding`, and a hit goes through the same
+  `passThrough` as a miss, so it is encoded for the browser that asked, the
+  `Location` rewrite applies, and the browser sees Clerk's own `Cache-Control`
+  (the 307 stays `private, no-store`).
+- **Stale if error** applies to the environment only: when Clerk is
+  unreachable, times out, or answers 5xx, a copy up to 10 minutes past fresh
+  is served (`X-Clerk-Gateway-Cache: stale`, log `cache: "stale"` with the
+  reason). Past that, the outage rule's 503 applies. Instance config 10 minutes
+  old is still right; a page that cannot load clerk-js at all is not, and an
+  outage still never reads as signed out.
+- **Refused requests never touch the cache.** The policy runs first, the same
+  for a hit as for a miss.
+- Every response a rule covers carries `X-Clerk-Gateway-Cache: hit|miss|stale`.
+- Measured in production on 2026-11-20 (Milan data center, Workers Logs): an
+  environment hit takes the Worker 5 ms against 188 ms forwarded to Clerk, and
+  a redirect or bundle hit 4 ms. Over one reused connection every hit lands
+  within 10 ms of a denied route, our floor.
+
+**Purging.** A deploy does not empty `caches.default`, and a rollback does not
+either. The sure way to drop every stored copy is to bump `CACHE_VERSION` in
+`src/cache.ts` and deploy: old keys become unreachable and age out. Without a
+deploy, "Purge Everything" for the `i10.tech` zone in the Cloudflare dashboard
+covers Cache API entries too (Cloudflare's docs), but empties the whole zone's
+cache, `cdn.i10.tech` included. A "Custom Purge" by the
+prefix `i10.tech/__clerk/__gateway_cache/` should drop only ours, but has not
+been tried. Doing nothing, an environment copy is gone within 11 minutes and a
+redirect within 5.
 
 **Logging.** One JSON line per request (`msg: "clerk-gateway"`): effective
 method, route name, decision, reason, our status, Clerk's status, duration,
-client IP, Cloudflare ray id, and for a refused request the path (never the
-query). No headers, no query, no body, ever: those carry cookies, session
+client IP, Cloudflare ray id, for a cached route `cache` (`hit`, `miss` or
+`stale`), and for a refused request the path (never the query). No headers, no query, no body, ever: those carry cookies, session
 tokens, dev-browser tokens, tickets and passwords. The type in `src/log.ts` is
 the whole vocabulary. The identity audit log (sign-ins, refusals, revocations) is the API's, in `identity.events`.
 
@@ -270,7 +322,8 @@ the gateway answers the host the publishable key already names.
 ### Rolling back
 
 - **A policy or code bug:** `bunx wrangler rollback` to the previous version.
-  The hostname, the secret and Clerk's `proxy_url` stay as they are.
+  The hostname, the secret and Clerk's `proxy_url` stay as they are. A rollback
+  does not purge the edge cache; see "Purging" above.
 - **Back to Clerk directly:** `PATCH /v1/domains/dmn_3Iiq1VlixQgH39w1edDOXEAMWWC`
   with `{"proxy_url": null}` (the PATCH was tested on 2026-11-20); remove the
   `clerk.i10.tech` custom domain and the `i10.tech/__clerk*` route from the

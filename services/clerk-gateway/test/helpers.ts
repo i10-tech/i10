@@ -1,3 +1,4 @@
+import type { EdgeCache } from "../src/cache.js"
 import type { Env } from "../src/config.js"
 import { handle, type GatewayDeps } from "../src/gateway.js"
 import { NOT_MANAGED, type ManagedAccounts } from "../src/managed.js"
@@ -64,21 +65,54 @@ export interface Seen {
   body: string | null
 }
 
-/** The gateway in-process, with a fake Clerk and a captured log. */
+/**
+ * `caches.default` in memory: what was put, by key, read back as a fresh copy
+ * each time. It never expires anything itself; the gateway decides freshness.
+ */
+export class MemoryCache implements EdgeCache {
+  readonly entries = new Map<
+    string,
+    { status: number; headers: Headers; body: string }
+  >()
+  matches: string[] = []
+
+  async match(key: string): Promise<Response | undefined> {
+    this.matches.push(key)
+    const entry = this.entries.get(key)
+    if (!entry) return undefined
+    return new Response(entry.body, { status: entry.status, headers: entry.headers })
+  }
+
+  async put(key: string, response: Response): Promise<void> {
+    this.entries.set(key, {
+      status: response.status,
+      headers: new Headers(response.headers),
+      body: await response.text(),
+    })
+  }
+}
+
+/** The gateway in-process, with a fake Clerk, an in-memory cache and a captured log. */
 export function harness(
   options: {
     env?: Partial<Env>
     managed?: ManagedAccounts
     upstream?: (seen: Seen) => Response | Promise<Response>
+    cache?: MemoryCache
   } = {},
 ) {
   const calls: Seen[] = []
   const logs: string[] = []
+  const cache = options.cache ?? new MemoryCache()
+  const deferred: Promise<unknown>[] = []
+  const clock = { now: 0 }
   const deps: GatewayDeps = {
     env: { ...ENV, ...options.env },
     managed: options.managed ?? NOT_MANAGED,
     log: (line) => logs.push(line),
-    now: () => 0,
+    now: () => clock.now,
+    cache,
+    defer: (work) => deferred.push(work),
     fetch: async (url, init) => {
       const raw = init.body
       let body: string | null = null
@@ -94,6 +128,10 @@ export function harness(
   return {
     calls,
     logs,
+    cache,
+    clock,
+    /** Wait for the cache writes the gateway left running. */
+    settle: () => Promise.all(deferred.splice(0)),
     send: (input: string, init?: RequestInit) =>
       handle(new Request(`https://clerk.i10.tech${input}`, init), deps),
     /** For URLs the WHATWG parser would normalise. */

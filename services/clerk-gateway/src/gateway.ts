@@ -1,6 +1,14 @@
+import {
+  assess,
+  cacheRule,
+  revive,
+  storableFor,
+  toStored,
+  type EdgeCache,
+} from "./cache.js"
 import { readConfig, type Config, type Env } from "./config.js"
 import { clientIp, passThrough, upstreamHeaders, upstreamUrl } from "./forward.js"
-import { formatLine, printablePath, type LogLine } from "./log.js"
+import { formatLine, printablePath, type CacheOutcome, type LogLine } from "./log.js"
 import type { ManagedAccounts } from "./managed.js"
 import { decide, type Body, type Decision } from "./policy.js"
 
@@ -16,6 +24,10 @@ export interface GatewayDeps {
   managed: ManagedAccounts
   log: (line: string) => void
   now: () => number
+  /** The edge cache (`caches.default` in the Worker). */
+  cache: EdgeCache
+  /** Work that may finish after the response is sent (`ctx.waitUntil`). */
+  defer: (work: Promise<unknown>) => void
 }
 
 /**
@@ -232,6 +244,42 @@ export async function handle(request: Request, deps: GatewayDeps): Promise<Respo
     return finish(refusal(decision), config)
   }
 
+  const acceptEncoding = request.headers.get("accept-encoding")
+  const serve = (clerk: Response, cache: CacheOutcome | null): Response => {
+    const out = passThrough(clerk, config, acceptEncoding)
+    if (cache) {
+      line.cache = cache
+      out.headers.set("X-Clerk-Gateway-Cache", cache)
+    }
+    return out
+  }
+
+  /*
+   * ⚠ ONLY AFTER THE POLICY HAS PASSED THE REQUEST. A refused request never
+   * reads or fills the cache, and the policy runs the same for a hit as for a
+   * miss (src/cache.ts).
+   *
+   * ⚠ A CACHE THAT FAILS IS A MISS. Both cache calls swallow their errors on
+   * purpose: the cache only ever saves time, so a broken one must cost a trip
+   * to Clerk, never the request.
+   */
+  const rule =
+    httpMethod === "GET"
+      ? cacheRule(decision.route, rawPath, search, request.headers, config)
+      : null
+  let fallback: Response | null = null
+  if (rule) {
+    const found = assess(
+      await deps.cache.match(rule.key).catch(() => undefined),
+      rule,
+      deps.now(),
+    )
+    if (found.state === "fresh")
+      return finish(serve(revive(found.stored), "hit"), config)
+    if (found.state === "stale") fallback = found.stored
+    else if (found.state === "expired") discard(found.stored)
+  }
+
   /*
    * ⚠ THE TIMER COVERS THE WAIT FOR CLERK'S HEADERS, NOT THE BODY. A token
    * refresh is the hot path; if Clerk has not started answering inside the
@@ -260,16 +308,35 @@ export async function handle(request: Request, deps: GatewayDeps): Promise<Respo
     }
     upstream = await deps.fetch(upstreamUrl(rawPath, search, config), init)
   } catch {
-    line.decision = "unavailable"
     line.reason = timedOut ? "upstream_timeout" : "upstream_unreachable"
+    if (fallback) return finish(serve(revive(fallback), "stale"), config)
+    line.decision = "unavailable"
     return finish(unavailable(), config)
   } finally {
     clearTimeout(timer)
   }
 
   line.upstream_status = upstream.status
-  return finish(
-    passThrough(upstream, config, request.headers.get("accept-encoding")),
-    config,
-  )
+  if (fallback && upstream.status >= 500) {
+    discard(upstream)
+    line.reason = "upstream_5xx"
+    return finish(serve(revive(fallback), "stale"), config)
+  }
+  if (fallback) discard(fallback)
+
+  if (rule) {
+    const freshMs = storableFor(rule, upstream)
+    if (freshMs !== null) {
+      // `as Response`: bun's types type `clone()` as undici's Response.
+      const copy = upstream.clone() as Response
+      const stored = toStored(copy, freshMs, rule.staleMs, deps.now())
+      deps.defer(deps.cache.put(rule.key, stored).catch(() => {}))
+    }
+  }
+  return finish(serve(upstream, rule ? "miss" : null), config)
+}
+
+/** Let go of a body we will not send. */
+function discard(response: Response): void {
+  response.body?.cancel().catch(() => {})
 }
