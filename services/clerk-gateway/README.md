@@ -158,7 +158,27 @@ from the root through turbo.
 
 ## Production rollout, in order
 
-Nothing below has been done. Each step is manual and in this order.
+> ⚠ LIVE SINCE 2026-11-20, AT TWO NAMES, BECAUSE CLERK ACCEPTS ONLY ONE OF
+> THEM. `proxy_url` must be on the domain's own host, so Clerk knows the gateway
+> as `https://i10.tech/__clerk` (route `i10.tech/__clerk*`); the Worker also
+> owns `clerk.i10.tech` as a custom domain, the name the publishable key
+> encodes, and forwards from both with that one `Clerk-Proxy-Url`. Requests
+> under `/__clerk` lose the prefix before matching, as in Clerk's own proxy.
+> P8 was answered by testing instead of step 1 (`docs/decisions/sso.md` 1.5).
+> Step 4 (the `workers.dev` rehearsal; Clerk refuses that host) was not done;
+> step 8 was (the `accounts.i10.tech` CNAME is gone; the name now falls to the
+> zone's `*.i10.tech` wildcard, so `dig` is not empty, but nothing of Clerk's
+> answers it); the steps below are kept as the
+> record of the order, with `https://i10.tech/__clerk` where they say
+> `https://clerk.i10.tech` for `proxy_url`.
+>
+> ⚠ GOOGLE AND GITHUB KNOW ONLY THE NEW CALLBACK. Clerk sends
+> `https://i10.tech/__clerk/v1/oauth_callback` as the `redirect_uri`; it is the
+> only redirect URI on the Google OAuth client and the GitHub OAuth app's
+> callback URL (both verified in a browser on 2026-11-20). A rollback must put
+> `https://clerk.i10.tech/v1/oauth_callback` back in both.
+
+Each step is manual and in this order.
 
 1. **Ask Clerk support the P8 question** in `docs/decisions/sso.md` 1.5 and wait
    for the answer. Record it in `sso.md` (1.5 and the P8 row of Part 5). If the
@@ -251,11 +271,16 @@ the gateway answers the host the publishable key already names.
 
 - **A policy or code bug:** `bunx wrangler rollback` to the previous version.
   The hostname, the secret and Clerk's `proxy_url` stay as they are.
-- **Back to Clerk directly:** `PATCH /v1/domains/<id>` with
-  `{"proxy_url": null}`, remove the custom domain from the Worker, and recreate
-  `clerk CNAME frontend-api.clerk.services` (DNS only, grey cloud), then use
-  "Verify configuration" on Clerk's Domains page so Clerk reissues its
-  certificate. Expect minutes of errors while the certificate is issued.
+- **Back to Clerk directly:** `PATCH /v1/domains/dmn_3Iiq1VlixQgH39w1edDOXEAMWWC`
+  with `{"proxy_url": null}` (the PATCH was tested on 2026-11-20); remove the
+  `clerk.i10.tech` custom domain and the `i10.tech/__clerk*` route from the
+  Worker (drop both from `routes` in `wrangler.jsonc` and deploy, or in the
+  dashboard); recreate `clerk CNAME frontend-api.clerk.services` (DNS only,
+  grey cloud; wrangler's login cannot write DNS, so the dashboard), then use
+  "Verify configuration" on Clerk's Domains page. Clerk's own certificate for
+  the name runs to 2027-01-28, so it should answer at once; if not, expect
+  minutes of errors while it is reissued. Put the OAuth callbacks back to
+  `https://clerk.i10.tech/v1/oauth_callback`.
 
 ## Adding an allowlist entry safely
 

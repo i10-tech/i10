@@ -163,9 +163,24 @@ function withCors(
   return response
 }
 
+/**
+ * The path Clerk is asked for: a request under the proxy URL's path loses that
+ * prefix (Clerk's own proxy, proxy.mjs lines 121-142). Anything else is taken
+ * as is, which is how requests to `clerk.i10.tech` arrive.
+ *
+ * ⚠ AN EXACT, CASE-SENSITIVE PREFIX ENDING AT A SEGMENT. `/__clerkx/...` is
+ * not under `/__clerk`, and what is left goes through the same path rules as
+ * any other request.
+ */
+export function withoutProxyPath(rawPath: string, proxyPath: string): string {
+  if (!proxyPath) return rawPath
+  if (rawPath === proxyPath) return "/"
+  return rawPath.startsWith(`${proxyPath}/`) ? rawPath.slice(proxyPath.length) : rawPath
+}
+
 export async function handle(request: Request, deps: GatewayDeps): Promise<Response> {
   const started = deps.now()
-  const { rawPath, search } = splitUrl(request.url)
+  const { rawPath: receivedPath, search } = splitUrl(request.url)
   const httpMethod = request.method.toUpperCase()
   const line: LogLine = {
     method: httpMethod,
@@ -194,6 +209,7 @@ export async function handle(request: Request, deps: GatewayDeps): Promise<Respo
     return finish(unavailable(), null)
   }
   const config = configured.config
+  const rawPath = withoutProxyPath(receivedPath, config.proxyPath)
 
   const read = await readBody(request, httpMethod)
   const decision = await decide(
@@ -212,7 +228,7 @@ export async function handle(request: Request, deps: GatewayDeps): Promise<Respo
 
   if (decision.outcome !== "pass") {
     line.reason = decision.reason
-    if (decision.outcome === "deny") line.path = printablePath(rawPath)
+    if (decision.outcome === "deny") line.path = printablePath(receivedPath)
     return finish(refusal(decision), config)
   }
 
