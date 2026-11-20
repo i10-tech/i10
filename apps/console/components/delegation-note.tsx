@@ -22,6 +22,9 @@ import type { DelegationReport, ZoneFinding } from "@/lib/types"
  * resolve. Reporting "not published yet" above it would send them to fix
  * something that is already correct.
  *
+ * @param added Whether the records are known to be in place: they pressed "I've
+ * added the records", or we published them. Only then is "waiting for them to
+ * appear" true.
  * @param status The domain's own status. `not_started` means no verify has ever
  * succeeded for it, which is the only way to know we have not published its
  * zones - see the note on the `nameserver_silent` branch.
@@ -30,12 +33,14 @@ export function DelegationNote({
   domainId,
   report,
   status = "",
+  added,
   loading = false,
 }: {
   /** Keys the grace clock, so a reload continues it - see `HandoverSettling`. */
   domainId?: string
   report?: DelegationReport
   status?: string
+  added: boolean
   loading?: boolean
 }) {
   if (loading || !report) {
@@ -245,13 +250,32 @@ export function DelegationNote({
   }
 
   const waiting = report.zones.filter((z) => z.code === "not_published")
+  if (waiting.length > 0 && !added) {
+    /*
+     * ⚠ NOBODY HAS ADDED THEM, SO THERE IS NOTHING TO WAIT FOR. This used to say
+     * "they usually show up within a minute or two of being added" to every
+     * domain, including one whose provider had just refused them - a sentence
+     * about records that did not exist.
+     */
+    return (
+      <Note
+        tone="muted"
+        icon={<Info className="size-4 text-muted-foreground" />}
+        title="The NS records are not published yet"
+        body={
+          <>
+            We cannot see records at {list(waiting.map((z) => z.zone))}. Add the NS
+            records in the table below at your DNS provider.
+          </>
+        }
+      />
+    )
+  }
   if (waiting.length > 0) {
     /*
-     * ⚠ THE FIRST MINUTE OF EVERY PROVIDER HAND-OFF LOOKS EXACTLY LIKE THIS. We
-     * write the NS records and ask for them a second later, before resolvers
-     * have seen them - so "we cannot see the NS records", with advice about
-     * mistyped hosts, arrived on the screen somebody reached by letting us add
-     * them. The advice is kept for when it has had time to be true.
+     * ⚠ THE FIRST MINUTE OF EVERY HAND-OFF LOOKS EXACTLY LIKE THIS. The records
+     * were added a moment ago and resolvers have not seen them yet, so the
+     * advice about mistyped hosts is kept for when it has had time to be true.
      */
     return (
       <HandoverSettling
@@ -260,9 +284,8 @@ export function DelegationNote({
         title="Waiting for the NS records to appear"
         body={
           <>
-            We are looking for the records at {list(waiting.map((z) => z.zone))}. They
-            usually show up within a minute or two of being added - this note updates
-            itself.
+            The records at {list(waiting.map((z) => z.zone))} were added. They usually
+            show up within a minute or two - this note updates itself.
           </>
         }
         failure={
@@ -277,10 +300,10 @@ export function DelegationNote({
             body={
               <>
                 Nothing is published at {list(waiting.map((z) => z.zone))} that we can
-                see. If you have just added the records this is normal - propagation is
-                usually minutes and can take up to 72 hours. If it has been longer,
-                check that the host is exactly the name in the table below: many
-                providers append the domain for you, so typing the full name produces{" "}
+                see yet. Propagation is usually minutes and can take up to 72 hours. If
+                you added them by hand and it has been longer, check that the host is
+                exactly the name in the table below: many providers append the domain
+                for you, so typing the full name produces{" "}
                 <span className="font-mono">mail.example.com.example.com</span>.
               </>
             }

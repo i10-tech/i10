@@ -1,6 +1,7 @@
 import type { Hono } from "hono"
 import { providerBySlug } from "@repo/dns-providers"
 import { OAuthError } from "../../dns/oauth.js"
+import { zoneFor } from "../../dns/port.js"
 import { connectableProviders, writerFor } from "../../dns/writers.js"
 import type { ConsoleDeps } from "./deps.js"
 import { notFound, notWired, readJson, validation } from "./http.js"
@@ -223,11 +224,33 @@ export function mountDns(app: Hono, d: ConsoleDeps): void {
         zones: zones.map((z) => z.name),
       })
 
+      /*
+       * ⚠ EVERY UNFINISHED DOMAIN COMES BACK WITH THE ZONE THIS CONNECTION
+       * REACHES FOR IT, OR NULL. Authorising an account that does not hold the
+       * domain is easy - it is whichever account the browser was signed in to -
+       * and the console used to find out only by publishing, after it had
+       * already said it was publishing. Answered here, with the same `zoneFor`
+       * the publisher uses, the console can say so before it claims anything.
+       */
+      const pending = d.domains
+        ? (await d.domains.list(tenantId))
+            .filter((domain) => domain.status !== "verified")
+            .map((domain) => ({
+              id: domain.id,
+              name: domain.name,
+              zone: zoneFor(zones, domain.name)?.name ?? null,
+            }))
+        : []
+
       // ⚠ THE RETURN PATH COMES BACK WITH THE CONNECTION, so the callback page
       // can finish the job and then put somebody back where they started. It
       // came out of the signed `state` and was re-checked there.
       return c.json(
-        { ...saved, ...(claimed.returnTo ? { return_to: claimed.returnTo } : {}) },
+        {
+          ...saved,
+          pending,
+          ...(claimed.returnTo ? { return_to: claimed.returnTo } : {}),
+        },
         201,
       )
     } catch (error) {
