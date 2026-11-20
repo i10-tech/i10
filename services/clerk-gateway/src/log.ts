@@ -10,6 +10,9 @@
  * TODO(#337): the identity audit log is written from these same facts; this
  * line is what Workers Logs keeps in the meantime.
  */
+/** How the edge cache took part: served it, asked Clerk, or stood in for Clerk. */
+export type CacheOutcome = "hit" | "miss" | "stale"
+
 export interface LogLine {
   /** The effective method (after `_method`). */
   method: string
@@ -24,6 +27,8 @@ export interface LogLine {
   duration_ms: number
   ip: string | null
   ray: string | null
+  /** Only for a request the edge cache covers (src/cache.ts). */
+  cache?: CacheOutcome
   /** Only for a refused request, sanitised; never the query. */
   path?: string
 }

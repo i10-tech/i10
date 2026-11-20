@@ -469,6 +469,7 @@ describe("the Worker entry", () => {
     const res = await worker.fetch(
       new Request("https://clerk.i10.tech/v1/organizations", { method: "POST" }),
       ENV,
+      { waitUntil: () => {} },
     )
     spy.mockRestore()
     expect(res.status).toBe(404)
