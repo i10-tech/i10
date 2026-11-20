@@ -4,10 +4,14 @@ import {
   webhookDeliveryListSchema,
   webhookDeliverySchema,
 } from "@repo/contracts"
-import { requireApiKey } from "../middleware/auth.js"
+import { webhookKey } from "./webhook-auth.js"
 import { DELIVERY_HTTP_CLASSES } from "../webhooks/history.js"
 import { POLLING_REPLAY } from "../webhooks/replay.js"
-import { errorResponse, notWired as notWiredFor } from "./shared.js"
+import {
+  errorResponse,
+  notWired as notWiredFor,
+  restrictedKeyResponse,
+} from "./shared.js"
 
 /**
  * What happened to a workspace's webhooks: every delivery, and every attempt
@@ -42,7 +46,7 @@ const list = createRoute({
     "a page is short only when the list is finished.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     query: z
       .object({
@@ -105,6 +109,7 @@ const list = createRoute({
       content: { "application/json": { schema: List } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     422: errorResponse("A filter is not acceptable."),
     501: errorResponse("Webhooks are not configured."),
   },
@@ -154,7 +159,7 @@ const get = createRoute({
     "(never the signature) and the first 20KB of what came back.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: { params: idParam },
   responses: {
     200: {
@@ -162,6 +167,7 @@ const get = createRoute({
       content: { "application/json": { schema: Detail } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such delivery for this API key's tenant."),
     501: errorResponse("Webhooks are not configured."),
   },
@@ -185,7 +191,7 @@ const expunge = createRoute({
     "attempted answers 409: it would otherwise go out empty.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: { params: idParam },
   responses: {
     200: {
@@ -197,6 +203,7 @@ const expunge = createRoute({
       },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such delivery for this API key's tenant."),
     409: errorResponse("The delivery is still being attempted."),
     501: errorResponse("Webhooks are not configured."),
@@ -233,7 +240,7 @@ const resend = createRoute({
     "recorded and not retried. A delivery still being attempted answers 409.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: { params: idParam },
   responses: {
     202: {
@@ -241,6 +248,7 @@ const resend = createRoute({
       content: { "application/json": { schema: z.object({ delivery_id: z.uuid() }) } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such delivery for this API key's tenant."),
     409: errorResponse(
       "Still being attempted, its endpoint is paused, or it belongs to a polling endpoint.",

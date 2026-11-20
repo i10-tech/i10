@@ -4,11 +4,14 @@ import {
   trustedTemplateListSchema,
   trustedTemplateSchema,
 } from "@repo/contracts"
-import type { MiddlewareHandler } from "hono"
-import { isRestricted } from "../auth/scope.js"
 import { requireApiKey } from "../middleware/auth.js"
 import type { TrustedTemplate } from "../risk/trusted.js"
-import { errorResponse, notWired as notWiredFor } from "./shared.js"
+import {
+  errorResponse,
+  notWired as notWiredFor,
+  refuseRestrictedKeys,
+  restrictedKeyResponse,
+} from "./shared.js"
 
 /**
  * Templates submitted for review, over the API (#222): list, submit, read,
@@ -29,18 +32,10 @@ const CreateTrustedTemplate = createTrustedTemplateSchema.openapi(
 )
 const notWired = notWiredFor("Trusted templates")
 
-const restricted = {
-  statusCode: 403,
-  name: "restricted_api_key" as const,
-  message:
-    "This key is restricted to a domain, and a reviewed template covers the whole " +
+const unrestricted = refuseRestrictedKeys(
+  "This key is restricted to a domain, and a reviewed template covers the whole " +
     "workspace. Use an unrestricted key.",
-}
-
-const unrestricted: MiddlewareHandler = async (c, next) => {
-  if (isRestricted(c.get("auth").scopes)) return c.json(restricted, 403)
-  return next()
-}
+)
 
 /** The public shape, shared with the console. */
 export const presentTrustedTemplate = (t: TrustedTemplate) => ({
@@ -64,7 +59,7 @@ const common = {
 
 const denied = {
   401: errorResponse("The API key is missing, malformed, or unknown."),
-  403: errorResponse("The key is restricted to a domain."),
+  403: restrictedKeyResponse,
   501: errorResponse("Trusted templates are not configured."),
 }
 

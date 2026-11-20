@@ -4,12 +4,15 @@ import {
   suppressionListSchema,
   suppressionSchema,
 } from "@repo/contracts"
-import type { MiddlewareHandler } from "hono"
-import { isRestricted } from "../auth/scope.js"
 import type { SuppressionRow } from "../console/queries.js"
 import { requireApiKey } from "../middleware/auth.js"
 import { removalRefusal } from "../suppressions/store.js"
-import { errorResponse, notWired as notWiredFor } from "./shared.js"
+import {
+  errorResponse,
+  notWired as notWiredFor,
+  refuseRestrictedKeys,
+  restrictedKeyResponse,
+} from "./shared.js"
 
 /**
  * The workspace's suppression list over the API (#159): list, add, remove.
@@ -32,18 +35,10 @@ const SuppressionList = suppressionListSchema.openapi("SuppressionList")
 const CreateSuppression = createSuppressionSchema.openapi("CreateSuppression")
 const notWired = notWiredFor("Suppressions")
 
-const restricted = {
-  statusCode: 403,
-  name: "restricted_api_key" as const,
-  message:
-    "This key is restricted to a domain, and the suppression list belongs to the " +
+const unrestricted = refuseRestrictedKeys(
+  "This key is restricted to a domain, and the suppression list belongs to the " +
     "whole workspace. Use an unrestricted key.",
-}
-
-const unrestricted: MiddlewareHandler = async (c, next) => {
-  if (isRestricted(c.get("auth").scopes)) return c.json(restricted, 403)
-  return next()
-}
+)
 
 const present = (r: SuppressionRow) => ({
   object: "suppression" as const,
@@ -60,7 +55,7 @@ const common = {
 
 const denied = {
   401: errorResponse("The API key is missing, malformed, or unknown."),
-  403: errorResponse("The key is restricted to a domain."),
+  403: restrictedKeyResponse,
   501: errorResponse("Suppressions are not configured."),
 }
 

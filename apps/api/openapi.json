@@ -4967,6 +4967,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The URL or the event list is not acceptable.",
             "content": {
@@ -5012,6 +5022,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5092,6 +5112,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5366,6 +5396,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5659,6 +5699,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such endpoint for this API key's tenant.",
             "content": {
@@ -5738,6 +5788,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6033,6 +6093,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such endpoint for this API key's tenant.",
             "content": {
@@ -6302,6 +6372,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6587,6 +6667,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such endpoint for this API key's tenant.",
             "content": {
@@ -6676,6 +6766,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6799,6 +6899,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such endpoint for this API key's tenant.",
             "content": {
@@ -6897,6 +7007,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7011,6 +7131,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such endpoint for this API key's tenant.",
             "content": {
@@ -7100,6 +7230,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7205,6 +7345,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such endpoint for this API key's tenant.",
             "content": {
@@ -7294,6 +7444,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7399,6 +7559,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "501": {
             "description": "Webhooks are not configured.",
             "content": {
@@ -7456,6 +7626,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7645,6 +7825,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "422": {
             "description": "A filter is not acceptable.",
             "content": {
@@ -7704,6 +7894,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7795,6 +7995,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such delivery for this API key's tenant.",
             "content": {
@@ -7873,6 +8083,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8013,6 +8233,16 @@
               }
             }
           },
+          "403": {
+            "description": "The key is restricted to a domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "422": {
             "description": "A filter is not acceptable.",
             "content": {
@@ -8093,6 +8323,16 @@
           },
           "401": {
             "description": "The API key is missing, malformed, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key is restricted to a domain.",
             "content": {
               "application/json": {
                 "schema": {

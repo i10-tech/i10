@@ -1,7 +1,11 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi"
 import { webhookHealthEventListSchema, webhookHealthEventSchema } from "@repo/contracts"
-import { requireApiKey } from "../middleware/auth.js"
-import { errorResponse, notWired as notWiredFor } from "./shared.js"
+import { webhookKey } from "./webhook-auth.js"
+import {
+  errorResponse,
+  notWired as notWiredFor,
+  restrictedKeyResponse,
+} from "./shared.js"
 
 /**
  * Every change in a workspace's endpoints' health (#284): failing, disabled,
@@ -23,7 +27,7 @@ const list = createRoute({
     "from the previous response's `next_cursor`.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     query: z.object({
       endpoint_id: z.uuid().optional(),
@@ -37,6 +41,7 @@ const list = createRoute({
       content: { "application/json": { schema: List } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     422: errorResponse("A filter is not acceptable."),
     501: errorResponse("Webhooks are not configured."),
   },
