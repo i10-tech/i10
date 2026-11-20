@@ -6,9 +6,11 @@ import {
   sendEmailResponseSchema,
   sendEmailSchema,
 } from "@repo/contracts"
+import { maySendFrom } from "../auth/scope.js"
 import { requireApiKey } from "../middleware/auth.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 import { acceptSend, type AcceptOutcome } from "../send/accept.js"
+import { domainOf } from "../send/address.js"
 
 /**
  * The send path.
@@ -369,7 +371,10 @@ const getEmail = createRoute({
       content: { "application/json": { schema: GetEmailResponse } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
-    404: errorResponse("No such message for this API key's tenant."),
+    404: errorResponse(
+      "No such message for this API key's tenant, or the key is restricted to " +
+        "other domains than the message's `from` address.",
+    ),
     422: errorResponse("`id` is not a uuid."),
     501: errorResponse("The send path is not configured."),
   },
@@ -390,6 +395,14 @@ emails.openapi(
     // would confirm the id exists and turn this into an oracle for enumerating
     // other customers' message ids.
     if (!email) return c.json(notFound, 404)
+
+    // ⚠ A DOMAIN-RESTRICTED KEY READS ONLY MAIL FROM ITS OWN DOMAINS, AND IS
+    // CONFINED RATHER THAN REFUSED. Sending and then polling here is what such
+    // a key is for. Anything else is the same 404 as an unknown id, so the key
+    // cannot confirm another domain's message exists. `maySendFrom` matches
+    // exactly: a subdomain is a separate domain, and an unparseable `from` is
+    // outside every restriction.
+    if (!maySendFrom(auth.scopes, domainOf(email.from))) return c.json(notFound, 404)
 
     return c.json(email, 200)
   },

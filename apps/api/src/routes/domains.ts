@@ -9,7 +9,12 @@ import {
   updateDomainSchema,
 } from "@repo/contracts"
 import { requireApiKey } from "../middleware/auth.js"
-import { errorResponse, notWired as notWiredFor } from "./shared.js"
+import {
+  errorResponse,
+  notWired as notWiredFor,
+  refuseRestrictedKeys,
+  restrictedKeyResponse,
+} from "./shared.js"
 
 /**
  * Domains, shaped as Resend's.
@@ -35,6 +40,18 @@ const CreateDomain = createDomainSchema.openapi("CreateDomain")
 const DeletedDomain = deletedDomainSchema.openapi("DeletedDomain")
 const UpdateDomain = updateDomainSchema.openapi("UpdateDomain")
 const notWired = notWiredFor("Domains")
+
+/**
+ * ⚠ A DOMAIN-RESTRICTED KEY IS REFUSED, NOT CONFINED TO ITS DOMAINS. Such a
+ * key exists to send mail, and Resend's equivalent (`sending_access`) cannot
+ * manage domains at all, so clients written against it already expect a 403
+ * here. Confining would need a scope check on every read and write, where one
+ * missed check widens the key; refusing is one guard on every route.
+ */
+const unrestricted = refuseRestrictedKeys(
+  "This key is restricted to a domain, so it cannot manage domains. " +
+    "Use the dashboard, or an unrestricted key.",
+)
 
 const notFound = {
   statusCode: 404,
@@ -62,7 +79,7 @@ const create = createRoute({
     "has confirmed them.",
   tags: ["Domains"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: [requireApiKey, unrestricted] as const,
   request: {
     body: {
       required: true,
@@ -75,7 +92,9 @@ const create = createRoute({
       content: { "application/json": { schema: Domain } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
-    403: errorResponse("The plan does not include another domain."),
+    403: errorResponse(
+      "The plan does not include another domain, or the key is restricted to a domain.",
+    ),
     409: errorResponse("That domain is already registered."),
     422: errorResponse("The name is not a domain."),
     501: errorResponse("Domains are not configured."),
@@ -136,13 +155,14 @@ const list = createRoute({
   description: "Summaries only. Fetch one domain to see its DNS records.",
   tags: ["Domains"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: [requireApiKey, unrestricted] as const,
   responses: {
     200: {
       description: "Every domain this key's tenant owns, newest first.",
       content: { "application/json": { schema: DomainList } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     501: errorResponse("Domains are not configured."),
   },
 })
@@ -160,7 +180,7 @@ const get = createRoute({
   summary: "Retrieve a domain",
   tags: ["Domains"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: [requireApiKey, unrestricted] as const,
   request: { params: idParam },
   responses: {
     200: {
@@ -168,6 +188,7 @@ const get = createRoute({
       content: { "application/json": { schema: Domain } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No domain with that id."),
     501: errorResponse("Domains are not configured."),
   },
@@ -193,7 +214,7 @@ const update = createRoute({
     "the next message sent, including ones already accepted but not yet sent.",
   tags: ["Domains"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: [requireApiKey, unrestricted] as const,
   request: {
     params: idParam,
     body: {
@@ -207,6 +228,7 @@ const update = createRoute({
       content: { "application/json": { schema: Domain } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No domain with that id."),
     422: errorResponse("Nothing to update, or a field is not a boolean."),
     501: errorResponse("Domains are not configured."),
@@ -247,7 +269,7 @@ const verify = createRoute({
     "retrying - neither means the records are wrong.",
   tags: ["Domains"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: [requireApiKey, unrestricted] as const,
   request: { params: idParam },
   responses: {
     200: {
@@ -255,6 +277,7 @@ const verify = createRoute({
       content: { "application/json": { schema: Domain } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No domain with that id."),
     409: errorResponse(
       "Another workspace verified this domain first. A name may be held by " +
@@ -310,7 +333,7 @@ const remove = createRoute({
     "unaffected; nothing new can be sent from it afterwards.",
   tags: ["Domains"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: [requireApiKey, unrestricted] as const,
   request: { params: idParam },
   responses: {
     200: {
@@ -318,6 +341,7 @@ const remove = createRoute({
       content: { "application/json": { schema: DeletedDomain } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No domain with that id."),
     501: errorResponse("Domains are not configured."),
   },
