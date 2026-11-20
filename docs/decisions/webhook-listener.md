@@ -183,11 +183,15 @@ standard envelope.
   domain-filtered endpoint, so this fails closed. It is also the right answer
   to the data question below: a key for `staging.acme.com` hears staging and
   nothing else.
-- **Prerequisite:** the webhook endpoint routes do not check `isRestricted`
-  today. A key restricted to one domain can create an unfiltered endpoint, or
-  poll one, and read every event for every domain the workspace owns.
-  Suppressions, trusted templates and key minting already refuse restricted
-  keys. This is a gap whether or not the listener is built.
+- **Prerequisite, done in #312:** every customer webhook route
+  (`/webhook-endpoints`, `/webhook-deliveries`, `/webhook-stats`,
+  `/webhook-health-events`) now refuses a domain-restricted key with
+  `403 restricted_api_key`, as suppressions, trusted templates and key minting
+  do. Before that, a key restricted to one domain could create an unfiltered
+  endpoint, or poll one, and read every event for every domain the workspace
+  owns. The listener kind is the one place a restricted key will be let back
+  in, confined to its domains; that needs its own exception in
+  `routes/webhook-auth.ts`, not a looser guard.
 - **Test keys do not help.** `i10_test_` keys do not separate events from live
   ones, so a listener hears real mail, with real recipient addresses, on a
   developer's laptop. The docs should say so plainly and point at a staging

@@ -1,4 +1,6 @@
 import { errorSchema } from "@repo/contracts"
+import type { MiddlewareHandler } from "hono"
+import { isRestricted } from "../auth/scope.js"
 
 /**
  * The pieces every route module needs, defined once.
@@ -33,3 +35,26 @@ export const notWired = (what: string) => ({
   name: "internal_server_error" as const,
   message: `${what} is not configured.`,
 })
+
+/**
+ * Refuses a domain-restricted key, for routes whose data is the whole
+ * workspace's rather than one domain's. Runs after `requireApiKey`.
+ *
+ * ⚠ 403 AND NOT 401. The key is real; it is being used for something outside
+ * what it was issued for, and telling somebody their credential is invalid
+ * would send them to rotate one that is fine.
+ */
+export const refuseRestrictedKeys =
+  (message: string): MiddlewareHandler =>
+  async (c, next) => {
+    if (isRestricted(c.get("auth").scopes)) {
+      return c.json(
+        { statusCode: 403, name: "restricted_api_key" as const, message },
+        403,
+      )
+    }
+    return next()
+  }
+
+/** The 403 `refuseRestrictedKeys` answers, for a route's documented responses. */
+export const restrictedKeyResponse = errorResponse("The key is restricted to a domain.")

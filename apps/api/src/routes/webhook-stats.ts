@@ -1,8 +1,12 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi"
 import { webhookStatsSchema } from "@repo/contracts"
-import { requireApiKey } from "../middleware/auth.js"
+import { webhookKey } from "./webhook-auth.js"
 import { statsWindow, type StatsWindow } from "../webhooks/stats.js"
-import { errorResponse, notWired as notWiredFor } from "./shared.js"
+import {
+  errorResponse,
+  notWired as notWiredFor,
+  restrictedKeyResponse,
+} from "./shared.js"
 
 /** The window a stats request names: `since`, `until`, `bucket`. Shared by both routes. */
 export const statsQuery = z.object({
@@ -44,7 +48,7 @@ const get = createRoute({
     "or `day` steps (at most 200), by event type, and by endpoint.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: { query: statsQuery },
   responses: {
     200: {
@@ -52,6 +56,7 @@ const get = createRoute({
       content: { "application/json": { schema: Stats } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     422: errorResponse("The window is backwards, or has too many steps."),
     501: errorResponse("Webhook endpoints are not configured."),
   },

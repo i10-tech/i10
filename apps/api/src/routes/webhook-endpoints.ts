@@ -15,9 +15,13 @@ import {
   webhookPollSchema,
   webhookTransformationResultSchema,
 } from "@repo/contracts"
-import { requireApiKey } from "../middleware/auth.js"
+import { webhookKey } from "./webhook-auth.js"
 import { invalidWindow, statsQuery, windowFrom } from "./webhook-stats.js"
-import { errorResponse, notWired as notWiredFor } from "./shared.js"
+import {
+  errorResponse,
+  notWired as notWiredFor,
+  restrictedKeyResponse,
+} from "./shared.js"
 
 /**
  * Managing where a customer's events go.
@@ -59,7 +63,7 @@ const create = createRoute({
     "here and never again - store it before you discard the response.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     body: {
       required: true,
@@ -72,6 +76,7 @@ const create = createRoute({
       content: { "application/json": { schema: WebhookEndpointWithSecret } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     422: errorResponse("The URL or the event list is not acceptable."),
     501: errorResponse("Webhook endpoints are not configured."),
   },
@@ -116,13 +121,14 @@ const list = createRoute({
   summary: "List webhook endpoints",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   responses: {
     200: {
       description: "Every endpoint for this tenant. Secrets are never included.",
       content: { "application/json": { schema: WebhookEndpointList } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     501: errorResponse("Webhook endpoints are not configured."),
   },
 })
@@ -143,7 +149,7 @@ const remove = createRoute({
     "deliveries stop; already-sent ones are not recalled.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     params: z.object({ id: z.uuid().openapi({ param: { name: "id", in: "path" } }) }),
   },
@@ -161,6 +167,7 @@ const remove = createRoute({
       },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     501: errorResponse("Webhook endpoints are not configured."),
   },
@@ -200,7 +207,7 @@ const rotate = createRoute({
     "Pass `signature_scheme` to switch between HMAC and Ed25519.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     params: z.object({ id: z.uuid().openapi({ param: { name: "id", in: "path" } }) }),
     body: {
@@ -216,6 +223,7 @@ const rotate = createRoute({
       content: { "application/json": { schema: WebhookEndpointWithSecret } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     422: errorResponse(
       "No choice for the previous secret, an `expires_in` out of range, or too many live keys.",
@@ -276,7 +284,7 @@ const revokePrevious = createRoute({
     "only the current key signs. Use it when a previous secret may have leaked.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     params: z.object({ id: z.uuid().openapi({ param: { name: "id", in: "path" } }) }),
   },
@@ -286,6 +294,7 @@ const revokePrevious = createRoute({
       content: { "application/json": { schema: webhookEndpointSchema } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     501: errorResponse("Webhook endpoints are not configured."),
   },
@@ -332,7 +341,7 @@ const getOne = createRoute({
   summary: "Get a webhook endpoint",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: { params: idParam },
   responses: {
     200: {
@@ -340,6 +349,7 @@ const getOne = createRoute({
       content: { "application/json": { schema: webhookEndpointSchema } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     501: errorResponse("Webhook endpoints are not configured."),
   },
@@ -363,7 +373,7 @@ const update = createRoute({
     "replaces the whole set.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     params: idParam,
     body: {
@@ -377,6 +387,7 @@ const update = createRoute({
       content: { "application/json": { schema: webhookEndpointSchema } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     422: errorResponse("A field is not acceptable."),
     501: errorResponse("Webhook endpoints are not configured."),
@@ -418,7 +429,7 @@ for (const [verb, enabled] of [
       : "Stops delivering. Events that happen while it is paused are not sent later.",
     tags: ["Webhooks"],
     security: [{ bearerAuth: [] }],
-    middleware: [requireApiKey] as const,
+    middleware: webhookKey,
     request: { params: idParam },
     responses: {
       200: {
@@ -426,6 +437,7 @@ for (const [verb, enabled] of [
         content: { "application/json": { schema: webhookEndpointSchema } },
       },
       401: errorResponse("The API key is missing, malformed, or unknown."),
+      403: restrictedKeyResponse,
       404: errorResponse("No such endpoint for this API key's tenant."),
       501: errorResponse("Webhook endpoints are not configured."),
     },
@@ -451,7 +463,7 @@ const stats = createRoute({
     "200), and by event type. The error rate is `failed_attempts / attempts`.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: { params: idParam, query: statsQuery },
   responses: {
     200: {
@@ -459,6 +471,7 @@ const stats = createRoute({
       content: { "application/json": { schema: WebhookEndpointStats } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     422: errorResponse("The window is backwards, or has too many steps."),
     501: errorResponse("Webhook endpoints are not configured."),
@@ -499,7 +512,7 @@ const testTransformation = createRoute({
     "delivery, and returns exactly what would be sent. Saves and sends nothing.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     params: idParam,
     body: {
@@ -513,6 +526,7 @@ const testTransformation = createRoute({
       content: { "application/json": { schema: TransformationResult } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     422: errorResponse("A polling endpoint, or no transformation to try."),
     501: errorResponse("Webhook endpoints are not configured."),
@@ -569,7 +583,7 @@ const poll = createRoute({
     "endpoint is reported as failing.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     params: idParam,
     query: z.object({
@@ -586,6 +600,7 @@ const poll = createRoute({
       content: { "application/json": { schema: Poll } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     409: errorResponse("Not a polling endpoint, or it is paused."),
     422: errorResponse("The cursor is malformed or ahead of the stream."),
@@ -658,7 +673,7 @@ const test = createRoute({
     "logged like any other, so it shows exactly what your receiver will see.",
   tags: ["Webhooks"],
   security: [{ bearerAuth: [] }],
-  middleware: [requireApiKey] as const,
+  middleware: webhookKey,
   request: {
     params: idParam,
     body: {
@@ -672,6 +687,7 @@ const test = createRoute({
       content: { "application/json": { schema: z.object({ delivery_id: z.uuid() }) } },
     },
     401: errorResponse("The API key is missing, malformed, or unknown."),
+    403: restrictedKeyResponse,
     404: errorResponse("No such endpoint for this API key's tenant."),
     409: errorResponse("The endpoint is paused or switched off."),
     422: errorResponse("Not an event type."),
@@ -714,6 +730,7 @@ const replayResponses = {
     content: { "application/json": { schema: Replay } },
   },
   401: errorResponse("The API key is missing, malformed, or unknown."),
+  403: restrictedKeyResponse,
   404: errorResponse("No such endpoint for this API key's tenant."),
   409: errorResponse("The endpoint is paused or switched off."),
   422: errorResponse("The window is not acceptable."),
@@ -775,7 +792,7 @@ webhookEndpoints.openapi(
       "31 days per replay.",
     tags: ["Webhooks"],
     security: [{ bearerAuth: [] }],
-    middleware: [requireApiKey] as const,
+    middleware: webhookKey,
     request: {
       params: idParam,
       body: {
@@ -798,7 +815,7 @@ webhookEndpoints.openapi(
       "Replay with failures only: every delivery that failed in the window, sent again.",
     tags: ["Webhooks"],
     security: [{ bearerAuth: [] }],
-    middleware: [requireApiKey] as const,
+    middleware: webhookKey,
     request: {
       params: idParam,
       body: {
@@ -827,7 +844,7 @@ webhookEndpoints.openapi(
       "was paused. Built from the stored event, exactly as it would have been.",
     tags: ["Webhooks"],
     security: [{ bearerAuth: [] }],
-    middleware: [requireApiKey] as const,
+    middleware: webhookKey,
     request: {
       params: idParam,
       body: {
@@ -848,7 +865,7 @@ webhookEndpoints.openapi(
     summary: "List a webhook endpoint's replays",
     tags: ["Webhooks"],
     security: [{ bearerAuth: [] }],
-    middleware: [requireApiKey] as const,
+    middleware: webhookKey,
     request: { params: idParam },
     responses: {
       200: {
@@ -858,6 +875,7 @@ webhookEndpoints.openapi(
         },
       },
       401: errorResponse("The API key is missing, malformed, or unknown."),
+      403: restrictedKeyResponse,
       501: errorResponse("Webhooks are not configured."),
     },
   }),
@@ -878,7 +896,7 @@ webhookEndpoints.openapi(
     summary: "Get a replay's progress",
     tags: ["Webhooks"],
     security: [{ bearerAuth: [] }],
-    middleware: [requireApiKey] as const,
+    middleware: webhookKey,
     request: {
       params: idParam.extend({
         replay_id: z.uuid().openapi({ param: { name: "replay_id", in: "path" } }),
@@ -890,6 +908,7 @@ webhookEndpoints.openapi(
         content: { "application/json": { schema: Replay } },
       },
       401: errorResponse("The API key is missing, malformed, or unknown."),
+      403: restrictedKeyResponse,
       404: errorResponse("No such replay."),
       501: errorResponse("Webhooks are not configured."),
     },
