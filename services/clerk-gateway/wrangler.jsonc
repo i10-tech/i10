@@ -4,11 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
 
-  // ⚠ NO ROUTE AND NO CUSTOM DOMAIN YET, ON PURPOSE. Attaching `clerk.i10.tech`
-  // is a step of the rollout in README.md, taken by hand in its order (Clerk
-  // support's answer first, then the secret, the deploy, the proxy check, and
-  // only then the DNS). Putting it here would make the first `wrangler deploy`
-  // take the hostname over before Clerk knows to expect a proxy.
+  // ⚠ LIVE ON BOTH NAMES SINCE 2026-11-20 (README.md, "Production rollout").
+  // Clerk refuses `clerk.i10.tech` as `proxy_url` (sso.md 1.5), so Clerk knows
+  // the gateway as the apex path below, and the custom domain keeps the name
+  // the publishable key encodes. Deploying this file with a `routes` change
+  // moves real sign-in traffic.
   //
   // ⚠ TWO SECRETS, BOTH SET OUT OF BAND, NEVER IN THIS FILE:
   //     wrangler secret put CLERK_SECRET_KEY
@@ -18,10 +18,17 @@
   // managed-account lookup fails, so sign-ins that name an identifier and the
   // self-service account routes answer 503; token refreshes are unaffected.
   "secrets": { "required": ["CLERK_SECRET_KEY", "I10_API_SECRET"] },
+  // ⚠ THE APEX PATH IS WHAT CLERK KNOWS US AS. Clerk accepts a `proxy_url` only
+  // on the domain's own host (`i10.tech`), so that is the label every forwarded
+  // request carries, whichever of the two names it arrived on.
+  "routes": [
+    { "pattern": "i10.tech/__clerk*", "zone_name": "i10.tech" },
+    { "pattern": "clerk.i10.tech", "custom_domain": true },
+  ],
   "vars": {
     "INSTANCE": "production",
     "UPSTREAM_ORIGIN": "https://frontend-api.clerk.dev",
-    "PROXY_URL": "https://clerk.i10.tech",
+    "PROXY_URL": "https://i10.tech/__clerk",
     "ALLOWED_ORIGINS": "https://auth.i10.tech,https://dash.i10.tech",
     "UPSTREAM_TIMEOUT_MS": "10000",
     // Our API, for the managed-account lookup (#337).

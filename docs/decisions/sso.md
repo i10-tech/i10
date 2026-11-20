@@ -134,9 +134,11 @@ every Frontend API request reaches us first:
   response can be logged or audited. This is the Clerk-side enforcement P2 and
   P3 showed Clerk will not give us, enforced by us at the door.
 - Register it with `PATCH /domains/{id}` `proxy_url` (production instances
-  only; "the full URL of the proxy", the example being a path, so a whole
-  hostname as the proxy is **(inferred to be accepted; `POST /proxy_checks`
-  validates it before switching, without downtime)**).
+  only; "the full URL of the proxy", the example being a path). ~~A whole
+  hostname as the proxy is inferred to be accepted.~~ **Tested 2026-11-20: it
+  is not.** `POST /proxy_checks` refuses `https://clerk.i10.tech` with
+  `form_param_format_invalid`, "Proxy url is invalid. Cannot be on a different
+  domain" (P8, 1.5).
 
 What it changes:
 
@@ -160,6 +162,10 @@ client that resolves `frontend-api.clerk.services` itself and sends
 `Host: clerk.i10.tech`, while Clerk's old certificate for the name is still
 valid. Once the DNS points at us, Clerk cannot renew that certificate, so the
 window should close **(inferred)**. Ask Clerk support before relying on it.
+**Answered by testing on 2026-11-20 instead (1.5): Clerk refuses the name as
+`proxy_url`, so the gateway is registered at `https://i10.tech/__clerk` and
+answers `clerk.i10.tech` too; once our Worker owns the name, every path to it
+reaches the gateway.**
 
 **What L2 changes for SSO.** Almost everything in the hard part disappears. There
 is no Clerk session in the browser, so no sign-in token, no handoff code, no
@@ -186,18 +192,18 @@ user and org store.
 
 Scores 1 (poor) to 5 (best) **(judgement)**:
 
-| Criterion                             | Weight | L1 gateway                                                                    | L2 Clerk behind API                                                           |
-| ------------------------------------- | ------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Meets "nobody talks to Clerk but us"  | 5      | 4 (every request passes us; the browser still holds a Clerk session; P8 open) | 5 (the browser never sees Clerk)                                              |
-| Strength of SSO enforcement           | 5      | 4 (refused at the door and at our API)                                        | 5 (no Clerk session exists to misuse)                                         |
-| SSO design complexity                 | 4      | 3 (ticket, handoff, bind; sweeper as backstop)                                | 5 (the callback makes an i10 session)                                         |
-| Build cost now                        | 4      | 4 (a small gateway; apps/auth flows stay)                                     | 2 (new session layer, sign-in flows, OAuth, passkeys, step-up, throttling)    |
-| Security-critical code we own forever | 4      | 4 (Clerk keeps sessions, password and bot protection)                         | 2 (sessions, cookies, CSRF, brute-force throttling, WebAuthn, OAuth all ours) |
-| Availability                          | 3      | 3 (gateway in the path of every token refresh, about once a minute)           | 4 (Clerk only in the path of sign-ins)                                        |
-| Value from what we pay Clerk          | 3      | 5 (sessions, `has()`, reverification, client trust, bot protection)           | 2 (Clerk shrinks to a user and org database)                                  |
-| Reversibility                         | 2      | 5 (unset `proxy_url`, restore the CNAME)                                      | 2                                                                             |
-| Open unknowns                         | 3      | 3 (P8; a whole hostname as `proxy_url` is inferred)                           | 3 (how Clerk counts retained users with no frontend sessions; its terms)      |
-| **Weighted total (of 165)**           |        | **127**                                                                       | **117**                                                                       |
+| Criterion                             | Weight | L1 gateway                                                           | L2 Clerk behind API                                                           |
+| ------------------------------------- | ------ | -------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Meets "nobody talks to Clerk but us"  | 5      | 4 (every request passes us; the browser still holds a Clerk session) | 5 (the browser never sees Clerk)                                              |
+| Strength of SSO enforcement           | 5      | 4 (refused at the door and at our API)                               | 5 (no Clerk session exists to misuse)                                         |
+| SSO design complexity                 | 4      | 3 (ticket, handoff, bind; sweeper as backstop)                       | 5 (the callback makes an i10 session)                                         |
+| Build cost now                        | 4      | 4 (a small gateway; apps/auth flows stay)                            | 2 (new session layer, sign-in flows, OAuth, passkeys, step-up, throttling)    |
+| Security-critical code we own forever | 4      | 4 (Clerk keeps sessions, password and bot protection)                | 2 (sessions, cookies, CSRF, brute-force throttling, WebAuthn, OAuth all ours) |
+| Availability                          | 3      | 3 (gateway in the path of every token refresh, about once a minute)  | 4 (Clerk only in the path of sign-ins)                                        |
+| Value from what we pay Clerk          | 3      | 5 (sessions, `has()`, reverification, client trust, bot protection)  | 2 (Clerk shrinks to a user and org database)                                  |
+| Reversibility                         | 2      | 5 (unset `proxy_url`, restore the CNAME)                             | 2                                                                             |
+| Open unknowns                         | 3      | 3 (P8 answered by testing, 1.5)                                      | 3 (how Clerk counts retained users with no frontend sessions; its terms)      |
+| **Weighted total (of 165)**           |        | **127**                                                              | **117**                                                                       |
 
 **Decided 2026-10-19 by the user: L1 through the gateway, default-deny.** It
 gets nearly all of L2's control (we see, refuse or rewrite every request) while
@@ -250,6 +256,87 @@ will consult our API (the managed-account check, #337), with a short cache.
 >    API?
 > 4. Do Clerk webhooks, sign-in tokens, actor tokens and OAuth callbacks keep
 >    working unchanged through the proxy?
+
+**P8, answered by testing on 2026-11-20 (the user chose not to wait for Clerk
+support).** Production instance `ins_3Iiq1WfsvpgLz3GdQTLmfcQ1Cyo`, domain
+`dmn_3Iiq1VlixQgH39w1edDOXEAMWWC` (`i10.tech`).
+
+1. **No, a whole hostname is not accepted.** `POST /v1/proxy_checks` validates
+   the URL's host against the domain's name before it tries to reach it:
+
+   | `proxy_url`                                                    | Answer (422)                                                   |
+   | -------------------------------------------------------------- | -------------------------------------------------------------- |
+   | `https://clerk.i10.tech`, `https://clerk.i10.tech/__clerk`     | `form_param_format_invalid`, "Cannot be on a different domain" |
+   | `https://auth.i10.tech/__clerk`, `dash.`, `www.`               | the same                                                       |
+   | `https://i10-clerk-gateway.i10-tech.workers.dev`               | the same (so the runbook's `workers.dev` rehearsal cannot run) |
+   | `https://i10.tech`, `https://i10.tech/__clerk`, `/clerk-proxy` | "Clerk Frontend API cannot be accessed through the proxy URL"  |
+
+   Only the apex `i10.tech`, with or without a path, passes. **So the gateway
+   is registered as `https://i10.tech/__clerk` and serves both names** (the
+   Worker on the route `i10.tech/__clerk*` and as the custom domain
+   `clerk.i10.tech`); every request it forwards carries
+   `Clerk-Proxy-Url: https://i10.tech/__clerk`, whichever name it arrived on.
+   The proxy check answered `successful: true`. Nothing in the apps changed:
+   the publishable key still names `clerk.i10.tech`, and Clerk now names the
+   apex path as the instance's `frontend_api_url`, so clerk-js bundles and
+   Clerk's own links (invitation links, OAuth callbacks) use the apex path.
+
+2. **Clerk does not refuse requests that skip the proxy; owning the name is
+   what closes them.** Clerk's edge picks the instance by the TLS name alone.
+   Before the switch, and still after `proxy_url` was set while the CNAME
+   pointed at Clerk, `curl --connect-to
+clerk.i10.tech:443:frontend-api.clerk.services:443` (also with `-k`, and
+   through `frontend-api.clerk.dev`'s address, the same anycast
+   `104.18.34.146`) answered 200 for `GET /v1/environment` and `GET /v1/client`
+   with no Clerk headers. A proxied request (`Clerk-Proxy-Url` and the secret
+   key to `frontend-api.clerk.dev`) answers `400 Invalid host` until
+   `proxy_url` is registered. Once the Worker owned `clerk.i10.tech` (custom
+   domain, 15:27:51 UTC), the same `--connect-to` requests to Clerk's own IP
+   reached **our** Worker: Cloudflare routes the name to the zone that owns it
+   on any of its addresses. `POST /v1/organizations` and `POST /v1/me?_method=DELETE`
+   answered 404 `X-Clerk-Gateway: denied`, with and without a live session, by
+   DNS, by the apex path and around DNS; the allowed `GET /v1/environment` sent
+   around DNS shows in Workers Logs as `environment.read`, `pass`. A
+   `Host: clerk.i10.tech` header whose SNI is another name still gets
+   Cloudflare's own 403. `change_password` and `email_addresses` reach Clerk
+   for an unmanaged account by design (`guard: "self_service"`; managed
+   accounts get 403 at the door).
+3. **Certificate:** Clerk's `CN=clerk.i10.tech` (Google Trust Services WE1)
+   runs 2026-10-30 to 2027-01-28; Clerk reissued about every 60 days
+   (certificate transparency: 2026-09-01 to 2026-11-30 before it). Cloudflare
+   kept presenting it on our zone's addresses while the Worker's own
+   certificate pack (`i10.tech`, `clerk.i10.tech`) was `pending_validation`;
+   the traffic already reached the Worker. Within the hour the pack was
+   `active` and `clerk.i10.tech` serves our own certificate (WE1, to
+   2027-02-18); Clerk can no longer renew its own. The publishable key
+   (`pk_live_`) decodes to `clerk.i10.tech$` only. Other names Clerk held for
+   us: `accounts.i10.tech` (Account Portal; its CNAME was deleted on 2026-11-20
+   and the name now falls to the zone's `*.i10.tech` wildcard, which answers
+   403), `clkmail` and the two DKIM CNAMEs, none a Frontend API.
+   `frontend-api.clerk.dev` with no proxy headers answers 501.
+4. **Through the proxy (throwaway users created with the Backend API, deleted
+   after):** password sign-in, token refresh (in the browser too, every
+   minute), sign-out, a sign-in token (the SSO ticket path), an actor token
+   (`act.sub` set), an organization invitation (`/v1/tickets/accept` answers
+   303 to `auth.i10.tech` with the ticket; the ticket sign-in completes and the
+   invitation is `accepted`) and switching workspaces (`setActive`, the token's
+   `o.id` follows) all work. Session tokens now carry
+   `iss: https://i10.tech/__clerk`, and our API and the console's server
+   accept them. Webhooks are unaffected (Clerk to our API directly):
+   `user.created`, `session.created`, `organization.deleted` and
+   `user.deleted` were applied. **OAuth needed the providers told about the
+   new callback:** Clerk now sends
+   `redirect_uri=https://i10.tech/__clerk/v1/oauth_callback`; Google answered
+   `Error 400: redirect_uri_mismatch` until it was added. The user set it as
+   the only redirect URI on the Google OAuth client and as the GitHub OAuth
+   app's callback URL (the old `clerk.i10.tech` one is gone from both, so a
+   rollback puts it back), and signed in with both in a browser on
+   2026-11-20. **Sign-up was not proven by automation:** Clerk's bot protection
+   (Turnstile) refuses the automated browser before the request is sent; from
+   curl it answers `captcha_missing_token`, so the route itself is reached.
+   Saved accounts behave as designed (`apps/api/src/devices/resume.ts`): after
+   an explicit sign-out a card without a passkey asks for the password, after
+   an expiry it signs straight in by ticket.
 
 **When to revisit L2:** if Clerk support says it keeps serving
 `clerk.i10.tech` in a way we cannot close (P8), or if the gateway ends up
@@ -1135,16 +1222,16 @@ afterwards and the instance restrictions were restored and re-read. Dev
 instances get every feature, so these prove behaviour, not what our production
 plan includes. Scripts were kept in the session scratchpad, not the repo.
 
-| #   | Question                                                                                 | Result                                                                                                                                                                                                 |
-| --- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| P1  | Does `second_factor_verification` skip Clerk 2FA?                                        | **Yes.** User with TOTP: no parameter → `needs_second_factor`; `fresh` → `complete`, `fva [0,0]`; `stale` → `complete`, `fva [0,99999]`                                                                |
-| P2  | Does the blocklist stop sign-in?                                                         | **No.** Clerk will not let us turn off `allowlist_blocklist_disabled_on_sign_in`; with the blocklist on and the email listed, email code, ticket and an older session's token refresh all still worked |
-| P3  | Does a `reserved` email change sign-in?                                                  | **No.** Password, email code, ticket and `verify_password` all still work; it only stops someone else signing up with that address (`form_identifier_exists`)                                          |
-| P4  | Does the client say how it signed in?                                                    | **Yes.** `last_authentication_strategy` is `ticket` or `email_code`                                                                                                                                    |
-| P5  | Do actor tokens work, and what do sessions carry?                                        | **Yes on dev.** `actor` and `act` = `{ sub: <staff user> }`, `fva [0,0]`. Production plan not checked                                                                                                  |
-| P6  | Can a member without system permissions change memberships at Clerk?                     | **No.** `403 missing_organization_permission` for invite, remove, re-role, rename; `org:admin` → 200                                                                                                   |
-| P7  | Do Better Auth's SSO preconditions pass on Bun + postgres-js + Drizzle?                  | **Yes, both:** the adapter exposes a native `transaction` function, and the transaction async-context storage resolves. Only the preconditions were exercised, not a full SSO flow                     |
-| P8  | Once proxied and the CNAME is gone, does Clerk still serve our Frontend API another way? | **Not run.** Production only; ask Clerk support before testing (1.4)                                                                                                                                   |
+| #   | Question                                                                                 | Result                                                                                                                                                                                                                         |
+| --- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P1  | Does `second_factor_verification` skip Clerk 2FA?                                        | **Yes.** User with TOTP: no parameter → `needs_second_factor`; `fresh` → `complete`, `fva [0,0]`; `stale` → `complete`, `fva [0,99999]`                                                                                        |
+| P2  | Does the blocklist stop sign-in?                                                         | **No.** Clerk will not let us turn off `allowlist_blocklist_disabled_on_sign_in`; with the blocklist on and the email listed, email code, ticket and an older session's token refresh all still worked                         |
+| P3  | Does a `reserved` email change sign-in?                                                  | **No.** Password, email code, ticket and `verify_password` all still work; it only stops someone else signing up with that address (`form_identifier_exists`)                                                                  |
+| P4  | Does the client say how it signed in?                                                    | **Yes.** `last_authentication_strategy` is `ticket` or `email_code`                                                                                                                                                            |
+| P5  | Do actor tokens work, and what do sessions carry?                                        | **Yes on dev.** `actor` and `act` = `{ sub: <staff user> }`, `fva [0,0]`. Production plan not checked                                                                                                                          |
+| P6  | Can a member without system permissions change memberships at Clerk?                     | **No.** `403 missing_organization_permission` for invite, remove, re-role, rename; `org:admin` → 200                                                                                                                           |
+| P7  | Do Better Auth's SSO preconditions pass on Bun + postgres-js + Drizzle?                  | **Yes, both:** the adapter exposes a native `transaction` function, and the transaction async-context storage resolves. Only the preconditions were exercised, not a full SSO flow                                             |
+| P8  | Once proxied and the CNAME is gone, does Clerk still serve our Frontend API another way? | **Tested on production 2026-11-20 (1.5).** `proxy_url` must be on `i10.tech` itself, so it is `https://i10.tech/__clerk`; Clerk keeps serving the name to anyone until our Worker owns it, then every path reaches the gateway |
 
 Also seen: Clerk's dev Frontend API rate-limits sign-ins hard (repeated `429`
 after about ten sign-ins in a minute from one address); and a new user with a
@@ -1159,6 +1246,9 @@ users) **(inferred)**.
 1. ~~The engine~~ **Decided 2026-10-19: A, our own SP** (Part 3, Part 4).
 2. ~~The layer level~~ **Decided 2026-10-19: L1 through our gateway at
    `clerk.i10.tech` (1.5).** P8 goes to Clerk support (question in 1.5).
+   **2026-11-20: tested instead and live; Clerk refuses `clerk.i10.tech` as
+   `proxy_url`, so the gateway is registered as `https://i10.tech/__clerk` and
+   also owns `clerk.i10.tech` (1.5).**
 3. ~~SAML now or later~~ **Decided 2026-10-19: SAML from the start (3.0).**
 4. **Plans: deferred on purpose (2026-10-19).** Everything is built behind
    per-feature plan flags; the split is set before launch. Proposed split on

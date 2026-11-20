@@ -2,7 +2,7 @@
  * The Worker's settings, read once per request from its bindings.
  *
  * ⚠ CONFIGURATION, SO THE SAME CODE FRONTS EITHER INSTANCE. Production points
- * at `frontend-api.clerk.dev` with `PROXY_URL=https://clerk.i10.tech`; local
+ * at `frontend-api.clerk.dev` with `PROXY_URL=https://i10.tech/__clerk`; local
  * development points at the dev instance with the local hostname (see
  * wrangler.jsonc `env.local`). Nothing about an instance is hard-coded here.
  */
@@ -38,6 +38,12 @@ export interface Config {
   /** Sent verbatim as `Clerk-Proxy-Url`. */
   proxyUrl: string
   proxyHost: string
+  /**
+   * The path of `PROXY_URL` with no trailing slash, `""` when it has none.
+   * Stripped from requests that arrive under it (`/__clerk/v1/...` is
+   * `/v1/...`), as Clerk's own proxy does.
+   */
+  proxyPath: string
   proxyProto: "https" | "http"
   development: boolean
   allowedOrigins: ReadonlySet<string>
@@ -125,6 +131,7 @@ export function readConfig(env: Env): ConfigResult {
       // `https://clerk.i10.tech/` → `https://clerk.i10.tech`, as Clerk's docs write it.
       proxyUrl: proxy.url.href.replace(/\/+$/, ""),
       proxyHost: proxy.url.host,
+      proxyPath: proxy.url.pathname.replace(/\/+$/, ""),
       proxyProto: proxy.url.protocol === "http:" ? "http" : "https",
       development,
       allowedOrigins,

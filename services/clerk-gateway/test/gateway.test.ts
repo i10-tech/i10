@@ -125,6 +125,57 @@ describe("forwarding", () => {
   })
 })
 
+describe("a proxy URL with a path", () => {
+  const env = { PROXY_URL: "https://i10.tech/__clerk" }
+
+  it("forwards a request under the path without it, labelled with the full URL", async () => {
+    const gw = harness({ env })
+    await gw.sendRaw(
+      new Request("https://i10.tech/__clerk/v1/environment?_clerk_js_version=6", {
+        headers: BROWSER,
+      }),
+    )
+    const [call] = gw.calls
+    expect(call?.url).toBe(
+      "https://frontend-api.clerk.dev/v1/environment?_clerk_js_version=6",
+    )
+    expect(call?.headers.get("clerk-proxy-url")).toBe("https://i10.tech/__clerk")
+    expect(call?.headers.get("x-forwarded-host")).toBe("i10.tech")
+  })
+
+  it("forwards a request that arrives at the bare hostname unchanged", async () => {
+    const gw = harness({ env })
+    await gw.send("/v1/client", { headers: BROWSER })
+    expect(gw.calls[0]?.url).toBe("https://frontend-api.clerk.dev/v1/client")
+    expect(gw.calls[0]?.headers.get("clerk-proxy-url")).toBe("https://i10.tech/__clerk")
+  })
+
+  it("still refuses a denied route under the path, and logs the path as received", async () => {
+    const gw = harness({ env })
+    const res = await gw.sendRaw(
+      new Request("https://i10.tech/__clerk/v1/organizations", {
+        method: "POST",
+        headers: BROWSER,
+      }),
+    )
+    expect(res.status).toBe(404)
+    expect(res.headers.get("x-clerk-gateway")).toBe("denied")
+    expect(gw.calls).toHaveLength(0)
+    expect(gw.lastLog().path).toBe("/__clerk/v1/organizations")
+  })
+
+  it.each([
+    "/__clerkx/v1/environment",
+    "/__CLERK/v1/environment",
+    "/__clerk//v1/environment",
+  ])("does not treat %s as under the path", async (path) => {
+    const gw = harness({ env })
+    const res = await gw.sendRaw(new Request(`https://i10.tech${path}`))
+    expect(res.status).toBe(404)
+    expect(gw.calls).toHaveLength(0)
+  })
+})
+
 describe("responses", () => {
   it("passes every Set-Cookie through separately", async () => {
     const cookies = [
