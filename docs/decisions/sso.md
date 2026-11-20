@@ -1229,7 +1229,7 @@ plan includes. Scripts were kept in the session scratchpad, not the repo.
 | P3  | Does a `reserved` email change sign-in?                                                  | **No.** Password, email code, ticket and `verify_password` all still work; it only stops someone else signing up with that address (`form_identifier_exists`)                                                                  |
 | P4  | Does the client say how it signed in?                                                    | **Yes.** `last_authentication_strategy` is `ticket` or `email_code`                                                                                                                                                            |
 | P5  | Do actor tokens work, and what do sessions carry?                                        | **Yes on dev.** `actor` and `act` = `{ sub: <staff user> }`, `fva [0,0]`. Production plan not checked                                                                                                                          |
-| P6  | Can a member without system permissions change memberships at Clerk?                     | **No.** `403 missing_organization_permission` for invite, remove, re-role, rename; `org:admin` → 200                                                                                                                           |
+| P6  | Can a member without system permissions change memberships at Clerk?                     | **No.** `403 missing_organization_permission` for invite, remove, re-role, rename; `org:admin` → 200. **Re-run on production 2026-11-20 (below): the gateway refuses all four with 404, for the creator too**                  |
 | P7  | Do Better Auth's SSO preconditions pass on Bun + postgres-js + Drizzle?                  | **Yes, both:** the adapter exposes a native `transaction` function, and the transaction async-context storage resolves. Only the preconditions were exercised, not a full SSO flow                                             |
 | P8  | Once proxied and the CNAME is gone, does Clerk still serve our Frontend API another way? | **Tested on production 2026-11-20 (1.5).** `proxy_url` must be on `i10.tech` itself, so it is `https://i10.tech/__clerk`; Clerk keeps serving the name to anyone until our Worker owns it, then every path reaches the gateway |
 
@@ -1238,6 +1238,34 @@ after about ten sign-ins in a minute from one address); and a new user with a
 password got `needs_second_factor` on a password sign-in from a new client,
 which looks like Clerk's client-trust check (`bypass_client_trust` exists on
 users) **(inferred)**.
+
+**P6 re-run on production, 2026-11-20, after #335 (#399) and the gateway
+(#499).** Two throwaway users and one workspace were made through the Backend
+API: the workspace `created_by` user A, and user B added as `org:member`. Both
+signed in with sign-in tickets through the gateway, with cookies as a browser
+does (the instance has Clerk's Native API off, so `_is_native` answers
+`native_api_disabled`). Each then tried invite, re-role, remove and rename at
+the Frontend API, once through `https://i10.tech/__clerk` and once through
+`https://clerk.i10.tech`.
+
+- **Creator demoted:** within seconds of creation our membership webhook had set
+  A to `org:member` in Clerk, and our table held A as `owner` and B as
+  `member`. Both Clerk memberships carried only `org:sys_memberships:read` and
+  `org:sys_billing:read`.
+- **Session token:** `iss` is `https://i10.tech/__clerk` on both names, and
+  `o.rol` is `member` for both users.
+- **All four refused at the gateway, on both names, for A and B:** `404
+resource_not_found` with `X-Clerk-Gateway: denied`, so none of them reached
+  Clerk. Reading `GET /v1/organizations/{id}/memberships` passed (200).
+  Afterwards Clerk still showed both as `org:member` and the name unchanged.
+- **What this does not show:** Clerk's own `403` for a powerless role could not
+  be re-checked on production, because since #499 every path to the Frontend
+  API reaches the gateway first (P8). That layer rests on the dev result above
+  and on every membership being `org:member`.
+
+The workspace and both users were deleted afterwards and re-read as 404, and our
+tenant for the workspace went with it (`core.tenant_for_principal` answers
+null).
 
 ---
 
@@ -1296,7 +1324,15 @@ users) **(inferred)**.
    Answer: workspaces are created through our API, which demotes the creator to
    `org:member` in the same request, and the roles webhook demotes any powerful
    membership that appears any other way. `domains_default_role` did switch to
-   `org:member` on dev. Prod limits read
+   `org:member` on dev. **On production it read `org:member` on 2026-11-20**
+   (`GET /v1/instance/organization_settings`), so nothing was changed there;
+   `creator_role` is `org:admin`, as above. **Production backfill, 2026-11-20**
+   (`workspace-roles --instance prod`): the dry run listed 4 workspaces, 1
+   already done (owner row held, Clerk `org:member`) and 3 whose only member,
+   the creator, had no row and was `org:admin` in Clerk, with no pending
+   invitations. `--apply` wrote 3 `owner` rows and demoted 3 memberships, 0
+   failed; the dry run after it shows every row kept and nothing to demote.
+   Prod limits read
    2026-10-19: `max_allowed_roles` 10, `max_allowed_permissions` 0 (no custom
    permissions in Clerk), roles today `org:admin` (all 9 system permissions)
    and `org:member` (`sys_memberships:read`, `sys_billing:read`).
