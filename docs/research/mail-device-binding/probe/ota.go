@@ -178,12 +178,12 @@ func (s *otaServer) phase2(w http.ResponseWriter, r *http.Request) {
 	chal := attr(base+".attrs.plist", "CHALLENGE")
 	serial := attr(base+".attrs.plist", "SERIAL")
 	product := attr(base+".attrs.plist", "PRODUCT")
-	if chal == "" || serial == "" {
-		reject(w, r, "attributes lack CHALLENGE or SERIAL", map[string]any{"phase": phase})
-		return
-	}
 
 	if phase == 2 {
+		if chal == "" || serial == "" {
+			reject(w, r, "attributes lack CHALLENGE or SERIAL", map[string]any{"phase": phase})
+			return
+		}
 		if err := s.chals.bind(chal, serial, product); err != nil {
 			reject(w, r, err.Error(), map[string]any{"phase": phase})
 			return
@@ -197,12 +197,22 @@ func (s *otaServer) phase2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Phase 3: the certificate step-ca issued must be for the device that
-	// passed phase 2 with this very challenge.
-	if signer.Subject.CommonName != serial {
-		reject(w, r, "signer CN does not match SERIAL", map[string]any{"phase": phase, "cn": signer.Subject.CommonName, "serial": serial})
+	// Phase 3: the device need not echo CHALLENGE or SERIAL here (Apple's
+	// sample final request has neither), so the enrollment is found from the
+	// certificate step-ca issued: its CN is the serial phase 2 bound. Whatever
+	// the device does echo must agree.
+	//
+	// ⚠ ONLY AS STRONG AS THE SCEP CHALLENGE. With the probe's static one, anyone
+	// who holds it can get a certificate for any CN and finish an enrollment
+	// whose phase 2 is pending for that serial. Production resolves this request
+	// by the certificate a per-enrollment SCEPCHALLENGE webhook allowed, never by
+	// a name (see README).
+	cn := signer.Subject.CommonName
+	if serial != "" && serial != cn {
+		reject(w, r, "signer CN does not match SERIAL", map[string]any{"phase": phase, "cn": cn, "serial": serial})
 		return
 	}
+	serial = cn
 	product, err = s.chals.consume(chal, serial)
 	if err != nil {
 		reject(w, r, err.Error(), map[string]any{"phase": phase})

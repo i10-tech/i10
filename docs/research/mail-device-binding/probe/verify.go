@@ -95,6 +95,8 @@ func (c *challenges) live(id string) *challenge {
 
 // bind ties an issued, unexpired challenge to a serial. Repeating it for the
 // same serial is fine (the device may retry); a different serial is refused.
+// A serial has at most one bound challenge: binding a new one drops any other,
+// so the latest enrollment of a device is the one its final request completes.
 func (c *challenges) bind(id, serial, product string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -105,21 +107,36 @@ func (c *challenges) bind(id, serial, product string) error {
 	if ch.serial != "" && ch.serial != serial {
 		return errors.New("challenge bound to another serial")
 	}
+	for k, v := range c.m {
+		if k != id && v.serial == serial {
+			delete(c.m, k)
+		}
+	}
 	ch.serial, ch.product = serial, product
 	return nil
 }
 
-// consume uses the challenge up. It must have been bound to this serial.
+// consume uses up the challenge bound to serial. The final request need not
+// echo CHALLENGE (Apple's sample phase 4 request carries only UDID, VERSION
+// and MAC_ADDRESS_EN0), so id may be empty and the serial, taken from the
+// certificate our CA issued, finds it. An echoed id must be that challenge.
 func (c *challenges) consume(id, serial string) (string, error) {
+	if serial == "" {
+		// An unbound challenge has an empty serial too; never match it.
+		return "", errors.New("no serial to find the challenge by")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	ch := c.live(id)
-	if ch == nil {
-		return "", errors.New("unknown, expired or used challenge")
+	for k := range c.m {
+		ch := c.live(k)
+		if ch == nil || ch.serial != serial {
+			continue
+		}
+		if id != "" && id != k {
+			return "", errors.New("echoed challenge is not the one bound to this serial")
+		}
+		delete(c.m, k)
+		return ch.product, nil
 	}
-	if ch.serial == "" || ch.serial != serial {
-		return "", errors.New("challenge not bound to this serial")
-	}
-	delete(c.m, id)
-	return ch.product, nil
+	return "", errors.New("no unexpired challenge bound to this serial")
 }
