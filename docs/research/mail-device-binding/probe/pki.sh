@@ -45,4 +45,16 @@ EOF
     -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
 done
 rm -f ./*.csr
+
+# Apple Root CA: the over-the-air enrollment (phase 2) verifies the device's
+# signature against it. Fetched from Apple, converted to PEM, and pinned.
+curl -fsS -o apple-root.cer https://www.apple.com/appleca/AppleIncRootCertificate.cer
+openssl x509 -inform DER -in apple-root.cer -out apple-root.pem
+rm -f apple-root.cer
+APPLE_FP=B0:B1:73:0E:CB:C7:FF:45:05:14:2C:49:F1:29:5E:6E:DA:6B:CA:ED:7E:2C:68:C5:BE:91:B5:A1:10:01:F0:24
+if [ "$(openssl x509 -in apple-root.pem -noout -fingerprint -sha256 | cut -d= -f2)" != "$APPLE_FP" ]; then
+  echo "apple-root.pem does not match the pinned Apple Root CA fingerprint" >&2
+  rm -f apple-root.pem
+  exit 1
+fi
 echo "pki ready"

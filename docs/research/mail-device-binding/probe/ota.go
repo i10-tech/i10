@@ -22,16 +22,37 @@ import (
 
 const otaHost = "ota.192-168-1-45.sslip.io"
 
+// otaServer holds what the enrollment endpoints need. The phase of a request
+// is decided by which root verified its CMS signature, never by a name.
+type otaServer struct {
+	dir       string
+	appleRoot string // phase 2 requests chain to this
+	stepRoot  string // phase 3 requests chain to this
+	stepInter string // optional intermediates for the step chain
+	chals     *challenges
+}
+
+func newOTAServer(dir string) *otaServer {
+	return &otaServer{
+		dir:       dir,
+		appleRoot: dir + "/pki/apple-root.pem",
+		stepRoot:  dir + "/stepca/certs/root_ca.crt",
+		stepInter: dir + "/stepca/certs/intermediate_ca.crt",
+		chals:     newChallenges(),
+	}
+}
+
 func init() {
 	if len(os.Args) < 2 {
 		return
 	}
 	dir := os.Args[1]
+	s := newOTAServer(dir)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ota/enroll.mobileconfig", otaPhase1)
-	mux.HandleFunc("/ota/profile", func(w http.ResponseWriter, r *http.Request) { otaPhase2(dir, w, r) })
-	http.HandleFunc("/ota/enroll.mobileconfig", otaPhase1)
-	http.HandleFunc("/ota/profile", func(w http.ResponseWriter, r *http.Request) { otaPhase2(dir, w, r) })
+	mux.HandleFunc("/ota/enroll.mobileconfig", s.phase1)
+	mux.HandleFunc("/ota/profile", s.phase2)
+	http.HandleFunc("/ota/enroll.mobileconfig", s.phase1)
+	http.HandleFunc("/ota/profile", s.phase2)
 	go func() {
 		err := http.ListenAndServeTLS("0.0.0.0:9443", dir+"/pki/server.pem", dir+"/pki/server.key", mux)
 		fmt.Fprintln(os.Stderr, "ota https:", err)
@@ -44,8 +65,13 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func otaPhase1(w http.ResponseWriter, r *http.Request) {
+func (s *otaServer) phase1(w http.ResponseWriter, r *http.Request) {
 	emit(0, "ota", "ota_phase1_download", map[string]any{"remote": r.RemoteAddr, "ua": r.UserAgent(), "tls": r.TLS != nil})
+	chal, err := s.chals.issue()
+	if err != nil {
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+		return
+	}
 	scheme := "https"
 	port := "9443"
 	if r.URL.Query().Get("plain") == "1" {
@@ -74,7 +100,7 @@ func otaPhase1(w http.ResponseWriter, r *http.Request) {
   <key>PayloadIdentifier</key><string>test.i10.probe.ota.service</string>
   <key>PayloadType</key><string>Profile Service</string>
 </dict>
-</plist>`, url, randHex(16), strings.ToUpper(uuidish()))
+</plist>`, url, chal, strings.ToUpper(uuidish()))
 	w.Header().Set("Content-Type", "application/x-apple-aspen-config")
 	w.Write([]byte(body))
 }
@@ -93,33 +119,93 @@ func run(name string, args ...string) (string, error) {
 	return out.String(), err
 }
 
-func otaPhase2(dir string, w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
-	stamp := time.Now().Format("150405")
-	base := fmt.Sprintf("%s/ota/req-%s", dir, stamp)
+// attr reads one string attribute from a verified attributes plist.
+func attr(plistPath, key string) string {
+	out, err := run("plutil", "-extract", key, "raw", plistPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+func reject(w http.ResponseWriter, r *http.Request, reason string, kv map[string]any) {
+	rec := map[string]any{"remote": r.RemoteAddr, "ua": r.UserAgent(), "reason": reason}
+	for k, v := range kv {
+		rec[k] = v
+	}
+	emit(0, "ota", "ota_rejected", rec)
+	http.Error(w, "rejected", http.StatusBadRequest)
+}
+
+// phase2 handles both device POSTs. Which root verified the CMS chain decides
+// the phase: Apple Root CA means phase 2 (the device's own certificate), the
+// step CA root means phase 3 (the SCEP certificate we issued). Anything that
+// verifies against neither gets a 400 and no profile.
+func (s *otaServer) phase2(w http.ResponseWriter, r *http.Request) {
+	dir := s.dir
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBody+1))
+	if err != nil || len(body) > maxRequestBody {
+		reject(w, r, "unreadable or oversized body", nil)
+		return
+	}
+	base := fmt.Sprintf("%s/ota/req-%s-%s", dir, time.Now().Format("150405"), randHex(3))
 	os.MkdirAll(dir+"/ota", 0o700)
 	os.WriteFile(base+".der", body, 0o600)
 
-	attrs, err1 := run("openssl", "cms", "-verify", "-noverify", "-inform", "DER", "-in", base+".der", "-signer", base+".signer.pem", "-out", base+".attrs.plist")
+	signer, errApple := verifyCMS(base+".der", s.appleRoot, "", base+".signer.pem", base+".attrs.plist")
+	phase := 2
+	if errApple != nil {
+		var errStep error
+		signer, errStep = verifyCMS(base+".der", s.stepRoot, s.stepInter, base+".signer.pem", base+".attrs.plist")
+		if errStep != nil {
+			reject(w, r, "signature or chain verifies against neither root",
+				map[string]any{"apple_err": errApple.Error(), "step_err": errStep.Error(), "bytes": len(body)})
+			return
+		}
+		phase = 3
+	}
+
 	chain, _ := run("openssl", "pkcs7", "-inform", "DER", "-in", base+".der", "-print_certs", "-noout")
 	signerInfo, _ := run("openssl", "x509", "-in", base+".signer.pem", "-noout", "-subject", "-issuer", "-dates", "-ext", "keyUsage,extendedKeyUsage")
 	keyAlg, _ := run("sh", "-c", "openssl x509 -in "+base+".signer.pem -noout -text | grep -m1 'Public Key Algorithm'")
 	plist, _ := os.ReadFile(base + ".attrs.plist")
 	emit(0, "ota", "ota_phase2_attributes", map[string]any{
 		"remote": r.RemoteAddr, "ua": r.UserAgent(), "ctype": r.Header.Get("Content-Type"), "bytes": len(body),
-		"verify_note": strings.TrimSpace(attrs), "verify_err": fmt.Sprint(err1),
+		"phase": phase, "verified": true,
 		"chain": chain, "signer": signerInfo, "signer_key": strings.TrimSpace(keyAlg), "attributes": string(plist),
 	})
 
-	if !strings.Contains(signerInfo, "i10 probe step CA") && r.URL.Query().Get("mode") != "direct" {
-		serial, _ := run("plutil", "-extract", "SERIAL", "raw", base+".attrs.plist")
-		serial = strings.TrimSpace(serial)
-		chal, _ := os.ReadFile(dir + "/scep-challenge.txt")
-		reply := enrollReply(serial, strings.TrimSpace(string(chal)))
+	chal := attr(base+".attrs.plist", "CHALLENGE")
+	serial := attr(base+".attrs.plist", "SERIAL")
+	product := attr(base+".attrs.plist", "PRODUCT")
+	if chal == "" || serial == "" {
+		reject(w, r, "attributes lack CHALLENGE or SERIAL", map[string]any{"phase": phase})
+		return
+	}
+
+	if phase == 2 {
+		if err := s.chals.bind(chal, serial, product); err != nil {
+			reject(w, r, err.Error(), map[string]any{"phase": phase})
+			return
+		}
+		scepChal, _ := os.ReadFile(dir + "/scep-challenge.txt")
+		reply := enrollReply(serial, strings.TrimSpace(string(scepChal)))
 		os.WriteFile(base+".enroll-reply.plist", []byte(reply), 0o600)
 		emit(0, "ota", "ota_phase2_enroll_reply", map[string]any{"client_identifier": serial})
 		w.Header().Set("Content-Type", "application/x-apple-aspen-config")
 		w.Write([]byte(reply))
+		return
+	}
+
+	// Phase 3: the certificate step-ca issued must be for the device that
+	// passed phase 2 with this very challenge.
+	if signer.Subject.CommonName != serial {
+		reject(w, r, "signer CN does not match SERIAL", map[string]any{"phase": phase, "cn": signer.Subject.CommonName, "serial": serial})
+		return
+	}
+	product, err = s.chals.consume(chal, serial)
+	if err != nil {
+		reject(w, r, err.Error(), map[string]any{"phase": phase})
 		return
 	}
 
@@ -169,8 +255,7 @@ func otaPhase2(dir string, w http.ResponseWriter, r *http.Request) {
       <key>ExtendedKeyUsage</key><array><string>1.3.6.1.5.5.7.3.2</string></array>
     </dict>
 </array>
-</plist>`, strings.ToUpper(uuidish()), code, code, "", strings.ToUpper(uuidish()), serialFrom(base))
-	product := productFrom(base)
+</plist>`, strings.ToUpper(uuidish()), code, code, "", strings.ToUpper(uuidish()), serial)
 	scope := "System"
 	if strings.HasPrefix(product, "Mac") {
 		// Mac: its own host and address, plus identity preferences that make
@@ -197,18 +282,18 @@ func otaPhase2(dir string, w http.ResponseWriter, r *http.Request) {
 	emit(0, "ota", "ota_phase3_platform", map[string]any{"product": product, "scope": scope})
 	os.WriteFile(base+".inner.plist", []byte(inner), 0o600)
 
-	mode := r.URL.Query().Get("mode")
-	var payloadKey, payloadVal string
 	encOut, encErr := run("openssl", "cms", "-encrypt", "-binary", "-outform", "DER", "-aes-256-cbc", "-in", base+".inner.plist", "-out", base+".enc.der", base+".signer.pem")
-	if encErr == nil && mode != "plain" {
-		enc, _ := os.ReadFile(base + ".enc.der")
-		payloadKey = "EncryptedPayloadContent"
-		payloadVal = "<data>" + b64(enc) + "</data>"
-	} else {
-		payloadKey = "PayloadContent"
-		payloadVal = inner[strings.Index(inner, "<array>"):strings.Index(inner, "</plist>")]
+	if encErr != nil {
+		// Never fall back to sending the code in the clear.
+		os.Remove(base + ".code.txt")
+		emit(0, "ota", "ota_encrypt_failed", map[string]any{"enc_err": encErr.Error(), "enc_out": strings.TrimSpace(encOut)})
+		http.Error(w, "encryption failed", http.StatusInternalServerError)
+		return
 	}
-	emit(0, "ota", "ota_phase2_reply", map[string]any{"encrypted": payloadKey == "EncryptedPayloadContent", "enc_err": fmt.Sprint(encErr), "enc_out": strings.TrimSpace(encOut)})
+	enc, _ := os.ReadFile(base + ".enc.der")
+	payloadKey := "EncryptedPayloadContent"
+	payloadVal := "<data>" + b64(enc) + "</data>"
+	emit(0, "ota", "ota_phase2_reply", map[string]any{"encrypted": true, "enc_out": strings.TrimSpace(encOut)})
 
 	outer := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -254,7 +339,7 @@ func enrollReply(serial, scepChallenge string) string {
       <key>PayloadContent</key>
       <dict>
         <key>URL</key><string>http://192.168.1.45:9001/scep/scep</string>
-        <key>Subject</key><array><array><array><string>CN</string><string>i10 enroll %s</string></array></array></array>
+        <key>Subject</key><array><array><array><string>CN</string><string>%s</string></array></array></array>
         <key>Challenge</key><string>%s</string>
         <key>Keysize</key><integer>2048</integer>
         <key>Key Type</key><string>RSA</string>
@@ -264,20 +349,6 @@ func enrollReply(serial, scepChallenge string) string {
   </array>
 </dict>
 </plist>`, strings.ToUpper(uuidish()), strings.ToUpper(uuidish()), serial, scepChallenge)
-}
-
-// serialFrom reads the serial the device reported in this or the newest earlier phase 2 request.
-func serialFrom(base string) string {
-	if out, err := run("plutil", "-extract", "SERIAL", "raw", base+".attrs.plist"); err == nil && strings.TrimSpace(out) != "" {
-		return strings.TrimSpace(out)
-	}
-	out, _ := run("sh", "-c", "for f in $(ls -t "+base[:strings.LastIndex(base, "/")]+"/*.attrs.plist); do plutil -extract SERIAL raw $f 2>/dev/null && break; done")
-	return strings.TrimSpace(out)
-}
-
-func productFrom(base string) string {
-	out, _ := run("sh", "-c", "for f in "+base+".attrs.plist $(ls -t "+base[:strings.LastIndex(base, "/")]+"/*.attrs.plist); do plutil -extract PRODUCT raw $f 2>/dev/null && break; done")
-	return strings.TrimSpace(out)
 }
 
 func between(s, a, b string) string {
