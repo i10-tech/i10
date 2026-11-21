@@ -134,9 +134,22 @@ So a Mac is **one enrollment plus two clicks**: Server Settings > Authentication
 
 **Revoking:** delete the device row and raise `credential_epoch`. Every path that removes access (suspension, deprovision, SCIM, Okta Universal Logout) must also end that person's device codes (see the cache-revocation rule in `services/authd/README.md`).
 
+That stops new sign-ins only. Stalwart never ends a session that has already signed in `[probe]`. Measured 2026-11-21 on a local Stalwart v1.1.0 (the version prod runs), with an IMAP session idling, a second IMAP session issuing commands and an SMTP session on 465, all signed in before the change:
+
+| Change made through the admin API              | New sign-in | Open IMAP: IDLE push of new mail, SEARCH, FETCH | Open SMTP: send |
+| ---------------------------------------------- | ----------- | ----------------------------------------------- | --------------- |
+| Password changed                               | refused     | still works                                     | still sends     |
+| `InvalidateCaches` action                      | works       | still works                                     | still sends     |
+| `authenticate` and `emailSend` permissions off | refused     | still works                                     | still sends     |
+| Account deleted                                | refused     | FETCH of existing mail works, LIST hangs        | still sends     |
+
+The admin API has no action that ends a session. Nothing caps how long an IMAP session lives: `authenticatedTimeout` and `idleTimeout` are both 30 minutes of inactivity, and a client that renews IDLE is never idle. An SMTP session lasts up to `maxDuration` (10 minutes, 30 on 465 in our plan). With the LDAP directory prod uses, Stalwart learns even less, because it hears from authd only when a login happens. Stalwart also knows only the account, never the device, so revoking one of a person's devices cannot be expressed to it at all.
+
+So revocation lives in the front (below). The front knows which device each connection belongs to: the certificate at the TLS handshake on a Mac or in Thunderbird, and the code in `AUTHENTICATE` or `LOGIN` on an iPhone, which it sees because it terminates TLS. A revoke publishes the device id. Every front instance closes that device's connections, and authd refuses its next sign-in. Account-wide revocations (suspension, deletion, payment hold, SSO-required) go out the same way with the account id. Those have the same hole today, without any device codes involved.
+
 **Needed in the stack**
 
-- **Stalwart to carry the client certificate to authd.** Today authd gets only an LDAP bind (address and password). A front for IMAP and SMTP that terminates TLS, checks the certificate and hands the connection to Stalwart over PROXY protocol is the likely shape. Stalwart supports PROXY v2, including its SSL extension.
+- **Stalwart to carry the client certificate to authd.** Today authd gets only an LDAP bind (address and password). A front for IMAP and SMTP that terminates TLS, checks the certificate and hands the connection to Stalwart over PROXY protocol is the likely shape. Stalwart supports PROXY v2, including its SSL extension. The front is also where revocation happens, because only the front can close a connection that has already signed in (see Revoking).
 - A SCEP and ACME (`device-attest-01`) service, or step-ca run as one.
 - An enrollment endpoint in the API.
 
