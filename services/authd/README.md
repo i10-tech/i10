@@ -405,7 +405,8 @@ preset, and replaced by the next write; nothing is migrated in bulk.
 
 OneLogin is not a preset: its password grant is documented only with
 `Authorization: Basic <client id>:<client secret>`, and this lane holds no client
-secret. Entra and Google have their own mail sign-in.
+secret. Entra and Google get no password lane; see "Lanes we are not building"
+below.
 
 **The token endpoint is discovered, once, when an owner saves.** The owner gives
 the issuer. The API reads `{issuer}/.well-known/openid-configuration` through its
@@ -540,6 +541,31 @@ is `passthrough:<connection id>` for both. An LDAP success is never cached, so
 nothing it minted can answer for an OIDC account; an OIDC success is cached, and
 the settings-change epoch raise above is what stops it answering after the
 connection leaves OIDC.
+
+⚠ **This lane needs MFA off for mail.** The provider must let the public client
+sign in with a password alone, so an admin who turns it on makes mail sign-in skip
+the second factor. That is why it stays an admin's opt-in. The default for SSO
+users is the device code (#383), which needs no setup at the provider.
+
+## Lanes we are not building
+
+These were probed and work, but device codes (#383) cover each one, so they are
+not built. The measurements are kept so nobody probes them again; the full record
+is in `docs/research/mail-device-binding.md`, section 7.
+
+- **Entra password grant (ROPC).** Works under Security Defaults for a user with
+  no MFA registered (`200`, about 6.7 s cold). A wrong password answers
+  `AADSTS50126`; a lock answers a distinct `AADSTS50053` and then refuses the right
+  password too, clearing in about 60 s. From a familiar address the lock came at
+  the 15th distinct failure after a success. It stops working the moment MFA
+  applies to the user, which is Entra's default.
+- **Thunderbird OAuth on Stalwart's own issuer.** A mail-scoped token (scope
+  `urn:ietf:params:oauth:scope:mail`) signed in to IMAP with XOAUTH2 and to SMTP.
+  It reached Thunderbird only; no other mail app was shown to use it.
+- **Google Secure LDAP (#400).** The only supported way to check a Google
+  Workspace password server-side, on paid Google plans only and with a per-tenant
+  client certificate. Never probed: i10.tech's Cloud Identity Free has no Secure
+  LDAP.
 
 ## Suspended mailboxes (#344)
 
