@@ -32,8 +32,13 @@ export const PG_IMAGE = "ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookwor
 export const POOLER_IMAGE = "ghcr.io/cloudnative-pg/pgbouncer:1.25.1"
 
 /** The four roles the migrations grant to (CNPG makes them in prod). */
-export const ROLES = ["authd", "i10_api", "pdns", "stalwart"] as const
-export type Role = (typeof ROLES)[number] | "i10"
+export const ROLES = ["authd", "i10_api", "pdns", "stalwart", "mailfront"] as const
+/**
+ * `i10` owns the database and is NOT a superuser, as in production (CNPG makes it
+ * the owner; check-migrations proves the migrations run without superuser).
+ * `postgres` is the bootstrap superuser, used only to set the server up.
+ */
+export type Role = (typeof ROLES)[number] | "i10" | "postgres"
 
 export const AUTO_EXPLAIN_PARAMS = [
   "auto_explain.log_min_duration",
@@ -108,7 +113,7 @@ export async function up(
   // Initialised once, so `docker restart` (a cold cache) keeps the data.
   const init = [
     "{ [ -s /tmp/pgdata/PG_VERSION ] || {" +
-      " initdb -D /tmp/pgdata -U i10 --auth=trust --encoding=UTF8 --locale=C >/dev/null &&" +
+      " initdb -D /tmp/pgdata -U postgres --auth=trust --encoding=UTF8 --locale=C >/dev/null &&" +
       // The published port is 127.0.0.1 only; inside, the pooler dials over the docker network.
       " echo 'host all all 0.0.0.0/0 trust' >> /tmp/pgdata/pg_hba.conf; }; }",
     "exec postgres -D /tmp/pgdata -c listen_addresses='*' -c full_page_writes=off" +
@@ -135,19 +140,22 @@ export async function up(
     "-c",
     init,
   ])
-  await waitFor(directUrl(s, "i10", "postgres"), "postgres")
+  await waitFor(directUrl(s, "postgres", "postgres"), "postgres")
 
-  const admin = postgres(directUrl(s, "i10", "postgres"), {
+  const admin = postgres(directUrl(s, "postgres", "postgres"), {
     max: 1,
     onnotice: () => {},
   })
   try {
-    await admin`create database i10`
+    // ⚠ A PLAIN OWNER, NEVER THE SUPERUSER. A superuser `i10` would bypass RLS
+    // and every missing grant, so the scratch would pass what production refuses.
+    await admin`create role i10 login`
+    await admin`create database i10 owner i10`
     for (const role of ROLES) await admin.unsafe(`create role ${role} login`)
   } finally {
     await admin.end()
   }
-  const db = postgres(directUrl(s), { max: 1, onnotice: () => {} })
+  const db = postgres(directUrl(s, "postgres"), { max: 1, onnotice: () => {} })
   try {
     // CNPG creates these as the superuser before the first migration (database.yaml).
     await db`create extension if not exists vector`
@@ -157,18 +165,21 @@ export async function up(
     for (const param of AUTO_EXPLAIN_PARAMS) {
       await db.unsafe(`grant set on parameter ${param} to i10_api, authd`)
     }
+    // measure.ts resets both statistics before a run, as the owner.
+    await db`grant execute on function pg_stat_reset() to i10`
+    await db`grant execute on function pg_stat_statements_reset to i10`
   } finally {
     await db.end()
   }
   if (migrate) {
     await applyMigrations(directUrl(s), MIGRATIONS)
     // A migrated, empty copy to reset from in a second instead of re-migrating.
-    const admin2 = postgres(directUrl(s, "i10", "postgres"), {
+    const admin2 = postgres(directUrl(s, "postgres", "postgres"), {
       max: 1,
       onnotice: () => {},
     })
     try {
-      await admin2`create database ${admin2(TEMPLATE)} template i10`
+      await admin2`create database ${admin2(TEMPLATE)} owner i10 template i10`
     } finally {
       await admin2.end()
     }
@@ -184,14 +195,14 @@ const TEMPLATE = "i10_migrated"
  * grants migration 0001 made (a template copies the contents, not the ACL).
  */
 export async function reset(s: Scratch): Promise<void> {
-  const admin = postgres(directUrl(s, "i10", "postgres"), {
+  const admin = postgres(directUrl(s, "postgres", "postgres"), {
     max: 1,
     onnotice: () => {},
   })
   try {
     await admin`drop database if exists i10 with (force)`
-    await admin`create database i10 template ${admin(TEMPLATE)}`
-    await admin`grant connect on database i10 to authd, i10_api, stalwart`
+    await admin`create database i10 owner i10 template ${admin(TEMPLATE)}`
+    await admin`grant connect on database i10 to authd, i10_api, stalwart, mailfront`
   } finally {
     await admin.end()
   }

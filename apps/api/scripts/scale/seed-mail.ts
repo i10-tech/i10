@@ -120,8 +120,14 @@ export async function seedMail(
     count,
     burst: null,
   }))
+  // ⚠ EIGHT DISTINCT DAYS: a day holds one burst, so a repeated draw would drop a
+  // whole campaign's allocation. Redrawing only on a clash keeps every seed whose
+  // draws never clashed byte for byte as before.
+  const burstDays = new Set<number>()
   for (let b = 0; b < 8; b++) {
-    const d = r.int(0, p.days - 2)
+    let d = r.int(0, p.days - 2)
+    while (burstDays.has(d)) d = r.int(0, p.days - 2)
+    burstDays.add(d)
     const tenant =
       b < 4 && huge ? huge : senders[r.int(0, Math.min(20, senders.length - 1))]!
     days[d]!.burst = {

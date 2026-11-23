@@ -129,7 +129,9 @@ export async function loadStats(twin: Scratch, scrubbed: string): Promise<void> 
 export async function pad(
   twin: Scratch,
 ): Promise<{ relations: number; paddedBytes: number }> {
-  const sql = postgres(directUrl(twin), { max: 1, onnotice: () => {} })
+  // The bootstrap superuser: CHECKPOINT and growing data files are server
+  // administration, not something the owner `i10` does (or may do) in production.
+  const sql = postgres(directUrl(twin, "postgres"), { max: 1, onnotice: () => {} })
   try {
     await sql`checkpoint`
     const rels = await sql<{ path: string; pages: number }[]>`
