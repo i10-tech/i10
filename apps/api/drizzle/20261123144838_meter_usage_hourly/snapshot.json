@@ -1,0 +1,231 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "16a42fb9-7a63-4583-a788-610f63a5ee98",
+  "prevIds": [
+    "33af7a88-e603-4680-a375-70d47d4030bf"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_usage_hourly"
+      ],
+      "writes": [
+        "s|tbl|core.meter_usage_hourly",
+        "n|tbl|core.meter_usage_hourly",
+        "e|tbl|core.meter_usage_hourly",
+        "n|rel|core.meter_usage_hourly",
+        "n|type|core.meter_usage_hourly",
+        "n|rel|core.meter_usage_hourly_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_usage_hourly"
+      ],
+      "writes": [
+        "s|fk|core.meter_usage_hourly.meter_usage_hourly_tenant_id_tenants_id_fkey",
+        "n|fk|core.meter_usage_hourly.meter_usage_hourly_tenant_id_tenants_id_fkey",
+        "e|fk|core.meter_usage_hourly.meter_usage_hourly_tenant_id_tenants_id_fkey",
+        "n|con|core.meter_usage_hourly.meter_usage_hourly_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|core.meter_usage_hourly",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.meter_usage_hourly.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "meter_usage_hourly"
+      ],
+      "writes": [
+        "s|pol|core.meter_usage_hourly.meter_usage_hourly_read",
+        "n|pol|core.meter_usage_hourly.meter_usage_hourly_read",
+        "e|pol|core.meter_usage_hourly.meter_usage_hourly_read"
+      ],
+      "reads": [
+        "n|tbl|core.meter_usage_hourly",
+        "n|sch|core",
+        "e|rls|core.meter_usage_hourly"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "meter_usage_hourly",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "feature_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "shard",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "hour",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "slot",
+        "type": "smallint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "used",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "meter_usage_hourly_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "meter_usage_hourly_pkey",
+        "columns": [
+          "tenant_id",
+          "feature_id",
+          "shard",
+          "hour",
+          "slot"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "meter_usage_hourly",
+        "name": "meter_usage_hourly_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"meter_usage_hourly\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    }
+  ]
+}

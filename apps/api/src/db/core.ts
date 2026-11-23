@@ -13,6 +13,7 @@ import {
   halfvec,
   primaryKey,
   real,
+  smallint,
   text,
   timestamp,
   unique,
@@ -3103,8 +3104,52 @@ export const meterEvents = core.table(
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.featureId, t.eventId] }),
-    // The gate's only read: one tenant, one feature, one shard, one window.
+    // The gate's read of the partial hours at a window's ends, and
+    // `firstEventStatement`.
     index("meter_events_window_idx").on(t.tenantId, t.featureId, t.shard, t.occurredAt),
+  ],
+)
+
+/**
+ * `core.meter_events` summed per hour, so the gate reads a month as a few
+ * hundred rows instead of every event in it (#507).
+ *
+ * ⚠ KEPT EXACT BY STATEMENT TRIGGERS ON `core.meter_events`, IN THE SAME
+ * TRANSACTION AS THE INSERT. A committed event and its hour's count commit
+ * together, so the gate sees what summing the events would have seen, and
+ * nothing written by a job that might be late. The triggers, and why updates of
+ * the counted columns are refused, are in
+ * drizzle/20261123144849_meter_usage_hourly_triggers.
+ *
+ * ⚠ `slot` SPREADS ONE HOUR OVER FOUR ROWS, chosen by the writing backend
+ * (`pg_backend_pid() % 4`). Without it every record of the largest workspace in
+ * an hour would wait on one row's lock. Readers sum the slots. The spread is
+ * approximate: PgBouncer's server connections can share a pid modulo 4, so
+ * measure contention under real load before raising the slot count.
+ *
+ * `hour` is the start of the hour (`date_bin`, so time zone free). Rows are
+ * never pruned: they live as long as the events they count, which retention
+ * never deletes, and go with the workspace.
+ */
+export const meterUsageHourly = core.table(
+  "meter_usage_hourly",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    featureId: text("feature_id").notNull(),
+    shard: integer("shard").notNull(),
+    hour: timestamp("hour", { withTimezone: true }).notNull(),
+    slot: smallint("slot").notNull(),
+    used: bigint("used", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.featureId, t.shard, t.hour, t.slot] }),
+    // ⚠ READ-ONLY TO THE API: only the triggers (owner, definer) write it.
+    pgPolicy("meter_usage_hourly_read", {
+      for: "select",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
   ],
 )
 
