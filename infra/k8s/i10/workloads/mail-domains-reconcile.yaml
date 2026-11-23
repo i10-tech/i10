@@ -52,7 +52,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: reconcile
-              image: ghcr.io/i10-tech/i10-api:prod-cf9e3c247e434eaa3c7a3983098306b7843a5cb0@sha256:96de1ace77784a7c2dc203c13b113aa108465fb1566cd9d4b2fc95248a3bb928
+              image: ghcr.io/i10-tech/i10-api:prod-9b5480562594dfc32904fbdf9346e0b437535ca6@sha256:1da6b2051427801def0087c0c19bd3fd7a61232eb185084985ef5c46f9c823c6
               imagePullPolicy: Always
               command: ["bun", "dist/mail-domains-reconcile.js"]
               envFrom:
