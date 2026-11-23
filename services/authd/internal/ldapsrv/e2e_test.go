@@ -16,7 +16,9 @@ import (
 	goldapclient "github.com/go-ldap/ldap/v3"
 	ldap "github.com/vjeantet/ldapserver"
 
+	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
+	"github.com/i10-tech/i10/services/authd/internal/directory"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
@@ -219,6 +221,20 @@ type fixtureOptions struct {
 	cache     *credcache.Cache
 	budget    verify.BudgetStore
 	opTimeout time.Duration
+	// keys overrides the bind token keys; nil means testTokenKey alone, and
+	// noKeys means none at all.
+	keys   bindtoken.Keys
+	noKeys bool
+}
+
+func (o fixtureOptions) tokenKeys() bindtoken.Keys {
+	switch {
+	case o.noKeys:
+		return nil
+	case o.keys != nil:
+		return o.keys
+	}
+	return bindtoken.Keys{testTokenKey.ID: testTokenKey.Secret}
 }
 
 func newFixture(t *testing.T, store projection.Store, v verify.Verifier, perMinute int) string {
@@ -255,6 +271,7 @@ func newFixtureOpts(t *testing.T, o fixtureOptions) string {
 		CredCache:         o.cache,
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OpTimeout:         opTimeout,
+		BindTokenKeys:     o.tokenKeys(),
 	}).Routes())
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -301,14 +318,35 @@ func defaultStore() *fakeStore {
 	}
 }
 
-func dial(t *testing.T, addr string) *goldapclient.Conn {
+// testTokenKey is the mail front's key in these tests.
+var testTokenKey = bindtoken.Key{ID: 1, Secret: []byte("0123456789abcdef0123456789abcdef")}
+
+// tokenConn is a connection that binds the way Stalwart does behind the mail
+// front: a person bind's password carries a fresh token for the account its DN
+// names. RawBind binds without one, as a sign-in from anywhere else would.
+type tokenConn struct{ *goldapclient.Conn }
+
+func (c *tokenConn) Bind(dn, password string) error {
+	if uid := directory.UIDFromDN(dn, baseDN); uid != "" {
+		wrapped, err := bindtoken.Wrap(testTokenKey, uid, password, time.Now())
+		if err != nil {
+			return err
+		}
+		password = wrapped
+	}
+	return c.Conn.Bind(dn, password)
+}
+
+func (c *tokenConn) RawBind(dn, password string) error { return c.Conn.Bind(dn, password) }
+
+func dial(t *testing.T, addr string) *tokenConn {
 	t.Helper()
 	c, err := goldapclient.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	return c
+	return &tokenConn{c}
 }
 
 func resultCode(err error) uint16 {

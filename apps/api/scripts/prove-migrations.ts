@@ -116,7 +116,7 @@ async function resetDatabase() {
   await adminSql.unsafe("drop database if exists i10 with (force)")
   await adminSql.unsafe("create database i10")
   await adminSql.unsafe(`comment on database i10 is '${MARK}'`)
-  for (const role of ["authd", "i10_api", "pdns", "stalwart"]) {
+  for (const role of ["authd", "i10_api", "pdns", "stalwart", "mailfront"]) {
     const [found] = await adminSql`select 1 from pg_roles where rolname = ${role}`
     if (!found) await adminSql.unsafe(`create role ${role} login password '${role}'`)
   }

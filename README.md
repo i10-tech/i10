@@ -58,6 +58,14 @@ bun install
 bun dev
 ```
 
+`dev/postgres/init.sql` creates the database roles only when the local volume
+is first made. If migrations stop on `role "mailfront" does not exist`, your
+volume predates that role. Add it once, or start over with `bun run dev:reset`:
+
+```bash
+docker compose -f compose.dev.yaml exec postgres psql -U postgres -d i10 -c "CREATE ROLE mailfront LOGIN PASSWORD 'mailfront'"
+```
+
 |            |                                                             |
 | ---------- | ----------------------------------------------------------- |
 | Bun        | 1.4.2 - runtime, package manager and test runner. No Node.¹ |

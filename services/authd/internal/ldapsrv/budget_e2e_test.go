@@ -511,7 +511,7 @@ func bindCodeNoT(addr, password string) uint16 {
 		return 0
 	}
 	defer c.Close()
-	if err := c.Bind(aliceDN, password); err != nil {
+	if err := (&tokenConn{c}).Bind(aliceDN, password); err != nil {
 		return resultCode(err)
 	}
 	return goldapclient.LDAPResultSuccess

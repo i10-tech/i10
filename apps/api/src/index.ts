@@ -130,6 +130,7 @@ import {
   startSiemWorker,
 } from "./queue/siem-queue.js"
 import { passthroughFor } from "./identity/ldap.js"
+import { passthroughVersion } from "./identity/authd-mirror.js"
 import { ldapProbe } from "./identity/ldap-probe.js"
 import { fixedWindow, ssoRateLimit } from "./identity/rate-limit.js"
 import { onIdentityClerkEvent } from "./identity/events.js"
@@ -211,10 +212,7 @@ import { tenantProfileStore } from "./console/tenant.js"
 import { usageStore } from "./console/usage.js"
 import { tenantResolver } from "./middleware/tenant.js"
 import { projectClerkUser } from "./projection/writer.js"
-import {
-  raiseAgainWhenAuthdForgets,
-  raiseConnectionCredentialEpochs,
-} from "./projection/connection-epoch.js"
+import { raiseConnectionCredentialEpochs } from "./projection/connection-epoch.js"
 import { MAILBOXES } from "./metering/levels.js"
 import { offlineIdentity, sesIdentity } from "./domains/identity.js"
 import { configurationSetsFor } from "./send/configuration-sets.js"
@@ -1905,17 +1903,6 @@ const identityConsole = {
     fetch: guardedFetch({
       vet: (host, signal) => vetHost(host, { allow: webhookEgressAllow, signal }),
     }),
-    invalidate: async (connectionId: string) => {
-      const raise = () => raiseConnectionCredentialEpochs(db, connectionId)
-      await raise()
-      raiseAgainWhenAuthdForgets(raise, {
-        onFailure: (error) =>
-          log.error(
-            { connectionId, err: error instanceof Error ? error.name : "unknown" },
-            "could not raise the credential epoch again after authd's settings expired",
-          ),
-      })
-    },
   },
   mail: { deps: mailDeps, groups: mailStore },
   deprovision: {
@@ -2431,6 +2418,7 @@ const app = createApp({
   internalAuthd: {
     secret: env.AUTHD_API_SECRET,
     passthrough: (connectionId: string) => passthroughFor(identity, connectionId),
+    version: (connectionId: string) => passthroughVersion(db, connectionId),
     log,
   },
   googleDirectory: {

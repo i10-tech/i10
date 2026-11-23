@@ -16,17 +16,27 @@ import { equalSecrets } from "../webhooks/signing.js"
  * the caller is checked first and in constant time against `AUTHD_API_SECRET`,
  * before the body is even read. No secret configured is a 503, never "open".
  * Nothing is cached by anyone on the way (`no-store`); authd keeps an answer
- * in memory for at most a minute. The Okta answer holds no secret at all.
+ * in memory for at most a minute, and not past a change (`version`, below). The
+ * Okta answer holds no secret at all.
  *
  * ⚠ EVERY FAILURE IS A 503, NEVER `enabled: false`. authd turns a 503 into
  * "directory unavailable" for managed accounts; an "off" given on an outage
  * would read as "this connection has no IMAP" and be cached as such.
+ *
+ * ⚠ THE ANSWER CARRIES ITS `version`, READ BEFORE THE SETTINGS. authd compares it
+ * with the version its bind just read from `authd.passthrough_versions` and
+ * fetches again when its copy is older (identity/authd-mirror.ts). The version
+ * commits with the change it counts, so settings read after it are at least as
+ * new as it says: read the other way round, an answer could claim a version its
+ * settings are older than.
  */
 
 export interface InternalAuthdDeps {
   /** `AUTHD_API_SECRET`. Absent: every call is 503. */
   secret: string | undefined
   passthrough(connectionId: string): Promise<PassthroughAnswer>
+  /** `authd.passthrough_versions` for the connection, 0 when it has no row yet. */
+  version(connectionId: string): Promise<number>
   log: { error: (o: object, m: string) => void }
 }
 
@@ -79,9 +89,10 @@ export function createInternalAuthdRoutes(deps?: InternalAuthdDeps) {
         422,
       )
     try {
+      const version = await deps.version(parsed.data.connectionId)
       const answer = await deps.passthrough(parsed.data.connectionId)
       c.header("Cache-Control", "no-store")
-      return c.json(answer)
+      return c.json({ ...answer, version })
     } catch (error) {
       deps.log.error(
         { err: error instanceof Error ? error.name : "unknown" },

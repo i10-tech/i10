@@ -1,0 +1,57 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "33af7a88-e603-4680-a375-70d47d4030bf",
+  "prevIds": [
+    "1e11b1fe-bb29-4421-becb-d12a570e5097"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "managed_accounts",
+        "authd_managed_connection_idx"
+      ],
+      "writes": [
+        "s|idx|authd.authd_managed_connection_idx",
+        "n|idx|authd.authd_managed_connection_idx",
+        "e|idx|authd.authd_managed_connection_idx",
+        "n|rel|authd.authd_managed_connection_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.managed_accounts",
+        "n|sch|authd",
+        "n|col|authd.managed_accounts.connection_id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "managed_accounts",
+        "name": "authd_managed_connection_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "connection_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    }
+  ]
+}

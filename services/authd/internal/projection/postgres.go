@@ -80,6 +80,8 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
 	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
+	coalesce((SELECT pv.version FROM authd.passthrough_versions pv
+	          WHERE pv.connection_id = m.connection_id), 0),
 	(a.suspended_at IS NOT NULL), (a.payment_hold_at IS NOT NULL), a.banned,
 	(a.locked AND (a.locked_until IS NULL OR a.locked_until > now())),
 	EXISTS (SELECT 1 FROM authd.required_domains rd
@@ -91,8 +93,13 @@ const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
 	          AND rd.tenant_id = a.tenant_id
 	          AND ex.clerk_user_id = a.clerk_user_id),
-		core.mailbox_domain_refused(a.tenant_id, lower(split_part(a.email, '@', 2))),
+	` + domainRefused + `,
 	(a.deleting_at IS NOT NULL)`
+
+// domainRefused is the account's domain gate (#406), the one column of
+// accountColumns that is not a read of a row: a call per account. The sweep
+// replaces it with the same call made once per domain (SweepQuery).
+const domainRefused = `core.mailbox_domain_refused(a.tenant_id, lower(split_part(a.email, '@', 2)))`
 
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
@@ -139,6 +146,81 @@ func (p *Postgres) AccountByUID(ctx context.Context, clerkUserID string) (*Accou
 		return nil, nil
 	}
 	if err := p.hydrate(ctx, accounts); err != nil {
+		return nil, err
+	}
+	return &accounts[0], nil
+}
+
+// AccountsByUIDs reads the gate's row for many accounts at once, for the mail
+// front's revocation sweep. Missing and inactive ids are simply absent.
+//
+// ⚠ THE SAME COLUMNS AS A BIND, SO THE SAME GATE. The front decides with
+// internal/gate on exactly what a bind would read. It is one primary-key lookup
+// per id (`= ANY($1)` on accounts_pkey), with no aliases or group membership,
+// which the gate does not need.
+func (p *Postgres) AccountsByUIDs(ctx context.Context, clerkUserIDs []string) ([]Account, error) {
+	if len(clerkUserIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := p.pool.Query(ctx, SweepQuery, clerkUserIDs)
+	if err != nil {
+		return nil, fmt.Errorf("projection: accounts by uids: %w", err)
+	}
+	return scanAccounts(rows)
+}
+
+// SweepQuery is AccountsByUIDs' statement, exported so its cost can be measured
+// with EXPLAIN on the statement that actually runs.
+//
+// ⚠ THE SAME COLUMNS AS A BIND, WITH THE DOMAIN GATE CALLED ONCE PER DOMAIN, NOT
+// ONCE PER ACCOUNT. `core.mailbox_domain_refused` is SECURITY DEFINER, so it is
+// never inlined: each call is its own plan. Indexed on `lower(name)` (the
+// 20261121202659 and 20261121202814 migrations) a call costs about 0.3 ms; before
+// them it scanned `core.domains`, about 14 ms a call at 20,000 domains (measured
+// 2026-11-21, docs/research/mail-device-binding.md). A bind pays one call. A
+// sweep paying one per account would still spend 0.3 s a second at 1,000 live
+// accounts. So the accounts come first, the distinct (tenant, domain) pairs are
+// judged once each in a MATERIALIZED step, and every other column is
+// accountColumns' own text, so a gate added there reaches the sweep without a
+// second edit.
+//
+// ⚠ AN INNER JOIN ON THE VERDICT. An account whose pair found no verdict is
+// dropped, which the front reads as "account gone" and closes: never as hosted.
+var SweepQuery = `
+	WITH live AS (
+		SELECT a.*, lower(split_part(a.email, '@', 2)) AS domain
+		FROM authd.accounts a
+		WHERE a.active AND a.clerk_user_id = ANY($1)
+	), verdicts AS MATERIALIZED (
+		SELECT p.tenant_id, p.domain,
+		       core.mailbox_domain_refused(p.tenant_id, p.domain) AS refused
+		FROM (SELECT DISTINCT tenant_id, domain FROM live) p
+	)
+	SELECT ` + strings.Replace(accountColumns, domainRefused, `v.refused`, 1) + `
+	FROM live a
+	JOIN verdicts v ON v.tenant_id IS NOT DISTINCT FROM a.tenant_id AND v.domain = a.domain
+	LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
+
+// AccountByLogin resolves the account a mail login names, the way Stalwart's
+// `filterLogin` (`(&(objectClass=inetOrgPerson)(mail=?))`) does through authd's
+// search: the address is normalised as every lookup here normalises it, and
+// only the PRIMARY address matches, because `mail` is the primary address
+// (aliases are `mailAlias`, which the login filter does not read). Email is
+// unique, so this is one row or none. Aliases and groups are not loaded.
+func (p *Postgres) AccountByLogin(ctx context.Context, login string) (*Account, error) {
+	norm := normalise([]string{login})
+	if len(norm) == 0 {
+		return nil, nil
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT `+accountColumns+`
+		`+accountFrom+`
+		WHERE a.active AND a.email = $1`, norm[0])
+	if err != nil {
+		return nil, fmt.Errorf("projection: account by login: %w", err)
+	}
+	accounts, err := scanAccounts(rows)
+	if err != nil || len(accounts) == 0 {
 		return nil, err
 	}
 	return &accounts[0], nil
@@ -195,7 +277,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 		var a Account
 		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
 			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
-			&a.Managed, &a.ManagedConnection, &a.Suspended, &a.PaymentHold,
+			&a.Managed, &a.ManagedConnection, &a.PassthroughVersion, &a.Suspended, &a.PaymentHold,
 			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt, &a.DomainNotHosted, &a.Deleting); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
 		}

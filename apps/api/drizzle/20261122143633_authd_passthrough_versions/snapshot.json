@@ -1,0 +1,161 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "0bd96b2c-742a-4b98-83d8-b7b4f75de5ba",
+  "prevIds": [
+    "ee011d10-bdd3-4693-a703-bd9314ad9d60"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "passthrough_versions"
+      ],
+      "writes": [
+        "s|tbl|authd.passthrough_versions",
+        "n|tbl|authd.passthrough_versions",
+        "e|tbl|authd.passthrough_versions",
+        "n|rel|authd.passthrough_versions",
+        "n|type|authd.passthrough_versions",
+        "n|rel|authd.passthrough_versions_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "passthrough_versions"
+      ],
+      "writes": [
+        "s|fk|authd.passthrough_versions.authd_passthrough_connection_fk",
+        "n|fk|authd.passthrough_versions.authd_passthrough_connection_fk",
+        "e|fk|authd.passthrough_versions.authd_passthrough_connection_fk",
+        "n|con|authd.passthrough_versions.authd_passthrough_connection_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.passthrough_versions",
+        "n|sch|authd",
+        "n|tbl|identity.connections",
+        "n|sch|identity",
+        "n|col|authd.passthrough_versions.connection_id",
+        "n|col|identity.connections.id",
+        "e|uniqueness|identity.connections.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "passthrough_versions",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "passthrough_versions",
+        "name": "connection_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "passthrough_versions",
+        "name": "version",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "passthrough_versions",
+        "name": "fingerprint",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "passthrough_versions",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "passthrough_versions",
+        "name": "authd_passthrough_connection_fk",
+        "nameExplicit": true,
+        "columns": [
+          "connection_id"
+        ],
+        "schemaTo": "identity",
+        "tableTo": "connections",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "passthrough_versions",
+        "name": "passthrough_versions_pkey",
+        "columns": [
+          "connection_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

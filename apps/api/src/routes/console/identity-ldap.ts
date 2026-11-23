@@ -50,6 +50,13 @@ import type { fixedWindow, Limit } from "../../identity/rate-limit.js"
  *
  * ⚠ THE SERVICE SECRET IS WRITE-ONLY, sealed with the connection's other
  * secrets, and the test password is used for one request and kept nowhere.
+ *
+ * ⚠ A SAVE ENDS THE MAIL SIGN-INS MADE UNDER THE OLD SETTINGS. Every write here
+ * goes through `setConnectionSecrets`, whose transaction runs
+ * identity/authd-mirror.ts `mirrorPassthrough`: when pass-through's answer moved,
+ * the connection's version and its managed accounts' credential epochs move with
+ * the commit, so authd fetches the settings again and the mail front closes the
+ * open IMAP and SMTP sessions. Nothing here raises anything after the fact.
  */
 
 export interface LdapConsoleDeps {

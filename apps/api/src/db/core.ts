@@ -628,6 +628,16 @@ export const domains = core.table(
     index("domains_tenant_idx").on(t.tenantId),
 
     /**
+     * ⚠ WHAT EVERY MAIL SIGN-IN'S DOMAIN GATE LOOKS NAMES UP BY. The functions
+     * behind `core.mailbox_domain_refused` (`name_holders`,
+     * `mailbox_domain_settings`) match `lower(name)`, which no other index here
+     * covers: without this each call scanned the whole table, about 14 ms at
+     * 20,000 domains, once per authd bind and once per domain on every sweep of
+     * the mail front (docs/research/mail-device-binding.md, section 9).
+     */
+    index("domains_lower_name_idx").on(sql`lower(${t.name})`),
+
+    /**
      * ⚠ ONE WORKSPACE, ONE ROW PER NAME. Without this, dropping the global
      * constraint would let a single tenant add `example.com` twice - two DKIM
      * keys and two record sets for one name, with no way to tell which of two
@@ -896,6 +906,8 @@ export const joinDomains = core.table(
     // (#337): a proof can only ever be covered by its own workspace's SSO.
     unique("join_domains_id_tenant_unique").on(t.id, t.tenantId),
     index("join_domains_name_idx").on(t.name),
+    // `core.name_holders` matches `lower(name)` here too; see domains_lower_name_idx.
+    index("join_domains_lower_name_idx").on(sql`lower(${t.name})`),
     pgPolicy("join_domains_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

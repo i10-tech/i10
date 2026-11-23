@@ -1,0 +1,99 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "eaa6c2b8-f43f-49ce-9636-83ca3849820b",
+  "prevIds": [
+    "ce023e44-0f94-41b7-b26e-88d5d064c079"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "domains",
+        "domains_lower_name_idx"
+      ],
+      "writes": [
+        "s|idx|core.domains_lower_name_idx",
+        "n|idx|core.domains_lower_name_idx",
+        "e|idx|core.domains_lower_name_idx",
+        "n|rel|core.domains_lower_name_idx"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "core",
+        "join_domains",
+        "join_domains_lower_name_idx"
+      ],
+      "writes": [
+        "s|idx|core.join_domains_lower_name_idx",
+        "n|idx|core.join_domains_lower_name_idx",
+        "e|idx|core.join_domains_lower_name_idx",
+        "n|rel|core.join_domains_lower_name_idx"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "domains_lower_name_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "lower(\"name\")",
+            "isExpression": true,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "join_domains_lower_name_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "lower(\"name\")",
+            "isExpression": true,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    }
+  ]
+}

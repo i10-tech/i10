@@ -1,4 +1,4 @@
--- The two login roles, and nothing else.
+-- The login roles, and nothing else.
 --
 -- ⚠ ONLY THE ROLES, BECAUSE THE MIGRATIONS OWN EVERYTHING ELSE. An earlier
 -- version of this file also created the `core`, `authd` and `pdns` schemas and
@@ -22,13 +22,18 @@
 -- ⚠ AND THE PASSWORDS ARE WORTHLESS ON PURPOSE. This database listens on a
 -- laptop's loopback and holds fixtures. A real secret here would be a real
 -- secret committed to the repository.
--- ⚠ ALL FOUR, BECAUSE THE MIGRATIONS GRANT TO ALL FOUR. `stalwart` and
--- `authd` have no local process to log in as - the mail server and the LDAP
--- bridge are not part of `bun dev` - but migrations 0001 and onwards issue
--- `GRANT … TO authd` and `… TO stalwart`, and a GRANT to a role that does not
--- exist is an error that stops the migrator on the first file. They exist here
+-- ⚠ ALL FIVE, BECAUSE THE MIGRATIONS GRANT TO ALL FIVE. `stalwart`, `authd`
+-- and `mailfront` have no local process to log in as - the mail server, the
+-- LDAP bridge and the mail front are not part of `bun dev` - but migrations
+-- 0001 and onwards issue `GRANT … TO authd` and `… TO stalwart`, and
+-- `*_mailfront_role_grants` grants to `mailfront`. A GRANT to a role that does
+-- not exist is an error that stops the migrator on that file. They exist here
 -- so the schema can be built, not because anything connects as them.
+--
+-- This file runs only when the volume is first created. A database made before
+-- a role was added here needs it added by hand (README.md, "Getting started").
 CREATE ROLE i10_api LOGIN PASSWORD 'i10_api';
 CREATE ROLE authd LOGIN PASSWORD 'authd';
 CREATE ROLE stalwart LOGIN PASSWORD 'stalwart';
 CREATE ROLE pdns LOGIN PASSWORD 'pdns';
+CREATE ROLE mailfront LOGIN PASSWORD 'mailfront';

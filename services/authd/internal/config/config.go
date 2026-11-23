@@ -77,6 +77,13 @@ type Config struct {
 	APISecret  string
 	APITimeout time.Duration
 
+	// BindTokenKeys is AUTHD_BIND_TOKEN_KEYS, the mail front's keys as
+	// "<id>:<base64>,..." (internal/bindtoken). Read by main, not validated here:
+	// ⚠ A MISSING OR BROKEN VALUE IS NOT A STARTUP FAILURE. authd starts, refuses
+	// every person bind and says why, and keeps serving the service bind and
+	// search, which Stalwart's delivery needs.
+	BindTokenKeys string
+
 	LogLevel string
 }
 
@@ -155,42 +162,46 @@ func (c Config) Validate() error {
 
 func Load() (Config, error) {
 	c := Config{
-		Listen:            env("AUTHD_LISTEN", "127.0.0.1:3893"),
-		BaseDN:            env("AUTHD_BASE_DN", "dc=i10,dc=tech"),
+		Listen:            Env("AUTHD_LISTEN", "127.0.0.1:3893"),
+		BaseDN:            Env("AUTHD_BASE_DN", "dc=i10,dc=tech"),
 		ServiceBindDN:     os.Getenv("AUTHD_SERVICE_BIND_DN"),
 		ServiceBindSecret: os.Getenv("AUTHD_SERVICE_BIND_SECRET"),
 		DatabaseURL:       os.Getenv("AUTHD_DATABASE_URL"),
 		ClerkSecretKey:    os.Getenv("AUTHD_CLERK_SECRET_KEY"),
-		ClerkBaseURL:      env("AUTHD_CLERK_BASE_URL", "https://api.clerk.com/v1"),
-		APIURL:            env("AUTHD_API_URL", ""),
+		ClerkBaseURL:      Env("AUTHD_CLERK_BASE_URL", "https://api.clerk.com/v1"),
+		APIURL:            Env("AUTHD_API_URL", ""),
 		APISecret:         os.Getenv("AUTHD_API_SECRET"),
-		LogLevel:          env("AUTHD_LOG_LEVEL", "info"),
+		BindTokenKeys:     os.Getenv("AUTHD_BIND_TOKEN_KEYS"),
+		LogLevel:          Env("AUTHD_LOG_LEVEL", "info"),
 	}
 
 	var err error
-	if c.ClerkTimeout, err = envDuration("AUTHD_CLERK_TIMEOUT", 5*time.Second); err != nil {
+	if c.ClerkTimeout, err = EnvDuration("AUTHD_CLERK_TIMEOUT", 5*time.Second); err != nil {
 		return c, err
 	}
-	if c.BindsPerMinute, err = envInt("AUTHD_BINDS_PER_MINUTE", 30); err != nil {
+	if c.BindsPerMinute, err = EnvInt("AUTHD_BINDS_PER_MINUTE", 30); err != nil {
 		return c, err
 	}
-	if c.APITimeout, err = envDuration("AUTHD_API_TIMEOUT", 5*time.Second); err != nil {
+	if c.APITimeout, err = EnvDuration("AUTHD_API_TIMEOUT", 5*time.Second); err != nil {
 		return c, err
 	}
-	if c.CredCacheTTL, err = envDuration("AUTHD_CRED_CACHE_TTL", 2*time.Hour); err != nil {
+	if c.CredCacheTTL, err = EnvDuration("AUTHD_CRED_CACHE_TTL", 2*time.Hour); err != nil {
 		return c, err
 	}
 	return c, c.Validate()
 }
 
-func env(key, fallback string) string {
+// Env reads a trimmed variable, or fallback when it is unset or blank. The
+// mail front loads its own settings with the same three helpers.
+func Env(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
 	}
 	return fallback
 }
 
-func envInt(key string, fallback int) (int, error) {
+// EnvInt reads an integer variable, or fallback when it is unset.
+func EnvInt(key string, fallback int) (int, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
 		return fallback, nil
@@ -202,7 +213,8 @@ func envInt(key string, fallback int) (int, error) {
 	return v, nil
 }
 
-func envDuration(key string, fallback time.Duration) (time.Duration, error) {
+// EnvDuration reads a Go duration variable, or fallback when it is unset.
+func EnvDuration(key string, fallback time.Duration) (time.Duration, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
 		return fallback, nil
