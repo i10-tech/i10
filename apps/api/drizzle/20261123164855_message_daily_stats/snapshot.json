@@ -1,0 +1,383 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "7581caa3-6a7a-4cc1-8bf3-8197a6f975c9",
+  "prevIds": [
+    "33af7a88-e603-4680-a375-70d47d4030bf"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "message_daily_stats"
+      ],
+      "writes": [
+        "s|tbl|core.message_daily_stats",
+        "n|tbl|core.message_daily_stats",
+        "e|tbl|core.message_daily_stats",
+        "n|rel|core.message_daily_stats",
+        "n|type|core.message_daily_stats",
+        "n|rel|core.message_daily_stats_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "message_daily_stats_state"
+      ],
+      "writes": [
+        "s|tbl|core.message_daily_stats_state",
+        "n|tbl|core.message_daily_stats_state",
+        "e|tbl|core.message_daily_stats_state",
+        "n|rel|core.message_daily_stats_state",
+        "n|type|core.message_daily_stats_state",
+        "n|rel|core.message_daily_stats_state_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "core",
+        "message_daily_stats"
+      ],
+      "writes": [
+        "s|fk|core.message_daily_stats.message_daily_stats_tenant_id_tenants_id_fkey",
+        "n|fk|core.message_daily_stats.message_daily_stats_tenant_id_tenants_id_fkey",
+        "e|fk|core.message_daily_stats.message_daily_stats_tenant_id_tenants_id_fkey",
+        "n|con|core.message_daily_stats.message_daily_stats_tenant_id_tenants_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|core.message_daily_stats",
+        "n|sch|core",
+        "n|tbl|core.tenants",
+        "n|sch|core",
+        "n|col|core.message_daily_stats.tenant_id",
+        "n|col|core.tenants.id",
+        "e|uniqueness|core.tenants.id"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "message_daily_stats"
+      ],
+      "writes": [
+        "s|pol|core.message_daily_stats.message_daily_stats_read",
+        "n|pol|core.message_daily_stats.message_daily_stats_read",
+        "e|pol|core.message_daily_stats.message_daily_stats_read"
+      ],
+      "reads": [
+        "n|tbl|core.message_daily_stats",
+        "n|sch|core",
+        "e|rls|core.message_daily_stats"
+      ]
+    },
+    {
+      "statementType": "create_policy",
+      "statementTarget": [
+        "table",
+        "core",
+        "message_daily_stats_state"
+      ],
+      "writes": [
+        "s|pol|core.message_daily_stats_state.message_daily_stats_state_read",
+        "n|pol|core.message_daily_stats_state.message_daily_stats_state_read",
+        "e|pol|core.message_daily_stats_state.message_daily_stats_state_read"
+      ],
+      "reads": [
+        "n|tbl|core.message_daily_stats_state",
+        "n|sch|core",
+        "e|rls|core.message_daily_stats_state"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "message_daily_stats",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "message_daily_stats_state",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "day",
+        "type": "date",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "sent",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "delivered",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "bounced",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "complained",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "delayed",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "failed",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats_state",
+        "name": "id",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "true",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats_state",
+        "name": "started_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats_state",
+        "name": "complete_before",
+        "type": "date",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "message_daily_stats_tenant_id_tenants_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tenant_id"
+        ],
+        "schemaTo": "core",
+        "tableTo": "tenants",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "message_daily_stats_pkey",
+        "columns": [
+          "tenant_id",
+          "day"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats_state",
+        "name": "message_daily_stats_state_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats",
+        "name": "message_daily_stats_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "\"core\".\"message_daily_stats\".\"tenant_id\" = current_setting('app.tenant_id')::uuid",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "message_daily_stats_state",
+        "name": "message_daily_stats_state_read",
+        "as": "PERMISSIVE",
+        "for": "SELECT",
+        "roles": [
+          "public"
+        ],
+        "using": "true",
+        "withCheck": null,
+        "entityType": "policies"
+      }
+    }
+  ]
+}
