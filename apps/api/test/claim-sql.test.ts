@@ -54,6 +54,17 @@ describe("the claim", () => {
     expect(statement).toContain("m.created_at = v.created_at")
   })
 
+  // ⚠ THE JOIN ALONE GIVES THE PLANNER NOTHING TO PRUNE BY, so every monthly
+  // partition was planned and probed (#507). The batch's own first and last
+  // `created_at`, as parameters, bound it to the partitions its rows are in.
+  it("bounds the partition key by the batch's own span", () => {
+    const { sql: statement, params } = claim([B, A])
+    expect(statement).toMatch(/m\.created_at >= \$\d+::timestamptz/)
+    expect(statement).toMatch(/m\.created_at <= \$\d+::timestamptz/)
+    expect(params).toContain(A.createdAt.toISOString())
+    expect(params).toContain(B.createdAt.toISOString())
+  })
+
   // ⚠ Without this a worker that dies mid-send strands its rows in `sending`
   // forever - no error, no retry, the mail simply never arrives.
   it("reclaims a stale `sending` row as well as a queued one", () => {

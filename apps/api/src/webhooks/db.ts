@@ -9,7 +9,7 @@ import {
   webhookDeliveries,
   webhookEndpoints,
 } from "../db/core.js"
-import { timestampFromUuidV7 } from "../ids.js"
+import { mintedRange } from "../db/partitions.js"
 import { enqueueDelivery, type WebhookJob } from "../queue/webhook-queue.js"
 import type { AttemptLog, DeliverDeps, DeliveryRecord } from "./deliver.js"
 import { policyForPlan } from "./schedule.js"
@@ -48,15 +48,6 @@ const EVENT_TO_LOG: Record<MailEventType, string> = {
   "email.unsubscribed": "unsubscribed",
 }
 
-/**
- * Slack around the id's embedded millisecond.
- *
- * The column defaults to `now()` in the same statement that mints the id, so
- * the two are microseconds apart rather than equal - but a partition is a
- * month wide, so a day of slack costs nothing and absorbs any clock skew
- * between the application and the database.
- */
-const OWNER_WINDOW_MS = 24 * 60 * 60 * 1000
 const EPOCH = new Date(0)
 const FOREVER = new Date("2999-12-31T00:00:00Z")
 
@@ -82,9 +73,9 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
       // An id we cannot date - a v4 from a fixture, a future scheme - falls
       // back to an unbounded range rather than to a guess: slow beats a null
       // for a message that exists.
-      const minted = timestampFromUuidV7(messageId)
-      const from = minted ? new Date(minted.getTime() - OWNER_WINDOW_MS) : EPOCH
-      const to = minted ? new Date(minted.getTime() + OWNER_WINDOW_MS) : FOREVER
+      const range = mintedRange(messageId)
+      const from = range?.from ?? EPOCH
+      const to = range?.to ?? FOREVER
 
       const rows = (await opts.db.execute(
         sql`select tenant_id, created_at
