@@ -30,10 +30,29 @@ if (!url) {
 }
 
 const api = join(import.meta.dir, "..")
-const files = (await readdir(join(api, "test")))
+
+/**
+ * `-db` files that never run against this database, each with why. Only these
+ * may be left out, and a name here that no longer exists fails the run, so the
+ * list cannot outlive its files.
+ */
+const ELSEWHERE: Record<string, string> = {
+  // The scale harness's own test (docs/research/db-scale): it starts and resets
+  // its own docker scratch (`cli.ts up --scratch dev`), keyed by
+  // DB_SCALE_TEST_PORT, and can never run against a shared migrated database.
+  "test/scale-generator-db.test.ts": "needs its own scale scratch",
+}
+
+const all = (await readdir(join(api, "test")))
   .filter((name) => name.endsWith("-db.test.ts"))
   .sort()
   .map((name) => `test/${name}`)
+const gone = Object.keys(ELSEWHERE).filter((file) => !all.includes(file))
+if (gone.length > 0) {
+  console.error(`ELSEWHERE names files that no longer exist: ${gone.join(", ")}`)
+  process.exit(1)
+}
+const files = all.filter((file) => !(file in ELSEWHERE))
 
 /** `*_TEST_DATABASE_URL`, not `*_TEST_API_DATABASE_URL`: the tests derive the `i10_api` url from the owner's. */
 const VARIABLE = /process\.env\.([A-Z0-9_]+_TEST_DATABASE_URL)\b/g
