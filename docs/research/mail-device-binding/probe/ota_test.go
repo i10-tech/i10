@@ -112,9 +112,8 @@ func sign(t *testing.T, id leaf, chal, serial string) []byte {
 	attrs := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CHALLENGE</key><string>%s</string><key>SERIAL</key><string>%s</string>
-<key>UDID</key><string>U</string><key>PRODUCT</key><string>iPhone15,2</string><key>VERSION</key><string>1</string>
-</dict></plist>`, chal, serial)
+%s<key>UDID</key><string>U</string><key>PRODUCT</key><string>iPhone15,2</string><key>VERSION</key><string>1</string>
+</dict></plist>`, echoed(chal, serial))
 	os.WriteFile(d+"/a.plist", []byte(attrs), 0o600)
 	out, err := exec.Command("openssl", "cms", "-sign", "-nodetach", "-binary", "-outform", "DER",
 		"-signer", d+"/c.pem", "-inkey", d+"/k.pem", "-in", d+"/a.plist", "-out", d+"/o.der").CombinedOutput()
@@ -123,6 +122,19 @@ func sign(t *testing.T, id leaf, chal, serial string) []byte {
 	}
 	b, _ := os.ReadFile(d + "/o.der")
 	return b
+}
+
+// echoed is the CHALLENGE and SERIAL keys a request carries; an empty value
+// leaves its key out, as Apple's sample final request does with both.
+func echoed(chal, serial string) string {
+	var b strings.Builder
+	if chal != "" {
+		fmt.Fprintf(&b, "<key>CHALLENGE</key><string>%s</string>", chal)
+	}
+	if serial != "" {
+		fmt.Fprintf(&b, "<key>SERIAL</key><string>%s</string>", serial)
+	}
+	return b.String()
 }
 
 func post(s *otaServer, body []byte) *httptest.ResponseRecorder {
@@ -250,4 +262,58 @@ func TestPhase2CannotRebindSerial(t *testing.T) {
 	dev := f.apple.issue(t, "device")
 	post(f.srv, sign(t, dev, chal, serial))
 	assertRejected(t, post(f.srv, sign(t, dev, chal, "OTHERSERIAL")))
+}
+
+// Apple's sample final (phase 4) request echoes neither CHALLENGE nor SERIAL.
+// The enrollment is then found from the issued certificate's CN.
+func TestFinalRequestWithoutEchoedAttributes(t *testing.T) {
+	f := newFixture(t)
+	chal := issued(t, f)
+	post(f.srv, sign(t, f.apple.issue(t, "device"), chal, serial))
+	p3 := post(f.srv, sign(t, f.step.issue(t, serial), "", ""))
+	if p3.Code != 200 || !strings.Contains(p3.Body.String(), "EncryptedPayloadContent") {
+		t.Fatalf("phase 3 without echoed attributes: %d %.200s", p3.Code, p3.Body.String())
+	}
+	// Used up: the same certificate cannot finish it again.
+	assertRejected(t, post(f.srv, sign(t, f.step.issue(t, serial), "", "")))
+}
+
+// Phase 2 still needs both: they are what binds the challenge to a serial.
+func TestPhase2RequiresChallengeAndSerial(t *testing.T) {
+	f := newFixture(t)
+	dev := f.apple.issue(t, "device")
+	chal := issued(t, f)
+	assertRejected(t, post(f.srv, sign(t, dev, chal, "")))
+	assertRejected(t, post(f.srv, sign(t, dev, "", serial)))
+}
+
+// An echoed challenge must be the one bound to the certificate's serial.
+func TestFinalRequestEchoingAnotherChallengeRejected(t *testing.T) {
+	f := newFixture(t)
+	mine, theirs := issued(t, f), issued(t, f)
+	post(f.srv, sign(t, f.apple.issue(t, "device"), mine, serial))
+	post(f.srv, sign(t, f.apple.issue(t, "device"), theirs, "OTHERSERIAL"))
+	assertRejected(t, post(f.srv, sign(t, f.step.issue(t, serial), theirs, "")))
+	if rec := post(f.srv, sign(t, f.step.issue(t, serial), mine, "")); rec.Code != 200 {
+		t.Fatalf("honest final request after the refusal: %d", rec.Code)
+	}
+}
+
+// Enrolling the same device again leaves one pending enrollment: the latest.
+func TestRebindingASerialKeepsOnlyTheLatest(t *testing.T) {
+	f := newFixture(t)
+	first, second := issued(t, f), issued(t, f)
+	post(f.srv, sign(t, f.apple.issue(t, "device"), first, serial))
+	post(f.srv, sign(t, f.apple.issue(t, "device"), second, serial))
+	assertRejected(t, post(f.srv, sign(t, f.step.issue(t, serial), first, "")))
+	if rec := post(f.srv, sign(t, f.step.issue(t, serial), second, "")); rec.Code != 200 {
+		t.Fatalf("latest enrollment: %d", rec.Code)
+	}
+}
+
+// A certificate with no CN never matches a challenge that is not yet bound.
+func TestEmptyCNFindsNothing(t *testing.T) {
+	f := newFixture(t)
+	issued(t, f) // unbound, serial empty
+	assertRejected(t, post(f.srv, sign(t, f.step.issue(t, ""), "", "")))
 }

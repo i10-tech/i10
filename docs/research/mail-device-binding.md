@@ -79,7 +79,7 @@ This is Apple's documented "Profile Service" flow, older than MDM and still supp
 3. **We answer with a SCEP-only profile.** The device makes its own key and enrolls it through SCEP.
    - Encrypting the final profile straight to the Apple device certificate **fails** ("Profile Installation Failed").
    - Putting anything besides the SCEP payload in this answer (an ACME payload, for example) **fails** with "The enrollment server did not provision a valid identity certificate", and the device never calls the SCEP server.
-4. **The device POSTs again, signed with its new SCEP key.**
+4. **The device POSTs again, signed with its new SCEP key.** Do not rely on this request echoing `CHALLENGE` or `SERIAL`: Apple's sample of it carries only `UDID`, `VERSION` and `MAC_ADDRESS_EN0` `[doc]`. Find the enrollment from the certificate we issued instead, which in production means the certificate a per-enrollment SCEP challenge allowed. Whether iOS 27 and macOS 27 echo them was not recorded during the probe.
 5. **We answer with the real profile, encrypted to that key** (`EncryptedPayloadContent`, CMS enveloped, AES-256-CBC). Only that device can open it. It held the mail account with the code and an ACME payload, and installed.
 
 Results:
