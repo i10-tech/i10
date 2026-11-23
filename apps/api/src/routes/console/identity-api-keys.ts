@@ -144,7 +144,7 @@ export function mountIdentityApiKeys(app: Hono, d: ConsoleDeps): void {
                 statusCode: 500,
                 name: "internal_server_error" as const,
                 message:
-                  "The key was revoked but may stay usable for up to a minute. Retry to confirm.",
+                  "The key was revoked but may stay usable until its cache entry expires. Retry to confirm.",
               },
               500,
             )

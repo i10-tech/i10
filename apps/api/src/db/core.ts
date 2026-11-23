@@ -1343,8 +1343,8 @@ export const apiKeys = core.table(
     /**
      * ⚠ REVOCATION IS IMMEDIATE, AND THAT IS THE WHOLE REASON IT LIVES HERE.
      * Under Clerk the floor was the cache TTL - a leaked production key stayed
-     * live for up to a minute. Setting this and deleting the cache entry ends it
-     * at once.
+     * live until the cached verification expired. Setting this and deleting the
+     * cache entry ends it at once.
      */
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),

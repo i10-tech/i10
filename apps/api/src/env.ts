@@ -93,11 +93,11 @@ const schema = z.object({
 
   // The Postgres behind PgBouncer.
   //
-  // ⚠ TRANSACTION POOLING DROPS `search_path` - PgBouncer accepts the SET and
-  // silently ignores it, because a pooled connection is not the same backend
-  // twice. Schema-qualify every statement, or use SET LOCAL inside an explicit
-  // transaction. Advisory locks must be pg_advisory_xact_lock, never the
-  // session variant, for the same reason.
+  // ⚠ SESSION `SET search_path` IS UNSAFE IN TRANSACTION MODE. PgBouncer can
+  // leave an untracked setting on its server connection, where it leaks to the
+  // next client that gets that connection. Schema-qualify every statement, or
+  // use SET LOCAL inside an explicit transaction. Advisory locks must be
+  // pg_advisory_xact_lock, never the session variant, for the same reason.
   DATABASE_URL: z.string().min(1),
 
   // The queues' Redis. i10's OWN instance, never one shared with PSL under a
