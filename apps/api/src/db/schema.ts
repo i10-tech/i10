@@ -374,6 +374,11 @@ export const authdManagedAccounts = authd.table(
       columns: [t.connectionId],
       foreignColumns: [connections.id],
     }).onDelete("set null"),
+    // The people of one connection: `mirrorPassthrough` raises their epoch when
+    // its settings move, and the `set null` above finds them when it is deleted.
+    // Without it both read every managed account (EXPLAIN on 50,000 rows: a seq
+    // scan, 368 buffers, to update 25).
+    index("authd_managed_connection_idx").on(t.connectionId),
   ],
 )
 
@@ -471,6 +476,48 @@ export const authdRequiredExempt = authd.table(
       "required_exempt_source_check",
       sql`"source" in ('owner_exemption', 'bypass')`,
     ),
+  ],
+)
+
+/**
+ * One version per SSO connection of what its mail pass-through answers
+ * (`passthroughFor` in identity/ldap.ts), so authd can tell when a copy of the
+ * settings it holds is older than the database.
+ *
+ * ⚠ IT MOVES IN THE SAME TRANSACTION AS THE CHANGE, AND THE ACCOUNTS' EPOCHS WITH
+ * IT. `fingerprint` is a hash of exactly what `passthroughFor` reads: whether the
+ * connection is active, whether a live proof backs it, its provider, its `ldap`
+ * and `oidcMail` settings and its sealed secrets. identity/authd-mirror.ts
+ * `mirrorPassthrough` recomputes it in the transaction of every change that can
+ * move any of those, and when it differs raises `version` and the
+ * `credential_epoch` of every account the connection manages, together. A crash
+ * leaves the change, the version and the epochs together or none of them.
+ *
+ * ⚠ WHAT THE VERSION IS FOR. authd keeps a connection's settings for up to a
+ * minute (services/authd/internal/passthrough MaxCacheTTL). The bind's account
+ * query reads this version, and a copy older than it is fetched again, so a
+ * sign-in after a change is never checked against the settings it replaced. The
+ * epoch raise ends what was already open: authd's cached successes and the mail
+ * front's sessions. Before this table the API raised the epochs after the change
+ * committed and once more a minute later from a timer, and a failure or a restart
+ * in between left sessions open for good.
+ *
+ * ⚠ ONE WRITER: identity/authd-mirror.ts. A connection deleted takes its row.
+ */
+export const authdPassthroughVersions = authd.table(
+  "passthrough_versions",
+  {
+    connectionId: uuid("connection_id").primaryKey(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "authd_passthrough_connection_fk",
+      columns: [t.connectionId],
+      foreignColumns: [connections.id],
+    }).onDelete("cascade"),
   ],
 )
 

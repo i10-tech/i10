@@ -28,13 +28,16 @@ func NewService(src Source, binder *Binder, oidcClient *oidc.Client) *Service {
 // ⚠ NO FALLBACK ANYWHERE. A connection without pass-through is refused
 // (IMAP is off for it); an API that cannot be reached is "unavailable". Neither
 // ever becomes a question for Clerk, and neither lane ever becomes the other.
-func (s *Service) Bind(ctx context.Context, connectionID, email, password string) Result {
-	answer, err := s.src.Fetch(ctx, connectionID)
+//
+// atLeast is the connection's version the bind read with the account; settings
+// older than it are never used (Source).
+func (s *Service) Bind(ctx context.Context, connectionID string, atLeast int64, email, password string) Result {
+	answer, err := s.src.Fetch(ctx, connectionID, atLeast)
 	if err != nil {
 		return Result{Outcome: Unavailable, Reason: ReasonSettingsDown}
 	}
 	switch {
-	case answer == nil:
+	case answer.Off():
 		return Result{Outcome: Rejected, Reason: ReasonPassthroughOff}
 	case answer.Lane == LaneLDAP && answer.LDAP != nil:
 		res := s.binder.Bind(ctx, *answer.LDAP, email, password)

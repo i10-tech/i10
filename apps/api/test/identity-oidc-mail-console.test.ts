@@ -17,8 +17,9 @@ import {
 /**
  * The console's OIDC mail routes (#383): an owner's move on every status, step-up
  * on every write, the token endpoint read from discovery and never typed,
- * validation that agrees with authd, one place for a connection's passwords, and
- * the cached passwords revoked on every change.
+ * validation that agrees with authd, and one place for a connection's passwords.
+ * That a change ends cached passwords and open sessions is the store's, in the
+ * save's transaction: passthrough-mirror-db.test.ts.
  */
 
 const ROLES: Record<string, Role> = {
@@ -55,7 +56,6 @@ function app(
     config?: Record<string, unknown>
     fresh?: boolean
     wired?: boolean
-    invalidate?: (connectionId: string) => Promise<void>
     /** What the provider's discovery URL answers. Default: a document for that issuer. */
     discovery?: (url: string) => Response | Promise<Response>
   } = {},
@@ -69,7 +69,6 @@ function app(
       }),
     ],
   })
-  const revoked: string[] = []
   const errors: object[] = []
   const asked: string[] = []
   const log = { ...console, error: (o: object) => errors.push(o), warn: () => {} }
@@ -108,14 +107,7 @@ function app(
         ...(options.wired === false
           ? {}
           : {
-              oidcMail: {
-                fetch,
-                invalidate:
-                  options.invalidate ??
-                  (async (id: string) => {
-                    revoked.push(id)
-                  }),
-              },
+              oidcMail: { fetch },
             }),
       },
     } as unknown as ConsoleDeps)
@@ -133,7 +125,6 @@ function app(
     store,
     call,
     base,
-    revoked,
     errors,
     asked,
     setFresh: (v: boolean) => (fresh = v),
@@ -157,7 +148,6 @@ describe("OIDC mail settings: refusals", () => {
     expect((await w.call("user_owner", "PUT", w.base, SETTINGS)).status).toBe(403)
     expect(w.stored()).toEqual({})
     expect(w.store.events).toEqual([])
-    expect(w.revoked).toEqual([])
     expect(w.asked).toEqual([])
     expect((await w.call("user_owner", "GET", w.base)).status).toBe(200)
   })
@@ -209,7 +199,6 @@ describe("OIDC mail settings: refusals", () => {
       }
       expect(w.stored()).toEqual({})
       expect(w.store.events).toEqual([])
-      expect(w.revoked).toEqual([])
       expect(w.asked).toEqual([])
       expect((await w.call("user_owner", "PUT", w.base, SETTINGS)).status).toBe(200)
     }
@@ -243,7 +232,6 @@ describe("OIDC mail settings: refusals", () => {
     expect(((await res.json()) as { message: string }).message).toMatch(/owner/)
     expect(w.stored().clientId).toBe(OTHER_CLIENT)
     expect(w.store.events).toEqual([])
-    expect(w.revoked).toEqual([])
   })
 
   it("lets an admin turn it OFF on a live connection, and nothing else", async () => {
@@ -287,7 +275,6 @@ describe("OIDC mail settings: refusals", () => {
         type: "connection.oidc_mail_refused",
         reason: "not_supported",
       })
-      expect(w.revoked).toEqual([])
       expect(w.asked).toEqual([])
       expect(await body(await w.call("user_owner", "GET", w.base))).toMatchObject({
         available: false,
@@ -437,7 +424,6 @@ describe("OIDC mail settings: the token endpoint is read, not typed", () => {
       expect(res.status).toBe(422)
       expect(w.stored()).toEqual({})
       expect(w.store.events).toEqual([])
-      expect(w.revoked).toEqual([])
     }
     const w = app({
       discovery: () =>
@@ -490,7 +476,6 @@ describe("OIDC mail settings: the token endpoint is read, not typed", () => {
       expect(JSON.stringify(answer)).not.toContain("10.0.0.1")
       expect(w.stored()).toEqual({})
       expect(w.store.events).toEqual([])
-      expect(w.revoked).toEqual([])
     }
   })
 
@@ -552,7 +537,6 @@ describe("OIDC mail settings: a row that moves while the provider is asked", () 
     // It asked about A, as it was told, and saved nothing for B.
     expect(w.asked).toEqual([`${A}/.well-known/openid-configuration`])
     expect(w.stored()).toEqual(row(B))
-    expect(w.revoked).toEqual([])
   })
 })
 
@@ -583,7 +567,6 @@ describe("OIDC mail settings: changes", () => {
       tokenEndpoint: TOKEN,
       enabled: true,
     })
-    expect(w.revoked).toEqual([CONNECTION])
     expect(events(w, "connection.oidc_mail_updated")).toHaveLength(1)
     expect(w.last()).toMatchObject({
       type: "connection.oidc_mail_updated",
@@ -595,7 +578,6 @@ describe("OIDC mail settings: changes", () => {
         status: "active",
         enabled: { from: false, to: true },
         to: { issuer: ISSUER, clientId: CLIENT, tokenEndpoint: TOKEN },
-        cachedPasswordsRevoked: true,
       },
     })
   })
@@ -668,7 +650,6 @@ describe("OIDC mail settings: changes", () => {
       tokenEndpoint: TOKEN,
       enabled: false,
     })
-    expect(w.revoked).toEqual([CONNECTION, CONNECTION])
 
     // A new issuer and the yes together are one move.
     await w.call("user_owner", "PUT", w.base, {
@@ -707,10 +688,8 @@ describe("OIDC mail settings: changes", () => {
   it("revokes on turning it off, since that is what an owner wants done now", async () => {
     const w = app()
     await w.call("user_owner", "PUT", w.base, { ...SETTINGS, enabled: true })
-    w.revoked.length = 0
     await w.call("user_admin", "PUT", w.base, { enabled: false })
     expect(w.stored().enabled).toBe(false)
-    expect(w.revoked).toEqual([CONNECTION])
     expect(w.last()).toMatchObject({
       data: { changed: [], trust: false, enabled: { from: true, to: false } },
     })
@@ -720,14 +699,12 @@ describe("OIDC mail settings: changes", () => {
     const w = app()
     await w.call("user_owner", "PUT", w.base, { ...SETTINGS, enabled: true })
     const before = w.store.events.length
-    w.revoked.length = 0
     w.asked.length = 0
     expect(
       (await w.call("user_owner", "PUT", w.base, { ...SETTINGS, enabled: true }))
         .status,
     ).toBe(200)
     expect(w.store.events).toHaveLength(before)
-    expect(w.revoked).toEqual([])
     expect(w.asked).toEqual([])
     expect(w.stored().enabled).toBe(true)
   })
@@ -756,25 +733,6 @@ describe("OIDC mail settings: changes", () => {
         enabled: true,
       },
     })
-  })
-
-  // The change is made; failing to revoke is on record, not an error to retry.
-  it("keeps the change and records it when the epochs cannot be raised", async () => {
-    const w = app({
-      invalidate: async () => {
-        throw new Error("db down: password=hunter2")
-      },
-    })
-    const res = await w.call("user_owner", "PUT", w.base, {
-      ...SETTINGS,
-      enabled: true,
-    })
-    expect(res.status).toBe(200)
-    expect(w.stored().enabled).toBe(true)
-    expect(w.last()).toMatchObject({ data: { cachedPasswordsRevoked: false } })
-    expect(w.errors).toHaveLength(1)
-    // The error's name, never its message.
-    expect(JSON.stringify(w.errors)).not.toContain("hunter2")
   })
 
   it("shows what is set, and that LDAP is on, without anything secret", async () => {
@@ -823,7 +781,6 @@ describe("OIDC mail settings: a row from before the lane was generic", () => {
         enabled: false,
       },
     })
-    expect(w.revoked).toEqual([CONNECTION])
     expect(w.asked).toEqual([])
   })
 

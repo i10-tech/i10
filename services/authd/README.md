@@ -530,9 +530,9 @@ and only for one. Three things end an entry sooner:
   refused at the next bind;
 - a change to the connection's OIDC settings (a different provider, client, preset
   or field, or OIDC mail sign-in switched off), which raises the `credential_epoch`
-  of every account the connection manages, now and once more just after authd's
-  own 60-second copy of the settings has expired
-  (`apps/api/src/projection/connection-epoch.ts`);
+  of every account the connection manages in the save's own transaction, together
+  with the connection's pass-through version, so authd's copy of the settings is
+  fetched again at the next bind (see "A change to pass-through" below);
 - `credential_epoch` itself, for any other revocation.
 
 ⚠ **The lane is not in the verifier's name.** Which lane a connection runs is the
@@ -573,6 +573,513 @@ A mailbox a company's directory switched off has `authd.accounts.suspended_at`
 set and stays `active`. Searches return it, so mail keeps arriving; every bind is
 refused with `invalidCredentials` (`mailbox_suspended`) BEFORE the verifier is
 chosen, so before the credential cache, Clerk or the pass-through is consulted.
+
+## Mail front (#383)
+
+`cmd/mailfront` is the TLS front for IMAP on 993 and SMTP submission on 465. It
+is a second binary in this image, run as its own container in the Stalwart pod.
+
+**Why it exists.** Stalwart never ends a session that has already signed in.
+Probed on v1.1.0 (`docs/research/mail-device-binding.md`, section 6): a password
+change, removed permissions and even a deleted account left open IMAP sessions
+reading and open SMTP sessions sending. Everything above in this README stops
+the next sign-in. Nothing stopped the session that was already open. The front
+closes it: it knows which account each connection signed in as, and once a
+second it asks the projection whether that account would still be let in.
+
+**Why it is not part of authd.** The front parses bytes from anyone on the
+internet before they have signed in. A parser bug that crashes it must not take
+LDAP down with it. A bug that leaks memory must find no secret to leak. The front
+has a TLS certificate, a read-only database connection as its own role
+(`mailfront`, below), the key it signs bind tokens with (below) and its
+settings. It has no Clerk key, no `AUTHD_API_SECRET` and no LDAP service
+secret. It has its own memory limit and
+its own user id. It shares code with authd (`internal/gate`,
+`internal/projection`, `internal/config`), not a process.
+
+### The bind token: the attribution boundary
+
+The front can only close a connection it can attribute, and Stalwart is what
+decides who a connection is signed in as. Every review round found a way to make
+the two disagree: a literal Stalwart read as a word (round 1), a second sign-in
+under the tag `*` or `+` (round 2), and a forged literal marker that Stalwart
+echoed raw, so the output scanner read the next 100 MB as a literal and missed
+an `UNAUTHENTICATE` and a second `LOGIN` behind it (round 3). Each was patched in
+the front's parsers, and each patch was a parser trying to follow Stalwart's.
+
+**So the boundary is not a parser.** Every person sign-in the front forwards
+carries a token in front of the password (`internal/bindtoken`):
+
+```
+i10mf1.<base64url: key id | expiry | nonce | HMAC-SHA256>.<the real password>
+```
+
+The HMAC, under a key the front shares with authd, covers a fixed domain label,
+the key id, the Clerk user id the front looked the login up as, the expiry (60
+seconds) and a 16-byte nonce. Stalwart passes the password through to authd's
+LDAP bind unchanged. authd accepts a **person** bind only with a valid token for
+the very user id the bind DN names, takes the token off, and only then checks
+the password the usual way. Whatever Stalwart does after the front lost track,
+a second sign-in carries what the client typed: a raw password, or a token the
+client cannot make. authd refuses it. Probed against a live Stalwart v1.1.0
+(`docs/research/mail-device-binding.md` section 9): round 3's exact bytes now
+end `e NO [AUTHENTICATIONFAILED]`.
+
+- **Every person DN, every lane.** Pass-through accounts (LDAP, OIDC) have the
+  same `uid=<clerk id>,ou=people,...` DN, so the token covers them too. The
+  service bind (`cn=stalwart`, Stalwart's delivery lookups) needs none.
+- **No permissive phase, no fallback.** A bind without a valid token is never
+  retried as a raw password, and a password that starts with `i10mf1.` is
+  wrapped like any other, so exactly one layer comes off.
+- **A refused bind costs nothing.** authd refuses it right after reading the
+  DN: before the projection, the credential cache, the failure budget, the
+  per-DN throttle, Clerk or any pass-through directory. A client signed in as
+  itself can send `LOGIN victim guess` as often as it likes without spending
+  the victim's budget or locking them out
+  (`TestARefusedBindTouchesNoBudgetNoThrottleAndNoProvider`).
+- **Not single use.** Stalwart binds once per sign-in, and a token is good for
+  one account for one minute. A replay inside that minute needs the bind
+  password, which only crosses loopback inside the pod.
+- **One spelling.** The parser takes the exact encoded length in the URL
+  alphabet and nothing else (`FuzzUnwrap` found that Go's base64 skips CR and
+  LF).
+
+**Every failure is closed:**
+
+| What is wrong                                     | What happens                                                                                                                                                                                  |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| authd has no keys, or cannot read them            | Every person bind is answered unavailable (`bind_token_no_keys_configured`, at ERROR), so clients retry instead of asking for a password. authd still runs, so delivery's service bind works. |
+| The front has no key, or cannot read it           | The front forwards no sign-in: IMAP `NO [UNAVAILABLE] Sign-in is temporarily unavailable.`, SMTP `454 4.7.0`. Logged at ERROR at start.                                                       |
+| The front's key is not among authd's              | `bind_token_unknown_key`: unavailable as above, at ERROR. Never a wrong password, because the fault is ours.                                                                                  |
+| A token for another account, or tampered          | `bind_token_bad_mac`.                                                                                                                                                                         |
+| A token older than a minute, or the clocks differ | `bind_token_expired`. The front, Stalwart and authd share the pod's clock; 5 seconds of skew are allowed ahead.                                                                               |
+| The front's lookup failed (database down)         | The front answers unavailable as above and forwards nothing.                                                                                                                                  |
+| The login is unknown to the front                 | Forwarded with no token; authd refuses it. A login Stalwart answers alone (its recovery admin) signs in unattributed, and the front closes it.                                                |
+
+Each refusal is logged by authd as `bind rejected` with its reason and the
+user id, at INFO.
+
+**Rotating the key.** authd takes a list (`AUTHD_BIND_TOKEN_KEYS`), the front
+signs with one (`MAILFRONT_BIND_TOKEN_KEY`), each `<id>:<base64 of at least 32
+bytes>`. In the `prod_mail_bind_token` Doppler config:
+
+1. Add the new key to `AUTHD_BIND_TOKEN_KEYS` beside the old one, under a new
+   id: `1:<old>,2:<new>`.
+2. Restart the Stalwart pods (a Doppler change needs a restart; authd reads the
+   list at start). Both keys are accepted.
+3. Set `MAILFRONT_BIND_TOKEN_KEY` to `2:<new>` and restart again. Open
+   sessions are not affected; the next sign-in uses the new key.
+4. Remove `1:<old>` from `AUTHD_BIND_TOKEN_KEYS` and restart once more.
+
+Each restart drops every connection, which clients take as a reconnect. A key
+leak alone signs nobody in: a token still needs the person's password behind
+it. It only takes the attribution back to where the parsers left it.
+
+**Outside the token design, on purpose:**
+
+- **Stalwart's recovery admin** (`STALWART_RECOVERY_ADMIN`) is checked by
+  Stalwart before any directory and never reaches authd, so no token covers it.
+  It stays set: it is how we administer Stalwart, including when authd is down.
+  Through the front, a first sign-in as it is closed as unattributed. A second
+  sign-in as it, behind round 3's forged literal, is not seen and stays open
+  (probed, section 9), and the same goes for impersonating a person with
+  `<user>%admin`. Both need the recovery admin's password, which already opens
+  the whole server over the management API.
+- **App passwords, API keys and Stalwart's OAuth tokens** are checked by
+  Stalwart locally too. The `i10user` role takes away the permissions to create
+  app passwords and API keys, Stalwart's OAuth endpoints are not published, and
+  the bearer mechanisms are off upstream (below).
+- **Bearer sign-ins** (OAUTHBEARER, XOAUTH2) are checked by Stalwart alone. The
+  front refuses them before sign-in, and as defence in depth Stalwart is set to
+  refuse them too: IMAP goes upstream without the SSL TLV, so Stalwart treats it
+  as cleartext, where it refuses bearer tokens, and `Imap.allowPlainTextAuth`
+  keeps LOGIN working; SMTP keeps the TLV and its `saslMechanisms` offer only
+  PLAIN and LOGIN on 465. Both probed on v1.1.0
+  (`infra/k8s/i10/stalwart/config/README.md`, "The mail front").
+- **JMAP and webmail** reach Stalwart's HTTP listener directly and never pass
+  the front, so they never carry a token: they would fail every person sign-in.
+  **Webmail stays off until the Bulwark JMAP proxy lands** (a later PR). Note
+  for that PR: Stalwart caches a successful HTTP Basic sign-in keyed on the
+  `Authorization` header for `OidcProvider.accessTokenExpiry`, default one hour
+  and at least ten minutes (`http/src/auth/authenticate.rs:112-126`,
+  `registry/src/schema/structs_impl.rs:53755`), and drops an entry earlier only
+  when the account's revision inside Stalwart changes. So a revocation does not
+  end an HTTP session for up to an hour unless the proxy ends it.
+
+### Its database role
+
+`mailfront` may SELECT `authd.accounts`, `authd.managed_accounts`,
+`authd.required_domains` and `authd.required_exempt`, and EXECUTE
+`core.mailbox_domain_refused`: exactly what `projection.accountColumns` reads,
+and nothing else (`apps/api/drizzle/*_mailfront_role_grants`). It is not
+`authd`'s role because `authd` may INSERT and UPDATE `authd.bind_failure_budget`,
+and a bug in a parser of internet bytes must not be able to reset or exhaust
+anyone's failure budget. `TestTheMailFrontRoleReadsTheGateAndWritesNothing`
+connects as the role and proves both halves. There are no default privileges:
+a table the gate starts reading later must be granted here, and that test fails
+until it is.
+
+⚠ **The role must exist before the grants run, and the grants are not
+guarded.** CNPG creates it (`managed.roles` in `platform-db/cluster.yaml`, with
+`i10-mailfront-db-role` from Doppler, like `authd`'s). The migrator records a
+folder once and never runs it again, so a guard that skipped the grants while
+the role was missing (as `20260917035550_pdns_role_grants` does) would leave the
+role without them for good. Unguarded, a migration run before the role exists
+fails the PreSync hook, loudly, and blocks the deploy until it does. So the
+order is:
+
+1. Doppler: `MAILFRONT_DB_USERNAME=mailfront` and an alphanumeric
+   `MAILFRONT_DB_PASSWORD` in their own config, a service token from it, and the
+   `doppler-token-i10-mailfront-db` Secret in `i10-prod` (by hand, like the other
+   tokens). Beside them, the bind token keys, in a `prod_mail_bind_token`
+   config of their own (Stalwart must not hold them, and it takes `prod_stalwart`
+   whole): one fresh key, `1:` followed by `openssl rand -base64 32`, as
+   `MAILFRONT_BIND_TOKEN_KEY`, the same value as `AUTHD_BIND_TOKEN_KEYS`, a
+   service token, and the `doppler-token-i10-mail-bind-token` Secret.
+2. Merge the role: the managed role and its DopplerSecret. Check that CNPG
+   created it (`\du mailfront`).
+3. Merge the code: the binary, the grants, the pass-through versions and the
+   domain indexes. Nothing runs the front yet; the pin commit publishes the
+   image that carries it. While the API pods roll, an authd that already reads
+   versions can be answered by an API pod that sends none (version 0). Once a
+   new API pod has raised a connection's version, those answers are older
+   than the bind's, so that connection's managed sign-ins are unavailable
+   (never accepted on old settings) until the API has rolled.
+   ⚠ **From the pin commit's roll, every person sign-in is refused until step
+   4's restart.** The new authd needs the front's token and has no keys yet;
+   nothing sends a token until the front runs. Delivery is not affected. This
+   is the "no permissive phase" decision; prod has no mail users yet. With
+   users, step 4 follows the pin at once.
+4. Merge the deploy: the `mailfront` container, Stalwart's loopback listeners,
+   the two bearer settings and the `i10-mail-bind-token` DopplerSecret that
+   carries the keys to the `authd` and `mailfront` containers
+   (`infra/k8s/i10/stalwart/config/README.md`, "The mail front"). Argo's roll
+   starts the front, which waits while Stalwart still holds 993 and 465; the
+   PostSync hook then writes the new listeners, which Stalwart reads only at
+   start. The pod restart after it (`./bootstrap.sh`) is what moves them.
+
+### The port layout
+
+```
+client ──TLS──▶ podIP:993  mailfront ──PROXY v2──────────▶ 127.0.0.1:993  Stalwart `imaps` (no TLS)
+client ──TLS──▶ podIP:465  mailfront ──PROXY v2 + SSL TLV──▶ 127.0.0.1:465  Stalwart `submissions` (no TLS)
+client ─────▶ :25 and in-cluster :2525 go to Stalwart directly, unchanged
+```
+
+- **The numbers do not change.** psl-vps's ufw ROUTED rules match the port after
+  the hostPort DNAT, so the hostPorts 993 and 465 moved from the `stalwart`
+  container to the `mailfront` container. Stalwart reads `local_port` from the
+  PROXY header's destination (probed: a header naming port 4999 made
+  `local_port == 465` false). The front sends the port the client reached, so the
+  plan's 465 rules hold.
+- **Both binds work in one network namespace.** The front binds the pod's own
+  addresses (`status.podIPs`, both families), and Stalwart binds `127.0.0.1` on
+  the same ports. Probed in Docker with the two containers sharing a namespace.
+  `mailfront.Config.Validate` refuses a wildcard or loopback address for the
+  front.
+- **Only the front reaches Stalwart's 993 and 465.** They are on `127.0.0.1`, so
+  only processes in this pod can connect, and Stalwart takes the PROXY header
+  from loopback only (`overrideProxyTrustedNetworks`). The other containers here
+  are authd and Stalwart itself. Stalwart sets `SO_REUSEPORT`, which Linux
+  shares only between sockets of the same user, so the front runs as uid 65532,
+  never Stalwart's 2000.
+- **The SSL TLV is required.** Without it Stalwart treats the connection as
+  cleartext: IMAP says LOGINDISABLED, SMTP offers no AUTH.
+- **TLS is what Stalwart served.** Measured against Stalwart v1.1.0 and the front
+  with the same RSA certificate: TLS 1.2 and 1.3 only, for 1.2 only
+  `ECDHE-RSA-AES128-GCM-SHA256`, `-AES256-GCM-SHA384` and `-CHACHA20-POLY1305`,
+  all three TLS 1.3 suites, and X25519MLKEM768 as the group. The front reloads
+  the mounted certificate files every 30 seconds, so a renewal reaches 993 and
+  465 without a restart. Port 25 is still Stalwart's and still needs
+  `cert-reload.yaml`.
+
+### What it parses, and where it stops
+
+Until a sign-in succeeds, the front reads the client's commands one at a time
+and sends Stalwart the next only after Stalwart has answered the last
+("lock-step").
+
+**Nothing a client sends reaches Stalwart as sent.** The front reads each
+command, then sends Stalwart a command it wrote itself, from what it read:
+
+- **IMAP:** only `CAPABILITY`, `NOOP`, `LOGOUT`, `ID`, `LOGIN` and
+  `AUTHENTICATE PLAIN`. `LOGIN`'s two arguments and every `ID` string go as
+  LITERAL+ literals, and a SASL response as freshly encoded base64. Every other
+  command (`SELECT`, `ENABLE`, anything unknown) is answered `BAD` by the front
+  and never forwarded; `STARTTLS` is answered too, since the client is already
+  on TLS. `ID` fields are logged (device naming, later PRs).
+- **SMTP:** only `EHLO`/`HELO` (with one domain word), `NOOP`, `RSET`, `QUIT`
+  and `AUTH PLAIN` / `AUTH LOGIN`. Anything else is answered `503` before AUTH.
+- **Every IMAP command goes under a random tag of the front's own** (`mf` and
+  16 hex digits), and the answer gets the client's tag back. A tagged answer for
+  any tag the front did not just use ends the session.
+
+Why: Stalwart's parser and the front's are two parsers, and wherever they
+differed a client could sign Stalwart in as one person while the front recorded
+another. One difference was real (found in review, 2026-11-21): Stalwart opens a
+literal only after whitespace, so `a NOOP x{N}` was a literal to the front and a
+word to Stalwart. The front answered `+`, forwarded N bytes, and Stalwart ran
+them as a `LOGIN` the front never saw, which a pipelined `LOGIN` under the same
+tag then took the credit for. With every forwarded command written by the front,
+Stalwart parses only text whose meaning is fixed, and with the front's own
+tags, no answer can be taken for another command's.
+
+**The front reads by Stalwart's grammar and refuses where the two could
+differ** (`readIMAPRequest`, written against Stalwart v1.1.0's
+`crates/imap-proto/src/receiver.rs`, and `parseSMTPCommand` against
+`Rfc5321Parser::hashed_value`): a tab, form feed or lone CR anywhere, a `"` or
+`{` in the middle of a word, literal8, an escape other than `\"` and `\\`,
+anything but a line end after a literal's brace, a verb byte that is not a
+letter or digit, and for SMTP a leading space or any control byte. Any of
+these before sign-in ends the connection. The tests run against a fake
+Stalwart whose reader is an independent port of Stalwart's
+(`stalwart_rules_test.go`), and `FuzzReadIMAPRequest` checks that everything
+the front reads, rebuilt, reads back through that port as the same arguments.
+
+- **Mechanisms it cannot attribute are refused and not advertised.**
+  `OAUTHBEARER` and `XOAUTH2` carry a user name that is only the client's claim.
+  They are taken out of the greeting, `CAPABILITY` and `EHLO`, and refused with
+  `BAD` / `504` before reaching Stalwart. Refusing them breaks nothing: no i10
+  client uses them, Stalwart's OAuth endpoints are not published, and the OAuth
+  lane is not being built. Closing the connection after the sign-in succeeded
+  would have looked like a working sign-in that keeps dropping. Stalwart
+  refuses them upstream as well (the bind token, above). `COMPRESS` is
+  also stripped, because compressed output would hide Stalwart's answers from
+  the scan below. PLAIN with an `authzid` naming somebody else is cancelled.
+- **Bounded.** 12290-byte lines (RFC 4954's AUTH line), 8 KiB literals and
+  16 KiB commands, 64 commands, 2 minutes from accept to signed in (30 s of that
+  for the handshake), 6000 connections, 2000 not signed in, 32 not signed in
+  per address (per /64 for IPv6). Stalwart keeps its own per-IP limits and
+  bans, and it sees the real address.
+
+After the sign-in, the client's bytes are spliced to Stalwart with no parsing.
+**Stalwart's output is still scanned, for one thing, as defence in depth only.**
+The bind token is the boundary: a second sign-in the scan misses is still
+refused by authd (round 3 was exactly such a miss). The scan stays because it
+closes the connection instead of leaving the client signed in as the first
+account, and because the recovery admin is outside the token. Stalwart answers
+`UNAUTHENTICATE` and then a second `LOGIN` on the same connection (probed), so
+a client could sign in as one account and carry on as another that is revoked
+later. Following the client's stream to catch that cannot be made exact: if
+Stalwart refuses a synchronizing literal, the bytes after it are read as
+commands. Stalwart's own output can be followed exactly, because it always sends
+the literal it announces. Every successful sign-in it answers has a
+`[CAPABILITY ...]` code on its OK, and nothing else after the greeting does, so
+after sign-in the front closes the connection on any OK with that code,
+**whatever word comes before it**. Stalwart takes any non-blank bytes as a tag
+and echoes them, so `* LOGIN b pw` is answered `* OK [CAPABILITY ...]`, which
+looks untagged (found in review, 2026-11-22; an earlier scan skipped `*` and
+`+` lines and let that sign-in through). Before sign-in the front refuses those
+tags, and every other byte RFC 3501 keeps out of a tag. SMTP gets the same
+guard for `235`, although Stalwart refuses a second AUTH today. The scan keeps a
+few bytes of state and skips literals by length, so message text that looks like
+a sign-in is never read as one. That rests on Stalwart never ending a line with
+bytes a client chose, which its v1.1.0 error texts do not (they quote client
+input, then end in fixed text). It is tested, fuzzed across read boundaries,
+and fuzzed against an independent line-by-line oracle (`secondSignInAt`).
+
+### Who the connection is
+
+Before the sign-in is forwarded, the front looks the login up the way
+Stalwart's `filterLogin` (`mail=?`) does through authd's search: normalised,
+primary address only (`projection.AccountByLogin`). It reads the row before
+forwarding, not after the OK. A revocation that lands before the read is seen
+by authd too, and the sign-in fails. A revocation that lands after the read
+changes the row away from what the front recorded, and the next sweep closes
+the connection.
+
+**No row means no session.** If the lookup found no active account, or found
+one the gate refuses, and Stalwart still answers OK, the front closes the
+connection. That is how a first sign-in as Stalwart's recovery admin ends. A
+lookup that failed forwards nothing (the bind token, above). The row is also
+what the token is minted for: its Clerk user id is the one authd checks against
+the bind DN.
+
+### The sweep
+
+Once a second, and only when connections are open, the sweeper sends **one**
+query for every distinct account (`projection.SweepQuery`, `= ANY($1)` on the
+primary key). It closes every connection whose account:
+
+- the gate now refuses. This is `internal/gate`, the code authd's bind uses,
+  with every row reason, plus SSO-required as `ManagedResolver` decides it, plus
+  losing an SSO exemption;
+- has a different `credential_epoch` or `clerk_updated_at` than at sign-in (the
+  values the credential cache is keyed on). Any Clerk profile change counts, so
+  a renamed person reconnects once, with the password their client already has;
+- is now answered by a different verifier (Clerk, or another connection);
+- has no active row any more.
+
+**A change to pass-through.** Whether a managed account's connection still has
+pass-through on, and where it asks, is the API's answer behind
+`AUTHD_API_SECRET`, which the front must not hold. It reaches the front and authd
+through two numbers, both moved in the transaction of the change itself, by one
+function (`mirrorPassthrough` in `apps/api/src/identity/authd-mirror.ts`):
+
+- the connection's version (`authd.passthrough_versions`), which the bind reads
+  with the account. authd's copy of the settings, kept up to a minute, is
+  fetched again at the first bind that read a newer version, on every pod, and
+  an answer older than the bind's version is never used. So no sign-in after a
+  change is checked against the settings it replaced;
+- the `credential_epoch` of every account the connection manages, which ends
+  authd's cached successes and makes the sweep close the open sessions.
+
+`mirrorPassthrough` hashes exactly what `passthroughFor` answers from: whether
+the connection is active, whether a live proof backs it, its provider, its
+`ldap` and `oidcMail` settings and its sealed secrets. It runs from every change
+that can move any of those: the LDAP and OIDC console routes (through
+`setConnectionSecrets`), any connection update (status included), and
+`mirrorRequiredDomains`, which already ran on every domain attached or detached
+and every proof lapsing, coming back or being displaced. Where the hash moved,
+both numbers move. A change to anything else (a rename, a SAML metadata
+refresh) moves neither. Before this, the API raised the epochs after the commit
+and again a minute later from a timer, and a failure or a restart in between
+left the sessions open for good. `test/passthrough-mirror-db.test.ts` covers
+every path, and that a rolled-back change takes its raise with it.
+
+**A revocation i10 cannot see is bounded by a maximum age.** A person disabled
+or given a new password in their company's own directory (the LDAP lane), or at
+an OIDC provider that sends neither Universal Logout nor SCIM, never reaches a
+row, so no sweep can see it. A session signed in through a pass-through lane is
+therefore closed `MAILFRONT_PASSTHROUGH_MAX_AGE` after sign-in (default 15
+minutes, the OIDC lane's success cache, so both lanes share one bound; 1 minute
+to 24 hours, with no "off"), logged as `passthrough_max_age`. The client signs in
+again with the password it saved, and the directory is asked again. Each session
+ends at a random point in the last tenth of the age, never after it, so clients
+that signed in together do not all come back together. A Clerk-routed session is
+not affected, because a Clerk change moves `clerk_updated_at`, which the sweep
+already watches. The check needs only the clock, so the sweep runs it first,
+before its query, and holds it during a database outage too: an expired
+pass-through session is closed even when nothing else can be.
+
+What it costs (measured 2026-11-22: 1.033 sign-ins per connection per max-age
+period, against the 1.026 the jitter predicts, with clients that reconnect at
+once). At 15 minutes that is about 4.2 reconnects an hour per open connection.
+On the LDAP lane each one is a directory sign-in (a service bind, a search and
+the person's bind), since authd caches no LDAP success. On the OIDC lane the
+credential cache answers the person's other connections, so it is about 4 token
+calls an hour per person, however many connections they hold.
+
+| Client (open IMAP connections, typical) | Reconnects / hour | LDAP directory sign-ins / hour | OIDC token calls / hour |
+| --------------------------------------- | ----------------- | ------------------------------ | ----------------------- |
+| iPhone Mail, push on (1)                | 4.2               | 4.2                            | about 4                 |
+| Apple Mail on a Mac (3)                 | 12.6              | 12.6                           | about 4                 |
+| Thunderbird (5, its default cache)      | 21                | 21                             | about 4                 |
+
+The connection counts are typical figures, not measured here. A thousand people
+on Apple Mail through one company's LDAP is about 3.5 directory sign-ins a
+second on top of the clients' own reconnects. A company that finds that too
+many can raise the age, which widens the window instead.
+
+**Not covered: JMAP and webmail on 8080.** They reach Stalwart directly, not
+through the front, so they carry no bind token and every person sign-in there
+is refused. Webmail stays off until the Bulwark JMAP proxy lands (a later PR,
+which also has to end sessions: Stalwart caches an HTTP Basic sign-in for up to
+an hour, see "Outside the token design" above). The API's own JMAP calls use
+an `x:ApiKey` bearer and never bind to authd, so they are unaffected.
+
+**If the database cannot be read, nothing is closed.** Closing every connection
+when the database blinks would disconnect every client at once, into an authd
+that cannot verify them either. A revocation made during the outage is still in
+the rows, and the first sweep that can read them closes the connection. The
+front logs this at ERROR on the first failure and every minute after, with how
+long it has lasted.
+
+**A slow sweep waits longer; it never runs back to back.** At least five times
+the last query's duration passes before the next sweep, so one front keeps a
+database backend busy at most a fifth of the time. The cost is a longer window,
+logged at WARN. The query's own timeout is 30 s, because a sweep that times out
+closes nothing; it guards a hung query, not a large one.
+
+**A revoked connection gets no goodbye.** The sweep closes the TCP connection
+under TLS, not the TLS one, which would first send a close_notify and wait up to
+five seconds for a client that is not reading, one connection after another.
+
+**What it costs, and where it stops scaling** (measured 2026-11-21 and
+2026-11-22 on a 500,000-account seed; tables, method and CSVs in
+`docs/research/mail-device-binding.md`, "Mail front scale"). With this PR's
+two migrations (an index on `lower(name)` for `core.domains` and
+`core.join_domains`, and the name filter inside `core.mailbox_domain_settings`)
+a sweep over 1,000 live accounts takes 14 ms, and over 10,000 about 125 ms.
+Without them it took 546 ms and 5.5 s.
+
+- **The knee**, where the 1 Hz sweep passes 5% of one database core: about
+  3,000 live accounts clustered on company domains, or 400 on one domain each,
+  by `EXPLAIN (ANALYZE)` time. Timed inside the server, without EXPLAIN's
+  instrumentation, it is about 7,000 clustered.
+- **The per-account part alone** (the domain gate replaced by a constant)
+  passes 5% at about 15,000 accounts, and is 16% of a core at 50,000. So no
+  cheaper domain gate gets one database core to 50,000. Re-checking only the
+  accounts whose access changed does (a change log or NOTIFY from the API,
+  with a slow full sweep as the backstop); that is a later PR.
+- **The front itself** stays near 2% of a core with 10,000 idle connections;
+  its limit is memory, about 61 KiB a connection.
+- **Several fronts** each sweep their own connections, so the database cost
+  adds up across them.
+
+**A sign-in surge is shed at accept, not queued into the database.** Measured
+2026-11-22 (`front-storm-2026-11-22.csv`): 6,000 clients signing in at the
+same instant, with the defaults (`pool_max_conns=4`, `MAILFRONT_MAX_PREAUTH`
+2000).
+
+- 2,000 were in within 1.1 s, none slower than that, and no lookup timed out.
+  The other 4,000 were closed at accept, and clients retry.
+- With the pre-auth cap raised to 6,000, every client got in, but the slowest
+  sign-in took 3.1 s, at the edge of the 3 s lookup timeout.
+- A pool of 8 brought that down to 2.4 s.
+
+So the cap is what keeps the timeout safe, and both defaults stay. Refusals at
+accept are logged once per 10 seconds, with a count per cap. The shutdown close
+has no jitter: the node runs one Stalwart pod, so the new front is not
+listening until the old one is gone, and the clients' own retry timers spread
+the reconnects.
+
+### Shutdown and failure modes
+
+- **SIGTERM:** close the listeners and every connection. Mail clients reconnect.
+- **The front dies:** 993 and 465 refuse until the kubelet restarts it. LDAP,
+  port 25 and JMAP are untouched.
+- **Stalwart dies:** each upstream connection ends, and the front closes the
+  matching client connection.
+- **The certificate or the database is not there at start:** the front waits,
+  retrying with backoff from one second to thirty and logging each attempt,
+  instead of exiting into a CrashLoopBackOff whose delay grows. It listens on
+  nothing meanwhile, so 993 and 465 refuse.
+- **The port is taken at start:** the front waits and retries every second, for
+  as long as it takes. On the first rollout Stalwart still holds `[::]:993` and
+  `[::]:465` until it restarts with the new listeners, and keeps serving them as
+  before. Any other listen error is retried for 30 seconds and then ends the
+  process with that error.
+- **The bind token key is missing or broken:** see the table under "The bind
+  token". Neither process exits over it.
+- **No probes.** The front listens on the pod's address, so the kubelet could
+  probe it, but no probe it offers is worth having. A `tcpSocket` probe on 993
+  passes against Stalwart itself during the first rollout, and against a front
+  whose database is down (it still accepts). A readiness probe gates the whole
+  pod, so a mail-port problem would take this node's JMAP out of the
+  `i10-stalwart` Service. A liveness probe would only restart a process that
+  exits by itself on a fatal error. `bootstrap.sh --verify` checks that 993 and 465 are the front: both answer `STARTTLS` with the front's own words (`startTLSAnswer`), which Stalwart words differently.
+
+### Configuration
+
+| Variable                        | Default                      |                                                 |
+| ------------------------------- | ---------------------------- | ----------------------------------------------- |
+| `MAILFRONT_LISTEN_IPS`          | -                            | The pod's addresses. Never a wildcard/loopback. |
+| `MAILFRONT_IMAP_PORT`           | `993`                        |                                                 |
+| `MAILFRONT_SMTP_PORT`           | `465`                        |                                                 |
+| `MAILFRONT_IMAP_UPSTREAM`       | `127.0.0.1:993`              | Must be loopback.                               |
+| `MAILFRONT_SMTP_UPSTREAM`       | `127.0.0.1:465`              | Must be loopback.                               |
+| `MAILFRONT_TLS_CERT_FILE`       | `/etc/mailfront/tls/tls.crt` | Re-read every 30 s.                             |
+| `MAILFRONT_TLS_KEY_FILE`        | `/etc/mailfront/tls/tls.key` |                                                 |
+| `MAILFRONT_DATABASE_URL`        | -                            | The `mailfront` role.                           |
+| `MAILFRONT_BIND_TOKEN_KEY`      | -                            | `<id>:<base64>`. Without it, no sign-ins.       |
+| `MAILFRONT_MAX_CONNECTIONS`     | `6000`                       | Sized with the memory limit; raise together.    |
+| `MAILFRONT_MAX_PREAUTH`         | `2000`                       | Not signed in yet. Bounds a sign-in surge.      |
+| `MAILFRONT_MAX_PREAUTH_PER_IP`  | `32`                         | Per address; per /64 for IPv6.                  |
+| `MAILFRONT_PREAUTH_TIMEOUT`     | `2m`                         | 10 s to 10 m.                                   |
+| `MAILFRONT_SWEEP_INTERVAL`      | `1s`                         | 200 ms to 10 s. It is the revocation window.    |
+| `MAILFRONT_PASSTHROUGH_MAX_AGE` | `15m`                        | 1 m to 24 h. Ends pass-through sessions.        |
+| `MAILFRONT_LOG_LEVEL`           | `info`                       | `debug` logs every sweep's timings.             |
 
 ## The one rule you must not break
 
@@ -642,28 +1149,34 @@ Worth reporting upstream.
 
 ## Configuration
 
-| Variable                    | Default                    |                                                      |
-| --------------------------- | -------------------------- | ---------------------------------------------------- |
-| `AUTHD_LISTEN`              | `127.0.0.1:3893`           | Must be loopback.                                    |
-| `AUTHD_BASE_DN`             | `dc=i10,dc=tech`           |                                                      |
-| `AUTHD_SERVICE_BIND_DN`     | -                          | Stalwart's own bind, needed even in bind-auth mode.  |
-| `AUTHD_SERVICE_BIND_SECRET` | -                          |                                                      |
-| `AUTHD_DATABASE_URL`        | -                          | The projection. Goes through PgBouncer.              |
-| `AUTHD_CLERK_SECRET_KEY`    | -                          |                                                      |
-| `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                      |
-| `AUTHD_CLERK_TIMEOUT`       | `5s`                       | Must be positive and at most `12s`.                  |
-| `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                   |
-| `AUTHD_CRED_CACHE_TTL`      | `2h`                       | Verified passwords only. `0` disables; max `3h`.     |
-| `AUTHD_API_URL`             | -                          | The API, for pass-through settings. Both or neither. |
-| `AUTHD_API_SECRET`          | -                          | Same value as the API's. 32+ characters.             |
-| `AUTHD_API_TIMEOUT`         | `5s`                       | Must be positive and at most `12s`.                  |
-| `AUTHD_LOG_LEVEL`           | `info`                     |                                                      |
+| Variable                    | Default                    |                                                       |
+| --------------------------- | -------------------------- | ----------------------------------------------------- |
+| `AUTHD_LISTEN`              | `127.0.0.1:3893`           | Must be loopback.                                     |
+| `AUTHD_BASE_DN`             | `dc=i10,dc=tech`           |                                                       |
+| `AUTHD_SERVICE_BIND_DN`     | -                          | Stalwart's own bind, needed even in bind-auth mode.   |
+| `AUTHD_SERVICE_BIND_SECRET` | -                          |                                                       |
+| `AUTHD_DATABASE_URL`        | -                          | The projection. Goes through PgBouncer.               |
+| `AUTHD_CLERK_SECRET_KEY`    | -                          |                                                       |
+| `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                       |
+| `AUTHD_CLERK_TIMEOUT`       | `5s`                       | Must be positive and at most `12s`.                   |
+| `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                    |
+| `AUTHD_CRED_CACHE_TTL`      | `2h`                       | Verified passwords only. `0` disables; max `3h`.      |
+| `AUTHD_API_URL`             | -                          | The API, for pass-through settings. Both or neither.  |
+| `AUTHD_API_SECRET`          | -                          | Same value as the API's. 32+ characters.              |
+| `AUTHD_API_TIMEOUT`         | `5s`                       | Must be positive and at most `12s`.                   |
+| `AUTHD_BIND_TOKEN_KEYS`     | -                          | `<id>:<base64>`, comma list. Without, no person bind. |
+| `AUTHD_LOG_LEVEL`           | `info`                     | ⚠ `debug` logs every LDAP packet, passwords too.      |
 
 ## Layout
 
 ```
 cmd/authd            entrypoint, signal handling, readiness
-internal/config      env loading, the loopback guard
+cmd/mailfront        the mail front's entrypoint: listeners, the sweep, shutdown
+internal/config      env loading, the loopback guard, the shared logger
+internal/gate        whether an account's row lets it sign in, and who answers;
+                     shared by the bind, the resolver and the mail front
+internal/mailfront   the TLS front: IMAP/SMTP before sign-in, PROXY v2, the scan
+                     of Stalwart's output, the sweep
 internal/directory   the LDAP view: entries, DNs, filter evaluation
 internal/verify      the Verifier / Resolver / BudgetStore seam, Outcome
 internal/clerkauth   the Clerk verifier: verify_password and its status mapping

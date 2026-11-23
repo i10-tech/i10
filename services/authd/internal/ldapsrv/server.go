@@ -19,6 +19,7 @@ import (
 
 	ldap "github.com/vjeantet/ldapserver"
 
+	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/inflight"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
@@ -60,6 +61,11 @@ type Options struct {
 	// query, and for a bind the verifier call as well. Defaults to
 	// DefaultOpTimeout.
 	OpTimeout time.Duration
+
+	// BindTokenKeys are the mail front's keys (internal/bindtoken). ⚠ EVERY
+	// PERSON BIND MUST CARRY A VALID TOKEN UNDER ONE OF THEM: with none, every
+	// person bind is refused. The service bind does not use them.
+	BindTokenKeys bindtoken.Keys
 }
 
 type Server struct {
@@ -75,6 +81,8 @@ type Server struct {
 	flights           *inflight.Group[bindAnswer]
 	log               *slog.Logger
 	opTimeout         time.Duration
+	tokenKeys         bindtoken.Keys
+	now               func() time.Time
 }
 
 func New(opts Options) *Server {
@@ -99,6 +107,8 @@ func New(opts Options) *Server {
 		flights:           inflight.New[bindAnswer](),
 		log:               log,
 		opTimeout:         timeout,
+		tokenKeys:         opts.BindTokenKeys,
+		now:               time.Now,
 	}
 }
 

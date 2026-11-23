@@ -121,7 +121,7 @@ jobs:
   migrations:
     name: Migrations (each alone)
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 5
+    timeout-minutes: 10
     # ⚠ A REAL POSTGRES, BECAUSE NOTHING ELSE IN THIS FILE RUNS A MIGRATION. The
     # unit tests never touch a database, so until this job existed the first
     # place a migration met Postgres was the production PreSync hook.
@@ -164,6 +164,23 @@ jobs:
         env:
           CHECK_MIGRATIONS_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
         run: bun run check-migrations
+      # ⚠ authd's DATABASE TESTS RUN HERE, BECAUSE THIS IS THE ONE JOB WITH A
+      # MIGRATED DATABASE. The check above leaves `i10` fully migrated, with every
+      # role cluster.yaml creates. In the `authd` job these tests skip, silently:
+      # the bind's gate query, the sweep's per-domain rewrite of it, the failure
+      # budget and what the `mailfront` role may and may not do are only proven
+      # against Postgres. Trust auth, so each role's password is irrelevant.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/authd/go.sum
+      - name: authd's database tests
+        working-directory: services/authd
+        env:
+          AUTHD_TEST_DATABASE_URL: postgres://authd@127.0.0.1:5432/i10
+          AUTHD_TEST_MAILFRONT_DATABASE_URL: postgres://mailfront@127.0.0.1:5432/i10
+          AUTHD_TEST_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/i10
+        run: go test -race -count=1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/
 
   authd:
     name: authd (Go)

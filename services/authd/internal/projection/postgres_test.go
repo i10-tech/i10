@@ -3,6 +3,7 @@ package projection
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -148,6 +149,19 @@ func TestAccountByUIDReadsManagedAndSuspendedWithTheEpoch(t *testing.T) {
 	}
 	if !got.Managed || got.ManagedConnection != conn || !got.Suspended || got.CredentialEpoch != 4 {
 		t.Fatalf("managed, suspended account at epoch 4 read as %+v", got)
+	}
+	// No version row yet for the connection reads as 0.
+	if got.PassthroughVersion != 0 {
+		t.Fatalf("PassthroughVersion = %d before any row, want 0", got.PassthroughVersion)
+	}
+
+	// The connection's pass-through version comes with the account, in the bind's
+	// own query, as the `authd` role (through its schema's default privileges).
+	exec(`INSERT INTO authd.passthrough_versions (connection_id, version, fingerprint) VALUES ($1::uuid, 7, 'x')
+		ON CONFLICT (connection_id) DO UPDATE SET version = 7`, conn)
+	got, err = store.AccountByUID(ctx, id)
+	if err != nil || got == nil || got.PassthroughVersion != 7 {
+		t.Fatalf("AccountByUID = (%+v, %v), want PassthroughVersion 7", got, err)
 	}
 
 	// A connection that was deleted leaves the account managed by NOTHING, which
@@ -393,11 +407,24 @@ func TestAccountReadsWhetherItsDomainStillHostsMail(t *testing.T) {
 	}
 	defer store.Close()
 
+	// ⚠ EVERY ANSWER IS ASKED TWICE: as a bind reads it, and as the mail front's
+	// sweep does (SweepQuery judges each domain once for all its accounts). The
+	// two must never disagree, or an open connection outlives what a new
+	// sign-in is refused for.
 	refused := func(id string) bool {
 		t.Helper()
 		got, err := store.AccountByUID(ctx, id)
 		if err != nil || got == nil {
 			t.Fatalf("AccountByUID(%s) = (%v, %v)", id, got, err)
+		}
+		swept, err := store.AccountsByUIDs(ctx, []string{hosted, bare, own})
+		if err != nil || len(swept) != 3 {
+			t.Fatalf("AccountsByUIDs = (%d rows, %v), want 3", len(swept), err)
+		}
+		for _, a := range swept {
+			if a.ClerkUserID == id && a.DomainNotHosted != got.DomainNotHosted {
+				t.Fatalf("%s: the sweep reads DomainNotHosted=%v, a bind %v", id, a.DomainNotHosted, got.DomainNotHosted)
+			}
 		}
 		return got.DomainNotHosted
 	}
@@ -437,5 +464,117 @@ func TestAccountReadsWhetherItsDomainStillHostsMail(t *testing.T) {
 	exec(`UPDATE core.domains SET displaced_at = now(), status = 'failed' WHERE name = $1`, domain)
 	if !refused(hosted) {
 		t.Fatal("a displaced domain still let its mailboxes sign in")
+	}
+}
+
+// The mail front's two reads: by login before a sign-in is forwarded, and by id
+// for the sweep. Both return the bind's gate columns, never an inactive row, and
+// the login matches the primary address only, as Stalwart's filterLogin does.
+func TestTheMailFrontsReads(t *testing.T) {
+	dsn, admin := os.Getenv("AUTHD_TEST_DATABASE_URL"), os.Getenv("AUTHD_TEST_ADMIN_DATABASE_URL")
+	if dsn == "" || admin == "" {
+		t.Skip("AUTHD_TEST_DATABASE_URL and AUTHD_TEST_ADMIN_DATABASE_URL are not both set")
+	}
+	ctx := context.Background()
+	w, err := pgxpool.New(ctx, admin)
+	if err != nil {
+		t.Fatalf("connect as admin: %v", err)
+	}
+	t.Cleanup(w.Close)
+	ids := []string{"user_front_a", "user_front_b", "user_front_gone"}
+	purge := func() {
+		for _, id := range ids {
+			_, _ = w.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id = $1`, id)
+		}
+	}
+	purge()
+	t.Cleanup(purge)
+	for _, q := range []string{
+		`INSERT INTO authd.accounts (clerk_user_id, email, active, credential_epoch) VALUES ('user_front_a', 'front-a@front.example', true, 5)`,
+		`INSERT INTO authd.accounts (clerk_user_id, email, active, suspended_at) VALUES ('user_front_b', 'front-b@front.example', true, now())`,
+		`INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ('user_front_gone', 'front-gone@front.example', false)`,
+		`INSERT INTO authd.aliases (clerk_user_id, address) VALUES ('user_front_a', 'alias-a@front.example')`,
+	} {
+		if _, err := w.Exec(ctx, q); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatalf("NewPostgres: %v", err)
+	}
+	defer store.Close()
+
+	got, err := store.AccountByLogin(ctx, "  Front-A@FRONT.example ")
+	if err != nil || got == nil || got.ClerkUserID != "user_front_a" || got.CredentialEpoch != 5 {
+		t.Fatalf("AccountByLogin = (%+v, %v)", got, err)
+	}
+	if got, err := store.AccountByLogin(ctx, "alias-a@front.example"); err != nil || got != nil {
+		t.Fatalf("an alias signed in as %+v (%v); filterLogin reads mail, the primary address", got, err)
+	}
+	if got, err := store.AccountByLogin(ctx, "front-gone@front.example"); err != nil || got != nil {
+		t.Fatalf("an inactive account resolved: %+v (%v)", got, err)
+	}
+
+	swept, err := store.AccountsByUIDs(ctx, append(ids, "user_front_never"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(swept) != 2 {
+		t.Fatalf("AccountsByUIDs returned %d rows, want the two active ones", len(swept))
+	}
+	for _, a := range swept {
+		one, err := store.AccountByUID(ctx, a.ClerkUserID)
+		if err != nil || one == nil {
+			t.Fatal(err)
+		}
+		one.Aliases, one.MemberOf = nil, nil
+		if !reflect.DeepEqual(&a, one) {
+			t.Fatalf("the sweep read %+v, a bind %+v", a, *one)
+		}
+	}
+}
+
+// The mail front's own role (`mailfront`, apps/api/drizzle/*_mailfront_role_
+// grants) can run both of the front's reads, every gate column included, and
+// can write nothing: least of all the failure budget, which `authd` may write.
+func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
+	dsn, admin := os.Getenv("AUTHD_TEST_MAILFRONT_DATABASE_URL"), os.Getenv("AUTHD_TEST_ADMIN_DATABASE_URL")
+	if dsn == "" || admin == "" {
+		t.Skip("AUTHD_TEST_MAILFRONT_DATABASE_URL and AUTHD_TEST_ADMIN_DATABASE_URL are not both set")
+	}
+	ctx := context.Background()
+	w, err := pgxpool.New(ctx, admin)
+	if err != nil {
+		t.Fatalf("connect as admin: %v", err)
+	}
+	t.Cleanup(w.Close)
+	purge := func() { _, _ = w.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id = 'user_front_role'`) }
+	purge()
+	t.Cleanup(purge)
+	if _, err := w.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ('user_front_role', 'front-role@front.example', true)`); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatalf("NewPostgres as mailfront: %v", err)
+	}
+	defer store.Close()
+	if got, err := store.AccountByLogin(ctx, "front-role@front.example"); err != nil || got == nil {
+		t.Fatalf("AccountByLogin as mailfront = (%v, %v)", got, err)
+	}
+	if got, err := store.AccountsByUIDs(ctx, []string{"user_front_role"}); err != nil || len(got) != 1 {
+		t.Fatalf("AccountsByUIDs as mailfront = (%d rows, %v)", len(got), err)
+	}
+	for _, q := range []string{
+		`INSERT INTO authd.bind_failure_budget (clerk_user_id, window_start, count) VALUES ('user_front_role', now(), 0)`,
+		`UPDATE authd.accounts SET credential_epoch = credential_epoch + 1 WHERE clerk_user_id = 'user_front_role'`,
+		`SELECT 1 FROM authd.aliases LIMIT 1`,
+		`SELECT 1 FROM core.domains LIMIT 1`,
+	} {
+		if _, err := store.Pool().Exec(ctx, q); err == nil {
+			t.Errorf("the mailfront role may run %q", q)
+		}
 	}
 }

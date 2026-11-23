@@ -9,9 +9,11 @@ import {
 } from "../db/identity.js"
 import {
   authdManagedAccounts,
+  authdPassthroughVersions,
   authdRequiredDomains,
   authdRequiredExempt,
 } from "../db/schema.js"
+import { OIDC_MAIL_KEY } from "./oidc-mail.js"
 
 /**
  * What authd is told about managed accounts (#344): ONE place that writes
@@ -143,6 +145,87 @@ export async function mirrorRequiredDomains(tx: Tx, tenantId: string): Promise<v
   // ⚠ WHO IS EXEMPT FOLLOWS WHICH CONNECTIONS REQUIRE, so a connection that starts
   // or stops requiring changes the set in the same transaction.
   await mirrorRequiredExempt(tx, tenantId)
+  // ⚠ AND WHETHER PASS-THROUGH ANSWERS FOLLOWS THE SAME CHANGES: a connection's
+  // status, a domain attached or detached, a proof lapsing, returning or being
+  // displaced. Every one of them reaches this function already.
+  await mirrorPassthrough(tx, tenantId)
+}
+
+/**
+ * Brings `authd.passthrough_versions` for one workspace to what its connections
+ * say NOW, and ends every mail sign-in a change to them takes away.
+ *
+ * For each connection it hashes exactly what `passthroughFor` (identity/ldap.ts)
+ * answers from: whether the connection is active, whether a live proof backs it,
+ * its provider, its `ldap` and `oidcMail` settings and its sealed secrets. Where
+ * the hash moved, in ONE statement, it raises the connection's `version` and the
+ * `credential_epoch` of every account the connection manages. authd then fetches
+ * the settings again at the next bind (its copy is older than the version), its
+ * cached successes stop matching, and the mail front closes the open sessions.
+ *
+ * ⚠ IN THE TRANSACTION OF THE CHANGE, NEVER AFTER IT. Raised after the commit, a
+ * failure or a restart in between left sessions signed in under settings that
+ * were gone. Here the change, the version and the epochs commit together or not
+ * at all. Every caller: `mirrorRequiredDomains` (status, domains, proofs) and
+ * identity/store.ts `updateConnection` and `setConnectionSecrets` (settings,
+ * secrets, provider), all from inside their own tenant transaction.
+ *
+ * ⚠ ONLY PASS-THROUGH'S INPUTS ARE HASHED. A SAML metadata refresh rewrites the
+ * connection's config on a schedule; hashing all of it would sign every managed
+ * person's mail out each time. The sealed secrets are hashed whole, because they
+ * cannot be opened in SQL: a change to any secret (the OIDC login's too) counts,
+ * which costs a reconnect and never a missed revocation. A connection seen here
+ * for the first time is a change too, for the same reason.
+ *
+ * ⚠ THE INPUTS ARE HASHED AS A JSON ARRAY, BY POSITION. A NULL stays a `null` in
+ * its own place, so an input that is missing can never shift the next one into
+ * its slot (a separator join skips NULLs, which would let two different states
+ * hash the same).
+ *
+ * ⚠ UNDER ONE LOCK PER WORKSPACE, as `mirrorRequiredExempt` is: two recomputes at
+ * once would each hash without the other's uncommitted change.
+ */
+export async function mirrorPassthrough(tx: Tx, tenantId: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`authd_passthrough:${tenantId}`}, 0))`,
+  )
+  await tx.execute(sql`
+    with now_ as (
+      select c.id as connection_id,
+             md5(jsonb_build_array(
+               c.status = 'active',
+               exists (
+                 select 1
+                   from identity.connection_domains cd
+                   join core.join_domains jd
+                     on jd.id = cd.join_domain_id and jd.tenant_id = cd.tenant_id
+                  where cd.connection_id = c.id
+                    and cd.tenant_id = c.tenant_id
+                    and jd.verified_at is not null
+                    and jd.lapsed_at is null
+                    and jd.displaced_at is null
+               ),
+               c.provider,
+               c.config -> 'ldap',
+               c.config -> ${OIDC_MAIL_KEY}::text,
+               md5(c.secrets)
+             )::text) as fingerprint
+        from identity.connections c
+       where c.tenant_id = ${tenantId}
+    ), moved as (
+      insert into authd.passthrough_versions as pv (connection_id, version, fingerprint, updated_at)
+      select connection_id, 1, fingerprint, now() from now_
+      on conflict (connection_id) do update
+        set version = pv.version + 1, fingerprint = excluded.fingerprint, updated_at = now()
+        where pv.fingerprint is distinct from excluded.fingerprint
+      returning pv.connection_id
+    )
+    update authd.accounts a
+       set credential_epoch = a.credential_epoch + 1, updated_at = now()
+      from authd.managed_accounts m
+      join moved on moved.connection_id = m.connection_id
+     where a.clerk_user_id = m.clerk_user_id
+  `)
 }
 
 /**
@@ -245,4 +328,21 @@ export async function mirrorRequiredExempt(tx: Tx, tenantId: string): Promise<vo
   const values = [...wanted.values()].map((w) => ({ ...w, tenantId, updatedAt: now }))
   for (let i = 0; i < values.length; i += 500)
     await tx.insert(authdRequiredExempt).values(values.slice(i, i + 500))
+}
+
+/**
+ * The connection's pass-through version (`mirrorPassthrough`), for the answer
+ * authd fetches (routes/authd.ts). 0 for a connection no recompute has seen yet:
+ * the version authd reads for it then too.
+ */
+export async function passthroughVersion(
+  db: Pick<Database, "select">,
+  connectionId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ version: authdPassthroughVersions.version })
+    .from(authdPassthroughVersions)
+    .where(eq(authdPassthroughVersions.connectionId, connectionId))
+    .limit(1)
+  return row?.version ?? 0
 }

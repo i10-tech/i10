@@ -38,7 +38,7 @@ func (l *laneSource) set(a *passthrough.Answer) {
 	l.a = a
 }
 
-func (l *laneSource) Fetch(context.Context, string) (*passthrough.Answer, error) {
+func (l *laneSource) Fetch(context.Context, string, int64) (*passthrough.Answer, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.a, nil

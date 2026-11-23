@@ -2,14 +2,17 @@ package ldapsrv
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"time"
 
 	ldap "github.com/vjeantet/ldapserver"
 
+	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
 	"github.com/i10-tech/i10/services/authd/internal/directory"
+	"github.com/i10-tech/i10/services/authd/internal/gate"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
@@ -80,6 +83,39 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 
+	// ⚠ THE MAIL FRONT'S TOKEN, BEFORE ANYTHING ELSE A BIND COSTS. Every person
+	// bind must carry a valid token for the account this DN names
+	// (internal/bindtoken): the front mints one for the account it credits the
+	// connection to, so a sign-in Stalwart takes from anywhere else (a client's
+	// own LOGIN after signing in, as another account) arrives with a raw
+	// password, or a token for someone else, and ends here.
+	//
+	// ⚠ IT COSTS THE ACCOUNT NOTHING. It is refused before the projection read,
+	// the credential cache, the identical-failure memory, the per-DN throttle,
+	// the failure budget and any provider: otherwise a client signed in as
+	// itself could lock a victim out by sending the victim's name with junk
+	// passwords. One HMAC, and the same answer as a wrong password.
+	//
+	// ⚠ EXCEPT WHEN THE FAULT IS OURS. No keys configured, or a key id authd does
+	// not hold (a half-synced Secret, a rotation done in the wrong order), says
+	// nothing about the person's password: invalidCredentials would make every
+	// mail client ask its user for a password that is right. Unavailable makes
+	// them back off and retry, as for any other outage of ours. A client gains
+	// nothing from the different code: a token it wrote itself is refused either
+	// way.
+	real, err := bindtoken.Unwrap(s.tokenKeys, uid, password, s.now())
+	if errors.Is(err, bindtoken.ErrNoKeys) || errors.Is(err, bindtoken.ErrUnknownKey) {
+		s.log.Error("bind refused: the mail front's key is not configured here", "reason", err.Error(), "uid", uid)
+		s.respondUnavailable(w, "authentication backend temporarily unavailable")
+		return
+	}
+	if err != nil {
+		s.log.Info("bind rejected", "reason", err.Error(), "uid", uid)
+		w.Write(res)
+		return
+	}
+	password = real
+
 	account, err := s.store.AccountByUID(ctx, uid)
 	if err != nil {
 		// The projection is unreachable. This is not evidence about the
@@ -88,43 +124,14 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		s.respondUnavailable(w, "directory temporarily unavailable")
 		return
 	}
-	if account == nil {
-		// No such account, or it is inactive - suspended, unpaid, or
-		// deprovisioned. Indistinguishable from a wrong password by design.
-		s.log.Info("bind rejected", "reason", "no_active_account", "uid", uid)
-		w.Write(res)
-		return
-	}
-
-	// ⚠ A SUSPENDED MAILBOX CANNOT LOG IN, AND IT STILL RECEIVES (#344). The
-	// directory switched the person off; the account is kept active so mail
-	// keeps arriving, and this is where the login is refused. It comes before the
-	// verifier is chosen and before the credential cache: a password that was
-	// right yesterday, cached or asked of the company's directory, must not open
-	// a suspended mailbox. Same answer as a wrong password, by design.
-	if account.Suspended {
-		s.log.Info("bind rejected", "reason", "mailbox_suspended", "uid", uid)
-		w.Write(res)
-		return
-	}
-
-	// ⚠ THE SAME FOR EVERY OTHER REASON THE ROW GIVES FOR TURNING A LOGIN OFF, AND
-	// FOR THE SAME REASON: each is read from the row this bind already holds, so it
-	// takes effect on both pods at once, and each comes before the verifier and the
-	// credential cache so that a password that was right yesterday cannot open it.
-	//
-	//   - a deletion grace: an owner or admin deleted the mailbox, which still
-	//     receives until the purge; only a restore clears the column.
-	//   - a payment hold: the workspace has no paid plan. Mail still arrives; paying
-	//     again clears the column and the next bind works.
-	//   - Clerk's ban or lock: neither moves `clerk_updated_at` the way a password
-	//     change does, and verify_password may still say yes for the user.
-	//   - the domain no longer hosts mail (#406): switched off, lost to another
-	//     workspace's proof, or its proof lapsed. A domain-level gate, so it needs no
-	//     write to the mailbox and a suspension an admin set by hand is untouched.
-	//
-	// Same answer as a wrong password, by design.
-	if reason := refusedByRow(account); reason != "" {
+	// ⚠ EVERY REASON THE ROW GIVES FOR TURNING A LOGIN OFF, BEFORE THE VERIFIER IS
+	// CHOSEN AND BEFORE THE CREDENTIAL CACHE: no active account, a suspension
+	// (#344), a deletion grace, a payment hold, a domain that no longer hosts mail
+	// (#406), Clerk's ban or lock. The list and the reasons for each are in
+	// internal/gate, which the mail front shares to close connections that signed
+	// in before the row changed. A suspended or deleting mailbox still receives;
+	// only the login is refused here. Same answer as a wrong password, by design.
+	if reason := gate.RowRefusal(account); reason != "" {
 		s.log.Info("bind rejected", "reason", reason, "uid", uid)
 		w.Write(res)
 		return
@@ -203,24 +210,6 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		resp.SetDiagnosticMessage(answer.diag)
 	}
 	w.Write(resp)
-}
-
-// refusedByRow names why the account row alone turns this login away, or "".
-// Suspension is checked before it, with its own reason, in handleBind.
-func refusedByRow(a *projection.Account) string {
-	switch {
-	case a.Deleting:
-		return "mailbox_deleting"
-	case a.PaymentHold:
-		return "payment_hold"
-	case a.DomainNotHosted:
-		return "domain_not_hosted"
-	case a.Banned:
-		return "account_banned"
-	case a.Locked:
-		return "account_locked"
-	}
-	return ""
 }
 
 // bindAnswer is what a verification concluded, shared by every bind that

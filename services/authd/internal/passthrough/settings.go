@@ -93,18 +93,35 @@ const (
 // connection. It is only ever READ, and becomes the okta preset of LaneOIDC.
 const laneOktaWire = "okta"
 
+// LaneOff is the API's answer that pass-through is off for the connection.
+const LaneOff = "off"
+
 // Answer is what the API says a connection does with a managed account's
-// password: exactly one of LDAP and OIDC is set, the one Lane names.
+// password: exactly one of LDAP and OIDC is set, the one Lane names, or neither
+// when Lane is LaneOff.
 type Answer struct {
 	Lane string
 	LDAP *Settings
 	OIDC *oidc.Settings
+
+	// Version is the connection's `authd.passthrough_versions.version` as the API
+	// read it, before the settings (apps/api/src/routes/authd.ts), so these
+	// settings are at least that new.
+	Version int64
 }
 
-// Source says how a connection answers a managed account's password. A nil
-// *Answer with a nil error means the API answered that pass-through is off for it.
+// Off reports whether the answer is that pass-through is off. A nil answer is off.
+func (a *Answer) Off() bool { return a == nil || a.Lane == LaneOff }
+
+// Source says how a connection answers a managed account's password.
+//
+// atLeast is the connection's version the bind just read with the account
+// (projection.Account.PassthroughVersion). ⚠ AN ANSWER OLDER THAN IT IS NEVER
+// USED: it was fetched before a change the bind can already see, and checking a
+// password against settings that change replaced is how a revoked directory
+// kept letting people in. Cache enforces it.
 type Source interface {
-	Fetch(ctx context.Context, connectionID string) (*Answer, error)
+	Fetch(ctx context.Context, connectionID string, atLeast int64) (*Answer, error)
 }
 
 // HTTPSource asks the API, authenticated by the shared secret.
@@ -150,6 +167,7 @@ func NewHTTPSource(baseURL, secret string, timeout time.Duration) (*HTTPSource, 
 // its token endpoint was always the issuer's /v1/token.
 type wire struct {
 	Enabled       bool              `json:"enabled"`
+	Version       int64             `json:"version"`
 	Lane          string            `json:"lane"`
 	Issuer        string            `json:"issuer"`
 	ClientID      string            `json:"clientId"`
@@ -164,16 +182,16 @@ func (w *wire) answer() (*Answer, error) {
 	switch w.Lane {
 	case "", LaneLDAP:
 		s := w.Settings
-		return &Answer{Lane: LaneLDAP, LDAP: &s}, nil
+		return &Answer{Lane: LaneLDAP, LDAP: &s, Version: w.Version}, nil
 	case LaneOIDC:
 		return &Answer{Lane: LaneOIDC, OIDC: &oidc.Settings{
 			Preset: w.Preset, Issuer: w.Issuer, TokenEndpoint: w.TokenEndpoint,
 			ClientID: w.ClientID, Extra: w.Extra,
-		}}, nil
+		}, Version: w.Version}, nil
 	case laneOktaWire:
 		return &Answer{Lane: LaneOIDC, OIDC: &oidc.Settings{
 			Preset: oidc.PresetOkta, Issuer: w.Issuer, TokenEndpoint: w.Issuer + "/v1/token", ClientID: w.ClientID,
-		}}, nil
+		}, Version: w.Version}, nil
 	}
 	// An API newer than this authd. Not "off": that would read as a connection
 	// with no IMAP, and be cached as such.
@@ -182,8 +200,8 @@ func (w *wire) answer() (*Answer, error) {
 
 // Fetch implements Source. Every failure is an error, never "off": the caller
 // answers "unavailable" for those, and an outage must not read as a connection
-// with no IMAP.
-func (h *HTTPSource) Fetch(ctx context.Context, connectionID string) (*Answer, error) {
+// with no IMAP. It asks every time; atLeast is Cache's to enforce.
+func (h *HTTPSource) Fetch(ctx context.Context, connectionID string, _ int64) (*Answer, error) {
 	body, err := json.Marshal(struct {
 		ConnectionID string `json:"connectionId"`
 	}{connectionID})
@@ -214,21 +232,32 @@ func (h *HTTPSource) Fetch(ctx context.Context, connectionID string) (*Answer, e
 		return nil, errors.New("passthrough: unreadable answer")
 	}
 	if !w.Enabled {
-		return nil, nil
+		return &Answer{Lane: LaneOff, Version: w.Version}, nil
 	}
 	return w.answer()
 }
 
 // MaxCacheTTL is the longest an answer is kept, however it is configured.
 //
-// ⚠ SIXTY SECONDS IS HOW LONG A DISABLED PASS-THROUGH KEEPS ANSWERING, and
-// how long a rotated service secret keeps being tried. It is a policy
-// statement, not a tuning knob.
+// ⚠ IT IS NOT HOW LONG A CHANGE TAKES. A change raises the connection's version
+// (Cache), and the first bind after it fetches again, on every pod. What the
+// minute bounds is an answer nothing has superseded: an API that cannot be
+// reached is not asked more than once a minute per connection either way.
 const MaxCacheTTL = 60 * time.Second
 
 type cached struct {
 	answer  *Answer
+	version int64
 	expires time.Time
+}
+
+// versionOf is an answer's version; a nil (off) answer from a source that
+// predates versions is 0.
+func versionOf(a *Answer) int64 {
+	if a == nil {
+		return 0
+	}
+	return a.Version
 }
 
 // Cache keeps the API's answers for a short while, in memory only.
@@ -240,6 +269,14 @@ type cached struct {
 //
 // Only answers are cached, never failures: an outage is retried at the next
 // bind rather than remembered. "Off" is cached like any other answer.
+//
+// ⚠ AN ENTRY ANSWERS ONLY A BIND THAT READ NO NEWER VERSION. The API raises a
+// connection's version in the same transaction as any change to what its
+// pass-through answers, and the bind reads the version with the account, so an
+// entry fetched before the change is fetched again at the first bind after it,
+// on every pod at once, not when its minute is up. A fresh answer older than
+// the bind's version (an API from before versions, or a read that lagged) is
+// not used at all: the bind is unavailable and asks again.
 type Cache struct {
 	src Source
 	ttl time.Duration
@@ -259,18 +296,24 @@ func NewCache(src Source, ttl time.Duration) *Cache {
 }
 
 // Fetch implements Source.
-func (c *Cache) Fetch(ctx context.Context, connectionID string) (*Answer, error) {
+func (c *Cache) Fetch(ctx context.Context, connectionID string, atLeast int64) (*Answer, error) {
 	if c.ttl > 0 {
 		c.mu.Lock()
 		e, ok := c.entries[connectionID]
 		c.mu.Unlock()
-		if ok && c.now().Before(e.expires) {
+		if ok && c.now().Before(e.expires) && e.version >= atLeast {
 			return e.answer, nil
 		}
 	}
-	a, err := c.src.Fetch(ctx, connectionID)
-	if err != nil || c.ttl <= 0 {
-		return a, err
+	a, err := c.src.Fetch(ctx, connectionID, atLeast)
+	if err != nil {
+		return nil, err
+	}
+	if versionOf(a) < atLeast {
+		return nil, ErrStaleAnswer
+	}
+	if c.ttl <= 0 {
+		return a, nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -282,6 +325,15 @@ func (c *Cache) Fetch(ctx context.Context, connectionID string) (*Answer, error)
 			delete(c.entries, id)
 		}
 	}
-	c.entries[connectionID] = cached{answer: a, expires: now.Add(c.ttl)}
+	// ⚠ NEVER REPLACED BY AN OLDER ONE. Two binds can fetch at once, and the
+	// slower answer may be the older; it must not push the newer out.
+	if e, ok := c.entries[connectionID]; ok && now.Before(e.expires) && e.version > versionOf(a) {
+		return a, nil
+	}
+	c.entries[connectionID] = cached{answer: a, version: versionOf(a), expires: now.Add(c.ttl)}
 	return a, nil
 }
+
+// ErrStaleAnswer is an answer older than the version the bind read: the API that
+// gave it is older than the change, or read behind it. The bind is unavailable.
+var ErrStaleAnswer = errors.New("passthrough: the answer is older than the connection's version")

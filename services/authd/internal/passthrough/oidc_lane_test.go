@@ -25,7 +25,7 @@ const (
 // answerSource answers every connection the same way.
 type answerSource struct{ a *Answer }
 
-func (s answerSource) Fetch(context.Context, string) (*Answer, error) { return s.a, nil }
+func (s answerSource) Fetch(context.Context, string, int64) (*Answer, error) { return s.a, nil }
 
 func oidcAnswer(s oidc.Settings) *Answer { return &Answer{Lane: LaneOIDC, OIDC: &s} }
 
@@ -72,7 +72,7 @@ func TestAnOIDCConnectionIsAskedOfItsProviderAndNeverOfTheDirectory(t *testing.T
 			srv := oidctest.Start(t)
 			svc := NewService(answerSource{oidcAnswer(f.Settings())}, untouchedBinder(t), srv.Client())
 
-			res := svc.Bind(context.Background(), "c1", laneEmail, lanePass)
+			res := svc.Bind(context.Background(), "c1", 0, laneEmail, lanePass)
 			if res.Outcome != Verified || res.Lane != LaneOIDC || res.Preset != f.Preset {
 				t.Fatalf("got %+v", res)
 			}
@@ -88,7 +88,7 @@ func TestAnLDAPConnectionIsAskedOfTheDirectoryAndNeverOfTheProvider(t *testing.T
 	binder, dials := countingBinder()
 	svc := NewService(answerSource{ldapAnswer()}, binder, srv.Client())
 
-	res := svc.Bind(context.Background(), "c1", laneEmail, lanePass)
+	res := svc.Bind(context.Background(), "c1", 0, laneEmail, lanePass)
 	if res.Outcome != Unavailable || res.Reason != ReasonDialFailed || res.Lane != LaneLDAP {
 		t.Fatalf("got %+v", res)
 	}
@@ -112,7 +112,7 @@ func TestAnAnswerThatIsNotWholeIsUnavailable(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc := NewService(answerSource{a}, untouchedBinder(t), srv.Client())
-			res := svc.Bind(context.Background(), "c1", laneEmail, lanePass)
+			res := svc.Bind(context.Background(), "c1", 0, laneEmail, lanePass)
 			if res.Outcome != Unavailable || res.Reason != ReasonBadSettings || srv.Count() != 0 {
 				t.Fatalf("got %+v after %d provider calls", res, srv.Count())
 			}
@@ -133,7 +133,7 @@ func TestMalformedOIDCSettingsAreUnavailableWithoutACall(t *testing.T) {
 			bad := oidctest.Okta.Settings()
 			mutate(&bad)
 			svc := NewService(answerSource{oidcAnswer(bad)}, untouchedBinder(t), srv.Client())
-			res := svc.Bind(context.Background(), "c1", laneEmail, lanePass)
+			res := svc.Bind(context.Background(), "c1", 0, laneEmail, lanePass)
 			if res.Outcome != Unavailable || res.Reason != oidc.ReasonBadSettings || srv.Count() != 0 {
 				t.Fatalf("got %+v after %d provider calls", res, srv.Count())
 			}
@@ -144,7 +144,7 @@ func TestMalformedOIDCSettingsAreUnavailableWithoutACall(t *testing.T) {
 func TestAnOffConnectionNeverReachesEitherLane(t *testing.T) {
 	srv := oidctest.Start(t)
 	svc := NewService(answerSource{nil}, untouchedBinder(t), srv.Client())
-	res := svc.Bind(context.Background(), "c1", laneEmail, lanePass)
+	res := svc.Bind(context.Background(), "c1", 0, laneEmail, lanePass)
 	if res.Outcome != Rejected || res.Reason != ReasonPassthroughOff || res.Lane != "" || srv.Count() != 0 {
 		t.Fatalf("got %+v after %d provider calls", res, srv.Count())
 	}
@@ -271,5 +271,14 @@ func TestAProviderThatRefusesOurClientIsUnavailableNotARejection(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), lanePass) {
 		t.Errorf("the password reached the error: %v", err)
+	}
+}
+
+// The API's "off" is a refusal, asked of nobody.
+func TestAnOffAnswerIsRefused(t *testing.T) {
+	svc := NewService(answerSource{&Answer{Lane: LaneOff, Version: 3}}, &Binder{}, nil)
+	res := svc.Bind(context.Background(), "c1", 3, laneEmail, lanePass)
+	if res.Outcome != Rejected || res.Reason != ReasonPassthroughOff {
+		t.Fatalf("Bind = %+v", res)
 	}
 }
