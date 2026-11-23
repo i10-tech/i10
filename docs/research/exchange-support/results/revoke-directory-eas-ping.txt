@@ -1,0 +1,7 @@
+FolderSync HTTP 200 strings=['1', 'ARHn_v24AQECAgEA', '15', 'ARMAAA', '0', 'Inbox', '2', 'ARMAAQ', '0', 'Deleted Items', '4', 'ARMAAg']
+Sync HTTP 200 strings=['ARDYxNakAwECAA', 'ARMAAA', '1']
+Sync HTTP 200 strings=[]
+Sync HTTP 200 strings=[]
+21:46:07 Ping sent (heartbeat 120s, inbox ARMAAA)
+21:46:17 Ping ended after 10.4s: HTTP 200 strings=['2', 'ARMAAA'] raw=03016a00000d454703320001494a0341524d41414100010101
+21:46:17 next FolderSync with the same header: HTTP 200

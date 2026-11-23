@@ -1,0 +1,77 @@
+21:52:50 <?xml version="1.0" encoding="utf-8"?>
+<Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+<soap:Header>
+<t:ServerVersionInfo MajorVersion="15" MinorVersion="1" MajorBuildNumber="225" MinorBuildNumber="42" Version="Exchange2016"/>
+</soap:Header>
+<soap:Body>
+<m:GetStreamingEventsResponse>
+<m:ResponseMessages>
+<m:GetStreamingEventsResponseMessage ResponseClass="Success">
+<m:ResponseCode>NoError</m:ResponseCode>
+<m:ConnectionStatus>OK</m:ConnectionStatus>
+</m:GetStreamingEventsResponseMessage>
+</m:ResponseMessages>
+</m:GetStreamingEventsResponse>
+</soap:Body>
+</Envelope>
+<Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+<soap:Header>
+<t:ServerVersionInfo MajorVersion="15" MinorVersion="1" MajorBuildNumber="225" MinorBuildNumber="42" Version="Exchange2016"/>
+</soap:Header>
+<soap:Body>
+<m:GetStreamingEventsResponse>
+<m:ResponseMessages>
+<m:GetStreamingEventsResponseMessage ResponseClass="Success">
+<m:ResponseCode>NoError</m:ResponseCode>
+<m:ConnectionStatus>OK</m:ConnectionStatus>
+</m:GetStreamingEventsResponseMessage>
+</m:ResponseMessages>
+</m:GetStreamingEventsResponse>
+</soap:Body>
+</Envelope>
+<Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+<soap:Header>
+<t:ServerVersionInfo MajorVersion="15" MinorVersion="1" MajorBuildNumber="225" MinorBuildNumber="42" Version="Exchange2016"/>
+</soap:Header>
+<soap:Body>
+<m:GetStreamingEventsResponse>
+<m:ResponseMessages>
+<m:GetStreamingEventsResponseMessage ResponseClass="Success">
+<m:ResponseCode>NoError</m:ResponseCode>
+<m:ConnectionStatus>OK</m:ConnectionStatus>
+</m:GetStreamingEventsResponseMessage>
+</m:ResponseMessages>
+</m:GetStreamingEventsResponse>
+</soap:Body>
+</Envelope>
+<Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+<soap:Header>
+<t:ServerVersionInfo MajorVersion="15" MinorVersion="1" MajorBuildNumber="225" MinorBuildNumber="42" Version="Exchange2016"/>
+</soap:Header>
+<soap:Body>
+<m:GetStreamingEventsResponse>
+<m:ResponseMessages>
+<m:GetStreamingEventsResponseMessage ResponseClass="Success">
+<m:ResponseCode>NoError</m:ResponseCode>
+<m:ConnectionStatus>OK</m:ConnectionStatus>
+</m:GetStreamingEventsResponseMessage>
+</m:ResponseMessages>
+</m:GetStreamingEventsResponse>
+</soap:Body>
+</Envelope>
+<Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+<soap:Header>
+<t:ServerVersionInfo MajorVersion="15" MinorVersion="1" MajorBuildNumber="225" MinorBuildNumber="42" Version="Exchange2016"/>
+</soap:Header>
+<soap:Body>
+<m:GetStreamingEventsResponse>
+<m:ResponseMessages>
+<m:GetStreamingEventsResponseMessage ResponseClass="Success">
+<m:ResponseCode>NoError</m:ResponseCode>
+<m:ConnectionStatus>Closed</m:ConnectionStatus>
+</m:GetStreamingEventsResponseMessage>
+</m:ResponseMessages>
+</m:GetStreamingEventsResponse>
+</soap:Body>
+</Envelope>
+21:52:50 [curl ended 200 after 180.014205s]
