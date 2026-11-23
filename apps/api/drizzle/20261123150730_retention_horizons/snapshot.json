@@ -1,0 +1,86 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "41c1cdaa-5213-4364-a7aa-edeaf1cf1f89",
+  "prevIds": [
+    "33af7a88-e603-4680-a375-70d47d4030bf"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "core",
+        "retention_horizons"
+      ],
+      "writes": [
+        "s|tbl|core.retention_horizons",
+        "n|tbl|core.retention_horizons",
+        "e|tbl|core.retention_horizons",
+        "n|rel|core.retention_horizons",
+        "n|type|core.retention_horizons",
+        "n|rel|core.retention_horizons_pkey"
+      ],
+      "reads": [
+        "n|sch|core"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "name": "retention_horizons",
+        "isRlsEnabled": true,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "retention_horizons",
+        "name": "tenant_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "retention_horizons",
+        "name": "oldest_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "retention_horizons",
+        "name": "retention_horizons_pkey",
+        "columns": [
+          "tenant_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}
