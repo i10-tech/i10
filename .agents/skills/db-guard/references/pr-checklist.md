@@ -28,6 +28,6 @@ under `docs/research/`).
 - [ ] Migration: lock taken per statement and for how long; `SET LOCAL lock_timeout` first; no rewrite or full scan of a large table; no index on a large or busy table (stop and ask until the #507 runner lands)
 - [ ] Rename or type change: expand-contract, authd's Go SQL and every function updated in step
 - [ ] Growth: how big each new table gets and what removes rows (retention, partition drop, TTL)
-- [ ] Redis: every key has a TTL; key count and bytes at scale; nothing needed after a Redis restart lives only there
+- [ ] Redis: every cache, counter, rate-limit and lock key has a TTL; queue keys (groupmq) have NO TTL, and a new queue or higher `keepCompleted`/`keepFailed` states its retention and memory instead; key count and bytes at scale; nothing needed after a Redis restart lives only there
 - [ ] Access removed anywhere: every cache of that access is invalidated in this change, with a test
 ```
