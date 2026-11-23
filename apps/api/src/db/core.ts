@@ -4967,6 +4967,33 @@ export const expiredMessages = core.table(
 )
 
 /**
+ * For each workspace id, a time before which it holds no message and no body
+ * (#507). `core.retention_due` only looks at a workspace once its cutoff has
+ * passed this time, instead of reading every workspace's oldest mail every hour.
+ *
+ * ⚠ A LOWER BOUND, NEVER THE EXACT OLDEST. It is written as at most an hour
+ * before the moment it was computed, and mail is only ever written with
+ * `created_at = now()` (send/accept-db.ts), so a send whose transaction was
+ * still open when the bound was computed cannot land before it.
+ *
+ * ⚠ NO FOREIGN KEY TO `core.tenants`, ON PURPOSE. Mail has none either, and a
+ * workspace removed by hand leaves its mail behind (a flush does not reach the
+ * message tables). Its row here is how retention keeps finding that mail, and
+ * the row goes once the mail has. A trigger on `core.tenants` writes the row as
+ * `-infinity` when a tenant is deleted, so a workspace removed before it ever
+ * had a horizon is still found.
+ *
+ * Only `core.retention_due` (definer) reads or writes it: RLS on, no policy.
+ * One row per workspace id.
+ */
+export const retentionHorizons = core
+  .table("retention_horizons", {
+    tenantId: uuid("tenant_id").primaryKey(),
+    oldestAt: timestamp("oldest_at", { withTimezone: true }).notNull(),
+  })
+  .enableRLS()
+
+/**
  * An embedding of one piece of content a workspace sent (#170), per day.
  *
  * ⚠ AN EMBEDDING IS DERIVED FROM THE MAIL AND CAN LEAK SOME OF IT, so it is
