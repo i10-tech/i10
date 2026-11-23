@@ -45,7 +45,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: message-stats
-              image: ghcr.io/i10-tech/i10-api:prod-e54bae0fa232e46566f9dc071acd1e26176020ad@sha256:d66e2af6e17aacd8dbf27e019902faab62490618585700aad1528bdda5ad8acb
+              image: ghcr.io/i10-tech/i10-api:prod-b95bda13ef41e807fa5890e9c743904d956658f4@sha256:fd4d270f4f5f7fddc0a6a48b8917b42251de581490393968efac8a1c4680bdd2
               imagePullPolicy: Always
               command: ["bun", "dist/message-stats.js"]
               envFrom:
