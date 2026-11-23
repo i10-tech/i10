@@ -21,6 +21,12 @@
 # Scoped to the Stalwart pod and to three ports. 587 is absent because nothing
 # listens there, and 8080 because the management API belongs behind Traefik.
 #
+# ⚠ 465 AND 993 ARE THE MAIL FRONT'S CONTAINER NOW, NOT STALWART'S, AND THIS
+# RULE IS UNCHANGED FOR IT. A policy selects the pod, not a container, and the
+# front listens on the pod's addresses on the same numbers. Stalwart's own 465
+# and 993 are on 127.0.0.1, which no policy is involved in: nothing outside the
+# pod's network namespace can reach them (config/README.md, "The mail front").
+#
 # ⚠ THIS POLICY IS NOT WHAT LETS THE SEND WORKER RELAY. `stalwart-relay-clients`
 # below admits the worker, and only the worker, to 2525. Policies are ADDITIVE,
 # so the ports here are open to every source, pods in i10-prod included: this

@@ -1063,6 +1063,153 @@ instead of failing it; `5.1.1` and `5.3.4` are still about the message.
 ⚠ **NEVER ADD 2525 TO A hostPort OR TO `allow-public-mail`.** Either makes this
 an open relay for the internet.
 
+## The mail front (#383)
+
+993 and 465 are no longer Stalwart's TLS. The `mailfront` container in the same
+pod (`services/authd/README.md`, "Mail front") terminates TLS on the pod's
+addresses and hands each connection to Stalwart over PROXY v2 (SMTP with the
+SSL extension, IMAP without it, below). It exists because Stalwart never ends a
+session that has signed in, and the front can: it closes a connection the moment
+its account loses access. Every person sign-in it forwards carries its bind
+token, and authd refuses a person bind without one (`services/authd/README.md`,
+"The bind token"). Port 25 and the `relay` on 2525 are unchanged.
+
+The two listeners the front sits in front of are upserted by name in
+`plan.ndjson`, in the stored shape:
+
+| Listener      | Bind            | TLS                                | PROXY header from |
+| ------------- | --------------- | ---------------------------------- | ----------------- |
+| `imaps`       | `127.0.0.1:993` | none (`useTls`, `implicitTls` off) | `127.0.0.1` only  |
+| `submissions` | `127.0.0.1:465` | none                               | `127.0.0.1` only  |
+
+What was probed on a local v1.1.0 before relying on it (2026-11-21,
+`docs/research/mail-device-binding.md`, "Mail front probes"):
+
+- **The SSL TLV makes a plaintext listener count as TLS.** With it, IMAP offers
+  `AUTH=PLAIN` and accepts LOGIN, and `is_tls` is true in SMTP expressions (so
+  the default `saslMechanisms` rule offers AUTH on 465). Without it, IMAP says
+  LOGINDISABLED and SMTP answers `503 5.5.1 AUTH not allowed`.
+- **TLS is also what turns on bearer sign-ins** (OAUTHBEARER, XOAUTH2,
+  `common/src/auth/sasl.rs:83`). Stalwart checks a bearer token itself and never
+  asks authd, so it would sign a client in without the front's bind token. Two
+  plan lines shut them, probed on v1.1.0 on 2026-11-23
+  (`docs/research/mail-device-binding.md` section 9):
+  - `Imap.allowPlainTextAuth: true`, and the front sends IMAP upstream without
+    the TLV. LOGIN and AUTHENTICATE PLAIN work as before; both bearer
+    mechanisms answer `NO [PRIVACYREQUIRED]`, "require a TLS connection". The
+    setting is global, so it would also allow plaintext
+    LOGIN on any other cleartext IMAP or POP3 listener: there is none (the plan has
+    only `imaps`, on loopback), and ⚠ one must never be added.
+  - `MtaStageAuth.saslMechanisms`: `[plain, login]` when
+    `local_port == 465 && is_tls`, otherwise none. SMTP keeps the TLV, because
+    Stalwart offers no AUTH on a connection it thinks is cleartext; EHLO now
+    says `AUTH PLAIN LOGIN`, and AUTH XOAUTH2 or OAUTHBEARER answer
+    `554 5.7.8 Authentication mechanism not supported.`
+- **`remote_ip` is the client's** (from the header), so the auth-failure webhook,
+  the throttles and auto-ban see real addresses.
+- **`local_port` is the header's destination port, not the bind's.** The front
+  sends the port the client reached, so every `local_port == 465` rule in this
+  plan holds. A front that sent another port would silently switch them off.
+- **No STARTTLS is offered** on the plaintext listeners, and the front refuses it.
+- **The default listeners bind `[::]` with `SO_REUSEADDR` and `SO_REUSEPORT`.**
+  A specific address on the same port cannot be bound while they listen (the
+  front waits, logging "port is taken"), and `SO_REUSEPORT` is shared only
+  between sockets of the same user.
+
+⚠ **A LISTENER CHANGE NEEDS A RESTART.** Stalwart's docs: "Listener changes take
+effect after a restart." `bootstrap.sh` lists `NetworkListener` among the
+startup-read objects, so after the hook applies this plan it ends with "A PERSON
+MUST RESTART THE PODS".
+
+### Rolling it out
+
+Three merges, in this order, because Argo deploys `main` as it lands:
+
+1. **The database role.** The `mailfront` role in `platform-db/cluster.yaml`
+   and its `i10-mailfront-db-role` DopplerSecret, after the Doppler values and
+   the service tokens exist (`services/authd/README.md`, "Mail front", "Its
+   database role", step 1, which also makes the two bind token keys). Check
+   that CNPG created it before the next step.
+2. **The code** (the `mailfront` binary in the authd image, the role's grants,
+   the pass-through versions and the domain index migrations). Nothing runs the
+   front yet. Its post-merge pin commit publishes the image the next step
+   references.
+   ⚠ **FROM THAT PIN, EVERY PERSON SIGN-IN IS REFUSED UNTIL STEP 3's RESTART.**
+   The pin rolls authd, and the new authd accepts a person bind only with the
+   front's token; nothing sends one until the front runs, and authd has no
+   keys until this deploy adds `AUTHD_BIND_TOKEN_KEYS`. There is no permissive
+   phase, by decision. Delivery is unaffected (the service bind needs no
+   token). Accepted while prod has no mail users; with users, run step 3
+   straight after the pin.
+3. **This deploy** (`node/statefulset.yaml`, `plan.ndjson`, `bootstrap.sh`,
+   `internal/kustomization.yaml`, `networkpolicy.yaml`, and the
+   `i10-mail-bind-token` DopplerSecret in `doppler/dopplersecrets.yaml`). Check
+   that the operator has synced that Secret with both keys
+   (`kubectl -n i10-prod get secret i10-mail-bind-token -o jsonpath='{.data}' | jq 'keys'`)
+   before the restart: both references are optional, so a missing key starts
+   the containers and refuses every sign-in instead of failing loudly. ⚠ The
+   `mailfront` container runs the same image as the authd container, and must
+   stay on it: `.github/scripts/pin-image.py` rewrites every reference to
+   `i10-authd` under `infra/k8s` on each authd build, so the two move together.
+   A digest older than step 2's pin has no mailfront binary, crash-loops, and
+   keeps the pod NotReady.
+   1. Argo rolls the pods. The `mailfront` container starts, finds Stalwart
+      still holding `[::]:993` and `[::]:465`, and waits. Stalwart still owns
+      both, but no person can sign in: authd already needs the front's token.
+   2. The PostSync hook applies the two listener upserts and reloads. Stalwart
+      keeps its old sockets, because a reload does not rebind, and the hook's
+      log ends with "A PERSON MUST RESTART THE PODS".
+   3. A person runs `./bootstrap.sh` on psl-vps, which restarts the pods.
+      Stalwart binds `127.0.0.1`, and the front binds the pod's addresses
+      within a second. Any later restart of the pods would do the same.
+      `./bootstrap.sh --verify` then reads port 25's certificate with STARTTLS
+      (still Stalwart's) and checks that 993 and 465 are the front, not
+      Stalwart.
+
+### Rolling it back
+
+The plan engine only upserts. **Deleting the two lines does not move the
+listeners back**: the stored objects keep `127.0.0.1` and no TLS. A rollback is
+one change with both halves:
+
+1. In `node/statefulset.yaml`: delete the `mailfront` container and the
+   `mailfront-tls` volume, and put the two ports back on the `stalwart`
+   container:
+
+   ```yaml
+   - { name: submissions, containerPort: 465, hostPort: 465 }
+   - { name: imaps, containerPort: 993, hostPort: 993 }
+   ```
+
+   The `sysctls` entry can stay; it is harmless without the front. In
+   `internal/kustomization.yaml`, delete the `test` and `remove` operations for
+   `containers/2`, or the overlay fails to build.
+
+2. In `plan.ndjson`: replace the two `imaps` and `submissions` lines with the
+   original shape, TLS from the first byte on every address:
+
+   ```json
+   {"@type": "upsert", "object": "NetworkListener", "matchOn": ["name"], "value": {"imaps": {"name": "imaps", "bind": {"[::]:993": true}, "protocol": "imap", "useTls": true, "implicitTls": true, "tlsDisableCipherSuites": {}, "tlsDisableProtocols": {}, "tlsIgnoreClientOrder": true, "tlsTimeout": 60000, "overrideProxyTrustedNetworks": {}, "socketBacklog": 1024, "socketNoDelay": true, "socketReuseAddress": true, "socketReusePort": true, "socketReceiveBufferSize": null, "socketSendBufferSize": null, "socketTosV4": null, "socketTtl": null}}}
+   {"@type": "upsert", "object": "NetworkListener", "matchOn": ["name"], "value": {"submissions": {"name": "submissions", "bind": {"[::]:465": true}, "protocol": "smtp", "useTls": true, "implicitTls": true, "tlsDisableCipherSuites": {}, "tlsDisableProtocols": {}, "tlsIgnoreClientOrder": true, "tlsTimeout": 60000, "overrideProxyTrustedNetworks": {}, "socketBacklog": 1024, "socketNoDelay": true, "socketReuseAddress": true, "socketReusePort": true, "socketReceiveBufferSize": null, "socketSendBufferSize": null, "socketTosV4": null, "socketTtl": null}}}
+   ```
+
+3. Merge, then run `./bootstrap.sh` by hand on psl-vps as soon as the pods
+   have rolled: it applies the deployed plan (now the rollback) and restarts
+   them. Between the roll and that restart, 993 and 465 answer nothing: the
+   front is gone and Stalwart still has the loopback listeners. (`PLAN_FILE`
+   only previews; it cannot apply a plan that is not deployed.)
+4. In `bootstrap.sh`, the 465 check can go back to `https://$H:465`, and the
+   993 front check must go.
+5. ⚠ **AND authd GOES BACK TOO, IN THE SAME CHANGE.** authd from PR 1 on
+   refuses every person bind without the front's token, and has no setting
+   that turns that off. Without the front nothing mints one, so a rollback
+   that leaves authd's image alone signs nobody in. Pin the `authd`
+   container's image back to the digest before PR 1's pin commit.
+6. The `Imap.allowPlainTextAuth` and `MtaStageAuth.saslMechanisms` lines can
+   stay: there is no cleartext IMAP or POP3 listener for the first to open, and on a
+   real TLS 465 the second still offers PLAIN and LOGIN (no bearer
+   mechanisms, which nothing of ours uses).
+
 ## `STALWART_WEBHOOK_SECRET` lives in two places, and must match
 
 The `WebHook` object in `plan.ndjson` reads its `signatureKey` from the

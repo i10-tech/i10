@@ -43,6 +43,16 @@ spec:
         fsGroup: 2000
         seccompProfile:
           type: RuntimeDefault
+        # ⚠ SO THE MAIL FRONT CAN BIND 993 AND 465 WITHOUT A CAPABILITY. It runs
+        # as nonroot with every capability dropped, and a capability added in the
+        # pod spec never reaches a non-root process's effective set (only a file
+        # capability does, which is how Stalwart's own binary gets
+        # NET_BIND_SERVICE). This sysctl is namespaced to the pod's network
+        # namespace and on the kubelet's safe list, so it changes nothing outside
+        # this pod. Inside it, every container could bind a low port, which grants
+        # nothing: the three that run here already hold the ports they need.
+        sysctls:
+          - { name: net.ipv4.ip_unprivileged_port_start, value: "0" }
 
       # ⚠ A NEW POD'S FIRST CONNECTION TO A ClusterIP IS REFUSED while kube-proxy
       # and the CNI finish programming rules for it. Stalwart dials the pooler
@@ -193,19 +203,24 @@ spec:
           # constraint we already have rather than one this adds.
           ports:
             - { name: smtp, containerPort: 25, hostPort: 25 }
-            - { name: submissions, containerPort: 465, hostPort: 465 }
+            # ⚠ 465 AND 993 ARE THE MAIL FRONT'S NOW (the `mailfront` container
+            # below, same numbers, same hostPorts). Stalwart's `imaps` and
+            # `submissions` listen on 127.0.0.1 behind it, without TLS, and take
+            # the PROXY header only from loopback (config/README.md, "The mail
+            # front"). A port named here would be a second claim on the same
+            # name in one pod, which the API server refuses.
+            #
             # ⚠ DECLARED, NOT LISTENED ON, AND THAT IS NOT CHANGING. Stalwart
-            # serves `smtp` on 25 and `submissions` on 465; there is no 587
-            # listener and the send worker does not want one - 465 is implicit
-            # TLS from the first byte, which RFC 8314 prefers over STARTTLS
-            # because it has no cleartext phase to downgrade.
+            # serves `smtp` on 25 and the front serves `submissions` on 465;
+            # there is no 587 listener and the send worker does not want one -
+            # 465 is implicit TLS from the first byte, which RFC 8314 prefers
+            # over STARTTLS because it has no cleartext phase to downgrade.
             #
             # The port stays here because `i10-stalwart-mail` maps 587 to this
             # name and a Service may not target a port the pod does not declare.
             # No hostPort: claiming it on the node would answer the internet with
             # a hang instead of a refusal.
             - { name: submission, containerPort: 587 }
-            - { name: imaps, containerPort: 993, hostPort: 993 }
             # ⚠ THE SEND WORKER'S RELAY, AND THE ABSENCE OF A hostPort IS THE
             # SECURITY. `relay` on 2525 takes mail WITHOUT authentication - the
             # trust is where the connection comes from, not what it presents. No
@@ -225,7 +240,9 @@ spec:
 
           # The wildcard cert-manager already issues for *.i10.tech, handed to
           # Stalwart as text so a Certificate object can reference it by
-          # variable name rather than carrying PEM in git.
+          # variable name rather than carrying PEM in git. Since the mail front
+          # it serves port 25's STARTTLS only: 993 and 465 are the front's, which
+          # reads the same Secret as files and reloads it by itself.
           #
           # ⚠ ENV VARS DO NOT UPDATE IN A RUNNING POD. cert-manager rewrites this
           # Secret when it renews (2026-10-31 for the current one), and this
@@ -384,6 +401,17 @@ spec:
             # the backend verify_password endpoint does not feed Clerk's counter.
             - { name: AUTHD_BINDS_PER_MINUTE, value: "30" }
             - { name: AUTHD_LOG_LEVEL, value: "info" }
+            # ⚠ WITHOUT IT EVERY PERSON BIND IS REFUSED: a person bind needs the
+            # mail front's token (services/authd/README.md, "The bind token").
+            # Optional on purpose: a missing key must not stop the container,
+            # because Stalwart's service bind (delivery lookups) needs authd
+            # running. authd logs the refusal reason at start and on each bind.
+            - name: AUTHD_BIND_TOKEN_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-mail-bind-token
+                  key: AUTHD_BIND_TOKEN_KEYS
+                  optional: true
 
           resources:
             requests: { cpu: 50m, memory: 64Mi }
@@ -411,10 +439,125 @@ spec:
           # listener on the pod IP. That is a deliberate addition, not a probe
           # stanza - see services/authd/README.md.
 
+        # ── the mail front: TLS for 993 and 465, and the revocation sweep ─────
+        - name: mailfront
+          # ⚠ THE SAME IMAGE AS authd, A SECOND BINARY IN IT. One build, one digest,
+          # one pin (pin-image.py rewrites every reference to the image), so the
+          # two can never run from different commits.
+          #
+          # ⚠ BEFORE THIS MERGES, SET THIS TO EXACTLY THE authd CONTAINER'S IMAGE
+          # ABOVE, AS PINNED BY PR 1's POST-MERGE PIN COMMIT (the one that built
+          # the image with /usr/local/bin/mailfront in it). Any older digest has no
+          # mailfront binary: the container crash-loops and the pod goes NotReady.
+          # The placeholder does not resolve on purpose, so a forgotten edit fails
+          # the image pull instead of running something old.
+          image: ghcr.io/i10-tech/i10-authd:prod-e10fbbcfb2680d07aa9dfff028209d6801bd5d63@sha256:36eac16f1fbad1557d841e75b7cd4dc9690d15b86d390dfc271c0cb29a9c14c6
+          command: ["/usr/local/bin/mailfront"]
+
+          # ⚠ ITS OWN PROCESS, ITS OWN LIMIT, AND NONE OF authd's SECRETS. It parses
+          # bytes from anyone on the internet before they sign in, so a crash in
+          # it must not take LDAP down and a leak from it must find no Clerk key,
+          # no AUTHD_API_SECRET and no LDAP service secret. It has the
+          # certificate, a read-only database connection as its own role,
+          # `mailfront`, the key it signs bind tokens with, and settings. See
+          # services/authd/README.md, "Mail front".
+          # ⚠ ITS OWN UID, NOT STALWART'S 2000 FROM THE POD. Stalwart's listeners
+          # set SO_REUSEPORT, which Linux shares between sockets of the SAME
+          # user: under uid 2000 the front could bind beside them. 65532 is the
+          # image's nonroot. fsGroup 2000 still lets it read the mounted
+          # certificate (0440, group 2000).
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+
+          # The hostPorts Stalwart held before, on the same numbers: psl-vps's ufw
+          # ROUTED rules match the port after the hostPort DNAT, and the plan's
+          # `local_port == 465` rules read the port the client reached (the PROXY
+          # header carries it). Changing a number breaks both, silently.
+          ports:
+            - { name: submissions, containerPort: 465, hostPort: 465 }
+            - { name: imaps, containerPort: 993, hostPort: 993 }
+
+          env:
+            # ⚠ THE POD'S OWN ADDRESSES, NEVER A WILDCARD. Stalwart listens on
+            # 127.0.0.1:993 and :465 in the same network namespace; a wildcard
+            # bind would take loopback too and fail. Both families when the pod
+            # has them (`status.podIPs` is comma separated).
+            - name: MAILFRONT_LISTEN_IPS
+              valueFrom:
+                fieldRef: { fieldPath: status.podIPs }
+            - { name: MAILFRONT_IMAP_UPSTREAM, value: "127.0.0.1:993" }
+            - { name: MAILFRONT_SMTP_UPSTREAM, value: "127.0.0.1:465" }
+            - { name: MAILFRONT_TLS_CERT_FILE, value: /etc/mailfront/tls/tls.crt }
+            - { name: MAILFRONT_TLS_KEY_FILE, value: /etc/mailfront/tls/tls.key }
+            # ⚠ ITS OWN ROLE, `mailfront`, NOT authd's: SELECT on what a bind
+            # reads and nothing else. `authd` can write the failure budget.
+            - name: MAILFRONT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: i10-mailfront-db-role, key: password }
+            - name: MAILFRONT_DATABASE_URL
+              value: postgres://mailfront:$(MAILFRONT_DB_PASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10?pool_max_conns=4
+            - { name: MAILFRONT_LOG_LEVEL, value: "info" }
+            # The key the front signs bind tokens with. Optional like authd's:
+            # without it the front answers every sign-in "temporarily
+            # unavailable" and forwards nothing.
+            - name: MAILFRONT_BIND_TOKEN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: i10-mail-bind-token
+                  key: MAILFRONT_BIND_TOKEN_KEY
+                  optional: true
+            # ⚠ SIZED TOGETHER, FROM A MEASUREMENT (2026-11-21, mail-device-
+            # binding.md "Mail front scale"): about 10 MiB at rest and 61 KiB per
+            # idle signed-in connection. 6000 connections is about 370 MiB; the
+            # Go heap limit makes the collector work hard before the container
+            # limit is reached, and the connection cap refuses new connections
+            # (they retry) before either is. Raise all three together.
+            - { name: MAILFRONT_MAX_CONNECTIONS, value: "6000" }
+            - { name: GOMEMLIMIT, value: "450MiB" }
+
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 512Mi }
+
+          volumeMounts:
+            - { name: mailfront-tls, mountPath: /etc/mailfront/tls, readOnly: true }
+
+          # ⚠ NO PROBES, AND WHAT THAT DOES AND DOES NOT BUY. A tcpSocket probe on
+          # the pod IP cannot tell the front from Stalwart (on the first rollout
+          # Stalwart still holds [::]:993 until it restarts, and the probe would
+          # pass against it), and nothing listens on loopback for the kubelet to
+          # reach (see authd above). Without a readiness probe a RUNNING front
+          # counts as ready, so a front that is up but failing (its database down,
+          # say) does not take this node out of the `i10-stalwart` Service.
+          #
+          # ⚠ A FRONT THAT CRASHES OR EXITS STILL MAKES THE POD NotReady, probes
+          # or not: a pod is ready only while every container is running. Until
+          # the kubelet restarts it, this node is dropped from the Service's
+          # endpoints, JMAP through it included. That is why the front retries
+          # its database and certificate at start instead of exiting, and why
+          # its image must carry the binary (above). bootstrap.sh --verify checks
+          # that 993 and 465 are answered by the front.
+
       volumes:
         - name: config
           configMap:
             name: i10-stalwart-config
+        # The wildcard certificate as files, for the mail front. The kubelet
+        # rewrites them when cert-manager renews, and the front re-reads them
+        # within a minute, so 993 and 465 need no restart for a renewal.
+        - name: mailfront-tls
+          secret:
+            secretName: i10-tech-tls
+            defaultMode: 0440
+            items:
+              - { key: tls.crt, path: tls.crt }
+              - { key: tls.key, path: tls.key }
         - name: tmp
           emptyDir: {}
         # ⚠ ONE NODE KEY FOR BOTH NODES, AND ONLY THE TWO FILES A NODE NEEDS. The
