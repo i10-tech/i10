@@ -94,6 +94,24 @@ spec:
         passwordSecret:
           name: i10-authd-db-role
 
+      # The mail front's role (services/authd/README.md, "Mail front"): what
+      # authd's bind reads and nothing else, read-only.
+      #
+      # ⚠ NOT THE `authd` ROLE, EVEN THOUGH IT READS THE SAME ROWS. `authd` may
+      # INSERT and UPDATE `authd.bind_failure_budget`, and the front parses
+      # bytes from anyone on the internet before they sign in. Sharing the role
+      # would let a bug in it reset or exhaust anyone's failure budget. The
+      # grants live in apps/api/drizzle/*_mailfront_role_grants, and they FAIL
+      # if this role does not exist yet: this must be reconciled first.
+      - name: mailfront
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: i10-mailfront-db-role
+
       # What apps/api and apps/worker connect as.
       #
       # ⚠ NOT THE `i10` OWNER, AND THAT IS THE WHOLE POINT. Row level security
