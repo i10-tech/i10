@@ -49,3 +49,12 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value: { name: STALWART_ROLE, value: internal }
+      # ⚠ NO MAIL FRONT HERE. This node serves no 993 or 465 (its role enables
+      # the http listener only), so a front would have nothing to front and no
+      # hostPort to bind. The test below makes the patch fail, rather than
+      # remove another container, if the order in ../node ever changes.
+      - op: test
+        path: /spec/template/spec/containers/2/name
+        value: mailfront
+      - op: remove
+        path: /spec/template/spec/containers/2

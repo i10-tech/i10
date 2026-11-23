@@ -695,6 +695,9 @@ def require_env_in_cluster(wanted):
 STARTUP_READ = {
     "Certificate", "SystemSettings", "Role", "Authentication", "Cache",
     "BlobStore", "InMemoryStore", "Coordinator", "ClusterRole", "DataStore",
+    # Stalwart's docs: "Listener changes take effect after a restart." The mail
+    # front moved `imaps` and `submissions` to 127.0.0.1 (config/README.md).
+    "NetworkListener",
 }
 
 # What a dry run found it would write, one entry per object type touched. Only
@@ -897,19 +900,54 @@ verify() {
   # self-signed certificate - invisible from the direction you are looking.
   #
   # curl against an IP LITERAL sends no SNI, which is exactly the case we want.
-  # It then fails to speak HTTP to an SMTP port, which does not matter: the TLS
-  # handshake has already happened and -v has already printed the peer subject.
+  #
+  # ⚠ PORT 25 WITH STARTTLS, NOT 465. Since the mail front (services/authd,
+  # "Mail front") 465 and 993 are the front's TLS, not Stalwart's, and Stalwart's
+  # own 465 on 127.0.0.1 speaks no TLS at all. 25 is the connection
+  # `defaultCertificateId` exists for anyway. curl needs the EHLO domain in the
+  # path: with none it sends the container's hostname and Stalwart refuses it
+  # (`550 5.5.0 Invalid EHLO domain`).
   local subject
-  subject=$(probe "$edge" 'curl -sv --max-time 5 --insecure "https://$H:465" 2>&1 | grep -m1 "subject:"' 2>/dev/null || true)
+  subject=$(probe "$edge" 'curl -sv --max-time 5 --insecure --ssl-reqd "smtp://$H:25/verify.i10.tech" 2>&1 | grep -m1 "subject:"' 2>/dev/null || true)
   subject=$(printf '%s' "$subject" | sed 's/^[* ]*subject: *//')
   case "$subject" in
-    *i10.tech*) ok "certificate without SNI: $subject" ;;
+    *i10.tech*) ok "certificate without SNI (25, STARTTLS): $subject" ;;
     *)
       warn "certificate without SNI is '${subject:-unreadable}' - expected CN=i10.tech."
       warn "  A reload does NOT switch certificates; the pod must be restarted."
       failures=$((failures + 1))
       ;;
   esac
+
+  # ⚠ THAT 993 AND 465 ARE ANSWERED BY THE FRONT, NOT BY STALWART, from a signal
+  # only the front gives. Both serve the same certificate, and on the first
+  # rollout Stalwart still holds both ports itself, so a certificate check would
+  # pass against the wrong server, and so would reading what is MISSING from its
+  # answers. The front answers STARTTLS itself, on both ports, with its own
+  # words (`startTLSAnswer` in services/authd/internal/mailfront/session.go);
+  # Stalwart says "Already in TLS mode.". curl sends the custom command with no
+  # credentials (checked against the front, 2026-11-23). The front binds the
+  # pod's address only, never 127.0.0.1 (Stalwart's plaintext listeners); by hand
+  # the probe runs inside the pod and asks `hostname -i` for that address.
+  local marker port answer
+  marker="Connection is already encrypted (i10 mail front)."
+  for port in 993 465; do
+    case "$port" in
+      993) answer=$(probe "$edge" 'F=$H; [ "$F" = 127.0.0.1 ] && F=$(hostname -i | cut -d" " -f1); curl -sv --max-time 5 --insecure "imaps://$F:993/" -X STARTTLS 2>&1 | grep -m1 -E "^< A[0-9]+ (BAD|NO) "' 2>/dev/null || true) ;;
+      465) answer=$(probe "$edge" 'F=$H; [ "$F" = 127.0.0.1 ] && F=$(hostname -i | cut -d" " -f1); curl -sv --max-time 5 --insecure "smtps://$F:465/verify.i10.tech" -X STARTTLS 2>&1 | grep -m1 "^< 50[0-9] "' 2>/dev/null || true) ;;
+    esac
+    case "$answer" in
+      *"$marker"*) ok "$port is the mail front" ;;
+      *"Already in TLS mode"*)
+        warn "$port is Stalwart itself, not the mail front: restart the pods (./bootstrap.sh) to move its listeners"
+        failures=$((failures + 1))
+        ;;
+      *)
+        warn "$port answered '${answer:-nothing}' to STARTTLS - is the mailfront container running?"
+        failures=$((failures + 1))
+        ;;
+    esac
+  done
 
   # Every node serves these (JMAP and the web endpoints are on both), so the Job
   # asks each; by hand it is the one pod it always was.
