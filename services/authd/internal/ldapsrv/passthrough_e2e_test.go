@@ -61,7 +61,7 @@ type fakeDirectory struct {
 	email string
 }
 
-func (f *fakeDirectory) Bind(_ context.Context, conn, email, _ string) passthrough.Result {
+func (f *fakeDirectory) Bind(_ context.Context, conn string, _ int64, email, _ string) passthrough.Result {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -96,12 +96,14 @@ var (
 // failing is an API that cannot be reached.
 type failing struct{ err error }
 
-func (f failing) Fetch(context.Context, string) (*passthrough.Answer, error) { return nil, f.err }
+func (f failing) Fetch(context.Context, string, int64) (*passthrough.Answer, error) {
+	return nil, f.err
+}
 
 // fixedSource answers every connection with the same LDAP settings, or off.
 type fixedSource struct{ s *passthrough.Settings }
 
-func (f fixedSource) Fetch(context.Context, string) (*passthrough.Answer, error) {
+func (f fixedSource) Fetch(context.Context, string, int64) (*passthrough.Answer, error) {
 	if f.s == nil {
 		return nil, nil
 	}

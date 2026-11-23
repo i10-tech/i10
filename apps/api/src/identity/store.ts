@@ -40,6 +40,7 @@ import type {
 } from "./ports.js"
 import {
   mirrorManaged,
+  mirrorPassthrough,
   mirrorRequiredDomains,
   unmirrorManaged,
 } from "./authd-mirror.js"
@@ -296,7 +297,9 @@ export function identityStore(db: Database, secrets: Sealer | null): IdentitySto
           .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
           .returning()
         // ⚠ IN THE SAME TRANSACTION: "required" turned on or off, or the connection
-        // going live or dark, is a change of whose Clerk password authd accepts.
+        // going live or dark, is a change of whose Clerk password authd accepts,
+        // and a change to its status or pass-through settings is one of whose mail
+        // sign-ins still stand (mirrorRequiredDomains runs mirrorPassthrough).
         if (updated.length > 0) await mirrorRequiredDomains(tx, tenantId)
         return updated
       })
@@ -477,6 +480,10 @@ export function identityStore(db: Database, secrets: Sealer | null): IdentitySto
           })
           .where(and(eq(connections.tenantId, tenantId), eq(connections.id, id)))
           .returning()
+        // ⚠ IN THE SAME TRANSACTION: a new service account, or LDAP settings saved
+        // with it, changes what pass-through answers, and the mail sign-ins made
+        // under the old answer end with this commit (authd-mirror.ts).
+        if (row) await mirrorPassthrough(tx, tenantId)
         return row ? toConnection(row) : null
       })
     },

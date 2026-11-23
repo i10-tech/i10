@@ -22,6 +22,7 @@ import (
 
 	ldap "github.com/vjeantet/ldapserver"
 
+	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/budgetstore"
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/config"
@@ -50,7 +51,7 @@ func run() error {
 		return err
 	}
 
-	log := newLogger(cfg.LogLevel)
+	log := config.NewLogger(cfg.LogLevel)
 	slog.SetDefault(log)
 
 	// The library logs through a package-level standard logger. Route it into
@@ -91,6 +92,25 @@ func run() error {
 		log.Warn("pass-through is not configured: managed accounts cannot bind")
 	}
 
+	// The mail front's keys (internal/bindtoken). ⚠ NO KEYS, NO PERSON BINDS: a
+	// missing or broken AUTHD_BIND_TOKEN_KEYS refuses every person bind (each one
+	// logged as bind_token_no_keys_configured), and authd still serves the
+	// service bind and search. It never falls back to raw passwords.
+	tokenKeys, err := bindtoken.ParseKeys(cfg.BindTokenKeys)
+	if err != nil {
+		log.Error("AUTHD_BIND_TOKEN_KEYS is unreadable: every person bind will be refused", slog.Any("err", err))
+		tokenKeys = nil
+	}
+	if len(tokenKeys) == 0 {
+		log.Error("no bind token keys: every person bind will be refused until AUTHD_BIND_TOKEN_KEYS is set")
+	} else {
+		ids := make([]int, 0, len(tokenKeys))
+		for id := range tokenKeys {
+			ids = append(ids, int(id))
+		}
+		log.Info("bind token keys loaded", "ids", ids)
+	}
+
 	srv := ldap.NewServer()
 	// Both are connection-level deadlines, reset each time a request is read, and
 	// both are deliberately well above ldapsrv.DefaultOpTimeout (14s) and
@@ -112,10 +132,11 @@ func run() error {
 			Directory: managed,
 			Log:       log,
 		},
-		Budget:    budgetstore.NewPostgres(store.Pool()),
-		Limiter:   limiter,
-		CredCache: credcache.New(cfg.CredCacheTTL),
-		Logger:    log,
+		Budget:        budgetstore.NewPostgres(store.Pool()),
+		Limiter:       limiter,
+		CredCache:     credcache.New(cfg.CredCacheTTL),
+		Logger:        log,
+		BindTokenKeys: tokenKeys,
 	}).Routes())
 
 	// The listener is created here, on this goroutine, rather than inside
@@ -191,12 +212,4 @@ func sweepLoop(ctx context.Context, l *throttle.Limiter, log *slog.Logger) {
 			}
 		}
 	}
-}
-
-func newLogger(level string) *slog.Logger {
-	var lvl slog.Level
-	if err := lvl.UnmarshalText([]byte(level)); err != nil {
-		lvl = slog.LevelInfo
-	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
 }

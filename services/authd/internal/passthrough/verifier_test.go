@@ -13,14 +13,15 @@ import (
 )
 
 type scripted struct {
-	result Result
-	conn   string
-	email  string
-	pass   string
+	result  Result
+	conn    string
+	atLeast int64
+	email   string
+	pass    string
 }
 
-func (s *scripted) Bind(_ context.Context, conn, email, password string) Result {
-	s.conn, s.email, s.pass = conn, email, password
+func (s *scripted) Bind(_ context.Context, conn string, atLeast int64, email, password string) Result {
+	s.conn, s.atLeast, s.email, s.pass = conn, atLeast, email, password
 	return s.result
 }
 
@@ -61,6 +62,20 @@ func TestTheResolverAsksWhoeverKeepsThePassword(t *testing.T) {
 	other := resolve(t, r, projection.Account{ClerkUserID: "u", Managed: true, ManagedConnection: "c2"})
 	if other.Name() == got.Name() {
 		t.Errorf("connections c1 and c2 share the verifier name %q", got.Name())
+	}
+}
+
+// The bind's own read of the connection's version reaches the settings fetch,
+// so a copy older than it is not used.
+func TestTheVerifierAsksForSettingsAtLeastAsNewAsTheBindRead(t *testing.T) {
+	dir := &scripted{result: Result{Outcome: Verified}}
+	r := &ManagedResolver{Unmanaged: clerkStub{}, Directory: dir, Log: quiet}
+	a := projection.Account{ClerkUserID: "u", Email: "u@acme.test", Managed: true, ManagedConnection: "c1", PassthroughVersion: 5}
+	if out, err := resolve(t, r, a).Verify(context.Background(), &a, "pw"); out != verify.Verified || err != nil {
+		t.Fatalf("Verify = %v, %v", out, err)
+	}
+	if dir.conn != "c1" || dir.atLeast != 5 {
+		t.Fatalf("asked %q at version %d, want c1 at 5", dir.conn, dir.atLeast)
 	}
 }
 

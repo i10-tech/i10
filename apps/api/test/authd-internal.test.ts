@@ -24,15 +24,25 @@ const ENABLED: PassthroughAnswer = {
 }
 
 function app(
-  over: { secret?: string | undefined; answer?: () => Promise<PassthroughAnswer> } = {},
+  over: {
+    secret?: string | undefined
+    answer?: () => Promise<PassthroughAnswer>
+    version?: () => Promise<number>
+  } = {},
 ) {
   const calls: string[] = []
+  const order: string[] = []
   const errors: object[] = []
   const routes = createInternalAuthdRoutes({
     secret: "secret" in over ? over.secret : SECRET,
     passthrough: async (id) => {
       calls.push(id)
+      order.push("settings")
       return (over.answer ?? (async () => ENABLED))()
+    },
+    version: async () => {
+      order.push("version")
+      return (over.version ?? (async () => 7))()
     },
     log: { error: (o) => errors.push(o) },
   })
@@ -42,7 +52,7 @@ function app(
       headers: { "content-type": "application/json", ...headers },
       body: typeof body === "string" ? body : JSON.stringify(body),
     })
-  return { post, calls, errors }
+  return { post, calls, order, errors }
 }
 
 describe("POST /internal/authd/passthrough", () => {
@@ -85,8 +95,29 @@ describe("POST /internal/authd/passthrough", () => {
     )
     expect(res.status).toBe(200)
     expect(res.headers.get("cache-control")).toBe("no-store")
-    expect(await res.json()).toEqual(ENABLED)
+    expect(await res.json()).toEqual({ ...ENABLED, version: 7 })
     expect(w.calls).toEqual([ID])
+  })
+
+  // ⚠ The version commits with its change, so settings read after it are at
+  // least as new as it says; read the other way round they could be older.
+  it("reads the version before the settings", async () => {
+    const w = app()
+    await w.post({ Authorization: `Bearer ${SECRET}` }, { connectionId: ID })
+    expect(w.order).toEqual(["version", "settings"])
+  })
+
+  it("is a 503 when the version cannot be read either", async () => {
+    const w = app({
+      version: async () => {
+        throw new Error("database down")
+      },
+    })
+    const res = await w.post(
+      { Authorization: `Bearer ${SECRET}` },
+      { connectionId: ID },
+    )
+    expect(res.status).toBe(503)
   })
 
   it("answers an OIDC connection with the preset, the endpoint and the client id, and nothing secret", async () => {
@@ -105,7 +136,7 @@ describe("POST /internal/authd/passthrough", () => {
       { connectionId: ID },
     )
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual(oidc)
+    expect(await res.json()).toEqual({ ...oidc, version: 7 })
   })
 
   it("passes 'off' on as off", async () => {
@@ -114,7 +145,8 @@ describe("POST /internal/authd/passthrough", () => {
       { Authorization: `Bearer ${SECRET}` },
       { connectionId: ID },
     )
-    expect(await res.json()).toEqual({ enabled: false })
+    // Off has a version too: authd caches "off" like any other answer.
+    expect(await res.json()).toEqual({ enabled: false, version: 7 })
   })
 
   it("validates the body strictly", async () => {

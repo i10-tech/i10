@@ -60,21 +60,17 @@ import {
  * direction; both check under the connection's row lock, so two requests at once
  * cannot leave both on.
  *
- * ⚠ A CHANGE REACHES CACHED PASSWORDS AT ONCE. authd remembers a success for
- * minutes (passthrough.OIDCMaxCacheTTL), so every change raises the credential
- * epoch of the connection's managed accounts (`invalidate`).
+ * ⚠ A CHANGE REACHES CACHED PASSWORDS AND OPEN SESSIONS AT ONCE. authd remembers
+ * a success for minutes (passthrough.OIDCMaxCacheTTL) and the mail front keeps
+ * signed-in sessions open, so the save itself raises the credential epoch of the
+ * connection's managed accounts, in its own transaction
+ * (identity/authd-mirror.ts `mirrorPassthrough`, from `setConnectionSecrets`).
  *
  * ⚠ A LEGACY OKTA-ONLY ROW (`config.oktaMail`) IS READ AND REPLACED. The first
  * write of any kind stores `oidcMail` and drops the old key, in the same save.
  */
 
 export interface OidcMailConsoleDeps {
-  /**
-   * Makes authd ask the provider again for every account the connection
-   * manages. Called after the change is saved; a failure is logged and recorded,
-   * never undone.
-   */
-  invalidate(connectionId: string): Promise<void>
   /** `guardedFetch`: the only way this route reaches a provider. */
   fetch: OidcFetch
 }
@@ -321,23 +317,6 @@ export function mountIdentityOidcMail(app: Hono, d: ConsoleDeps): void {
 
     const moved = applied.changed.length > 0 || applied.before !== applied.after
     if (moved) {
-      // ⚠ AFTER THE SAVE, AND NEVER UNDOING IT: the change is made. If the
-      // epochs cannot be raised the cached passwords live out their minutes
-      // (OIDCMaxCacheTTL), and that is on record rather than an error for the
-      // admin to retry.
-      let revoked = true
-      try {
-        await oidcMail.invalidate(connection.id)
-      } catch (error) {
-        revoked = false
-        id.log.error(
-          {
-            connectionId: connection.id,
-            err: error instanceof Error ? error.name : "unknown",
-          },
-          "could not raise the credential epoch after an OIDC mail change",
-        )
-      }
       await id.store.record(tenantId, {
         type: "connection.oidc_mail_updated",
         actorUserId: userId,
@@ -348,7 +327,6 @@ export function mountIdentityOidcMail(app: Hono, d: ConsoleDeps): void {
           status: connection.status,
           enabled: { from: applied.before, to: applied.after },
           to: applied.to,
-          cachedPasswordsRevoked: revoked,
         },
       })
     }

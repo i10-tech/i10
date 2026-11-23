@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/i10-tech/i10/services/authd/internal/gate"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/verify"
 )
@@ -54,7 +55,7 @@ var FailureBudget = verify.Budget{Max: 3, Window: 15 * time.Minute}
 // Directory answers one managed account's bind through its connection's lane.
 // *Service is the production one; tests put a script in its place.
 type Directory interface {
-	Bind(ctx context.Context, connectionID, email, password string) Result
+	Bind(ctx context.Context, connectionID string, atLeast int64, email, password string) Result
 }
 
 var _ Directory = (*Service)(nil)
@@ -122,7 +123,7 @@ var _ verify.CacheLimit = (*Verifier)(nil)
 // provider's own check; the error is a reason code, never the password, a
 // secret, a token or a DN.
 func (v *Verifier) Verify(ctx context.Context, account *projection.Account, password string) (verify.Outcome, error) {
-	res := v.svc.Bind(ctx, v.connection, account.Email, password)
+	res := v.svc.Bind(ctx, v.connection, account.PassthroughVersion, account.Email, password)
 	v.lane = res.Lane
 	switch res.Outcome {
 	case Verified:
@@ -141,16 +142,14 @@ func (v *Verifier) Verify(ctx context.Context, account *projection.Account, pass
 
 var _ verify.Verifier = (*Verifier)(nil)
 
-// Reasons a managed account has nowhere to be asked, and is refused.
+// Reasons a managed account has nowhere to be asked, and is refused. The two the
+// row decides are internal/gate's; see gate.SSORequired for what it means.
 const (
-	ReasonManagedNoConnection = "managed_no_connection"
-	ReasonNotConfigured       = "passthrough_not_configured"
-	// ReasonSSORequired is an account that is NOT managed but whose address is on a
-	// domain an active connection requires SSO for: its Clerk password is not
-	// accepted any more, and it becomes managed (and gets its company's password)
-	// by signing in through SSO. Not the people the SSO layer exempts (owners and
-	// admins while the owner exemption is on, a connection's bypass list).
-	ReasonSSORequired = "sso_required"
+	ReasonManagedNoConnection = gate.ManagedNoConnection
+	ReasonSSORequired         = gate.SSORequired
+	// ReasonNotConfigured is this authd having no pass-through configured at all,
+	// a fact about the process and not about the account.
+	ReasonNotConfigured = "passthrough_not_configured"
 )
 
 // refusal is the verifier of a managed account that has no directory to ask. It
@@ -193,8 +192,9 @@ var _ verify.Verifier = refusal{}
 // from Unmanaged's, so the password Unmanaged cached for them stops matching with
 // no query of its own.
 //
-// The resolver does no I/O. Whether the connection has pass-through settings,
-// and what they are, is fetched inside Verify, where the verifier's own timeout
+// The resolver does no I/O. The route comes from the row (gate.RouteOf, shared
+// with the mail front); whether the connection has pass-through settings, and
+// what they are, is fetched inside Verify, where the verifier's own timeout
 // bounds it.
 type ManagedResolver struct {
 	// Unmanaged answers every account no connection manages.
@@ -209,13 +209,12 @@ type ManagedResolver struct {
 
 // Resolve implements verify.Resolver.
 func (r *ManagedResolver) Resolve(_ context.Context, account *projection.Account) (verify.Verifier, error) {
+	route := gate.RouteOf(account)
 	switch {
-	case !account.Managed && account.SSORequired && !account.SSOExempt:
-		return refusal{ReasonSSORequired}, nil
-	case !account.Managed:
+	case route.Refusal != "":
+		return refusal{route.Refusal}, nil
+	case route.Clerk():
 		return r.Unmanaged, nil
-	case account.ManagedConnection == "":
-		return refusal{ReasonManagedNoConnection}, nil
 	case r.Directory == nil:
 		return refusal{ReasonNotConfigured}, nil
 	}
@@ -223,7 +222,7 @@ func (r *ManagedResolver) Resolve(_ context.Context, account *projection.Account
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Verifier{svc: r.Directory, connection: account.ManagedConnection, log: log}, nil
+	return &Verifier{svc: r.Directory, connection: route.Connection, log: log}, nil
 }
 
 var _ verify.Resolver = (*ManagedResolver)(nil)

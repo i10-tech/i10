@@ -1,0 +1,5 @@
+idle_signed_in_connections,all_signed_in_after_s,rss_kib,rss_per_connection_kib,cpu_pct_of_one_core_over_30s_idle,sweep_total_ms_p50,sweep_query_ms_p50,sweep_in_process_ms_p50,db_schema_during_run
+0,0,10256,0,0.03,0,0,0,current
+100,0.437,20252,99,0.26,99.72,99.57,0.17,current
+1000,0.516,82588,72,0.66,40.34,39.31,1.15,with-fix
+10000,4.29,623564,61,2.06,141.09,132.96,9.92,with-fix

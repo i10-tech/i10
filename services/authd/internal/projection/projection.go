@@ -32,6 +32,13 @@ type Account struct {
 	Managed           bool
 	ManagedConnection string
 
+	// PassthroughVersion is ManagedConnection's `authd.passthrough_versions.
+	// version`, 0 while it has no row. The API raises it in the same transaction
+	// as any change to what the connection's pass-through answers, so a copy of
+	// the settings older than it is fetched again before this bind uses it
+	// (passthrough.Cache). Read in the bind's own query, so it costs no round trip.
+	PassthroughVersion int64
+
 	// Suspended is true when a company's directory switched the person off
 	// (#344): the mailbox still exists and still receives mail, so searches
 	// return it, but NO BIND succeeds. It is not Active=false, which would make

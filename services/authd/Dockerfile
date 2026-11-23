@@ -28,14 +28,20 @@ ARG GIT_SHA=dev
 RUN CGO_ENABLED=0 go build \
         -trimpath \
         -ldflags="-s -w -X main.version=${GIT_SHA}" \
-        -o /out/authd ./cmd/authd
+        -o /out/ ./cmd/authd ./cmd/mailfront
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /out/authd /usr/local/bin/authd
+# ⚠ THE MAIL FRONT IS A SECOND BINARY IN THIS IMAGE, NOT A SECOND IMAGE, so the
+# two always come from the same commit and the deploy pins one digest. It runs
+# as its own container with `command: [/usr/local/bin/mailfront]` and none of
+# authd's secrets (services/authd/README.md, "Mail front").
+COPY --from=build /out/mailfront /usr/local/bin/mailfront
 
 # Loopback only. The pod spec must not publish this port, and the Service must
 # not select it - Stalwart reaches authd over localhost inside the same pod.
+# (The mail front's 993 and 465 are published by the pod spec, on the pod IP.)
 EXPOSE 3893
 
 USER nonroot:nonroot
