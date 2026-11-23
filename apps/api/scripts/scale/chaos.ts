@@ -283,46 +283,68 @@ const FULL_LOAD_MAX = 20_000
 const PER_BUCKET = 64
 const SAMPLE = 2_000
 
+/** The first pages of each partition the spread sample is drawn from. */
+const SAMPLE_PAGES = 64
+const TEXT_TYPES = new Set(["text", "varchar", "bpchar", "citext"])
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /**
- * The rows `locatorsForTable` would prefer, without reading the whole table: the
- * first PER_BUCKET rows of each preferred tenant, the first PER_BUCKET rows holding
- * a looked-up value, and the first SAMPLE rows as the pool the rest are drawn from.
- * Each query stops at its LIMIT, so memory is bounded whatever the table's size.
+ * The rows `locatorsForTable` would prefer, without reading the whole table: up
+ * to PER_BUCKET rows of each preferred tenant, up to PER_BUCKET rows holding a
+ * looked-up value, and up to SAMPLE rows from the first SAMPLE_PAGES pages of each
+ * partition as the pool the rest are drawn from.
+ *
+ * ⚠ PICK FIRST, THEN FETCH. Each slice picks row positions with no JSON built,
+ * ordered by (partition, ctid) so the same seed picks the same rows, and only the
+ * picked rows are turned into JSON, through a TID scan. Memory is bounded by the
+ * LIMITs, and no slice builds JSON for a row it does not keep.
  */
 async function boundedRows(
   sql: Sql,
-  schema: string,
-  table: string,
   rel: string,
+  cols: Column[],
   tenantOrder: string[],
   keyedValues: Set<string>,
 ): Promise<SourceRow[]> {
-  const out: SourceRow[] = []
-  const [{ tenant } = { tenant: false }] = await sql<{ tenant: boolean }[]>`
-    select exists(select 1 from information_schema.columns
-                   where table_schema = ${schema} and table_name = ${table}
-                     and column_name = 'tenant_id') tenant`
-  if (tenant)
-    for (const id of tenantOrder)
-      out.push(
-        ...(await sql.unsafe<SourceRow[]>(
-          `${SOURCE_ROWS(rel)} where t.tenant_id = $1::uuid order by t.ctid limit ${PER_BUCKET}`,
-          [id],
-        )),
-      )
-  if (keyedValues.size)
-    out.push(
-      ...(await sql.unsafe<SourceRow[]>(
-        `${SOURCE_ROWS(rel)} where exists (select 1 from jsonb_each_text(to_jsonb(t)) e
-           where e.value = any($1::text[])) limit ${PER_BUCKET}`,
-        [[...keyedValues]],
-      )),
+  const pick = (where: string, limit: number, params: unknown[] = []) =>
+    sql.unsafe<SourceRow[]>(
+      `with picked as materialized (
+         select s.tableoid, s.ctid from ${rel} s where ${where}
+          order by s.tableoid, s.ctid limit ${limit})
+       ${SOURCE_ROWS(rel)}
+        where t.ctid = any(array(select ctid from picked))
+          and (t.tableoid, t.ctid) in (select tableoid, ctid from picked)
+        order by t.tableoid, t.ctid`,
+      params as never[],
     )
-  out.push(
-    ...(await sql.unsafe<SourceRow[]>(
-      `${SOURCE_ROWS(rel)} order by t.ctid limit ${SAMPLE}`,
-    )),
-  )
+  const out: SourceRow[] = []
+  if (cols.some((c) => c.name === "tenant_id" && c.type === "uuid"))
+    for (const id of tenantOrder)
+      out.push(...(await pick(`s.tenant_id = $1::uuid`, PER_BUCKET, [id])))
+  if (keyedValues.size) {
+    // The typed columns themselves, so an index on them can answer: never the
+    // whole row exploded into JSON.
+    const texts = [...keyedValues]
+    const uuids = texts.filter((v) => UUID.test(v))
+    const textCols = cols.filter((c) => TEXT_TYPES.has(c.type))
+    const uuidCols = uuids.length ? cols.filter((c) => c.type === "uuid") : []
+    // Numbered by use: Postgres refuses a parameter the statement never reads.
+    const params: unknown[] = []
+    const tests: string[] = []
+    if (textCols.length) {
+      params.push(texts)
+      const n = params.length
+      tests.push(...textCols.map((c) => `s.${q(c.name)} = any($${n}::text[])`))
+    }
+    if (uuidCols.length) {
+      params.push(uuids)
+      const n = params.length
+      tests.push(...uuidCols.map((c) => `s.${q(c.name)} = any($${n}::uuid[])`))
+    }
+    if (tests.length)
+      out.push(...(await pick(`(${tests.join(" or ")})`, PER_BUCKET, params)))
+  }
+  out.push(...(await pick(`s.ctid < '(${SAMPLE_PAGES},0)'::tid`, SAMPLE)))
   const seen = new Set<string>()
   return out.filter((r) => {
     const key = `${r.child}:${r.tid}`
@@ -336,13 +358,15 @@ async function locatorsForTable(
   sql: Sql,
   schema: string,
   table: string,
+  cols: Column[],
   tenantOrder: string[],
   valueOrder: Map<string, Set<string>>,
   salt: number,
 ): Promise<Locator[]> {
   const rel = relation(schema, table)
   const [{ count } = { count: 0 }] = await sql.unsafe<{ count: number }[]>(
-    `select count(*)::int count from ${rel}`,
+    // Counted only up to the cutoff: past it the exact size does not matter.
+    `select count(*)::int count from (select 1 from ${rel} limit ${FULL_LOAD_MAX + 1}) x`,
   )
   if (!count) return []
   const keyedValues =
@@ -350,7 +374,7 @@ async function locatorsForTable(
   const rows =
     count <= FULL_LOAD_MAX
       ? await sql.unsafe<SourceRow[]>(`${SOURCE_ROWS(rel)} order by t.ctid`)
-      : await boundedRows(sql, schema, table, rel, tenantOrder, keyedValues)
+      : await boundedRows(sql, rel, cols, tenantOrder, keyedValues)
   const preferred = new Map<string, Locator[]>()
   const tenantKeys = new Set(tenantOrder)
   const rest: Locator[] = []
@@ -427,6 +451,7 @@ export async function seedChaos(sql: Sql, seed: number, log: (m: string) => void
       sql,
       schema,
       table,
+      cols,
       preferred.tenantOrder,
       preferred.valueOrder,
       preferred.salt,
