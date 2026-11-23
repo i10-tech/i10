@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { EmailsView } from "@/components/emails-view"
 import { tryApi } from "@/lib/api"
-import { rangeStart } from "@/lib/range"
+import { defaultEmailsRange, rangeStart } from "@/lib/range"
 import { emailsShape, type EmailsData } from "@/lib/shapes/emails"
 import type { ApiKeyRow, DomainSummary, EmailRow, Page as ApiPage } from "@/lib/types"
 
@@ -58,7 +58,8 @@ export default async function EmailsPage({
         // link working.
         broadcast_id: params.broadcast_id,
         search: params.search,
-        from: rangeStart(params.days),
+        // ⚠ 30 DAYS UNDER A KEY FILTER UNLESS A RANGE WAS PICKED (lib/range.ts).
+        from: rangeStart(params.days || defaultEmailsRange(params.api_key_id)),
         api_key_id: params.api_key_id,
         cursor: params.cursor,
         limit: PAGE_SIZE,
