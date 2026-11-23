@@ -483,6 +483,11 @@ suite("templates", () => {
     ).toBe(false)
     expect(bucket.objects.size).toBe(1)
     expect(await assets.sweepDeleted()).toBe(0)
+
+    // Leave no image behind: the sweep is not per workspace, so the next run on
+    // this database would count one left here.
+    await owner`update core.tenants set status = 'deleted' where id = ${b}`
+    expect(await assets.sweepDeleted()).toBe(1)
   })
 })
 

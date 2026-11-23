@@ -10,6 +10,7 @@
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit",
     "test": "bun test",
+    "test:db": "bun scripts/db-tests.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "check-migrations": "bun scripts/check-migrations.ts",

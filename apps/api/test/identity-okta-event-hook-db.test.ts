@@ -34,6 +34,8 @@ const bob = `user_bob_${suffix}`
 const rivalAda = `user_rival_ada_${suffix}`
 const ghost = `user_ghost_${suffix}`
 const box = testSealer()
+/** Each account's epoch as inserted, so a test can count raises. */
+const seeds = new Map<string, number>()
 
 suite("Okta event hook against Postgres", () => {
   beforeAll(async () => {
@@ -46,8 +48,10 @@ suite("Okta event hook against Postgres", () => {
     ] as const)
       await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id, clerk_org_id)
                   values (${id}, ${`a-${id.slice(0, 8)}`}, ${name}, ${`owner-${id}`}, ${`org_${id.slice(0, 8)}`})`
-    for (const id of [ada, bob, rivalAda])
+    for (const id of [ada, bob, rivalAda]) {
       await owner`insert into authd.accounts (clerk_user_id, email) values (${id}, ${`${id}@mail.test`})`
+      seeds.set(id, await epoch(id))
+    }
   })
   afterAll(async () => {
     await owner`delete from authd.accounts where clerk_user_id in (${ada}, ${bob}, ${rivalAda})`
@@ -63,6 +67,8 @@ suite("Okta event hook against Postgres", () => {
         await owner`select credential_epoch from authd.accounts where clerk_user_id = ${id}`
       )[0]!.credential_epoch,
     )
+  /** How many times the epoch moved since the row was made. A new row's epoch starts from the clock, not 0 (see `credentialEpoch` in schema.ts). */
+  const raises = async (id: string) => (await epoch(id)) - seeds.get(id)!
   const touched = async (id: string) =>
     (
       await owner`select clerk_updated_at, active from authd.accounts where clerk_user_id = ${id}`
@@ -179,9 +185,9 @@ suite("Okta event hook against Postgres", () => {
     expect(
       (await post("00000000-0000-4000-8000-000000000000", acmeSecret, events)).status,
     ).toBe(401)
-    expect(await epoch(ada)).toBe(0)
-    expect(await epoch(bob)).toBe(0)
-    expect(await epoch(rivalAda)).toBe(0)
+    expect(await raises(ada)).toBe(0)
+    expect(await raises(bob)).toBe(0)
+    expect(await raises(rivalAda)).toBe(0)
   })
 
   it("raises the epoch of the person an event names, and of nobody else", async () => {
@@ -189,10 +195,10 @@ suite("Okta event hook against Postgres", () => {
       event("user.account.update_password", "00u_ada", "ada@acme.test"),
     ])
     expect(res.status).toBe(200)
-    expect(await epoch(ada)).toBe(1)
-    expect(await epoch(bob)).toBe(0)
+    expect(await raises(ada)).toBe(1)
+    expect(await raises(bob)).toBe(0)
     // The other workspace's person with the same Okta id string.
-    expect(await epoch(rivalAda)).toBe(0)
+    expect(await raises(rivalAda)).toBe(0)
   })
 
   it("changes only the epoch: the account stays active and clerk_updated_at stays put", async () => {
@@ -200,7 +206,7 @@ suite("Okta event hook against Postgres", () => {
     await post(acmeConn, acmeSecret, [
       event("user.session.clear", "00u_bob", "bob@acme.test"),
     ])
-    expect(await epoch(bob)).toBe(1)
+    expect(await raises(bob)).toBe(1)
     expect(await touched(bob)).toEqual(before)
   })
 
@@ -209,14 +215,14 @@ suite("Okta event hook against Postgres", () => {
       event("user.lifecycle.suspend", "00u_ada", "ada@acme.test"),
       event("user.lifecycle.deactivate", "00u_ada", "ada@acme.test"),
     ])
-    expect(await epoch(ada)).toBe(2)
+    expect(await raises(ada)).toBe(2)
   })
 
   it("finds a person by the address when the Okta id is not the link's subject", async () => {
     await post(acmeConn, acmeSecret, [
       event("user.account.reset_password", "00u_other_id", "BOB@acme.test"),
     ])
-    expect(await epoch(bob)).toBe(2)
+    expect(await raises(bob)).toBe(2)
   })
 
   it("is a quiet success for a linked person with no mailbox, and for someone unknown", async () => {
@@ -225,8 +231,8 @@ suite("Okta event hook against Postgres", () => {
       event("user.session.clear", "00u_nobody", "nobody@acme.test"),
     ])
     expect(res.status).toBe(200)
-    expect(await epoch(ada)).toBe(2)
-    expect(await epoch(bob)).toBe(2)
+    expect(await raises(ada)).toBe(2)
+    expect(await raises(bob)).toBe(2)
   })
 
   it("lets the other workspace's own secret reach only its own people", async () => {
@@ -234,16 +240,16 @@ suite("Okta event hook against Postgres", () => {
       event("user.account.update_password", "00u_ada", "ada@rival.test"),
     ])
     expect(res.status).toBe(200)
-    expect(await epoch(rivalAda)).toBe(1)
-    expect(await epoch(ada)).toBe(2)
+    expect(await raises(rivalAda)).toBe(1)
+    expect(await raises(ada)).toBe(2)
   })
 
   it("stops honouring a secret the moment a new one replaces it", async () => {
     const next = await issue(acme, acmeConn)
     const events = [event("user.account.update_password", "00u_ada", "ada@acme.test")]
     expect((await post(acmeConn, acmeSecret, events)).status).toBe(401)
-    expect(await epoch(ada)).toBe(2)
+    expect(await raises(ada)).toBe(2)
     expect((await post(acmeConn, next, events)).status).toBe(200)
-    expect(await epoch(ada)).toBe(3)
+    expect(await raises(ada)).toBe(3)
   })
 })

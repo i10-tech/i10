@@ -150,8 +150,6 @@ jobs:
       - uses: ./.github/actions/bun-toolchain
         with:
           bun-version: ${{ env.BUN_VERSION }}
-          # The check is a plain bun script, not a turbo task.
-          turbo-cache: "false"
       # ⚠ ONE MIGRATION PER SESSION, AS THE NON-SUPERUSER OWNER. Migrating an
       # empty database in a single run is the one way production never applies
       # them, and it hides two kinds of failure: a migration that only works in
@@ -181,6 +179,18 @@ jobs:
           AUTHD_TEST_MAILFRONT_DATABASE_URL: postgres://mailfront@127.0.0.1:5432/i10
           AUTHD_TEST_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/i10
         run: go test -race -count=1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/
+      # ⚠ AND SO DO THE API's. Every apps/api/test/*-db.test.ts skips itself
+      # when its variable is unset, so in the `test` matrix job they all skip,
+      # and eleven of them sat broken on main unnoticed (#514). The script sets
+      # every variable the files read and fails if any test skipped. The tests
+      # import the workspace packages' built dist/, hence the build first.
+      - name: Build the API's workspace packages
+        run: bunx turbo run build --filter=@i10/api^...
+      - name: API's database tests
+        working-directory: apps/api
+        env:
+          DB_TESTS_DATABASE_URL: postgres://i10@127.0.0.1:5432/i10
+        run: bun run test:db
 
   authd:
     name: authd (Go)
