@@ -283,10 +283,17 @@ func TestTheHiddenLoginIsRefused(t *testing.T) {
 	h := startFront(t, IMAP, alice(), nil)
 	c := h.dial()
 	c.until("* OK")
-	c.send("a NOOP x{" + strconv.Itoa(len(hidden)) + "}\r\n")
-	c.send(hidden)
-	c.send(`T LOGIN alice@i10.test "right horse"` + "\r\n")
-	if got := c.line(); !strings.HasPrefix(got, "a BAD") && !strings.HasPrefix(got, "* BYE") {
+	// ⚠ ONE WRITE, AS AN ATTACKER SENDS IT. The front ends the connection on the
+	// first line (an ambiguous literal), so a second write can land on a closed
+	// socket and fail with a broken pipe: that was a race in this test, not in
+	// the front.
+	c.send("a NOOP x{" + strconv.Itoa(len(hidden)) + "}\r\n" +
+		hidden +
+		`T LOGIN alice@i10.test "right horse"` + "\r\n")
+	if !c.closed(2 * time.Second) {
+		t.Fatal("still open after an ambiguous literal")
+	}
+	if got := c.seen(); got != "" && !strings.HasPrefix(got, "a BAD") && !strings.HasPrefix(got, "* BYE") {
 		t.Fatalf("answered %q", got)
 	}
 	// Whatever the front does next, Stalwart must never sign bob in on a
