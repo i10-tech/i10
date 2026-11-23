@@ -112,11 +112,30 @@ Never measure on the cluster, on prod, or on the shared dev database on port
 
 ### Counting queries per request
 
-On the throwaway server, start Postgres with
+⚠ **A running API is never quiet.** `apps/api/src/index.ts` starts timers and
+workers (directory sync, mailbox deletion, SIEM, health emails, and more) that
+query the database on their own schedule. `pg_stat_statements` counts per
+statement for the whole server, not per request (PostgreSQL docs, pg_stat_statements), so any
+of them firing during the measurement inflates the count. Count in a way that
+only sees the request.
+
+**Preferred: count inside a test.** The `-db` tests call routes and stores with
+their own client and start no background workers. Give that client postgres.js's
+`debug` option, `postgres(url, { debug: (_conn, query) => seen.push(query) })`,
+make the call once, and assert on `seen.length`. Run it with two data sizes
+(for example 1 and 50 items): a count that grows with the items is N+1
+(`queries.md`). The assertion then stays in the suite as a regression test.
+
+**Against a running local API**, on the throwaway server, start Postgres with
 `-c shared_preload_libraries=pg_stat_statements` and run `CREATE EXTENSION
-pg_stat_statements` in `i10`. Point a local API at it, then:
+pg_stat_statements` in `i10`. Then take a baseline over the same interval with no
+request, and subtract it:
 
 ```sql
+SELECT pg_stat_statements_reset();
+-- wait as long as one request takes, make NO request
+SELECT sum(calls) FROM pg_stat_statements
+WHERE dbid = (SELECT oid FROM pg_database WHERE datname = 'i10');
 SELECT pg_stat_statements_reset();
 -- make exactly one request
 SELECT calls, rows, query FROM pg_stat_statements
@@ -124,10 +143,12 @@ WHERE dbid = (SELECT oid FROM pg_database WHERE datname = 'i10')
 ORDER BY calls DESC;
 ```
 
-The sum of `calls` is the query count for that request. A number that grows with
-the size of the page or the number of items is N+1 (`queries.md`). A plainer
-alternative is `log_statement = 'all'` on the throwaway server and counting the
-log lines.
+Repeat it three times. Trust the count only when the baseline is zero and the
+three runs agree; otherwise read the statement list and keep only the ones the
+route issues. A plainer alternative is `log_statement = 'all'` with
+`log_line_prefix = '%p '` on the throwaway server and counting the log lines of
+the connection that served the request, but through PgBouncer that connection
+can change between statements, so the test method above is the reliable one.
 
 ## Reading a plan: what fails review
 

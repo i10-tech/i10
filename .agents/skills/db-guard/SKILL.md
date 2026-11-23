@@ -62,9 +62,13 @@ without the evidence is not reviewable: ask for it, do not estimate it.
 - **authd's Go SQL is plain text against Drizzle's tables.** A rename or type
   change in `schema.ts` must change `services/authd` in the same PR, through an
   expand-contract migration.
-- **Every Redis key on `i10-redis` has a TTL.** The instance is `noeviction` and
-  holds the send and webhook queues: a cache that only grows ends in queue writes
-  refused with OOM.
+- **Every cache, counter, rate-limit and lock key on `i10-redis` has a TTL.** The
+  instance is `noeviction` and holds the send and webhook queues: a cache that
+  only grows ends in queue writes refused with OOM. **Queue data is the
+  exception: never put a TTL on groupmq's job hashes or its ready and delayed
+  sets.** They are product data until the job is processed, and an expiry would
+  silently drop pending sends. Queue memory is bounded by the queue's own
+  lifecycle instead (`references/redis.md`).
 - **Every path that removes access invalidates every cache of that access**, in
   the same change, with a test (`services/authd/README.md`, "The credential
   cache").

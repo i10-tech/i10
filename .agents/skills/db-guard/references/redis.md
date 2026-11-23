@@ -30,12 +30,20 @@ That covers billing and usage (`core.meter_events`), message state
 decisions, and anything a customer was told succeeded. AOF `everysec` can lose
 about a second of writes, so design for losing them.
 
-## Every key has a TTL
+## Every cache, counter, rate-limit and lock key has a TTL
 
 `i10-redis` is `noeviction`. When memory reaches `maxmemory`, Redis refuses
 write commands with an OOM error instead of evicting (Redis docs, "Key
 eviction"). The queues share that memory. So a cache key without a TTL, or a key
 per user that is never deleted, ends in sends and webhooks failing to enqueue.
+
+⚠ **Queue keys are the exception, and must NEVER get a TTL.** groupmq's job
+hashes and its ready, delayed and group sets hold jobs that have not run yet: an
+expiry would drop a pending send or webhook with no error anywhere. Their memory
+is bounded by the queue's own lifecycle: jobs leave when they are processed, and
+completed and failed jobs are trimmed by each queue's `keepCompleted` and `keepFailed` (apps/api/src/queue/). A change
+that adds a queue, or keeps more completed or failed jobs, states that retention
+and its memory at the brief's scale instead of a TTL.
 
 - Set the TTL in the same command: `SET key value EX <seconds>`, not `SET`
   then `EXPIRE`. For counters, `INCR` then `EXPIRE` when the result is 1 is the
