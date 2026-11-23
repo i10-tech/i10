@@ -192,9 +192,9 @@ export function createApiKeyRoutes(deps?: ApiKeyRouteDeps) {
   /**
    * ⚠ REVOCATION IS IMMEDIATE, AND THE CACHE EVICTION IS WHAT MAKES IT SO. The
    * row is only half of it: a verified key lives in Redis for the TTL, and
-   * without deleting that entry the key keeps working for up to a minute after
-   * the customer was told it was dead. That minute is the entire reason this
-   * system stopped asking Clerk.
+   * without deleting that entry the key could keep working until its cache TTL
+   * expires (up to one hour). Evicting the entry is what makes API revocation
+   * immediate; the TTL only bounds revocation performed out of band.
    *
    * ⚠ AND THE EVICTION FAILING IS A 500, NOT A QUIET SUCCESS. Reporting success
    * while a leaked credential is still live is the worst possible answer here -

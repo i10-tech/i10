@@ -31,10 +31,10 @@ export async function revokeKey(
   /*
    * ⚠ THE CACHE EVICTION IS HALF OF REVOCATION AND ITS FAILURE IS AN ERROR.
    * A verified key lives in Redis for the TTL; without deleting that entry
-   * the key keeps working for up to a minute after the customer was told it
-   * was dead. Reporting success while a leaked credential is still live is
-   * the worst possible answer - they stop looking. The row stays revoked, so
-   * a retry converges.
+   * the key could keep working for up to one hour after the customer was told
+   * it was dead. Evicting it makes API revocation immediate. Reporting success
+   * while a leaked credential is still live is the worst possible answer - they
+   * stop looking. The row stays revoked, so a retry converges.
    */
   if (keys.cache) {
     try {

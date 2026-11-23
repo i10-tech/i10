@@ -117,7 +117,7 @@ export interface KeyStore {
    *
    * ⚠ THE SECRET IS UNTOUCHED, AND THE CACHE MUST STILL BE EVICTED. A verified
    * key lives in Redis with its scopes baked in for the TTL, so a narrowed key
-   * keeps its old permissions for up to a minute otherwise - the same failure
+   * keeps its old permissions for up to one hour otherwise - the same failure
    * `revoke` documents, with a quieter symptom. The hash comes back for that.
    */
   setScopes(

@@ -291,8 +291,8 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
    *
    * ⚠ AND THE CACHE EVICTION IS NOT OPTIONAL HERE EITHER. A verified key sits
    * in Redis with its scopes baked in for the TTL, so a key narrowed to
-   * staging keeps sending as production for up to a minute. It is the same
-   * failure the delete route documents with a quieter symptom - nothing looks
+   * staging keeps sending as production for up to one hour otherwise. It is the
+   * same failure the delete route documents with a quieter symptom - nothing looks
    * wrong, the restriction simply is not in force yet.
    */
   /*
@@ -347,7 +347,8 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
           {
             statusCode: 500,
             name: "internal_server_error" as const,
-            message: "The scope was saved but may not be in force for a minute. Retry.",
+            message:
+              "The scope was saved but may not be in force until its cache entry expires. Retry.",
           },
           500,
         )
@@ -396,7 +397,7 @@ export function mountCredentials(app: Hono, d: ConsoleDeps): void {
           statusCode: 500,
           name: "internal_server_error" as const,
           message:
-            "The key was revoked but may stay usable for up to a minute. Retry to confirm.",
+            "The key was revoked but may stay usable until its cache entry expires. Retry to confirm.",
         },
         500,
       )

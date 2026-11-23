@@ -14,8 +14,9 @@ export type Database = ReturnType<typeof createDb>["db"]
  * not exist" under load, which looks like a database fault rather than a client
  * misconfiguration.
  *
- * The same property is why every statement must be schema-qualified: PgBouncer
- * accepts `SET search_path` and silently drops it.
+ * The same property is why every statement must be schema-qualified: a session
+ * `SET search_path` can remain on a PgBouncer server connection and leak to the
+ * next client that gets it.
  */
 export function createDb(url: string) {
   const sql = postgres(url, {

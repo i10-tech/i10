@@ -6,12 +6,12 @@
 # `AuthUserSecret not found`, which points at entirely the wrong thing. The
 # real cause (`notOwnedServiceName`) appears only in the operator log.
 #
-# ⚠ TRANSACTION POOLING DROPS `search_path`. PgBouncer accepts the SET and
-# silently ignores it, because a pooled connection is not the same backend
-# twice. Schema-qualify every statement, or use SET LOCAL inside an explicit
-# transaction. The same applies to prepared statements across transactions,
-# LISTEN/NOTIFY, and session advisory locks - use pg_advisory_xact_lock, which
-# releases at commit and therefore survives pooling.
+# ⚠ SESSION `SET` IS UNSAFE IN TRANSACTION MODE. PgBouncer can leave an
+# untracked setting on its server connection, where it leaks to the next client
+# that gets that connection. Schema-qualify every statement, or use SET LOCAL
+# inside an explicit transaction. The same applies to prepared statements
+# across transactions, LISTEN/NOTIFY, and session advisory locks - use
+# pg_advisory_xact_lock, which releases at commit and therefore survives pooling.
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler
 metadata:

@@ -42,6 +42,33 @@ spec:
       # so torn pages cannot happen. On ext4/xfs this risks unrecoverable
       # corruption - the setting travels with the storage class, not the cluster.
       full_page_writes: "off"
+      # These are deliberately generous because the cluster serves migrations
+      # and batch jobs as well as requests. lock_timeout remains short enough
+      # to fail a DDL lock wait rather than queueing behind it indefinitely.
+      statement_timeout: "30min"
+      lock_timeout: "30s"
+      idle_in_transaction_session_timeout: "5min"
+
+      # CNPG manages both preload libraries and installs pg_stat_statements
+      # when these parameters are configured. track=all includes statements
+      # run inside functions such as the SECURITY DEFINER hot paths.
+      pg_stat_statements.max: "5000"
+      pg_stat_statements.track: "all"
+
+      # Capture sampled plans for statements slower than 1s. Analyze adds
+      # instrumentation only to sampled statements; timing remains off to keep
+      # per-node clock reads out of execution. Buffers are counters, not clock
+      # reads, and they are what db-guard reviews a plan by.
+      auto_explain.log_min_duration: "1s"
+      auto_explain.log_analyze: "on"
+      auto_explain.log_buffers: "on"
+      auto_explain.log_timing: "off"
+      # Never the bound values: they are customer data (addresses, subjects,
+      # tokens), and since PostgreSQL 16 auto_explain logs them in full by
+      # default (-1). The plan is what we read; the values add only risk.
+      auto_explain.log_parameter_max_length: "0"
+      auto_explain.log_nested_statements: "on"
+      auto_explain.sample_rate: "0.1"
 
   # The fast, LOCAL copy - not a backup. It dies with the pool. What it buys is
   # instant CoW clones: prod cloned in ~23s for under 2 MB, which is the whole
