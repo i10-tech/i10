@@ -9,6 +9,8 @@ import {
   UrlListSearch,
   UrlRangeSelect,
 } from "@/components/list/toolbar"
+import { useUrlParam } from "@/components/list/url-state"
+import { defaultEmailsRange } from "@/lib/range"
 import { StatusDot, describeStatus } from "@/components/status"
 
 /**
@@ -73,6 +75,9 @@ export function EmailFilters({
   showDomains: boolean
   showKeys: boolean
 }) {
+  // The page reads the same default (emails/(index)/page.tsx), so the menu
+  // shows the range the list was actually read over.
+  const [apiKeyId] = useUrlParam("api_key_id")
   return (
     <ListToolbar>
       <UrlListSearch placeholder="Search subject or address" label="Search emails" />
@@ -81,7 +86,7 @@ export function EmailFilters({
         params={["search", "days", "status", "domain_id", "api_key_id", "broadcast_id"]}
       />
       <ListToolbarEnd>
-        <UrlRangeSelect />
+        <UrlRangeSelect fallback={defaultEmailsRange(apiKeyId || undefined)} />
         <UrlFilterMulti
           param="status"
           label="Delivery state"

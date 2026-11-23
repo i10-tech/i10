@@ -13,6 +13,7 @@ import {
   halfvec,
   primaryKey,
   real,
+  smallint,
   text,
   timestamp,
   unique,
@@ -1824,6 +1825,74 @@ export const messageEvents = core.table(
 )
 
 /**
+ * The console overview's daily counts, one row per workspace and UTC day that
+ * had at least one counted event (#507).
+ *
+ * ⚠ DERIVED, AND WRITTEN ONLY BY `core.refresh_message_daily_stats()`, which the
+ * `i10-message-stats` CronJob calls. Each run recomputes, from
+ * `core.message_events`, every cell that an event ingested since the previous
+ * run belongs to, so a late bounce or complaint for an old day lands in its own
+ * day. A recount never lowers a count, which makes a rerun harmless and keeps a
+ * day's counts after retention has deleted its mail.
+ *
+ * ⚠ NOT A COUNTER BUMPED PER EVENT. That would be one row the largest workspace
+ * updates on every delivery notification, all day.
+ *
+ * ⚠ READ-ONLY TO THE API. The policy allows SELECT for the workspace in
+ * `app.tenant_id` and nothing else; the refresh is a definer function and
+ * bypasses RLS as the owner.
+ *
+ * Rows older than the overview can show (90 days, routes/console/sending.ts)
+ * are deleted by the refresh, so the table holds at most about 100 days per
+ * active workspace.
+ */
+export const messageDailyStats = core.table(
+  "message_daily_stats",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    sent: integer("sent").notNull(),
+    delivered: integer("delivered").notNull(),
+    bounced: integer("bounced").notNull(),
+    complained: integer("complained").notNull(),
+    delayed: integer("delayed").notNull(),
+    failed: integer("failed").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.day] }),
+    pgPolicy("message_daily_stats_read", {
+      for: "select",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
+  ],
+)
+
+/**
+ * Where `core.refresh_message_daily_stats()` got to. One row, or none before
+ * the first run.
+ *
+ * `started_at` is when the last run began. The next run rescans events whose
+ * uuidv7 id is newer than an hour before it, which catches every event whose
+ * transaction committed after that run read the table. `complete_before` is
+ * the UTC day of `started_at`: `core.message_stats` reads every day before it
+ * from `core.message_daily_stats`, and that day and later from the events.
+ */
+export const messageDailyStatsState = core.table(
+  "message_daily_stats_state",
+  {
+    /** ⚠ ONE ROW, ENFORCED BY THE KEY. */
+    id: boolean("id").primaryKey().default(true),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    completeBefore: date("complete_before").notNull(),
+  },
+  () => [
+    pgPolicy("message_daily_stats_state_read", { for: "select", using: sql`true` }),
+  ],
+)
+
+/**
  * A customer's HTTP endpoint, and what it wants to hear about.
  *
  * ⚠ THE ENDPOINT IS THE UNIT OF ORDERING AND OF ISOLATION, WHICH IS WHY THE
@@ -3035,8 +3104,52 @@ export const meterEvents = core.table(
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.featureId, t.eventId] }),
-    // The gate's only read: one tenant, one feature, one shard, one window.
+    // The gate's read of the partial hours at a window's ends, and
+    // `firstEventStatement`.
     index("meter_events_window_idx").on(t.tenantId, t.featureId, t.shard, t.occurredAt),
+  ],
+)
+
+/**
+ * `core.meter_events` summed per hour, so the gate reads a month as a few
+ * hundred rows instead of every event in it (#507).
+ *
+ * ⚠ KEPT EXACT BY STATEMENT TRIGGERS ON `core.meter_events`, IN THE SAME
+ * TRANSACTION AS THE INSERT. A committed event and its hour's count commit
+ * together, so the gate sees what summing the events would have seen, and
+ * nothing written by a job that might be late. The triggers, and why updates of
+ * the counted columns are refused, are in
+ * drizzle/20261123144849_meter_usage_hourly_triggers.
+ *
+ * ⚠ `slot` SPREADS ONE HOUR OVER FOUR ROWS, chosen by the writing backend
+ * (`pg_backend_pid() % 4`). Without it every record of the largest workspace in
+ * an hour would wait on one row's lock. Readers sum the slots. The spread is
+ * approximate: PgBouncer's server connections can share a pid modulo 4, so
+ * measure contention under real load before raising the slot count.
+ *
+ * `hour` is the start of the hour (`date_bin`, so time zone free). Rows are
+ * never pruned: they live as long as the events they count, which retention
+ * never deletes, and go with the workspace.
+ */
+export const meterUsageHourly = core.table(
+  "meter_usage_hourly",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    featureId: text("feature_id").notNull(),
+    shard: integer("shard").notNull(),
+    hour: timestamp("hour", { withTimezone: true }).notNull(),
+    slot: smallint("slot").notNull(),
+    used: bigint("used", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.featureId, t.shard, t.hour, t.slot] }),
+    // ⚠ READ-ONLY TO THE API: only the triggers (owner, definer) write it.
+    pgPolicy("meter_usage_hourly_read", {
+      for: "select",
+      using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
+    }),
   ],
 )
 

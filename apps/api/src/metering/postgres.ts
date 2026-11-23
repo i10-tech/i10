@@ -214,12 +214,66 @@ export const hasAssignmentStatement = (tenantId: string): SQL => sql`
 `
 
 /**
+ * The earliest usage event in `[from, to]`: where a `first_use` window opens.
+ * Uses the same index as `usedInStatement`.
+ */
+export const firstEventStatement = (key: MeterKey, from: Date, to: Date): SQL => sql`
+  select min(occurred_at) as first
+    from core.meter_events
+   where tenant_id   = ${key.tenantId}::uuid
+     and feature_id  = ${key.featureId}
+     and shard       = ${key.shard}
+     and occurred_at >= ${ts(from)}
+     and occurred_at <= ${ts(to)}
+`
+
+const HOUR = 3_600_000
+
+/**
+ * How `usedInStatement` splits `[start, end)`: the events in `head` and `tail`,
+ * the hourly rollup in `hours`. Each part is half-open and they do not overlap.
+ * A window inside one hour boundary has no `hours`, and is read from the events
+ * exactly as before.
+ */
+export function usedInParts(window: ResetWindow): {
+  head: { from: Date; to: Date }
+  hours: { from: Date; to: Date | null } | null
+  tail: { from: Date; to: Date } | null
+} {
+  const firstHour = new Date(Math.ceil(window.start.getTime() / HOUR) * HOUR)
+  if (window.end === null) {
+    return {
+      head: { from: window.start, to: firstHour },
+      hours: { from: firstHour, to: null },
+      tail: null,
+    }
+  }
+  const lastHour = new Date(Math.floor(window.end.getTime() / HOUR) * HOUR)
+  if (lastHour <= firstHour) {
+    return { head: { from: window.start, to: window.end }, hours: null, tail: null }
+  }
+  return {
+    head: { from: window.start, to: firstHour },
+    hours: { from: firstHour, to: lastHour },
+    tail: { from: lastHour, to: window.end },
+  }
+}
+
+/**
  * What this meter has consumed inside a window.
  *
  * ⚠ HALF-OPEN, MATCHING `windowFor`. `>= start` and `< end`, so an event landing
  * exactly on a boundary is counted in the window it opens and in no other. Both
  * ends inclusive would bill a tick twice and put the two sides of the
  * reconciler permanently out of step by however many events fell on it.
+ *
+ * ⚠ WHOLE HOURS COME FROM `core.meter_usage_hourly`, ONLY THE ENDS FROM THE
+ * EVENTS (#507). Summing a month of events made every send read the tenant's
+ * whole month: 22.9 ms and 99 MB for the largest workspace on the scale seed.
+ * Now the hours fully inside the window are read from the rollup, which
+ * triggers keep equal to the events in the same transaction, and only the
+ * partial hour at each end is summed from `meter_events`. The answer is the
+ * same number from the same snapshot; see `usedInParts` for the split.
  *
  * ⚠ AND IT IS SCOPED TO ONE SHARD, BECAUSE THE GATE IS. A shard draws against
  * its own slice of the allowance and never reads its siblings; summing them is
@@ -239,29 +293,33 @@ export const hasAssignmentStatement = (tenantId: string): SQL => sql`
  * range, the event's `occurred_at`. This one was the exception, which is
  * exactly why nobody looked at it.
  */
-/**
- * The earliest usage event in `[from, to]`: where a `first_use` window opens.
- * Uses the same index as `usedInStatement`.
- */
-export const firstEventStatement = (key: MeterKey, from: Date, to: Date): SQL => sql`
-  select min(occurred_at) as first
-    from core.meter_events
-   where tenant_id   = ${key.tenantId}::uuid
-     and feature_id  = ${key.featureId}
-     and shard       = ${key.shard}
-     and occurred_at >= ${ts(from)}
-     and occurred_at <= ${ts(to)}
-`
-
-export const usedInStatement = (key: MeterKey, window: ResetWindow): SQL => sql`
-  select coalesce(sum(value), 0)::bigint as used
-    from core.meter_events
-   where tenant_id   = ${key.tenantId}::uuid
-     and feature_id  = ${key.featureId}
-     and shard       = ${key.shard}
-     and occurred_at >= ${ts(window.start)}
-     ${window.end === null ? sql`` : sql`and occurred_at < ${ts(window.end)}`}
-`
+export const usedInStatement = (key: MeterKey, window: ResetWindow): SQL => {
+  const { head, hours, tail } = usedInParts(window)
+  const events = (from: Date, to: Date) => sql`(
+    select coalesce(sum(value), 0)::bigint
+      from core.meter_events
+     where tenant_id   = ${key.tenantId}::uuid
+       and feature_id  = ${key.featureId}
+       and shard       = ${key.shard}
+       and occurred_at >= ${ts(from)}
+       and occurred_at < ${ts(to)}
+  )`
+  const rollup = (from: Date, to: Date | null) => sql`(
+    select coalesce(sum(used), 0)::bigint
+      from core.meter_usage_hourly
+     where tenant_id   = ${key.tenantId}::uuid
+       and feature_id  = ${key.featureId}
+       and shard       = ${key.shard}
+       and hour >= ${ts(from)}
+       ${to === null ? sql`` : sql`and hour < ${ts(to)}`}
+  )`
+  const parts = [
+    events(head.from, head.to),
+    ...(hours ? [rollup(hours.from, hours.to)] : []),
+    ...(tail ? [events(tail.from, tail.to)] : []),
+  ]
+  return sql`select (${sql.join(parts, sql` + `)})::bigint as used`
+}
 
 /**
  * Append usage.

@@ -36,7 +36,7 @@ import {
   type View,
 } from "@/components/list/remembered-views"
 import { useUrlList, useUrlParam, useUrlSearch } from "@/components/list/url-state"
-import { RANGES } from "@/lib/range"
+import { ALL_TIME, RANGES } from "@/lib/range"
 
 /**
  * The bar above every list, one height (36px) and one radius, so moving
@@ -541,14 +541,22 @@ export function UrlFilterMulti({
 /** Resend's "Last 15 days", as `?days=`. */
 export function UrlRangeSelect({
   param = "days",
+  fallback,
   className,
 }: {
   param?: string
+  /**
+   * The range shown, and read, while the URL names none. With one, picking All
+   * time writes `ALL_TIME`, because an absent param would mean the fallback.
+   */
+  fallback?: string
   className?: string
 }) {
+  const [value, setValue] = useUrlParam(param)
   return (
-    <UrlFilterSelect
-      param={param}
+    <FilterSelect
+      value={value || fallback || ""}
+      onValueChange={(next) => setValue(next || (fallback ? ALL_TIME : ""))}
       options={RANGES.map((r) => ({ ...r }))}
       allLabel="All time"
       label="Date range"
