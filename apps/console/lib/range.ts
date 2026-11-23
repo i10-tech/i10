@@ -18,3 +18,24 @@ export function rangeStart(days: string | undefined): string | undefined {
   if (!days || !RANGES.some((r) => r.value === days)) return undefined
   return new Date(Date.now() - Number(days) * 86_400_000).toISOString()
 }
+
+/**
+ * `?days=all`: All time, chosen on purpose where a filter defaults to a range.
+ * Not in `RANGES`, so `rangeStart` reads it as no bound.
+ */
+export const ALL_TIME = "all"
+
+/**
+ * The delivery log's range when `?days=` names none: the last 30 days while it
+ * is filtered by an API key, else all time (undefined).
+ *
+ * ⚠ 30 DAYS UNDER A KEY FILTER (#507). No index leads with `api_key_id` on
+ * `core.messages`, so a key filter reads the workspace's mail in the range and
+ * keeps that key's: about 11 ms for the largest workspace on the scale seed
+ * over 7 days, 190 ms and 1.2 GB over all time. An index would cost every
+ * message three more index writes, for a filter used now and then. All time
+ * stays one pick away in the menu (`ALL_TIME`).
+ */
+export function defaultEmailsRange(apiKeyId: string | undefined): string | undefined {
+  return apiKeyId ? "30" : undefined
+}
