@@ -291,7 +291,9 @@ suite("console template routes", () => {
       from: "Acme <hi@acme.test>",
       to: ["me@acme.test"],
       subject: "[Test] Join us",
-      html: "<p>Hi {{ who }}</p>",
+      // A variable with no fallback goes out as written, in the triple-brace form.
+      html: "<p>Hi {{{ who }}}</p>",
+      tags: [{ name: "template_test", value: "true" }],
     })
     expect((await call("POST", `/templates/${t.id}/test`, { to: "x" })).status).toBe(
       422,

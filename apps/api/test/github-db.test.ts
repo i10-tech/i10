@@ -154,6 +154,9 @@ suite("github-connected templates", () => {
   }
 
   const iid = () => Math.floor(Math.random() * 1e9) + 1
+  /** The workspace's own templates, without the shared welcome every workspace lists. */
+  const ownTemplates = async (t: string) =>
+    (await templates.list(t)).filter((x) => !x.shared)
 
   it("versions a push to the target branch, and only what changed", async () => {
     const { gh, t, repo, sync } = await connected(iid())
@@ -265,7 +268,7 @@ suite("github-connected templates", () => {
     const { gh, t, repo, syncer } = await connected(iid())
     const sha = gh.push("feature", { "emails/new.tsx": tpl("new") })
     await syncer.check(t, repo, sha)
-    expect(await templates.list(t)).toEqual([])
+    expect(await ownTemplates(t)).toEqual([])
     expect(gh.checks.at(-1)).toMatchObject({
       head_sha: sha,
       conclusion: "success",
@@ -324,7 +327,7 @@ suite("github-connected templates", () => {
     const good = `sha256=${createHmac("sha256", "s".repeat(20)).update(body).digest("hex")}`
     expect((await post(good)).status).toBe(202)
     await new Promise((r) => setTimeout(r, 300))
-    expect((await templates.list(t)).map((x) => x.name)).toEqual(["hooked"])
+    expect((await ownTemplates(t)).map((x) => x.name)).toEqual(["hooked"])
   })
 
   it("recovers a sync a restart left pending", async () => {
