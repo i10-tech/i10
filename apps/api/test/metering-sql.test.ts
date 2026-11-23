@@ -6,6 +6,7 @@ import {
   assignmentStatement,
   ensureStatement,
   recordStatement,
+  usedInParts,
   usedInStatement,
 } from "../src/metering/postgres.js"
 import type { MeterKey } from "@repo/metering"
@@ -69,6 +70,8 @@ describe("reading a window", () => {
     const { sql: statement } = render(usedInStatement(KEY, WINDOW))
     expect(statement).toContain("occurred_at >= $4")
     expect(statement).toContain("occurred_at < $5")
+    expect(statement).toContain("hour >= $9")
+    expect(statement).toContain("hour < $10")
   })
 
   // ⚠ A LIFETIME ALLOWANCE HAS NO END, SO THE PREDICATE MUST NOT BE THERE AT
@@ -78,8 +81,16 @@ describe("reading a window", () => {
     const { sql: statement } = render(
       usedInStatement(KEY, { start: WINDOW.start, end: null }),
     )
-    expect(statement).toContain("occurred_at >= $4")
-    expect(statement).not.toContain("occurred_at <")
+    expect(statement).toContain("hour >= $9")
+    expect(statement).not.toContain("hour <")
+    // The only `occurred_at <` closes the partial first hour.
+    expect(statement.match(/occurred_at </g)).toHaveLength(1)
+  })
+
+  it("reads whole hours from the rollup and only the partial ends from the events", () => {
+    const { sql: statement } = render(usedInStatement(KEY, WINDOW))
+    expect(statement).toContain("from core.meter_usage_hourly")
+    expect(statement.match(/from core\.meter_events/g)).toHaveLength(2)
   })
 
   /**
@@ -126,6 +137,56 @@ describe("reading a window", () => {
   it("sums to a defined zero rather than to null", () => {
     const { sql: statement } = render(usedInStatement(KEY, WINDOW))
     expect(statement).toContain("coalesce(sum(value), 0)::bigint")
+    expect(statement).toContain("coalesce(sum(used), 0)::bigint")
+  })
+})
+
+describe("splitting a window into partial hours and whole ones", () => {
+  const at = (iso: string) => new Date(iso)
+  const iso = (d: Date | null | undefined) => d?.toISOString() ?? null
+
+  it("rounds the start up and the end down to the hour", () => {
+    const parts = usedInParts({
+      start: at("2026-02-01T10:42:17.123Z"),
+      end: at("2026-03-01T10:42:17.123Z"),
+    })
+    expect(iso(parts.head.from)).toBe("2026-02-01T10:42:17.123Z")
+    expect(iso(parts.head.to)).toBe("2026-02-01T11:00:00.000Z")
+    expect(iso(parts.hours?.from)).toBe("2026-02-01T11:00:00.000Z")
+    expect(iso(parts.hours?.to)).toBe("2026-03-01T10:00:00.000Z")
+    expect(iso(parts.tail?.from)).toBe("2026-03-01T10:00:00.000Z")
+    expect(iso(parts.tail?.to)).toBe("2026-03-01T10:42:17.123Z")
+  })
+
+  it("leaves empty ends when the window is on the hour", () => {
+    const parts = usedInParts(WINDOW)
+    expect(iso(parts.head.to)).toBe(iso(WINDOW.start))
+    expect(iso(parts.hours?.from)).toBe(iso(WINDOW.start))
+    expect(iso(parts.hours?.to)).toBe(iso(WINDOW.end))
+    expect(iso(parts.tail?.from)).toBe(iso(WINDOW.end))
+  })
+
+  // ⚠ ONE HOUR BOUNDARY OR NONE, AND THERE IS NO WHOLE HOUR TO READ: the
+  // window is summed from the events, as it always was.
+  it("reads a window with no whole hour from the events alone", () => {
+    for (const [start, end] of [
+      ["2026-02-01T10:05:00.000Z", "2026-02-01T10:55:00.000Z"],
+      ["2026-02-01T10:05:00.000Z", "2026-02-01T11:55:00.000Z"],
+    ] as const) {
+      const parts = usedInParts({ start: at(start), end: at(end) })
+      expect(parts.hours).toBeNull()
+      expect(parts.tail).toBeNull()
+      expect(iso(parts.head.from)).toBe(start)
+      expect(iso(parts.head.to)).toBe(end)
+    }
+  })
+
+  it("reads every hour after the first for a lifetime window", () => {
+    const parts = usedInParts({ start: at("2026-02-01T10:42:00.000Z"), end: null })
+    expect(iso(parts.head.to)).toBe("2026-02-01T11:00:00.000Z")
+    expect(iso(parts.hours?.from)).toBe("2026-02-01T11:00:00.000Z")
+    expect(parts.hours?.to).toBeNull()
+    expect(parts.tail).toBeNull()
   })
 })
 
