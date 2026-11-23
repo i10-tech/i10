@@ -267,6 +267,71 @@ async function preferredValues(sql: Sql, seed: number) {
   return { tenantOrder, valueOrder, salt: rng.int(0, 2 ** 20) }
 }
 
+type SourceRow = { tid: string; child: string; row: Record<string, unknown> }
+
+const SOURCE_ROWS = (rel: string) =>
+  `select t.ctid::text tid, t.tableoid::regclass::text child, to_jsonb(t) row from ${rel} t`
+
+/**
+ * A table up to this size is read whole, so the small profile picks exactly the
+ * rows it always has. Above it (the large profile's messages, events, deliveries
+ * and attempts run to millions) only bounded slices are read: a column needs a
+ * few dozen distinct rows, never the table.
+ */
+const FULL_LOAD_MAX = 20_000
+/** Rows per preferred bucket, and the size of the spread sample, above FULL_LOAD_MAX. */
+const PER_BUCKET = 64
+const SAMPLE = 2_000
+
+/**
+ * The rows `locatorsForTable` would prefer, without reading the whole table: the
+ * first PER_BUCKET rows of each preferred tenant, the first PER_BUCKET rows holding
+ * a looked-up value, and the first SAMPLE rows as the pool the rest are drawn from.
+ * Each query stops at its LIMIT, so memory is bounded whatever the table's size.
+ */
+async function boundedRows(
+  sql: Sql,
+  schema: string,
+  table: string,
+  rel: string,
+  tenantOrder: string[],
+  keyedValues: Set<string>,
+): Promise<SourceRow[]> {
+  const out: SourceRow[] = []
+  const [{ tenant } = { tenant: false }] = await sql<{ tenant: boolean }[]>`
+    select exists(select 1 from information_schema.columns
+                   where table_schema = ${schema} and table_name = ${table}
+                     and column_name = 'tenant_id') tenant`
+  if (tenant)
+    for (const id of tenantOrder)
+      out.push(
+        ...(await sql.unsafe<SourceRow[]>(
+          `${SOURCE_ROWS(rel)} where t.tenant_id = $1::uuid order by t.ctid limit ${PER_BUCKET}`,
+          [id],
+        )),
+      )
+  if (keyedValues.size)
+    out.push(
+      ...(await sql.unsafe<SourceRow[]>(
+        `${SOURCE_ROWS(rel)} where exists (select 1 from jsonb_each_text(to_jsonb(t)) e
+           where e.value = any($1::text[])) limit ${PER_BUCKET}`,
+        [[...keyedValues]],
+      )),
+    )
+  out.push(
+    ...(await sql.unsafe<SourceRow[]>(
+      `${SOURCE_ROWS(rel)} order by t.ctid limit ${SAMPLE}`,
+    )),
+  )
+  const seen = new Set<string>()
+  return out.filter((r) => {
+    const key = `${r.child}:${r.tid}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 async function locatorsForTable(
   sql: Sql,
   schema: string,
@@ -280,15 +345,14 @@ async function locatorsForTable(
     `select count(*)::int count from ${rel}`,
   )
   if (!count) return []
-  const rows = await sql.unsafe<
-    { tid: string; child: string; row: Record<string, unknown> }[]
-  >(
-    `select t.ctid::text tid, t.tableoid::regclass::text child, to_jsonb(t) row from ${rel} t order by t.ctid`,
-  )
-  const preferred = new Map<string, Locator[]>()
-  const tenantKeys = new Set(tenantOrder)
   const keyedValues =
     valueOrder.get(`${schema}.${table}`) ?? valueOrder.get(table) ?? new Set<string>()
+  const rows =
+    count <= FULL_LOAD_MAX
+      ? await sql.unsafe<SourceRow[]>(`${SOURCE_ROWS(rel)} order by t.ctid`)
+      : await boundedRows(sql, schema, table, rel, tenantOrder, keyedValues)
+  const preferred = new Map<string, Locator[]>()
+  const tenantKeys = new Set(tenantOrder)
   const rest: Locator[] = []
   for (const r of rows) {
     const tenant = r.row.tenant_id == null ? null : String(r.row.tenant_id)
@@ -306,8 +370,11 @@ async function locatorsForTable(
       tenant,
       bucket,
     }
-    if (bucket) preferred.set(bucket, [...(preferred.get(bucket) ?? []), loc])
-    else rest.push(loc)
+    if (bucket) {
+      const list = preferred.get(bucket)
+      if (list) list.push(loc)
+      else preferred.set(bucket, [loc])
+    } else rest.push(loc)
   }
   const orderedBuckets = [
     ...tenantOrder.map((tenant) => `tenant:${tenant}`),
