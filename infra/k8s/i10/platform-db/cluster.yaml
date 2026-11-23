@@ -63,6 +63,10 @@ spec:
       auto_explain.log_analyze: "on"
       auto_explain.log_buffers: "on"
       auto_explain.log_timing: "off"
+      # Never the bound values: they are customer data (addresses, subjects,
+      # tokens), and since PostgreSQL 16 auto_explain logs them in full by
+      # default (-1). The plan is what we read; the values add only risk.
+      auto_explain.log_parameter_max_length: "0"
       auto_explain.log_nested_statements: "on"
       auto_explain.sample_rate: "0.1"
 
