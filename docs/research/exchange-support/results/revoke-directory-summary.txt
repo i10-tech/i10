@@ -1,0 +1,7 @@
+21:46:07 EWS subscription AQgBBImOlfbS3eDPQ4G4tpWWoufYaQ==
+21:46:07 carol using dave's subscription id: ResponseCode>ErrorInvalidSubscription ResponseCode>NoError 
+21:46:13 REVOKE: dave deleted from the directory
+21:46:17 CreateItem in dave's inbox with dave's header: ResponseClass="Success"
+HTTP 500
+21:46:17 fresh sign-in with dave's password and a new header form: HTTP 401
+21:47:27 80 s after revocation, same header, GetFolder: ResponseClass="Success" <t:TotalCount>1 

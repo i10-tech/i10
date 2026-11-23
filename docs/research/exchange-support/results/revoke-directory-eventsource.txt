@@ -1,0 +1,23 @@
+21:46:17 event: state
+21:46:17 data: {"@type":"StateChange","changed":{"e":{"Thread":"sam","Mailbox":"sam","Email":"sam"}}}
+21:46:17 
+21:46:47 event: ping
+21:46:47 data: {"interval": 30}
+21:46:47 
+21:47:17 event: ping
+21:47:17 data: {"interval": 30}
+21:47:17 
+21:47:47 event: ping
+21:47:47 data: {"interval": 30}
+21:47:47 
+21:48:17 event: ping
+21:48:17 data: {"interval": 30}
+21:48:17 
+21:48:47 event: ping
+21:48:47 data: {"interval": 30}
+21:48:47 
+21:49:17 event: ping
+21:49:17 data: {"interval": 30}
+21:49:17 
+21:49:27 
+21:49:27 [curl ended 200 after 200.002086s]

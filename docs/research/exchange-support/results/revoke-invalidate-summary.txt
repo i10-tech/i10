@@ -1,0 +1,7 @@
+21:49:50 EWS subscription AQgBBLXP17PwvpOoWuip/rGV2taDOA==
+21:49:50 carol using dave's subscription id: ResponseCode>ErrorInvalidSubscription ResponseCode>NoError 
+21:49:56 REVOKE: dave deleted from the directory
+21:49:56 InvalidateCaches sent
+21:50:00 CreateItem in dave's inbox with dave's header: HTTP 401
+21:50:01 fresh sign-in with dave's password and a new header form: HTTP 401
+21:51:12 80 s after revocation, same header, GetFolder: 
