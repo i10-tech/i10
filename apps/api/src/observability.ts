@@ -51,6 +51,7 @@ export type Service =
   | "content-store"
   | "retention"
   | "team-sent"
+  | "message-stats"
 
 export interface ObservabilityOptions {
   /**
