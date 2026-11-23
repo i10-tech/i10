@@ -29,8 +29,8 @@ import {
   connections as ssoConnections,
   directories as ssoDirectories,
 } from "../db/identity.js"
-import { lastEvent, PRUNE_WINDOW_MS } from "../send/lookup.js"
-import { timestampFromUuidV7 } from "../ids.js"
+import { lastEvent } from "../send/lookup.js"
+import { createdAtForId, eventsOfMessagesSince, notAfter } from "../db/partitions.js"
 import { deliveryConditions, type DeliveryFilter } from "../webhooks/history.js"
 
 /**
@@ -445,7 +445,9 @@ export function consoleQueries(
       const cursor = decodeCursor(filters.cursor)
 
       return withTenant(db, tenantId, async (tx) => {
-        const where: SQL[] = []
+        // ⚠ BOUNDED ABOVE BY NOW, so the empty partitions ahead are not planned
+        // or merged into every page (db/partitions.ts).
+        const where: SQL[] = [notAfter(messages.createdAt)]
 
         if (filters.domainId) where.push(eq(messages.domainId, filters.domainId))
         if (filters.broadcastId)
@@ -540,14 +542,12 @@ export function consoleQueries(
                 and(
                   inArray(messageEvents.messageId, ids),
                   // ⚠ THE PARTITION PRUNE, TAKEN FROM THE PAGE ITSELF. An event
-                  // cannot precede its message, so the oldest row on this page
-                  // minus an hour of slack excludes every older partition and
-                  // excludes nothing real.
-                  gte(
+                  // cannot precede its message nor be dated in the future, so
+                  // the oldest row on this page and now exclude every other
+                  // partition and nothing real.
+                  ...eventsOfMessagesSince(
                     messageEvents.occurredAt,
-                    new Date(
-                      Math.min(...page.map((r) => r.createdAt.getTime())) - 3_600_000,
-                    ),
+                    new Date(Math.min(...page.map((r) => r.createdAt.getTime()))),
                   ),
                 ),
               )
@@ -623,13 +623,7 @@ export function consoleQueries(
        * better failure than a lie. See send/lookup.ts, which states the same
        * rule for the same reason.
        */
-      const minted = timestampFromUuidV7(id)
-      const window = minted
-        ? [
-            gte(messages.createdAt, new Date(minted.getTime() - PRUNE_WINDOW_MS)),
-            lte(messages.createdAt, new Date(minted.getTime() + PRUNE_WINDOW_MS)),
-          ]
-        : []
+      const window = createdAtForId(messages.createdAt, id)
 
       // What of the body lives in R2 (#168, #188); null when nothing does.
       let stored = null as {
@@ -674,10 +668,7 @@ export function consoleQueries(
             .where(
               and(
                 eq(messageEvents.messageId, message.id),
-                gte(
-                  messageEvents.occurredAt,
-                  new Date(message.createdAt.getTime() - 3_600_000),
-                ),
+                ...eventsOfMessagesSince(messageEvents.occurredAt, message.createdAt),
               ),
             )
             .orderBy(messageEvents.occurredAt),
@@ -917,7 +908,9 @@ export function consoleQueries(
             .select({
               domains: scalarSubquery(domains),
               apiKeys: scalarSubquery(apiKeys),
-              emails: scalarSubquery(messages),
+              // ⚠ BOUNDED ABOVE BY NOW, so the empty partitions ahead are
+              // not planned or probed for a workspace with no mail.
+              emails: sql<number>`(select count(*)::int from (select 1 from ${messages} where ${messages.tenantId} = ${tenantId} and ${notAfter(messages.createdAt)} limit ${SKELETON_LIMIT_PLUS_ONE}) s)`,
               logs: scalarSubquery(apiRequests),
               suppressions: scalarSubquery(suppressions),
               contacts: scalarSubquery(contacts),

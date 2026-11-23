@@ -2,10 +2,10 @@ import type { ContentStore } from "../content/object-store.js"
 import { restoreContent } from "../content/packs.js"
 import { restoreBodies } from "../content/restore.js"
 import type { EmailEventName, GetEmailResponse } from "@repo/contracts"
-import { and, eq, gte, lte } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { withTenant, type Database } from "../db/client.js"
 import { messageBodies, messageEvents, messages } from "../db/core.js"
-import { timestampFromUuidV7 } from "../ids.js"
+import { createdAtForId, eventsOfMessagesSince } from "../db/partitions.js"
 
 /**
  * Reading one message back.
@@ -16,14 +16,9 @@ import { timestampFromUuidV7 } from "../ids.js"
  * today that is cheap and in a year it is a table scan per status check, on the
  * endpoint an SDK polls. A UUIDv7 carries its own creation millisecond, so the
  * range predicate below prunes to a single partition before the index is used.
- *
- * ⚠ AND THE WINDOW IS A WINDOW RATHER THAN AN EQUALITY, because the id's
- * timestamp and the column's `now()` are minted microseconds apart in the same
- * statement - close enough to prune with, wrong to match on. An hour either side
- * costs nothing (the planner still drops every other partition) and cannot be
- * defeated by clock skew between the database and whoever generated the id.
+ * The window and its slack are db/partitions.ts's, shared by every read of the
+ * message tables by id.
  */
-export const PRUNE_WINDOW_MS = 60 * 60 * 1000
 
 /**
  * The furthest a message has got, as one value.
@@ -72,7 +67,6 @@ export function emailLookup(
 ): EmailLookup {
   return {
     async get(tenantId, id) {
-      const minted = timestampFromUuidV7(id)
       let stored = null as Stored | null
 
       const email = await withTenant(db, tenantId, async (tx) => {
@@ -81,12 +75,7 @@ export function emailLookup(
         // otherwise prune to a window it never belonged to and return null for
         // a message that exists - a 404 for a real send is worse than a slow
         // query.
-        const window = minted
-          ? [
-              gte(messages.createdAt, new Date(minted.getTime() - PRUNE_WINDOW_MS)),
-              lte(messages.createdAt, new Date(minted.getTime() + PRUNE_WINDOW_MS)),
-            ]
-          : []
+        const window = createdAtForId(messages.createdAt, id)
 
         const rows = await tx
           .select({
@@ -141,10 +130,10 @@ export function emailLookup(
             .limit(1),
 
           // ⚠ `message_events` IS PARTITIONED ON `occurred_at` TOO, so this
-          // needs its own lower bound or it merge-appends across every
-          // partition ever created. An event cannot precede the message, so
-          // the message's own creation time - minus the same slack the id
-          // window uses - prunes everything older and excludes nothing real.
+          // needs its own bounds or it reads every partition ever created,
+          // the empty ones ahead included. An event cannot precede the
+          // message nor be dated in the future, so the message's own creation
+          // time and now prune everything else and exclude nothing real.
           //
           // ⚠ AND IT IS `distinct` RATHER THAN ordered-and-limited. `lastEvent`
           // takes a maximum over a severity table, so order buys nothing - and
@@ -157,14 +146,7 @@ export function emailLookup(
             .where(
               and(
                 eq(messageEvents.messageId, message.id),
-                ...(minted
-                  ? [
-                      gte(
-                        messageEvents.occurredAt,
-                        new Date(minted.getTime() - PRUNE_WINDOW_MS),
-                      ),
-                    ]
-                  : []),
+                ...eventsOfMessagesSince(messageEvents.occurredAt, message.createdAt),
               ),
             ),
         ])
