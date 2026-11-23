@@ -117,6 +117,13 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
   const rows = refs.map(
     (r) => sql`(${r.id}::uuid, ${r.createdAt.toISOString()}::timestamptz)`,
   )
+  // ⚠ THE BATCH'S OWN SPAN, AS CONSTANTS THE PLANNER CAN PRUNE BY (#507).
+  // `m.created_at = v.created_at` alone is a join, so every partition was
+  // planned and probed for an UPDATE of rows that all sit in one or two. The
+  // refs carry the exact `created_at`, so these bounds exclude nothing.
+  const times = refs.map((r) => r.createdAt.getTime())
+  const first = new Date(Math.min(...times)).toISOString()
+  const last = new Date(Math.max(...times)).toISOString()
 
   return sql`
     update core.messages m
@@ -127,6 +134,8 @@ export function claimStatement(refs: readonly MessageRef[], opts: ClaimOptions):
       from (values ${sql.join(rows, sql`, `)}) as v (id, created_at)
      where m.id = v.id
        and m.created_at = v.created_at
+       and m.created_at >= ${first}::timestamptz
+       and m.created_at <= ${last}::timestamptz
        and (m.scheduled_at is null or m.scheduled_at <= now())
        and (
              m.status = 'queued'
