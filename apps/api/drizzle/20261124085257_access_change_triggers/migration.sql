@@ -247,7 +247,10 @@ CREATE TRIGGER "access_changes_trunc" AFTER TRUNCATE ON "core"."join_domains"
 -- the edge (a long transaction's) waits for a later call.
 --
 -- ⚠ A RANGE OF THE PRIMARY KEY, NOT A JOIN. Ids are unique, so `[low, edge)`
--- holds at most 10,000 rows, and the delete is one index range scan. A join to
+-- holds at most 10,000 rows, and the delete is one index range scan. Both ends
+-- are written out (`c.id >= b.low AND c.id < b.edge`): an upper bound alone is
+-- estimated at a third of the table, which on a large log could make a
+-- sequential scan look cheaper than the range. A join to
 -- a list of ids was planned as a hash join over a sequential scan of the whole
 -- log (EXPLAIN on 687,041 rows: 94 ms). Gaps in the ids only make a call delete
 -- fewer; it deletes nothing (returns 0) only when the table is empty or the
@@ -263,7 +266,8 @@ AS $$
   WITH low AS (
     SELECT min(c.id) AS id FROM authd.access_changes c
   ), bounds AS (
-    SELECT coalesce(
+    SELECT l.id AS low,
+           coalesce(
              (SELECT min(c.id) FROM authd.access_changes c
                WHERE c.id >= l.id AND c.id < l.id + 10000
                  AND c.at >= now() - interval '1 hour'),
@@ -272,7 +276,7 @@ AS $$
       FROM low l WHERE l.id IS NOT NULL
   ), gone AS (
     DELETE FROM authd.access_changes c USING bounds b
-     WHERE c.id < b.edge
+     WHERE c.id >= b.low AND c.id < b.edge
     RETURNING 1
   )
   SELECT count(*)::integer FROM gone

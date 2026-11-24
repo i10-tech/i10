@@ -1002,7 +1002,9 @@ log read either, so a later poll returns it. `TestAPollRechecksAConnectionThatSi
 **When the poll cannot tell whom a change names.** A `TRUNCATE` (kind `all`), a
 kind this front does not know, more than 10,000 changes in one read
 (`DefaultMaxChanges`), a position older than ten minutes (after a long outage),
-or transaction ids that went back make the poll ask the sweep loop for a full
+transaction ids that went back, or a changed database start time
+(`pg_postmaster_start_time()`, a restart, restore or failover) make the poll
+ask the sweep loop for a full
 sweep, logged at WARN. It re-checks nobody itself: it advances its position and
 polls again at its normal interval, so a burst does not hold the next targeted
 revocation back by the seconds a full sweep takes at 50,000 accounts. The
