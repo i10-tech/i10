@@ -99,6 +99,9 @@ suite("lowercase CHECK constraints", () => {
       await owner`delete from core.mailbox_jobs where tenant_id = ${TENANT}`
       await owner`delete from core.message_events where tenant_id = ${TENANT}`
       await owner`delete from core.tenants where id = ${TENANT}`
+      // The tenant delete's trigger (retention_horizons_keep_deleted) leaves a
+      // horizon row behind; remove it as retention-due-db.test.ts does.
+      await owner`delete from core.retention_horizons where tenant_id = ${TENANT}`
       await owner.end()
     }
     if (apiClient) await apiClient.end()
