@@ -223,6 +223,7 @@ export const accounts = authd.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    check("accounts_email_lowercase", sql`"email" = lower("email")`),
     check(
       "accounts_storage_allocation_positive",
       sql`${t.storageAllocation} is null or ${t.storageAllocation} > 0`,
@@ -259,6 +260,7 @@ export const aliases = authd.table(
   },
   (t) => [
     index("aliases_account_idx").on(t.clerkUserId),
+    check("aliases_address_lowercase", sql`"address" = lower("address")`),
     check("aliases_source_check", sql`"source" in ('clerk', 'directory', 'console')`),
   ],
 )
@@ -291,6 +293,7 @@ export const groups = authd.table(
   },
   (t) => [
     index("groups_tenant_idx").on(t.tenantId),
+    check("groups_email_lowercase", sql`"email" is null or "email" = lower("email")`),
     foreignKey({
       name: "authd_groups_directory_group_fk",
       columns: [t.directoryGroupId],
@@ -416,6 +419,7 @@ export const authdRequiredDomains = authd.table(
   },
   (t) => [
     index("required_domains_tenant_idx").on(t.tenantId),
+    check("required_domains_domain_lowercase", sql`"domain" = lower("domain")`),
     foreignKey({
       name: "authd_required_connection_fk",
       columns: [t.connectionId],

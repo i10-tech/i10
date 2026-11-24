@@ -56,7 +56,7 @@ export function accountEventOps(db: Database): AccountEventOps {
         await tx.insert(mailboxAuthFailures).values({
           tenantId: owner.tenantId,
           clerkUserId: owner.clerkUserId,
-          account: event.account,
+          account: event.account.trim().toLowerCase(),
           ip: event.ip,
           subnet: subnetOf(event.ip),
           listener: event.listener,

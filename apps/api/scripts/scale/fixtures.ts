@@ -36,32 +36,32 @@ export const FIXTURES: Fixture[] = [
     check: `select 1 from core.tenants t where t.id = '${FIXTURE_TENANTS.empty}' and not exists (select 1 from core.domains where tenant_id = t.id)`,
   },
   {
-    risk: "a verified, mail-hosting domain stored with capitals: every lookup that compares lower() to a raw column",
-    check: `select 1 from core.domains where name = 'MixedCase.Example' and status = 'verified' and hosts_mailboxes`,
+    risk: "a verified, mail-hosting domain enforced lowercase by domains_name_lowercase CHECK",
+    check: `select 1 from core.domains d join pg_constraint c on c.conname = 'domains_name_lowercase' and c.convalidated where d.name = 'mixedcase.example' and d.status = 'verified' and d.hosts_mailboxes`,
   },
   {
     risk: "a mailbox on that domain, stored lowercase as the projection writes it",
     check: `select 1 from authd.accounts where email = 'ceo@mixedcase.example' and active`,
   },
   {
-    risk: "an alias stored with capitals, which authd's lowercase lookup can never match",
-    check: `select 1 from authd.aliases where address = 'Sales@mixedcase.example'`,
+    risk: "an alias enforced lowercase by aliases_address_lowercase CHECK",
+    check: `select 1 from authd.aliases al join pg_constraint c on c.conname = 'aliases_address_lowercase' and c.convalidated where al.address = 'sales@mixedcase.example'`,
   },
   {
-    risk: "a team inbox address stored with capitals (groups are found by lower(email))",
-    check: `select 1 from authd.groups where email = 'Support@MixedCase.Example'`,
+    risk: "a team inbox address enforced lowercase by groups_email_lowercase CHECK",
+    check: `select 1 from authd.groups g join pg_constraint c on c.conname = 'groups_email_lowercase' and c.convalidated where g.email = 'support@mixedcase.example'`,
   },
   {
     risk: "a second workspace claiming the same name, unverified",
-    check: `select 1 from core.domains where lower(name) = 'mixedcase.example' and tenant_id = '${FIXTURE_TENANTS.claimant}' and status = 'pending'`,
+    check: `select 1 from core.domains where name = 'mixedcase.example' and tenant_id = '${FIXTURE_TENANTS.claimant}' and status = 'pending'`,
   },
   {
     risk: "two contacts in one workspace that differ only in case",
     check: `select 1 from core.contacts where tenant_id = '${FIXTURE_TENANTS.mixedCase}' and lower(email) = 'ann@example.test' having count(*) = 2`,
   },
   {
-    risk: "a suppression stored with capitals for an address mail is sent to in lowercase",
-    check: `select 1 from core.suppressions where tenant_id = '${FIXTURE_TENANTS.mixedCase}' and address = 'Bob@Example.test'`,
+    risk: "a suppression enforced lowercase by suppressions_address_lowercase CHECK",
+    check: `select 1 from core.suppressions s join pg_constraint c on c.conname = 'suppressions_address_lowercase' and c.convalidated where s.tenant_id = '${FIXTURE_TENANTS.mixedCase}' and s.address = 'bob@example.test'`,
   },
   {
     risk: "a workspace and member named in RTL script, emoji and combining marks",
@@ -129,16 +129,37 @@ export async function loadFixtures(sql: Sql, anchor: Date): Promise<void> {
     await tx`insert into core.workspace_roles (tenant_id, clerk_user_id, role, source)
              values (${F.unicode}, 'user_fixture_unicode_member', 'member', 'clerk')`
 
+    const assertRefused = async (
+      label: string,
+      run: (sp: typeof tx) => Promise<unknown>,
+    ) => {
+      try {
+        await tx.savepoint(async (sp) => {
+          await run(sp)
+          throw new Error(
+            `expected CHECK constraint to refuse mixed-case write: ${label}`,
+          )
+        })
+      } catch (err) {
+        if ((err as { code?: unknown }).code === "23514") return
+        throw err
+      }
+    }
+
     const domain = (
       id: string,
       tenant: string,
       name: string,
       status: string,
       hosts: boolean,
+      db: typeof tx = tx,
     ) =>
-      tx`insert into core.domains (id, tenant_id, name, status, hosts_mailboxes, verified_at, created_at, updated_at)
+      db`insert into core.domains (id, tenant_id, name, status, hosts_mailboxes, verified_at, created_at, updated_at)
          values (${id}, ${tenant}, ${name}, ${status}::core.domain_status, ${hosts}, ${status === "verified" ? at(-1) : null}, ${at(-2)}, ${at(-2)})`
-    await domain(R(1), F.mixedCase, "MixedCase.Example", "verified", true)
+    await assertRefused("core.domains.name", (sp) =>
+      domain(R(1), F.mixedCase, "MixedCase.Example", "verified", true, sp),
+    )
+    await domain(R(1), F.mixedCase, "mixedcase.example", "verified", true)
     await domain(R(2), F.claimant, "mixedcase.example", "pending", false)
     await domain(R(3), F.everyGate, "gates.example", "verified", true)
     await domain(R(4), F.deleted, "deleted.example", "verified", false)
@@ -147,8 +168,18 @@ export async function loadFixtures(sql: Sql, anchor: Date): Promise<void> {
 
     await tx`insert into authd.accounts (clerk_user_id, email, active, tenant_id) values
              ('user_fixture_mixed-case', 'ceo@mixedcase.example', true, ${F.mixedCase})`
-    await tx`insert into authd.aliases (address, clerk_user_id, source) values ('Sales@mixedcase.example', 'user_fixture_mixed-case', 'console')`
-    await tx`insert into authd.groups (name, email, tenant_id) values ('fixture-support', 'Support@MixedCase.Example', ${F.mixedCase})`
+    await assertRefused(
+      "authd.aliases.address",
+      (sp) =>
+        sp`insert into authd.aliases (address, clerk_user_id, source) values ('Sales@mixedcase.example', 'user_fixture_mixed-case', 'console')`,
+    )
+    await tx`insert into authd.aliases (address, clerk_user_id, source) values ('sales@mixedcase.example', 'user_fixture_mixed-case', 'console')`
+    await assertRefused(
+      "authd.groups.email",
+      (sp) =>
+        sp`insert into authd.groups (name, email, tenant_id) values ('fixture-support', 'Support@MixedCase.Example', ${F.mixedCase})`,
+    )
+    await tx`insert into authd.groups (name, email, tenant_id) values ('fixture-support', 'support@mixedcase.example', ${F.mixedCase})`
     await tx`insert into authd.group_members (group_name, clerk_user_id) values ('fixture-support', 'user_fixture_mixed-case')`
 
     // Every gate at once, on a domain that requires SSO, with the person exempt from it.
@@ -167,7 +198,12 @@ export async function loadFixtures(sql: Sql, anchor: Date): Promise<void> {
     await tx`insert into authd.managed_accounts (clerk_user_id, connection_id) values ('user_fixture_every-gate', ${conn.id})`
 
     await tx`insert into core.contacts (tenant_id, email) values (${F.mixedCase}, 'Ann@Example.test'), (${F.mixedCase}, 'ann@example.test')`
-    await tx`insert into core.suppressions (tenant_id, address, reason) values (${F.mixedCase}, 'Bob@Example.test', 'manual')`
+    await assertRefused(
+      "core.suppressions.address",
+      (sp) =>
+        sp`insert into core.suppressions (tenant_id, address, reason) values (${F.mixedCase}, 'Bob@Example.test', 'manual')`,
+    )
+    await tx`insert into core.suppressions (tenant_id, address, reason) values (${F.mixedCase}, 'bob@example.test', 'manual')`
 
     await tx`insert into core.api_keys (id, tenant_id, name, prefix, mode, secret_hash, revoked_at, expires_at) values
              (${R(8)}, ${F.suspended}, 'live', 'i10_live_', 'live', ${"f".repeat(63) + "1"}, null, null),

@@ -672,7 +672,7 @@ export function identityStore(db: Database, secrets: Sealer | null): IdentitySto
                 connectionId: key.connectionId,
                 subject: input.subject,
                 clerkUserId: input.clerkUserId,
-                email: input.email,
+                email: input.email ? input.email.trim().toLowerCase() : null,
               })
               .returning({ id: identities.id })
             return { id: row!.id }
@@ -924,7 +924,11 @@ export function identityStore(db: Database, secrets: Sealer | null): IdentitySto
       const [row] = await withTenant(db, tenantId, (tx) =>
         tx
           .insert(identities)
-          .values({ tenantId, ...input })
+          .values({
+            tenantId,
+            ...input,
+            email: input.email ? input.email.trim().toLowerCase() : null,
+          })
           .returning({ id: identities.id }),
       )
       return { id: row!.id }
@@ -934,7 +938,7 @@ export function identityStore(db: Database, secrets: Sealer | null): IdentitySto
       await withTenant(db, tenantId, (tx) =>
         tx
           .update(identities)
-          .set({ email, lastLoginAt: at })
+          .set({ email: email ? email.trim().toLowerCase() : null, lastLoginAt: at })
           .where(and(eq(identities.tenantId, tenantId), eq(identities.id, id))),
       )
     },

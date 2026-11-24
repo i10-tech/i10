@@ -275,6 +275,10 @@ export const identities = identity.table(
     uniqueIndex("identities_connection_subject_unique").on(t.connectionId, t.subject),
     uniqueIndex("identities_connection_user_unique").on(t.connectionId, t.clerkUserId),
     index("identities_user_idx").on(t.clerkUserId),
+    check(
+      "identities_email_lowercase",
+      sql`"email" is null or "email" = lower("email")`,
+    ),
     pgPolicy("identities_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
@@ -1232,6 +1236,10 @@ export const directoryUsers = identity.table(
     index("directory_users_tenant_user_idx").on(t.tenantId, t.clerkUserId),
     index("directory_users_external_idx").on(t.directoryId, t.externalId),
     index("directory_users_email_idx").on(t.tenantId, t.email),
+    check(
+      "directory_users_email_lowercase",
+      sql`"email" is null or "email" = lower("email")`,
+    ),
     check(
       "directory_users_mailbox_note_check",
       sql`"mailbox_note" is null or "mailbox_note" in ('domain_not_hosted', 'limit', 'address_taken')`,

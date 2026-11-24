@@ -8,14 +8,7 @@ import type { Sql } from "postgres"
 import { bulkRows } from "./bulk.js"
 import type { Profile } from "./profiles.js"
 import { apportion, Rng, zipfWeights } from "./rng.js"
-import {
-  caseVariant,
-  clerkId,
-  domainName,
-  localPart,
-  personName,
-  slugOf,
-} from "./values.js"
+import { clerkId, domainName, localPart, personName, slugOf } from "./values.js"
 
 export const OWN_DOMAIN = "i10.tech"
 const DAY = 86_400_000
@@ -264,8 +257,6 @@ export async function seedWorld(
           // A claim of a name another workspace already verified: allowed while unverified.
           if (status !== "verified" && verifiedNames.length && dr.chance(0.03))
             name = dr.pick(verifiedNames)
-          // A stored case variant, the shape `lower(name)` lookups exist for.
-          if (status !== "verified" && dr.chance(0.01)) name = caseVariant(dr, name)
           if (names.has(name)) continue
           names.add(name)
           if (status === "verified") verifiedNames.push(name)
@@ -436,7 +427,7 @@ export async function seedWorld(
     },
   )
 
-  // Team inboxes, with an address that is sometimes stored with capitals (groups by `lower(email)`).
+  // Team inboxes, stored lowercase (`groups_email_lowercase`).
   const groups: { name: string; tenant: Tenant }[] = []
   await bulkRows(
     sql,
@@ -449,9 +440,9 @@ export async function seedWorld(
         const hosted = t.domains.filter((d) => d.hosts)
         for (let i = t.n === 0 ? 200 : xr.int(1, 8); i > 0; i--) {
           const name = `team-${gn++}`
-          let email = `${xr.pick(["support", "sales", "ops", "billing", "hr"])}${gn}@${xr.pick(hosted).name}`
+          const email =
+            `${xr.pick(["support", "sales", "ops", "billing", "hr"])}${gn}@${xr.pick(hosted).name}`.toLowerCase()
           if (emails.has(email)) continue
-          if (xr.chance(0.1)) email = caseVariant(xr, email)
           groups.push({ name, tenant: t })
           await w.row([
             name,

@@ -385,7 +385,7 @@ func (p *Postgres) GroupsByAddress(ctx context.Context, addresses []string) ([]G
 	rows, err := p.pool.Query(ctx, `
 		SELECT g.name, coalesce(g.email, ''), coalesce(g.description, '')
 		FROM authd.groups g
-		WHERE lower(g.email) = ANY($1)`, norm)
+		WHERE g.email = ANY($1)`, norm)
 	if err != nil {
 		return nil, fmt.Errorf("projection: groups by address: %w", err)
 	}

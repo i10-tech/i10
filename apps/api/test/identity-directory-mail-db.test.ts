@@ -214,7 +214,7 @@ suite("directory mail", () => {
             values (${acme}, ${dir}, ${name}, ${over.email as string}, ${(over.active as boolean) ?? true}, ${(over.clerk as string | null) ?? null}, ${(over.deleted as Date | null) ?? null})`
     await row(dirA, "ada", { email: `ada@${domain}`, clerk: grace })
     await row(dirB, "ada2", { email: `ada2@${domain}`, clerk: grace })
-    await row(dirA, "new", { email: `New@${domain}` })
+    await row(dirA, "new", { email: `new@${domain}` })
     await row(dirB, "new2", { email: `new@${domain}` })
     await row(dirOff, "off", { email: `off@${domain}` })
     await row(dirA, "gone", { email: `gone@${domain}`, deleted: new Date() })
