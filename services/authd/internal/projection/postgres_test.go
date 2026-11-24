@@ -423,7 +423,7 @@ func TestAccountReadsWhetherItsDomainStillHostsMail(t *testing.T) {
 		if err != nil || got == nil {
 			t.Fatalf("AccountByUID(%s) = (%v, %v)", id, got, err)
 		}
-		swept, err := store.AccountsByUIDs(ctx, []string{hosted, bare, own})
+		swept, _, err := store.AccountsByUIDs(ctx, []string{hosted, bare, own})
 		if err != nil || len(swept) != 3 {
 			t.Fatalf("AccountsByUIDs = (%d rows, %v), want 3", len(swept), err)
 		}
@@ -522,7 +522,7 @@ func TestTheMailFrontsReads(t *testing.T) {
 		t.Fatalf("an inactive account resolved: %+v (%v)", got, err)
 	}
 
-	swept, err := store.AccountsByUIDs(ctx, append(ids, "user_front_never"))
+	swept, _, err := store.AccountsByUIDs(ctx, append(ids, "user_front_never"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,14 +570,25 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 	if got, err := store.AccountByLogin(ctx, "front-role@front.example"); err != nil || got == nil {
 		t.Fatalf("AccountByLogin as mailfront = (%v, %v)", got, err)
 	}
-	if got, err := store.AccountsByUIDs(ctx, []string{"user_front_role"}); err != nil || len(got) != 1 {
+	if got, _, err := store.AccountsByUIDs(ctx, []string{"user_front_role"}); err != nil || len(got) != 1 {
 		t.Fatalf("AccountsByUIDs as mailfront = (%d rows, %v)", len(got), err)
+	}
+	// It reads the access-change log, and may neither write it nor prune it.
+	b, err := store.AccessChanges(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("AccessChanges as mailfront: %v", err)
+	}
+	if _, err := store.AccessChanges(ctx, b.Snapshot, 10); err != nil {
+		t.Fatalf("AccessChanges from a position as mailfront: %v", err)
 	}
 	for _, q := range []string{
 		`INSERT INTO authd.bind_failure_budget (clerk_user_id, window_start, count) VALUES ('user_front_role', now(), 0)`,
 		`UPDATE authd.accounts SET credential_epoch = credential_epoch + 1 WHERE clerk_user_id = 'user_front_role'`,
 		`SELECT 1 FROM authd.aliases LIMIT 1`,
 		`SELECT 1 FROM core.domains LIMIT 1`,
+		`INSERT INTO authd.access_changes (kind, key) VALUES ('all', '')`,
+		`DELETE FROM authd.access_changes`,
+		`SELECT authd.prune_access_changes()`,
 	} {
 		if _, err := store.Pool().Exec(ctx, q); err == nil {
 			t.Errorf("the mailfront role may run %q", q)

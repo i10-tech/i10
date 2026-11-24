@@ -1,0 +1,429 @@
+# Change-driven recheck: EXPLAIN (ANALYZE, BUFFERS), 2026-11-24
+# Seed: docs/research/mail-device-binding/sweep-seed.sql (500,000 accounts, 20,000 domains) on
+# ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookworm, 1 GiB container, direct connection.
+# Second run of each statement shown (warm). Roles: mailfront for reads, i10 (owner) for writes.
+
+### Sections 1 and 2 rerun after the review fixes (2026-11-24), on pgvector/pgvector:pg18 in a 1 GiB
+### container with the same seed, as mailfront, through PREPARE/EXECUTE of projection.AccessChangesQuery
+### ($2 = 10001: DefaultMaxChanges + 1). The predicate is now `txid >= xmax(prev)` UNION ALL
+### `txid = ANY (xip(prev))`. An OR of the two was planned as a Seq Scan of the whole log (13 ms,
+### 3,366 buffers over 360,100 rows on the test scratch), so the statement is a UNION ALL.
+### The large row estimates on the xip branch come from the history being inserted in one
+### transaction (one txid for 360,000 rows); the plan uses the index regardless.
+
+### 1. poll, typical: 100 single-row changes committed since a snapshot
+### rows in the log
+ count  
+--------
+ 360200
+(1 row)
+
+snapshot 950:950:
+You are now connected to database "i10" as user "mailfront".
+PREPARE
+                                                                                QUERY PLAN                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=415.53..415.56 rows=1 width=101) (actual time=0.066..0.066 rows=1.00 loops=1)
+   Buffers: shared hit=4
+   ->  Limit  (cost=0.30..340.52 rows=10001 width=20) (actual time=0.018..0.050 rows=100.00 loops=1)
+         Buffers: shared hit=4
+         ->  Append  (cost=0.30..12254.35 rows=360215 width=20) (actual time=0.017..0.044 rows=100.00 loops=1)
+               Buffers: shared hit=4
+               ->  Index Scan using access_changes_txid_idx on access_changes l  (cost=0.30..4.32 rows=1 width=20) (actual time=0.017..0.026 rows=100.00 loops=1)
+                     Index Cond: (txid >= '950'::xid8)
+                     Index Searches: 1
+                     Buffers: shared hit=4
+               ->  Index Scan using access_changes_txid_idx on access_changes l_1  (cost=0.56..10448.96 rows=360214 width=20) (actual time=0.012..0.012 rows=0.00 loops=1)
+                     Index Cond: (txid = ANY ((InitPlan 1).col1))
+                     Index Searches: 0
+                     InitPlan 1
+                       ->  ProjectSet  (cost=0.00..0.27 rows=50 width=8) (actual time=0.002..0.002 rows=0.00 loops=1)
+                             ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.000..0.000 rows=1.00 loops=1)
+ Planning:
+   Buffers: shared hit=181
+ Planning Time: 0.532 ms
+ Execution Time: 0.133 ms
+(20 rows)
+
+=== second run (warm)
+                                                                                QUERY PLAN                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=415.53..415.56 rows=1 width=101) (actual time=0.046..0.047 rows=1.00 loops=1)
+   Buffers: shared hit=4
+   ->  Limit  (cost=0.30..340.52 rows=10001 width=20) (actual time=0.005..0.033 rows=100.00 loops=1)
+         Buffers: shared hit=4
+         ->  Append  (cost=0.30..12254.35 rows=360215 width=20) (actual time=0.005..0.027 rows=100.00 loops=1)
+               Buffers: shared hit=4
+               ->  Index Scan using access_changes_txid_idx on access_changes l  (cost=0.30..4.32 rows=1 width=20) (actual time=0.004..0.018 rows=100.00 loops=1)
+                     Index Cond: (txid >= '950'::xid8)
+                     Index Searches: 1
+                     Buffers: shared hit=4
+               ->  Index Scan using access_changes_txid_idx on access_changes l_1  (cost=0.56..10448.96 rows=360214 width=20) (actual time=0.002..0.002 rows=0.00 loops=1)
+                     Index Cond: (txid = ANY ((InitPlan 1).col1))
+                     Index Searches: 0
+                     InitPlan 1
+                       ->  ProjectSet  (cost=0.00..0.27 rows=50 width=8) (actual time=0.001..0.001 rows=0.00 loops=1)
+                             ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.000..0.000 rows=1.00 loops=1)
+ Planning Time: 0.063 ms
+ Execution Time: 0.063 ms
+(18 rows)
+
+
+### 2. poll, worst case: a writing transaction held open while 100,000 changes commit (100 commits
+### of 1,000), then 100 more; the snapshot holds the open transaction in its xip list
+ pg_sleep 
+----------
+ 
+(1 row)
+
+DO
+ANALYZE
+### rows in the log
+ count  
+--------
+ 460300
+(1 row)
+
+snapshot 1050:1152:1050
+You are now connected to database "i10" as user "mailfront".
+PREPARE
+                                                                               QUERY PLAN                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=438.58..438.61 rows=1 width=101) (actual time=0.056..0.056 rows=1.00 loops=1)
+   Buffers: shared hit=9
+   ->  Limit  (cost=0.42..363.57 rows=10001 width=20) (actual time=0.005..0.040 rows=100.00 loops=1)
+         Buffers: shared hit=9
+         ->  Append  (cost=0.42..1389.97 rows=38268 width=20) (actual time=0.005..0.033 rows=100.00 loops=1)
+               Buffers: shared hit=9
+               ->  Index Scan using access_changes_txid_idx on access_changes l  (cost=0.42..10.02 rows=91 width=20) (actual time=0.004..0.014 rows=100.00 loops=1)
+                     Index Cond: (txid >= '1152'::xid8)
+                     Index Searches: 1
+                     Buffers: shared hit=5
+               ->  Index Scan using access_changes_txid_idx on access_changes l_1  (cost=0.69..1188.61 rows=38177 width=20) (actual time=0.013..0.014 rows=0.00 loops=1)
+                     Index Cond: (txid = ANY ((InitPlan 1).col1))
+                     Index Searches: 1
+                     Buffers: shared hit=4
+                     InitPlan 1
+                       ->  ProjectSet  (cost=0.00..0.27 rows=50 width=8) (actual time=0.001..0.002 rows=1.00 loops=1)
+                             ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.000..0.000 rows=1.00 loops=1)
+ Planning:
+   Buffers: shared hit=188
+ Planning Time: 0.468 ms
+ Execution Time: 0.116 ms
+(21 rows)
+
+=== second run (warm)
+                                                                               QUERY PLAN                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=438.58..438.61 rows=1 width=101) (actual time=0.038..0.039 rows=1.00 loops=1)
+   Buffers: shared hit=9
+   ->  Limit  (cost=0.42..363.57 rows=10001 width=20) (actual time=0.004..0.027 rows=100.00 loops=1)
+         Buffers: shared hit=9
+         ->  Append  (cost=0.42..1389.97 rows=38268 width=20) (actual time=0.004..0.022 rows=100.00 loops=1)
+               Buffers: shared hit=9
+               ->  Index Scan using access_changes_txid_idx on access_changes l  (cost=0.42..10.02 rows=91 width=20) (actual time=0.003..0.012 rows=100.00 loops=1)
+                     Index Cond: (txid >= '1152'::xid8)
+                     Index Searches: 1
+                     Buffers: shared hit=5
+               ->  Index Scan using access_changes_txid_idx on access_changes l_1  (cost=0.69..1188.61 rows=38177 width=20) (actual time=0.003..0.004 rows=0.00 loops=1)
+                     Index Cond: (txid = ANY ((InitPlan 1).col1))
+                     Index Searches: 1
+                     Buffers: shared hit=4
+                     InitPlan 1
+                       ->  ProjectSet  (cost=0.00..0.27 rows=50 width=8) (actual time=0.000..0.001 rows=1.00 loops=1)
+                             ->  Result  (cost=0.00..0.01 rows=1 width=0) (actual time=0.000..0.000 rows=1.00 loops=1)
+ Planning:
+   Buffers: shared hit=4
+ Planning Time: 0.079 ms
+ Execution Time: 0.049 ms
+(21 rows)
+
+=== the OLD predicate on the same state, for comparison (warm)
+                                                                               QUERY PLAN                                                                               
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=617.03..617.04 rows=1 width=8) (actual time=8.015..8.016 rows=1.00 loops=1)
+   Buffers: shared hit=1039
+   ->  Limit  (cost=0.42..492.02 rows=10001 width=64) (actual time=7.990..8.006 rows=100.00 loops=1)
+         Buffers: shared hit=1039
+         ->  Index Only Scan using access_changes_txid_idx on access_changes l  (cost=0.42..3326.20 rows=67659 width=64) (actual time=7.989..8.001 rows=100.00 loops=1)
+               Index Cond: (txid >= '1050'::xid8)
+               Filter: (NOT pg_visible_in_snapshot(txid, '1050:1152:1050'::pg_snapshot))
+               Rows Removed by Filter: 100000
+               Heap Fetches: 100101
+               Index Searches: 1
+               Buffers: shared hit=1039
+ Planning Time: 0.020 ms
+ Execution Time: 8.029 ms
+(13 rows)
+
+                                                                               QUERY PLAN                                                                               
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=617.03..617.04 rows=1 width=8) (actual time=7.400..7.401 rows=1.00 loops=1)
+   Buffers: shared hit=1039
+   ->  Limit  (cost=0.42..492.02 rows=10001 width=64) (actual time=7.377..7.393 rows=100.00 loops=1)
+         Buffers: shared hit=1039
+         ->  Index Only Scan using access_changes_txid_idx on access_changes l  (cost=0.42..3326.20 rows=67659 width=64) (actual time=7.376..7.386 rows=100.00 loops=1)
+               Index Cond: (txid >= '1050'::xid8)
+               Filter: (NOT pg_visible_in_snapshot(txid, '1050:1152:1050'::pg_snapshot))
+               Rows Removed by Filter: 100000
+               Heap Fetches: 100101
+               Index Searches: 1
+               Buffers: shared hit=1039
+ Planning Time: 0.074 ms
+ Execution Time: 7.418 ms
+(13 rows)
+
+### 3. re-check of 100 spread accounts (projection.SweepQuery)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop Left Join  (cost=846.11..877.51 rows=1 width=194) (actual time=15.626..15.909 rows=100.00 loops=1)
+   Buffers: shared hit=2723
+   CTE live
+     ->  Bitmap Heap Scan on accounts a_1  (cost=439.27..814.08 rows=100 width=214) (actual time=0.373..0.523 rows=100.00 loops=1)
+           Recheck Cond: (clerk_user_id = ANY ('{bench_169782,bench_496955,bench_79089,bench_207002,bench_341278,bench_25316,bench_37978,bench_430585,bench_280957,bench_49352,bench_191727,bench_305549,bench_30409,bench_476947,bench_266043,bench_112564,bench_19659,bench_45062,bench_227356,bench_219243,bench_36625,bench_126177,bench_47560,bench_288908,bench_222571,bench_30991,bench_433509,bench_296461,bench_64908,bench_496737,bench_117042,bench_330630,bench_328956,bench_305659,bench_496873,bench_32434,bench_302569,bench_306993,bench_207975,bench_26000,bench_115911,bench_24423,bench_291853,bench_450085,bench_69822,bench_151839,bench_219750,bench_75632,bench_283476,bench_61758,bench_299324,bench_161734,bench_293737,bench_427886,bench_357566,bench_94753,bench_54031,bench_304926,bench_299476,bench_334975,bench_98499,bench_195244,bench_51082,bench_287176,bench_373352,bench_32920,bench_295892,bench_31249,bench_324540,bench_107982,bench_260265,bench_356726,bench_278775,bench_224182,bench_407492,bench_164704,bench_244110,bench_307004,bench_484150,bench_237600,bench_189574,bench_157165,bench_130248,bench_416484,bench_94250,bench_366475,bench_408856,bench_127977,bench_42916,bench_301164,bench_157418,bench_275355,bench_259584,bench_458825,bench_180081,bench_382440,bench_235319,bench_150963,bench_319270,bench_38379}'::text[]))
+           Filter: active
+           Heap Blocks: exact=117
+           Buffers: shared hit=414
+           ->  Bitmap Index Scan on accounts_pkey  (cost=0.00..439.00 rows=100 width=0) (actual time=0.348..0.349 rows=118.00 loops=1)
+                 Index Cond: (clerk_user_id = ANY ('{bench_169782,bench_496955,bench_79089,bench_207002,bench_341278,bench_25316,bench_37978,bench_430585,bench_280957,bench_49352,bench_191727,bench_305549,bench_30409,bench_476947,bench_266043,bench_112564,bench_19659,bench_45062,bench_227356,bench_219243,bench_36625,bench_126177,bench_47560,bench_288908,bench_222571,bench_30991,bench_433509,bench_296461,bench_64908,bench_496737,bench_117042,bench_330630,bench_328956,bench_305659,bench_496873,bench_32434,bench_302569,bench_306993,bench_207975,bench_26000,bench_115911,bench_24423,bench_291853,bench_450085,bench_69822,bench_151839,bench_219750,bench_75632,bench_283476,bench_61758,bench_299324,bench_161734,bench_293737,bench_427886,bench_357566,bench_94753,bench_54031,bench_304926,bench_299476,bench_334975,bench_98499,bench_195244,bench_51082,bench_287176,bench_373352,bench_32920,bench_295892,bench_31249,bench_324540,bench_107982,bench_260265,bench_356726,bench_278775,bench_224182,bench_407492,bench_164704,bench_244110,bench_307004,bench_484150,bench_237600,bench_189574,bench_157165,bench_130248,bench_416484,bench_94250,bench_366475,bench_408856,bench_127977,bench_42916,bench_301164,bench_157418,bench_275355,bench_259584,bench_458825,bench_180081,bench_382440,bench_235319,bench_150963,bench_319270,bench_38379}'::text[]))
+                 Index Searches: 99
+                 Buffers: shared hit=297
+   CTE verdicts
+     ->  Subquery Scan on p  (cost=2.50..28.50 rows=100 width=49) (actual time=0.528..15.161 rows=100.00 loops=1)
+           Buffers: shared hit=1815
+           ->  HashAggregate  (cost=2.50..3.50 rows=100 width=48) (actual time=0.232..0.257 rows=100.00 loops=1)
+                 Group Key: live.tenant_id, live.domain
+                 Batches: 1  Memory Usage: 32kB
+                 Buffers: shared hit=115
+                 ->  CTE Scan on live  (cost=0.00..2.00 rows=100 width=48) (actual time=0.000..0.200 rows=100.00 loops=1)
+                       Storage: Memory  Maximum Storage: 31kB
+                       Buffers: shared hit=115
+   ->  Hash Join  (cost=3.25..6.88 rows=1 width=196) (actual time=15.607..15.643 rows=100.00 loops=1)
+         Hash Cond: (a.domain = v.domain)
+         Join Filter: (NOT (v.tenant_id IS DISTINCT FROM a.tenant_id))
+         Buffers: shared hit=2114
+         ->  CTE Scan on live a  (cost=0.00..2.00 rows=100 width=227) (actual time=0.375..0.383 rows=100.00 loops=1)
+               Storage: Memory  Maximum Storage: 31kB
+               Buffers: shared hit=299
+         ->  Hash  (cost=2.00..2.00 rows=100 width=49) (actual time=15.227..15.227 rows=100.00 loops=1)
+               Buckets: 1024  Batches: 1  Memory Usage: 15kB
+               Buffers: shared hit=1815
+               ->  CTE Scan on verdicts v  (cost=0.00..2.00 rows=100 width=49) (actual time=0.529..15.198 rows=100.00 loops=1)
+                     Storage: Memory  Maximum Storage: 23kB
+                     Buffers: shared hit=1815
+   ->  Index Scan using managed_accounts_pkey on managed_accounts m  (cost=0.28..3.14 rows=1 width=28) (actual time=0.001..0.001 rows=0.00 loops=100)
+         Index Cond: (clerk_user_id = a.clerk_user_id)
+         Index Searches: 100
+         Buffers: shared hit=200
+   SubPlan 3
+     ->  Seq Scan on passthrough_versions pv  (cost=0.00..0.00 rows=1 width=8) (actual time=0.000..0.000 rows=0.00 loops=100)
+           Filter: (connection_id = m.connection_id)
+   SubPlan 4
+     ->  Index Scan using required_domains_tenant_idx on required_domains rd  (cost=0.27..8.30 rows=1 width=0) (actual time=0.000..0.000 rows=0.02 loops=100)
+           Index Cond: (tenant_id = a.tenant_id)
+           Filter: (domain = lower(split_part(a.email, '@'::text, 2)))
+           Index Searches: 100
+           Buffers: shared hit=202
+   SubPlan 6
+     ->  Nested Loop  (cost=0.55..16.61 rows=1 width=0) (actual time=0.001..0.001 rows=0.01 loops=100)
+           Buffers: shared hit=207
+           ->  Index Scan using required_domains_tenant_idx on required_domains rd_1  (cost=0.27..8.30 rows=1 width=32) (actual time=0.000..0.000 rows=0.02 loops=100)
+                 Index Cond: (tenant_id = a.tenant_id)
+                 Filter: (domain = lower(split_part(a.email, '@'::text, 2)))
+                 Index Searches: 100
+                 Buffers: shared hit=202
+           ->  Index Scan using required_exempt_connection_id_clerk_user_id_source_pk on required_exempt ex  (cost=0.28..8.30 rows=1 width=32) (actual time=0.003..0.003 rows=0.50 loops=2)
+                 Index Cond: ((connection_id = rd_1.connection_id) AND (clerk_user_id = a.clerk_user_id))
+                 Filter: (tenant_id = a.tenant_id)
+                 Index Searches: 2
+                 Buffers: shared hit=5
+ Planning:
+   Buffers: shared hit=32
+ Planning Time: 0.601 ms
+ Execution Time: 15.972 ms
+(65 rows)
+
+### 4. the prune, rerun after the second review (2026-11-24), on pgvector/pgvector:pg18 with migrations
+### applied: the body of authd.prune_access_changes (bounded edge search, DELETE bounded on both ends),
+### as i10, inside BEGIN ... ROLLBACK. Two states: a 1,000,000-row expired backlog plus 50,000 recent rows,
+### then an all-recent log. Both stay a primary-key range bounded by one 10,000-row batch.
+
+=== backlog: 1,000,000 expired + 50,000 recent
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate (actual time=7.374..7.376 rows=1.00 loops=1)
+   Buffers: shared hit=20316 dirtied=84
+   CTE gone
+     ->  Delete on access_changes c_2 (actual time=1.049..5.734 rows=10000.00 loops=1)
+           Buffers: shared hit=20316 dirtied=84
+           ->  Nested Loop (actual time=1.030..2.561 rows=10000.00 loops=1)
+                 Buffers: shared hit=232
+                 ->  Subquery Scan on l (actual time=0.226..0.227 rows=1.00 loops=1)
+                       Buffers: shared hit=4
+                       ->  Result (actual time=0.017..0.018 rows=1.00 loops=1)
+                             One-Time Filter: ((InitPlan 3).col1 IS NOT NULL)
+                             Buffers: shared hit=4
+                             InitPlan 3
+                               ->  Limit (actual time=0.015..0.015 rows=1.00 loops=1)
+                                     Buffers: shared hit=4
+                                     ->  Index Only Scan using access_changes_pkey on access_changes c_1 (actual time=0.014..0.015 rows=1.00 loops=1)
+                                           Heap Fetches: 0
+                                           Index Searches: 1
+                                           Buffers: shared hit=4
+                 ->  Index Scan using access_changes_pkey on access_changes c_2 (actual time=0.008..0.881 rows=10000.00 loops=1)
+                       Index Cond: ((id >= l.id) AND (id < COALESCE((SubPlan 2), (l.id + 10000))))
+                       Index Searches: 1
+                       Buffers: shared hit=114
+                       SubPlan 2
+                         ->  Result (actual time=0.789..0.790 rows=1.00 loops=1)
+                               Buffers: shared hit=114
+                               InitPlan 1
+                                 ->  Limit (actual time=0.788..0.788 rows=0.00 loops=1)
+                                       Buffers: shared hit=114
+                                       ->  Index Scan using access_changes_pkey on access_changes c (actual time=0.787..0.787 rows=0.00 loops=1)
+                                             Index Cond: ((id >= l.id) AND (id < (l.id + 10000)))
+                                             Filter: (at >= (now() - '01:00:00'::interval))
+                                             Rows Removed by Filter: 10000
+                                             Index Searches: 1
+                                             Buffers: shared hit=114
+   ->  CTE Scan on gone (actual time=1.051..6.881 rows=10000.00 loops=1)
+         Storage: Memory  Maximum Storage: 441kB
+         Buffers: shared hit=20316 dirtied=84
+ Planning:
+   Buffers: shared hit=83
+ Planning Time: 0.301 ms
+ Execution Time: 7.539 ms
+(42 rows)
+
+=== all recent (expired rows removed)
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate (actual time=0.053..0.055 rows=1.00 loops=1)
+   Buffers: shared hit=8
+   CTE gone
+     ->  Delete on access_changes c_2 (actual time=0.047..0.048 rows=0.00 loops=1)
+           Buffers: shared hit=8
+           ->  Nested Loop (actual time=0.046..0.047 rows=0.00 loops=1)
+                 Buffers: shared hit=8
+                 ->  Subquery Scan on l (actual time=0.028..0.028 rows=1.00 loops=1)
+                       Buffers: shared hit=3
+                       ->  Result (actual time=0.018..0.018 rows=1.00 loops=1)
+                             One-Time Filter: ((InitPlan 3).col1 IS NOT NULL)
+                             Buffers: shared hit=3
+                             InitPlan 3
+                               ->  Limit (actual time=0.016..0.016 rows=1.00 loops=1)
+                                     Buffers: shared hit=3
+                                     ->  Index Only Scan using access_changes_pkey on access_changes c_1 (actual time=0.015..0.015 rows=1.00 loops=1)
+                                           Heap Fetches: 0
+                                           Index Searches: 1
+                                           Buffers: shared hit=3
+                 ->  Index Scan using access_changes_pkey on access_changes c_2 (actual time=0.001..0.002 rows=0.00 loops=1)
+                       Index Cond: ((id >= l.id) AND (id < COALESCE((SubPlan 2), (l.id + 10000))))
+                       Index Searches: 1
+                       Buffers: shared hit=2
+                       SubPlan 2
+                         ->  Result (actual time=0.013..0.013 rows=1.00 loops=1)
+                               Buffers: shared hit=3
+                               InitPlan 1
+                                 ->  Limit (actual time=0.013..0.013 rows=1.00 loops=1)
+                                       Buffers: shared hit=3
+                                       ->  Index Scan using access_changes_pkey on access_changes c (actual time=0.012..0.012 rows=1.00 loops=1)
+                                             Index Cond: ((id >= l.id) AND (id < (l.id + 10000)))
+                                             Filter: (at >= (now() - '01:00:00'::interval))
+                                             Index Searches: 1
+                                             Buffers: shared hit=3
+   ->  CTE Scan on gone (actual time=0.048..0.048 rows=0.00 loops=1)
+         Storage: Memory  Maximum Storage: 17kB
+         Buffers: shared hit=8
+ Planning:
+   Buffers: shared hit=13
+ Planning Time: 0.254 ms
+ Execution Time: 0.116 ms
+(41 rows)
+
+### 5. write, triggers DISABLED: UPDATE authd.accounts SET suspended_at = now() WHERE clerk_user_id = 'bench_123457'
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Update on accounts  (cost=0.42..8.44 rows=0 width=0) (actual time=0.021..0.021 rows=0.00 loops=1)
+   Buffers: shared hit=7
+   WAL: records=1 bytes=86
+   ->  Index Scan using accounts_pkey on accounts  (cost=0.42..8.44 rows=1 width=14) (actual time=0.005..0.005 rows=1.00 loops=1)
+         Index Cond: (clerk_user_id = 'bench_123457'::text)
+         Index Searches: 1
+         Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=9
+ Planning Time: 0.040 ms
+ Execution Time: 0.034 ms
+(11 rows)
+
+### 5. write, triggers ENABLED: UPDATE authd.accounts SET suspended_at = now() WHERE clerk_user_id = 'bench_123457'
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Update on accounts  (cost=0.42..8.44 rows=0 width=0) (actual time=0.024..0.024 rows=0.00 loops=1)
+   Buffers: shared hit=7
+   WAL: records=1 bytes=86
+   ->  Index Scan using accounts_pkey on accounts  (cost=0.42..8.44 rows=1 width=14) (actual time=0.008..0.009 rows=1.00 loops=1)
+         Index Cond: (clerk_user_id = 'bench_123457'::text)
+         Index Searches: 1
+         Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=1
+ Planning Time: 0.023 ms
+ Trigger access_changes_upd: time=0.161 calls=1
+ Execution Time: 0.195 ms
+(12 rows)
+
+### 5. write, triggers DISABLED: UPDATE authd.accounts SET payment_hold_at = now() WHERE clerk_user_id = ANY (SELECT 'bench_' || g FROM generate_series(1, 500000, 50) g)
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on accounts  (cost=125.43..1787.13 rows=0 width=0) (actual time=114.766..114.767 rows=0.00 loops=1)
+   Buffers: shared hit=201475 read=1015 dirtied=1190 written=1392
+   I/O Timings: shared read=2.167 write=5.061
+   WAL: records=47764 bytes=4659967
+   ->  Nested Loop  (cost=125.43..1787.13 rows=10000 width=42) (actual time=3.366..35.761 rows=10000.00 loops=1)
+         Buffers: shared hit=39846 read=204 dirtied=345 written=203
+         I/O Timings: shared read=0.469 write=0.871
+         WAL: records=91 bytes=4764
+         ->  HashAggregate  (cost=125.00..127.00 rows=200 width=32) (actual time=3.353..4.889 rows=10000.00 loops=1)
+               Group Key: ('bench_'::text || (g.g)::text)
+               Batches: 1  Memory Usage: 1073kB
+               ->  Function Scan on generate_series g  (cost=0.00..100.00 rows=10000 width=32) (actual time=0.279..1.569 rows=10000.00 loops=1)
+         ->  Index Scan using accounts_pkey on accounts  (cost=0.43..8.33 rows=1 width=18) (actual time=0.003..0.003 rows=1.00 loops=10000)
+               Index Cond: (clerk_user_id = ('bench_'::text || (g.g)::text))
+               Index Searches: 10000
+               Buffers: shared hit=39821 read=204 dirtied=345 written=203
+               I/O Timings: shared read=0.469 write=0.871
+               WAL: records=91 bytes=4764
+ Planning:
+   Buffers: shared hit=20
+ Planning Time: 0.141 ms
+ Execution Time: 114.909 ms
+(22 rows)
+
+### 5. write, triggers ENABLED: UPDATE authd.accounts SET payment_hold_at = now() WHERE clerk_user_id = ANY (SELECT 'bench_' || g FROM generate_series(1, 500000, 50) g)
+                                                                   QUERY PLAN                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on accounts  (cost=125.44..1787.59 rows=0 width=0) (actual time=108.717..108.718 rows=0.00 loops=1)
+   Buffers: shared hit=202371 read=109 dirtied=210 written=370
+   I/O Timings: shared read=0.409 write=1.822
+   WAL: records=47789 bytes=4671789
+   ->  Nested Loop  (cost=125.44..1787.59 rows=10000 width=42) (actual time=3.344..35.332 rows=10000.00 loops=1)
+         Buffers: shared hit=40050
+         WAL: records=107 bytes=5684
+         ->  HashAggregate  (cost=125.00..127.00 rows=200 width=32) (actual time=3.325..4.939 rows=10000.00 loops=1)
+               Group Key: ('bench_'::text || (g.g)::text)
+               Batches: 1  Memory Usage: 1073kB
+               ->  Function Scan on generate_series g  (cost=0.00..100.00 rows=10000 width=32) (actual time=0.290..1.625 rows=10000.00 loops=1)
+         ->  Index Scan using accounts_pkey on accounts  (cost=0.43..8.33 rows=1 width=18) (actual time=0.003..0.003 rows=1.00 loops=10000)
+               Index Cond: (clerk_user_id = ('bench_'::text || (g.g)::text))
+               Index Searches: 10000
+               Buffers: shared hit=40025
+               WAL: records=107 bytes=5684
+ Planning:
+   Buffers: shared hit=1
+ Planning Time: 0.116 ms
+ Trigger access_changes_upd: time=167.053 calls=1
+ Execution Time: 275.817 ms
+(21 rows)
+

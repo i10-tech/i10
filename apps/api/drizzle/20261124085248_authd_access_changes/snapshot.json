@@ -1,0 +1,199 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "66ae8e4a-0b39-40b4-8af7-eda92330ec8f",
+  "prevIds": [
+    "75a8be36-f3a2-448f-87ac-e1620b6cef75",
+    "d1f82051-185a-405d-bd14-5733df4c7990",
+    "0704afcc-9544-4e6b-89fc-0abaf5bbe5b5"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "access_changes"
+      ],
+      "writes": [
+        "s|tbl|authd.access_changes",
+        "n|tbl|authd.access_changes",
+        "e|tbl|authd.access_changes",
+        "n|rel|authd.access_changes",
+        "n|type|authd.access_changes",
+        "n|rel|authd.access_changes_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "access_changes",
+        "access_changes_txid_idx"
+      ],
+      "writes": [
+        "s|idx|authd.access_changes_txid_idx",
+        "n|idx|authd.access_changes_txid_idx",
+        "e|idx|authd.access_changes_txid_idx",
+        "n|rel|authd.access_changes_txid_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.access_changes",
+        "n|sch|authd",
+        "n|col|authd.access_changes.txid"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "access_changes",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "id",
+        "type": "bigint",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": {
+          "type": "always",
+          "name": "access_changes_id_seq",
+          "increment": "1",
+          "startWith": "1",
+          "minValue": "1",
+          "maxValue": "9223372036854775807",
+          "cache": 1,
+          "cycle": false
+        },
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "txid",
+        "type": "xid8",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "pg_current_xact_id()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "kind",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "key",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "access_changes_txid_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "txid",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "access_changes_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "access_changes",
+        "name": "access_changes_kind_check",
+        "value": "\"kind\" in ('account', 'domain', 'connection', 'all')",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

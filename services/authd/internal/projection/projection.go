@@ -18,6 +18,10 @@ type Account struct {
 	Active         bool
 	ClerkUpdatedAt *time.Time
 
+	// MailDomain is Email's mail domain exactly as the gate's SQL compares it,
+	// `lower(split_part(email, '@', 2))`, computed by the server in the same query.
+	MailDomain string
+
 	// CredentialEpoch is `authd.accounts.credential_epoch`, raised by the API to
 	// invalidate every cached verification for this person on every pod. Only
 	// ever compared for equality; see credcache.
@@ -104,6 +108,49 @@ type Account struct {
 
 	Aliases  []string
 	MemberOf []string // group names, not DNs; the caller renders DNs
+}
+
+// ChangeKind says what a Change's Key names (`authd.access_changes.kind`).
+type ChangeKind string
+
+const (
+	// ChangeAccount: a Clerk user id.
+	ChangeAccount ChangeKind = "account"
+	// ChangeDomain: a lowercased mail domain, the part of an address after the @.
+	ChangeDomain ChangeKind = "domain"
+	// ChangeConnection: an SSO connection id.
+	ChangeConnection ChangeKind = "connection"
+	// ChangeAll: a gate table was truncated; every account may have changed.
+	ChangeAll ChangeKind = "all"
+)
+
+// Change is one key whose gate inputs a committed transaction touched.
+type Change struct {
+	Kind ChangeKind
+	Key  string
+}
+
+// ChangeBatch is one read of the access-change log (Postgres.AccessChanges).
+type ChangeBatch struct {
+	Changes []Change
+	// Snapshot is where the next read starts, opaque to the caller.
+	Snapshot string
+	// ServerStart is the server's `pg_postmaster_start_time()` when this batch
+	// was read. A change between polls means the server restarted or failed over;
+	// a lagging replica promoted and then advanced by new commits past the old
+	// xmax would not trip Rewound on xmax alone, so the caller treats a changed
+	// ServerStart as rewound too.
+	ServerStart time.Time
+	// Truncated is true when there were more changes than the read's limit.
+	Truncated bool
+	// Rewound is true when the server's transaction ids are below the position
+	// read from (a point-in-time restore, or a failover to a replica that had not
+	// replayed everything): the changes cannot be trusted, and the reader must
+	// re-check everything and continue from Snapshot.
+	Rewound bool
+	// QueryTime is the statement's own time, without the wait for a pooled
+	// connection.
+	QueryTime time.Duration
 }
 
 // Group is a mail-enabled group.

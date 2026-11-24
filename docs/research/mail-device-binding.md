@@ -272,7 +272,66 @@ The per-connection figure includes Go's GC headroom. Taking the pre-auth buffers
 - **Database, per-account part alone:** about 15,000 live accounts (in-server time).
 - **Front:** CPU stays under 5% past 10,000 connections; memory is the limit (61 KiB a connection).
 
-**A design change is needed well before 50,000.** Re-reading every live account every second cannot reach 50,000 accounts on one database core: the per-account part alone is 16% of a core there, and the whole query 42 to 62% clustered and over 250% spread. The shape that scales re-checks only the accounts whose access changed. The API appends a row to a change log (or sends a NOTIFY) in every transaction that removes access: the gate columns, `required_domains`, `required_exempt`, managed accounts, a domain's hosting. Each second the front reads the log past its last position, an index range scan that costs next to nothing when nothing changed, and re-checks only those accounts with the full gate. A full sweep every few minutes stays as the backstop for a missed write. Until then: land the migration, keep the 1 Hz sweep, and let the duty-cycle cap stretch the window rather than load the database.
+**A design change is needed well before 50,000.** Re-reading every live account every second cannot reach 50,000 accounts on one database core: the per-account part alone is 16% of a core there, and the whole query 42 to 62% clustered and over 250% spread. The shape that scales re-checks only the accounts whose access changed, with a slow full sweep as the backstop. That is built now; see "Change-driven re-check" below.
+
+### Change-driven re-check (measured 2026-11-24)
+
+The front no longer re-reads every live account every second (services/authd README, "The sweep"). A statement-level trigger on every table the gate reads writes the keys it touched to `authd.access_changes`; each second the front reads what committed since its last read, by snapshot (`txid >= pg_snapshot_xmax(prev)` UNION ALL `txid = ANY (pg_snapshot_xip(prev))`, exactly the rows not visible in the previous snapshot), and re-checks only the connections that names plus every connection that signed in since the last poll. The full sweep runs once a minute as the backstop, in its own loop, and as soon as it may when a poll cannot tell whom its changes name.
+
+Raw numbers: `mail-device-binding/sweep-db-2026-11-24.csv` (the full sweep, before and after, rerun on one machine and seed), `poll-2026-11-24.csv`, `trigger-writes-2026-11-24.csv`, `revocation-latency-2026-11-24.csv`, and every plan in `change-driven-plans-2026-11-24.txt`. Rerun them with `TestSweepQueryScale`, `TestChangeDrivenPollScale` and `TestRevocationLatency` (services/authd/internal/mailfront). Seed: `sweep-seed.sql` as above, on `ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookworm` in a 1 GiB container (`apps/api/scripts/scale/cli.ts up --scratch dev`), direct connection, 8 cores, everything cached. "Before" ran as `authd` on main (608be608); "after" as `mailfront` with this change's two migrations. The sweep query is the same statement in both, so its buffers match row for row; the time differences between the two runs are noise.
+
+**What the front costs the database, before and after.** "Before" is the 1 Hz full sweep. "After" is the full sweep once a minute plus the poll every second, at 0, 10 and 100 changed accounts a second. The poll's share is the log read plus the re-check of every changed account as if each one had a live connection, the worst case; at 10 live accounts that overstates it.
+
+| Distribution | Live accounts | Before: full sweep at 1 Hz | After: backstop at 1/60 Hz | After, 0 changes/s | After, 10 changes/s | After, 100 changes/s |
+| ------------ | ------------- | -------------------------- | -------------------------- | ------------------ | ------------------- | -------------------- |
+| clustered    | 10            | 0.03%                      | 0.001%                     | 0.01%              | 0.31%               | 1.2%                 |
+| clustered    | 100           | 0.1%                       | 0.003%                     | 0.01%              | 0.31%               | 1.2%                 |
+| clustered    | 1,000         | 1.0%                       | 0.02%                      | 0.03%              | 0.32%               | 1.2%                 |
+| clustered    | 10,000        | 9.4%                       | 0.18%                      | 0.19%              | 0.49%               | 1.4%                 |
+| clustered    | 50,000        | 56%                        | 1.1%                       | 1.1%               | 1.4%                | 2.3%                 |
+| spread       | 10            | 0.3%                       | 0.003%                     | 0.01%              | 0.31%               | 1.2%                 |
+| spread       | 100           | 1.6%                       | 0.03%                      | 0.03%              | 0.33%               | 1.2%                 |
+| spread       | 1,000         | 13%                        | 0.24%                      | 0.25%              | 0.55%               | 1.4%                 |
+| spread       | 10,000        | 148%                       | 2.4%                       | 2.4%               | 2.7%                | 3.6%                 |
+| spread       | 50,000        | 367%                       | 4.2%                       | 4.2%               | 4.5%                | 5.3%                 |
+
+Core share is `EXPLAIN (ANALYZE)` execution time per second, as above. The backstop column is the after run's full sweep (for example 645 ms clustered and 2.49 s spread at 50,000) over 60 seconds. The before run's p50 at 50,000 was 601 ms clustered and 3.21 s spread; the earlier 2026-11-21 run on another machine measured 688 ms and 2.67 s.
+
+**The poll** (`poll-2026-11-24.csv`, 59 polls a second apart for each rate, with a writer committing that many single-row account changes a second, each in its own transaction; the log pre-filled with an hour of rows at 100 a second, 360,000, the most it holds at that rate). Rerun after the review fixes to the poll's statement, on `pgvector/pgvector:pg18` in a 1 GiB container with the same seed, through Docker's port forwarding, so the wall times are higher than the first run's 2.0 to 2.8 ms p50; buffers and in-server times are what carry over.
+
+| Changes a second | Rows a poll | Log read p50 / p95 (wall) | Log read buffers | Log read in-server | Re-check of that many accounts, p50 / p95 | Re-check in-server | Core share at 1 Hz |
+| ---------------- | ----------- | ------------------------- | ---------------- | ------------------ | ----------------------------------------- | ------------------ | ------------------ |
+| 0                | 0           | 5.3 / 14.4 ms             | 2                | 0.09 ms            | none                                      | none               | 0.009%             |
+| 10               | 10          | 4.6 / 7.8 ms              | 3                | 0.34 ms            | 5.8 / 8.1 ms (240 buffers)                | 1.7 ms             | 0.20%              |
+| 100              | 101         | 5.4 / 11.5 ms             | 4                | 0.38 ms            | 14.3 / 18.6 ms (2,407 buffers)            | 11.8 ms            | 1.2%               |
+
+The log read is one `Index Scan using access_changes_txid_idx` from the previous snapshot's xmax, plus one index lookup per transaction that snapshot listed as in progress (`txid >= pg_snapshot_xmax(prev)` UNION ALL `txid = ANY (pg_snapshot_xip(prev))`, the exact complement of "visible in prev"): 4 buffers for 100 rows, whatever the log holds. Its wall time is the round trip. Written as an OR of the two, the same predicate was planned as a sequential scan of the whole log (13 ms, 3,366 buffers over 360,100 rows), which is why it is a UNION ALL. **A long writing transaction elsewhere no longer costs a re-read**: with one held open while 100,000 changes committed behind it, the read took 9 buffers and 0.05 ms in the server (plan 2 in the plans file), where the first version of the statement, which scanned from the snapshot's xmin, took 1,039 buffers and 7.4 ms on the same data. A burst of more than 10,000 changes in one read makes that poll ask the sweep loop for a full sweep and carry on at its own interval, instead of re-checking everyone itself.
+
+The poll's queries are timed without the wait for a pooled connection, so the duty cycle (`nextWait`) paces on the database's time only. The full sweep now also returns each account's mail domain as the gate derives it (`lower(split_part(email, '@', 2))`); it reads that from the `live` step, which already computed it, so it adds no work. Measured as a separate expression it would have been about 12 ms at 50,000 accounts (0.25 µs a row, same buffers); the backstop's figures above are from before this change and were not rerun.
+
+**What the triggers add to writes** (`trigger-writes-2026-11-24.csv`, `EXPLAIN (ANALYZE, BUFFERS, WAL)` inside a transaction that rolls back, median of 6, with the `UPDATE` trigger enabled and disabled):
+
+| Write                                                                 | Without | With    | Trigger | Log rows |
+| --------------------------------------------------------------------- | ------- | ------- | ------- | -------- |
+| One account (`suspended_at`)                                          | 0.11 ms | 0.28 ms | 0.20 ms | 1        |
+| 10,000 accounts in one statement (`payment_hold_at`)                  | 159 ms  | 364 ms  | 209 ms  | 10,000   |
+| One domain (`hosts_mailboxes`)                                        | 1.24 ms | 1.51 ms | 0.27 ms | 1        |
+| 10,000 domains, only ignored columns (`dns_checked_at`, `updated_at`) | 153 ms  | 460 ms  | 322 ms  | 0        |
+
+A single-row write pays about 0.2 ms, once per statement. The bulk cost is the comparison of the old and new images as `to_jsonb(row) - ignored`, which is proportional to the rows and their width (`core.domains` rows carry DKIM keys); the 10,000-row domain update logged nothing, which is the point of the comparison, but still paid for it. None of these tables is written per message or per sign-in; the bulk writers are billing (payment holds), SSO mirrors and the domain re-check, none on a request path.
+
+**Revocation latency for every path** (`revocation-latency-2026-11-24.csv`). For each of the 43 paths in `gatePaths` that revokes access (every gate column of `authd.accounts`, `authd.managed_accounts`, `authd.required_domains`, `authd.required_exempt`, `core.domains` and `core.join_domains`, and their inserts and deletes), with the real `Sweeper.Run` at its production settings (poll every second, backstop every minute), three runs each, committed at three different points of the poll's second, from `COMMIT` returning to the connection closing. On the small test scratch, not the seed: the time is the poll interval, and the poll and re-check cost a few milliseconds even at 50,000 live accounts (above).
+
+| Table                    | Paths | Fastest | Slowest |
+| ------------------------ | ----- | ------- | ------- |
+| `authd.accounts`         | 13    | 145 ms  | 850 ms  |
+| `authd.managed_accounts` | 4     | 150 ms  | 858 ms  |
+| `authd.required_domains` | 4     | 154 ms  | 882 ms  |
+| `authd.required_exempt`  | 4     | 164 ms  | 861 ms  |
+| `core.domains`           | 10    | 129 ms  | 845 ms  |
+| `core.join_domains`      | 8     | 167 ms  | 854 ms  |
+
+The bound is one poll interval plus one poll, about 1.0 s: no path took longer than 882 ms in 129 runs (rerun after the review fixes to the poll). The paths that only re-check (a display name, a pass-through version, a source change on an exemption) and the ones the triggers ignore are in `gatePaths` too, and `TestEveryGateInputReachesThePoll` checks each of the 60 against the real database on every CI run.
 
 **A sign-in surge** (measured 2026-11-22, `mail-device-binding/front-storm-2026-11-22.csv`). Every client of a full front reconnecting at once, as after a restart: 6,000 IMAP clients through the real front (Linux, migrated seed, the 500 SSO-required tenants skipped with `mailfront-scale -domain-offset 600`), against the fake upstream, with each client's TLS handshake plus LOGIN timed. The per-address cap was raised, since every test client shares one address; everything else is the default.
 

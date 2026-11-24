@@ -1,0 +1,4 @@
+changes_per_s,polls,log_rows,poll_p50_ms,poll_p95_ms,poll_max_ms,poll_shared_hit,poll_shared_read,poll_explain_ms,recheck_p50_ms,recheck_p95_ms,recheck_shared_hit,recheck_explain_ms,db_core_share_at_1hz_pct
+0,59,0,5.26,14.38,34.91,2,0,0.085,0,0,0,0,0.009
+10,59,10,4.55,7.83,9.33,3,0,0.335,5.82,8.06,240,1.671,0.201
+100,59,101,5.37,11.47,22.73,4,0,0.381,14.33,18.60,2407,11.756,1.214

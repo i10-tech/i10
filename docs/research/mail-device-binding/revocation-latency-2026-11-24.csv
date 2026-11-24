@@ -1,0 +1,44 @@
+table,path,runs,min_ms,max_ms
+authd.accounts,active,3,165,840
+authd.accounts,email,3,148,838
+authd.accounts,tenant_id,3,170,837
+authd.accounts,clerk_updated_at,3,168,832
+authd.accounts,credential_epoch,3,169,837
+authd.accounts,suspended_at,3,168,838
+authd.accounts,payment_hold_at,3,169,840
+authd.accounts,deleting_at,3,162,842
+authd.accounts,banned,3,185,830
+authd.accounts,locked,3,145,832
+authd.accounts,locked_until,3,174,829
+authd.accounts,delete,3,168,849
+authd.accounts,delete and insert again,3,164,850
+authd.managed_accounts,insert,3,177,858
+authd.managed_accounts,connection_id,3,175,852
+authd.managed_accounts,connection_id to none,3,186,847
+authd.managed_accounts,delete,3,150,850
+authd.required_domains,insert,3,170,750
+authd.required_domains,domain (the new key),3,170,835
+authd.required_domains,tenant_id,3,154,840
+authd.required_domains,connection_id,3,162,882
+authd.required_exempt,delete,3,177,838
+authd.required_exempt,connection_id,3,165,861
+authd.required_exempt,tenant_id,3,166,855
+authd.required_exempt,clerk_user_id (the old key),3,164,842
+core.domains,hosts_mailboxes,3,168,844
+core.domains,displaced_at,3,172,838
+core.domains,tenant_id,3,170,842
+core.domains,status,3,169,834
+core.domains,proof_missing_since,3,170,840
+core.domains,identity_registered_at,3,129,845
+core.domains,verified_at,3,166,838
+core.domains,created_at,3,177,840
+core.domains,insert,3,177,843
+core.domains,delete,3,172,845
+core.join_domains,verified_at,3,167,839
+core.join_domains,lapsed_at,3,170,839
+core.join_domains,displaced_at,3,169,850
+core.join_domains,source,3,171,849
+core.join_domains,tenant_id,3,175,849
+core.join_domains,name (the old key),3,178,853
+core.join_domains,delete,3,183,854
+core.join_domains,insert,3,172,833

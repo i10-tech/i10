@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -522,6 +523,57 @@ export const authdPassthroughVersions = authd.table(
       columns: [t.connectionId],
       foreignColumns: [connections.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/** A 64-bit transaction id (`xid8`), which Drizzle has no column type for. Read as text. */
+const xid8 = customType<{ data: string; driverData: string }>({
+  dataType: () => "xid8",
+})
+
+/**
+ * Which keys of the mail gate changed, and in which transaction: the mail front
+ * re-checks only the open connections these name, instead of every one, every
+ * second (services/authd/internal/mailfront, README "The sweep").
+ *
+ * ⚠ WRITTEN ONLY BY TRIGGERS, ON EVERY TABLE THE GATE READS. A statement-level
+ * trigger on each of them (`authd.log_access_change`, migration
+ * `*_access_change_triggers`) inserts one row per distinct key a statement
+ * touched, old and new: `account` (a Clerk user id), `domain` (a lowercased mail
+ * domain), `connection` (an SSO connection id), or `all` for a TRUNCATE. Nothing
+ * else may write here: the API and authd hold no grant on it, and a table the
+ * gate starts reading without a trigger fails
+ * `TestEveryTableTheGateReadsLogsItsChanges` (services/authd/internal/projection).
+ *
+ * ⚠ `txid` IS THE ORDER, NOT `id`. Both are taken before commit, so a
+ * transaction that commits late lands below rows the front has already read.
+ * The front reads by snapshot instead (`projection.AccessChanges`): the rows of
+ * every transaction that was not yet visible in its previous snapshot, found by
+ * an index range scan from that snapshot's xmax (`txid >= xmax`) UNION ALL an
+ * index lookup per in-progress transaction (`txid = ANY(xip)`).
+ *
+ * ⚠ ROWS LIVE AN HOUR. `authd.prune_access_changes()` deletes older ones from
+ * the hourly retention job (retention.ts). The front needs a row for about a
+ * second, and falls back to a full sweep once a minute and after ten minutes
+ * without a successful read, so nothing it depends on is that old.
+ */
+export const accessChanges = authd.table(
+  "access_changes",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    txid: xid8("txid")
+      .notNull()
+      .default(sql`pg_current_xact_id()`),
+    kind: text("kind").notNull(),
+    key: text("key").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("access_changes_txid_idx").on(t.txid),
+    check(
+      "access_changes_kind_check",
+      sql`${t.kind} in ('account', 'domain', 'connection', 'all')`,
+    ),
   ],
 )
 

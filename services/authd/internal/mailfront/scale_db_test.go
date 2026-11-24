@@ -77,7 +77,7 @@ func TestSweepQueryScale(t *testing.T) {
 					break
 				}
 				start := time.Now()
-				got, err := store.AccountsByUIDs(ctx, ids)
+				got, _, err := store.AccountsByUIDs(ctx, ids)
 				if err != nil {
 					t.Fatal(err)
 				}
