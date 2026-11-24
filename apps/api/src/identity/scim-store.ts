@@ -143,7 +143,7 @@ const userColumns = (input: StoredUser) => ({
   displayName: input.displayName,
   givenName: input.givenName,
   familyName: input.familyName,
-  email: input.email,
+  email: input.email ? input.email.trim().toLowerCase() : null,
   active: input.active,
   resource: input.resource,
 })

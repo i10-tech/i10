@@ -1,0 +1,17 @@
+SET LOCAL lock_timeout = '5s';--> statement-breakpoint
+ALTER TABLE "authd"."accounts" ADD CONSTRAINT "accounts_email_lowercase" CHECK ("email" = lower("email"));--> statement-breakpoint
+ALTER TABLE "authd"."aliases" ADD CONSTRAINT "aliases_address_lowercase" CHECK ("address" = lower("address"));--> statement-breakpoint
+ALTER TABLE "authd"."required_domains" ADD CONSTRAINT "required_domains_domain_lowercase" CHECK ("domain" = lower("domain"));--> statement-breakpoint
+ALTER TABLE "authd"."groups" ADD CONSTRAINT "groups_email_lowercase" CHECK ("email" is null or "email" = lower("email"));--> statement-breakpoint
+ALTER TABLE "core"."delegations" ADD CONSTRAINT "delegations_name_lowercase" CHECK ("name" = lower("name"));--> statement-breakpoint
+ALTER TABLE "core"."domain_transfers" ADD CONSTRAINT "domain_transfers_recipient_email_lowercase" CHECK ("recipient_email" = lower("recipient_email"));--> statement-breakpoint
+ALTER TABLE "core"."domains" ADD CONSTRAINT "domains_name_lowercase" CHECK ("name" = lower("name"));--> statement-breakpoint
+ALTER TABLE "core"."join_domains" ADD CONSTRAINT "join_domains_name_lowercase" CHECK ("name" = lower("name"));--> statement-breakpoint
+ALTER TABLE "core"."join_exclusions" ADD CONSTRAINT "join_exclusions_email_lowercase" CHECK ("email" = lower("email"));--> statement-breakpoint
+ALTER TABLE "core"."mailbox_auth_failures" ADD CONSTRAINT "mailbox_auth_failures_account_lowercase" CHECK ("account" = lower("account"));--> statement-breakpoint
+ALTER TABLE "core"."mailbox_jobs" ADD CONSTRAINT "mailbox_jobs_mailbox_address_lowercase" CHECK ("mailbox_address" = lower("mailbox_address"));--> statement-breakpoint
+ALTER TABLE "core"."mailbox_usage" ADD CONSTRAINT "mailbox_usage_address_lowercase" CHECK ("address" = lower("address"));--> statement-breakpoint
+ALTER TABLE "core"."member_invitations" ADD CONSTRAINT "member_invitations_email_lowercase" CHECK ("email" = lower("email"));--> statement-breakpoint
+ALTER TABLE "core"."suppressions" ADD CONSTRAINT "suppressions_address_lowercase" CHECK ("address" = lower("address"));--> statement-breakpoint
+ALTER TABLE "identity"."directory_users" ADD CONSTRAINT "directory_users_email_lowercase" CHECK ("email" is null or "email" = lower("email"));--> statement-breakpoint
+ALTER TABLE "identity"."identities" ADD CONSTRAINT "identities_email_lowercase" CHECK ("email" is null or "email" = lower("email"));

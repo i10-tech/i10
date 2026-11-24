@@ -116,22 +116,19 @@ export const REGISTRY: Entry[] = [
         expect: hasRows(true),
       },
       {
-        // What authd sends after normalise() lowercases it; the row says `Sales@...`.
-        name: "alias stored with capitals",
+        // aliases_address_lowercase enforces lowercase storage, so authd's
+        // byte-for-byte lookup matches after normalise() lowercases the input.
+        name: "fixture alias",
         arg: async () => ["sales@mixedcase.example"],
-        expect: (r) =>
-          hasRows(true)(r)
-            ? "an alias stored as Sales@mixedcase.example receives nothing: authd compares the raw column to the lowercased address"
-            : null,
+        expect: hasRows(true),
       },
       {
         name: "sso required domain",
         arg: async (p) => [await p.ssoAccount()],
         expect: hasRows(true),
       },
-      // The domain row says `MixedCase.Example`; the mailbox must still be found and hosted.
       {
-        name: "mixed-case domain row",
+        name: "fixture domain mailbox",
         arg: async () => ["ceo@mixedcase.example"],
         expect: hasRows(true),
       },
@@ -169,7 +166,7 @@ export const REGISTRY: Entry[] = [
     cases: [
       { name: "huge tenant group", arg: async (p) => [await p.hugeGroupEmail()] },
       {
-        name: "address stored with capitals",
+        name: "fixture group",
         arg: async () => ["support@mixedcase.example"],
         expect: hasRows(true),
       },
@@ -379,7 +376,7 @@ export const REGISTRY: Entry[] = [
         },
       },
       {
-        name: "domain stored with capitals",
+        name: "fixture verified domain",
         arg: async () => ({
           tenant: FIXTURE_TENANTS.mixedCase,
           domains: ["mixedcase.example"],
@@ -387,7 +384,7 @@ export const REGISTRY: Entry[] = [
         expect: (r) =>
           (r as Set<string>).has("mixedcase.example")
             ? null
-            : "a verified domain stored as MixedCase.Example is not sendable: the gate compares the raw column to a lowercased name",
+            : "expected verified fixture domain mixedcase.example to be sendable",
       },
       {
         name: "empty tenant",
@@ -425,7 +422,7 @@ export const REGISTRY: Entry[] = [
         },
       },
       {
-        name: "suppression stored with capitals",
+        name: "fixture suppression",
         arg: async () => ({
           tenant: FIXTURE_TENANTS.mixedCase,
           to: ["bob@example.test"],
@@ -433,7 +430,7 @@ export const REGISTRY: Entry[] = [
         expect: (r) =>
           (r as Set<string>).size > 0
             ? null
-            : "a suppression stored as Bob@Example.test does not stop mail to bob@example.test",
+            : "expected fixture suppression bob@example.test to match",
       },
     ],
     run: (ctx, a) => sendOps(ctx).suppressedFor(a.tenant, a.to),
@@ -963,7 +960,7 @@ export const REGISTRY: Entry[] = [
     cases: [
       { name: "huge tenant", arg: (p) => p.hugeTenant() },
       { name: "sso tenant", arg: (p) => p.ssoTenant() },
-      { name: "mixed-case domain", arg: async () => FIXTURE_TENANTS.mixedCase },
+      { name: "fixture domain", arg: async () => FIXTURE_TENANTS.mixedCase },
     ],
     run: (ctx, tenant) =>
       consoleMailboxStore(ctx.db).list({ tenantId: tenant, limit: 50 } as never),

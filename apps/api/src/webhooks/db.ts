@@ -110,7 +110,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
           .values(
             event.suppress.map((entry) => ({
               tenantId,
-              address: entry.address,
+              address: entry.address.trim().toLowerCase(),
               reason: entry.reason,
               messageId: event.messageId,
             })),
@@ -157,7 +157,7 @@ export function webhookEventOps(opts: Omit<WebhookDbOptions, "secrets">): EventO
             .values(
               event.suppress.map((entry) => ({
                 tenantId,
-                address: entry.address,
+                address: entry.address.trim().toLowerCase(),
                 reason: entry.reason,
                 messageId: event.messageId,
               })),

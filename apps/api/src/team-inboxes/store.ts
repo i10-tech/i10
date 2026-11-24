@@ -105,7 +105,7 @@ export function teamInboxStore(db: Database): TeamInboxStore {
         db
           .select({ address: sql<string>`${groups.email}`.as("address") })
           .from(groups)
-          .where(eq(sql`lower(${groups.email})`, address)),
+          .where(eq(groups.email, address)),
       ).limit(1)
 
       return rows.length > 0
@@ -131,7 +131,7 @@ export function teamInboxStore(db: Database): TeamInboxStore {
             .insert(groups)
             .values({
               name: input.name,
-              email: input.address,
+              email: input.address.trim().toLowerCase(),
               description: input.displayName,
               tenantId: input.tenantId,
             })

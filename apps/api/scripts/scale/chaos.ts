@@ -261,7 +261,6 @@ async function preferredValues(sql: Sql, seed: number) {
     await pickers.hostedDomain(await pickers.ssoTenant()),
   ]
   for (const name of domains) add("core.domains", name)
-  add("core.domains", "MixedCase.Example")
   add("core.domains", "mixedcase.example")
   const rng = new Rng(seed, 918)
   return { tenantOrder, valueOrder, salt: rng.int(0, 2 ** 20) }
