@@ -1,0 +1,28 @@
+== 1 classic Outlook, POX, anonymous (first try, before the password)
+401 Basic realm="Stalwart Server"
+== 2 classic Outlook, POX, with X-MapiHttpCapability, /autodiscover/autodiscover.xml
+<Action>settings <AutoDiscoverSMTPAddress>someone@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/emsmdb/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/nspi/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <Protocol Type="mapiHttp" <Server>mail.i10.test <Type>IMAP <Type>POP3 <Type>SMTP 
+== 2 classic Outlook, POX, with X-MapiHttpCapability, /Autodiscover/Autodiscover.xml
+<Action>settings <AutoDiscoverSMTPAddress>someone@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/emsmdb/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/nspi/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <Protocol Type="mapiHttp" <Server>mail.i10.test <Type>IMAP <Type>POP3 <Type>SMTP 
+== 2 classic Outlook, POX, with X-MapiHttpCapability, /AutoDiscover/AutoDiscover.xml
+<Action>settings <AutoDiscoverSMTPAddress>someone@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/emsmdb/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/nspi/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <Protocol Type="mapiHttp" <Server>mail.i10.test <Type>IMAP <Type>POP3 <Type>SMTP 
+== 3 Outlook POX without X-MapiHttpCapability (EWS clients that use POX)
+<ASUrl>https://mail.i10.test/EWS/Exchange.asmx <Action>settings <AutoDiscoverSMTPAddress>someone@customer-domain.test <EwsUrl>https://mail.i10.test/EWS/Exchange.asmx <Server>mail.i10.test <Type>EXCH <Type>EXPR <Type>IMAP <Type>POP3 <Type>SMTP 
+== 4 POX for the account's alias sales@ (address typed differs from the login)
+<Action>settings <AutoDiscoverSMTPAddress>sales@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/emsmdb/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/nspi/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <Protocol Type="mapiHttp" <Server>mail.i10.test <Type>IMAP <Type>POP3 <Type>SMTP 
+== 5 POX with the address in capitals
+<Action>settings <AutoDiscoverSMTPAddress>someone@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/emsmdb/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <ExternalUrl>https://mail.i10.test/mapi/nspi/?MailboxId=8d19a191-182d-8dab-a1d6-a940798cd185@customer-domain.test <Protocol Type="mapiHttp" <Server>mail.i10.test <Type>IMAP <Type>POP3 <Type>SMTP 
+== 6 iPhone / Android, mobilesync schema
+<Action> <Server> <Type>MobileSync <Url>https://mail.i10.test/Microsoft-Server-ActiveSync 
+== 7 iPhone 'Sign In' path: Microsoft 365 redirects here, JSON with ?Email=&Protocol=ActiveSync&RedirectCount=1
+{"Protocol":"ActiveSync","Url":"https://mail.i10.test/Microsoft-Server-ActiveSync"} [200]
+== 8 Outlook for Mac, JSON v1.0 path form
+{"Protocol":"AutodiscoverV1","Url":"https://mail.i10.test/autodiscover/autodiscover.xml"} [200]
+{"Protocol":"Ews","Url":"https://mail.i10.test/EWS/Exchange.asmx"} [200]
+{"Protocol":"ActiveSync","Url":"https://mail.i10.test/Microsoft-Server-ActiveSync"} [200]
+== 9 SOAP GetUserSettings (EWS clients that use SOAP Autodiscover)
+<ErrorCode>NoError <ErrorCode>NoError <Name>ExternalEwsUrl <Value>https://mail.i10.test/EWS/Exchange.asmx <Name>UserDisplayName <Value>someone@customer-domain.test 
+== 10 a GET with credentials (what an Outlook HTTP-redirect probe would hit)
+<ErrorCode>600 <Message>Invalid Request 
+== 11 someone asking for bob's settings
+<ErrorCode>500 <Message>The email address can't be found. 
