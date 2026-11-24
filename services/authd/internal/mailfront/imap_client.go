@@ -47,9 +47,10 @@ func (r *imapRequest) str(i int) (string, bool) {
 	return "", false
 }
 
-// readIMAPRequest reads one command the way Stalwart v1.1.0's receiver does
-// (crates/imap-proto/src/receiver.rs), and refuses anything where the two
-// could differ.
+// readIMAPRequest reads one command the way Stalwart's receiver does
+// (crates/imap-proto/src/receiver.rs, v1.1.0; v1.2.0 reads the same grammar and
+// changed only how a request's size is counted), and refuses anything where
+// the two could differ.
 //
 // What Stalwart does, and what the front does with it:
 //

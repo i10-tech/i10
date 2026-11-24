@@ -23,15 +23,15 @@ const (
 // and, when ssl is not nil, that it spoke TLS.
 //
 // ⚠ THE SSL TLV IS WHAT MAKES STALWART TREAT A CONNECTION AS TLS, AND TLS IS
-// WHAT TURNS ON BEARER SIGN-INS. Stalwart v1.1.0 accepts OAUTHBEARER and
-// XOAUTH2 only on a TLS connection (common/src/auth/sasl.rs:83), and a bearer
+// WHAT TURNS ON BEARER SIGN-INS. Stalwart accepts OAUTHBEARER and XOAUTH2 only
+// on a TLS connection (common/src/auth/sasl.rs:83, unchanged in v1.2.0), and a bearer
 // token is checked by Stalwart alone, never by authd, so it never carries the
 // front's bind token. So:
 //
 //   - IMAP goes upstream WITHOUT the TLV. The plan sets Imap.allowPlainTextAuth,
 //     so LOGIN and AUTHENTICATE PLAIN still work on the cleartext loopback
 //     listener, and both bearer mechanisms are answered "require a TLS
-//     connection" (probed on v1.1.0, 2026-11-23, docs/research/mail-device-
+//     connection" (probed on v1.1.0 and v1.2.0, 2026-11-23, docs/research/mail-device-
 //     binding.md section 9). Without that setting IMAP would advertise
 //     LOGINDISABLED and refuse every sign-in.
 //   - SMTP keeps the TLV: Stalwart offers no AUTH on a connection it thinks is

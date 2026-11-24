@@ -88,7 +88,7 @@ spec:
       # before, just not for the one-second race.
       initContainers:
         - name: wait-for-db
-          image: stalwartlabs/stalwart:v1.1.0-alpine
+          image: stalwartlabs/stalwart:v1.2.0-alpine
           command:
             - sh
             - -c
@@ -131,7 +131,7 @@ spec:
         # 1 and the kubelet retries the init container, which is the right end
         # state.
         - name: wait-for-keep
-          image: stalwartlabs/stalwart:v1.1.0-alpine
+          image: stalwartlabs/stalwart:v1.2.0-alpine
           command:
             - sh
             - -c
@@ -155,10 +155,13 @@ spec:
 
       containers:
         - name: stalwart
-          # ⚠ 1.1.0 IS THE FIRST RELEASE WITH Stalwart Keep, and the init containers
-          # above must stay on the same tag. See config/README.md, "Stalwart Keep", for what
-          # the 1.0.3 to 1.1.0 jump changed for us (nothing that needs a setting).
-          image: stalwartlabs/stalwart:v1.1.0-alpine
+          # ⚠ THE INIT CONTAINERS ABOVE MUST STAY ON THE SAME TAG. 1.1.0 was the
+          # first release with Stalwart Keep (config/README.md, "Stalwart Keep");
+          # 1.2.0 keeps the same Keep client (keep-client 1.0.0 in both lockfiles).
+          # 1.2.0 needs new permissions on Stalwart's default roles and cannot be
+          # rolled back without removing them first: config/README.md,
+          # "Upgrading to 1.2.0".
+          image: stalwartlabs/stalwart:v1.2.0-alpine
           # ⚠ THE FLAG IS NOT OPTIONAL. Without --config the server looks
           # elsewhere, finds nothing, and enters bootstrap mode - serving a setup
           # wizard instead of mail.
@@ -441,17 +444,16 @@ spec:
 
         # ── the mail front: TLS for 993 and 465, and the revocation sweep ─────
         - name: mailfront
-          # ⚠ THE SAME IMAGE AS authd, A SECOND BINARY IN IT. One build, one digest,
-          # one pin (pin-image.py rewrites every reference to the image), so the
-          # two can never run from different commits.
-          #
-          # ⚠ BEFORE THIS MERGES, SET THIS TO EXACTLY THE authd CONTAINER'S IMAGE
-          # ABOVE, AS PINNED BY PR 1's POST-MERGE PIN COMMIT (the one that built
-          # the image with /usr/local/bin/mailfront in it). Any older digest has no
-          # mailfront binary: the container crash-loops and the pod goes NotReady.
-          # The placeholder does not resolve on purpose, so a forgotten edit fails
-          # the image pull instead of running something old.
-          image: ghcr.io/i10-tech/i10-authd:prod-e10fbbcfb2680d07aa9dfff028209d6801bd5d63@sha256:36eac16f1fbad1557d841e75b7cd4dc9690d15b86d390dfc271c0cb29a9c14c6
+          # ⚠ THE SAME IMAGE AS authd, A SECOND BINARY IN IT, AND IT MUST STAY ON
+          # authd's PIN. The bind token format is shared, so the two must not drift.
+          # pin-image.py rewrites every reference to i10-authd on each authd build,
+          # which keeps them together from then on. A merge that ADDS a reference
+          # can still land beside an older pin: on 2026-11-23 this container
+          # arrived on e10fbbc after a build had moved authd to 3f79aaa, and the
+          # Stalwart 1.2.0 upgrade set both back to one digest. A digest older than
+          # #509 has no /usr/local/bin/mailfront: the container crash-loops and the
+          # pod goes NotReady.
+          image: ghcr.io/i10-tech/i10-authd:prod-3f79aaa1dc8761d8f27859a4cba4da83f85b8181@sha256:620eeb6a95522793963399f7c7e6cdcfe87c6b91dff93f0ba874a5f179dd3055
           command: ["/usr/local/bin/mailfront"]
 
           # ⚠ ITS OWN PROCESS, ITS OWN LIMIT, AND NONE OF authd's SECRETS. It parses

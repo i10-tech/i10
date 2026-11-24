@@ -2,9 +2,12 @@
 //
 // It terminates TLS, hands each connection to Stalwart over PROXY v2 with the
 // SSL extension, learns which account the connection signs in as, and closes it
-// the moment that account loses access. Stalwart cannot do the last part: it
-// never ends a session that has already signed in (probed on v1.1.0,
-// docs/research/mail-device-binding.md section 6).
+// the moment that account loses access. Stalwart cannot do the last part: v1.1.0
+// never ended a session that had already signed in (docs/research/mail-device-
+// binding.md section 6), and v1.2.0 ends an IMAP one only when the account's
+// permissions or password change inside Stalwart, on its next command. An
+// authd revocation is not such a change, and SMTP has no such check (probed
+// 2026-11-23, infra/k8s/i10/stalwart/config/README.md, "Upgrading to 1.2.0").
 //
 // It is its own process, not part of authd. See "Mail front" in
 // services/authd/README.md for why, the port layout and the failure modes.
