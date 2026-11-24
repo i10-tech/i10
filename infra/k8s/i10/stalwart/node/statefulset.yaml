@@ -340,7 +340,7 @@ spec:
           # Built from services/authd by .github/workflows/build.yml. `prod-latest`
           # matches every other i10 workload: the Build job tags prod-<sha> and
           # prod-latest only on main, so staging can never publish over it.
-          image: ghcr.io/i10-tech/i10-authd:prod-f10f451d20bd7fdc29a560dbfe4561ac42f45c1f@sha256:833af03bb30dd3458fc2b6ac8bae7dc6535feb25d7730dff33da610480a4b954
+          image: ghcr.io/i10-tech/i10-authd:prod-47fff4ffc1412978bc4f3c77b1a3950c93ae628b@sha256:4b075f3ce9f490ea3fc986f4b9c299100985ef5ebc92e611cad668ad9c4394d9
 
           securityContext:
             allowPrivilegeEscalation: false
@@ -453,7 +453,7 @@ spec:
           # Stalwart 1.2.0 upgrade set both back to one digest. A digest older than
           # #509 has no /usr/local/bin/mailfront: the container crash-loops and the
           # pod goes NotReady.
-          image: ghcr.io/i10-tech/i10-authd:prod-f10f451d20bd7fdc29a560dbfe4561ac42f45c1f@sha256:833af03bb30dd3458fc2b6ac8bae7dc6535feb25d7730dff33da610480a4b954
+          image: ghcr.io/i10-tech/i10-authd:prod-47fff4ffc1412978bc4f3c77b1a3950c93ae628b@sha256:4b075f3ce9f490ea3fc986f4b9c299100985ef5ebc92e611cad668ad9c4394d9
           command: ["/usr/local/bin/mailfront"]
 
           # ⚠ ITS OWN PROCESS, ITS OWN LIMIT, AND NONE OF authd's SECRETS. It parses
