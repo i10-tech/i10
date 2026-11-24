@@ -104,6 +104,21 @@ const domainRefused = `core.mailbox_domain_refused(a.tenant_id, lower(split_part
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
 
+// AccountsByAddress resolves the active accounts whose primary address or any
+// alias is in addresses, once each, with their aliases and groups.
+//
+// ⚠ THE ADDRESSES ARE TURNED INTO ACCOUNT IDS FIRST, ONE INDEX LOOKUP PER BRANCH,
+// AND ONLY THEN ARE THE ACCOUNTS READ, BY PRIMARY KEY. It runs on every IMAP and
+// SMTP sign-in and every LDAP search Stalwart makes for a recipient. Written as
+// one `a.email = ANY($1) OR EXISTS (alias ...)`, the OR with a correlated
+// subquery kept `accounts_email_unique` from being used: the planner filtered
+// every active account and hashed all of `authd.managed_accounts` for the join,
+// 262 ms for one address and 823 ms for 50 at 300,000 mailboxes, and the same
+// full scan for an address that does not exist (finding 1 of
+// docs/research/db-scale/README.md, report-2026-11-22.md). Here the email
+// branch uses `accounts_email_unique`, the alias branch the `authd.aliases`
+// primary key, UNION removes an account both branches find, and the managed
+// join is a primary-key probe per account found.
 func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([]Account, error) {
 	norm := normalise(addresses)
 	if len(norm) == 0 {
@@ -113,10 +128,10 @@ func (p *Postgres) AccountsByAddress(ctx context.Context, addresses []string) ([
 		SELECT `+accountColumns+`
 		`+accountFrom+`
 		WHERE a.active
-		  AND (a.email = ANY($1)
-		       OR EXISTS (SELECT 1 FROM authd.aliases al
-		                  WHERE al.clerk_user_id = a.clerk_user_id
-		                    AND al.address = ANY($1)))`, norm)
+		  AND a.clerk_user_id IN (
+		        SELECT e.clerk_user_id FROM authd.accounts e WHERE e.email = ANY($1::text[])
+		        UNION
+		        SELECT al.clerk_user_id FROM authd.aliases al WHERE al.address = ANY($1::text[]))`, norm)
 	if err != nil {
 		return nil, fmt.Errorf("projection: accounts by address: %w", err)
 	}
