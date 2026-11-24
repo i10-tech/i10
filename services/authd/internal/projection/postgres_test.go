@@ -2,8 +2,12 @@ package projection
 
 import (
 	"context"
+	"fmt"
+	"math/rand/v2"
 	"os"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -586,6 +590,232 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 	} {
 		if _, err := store.Pool().Exec(ctx, q); err == nil {
 			t.Errorf("the mailfront role may run %q", q)
+		}
+	}
+}
+
+// oldAccountsByAddress is AccountsByAddress' statement before the scale harness
+// (finding 1, docs/research/db-scale/README.md): one OR with a correlated alias
+// subquery, which read every active account. It is kept here only as the
+// reference the rewrite must agree with, on the same column list.
+const oldAccountsByAddress = `
+	SELECT ` + accountColumns + `
+	` + accountFrom + `
+	WHERE a.active
+	  AND (a.email = ANY($1)
+	       OR EXISTS (SELECT 1 FROM authd.aliases al
+	                  WHERE al.clerk_user_id = a.clerk_user_id
+	                    AND al.address = ANY($1)))`
+
+// addressFixture writes accounts and aliases through the privileged connection
+// and removes every row it wrote, before and after the test. Every id starts
+// with prefix and every address ends in @domain, so runs of other tests in the
+// same database are untouched.
+type addressFixture struct {
+	t      *testing.T
+	ctx    context.Context
+	w      *pgxpool.Pool
+	store  *Postgres
+	prefix string
+}
+
+func newAddressFixture(t *testing.T, prefix string) *addressFixture {
+	t.Helper()
+	dsn, admin := os.Getenv("AUTHD_TEST_DATABASE_URL"), os.Getenv("AUTHD_TEST_ADMIN_DATABASE_URL")
+	if dsn == "" || admin == "" {
+		t.Skip("AUTHD_TEST_DATABASE_URL and AUTHD_TEST_ADMIN_DATABASE_URL are not both set")
+	}
+	ctx := context.Background()
+	w, err := pgxpool.New(ctx, admin)
+	if err != nil {
+		t.Fatalf("connect as admin: %v", err)
+	}
+	t.Cleanup(w.Close)
+	f := &addressFixture{t: t, ctx: ctx, w: w, prefix: prefix}
+	f.purge()
+	t.Cleanup(f.purge)
+
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatalf("NewPostgres: %v", err)
+	}
+	t.Cleanup(store.Close)
+	f.store = store
+	return f
+}
+
+// Aliases go with their account (ON DELETE CASCADE).
+func (f *addressFixture) purge() {
+	if _, err := f.w.Exec(f.ctx, `DELETE FROM authd.accounts WHERE starts_with(clerk_user_id, $1)`, f.prefix); err != nil {
+		f.t.Logf("purge: %v", err)
+	}
+}
+
+func (f *addressFixture) account(id, email string, active bool, aliases ...string) {
+	f.t.Helper()
+	if _, err := f.w.Exec(f.ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ($1, $2, $3)`,
+		f.prefix+id, email, active); err != nil {
+		f.t.Fatalf("seed account %s: %v", id, err)
+	}
+	for _, al := range aliases {
+		if _, err := f.w.Exec(f.ctx, `INSERT INTO authd.aliases (clerk_user_id, address) VALUES ($1, $2)`,
+			f.prefix+id, al); err != nil {
+			f.t.Fatalf("seed alias %s: %v", al, err)
+		}
+	}
+}
+
+// ids is what AccountsByAddress returned, with the prefix stripped, in the
+// order returned (no ORDER BY, so callers sort when they compare sets).
+func (f *addressFixture) ids(addresses ...string) []string {
+	f.t.Helper()
+	got, err := f.store.AccountsByAddress(f.ctx, addresses)
+	if err != nil {
+		f.t.Fatalf("AccountsByAddress(%v): %v", addresses, err)
+	}
+	out := make([]string, len(got))
+	for i, a := range got {
+		out[i] = strings.TrimPrefix(a.ClerkUserID, f.prefix)
+	}
+	return out
+}
+
+func sorted(s []string) []string {
+	s = slices.Clone(s)
+	slices.Sort(s)
+	return s
+}
+
+// Each way an address can name an account, against the real tables as the
+// `authd` role.
+func TestAccountsByAddressMatchesPrimaryAddressesAndAliases(t *testing.T) {
+	f := newAddressFixture(t, "user_addr_cases_")
+	const d = "@addr-cases.test"
+	f.account("primary", "primary"+d, true)
+	f.account("aliased", "aliased"+d, true, "alias-of-aliased"+d)
+	f.account("both", "both"+d, true, "both-alias"+d)
+	f.account("off", "off"+d, false, "off-alias"+d)
+	// One address that is an inactive account's primary and an active
+	// account's alias (no constraint spans the two tables).
+	f.account("stale", "shared"+d, false)
+	f.account("live", "live"+d, true, "shared"+d)
+
+	cases := []struct {
+		name      string
+		addresses []string
+		want      []string
+	}{
+		{"primary address only", []string{"primary" + d}, []string{"primary"}},
+		{"alias only", []string{"alias-of-aliased" + d}, []string{"aliased"}},
+		{"one account's primary and another's alias", []string{"primary" + d, "alias-of-aliased" + d}, []string{"aliased", "primary"}},
+		{"one account by its primary and its alias, once", []string{"both" + d, "both-alias" + d}, []string{"both"}},
+		{"inactive by primary", []string{"off" + d}, nil},
+		{"inactive by alias", []string{"off-alias" + d}, nil},
+		{"missing", []string{"nobody" + d}, nil},
+		{"an inactive primary and an active alias on one address", []string{"shared" + d}, []string{"live"}},
+		{"normalised before the lookup", []string{"  PRIMARY" + strings.ToUpper(d) + " "}, []string{"primary"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := sorted(f.ids(c.addresses...)); !slices.Equal(got, c.want) {
+				t.Fatalf("AccountsByAddress(%v) = %v, want %v", c.addresses, got, c.want)
+			}
+		})
+	}
+
+	t.Run("empty input asks nothing", func(t *testing.T) {
+		for _, in := range [][]string{nil, {}, {"", "  "}} {
+			got, err := f.store.AccountsByAddress(f.ctx, in)
+			if err != nil || got != nil {
+				t.Fatalf("AccountsByAddress(%q) = (%v, %v), want (nil, nil)", in, got, err)
+			}
+		}
+	})
+
+	// The aliases and groups of the accounts found still come with them.
+	t.Run("hydrated", func(t *testing.T) {
+		got, err := f.store.AccountsByAddress(f.ctx, []string{"both-alias" + d})
+		if err != nil || len(got) != 1 || !slices.Equal(got[0].Aliases, []string{"both-alias" + d}) {
+			t.Fatalf("AccountsByAddress = (%+v, %v), want one account carrying its alias", got, err)
+		}
+	})
+}
+
+// A 50-recipient delivery: present and missing addresses, primaries and aliases
+// mixed, with a duplicate account among them.
+func TestAccountsByAddressFiftyRecipients(t *testing.T) {
+	f := newAddressFixture(t, "user_addr_fifty_")
+	const d = "@addr-fifty.test"
+	var addresses, want []string
+	for i := range 25 {
+		id := fmt.Sprintf("r%02d", i)
+		f.account(id, id+d, true, id+"-alias"+d)
+		want = append(want, id)
+		if i%2 == 0 {
+			addresses = append(addresses, id+d)
+		} else {
+			addresses = append(addresses, id+"-alias"+d)
+		}
+	}
+	// r00 is named a second time, by its alias.
+	addresses = append(addresses, "r00-alias"+d)
+	for i := len(addresses); i < 50; i++ {
+		addresses = append(addresses, fmt.Sprintf("missing%02d%s", i, d))
+	}
+	if got := sorted(f.ids(addresses...)); !slices.Equal(got, want) {
+		t.Fatalf("AccountsByAddress(50 addresses) = %v, want %v", got, want)
+	}
+}
+
+// The rewrite against the statement it replaced, on a random fixture: the same
+// accounts, with every gate column equal, for every draw of addresses.
+func TestAccountsByAddressAgreesWithTheOldStatement(t *testing.T) {
+	f := newAddressFixture(t, "user_addr_ref_")
+	const d = "@addr-ref.test"
+	rng := rand.New(rand.NewPCG(507, 1))
+
+	var pool []string // every address the fixture wrote, primaries and aliases
+	for i := range 200 {
+		id := fmt.Sprintf("a%03d", i)
+		var aliases []string
+		for j := range rng.IntN(4) {
+			aliases = append(aliases, fmt.Sprintf("%s-al%d%s", id, j, d))
+		}
+		f.account(id, id+d, rng.IntN(5) != 0, aliases...)
+		pool = append(append(pool, id+d), aliases...)
+	}
+	for i := range 20 {
+		pool = append(pool, fmt.Sprintf("missing%02d%s", i, d))
+	}
+
+	for draw := range 50 {
+		n := 1 + rng.IntN(60)
+		addresses := make([]string, n)
+		for i := range addresses {
+			addresses[i] = pool[rng.IntN(len(pool))]
+		}
+
+		got, err := f.store.AccountsByAddress(f.ctx, addresses)
+		if err != nil {
+			t.Fatalf("draw %d: AccountsByAddress: %v", draw, err)
+		}
+		rows, err := f.store.Pool().Query(f.ctx, oldAccountsByAddress, normalise(addresses))
+		if err != nil {
+			t.Fatalf("draw %d: old statement: %v", draw, err)
+		}
+		want, err := scanAccounts(rows)
+		if err != nil {
+			t.Fatalf("draw %d: scan old statement: %v", draw, err)
+		}
+		for i := range got {
+			got[i].Aliases, got[i].MemberOf = nil, nil
+		}
+		byID := func(a, b Account) int { return strings.Compare(a.ClerkUserID, b.ClerkUserID) }
+		slices.SortFunc(got, byID)
+		slices.SortFunc(want, byID)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("draw %d (%d addresses): the rewrite returned %d accounts, the old statement %d\nnew: %+v\nold: %+v",
+				draw, n, len(got), len(want), got, want)
 		}
 	}
 }
