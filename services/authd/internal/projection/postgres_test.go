@@ -684,6 +684,10 @@ func TestAccountsByAddressMatchesPrimaryAddressesAndAliases(t *testing.T) {
 	f.account("aliased", "aliased"+d, true, "alias-of-aliased"+d)
 	f.account("both", "both"+d, true, "both-alias"+d)
 	f.account("off", "off"+d, false, "off-alias"+d)
+	// One address that is an inactive account's primary and an active
+	// account's alias (no constraint spans the two tables).
+	f.account("stale", "shared"+d, false)
+	f.account("live", "live"+d, true, "shared"+d)
 
 	cases := []struct {
 		name      string
@@ -697,6 +701,7 @@ func TestAccountsByAddressMatchesPrimaryAddressesAndAliases(t *testing.T) {
 		{"inactive by primary", []string{"off" + d}, nil},
 		{"inactive by alias", []string{"off-alias" + d}, nil},
 		{"missing", []string{"nobody" + d}, nil},
+		{"an inactive primary and an active alias on one address", []string{"shared" + d}, []string{"live"}},
 		{"normalised before the lookup", []string{"  PRIMARY" + strings.ToUpper(d) + " "}, []string{"primary"}},
 	}
 	for _, c := range cases {
