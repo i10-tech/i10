@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,9 @@ type fakeAccounts struct {
 	byLogin map[string]*projection.Account
 	failAll bool
 	sweeps  int
+	// changes is the access-change log; a snapshot is how many rows it held.
+	changes []projection.Change
+	polls   int
 }
 
 func newFakeAccounts(accts ...projection.Account) *fakeAccounts {
@@ -62,12 +66,12 @@ func (f *fakeAccounts) AccountByLogin(_ context.Context, login string) (*project
 	return &cp, nil
 }
 
-func (f *fakeAccounts) AccountsByUIDs(_ context.Context, ids []string) ([]projection.Account, error) {
+func (f *fakeAccounts) AccountsByUIDs(_ context.Context, ids []string) ([]projection.Account, time.Duration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sweeps++
 	if f.failAll {
-		return nil, errors.New("projection unreachable")
+		return nil, 0, errors.New("projection unreachable")
 	}
 	want := map[string]bool{}
 	for _, id := range ids {
@@ -79,13 +83,54 @@ func (f *fakeAccounts) AccountsByUIDs(_ context.Context, ids []string) ([]projec
 			out = append(out, *a)
 		}
 	}
-	return out, nil
+	return out, 0, nil
 }
 
-// update changes the account with this primary address, as the API would.
+func (f *fakeAccounts) AccessChanges(_ context.Context, since string, limit int) (projection.ChangeBatch, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.polls++
+	if f.failAll {
+		return projection.ChangeBatch{}, errors.New("projection unreachable")
+	}
+	b := projection.ChangeBatch{Snapshot: strconv.Itoa(len(f.changes))}
+	if since == "" {
+		return b, nil
+	}
+	from, _ := strconv.Atoi(since)
+	if from > len(f.changes) {
+		// The log is shorter than the position: the ids went back.
+		b.Rewound = true
+		return b, nil
+	}
+	b.Changes = append(b.Changes, f.changes[from:]...)
+	if len(b.Changes) > limit {
+		b.Changes, b.Truncated = b.Changes[:limit], true
+	}
+	return b, nil
+}
+
+// update changes the account with this primary address, as the API would, and
+// logs it as the triggers would.
 func (f *fakeAccounts) update(email string, fn func(*projection.Account)) {
 	f.mu.Lock()
+	a := f.byLogin[email]
+	fn(a)
+	f.changes = append(f.changes, projection.Change{Kind: projection.ChangeAccount, Key: a.ClerkUserID})
+	f.mu.Unlock()
+}
+
+// silently changes the account without logging it: a write the log missed.
+func (f *fakeAccounts) silently(email string, fn func(*projection.Account)) {
+	f.mu.Lock()
 	fn(f.byLogin[email])
+	f.mu.Unlock()
+}
+
+// logChange appends a change to the log, as a trigger on another table would.
+func (f *fakeAccounts) logChange(kind projection.ChangeKind, key string) {
+	f.mu.Lock()
+	f.changes = append(f.changes, projection.Change{Kind: kind, Key: key})
 	f.mu.Unlock()
 }
 
@@ -102,7 +147,9 @@ func (f *fakeAccounts) uids() map[string]string {
 
 func account(id, email string) projection.Account {
 	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	return projection.Account{ClerkUserID: id, Email: email, Active: true, CredentialEpoch: 7, ClerkUpdatedAt: &at}
+	_, domain, _ := strings.Cut(email, "@")
+	return projection.Account{ClerkUserID: id, Email: email, MailDomain: strings.ToLower(domain), Active: true,
+		CredentialEpoch: 7, ClerkUpdatedAt: &at}
 }
 
 // ── a Stalwart that speaks just enough ───────────────────────────────────────

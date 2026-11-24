@@ -44,8 +44,8 @@ func (p Protocol) String() string {
 	return "imap"
 }
 
-// Server accepts clients on any number of listeners and runs one sweeper over
-// all of them.
+// Server accepts clients on any number of listeners and runs one sweeper (its
+// poll and its backstop sweep) over all of them.
 type Server struct {
 	Accounts Accounts
 	TLS      *tls.Config
@@ -113,7 +113,8 @@ func NewServer(accounts Accounts, tlsConf *tls.Config, log *slog.Logger) *Server
 
 // Sweeper returns the sweeper over this server's connections.
 func (s *Server) Sweeper(interval, timeout time.Duration) *Sweeper {
-	return &Sweeper{Accounts: s.Accounts, Interval: interval, Timeout: timeout, Log: s.Log, reg: s.reg}
+	return &Sweeper{Accounts: s.Accounts, Interval: interval, Backstop: DefaultBackstop, Timeout: timeout,
+		MaxChanges: DefaultMaxChanges, Log: s.Log, reg: s.reg, fullSweep: make(chan struct{}, 1)}
 }
 
 // Live is the number of signed-in connections.

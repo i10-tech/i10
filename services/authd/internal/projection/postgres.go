@@ -57,6 +57,17 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 // account they belong to, and so a new one cannot be added to the search path
 // and forgotten on the bind path.
 //
+// ⚠ AND EVERY TABLE THIS READS HAS AN ACCESS-CHANGE TRIGGER. The mail front
+// re-checks an open connection when `authd.access_changes` names it (see
+// AccessChanges), so a table or column added here, or to a `core` function it
+// calls, must be logged too, or a revocation through it closes open sessions
+// only at the once-a-minute backstop. TestEveryTableTheGateReadsLogsItsChanges
+// reads the tables from this text and the functions it reaches, and fails until
+// each has its triggers and no column read here is in a trigger's ignore list;
+// the new path belongs in gatePaths (internal/mailfront paths_db_test.go).
+// `locked_until > now()` is the one clock read: it only ever lifts a lock, so it
+// needs no trigger.
+//
 // ⚠ AND SO IS WHETHER THE ACCOUNT'S DOMAIN STILL HOSTS MAIL (#406):
 // `core.mailbox_domain_refused` is a SECURITY DEFINER function the `authd` role may
 // execute and nothing else in `core`. It is true only for a name that has a
@@ -77,7 +88,12 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 // and tenant, so a pass for one connection says nothing about another's. Nothing in
 // it expires by itself (see `authd.required_exempt` in apps/api/src/db/schema.ts),
 // which is why no clock is read here.
-const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
+//
+// ⚠ THE MAIL DOMAIN IS RETURNED AS THE GATE ITSELF DERIVES IT (accountDomain), so
+// the key the mail front files a connection under (`domain` changes in
+// `authd.access_changes`) is the text these comparisons used, in the server's
+// own lower(), and never a client-side copy that could lowercase differently.
+const accountColumns = `a.clerk_user_id, a.email, ` + accountDomain + `, coalesce(a.display_name, ''),
 	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
 	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
 	coalesce((SELECT pv.version FROM authd.passthrough_versions pv
@@ -85,12 +101,12 @@ const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 	(a.suspended_at IS NOT NULL), (a.payment_hold_at IS NOT NULL), a.banned,
 	(a.locked AND (a.locked_until IS NULL OR a.locked_until > now())),
 	EXISTS (SELECT 1 FROM authd.required_domains rd
-	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
+	        WHERE rd.domain = ` + accountDomain + `
 	          AND rd.tenant_id = a.tenant_id),
 	EXISTS (SELECT 1 FROM authd.required_domains rd
 	        JOIN authd.required_exempt ex
 	          ON ex.connection_id = rd.connection_id AND ex.tenant_id = rd.tenant_id
-	        WHERE rd.domain = lower(split_part(a.email, '@', 2))
+	        WHERE rd.domain = ` + accountDomain + `
 	          AND rd.tenant_id = a.tenant_id
 	          AND ex.clerk_user_id = a.clerk_user_id),
 	` + domainRefused + `,
@@ -99,7 +115,10 @@ const accountColumns = `a.clerk_user_id, a.email, coalesce(a.display_name, ''),
 // domainRefused is the account's domain gate (#406), the one column of
 // accountColumns that is not a read of a row: a call per account. The sweep
 // replaces it with the same call made once per domain (SweepQuery).
-const domainRefused = `core.mailbox_domain_refused(a.tenant_id, lower(split_part(a.email, '@', 2)))`
+const domainRefused = `core.mailbox_domain_refused(a.tenant_id, ` + accountDomain + `)`
+
+// accountDomain is an account's mail domain as every gate query compares it.
+const accountDomain = `lower(split_part(a.email, '@', 2))`
 
 const accountFrom = `FROM authd.accounts a
 		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
@@ -152,21 +171,50 @@ func (p *Postgres) AccountByUID(ctx context.Context, clerkUserID string) (*Accou
 }
 
 // AccountsByUIDs reads the gate's row for many accounts at once, for the mail
-// front's revocation sweep. Missing and inactive ids are simply absent.
+// front's revocation sweep. Missing and inactive ids are simply absent. The
+// duration is the query's own, without the wait for a pooled connection
+// (queryTimed).
 //
 // ⚠ THE SAME COLUMNS AS A BIND, SO THE SAME GATE. The front decides with
 // internal/gate on exactly what a bind would read. It is one primary-key lookup
 // per id (`= ANY($1)` on accounts_pkey), with no aliases or group membership,
 // which the gate does not need.
-func (p *Postgres) AccountsByUIDs(ctx context.Context, clerkUserIDs []string) ([]Account, error) {
+func (p *Postgres) AccountsByUIDs(ctx context.Context, clerkUserIDs []string) ([]Account, time.Duration, error) {
 	if len(clerkUserIDs) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
-	rows, err := p.pool.Query(ctx, SweepQuery, clerkUserIDs)
+	var accounts []Account
+	took, err := p.queryTimed(ctx, func(conn *pgxpool.Conn) error {
+		rows, err := conn.Query(ctx, SweepQuery, clerkUserIDs)
+		if err != nil {
+			return err
+		}
+		accounts, err = scanAccounts(rows)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("projection: accounts by uids: %w", err)
+		return nil, took, fmt.Errorf("projection: accounts by uids: %w", err)
 	}
-	return scanAccounts(rows)
+	return accounts, took, nil
+}
+
+// queryTimed runs fn on one pooled connection and returns how long fn took,
+// leaving out the wait to acquire the connection.
+//
+// ⚠ THE MAIL FRONT PACES ITSELF ON THIS NUMBER (mailfront nextWait), SO IT IS
+// THE DATABASE'S TIME, NOT THE POOL'S. A reconnect storm that holds every
+// connection of the pool (`pool_max_conns`) makes the acquire wait while the
+// database is idle; counted in, it would stretch the revocation window for no
+// load at all.
+func (p *Postgres) queryTimed(ctx context.Context, fn func(*pgxpool.Conn) error) (time.Duration, error) {
+	conn, err := p.pool.Acquire(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Release()
+	start := time.Now()
+	err = fn(conn)
+	return time.Since(start), err
 }
 
 // SweepQuery is AccountsByUIDs' statement, exported so its cost can be measured
@@ -182,13 +230,17 @@ func (p *Postgres) AccountsByUIDs(ctx context.Context, clerkUserIDs []string) ([
 // accounts. So the accounts come first, the distinct (tenant, domain) pairs are
 // judged once each in a MATERIALIZED step, and every other column is
 // accountColumns' own text, so a gate added there reaches the sweep without a
-// second edit.
+// second edit. The account's domain, which accountColumns derives three times,
+// is read from `live`, which derived it once with the same text (accountDomain).
+// The mail front runs it for every live account once a minute
+// (the backstop) and, each second, for the accounts the access-change log names
+// (AccessChanges).
 //
 // ⚠ AN INNER JOIN ON THE VERDICT. An account whose pair found no verdict is
 // dropped, which the front reads as "account gone" and closes: never as hosted.
 var SweepQuery = `
 	WITH live AS (
-		SELECT a.*, lower(split_part(a.email, '@', 2)) AS domain
+		SELECT a.*, ` + accountDomain + ` AS domain
 		FROM authd.accounts a
 		WHERE a.active AND a.clerk_user_id = ANY($1)
 	), verdicts AS MATERIALIZED (
@@ -196,10 +248,91 @@ var SweepQuery = `
 		       core.mailbox_domain_refused(p.tenant_id, p.domain) AS refused
 		FROM (SELECT DISTINCT tenant_id, domain FROM live) p
 	)
-	SELECT ` + strings.Replace(accountColumns, domainRefused, `v.refused`, 1) + `
+	SELECT ` + strings.ReplaceAll(strings.Replace(accountColumns, domainRefused, `v.refused`, 1), accountDomain, `a.domain`) + `
 	FROM live a
 	JOIN verdicts v ON v.tenant_id IS NOT DISTINCT FROM a.tenant_id AND v.domain = a.domain
 	LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
+
+// AccessChanges reads the access-change log (`authd.access_changes`, written by
+// a trigger on every table the gate reads) for the mail front: every change
+// whose transaction was not yet visible in the snapshot `since`, and the
+// current snapshot to pass as `since` next time. An empty `since` returns no
+// changes, only the snapshot. At most `limit` changes come back; Truncated says
+// there were more. QueryTime is the statement's own time (queryTimed).
+//
+// ⚠ BY SNAPSHOT, NOT BY ID OR txid. Both are assigned before commit, so a
+// transaction that commits after a later one has rows below what a reader has
+// already passed, and "id > last" loses them. A change is returned by the first
+// read whose snapshot sees its transaction: it was not visible in that read's
+// `since` (the previous read's snapshot), and it is visible now. Visibility only
+// grows from one snapshot to the next, so each committed change is returned
+// exactly once, however late it commits.
+//
+// ⚠ "NOT VISIBLE IN since" IS "AT OR ABOVE ITS xmax, OR IN ITS IN-PROGRESS LIST",
+// exactly (pg_visible_in_snapshot: below xmin is visible, at or above xmax is
+// not, and between them only the listed transactions are not). Written that way
+// the read is one index range from xmax plus a point lookup per transaction that
+// was in progress, so a long writing transaction elsewhere, which holds xmin
+// back, costs one more lookup and not a re-read of everything committed since it
+// began. ⚠ AS A UNION ALL, NOT AN OR: the OR form was planned as a sequential
+// scan of the whole log (docs/research/mail-device-binding/
+// change-driven-plans-2026-11-24.txt).
+//
+// ⚠ ONE STATEMENT, SO ONE SNAPSHOT. The rows and the snapshot handed back are
+// the same snapshot (pg_current_snapshot() is the statement's), which is what
+// makes the next read start exactly where this one stopped. No session state:
+// it runs as one autocommit statement through PgBouncer in transaction mode.
+//
+// ⚠ TRANSACTION IDS THAT WENT BACK ARE REPORTED, NOT READ PAST (Rewound). After a
+// point-in-time restore, or a failover to a replica that had not replayed
+// everything, the server hands out ids below `since`'s xmax again, and a
+// snapshot test calls each of them already seen. The same statement compares the
+// current xmax with `since`'s; when it is lower, the caller must re-check
+// everything and start again from the snapshot returned.
+func (p *Postgres) AccessChanges(ctx context.Context, since string, limit int) (ChangeBatch, error) {
+	var b ChangeBatch
+	var kinds, keys []string
+	var n int
+	took, err := p.queryTimed(ctx, func(conn *pgxpool.Conn) error {
+		return conn.QueryRow(ctx, AccessChangesQuery, nullIfEmpty(since), limit+1).Scan(&b.Snapshot, &b.Rewound, &n, &kinds, &keys)
+	})
+	b.QueryTime = took
+	if err != nil {
+		return ChangeBatch{QueryTime: took}, fmt.Errorf("projection: access changes: %w", err)
+	}
+	b.Truncated = n > limit
+	b.Changes = make([]Change, min(len(kinds), limit))
+	for i := range b.Changes {
+		b.Changes[i] = Change{Kind: ChangeKind(kinds[i]), Key: keys[i]}
+	}
+	return b, nil
+}
+
+// AccessChangesQuery is AccessChanges' statement, exported so its cost can be
+// measured with EXPLAIN on the statement that actually runs. $2 is one more
+// than the most changes the caller takes, so a full read is told from a read of
+// exactly that many. The changes are limited before they are aggregated, so a
+// burst costs at most $2 rows. A NULL $1 matches no row (every comparison with
+// it is NULL) and is never rewound.
+const AccessChangesQuery = `
+	SELECT pg_current_snapshot()::text,
+	       coalesce(pg_snapshot_xmax(pg_current_snapshot()) < pg_snapshot_xmax($1::pg_snapshot), false),
+	       count(*)::int, coalesce(array_agg(c.kind), '{}'), coalesce(array_agg(c.key), '{}')
+	FROM (
+		(SELECT l.kind, l.key FROM authd.access_changes l
+		  WHERE l.txid >= pg_snapshot_xmax($1::pg_snapshot))
+		UNION ALL
+		(SELECT l.kind, l.key FROM authd.access_changes l
+		  WHERE l.txid = ANY (ARRAY(SELECT pg_snapshot_xip($1::pg_snapshot))))
+		LIMIT $2
+	) c`
+
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
 
 // AccountByLogin resolves the account a mail login names, the way Stalwart's
 // `filterLogin` (`(&(objectClass=inetOrgPerson)(mail=?))`) does through authd's
@@ -275,7 +408,7 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	var out []Account
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.DisplayName,
+		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.MailDomain, &a.DisplayName,
 			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
 			&a.Managed, &a.ManagedConnection, &a.PassthroughVersion, &a.Suspended, &a.PaymentHold,
 			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt, &a.DomainNotHosted, &a.Deleting); err != nil {

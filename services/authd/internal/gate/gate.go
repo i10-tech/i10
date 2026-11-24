@@ -8,6 +8,16 @@
 // row changed. A rule added here reaches all three; a rule added anywhere else
 // reaches one of them, which is how an open session outlives a revocation.
 //
+// ⚠ A NEW INPUT ALSO NEEDS A TRIGGER. The mail front re-checks an open
+// connection when the access-change log names it (`authd.access_changes`,
+// written by a trigger on every table this decision reads), and every
+// connection only once a minute otherwise. A rule that reads a new table or
+// column without a trigger that logs its changes closes open sessions a minute
+// late. TestEveryTableTheGateReadsLogsItsChanges (internal/projection) fails for
+// a table without the triggers, and every input has a row in gatePaths
+// (internal/mailfront paths_db_test.go), whose test commits each change and
+// checks that the next poll closes the connection.
+//
 // Everything here is pure: no I/O, no clock. The row already carries every
 // input, read in one query (projection.accountColumns), including the ones
 // that are not columns of authd.accounts: the required SSO domains, who is

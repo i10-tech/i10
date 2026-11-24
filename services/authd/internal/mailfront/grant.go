@@ -13,6 +13,11 @@ import (
 // so the connection is closed.
 type Grant struct {
 	AccountID string
+	// Email is the primary address the row had at sign-in, and Domain its mail
+	// domain as the gate's SQL derived it (projection.Account.MailDomain): the key
+	// a `domain` change in the access-change log names this connection by.
+	Email     string
+	Domain    string
 	Epoch     int64
 	UpdatedAt *time.Time
 	Route     gate.Route
@@ -38,19 +43,20 @@ const DefaultPassthroughMaxAge = 15 * time.Minute
 
 // Reasons a connection is closed. Stable log reason codes.
 const (
-	ReasonLookupFailed  = "lookup_failed"
-	ReasonUnattributed  = "unattributed"
-	ReasonAccountGone   = "account_gone"
-	ReasonEpochMoved    = "credential_epoch_moved"
-	ReasonClerkMoved    = "clerk_updated_at_moved"
-	ReasonRouteChanged  = "verifier_changed"
-	ReasonSecondSignIn  = "second_sign_in"
-	ReasonUnattribAuth  = "unattributed_sign_in"
-	ReasonUnexpectedTag = "unexpected_tagged_answer"
-	ReasonAmbiguous     = "ambiguous_command"
-	ReasonShutdown      = "shutdown"
-	ReasonPreAuthLimits = "preauth_limit"
-	ReasonMaxAge        = "passthrough_max_age"
+	ReasonLookupFailed   = "lookup_failed"
+	ReasonUnattributed   = "unattributed"
+	ReasonAccountGone    = "account_gone"
+	ReasonEpochMoved     = "credential_epoch_moved"
+	ReasonClerkMoved     = "clerk_updated_at_moved"
+	ReasonRouteChanged   = "verifier_changed"
+	ReasonAddressChanged = "address_changed"
+	ReasonSecondSignIn   = "second_sign_in"
+	ReasonUnattribAuth   = "unattributed_sign_in"
+	ReasonUnexpectedTag  = "unexpected_tagged_answer"
+	ReasonAmbiguous      = "ambiguous_command"
+	ReasonShutdown       = "shutdown"
+	ReasonPreAuthLimits  = "preauth_limit"
+	ReasonMaxAge         = "passthrough_max_age"
 )
 
 // admit decides whether an authenticated session may continue, from the row
@@ -82,6 +88,8 @@ func admit(acct *projection.Account, lookupErr error, until time.Time) (Grant, s
 	}
 	g := Grant{
 		AccountID: acct.ClerkUserID,
+		Email:     acct.Email,
+		Domain:    acct.MailDomain,
 		Epoch:     acct.CredentialEpoch,
 		UpdatedAt: acct.ClerkUpdatedAt,
 		Route:     gate.RouteOf(acct),
@@ -106,6 +114,12 @@ func admit(acct *projection.Account, lookupErr error, until time.Time) (Grant, s
 //     on every profile change, so a renamed person reconnects once; the client
 //     does that with the password it already has;
 //   - the route: Clerk, or which company directory, answers for the password.
+//
+// And the primary address: it is the login the session signed in with, and its
+// domain is how a `domain` change finds this connection (Sweeper.Poll), so a
+// session whose address moved is closed rather than watched under a domain it
+// is no longer on. The client's saved login is the old address, which no longer
+// signs in either, so this only brings forward what its next sign-in would meet.
 func (g Grant) revoked(now *projection.Account) string {
 	if now == nil {
 		return ReasonAccountGone
@@ -120,6 +134,8 @@ func (g Grant) revoked(now *projection.Account) string {
 		return ReasonClerkMoved
 	case gate.RouteOf(now) != g.Route:
 		return ReasonRouteChanged
+	case now.Email != g.Email:
+		return ReasonAddressChanged
 	}
 	return ""
 }

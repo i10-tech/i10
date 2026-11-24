@@ -1,0 +1,9 @@
+write,triggers,runs,rows,p50_ms,max_ms,trigger_ms_p50,wal_bytes_p50,log_rows
+one account (suspended_at),false,6,1,0.107,0.436,0.000,474,0
+one account (suspended_at),true,6,1,0.280,0.318,0.197,474,1
+"10,000 accounts (payment_hold_at)",false,6,10000,158.847,192.228,0.000,4685943,0
+"10,000 accounts (payment_hold_at)",true,6,10000,364.196,407.559,208.516,4666321,10000
+one domain (hosts_mailboxes),false,6,1,1.242,1.353,0.000,649,0
+one domain (hosts_mailboxes),true,6,1,1.512,1.619,0.268,649,1
+"10,000 domains, ignored columns only (dns_checked_at)",false,6,10000,153.470,175.737,0.000,7090854,0
+"10,000 domains, ignored columns only (dns_checked_at)",true,6,10000,460.096,472.353,322.105,7005940,0

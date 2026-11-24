@@ -404,25 +404,37 @@ func TestRevocationClosesOpenSessions(t *testing.T) {
 		{"changed in Clerk", func(a *projection.Account) { t := a.ClerkUpdatedAt.Add(time.Second); a.ClerkUpdatedAt = &t }},
 		{"now managed by a connection", func(a *projection.Account) { a.Managed, a.ManagedConnection = true, "conn-1" }},
 		{"gone", func(a *projection.Account) { a.Active = false }},
+		{"primary address changed", func(a *projection.Account) { a.Email = "alice@elsewhere.test" }},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := startFront(t, IMAP, alice(), nil)
-			c := signInIMAP(t, h)
-			c.send("b IDLE\r\n")
-			c.until("+ idling")
+	// The change-driven poll and the backstop sweep decide alike (Grant.revoked).
+	passes := []struct {
+		name string
+		run  func(*Sweeper, context.Context) SweepStats
+	}{{"poll", (*Sweeper).Poll}, {"sweep", (*Sweeper).Sweep}}
+	for _, pass := range passes {
+		for _, tc := range cases {
+			t.Run(pass.name+"/"+tc.name, func(t *testing.T) {
+				h := startFront(t, IMAP, alice(), nil)
+				c := signInIMAP(t, h)
+				c.send("b IDLE\r\n")
+				c.until("+ idling")
 
-			if st := h.sweeper.Sweep(context.Background()); st.Closed != 0 {
-				t.Fatalf("a sweep with nothing changed closed %d", st.Closed)
-			}
-			h.accounts.update("alice@i10.test", tc.change)
-			if st := h.sweeper.Sweep(context.Background()); st.Closed != 1 {
-				t.Fatalf("sweep closed %d connections, want 1", st.Closed)
-			}
-			if !c.closed(time.Second) {
-				t.Fatal("the IDLE session is still open")
-			}
-		})
+				if st := pass.run(h.sweeper, context.Background()); st.Closed != 0 {
+					t.Fatalf("a %s with nothing changed closed %d", pass.name, st.Closed)
+				}
+				h.accounts.update("alice@i10.test", tc.change)
+				st := pass.run(h.sweeper, context.Background())
+				if st.Closed != 1 {
+					t.Fatalf("%s closed %d connections, want 1", pass.name, st.Closed)
+				}
+				if pass.name == "poll" && st.Full {
+					t.Fatalf("the poll re-checked everything (%s) for one account's change", st.FullWhy)
+				}
+				if !c.closed(time.Second) {
+					t.Fatal("the IDLE session is still open")
+				}
+			})
+		}
 	}
 }
 
@@ -985,11 +997,18 @@ func TestDatabaseDownAnswersSMTPSignInsUnavailable(t *testing.T) {
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
 func TestASlowSweepWaitsLongerInsteadOfRunningBackToBack(t *testing.T) {
-	s := &Sweeper{Interval: time.Second}
-	if got := s.nextWait(SweepStats{Query: 20 * time.Millisecond}); got != time.Second {
-		t.Fatalf("a fast sweep waits %s, want the interval", got)
+	if got := nextWait(time.Second, SweepStats{Query: 20 * time.Millisecond}); got != time.Second {
+		t.Fatalf("a fast pass waits %s, want the interval", got)
 	}
-	if got := s.nextWait(SweepStats{Query: 600 * time.Millisecond}); got != 3*time.Second {
-		t.Fatalf("a 600ms sweep waits %s, want 3s (a fifth of the backend)", got)
+	if got := nextWait(time.Second, SweepStats{Query: 600 * time.Millisecond}); got != 3*time.Second {
+		t.Fatalf("a 600ms pass waits %s, want 3s (a fifth of the backend)", got)
+	}
+	// A poll's log read counts with its re-check.
+	if got := nextWait(time.Second, SweepStats{Log: 300 * time.Millisecond, Query: 300 * time.Millisecond}); got != 3*time.Second {
+		t.Fatalf("a poll of 300ms + 300ms waits %s, want 3s", got)
+	}
+	// The backstop keeps its minute until a sweep takes more than 12 s.
+	if got := nextWait(time.Minute, SweepStats{Query: 3 * time.Second}); got != time.Minute {
+		t.Fatalf("a 3s backstop sweep waits %s, want its minute", got)
 	}
 }

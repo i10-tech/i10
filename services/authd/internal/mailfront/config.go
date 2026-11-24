@@ -135,7 +135,8 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("MAILFRONT_PREAUTH_TIMEOUT is %s: keep it between 10s and 10m", c.PreAuthTimeout))
 	}
 	if c.SweepInterval < 200*time.Millisecond || c.SweepInterval > 10*time.Second {
-		// The sweep interval IS the revocation window for open connections.
+		// The poll interval IS the revocation window for open connections (the
+		// change-driven poll, Sweeper.Poll; the full sweep is once a minute).
 		errs = append(errs, fmt.Errorf("MAILFRONT_SWEEP_INTERVAL is %s: keep it between 200ms and 10s; it is how "+
 			"long a revoked account's open connections survive", c.SweepInterval))
 	}

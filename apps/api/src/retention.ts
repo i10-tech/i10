@@ -4,6 +4,8 @@ import "./openapi-first.js"
  * (docs/decisions/storage.md).
  *
  * One run, in this order:
+ *   0. Prunes the mail front's access-change log (`authd.access_changes`) of
+ *      rows older than an hour: the cutoff is fixed inside the function.
  *   1. Keeps a year of monthly partitions ahead, locked down like 0064's.
  *   2. Deletes every workspace's mail older than its plan keeps it: row, body,
  *      events, webhook deliveries - leaving a tombstone per message.
@@ -92,6 +94,7 @@ await withMonitor(
       mailboxRows: 0,
       mailboxesPurged: 0,
       mailboxesWaitingForExport: 0,
+      accessChangesPruned: 0,
       tombstonesPruned: 0,
       partitionsDropped: [] as string[],
       partitionsRefused: [] as string[],
@@ -99,6 +102,26 @@ await withMonitor(
     }
     try {
       await assertRlsSubject(client, log)
+
+      // ── 0. The access-change log ──
+      // ⚠ FIRST, AND ON ITS OWN. The triggers on every table the mail gate reads
+      // write it whether or not a mail front runs to read it, so this job, which
+      // runs wherever the writers do, keeps it bounded. A failure in any later
+      // step must not let it grow. Each call deletes at most 10,000 rows, and
+      // none only when nothing older than the hour is left.
+      try {
+        for (let calls = 0; calls < 100; calls++) {
+          const [pruned] = (await db.execute(
+            sql`select authd.prune_access_changes() as n`,
+          )) as unknown as { n: number }[]
+          const n = Number(pruned?.n ?? 0)
+          summary.accessChangesPruned += n
+          if (n === 0) break
+        }
+      } catch (error) {
+        log.error({ err: error }, "could not prune the access-change log")
+        captureError(error, { phase: "access_changes" })
+      }
 
       // ── 1. Partitions ahead ──
       const [created] = (await db.execute(

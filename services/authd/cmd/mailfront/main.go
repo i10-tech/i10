@@ -84,9 +84,11 @@ func run() error {
 		log.Info("bind token key loaded", "id", int(cfg.BindTokenKey.ID))
 	}
 
-	// ⚠ THE TIMEOUT GUARDS A HUNG QUERY, NOT A LARGE ONE. A sweep that times out
-	// closes nothing, so a timeout below what the live set costs would turn every
-	// revocation off. The duty cycle in Sweeper.nextWait is what bounds the load.
+	// ⚠ THE TIMEOUT GUARDS A HUNG QUERY, NOT A LARGE ONE. A poll or sweep that
+	// times out closes nothing, so a timeout below what the live set costs would
+	// turn every revocation off. The duty cycle (nextWait) is what bounds the
+	// load. MAILFRONT_SWEEP_INTERVAL is the change-driven poll's; the full sweep
+	// runs once a minute beside it (DefaultBackstop).
 	sweeper := srv.Sweeper(cfg.SweepInterval, 30*time.Second)
 	go sweeper.Run(ctx)
 

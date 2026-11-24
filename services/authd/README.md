@@ -584,8 +584,9 @@ Probed on v1.1.0 (`docs/research/mail-device-binding.md`, section 6): a password
 change, removed permissions and even a deleted account left open IMAP sessions
 reading and open SMTP sessions sending. Everything above in this README stops
 the next sign-in. Nothing stopped the session that was already open. The front
-closes it: it knows which account each connection signed in as, and once a
-second it asks the projection whether that account would still be let in.
+closes it: it knows which account each connection signed in as, and within
+about a second of a change that could revoke it, it asks the projection whether
+that account would still be let in (see "The sweep").
 
 **Why it is not part of authd.** The front parses bytes from anyone on the
 internet before they have signed in. A parser bug that crashes it must not take
@@ -709,9 +710,12 @@ it. It only takes the attribution back to where the parsers left it.
 ### Its database role
 
 `mailfront` may SELECT `authd.accounts`, `authd.managed_accounts`,
-`authd.required_domains` and `authd.required_exempt`, and EXECUTE
-`core.mailbox_domain_refused`: exactly what `projection.accountColumns` reads,
-and nothing else (`apps/api/drizzle/*_mailfront_role_grants`). It is not
+`authd.required_domains`, `authd.required_exempt` and
+`authd.passthrough_versions`, and EXECUTE `core.mailbox_domain_refused`:
+exactly what `projection.accountColumns` reads
+(`apps/api/drizzle/*_mailfront_role_grants`). It may also SELECT the
+access-change log, `authd.access_changes` (`*_access_change_triggers`), and
+nothing else. It writes nothing, not even the log: the retention job prunes it. It is not
 `authd`'s role because `authd` may INSERT and UPDATE `authd.bind_failure_budget`,
 and a bug in a parser of internet bytes must not be able to reset or exhaust
 anyone's failure budget. `TestTheMailFrontRoleReadsTheGateAndWritesNothing`
@@ -897,9 +901,22 @@ the bind DN.
 
 ### The sweep
 
-Once a second, and only when connections are open, the sweeper sends **one**
-query for every distinct account (`projection.SweepQuery`, `= ANY($1)` on the
-primary key). It closes every connection whose account:
+Two loops close revoked connections (`Sweeper.Run`), and both decide with the
+same code: `Grant.revoked` on rows read by `projection.SweepQuery`, which is the
+bind's own column list, so whatever authd would refuse at the next sign-in
+closes the connection that is already open.
+
+- **The poll, every second** (`MAILFRONT_SWEEP_INTERVAL`, `Sweeper.Poll`), reads
+  the access-change log for what committed since its last read, and re-checks
+  only the open connections that names, plus every connection that signed in
+  since the last poll. With nothing changed and nobody new it reads no account.
+- **The backstop, every minute** (`DefaultBackstop`, `Sweeper.Sweep`),
+  re-checks every open connection, as the front once did every second. It is
+  the bound for a write the log missed, and it also runs as soon as it may when
+  a poll asks for it (below). It runs in its own goroutine, so a slow full sweep
+  never holds the poll back.
+
+Either closes a connection whose account:
 
 - the gate now refuses. This is `internal/gate`, the code authd's bind uses,
   with every row reason, plus SSO-required as `ManagedResolver` decides it, plus
@@ -908,7 +925,119 @@ primary key). It closes every connection whose account:
   values the credential cache is keyed on). Any Clerk profile change counts, so
   a renamed person reconnects once, with the password their client already has;
 - is now answered by a different verifier (Clerk, or another connection);
+- has a different primary address than the one it signed in with: that address
+  is the login, and its domain is how the poll finds the connection;
 - has no active row any more.
+
+**The access-change log** (`authd.access_changes`). A statement-level trigger,
+`authd.log_access_change`, on every table the gate reads (`authd.accounts`,
+`authd.managed_accounts`, `authd.passthrough_versions`, `authd.required_domains`,
+`authd.required_exempt`, `core.domains`, `core.join_domains`) inserts one row
+per distinct key a statement touched, in the writer's own transaction:
+
+| Kind         | Key                    | Written by                                                              | Re-checks                                            |
+| ------------ | ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------- |
+| `account`    | Clerk user id          | `accounts`, `managed_accounts`, `required_exempt`                       | the connections of that account                      |
+| `domain`     | lowercased mail domain | `required_domains`, `core.domains`, `core.join_domains` (`lower(name)`) | the connections that signed in with an address there |
+| `connection` | SSO connection id      | `passthrough_versions`                                                  | the connections that connection answers for          |
+| `all`        | (none)                 | a TRUNCATE of any of them                                               | every connection                                     |
+
+INSERT, UPDATE and DELETE are logged; foreign key cascades fire them too, so a
+workspace or mailbox deleted reaches the log. An update logs the old and the new
+key of every row it changed, so an address or a domain name that moves is
+re-checked under both. A bulk update of 10,000 accounts is one trigger call that
+inserts 10,000 small rows in one statement. An update that moves only columns
+the gate never reads logs nothing: each trigger names those columns (a
+deny-list, so a column added to a table later is watched), and
+`TestEveryTableTheGateReadsLogsItsChanges` checks each one against the gate's
+SQL text. The same test reads the tables from the gate's own SQL and from every
+`core` function it reaches, so a table the gate starts reading fails it until it
+has its four triggers. `gatePaths` (`internal/mailfront/paths_db_test.go`) lists
+every input, each column and each insert and delete, and
+`TestEveryGateInputReachesThePoll` commits each one against a real database and
+checks that the next poll, not the backstop, closes the connection. The one
+clock read, `locked_until > now()`, only ever lifts a lock, so it needs no
+trigger; the pass-through maximum age (below) is the front's own clock.
+
+⚠ **The poll reads by snapshot, not by id.** Ids and transaction ids are
+assigned before commit, so a transaction that commits after a later one lands
+below what a reader has already passed, and "id greater than the last one" loses
+it for good. Each poll is one statement that returns the rows of every
+transaction not yet visible in the previous poll's snapshot, and the current
+snapshot for the next poll (`projection.AccessChanges`). "Not visible in
+`prev`" is exactly "at or above `prev`'s xmax, or in its in-progress list", so
+the statement is `txid >= pg_snapshot_xmax(prev)` UNION ALL `txid = ANY
+(pg_snapshot_xip(prev))`: one index range scan from xmax plus one index lookup
+per transaction that was in progress. (Written as an OR, it was planned as a
+sequential scan of the whole log.) Visibility only grows from one snapshot to
+the next, so each committed change is returned exactly once, however late it
+commits (`TestAccessChangesReturnsALateCommitOnceItCommits`). A long writing
+transaction elsewhere holds xmin back but not xmax, so it costs each poll one
+more lookup, not a re-read of everything committed since it began. This is one
+statement through PgBouncer in transaction mode, with no LISTEN, no session state
+and no prepared statement.
+
+⚠ **Transaction ids that go back are caught, not read past.** After a
+point-in-time restore, or a failover to a replica that had not replayed
+everything, the server hands out ids below the previous snapshot's xmax again,
+and a snapshot test would call each of them already seen. The same statement
+compares the server's current xmax with the previous one; when it is lower, the
+poll asks for a full sweep, starts again from the current snapshot, and logs it
+(`TestAccessChangesReportsTransactionIDsThatWentBack`).
+
+⚠ **Every connection that signed in since the last poll is re-checked, whatever
+the log says.** Its row was read at sign-in, before it was registered with the
+sweeper. A revocation that commits between that read and the registration can
+be read by a poll that runs in between, when the connection is not there to be
+matched, and no later poll returns it again. So each registration gets a
+sequence number, and the first poll whose registry snapshot holds it re-checks
+it with a row read taken after that poll's log read: a change committed before
+that row read is in the row, and one committed after it was not visible to the
+log read either, so a later poll returns it. `TestAPollRechecksAConnectionThatSignedInDuringAChange`
+(and its `OnTheDatabase` twin) pin it, and both fail without the rule.
+
+**When the poll cannot tell whom a change names.** A `TRUNCATE` (kind `all`), a
+kind this front does not know, more than 10,000 changes in one read
+(`DefaultMaxChanges`), a position older than ten minutes (after a long outage),
+or transaction ids that went back make the poll ask the sweep loop for a full
+sweep, logged at WARN. It re-checks nobody itself: it advances its position and
+polls again at its normal interval, so a burst does not hold the next targeted
+revocation back by the seconds a full sweep takes at 50,000 accounts. The
+request is one slot (a channel of one), so requests made before the sweep loop
+takes one are the same request and nothing queues. ⚠ The sweep that answers it
+re-checks every connection with a row read after the poll's log read: the poll
+asks after its log read, and the sweep loop takes the request before the pass
+that answers it starts, so that pass's registry snapshot and row read both come
+later; a request made while a sweep is already running stays in the slot and
+starts another sweep after it (`TestAFullPollIsAnsweredByASweepThatStartsAfterIt`).
+A requested sweep still waits out the duty cycle below and at least one poll
+interval after the previous sweep, and one that fails asks again at that pace.
+With no connection open, the poll reads nothing and forgets its position: the
+next connection is new, so nothing before it matters.
+
+**The position moves only after the re-check has read the rows**, or once the
+poll has asked for a full sweep. A failed read of the log or of the accounts
+leaves it, and the next poll reads the same changes again. Re-checks are
+idempotent.
+
+**Pruning.** Rows live an hour. `authd.prune_access_changes()`, a `SECURITY
+DEFINER` function whose one-hour cutoff is fixed inside it, deletes older rows
+at most 10,000 a call, and the hourly retention job (`apps/api/src/retention.ts`,
+step 0, as `i10_api`) calls it until a call deletes fewer. It is the retention
+job and not the front because the triggers write the log wherever the API
+writes, whether or not a front runs to read it, and it keeps the `mailfront`
+role free of any write. The front needs a row for about a second, and re-checks
+everyone after ten minutes without a successful read, so nothing it reads is
+that old. Rows are deleted by id below the oldest row of the last hour, so a
+prune reads only what it deletes. Neither the API nor authd may write or delete
+the log; only the triggers and the prune do.
+
+⚠ **The prune's remaining window.** A row's `at` is its transaction's start
+(`now()`), and its id is taken when it is written, not when it commits. A
+transaction that writes a gate table more than an hour before it commits, and
+commits in the second before an hourly prune, can have its rows deleted before
+the next poll reads them. Its revocation then waits for the backstop, at most a
+minute. Nothing on a request path keeps a transaction open that long.
 
 **A change to pass-through.** Whether a managed account's connection still has
 pass-through on, and where it asks, is the API's answer behind
@@ -948,8 +1077,8 @@ again with the password it saved, and the directory is asked again. Each session
 ends at a random point in the last tenth of the age, never after it, so clients
 that signed in together do not all come back together. A Clerk-routed session is
 not affected, because a Clerk change moves `clerk_updated_at`, which the sweep
-already watches. The check needs only the clock, so the sweep runs it first,
-before its query, and holds it during a database outage too: an expired
+already watches. The check needs only the clock, so both the poll and the
+sweep run it first, before any query, and hold it during a database outage too: an expired
 pass-through session is closed even when nothing else can be.
 
 What it costs (measured 2026-11-22: 1.033 sign-ins per connection per max-age
@@ -981,41 +1110,54 @@ an `x:ApiKey` bearer and never bind to authd, so they are unaffected.
 **If the database cannot be read, nothing is closed.** Closing every connection
 when the database blinks would disconnect every client at once, into an authd
 that cannot verify them either. A revocation made during the outage is still in
-the rows, and the first sweep that can read them closes the connection. The
-front logs this at ERROR on the first failure and every minute after, with how
+the rows, and the first poll or sweep that can read them closes the connection
+(the poll's position has not moved, so it reads the same changes again). Each
+loop logs this at ERROR on its first failure and every minute after, with how
 long it has lasted.
 
-**A slow sweep waits longer; it never runs back to back.** At least five times
-the last query's duration passes before the next sweep, so one front keeps a
-database backend busy at most a fifth of the time. The cost is a longer window,
-logged at WARN. The query's own timeout is 30 s, because a sweep that times out
-closes nothing; it guards a hung query, not a large one.
+**A slow pass waits longer; it never runs back to back.** In each loop, at
+least five times the last pass's query time goes by before the next pass, so
+each loop keeps a database backend busy at most a sixth of the time (T busy,
+then 5T idle). The query time is the database's own: the front acquires a pooled
+connection first and times only the statement, so a reconnect storm that holds
+all of `pool_max_conns` does not stretch the interval while the database is
+idle. The
+backstop keeps its minute until one full sweep takes more than 12 seconds; the
+poll keeps its second until a poll and its re-check take more than 200 ms. The
+cost is a longer window, logged at WARN. The query timeout is 30 s, because a
+pass that times out closes nothing; it guards a hung query, not a large one.
 
 **A revoked connection gets no goodbye.** The sweep closes the TCP connection
 under TLS, not the TLS one, which would first send a close_notify and wait up to
 five seconds for a client that is not reading, one connection after another.
 
-**What it costs, and where it stops scaling** (measured 2026-11-21 and
-2026-11-22 on a 500,000-account seed; tables, method and CSVs in
-`docs/research/mail-device-binding.md`, "Mail front scale"). With this PR's
-two migrations (an index on `lower(name)` for `core.domains` and
-`core.join_domains`, and the name filter inside `core.mailbox_domain_settings`)
-a sweep over 1,000 live accounts takes 14 ms, and over 10,000 about 125 ms.
-Without them it took 546 ms and 5.5 s.
+**What it costs** (measured 2026-11-24 on the 500,000-account seed; tables,
+method, CSVs and plans in `docs/research/mail-device-binding.md`, "Change-driven
+re-check").
 
-- **The knee**, where the 1 Hz sweep passes 5% of one database core: about
-  3,000 live accounts clustered on company domains, or 400 on one domain each,
-  by `EXPLAIN (ANALYZE)` time. Timed inside the server, without EXPLAIN's
-  instrumentation, it is about 7,000 clustered.
-- **The per-account part alone** (the domain gate replaced by a constant)
-  passes 5% at about 15,000 accounts, and is 16% of a core at 50,000. So no
-  cheaper domain gate gets one database core to 50,000. Re-checking only the
-  accounts whose access changed does (a change log or NOTIFY from the API,
-  with a slow full sweep as the backstop); that is a later PR.
+- **The poll** is one index range scan of the log from the previous snapshot's
+  xmax plus a lookup per transaction it listed as in progress: 2 to 4 buffers
+  and under 0.4 ms in the server with 0 to 100 changes a second, whatever the
+  log holds. Re-checking 100 changed accounts adds about 12 ms. At 100 changes
+  a second that is 1.2% of a database core.
+- **The backstop** is the old full sweep once a minute: 645 ms clustered and
+  2.5 s spread at 50,000 live accounts, so 1.1% and 4.2% of a core. The 1 Hz
+  sweep it replaces cost 56% and 367% there.
+- **A long writing transaction elsewhere** holds the snapshot's xmin back but
+  not its xmax, so it costs each poll one more index lookup: 9 buffers and
+  0.05 ms with 100,000 changes committed behind one, where reading from xmin
+  took 1,039 buffers and 7.4 ms.
+- **The triggers** add about 0.2 ms to a single-row write of a gate table, and
+  about 20 µs a row to a bulk update (10,000 accounts: 159 ms without, 364 ms
+  with). An update of only ignored columns logs nothing but still pays the
+  comparison (10,000 domains: 322 ms).
+- **Revocation latency**: every one of the 43 paths that revokes access closed
+  its connection within 882 ms of `COMMIT` (three runs each, at the production
+  one-second interval). The bound is one interval plus one poll.
 - **The front itself** stays near 2% of a core with 10,000 idle connections;
   its limit is memory, about 61 KiB a connection.
-- **Several fronts** each sweep their own connections, so the database cost
-  adds up across them.
+- **Several fronts** each poll and sweep their own connections, so the database
+  cost adds up across them.
 
 **A sign-in surge is shed at accept, not queued into the database.** Measured
 2026-11-22 (`front-storm-2026-11-22.csv`): 6,000 clients signing in at the
@@ -1062,24 +1204,24 @@ the reconnects.
 
 ### Configuration
 
-| Variable                        | Default                      |                                                 |
-| ------------------------------- | ---------------------------- | ----------------------------------------------- |
-| `MAILFRONT_LISTEN_IPS`          | -                            | The pod's addresses. Never a wildcard/loopback. |
-| `MAILFRONT_IMAP_PORT`           | `993`                        |                                                 |
-| `MAILFRONT_SMTP_PORT`           | `465`                        |                                                 |
-| `MAILFRONT_IMAP_UPSTREAM`       | `127.0.0.1:993`              | Must be loopback.                               |
-| `MAILFRONT_SMTP_UPSTREAM`       | `127.0.0.1:465`              | Must be loopback.                               |
-| `MAILFRONT_TLS_CERT_FILE`       | `/etc/mailfront/tls/tls.crt` | Re-read every 30 s.                             |
-| `MAILFRONT_TLS_KEY_FILE`        | `/etc/mailfront/tls/tls.key` |                                                 |
-| `MAILFRONT_DATABASE_URL`        | -                            | The `mailfront` role.                           |
-| `MAILFRONT_BIND_TOKEN_KEY`      | -                            | `<id>:<base64>`. Without it, no sign-ins.       |
-| `MAILFRONT_MAX_CONNECTIONS`     | `6000`                       | Sized with the memory limit; raise together.    |
-| `MAILFRONT_MAX_PREAUTH`         | `2000`                       | Not signed in yet. Bounds a sign-in surge.      |
-| `MAILFRONT_MAX_PREAUTH_PER_IP`  | `32`                         | Per address; per /64 for IPv6.                  |
-| `MAILFRONT_PREAUTH_TIMEOUT`     | `2m`                         | 10 s to 10 m.                                   |
-| `MAILFRONT_SWEEP_INTERVAL`      | `1s`                         | 200 ms to 10 s. It is the revocation window.    |
-| `MAILFRONT_PASSTHROUGH_MAX_AGE` | `15m`                        | 1 m to 24 h. Ends pass-through sessions.        |
-| `MAILFRONT_LOG_LEVEL`           | `info`                       | `debug` logs every sweep's timings.             |
+| Variable                        | Default                      |                                                  |
+| ------------------------------- | ---------------------------- | ------------------------------------------------ |
+| `MAILFRONT_LISTEN_IPS`          | -                            | The pod's addresses. Never a wildcard/loopback.  |
+| `MAILFRONT_IMAP_PORT`           | `993`                        |                                                  |
+| `MAILFRONT_SMTP_PORT`           | `465`                        |                                                  |
+| `MAILFRONT_IMAP_UPSTREAM`       | `127.0.0.1:993`              | Must be loopback.                                |
+| `MAILFRONT_SMTP_UPSTREAM`       | `127.0.0.1:465`              | Must be loopback.                                |
+| `MAILFRONT_TLS_CERT_FILE`       | `/etc/mailfront/tls/tls.crt` | Re-read every 30 s.                              |
+| `MAILFRONT_TLS_KEY_FILE`        | `/etc/mailfront/tls/tls.key` |                                                  |
+| `MAILFRONT_DATABASE_URL`        | -                            | The `mailfront` role.                            |
+| `MAILFRONT_BIND_TOKEN_KEY`      | -                            | `<id>:<base64>`. Without it, no sign-ins.        |
+| `MAILFRONT_MAX_CONNECTIONS`     | `6000`                       | Sized with the memory limit; raise together.     |
+| `MAILFRONT_MAX_PREAUTH`         | `2000`                       | Not signed in yet. Bounds a sign-in surge.       |
+| `MAILFRONT_MAX_PREAUTH_PER_IP`  | `32`                         | Per address; per /64 for IPv6.                   |
+| `MAILFRONT_PREAUTH_TIMEOUT`     | `2m`                         | 10 s to 10 m.                                    |
+| `MAILFRONT_SWEEP_INTERVAL`      | `1s`                         | 200 ms to 10 s. The poll: the revocation window. |
+| `MAILFRONT_PASSTHROUGH_MAX_AGE` | `15m`                        | 1 m to 24 h. Ends pass-through sessions.         |
+| `MAILFRONT_LOG_LEVEL`           | `info`                       | `debug` logs every sweep's timings.              |
 
 ## The one rule you must not break
 
