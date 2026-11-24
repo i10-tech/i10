@@ -503,28 +503,29 @@ export const directoryMail = {
     userId: string,
     wanted: readonly string[],
   ): Promise<{ taken: string[] }> {
+    const normalised = [...new Set(wanted.map((a) => a.trim().toLowerCase()).filter(Boolean))]
     await tx
       .delete(aliases)
       .where(
         and(
           eq(aliases.clerkUserId, userId),
           eq(aliases.source, "directory"),
-          wanted.length > 0 ? not(inArray(aliases.address, [...wanted])) : undefined,
+          normalised.length > 0 ? not(inArray(aliases.address, normalised)) : undefined,
         ),
       )
-    if (wanted.length === 0) return { taken: [] }
+    if (normalised.length === 0) return { taken: [] }
     // An address that is some account's primary is not an alias of another.
     const primaries = await tx
       .select({ email: accounts.email })
       .from(accounts)
       .where(
         and(
-          inArray(accounts.email, [...wanted]),
+          inArray(accounts.email, normalised),
           not(eq(accounts.clerkUserId, userId)),
         ),
       )
     const blocked = new Set(primaries.map((r) => r.email))
-    const free = wanted.filter((a) => !blocked.has(a))
+    const free = normalised.filter((a) => !blocked.has(a))
     if (free.length > 0)
       await tx
         .insert(aliases)
@@ -540,10 +541,10 @@ export const directoryMail = {
       .select({ address: aliases.address })
       .from(aliases)
       .where(
-        and(eq(aliases.clerkUserId, userId), inArray(aliases.address, [...wanted])),
+        and(eq(aliases.clerkUserId, userId), inArray(aliases.address, normalised)),
       )
     const held = new Set(mine.map((r) => r.address))
-    return { taken: wanted.filter((a) => !held.has(a)) }
+    return { taken: normalised.filter((a) => !held.has(a)) }
   },
 
   /** `taken`: the address is some account's, alias or another list. */
@@ -556,28 +557,29 @@ export const directoryMail = {
       directoryGroupId: string
     },
   ): Promise<"mirrored" | "taken"> {
+    const email = input.email.trim().toLowerCase()
     const [primary] = await tx
       .select({ id: accounts.clerkUserId })
       .from(accounts)
-      .where(eq(accounts.email, input.email))
+      .where(eq(accounts.email, email))
       .limit(1)
     const [alias] = await tx
       .select({ id: aliases.address })
       .from(aliases)
-      .where(eq(aliases.address, input.email))
+      .where(eq(aliases.address, email))
       .limit(1)
     if (primary || alias) return "taken"
     const done = await tx
       .insert(groups)
       .values({
         name: input.name,
-        email: input.email,
+        email,
         description: input.description,
         directoryGroupId: input.directoryGroupId,
       })
       .onConflictDoUpdate({
         target: groups.name,
-        set: { email: input.email, description: input.description },
+        set: { email, description: input.description },
         setWhere: eq(groups.directoryGroupId, input.directoryGroupId),
       })
       .returning({ name: groups.name })
@@ -607,15 +609,16 @@ export const directoryMail = {
       alias?: string
     },
   ): Promise<void> {
+    const email = input.email ? input.email.trim().toLowerCase() : null
     const name = input.alias
       ? aliasListName(input.leaverId, input.alias)
       : `${input.kind}-${input.leaverId}`
     await tx
       .insert(groups)
-      .values({ name, email: input.email, description: input.kind })
+      .values({ name, email, description: input.kind })
       .onConflictDoUpdate({
         target: groups.name,
-        set: { email: input.email, description: input.kind },
+        set: { email, description: input.kind },
       })
     await tx.delete(groupMembers).where(eq(groupMembers.groupName, name))
     await tx

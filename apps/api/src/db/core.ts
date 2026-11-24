@@ -655,6 +655,7 @@ export const domains = core.table(
     uniqueIndex("domains_verified_name_unique")
       .on(t.name)
       .where(sql`${t.status} = 'verified'`),
+    check("domains_name_lowercase", sql`"name" = lower("name")`),
   ],
 )
 
@@ -708,6 +709,7 @@ export const delegations = core.table(
      * out from under that branch without anything failing.
      */
     primaryKey({ name: "delegations_name_unique", columns: [t.name] }),
+    check("delegations_name_lowercase", sql`"name" = lower("name")`),
 
     /** One claim per domain row, so a retry cannot claim the same name twice. */
     unique("delegations_domain_unique").on(t.domainId),
@@ -803,6 +805,10 @@ export const domainTransfers = core.table(
   (t) => [
     index("domain_transfers_tenant_idx").on(t.tenantId),
     index("domain_transfers_recipient_idx").on(t.recipientEmail),
+    check(
+      "domain_transfers_recipient_email_lowercase",
+      sql`"recipient_email" = lower("recipient_email")`,
+    ),
 
     /**
      * ⚠ ONE OPEN OFFER PER DOMAIN. Two would let two people accept the same
@@ -909,6 +915,7 @@ export const joinDomains = core.table(
     index("join_domains_name_idx").on(t.name),
     // `core.name_holders` matches `lower(name)` here too; see domains_lower_name_idx.
     index("join_domains_lower_name_idx").on(sql`lower(${t.name})`),
+    check("join_domains_name_lowercase", sql`"name" = lower("name")`),
     pgPolicy("join_domains_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
@@ -1025,6 +1032,7 @@ export const joinExclusions = core.table(
   },
   (t) => [
     uniqueIndex("join_exclusions_tenant_email_unique").on(t.tenantId, t.email),
+    check("join_exclusions_email_lowercase", sql`"email" = lower("email")`),
     pgPolicy("join_exclusions_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
@@ -1168,6 +1176,7 @@ export const memberInvitations = core.table(
     index("member_invitations_tenant_idx").on(t.tenantId, t.status),
     index("member_invitations_email_idx").on(t.email),
     uniqueIndex("member_invitations_clerk_unique").on(t.clerkInvitationId),
+    check("member_invitations_email_lowercase", sql`"email" = lower("email")`),
     pgPolicy("member_invitations_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
@@ -2409,6 +2418,7 @@ export const suppressions = core.table(
      * whole list.
      */
     index("suppressions_tenant_created_idx").on(t.tenantId, t.createdAt),
+    check("suppressions_address_lowercase", sql`"address" = lower("address")`),
   ],
 )
 
@@ -4737,6 +4747,7 @@ export const mailboxAuthFailures = core.table(
   },
   (t) => [
     index("mailbox_auth_failures_account_idx").on(t.tenantId, t.account, t.occurredAt),
+    check("mailbox_auth_failures_account_lowercase", sql`"account" = lower("account")`),
     tenantPolicy("mailbox_auth_failures_tenant", t.tenantId),
   ],
 )
@@ -5347,6 +5358,10 @@ export const mailboxJobs = core.table(
   (t) => [
     index("mailbox_jobs_tenant_idx").on(t.tenantId, t.status),
     index("mailbox_jobs_address_idx").on(t.mailboxAddress),
+    check(
+      "mailbox_jobs_mailbox_address_lowercase",
+      sql`"mailbox_address" = lower("mailbox_address")`,
+    ),
     pgPolicy("mailbox_jobs_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,
@@ -5437,6 +5452,7 @@ export const mailboxUsage = core.table(
      * bill) down with it. The old holder's row is simply left behind.
      */
     primaryKey({ columns: [t.tenantId, t.address] }),
+    check("mailbox_usage_address_lowercase", sql`"address" = lower("address")`),
     pgPolicy("mailbox_usage_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

@@ -578,3 +578,76 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupsByAddress(t *testing.T) {
+	dsn, admin := os.Getenv("AUTHD_TEST_DATABASE_URL"), os.Getenv("AUTHD_TEST_ADMIN_DATABASE_URL")
+	if dsn == "" || admin == "" {
+		t.Skip("AUTHD_TEST_DATABASE_URL and AUTHD_TEST_ADMIN_DATABASE_URL are not both set")
+	}
+	ctx := context.Background()
+
+	w, err := pgxpool.New(ctx, admin)
+	if err != nil {
+		t.Fatalf("connect as admin: %v", err)
+	}
+	t.Cleanup(w.Close)
+
+	purge := func() {
+		_, _ = w.Exec(ctx, `DELETE FROM authd.groups WHERE name IN ('grp_by_addr_1', 'grp_by_addr_2', 'grp_by_addr_null')`)
+		_, _ = w.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id IN ('user_grp_active', 'user_grp_inactive')`)
+	}
+	purge()
+	t.Cleanup(purge)
+
+	for _, q := range []string{
+		`INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ('user_grp_active', 'active@grp.test', true)`,
+		`INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ('user_grp_inactive', 'inactive@grp.test', false)`,
+		`INSERT INTO authd.groups (name, email, description) VALUES ('grp_by_addr_1', 'support@grp.test', 'Support')`,
+		`INSERT INTO authd.groups (name, email, description) VALUES ('grp_by_addr_2', 'sales@grp.test', 'Sales')`,
+		`INSERT INTO authd.groups (name, email, description) VALUES ('grp_by_addr_null', NULL, 'No Email')`,
+		`INSERT INTO authd.group_members (group_name, clerk_user_id) VALUES ('grp_by_addr_1', 'user_grp_active')`,
+		`INSERT INTO authd.group_members (group_name, clerk_user_id) VALUES ('grp_by_addr_1', 'user_grp_inactive')`,
+	} {
+		if _, err := w.Exec(ctx, q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+
+	// Mixed-case group email is refused by the database CHECK constraint.
+	if _, err := w.Exec(ctx, `INSERT INTO authd.groups (name, email) VALUES ('grp_by_addr_bad', 'Mixed@Grp.Test')`); err == nil {
+		t.Fatal("expected CHECK constraint to refuse mixed-case authd.groups.email")
+	}
+
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatalf("NewPostgres: %v", err)
+	}
+	defer store.Close()
+
+	// Mixed-case lookup input is normalised and matches the stored lowercase email.
+	got, err := store.GroupsByAddress(ctx, []string{"  Support@Grp.Test ", "nobody@grp.test"})
+	if err != nil {
+		t.Fatalf("GroupsByAddress: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "grp_by_addr_1" || got[0].Email != "support@grp.test" {
+		t.Fatalf("GroupsByAddress = %+v, want [grp_by_addr_1]", got)
+	}
+	if !reflect.DeepEqual(got[0].Members, []string{"user_grp_active"}) {
+		t.Fatalf("Members = %v, want [user_grp_active]", got[0].Members)
+	}
+
+	// Batch lookup returns both groups.
+	both, err := store.GroupsByAddress(ctx, []string{"SUPPORT@GRP.TEST", "sales@grp.test"})
+	if err != nil {
+		t.Fatalf("GroupsByAddress batch: %v", err)
+	}
+	if len(both) != 2 {
+		t.Fatalf("GroupsByAddress batch returned %d groups, want 2: %+v", len(both), both)
+	}
+
+	// Missing address returns empty.
+	none, err := store.GroupsByAddress(ctx, []string{"missing@grp.test"})
+	if err != nil || len(none) != 0 {
+		t.Fatalf("GroupsByAddress missing = (%+v, %v), want empty", none, err)
+	}
+}

@@ -1,0 +1,477 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "ffea0dec-5505-42d0-a865-549db1dca179",
+  "prevIds": [
+    "60b401c8-475e-4a35-92a9-973f8501e74e"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "authd",
+        "accounts"
+      ],
+      "writes": [
+        "s|ck|authd.accounts.accounts_email_lowercase",
+        "n|ck|authd.accounts.accounts_email_lowercase",
+        "e|ck|authd.accounts.accounts_email_lowercase",
+        "n|con|authd.accounts.accounts_email_lowercase"
+      ],
+      "reads": [
+        "n|tbl|authd.accounts",
+        "n|sch|authd",
+        "n|col|authd.accounts.email"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "authd",
+        "aliases"
+      ],
+      "writes": [
+        "s|ck|authd.aliases.aliases_address_lowercase",
+        "n|ck|authd.aliases.aliases_address_lowercase",
+        "e|ck|authd.aliases.aliases_address_lowercase",
+        "n|con|authd.aliases.aliases_address_lowercase"
+      ],
+      "reads": [
+        "n|tbl|authd.aliases",
+        "n|sch|authd",
+        "n|col|authd.aliases.address"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "authd",
+        "required_domains"
+      ],
+      "writes": [
+        "s|ck|authd.required_domains.required_domains_domain_lowercase",
+        "n|ck|authd.required_domains.required_domains_domain_lowercase",
+        "e|ck|authd.required_domains.required_domains_domain_lowercase",
+        "n|con|authd.required_domains.required_domains_domain_lowercase"
+      ],
+      "reads": [
+        "n|tbl|authd.required_domains",
+        "n|sch|authd",
+        "n|col|authd.required_domains.domain"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "authd",
+        "groups"
+      ],
+      "writes": [
+        "s|ck|authd.groups.groups_email_lowercase",
+        "n|ck|authd.groups.groups_email_lowercase",
+        "e|ck|authd.groups.groups_email_lowercase",
+        "n|con|authd.groups.groups_email_lowercase"
+      ],
+      "reads": [
+        "n|tbl|authd.groups",
+        "n|sch|authd",
+        "n|col|authd.groups.email"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "delegations"
+      ],
+      "writes": [
+        "s|ck|core.delegations.delegations_name_lowercase",
+        "n|ck|core.delegations.delegations_name_lowercase",
+        "e|ck|core.delegations.delegations_name_lowercase",
+        "n|con|core.delegations.delegations_name_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.delegations",
+        "n|sch|core",
+        "n|col|core.delegations.name"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "domain_transfers"
+      ],
+      "writes": [
+        "s|ck|core.domain_transfers.domain_transfers_recipient_email_lowercase",
+        "n|ck|core.domain_transfers.domain_transfers_recipient_email_lowercase",
+        "e|ck|core.domain_transfers.domain_transfers_recipient_email_lowercase",
+        "n|con|core.domain_transfers.domain_transfers_recipient_email_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.domain_transfers",
+        "n|sch|core",
+        "n|col|core.domain_transfers.recipient_email"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "domains"
+      ],
+      "writes": [
+        "s|ck|core.domains.domains_name_lowercase",
+        "n|ck|core.domains.domains_name_lowercase",
+        "e|ck|core.domains.domains_name_lowercase",
+        "n|con|core.domains.domains_name_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.domains",
+        "n|sch|core",
+        "n|col|core.domains.name"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_domains"
+      ],
+      "writes": [
+        "s|ck|core.join_domains.join_domains_name_lowercase",
+        "n|ck|core.join_domains.join_domains_name_lowercase",
+        "e|ck|core.join_domains.join_domains_name_lowercase",
+        "n|con|core.join_domains.join_domains_name_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.join_domains",
+        "n|sch|core",
+        "n|col|core.join_domains.name"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "join_exclusions"
+      ],
+      "writes": [
+        "s|ck|core.join_exclusions.join_exclusions_email_lowercase",
+        "n|ck|core.join_exclusions.join_exclusions_email_lowercase",
+        "e|ck|core.join_exclusions.join_exclusions_email_lowercase",
+        "n|con|core.join_exclusions.join_exclusions_email_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.join_exclusions",
+        "n|sch|core",
+        "n|col|core.join_exclusions.email"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_auth_failures"
+      ],
+      "writes": [
+        "s|ck|core.mailbox_auth_failures.mailbox_auth_failures_account_lowercase",
+        "n|ck|core.mailbox_auth_failures.mailbox_auth_failures_account_lowercase",
+        "e|ck|core.mailbox_auth_failures.mailbox_auth_failures_account_lowercase",
+        "n|con|core.mailbox_auth_failures.mailbox_auth_failures_account_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_auth_failures",
+        "n|sch|core",
+        "n|col|core.mailbox_auth_failures.account"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_jobs"
+      ],
+      "writes": [
+        "s|ck|core.mailbox_jobs.mailbox_jobs_mailbox_address_lowercase",
+        "n|ck|core.mailbox_jobs.mailbox_jobs_mailbox_address_lowercase",
+        "e|ck|core.mailbox_jobs.mailbox_jobs_mailbox_address_lowercase",
+        "n|con|core.mailbox_jobs.mailbox_jobs_mailbox_address_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_jobs",
+        "n|sch|core",
+        "n|col|core.mailbox_jobs.mailbox_address"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "mailbox_usage"
+      ],
+      "writes": [
+        "s|ck|core.mailbox_usage.mailbox_usage_address_lowercase",
+        "n|ck|core.mailbox_usage.mailbox_usage_address_lowercase",
+        "e|ck|core.mailbox_usage.mailbox_usage_address_lowercase",
+        "n|con|core.mailbox_usage.mailbox_usage_address_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.mailbox_usage",
+        "n|sch|core",
+        "n|col|core.mailbox_usage.address"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "member_invitations"
+      ],
+      "writes": [
+        "s|ck|core.member_invitations.member_invitations_email_lowercase",
+        "n|ck|core.member_invitations.member_invitations_email_lowercase",
+        "e|ck|core.member_invitations.member_invitations_email_lowercase",
+        "n|con|core.member_invitations.member_invitations_email_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.member_invitations",
+        "n|sch|core",
+        "n|col|core.member_invitations.email"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "core",
+        "suppressions"
+      ],
+      "writes": [
+        "s|ck|core.suppressions.suppressions_address_lowercase",
+        "n|ck|core.suppressions.suppressions_address_lowercase",
+        "e|ck|core.suppressions.suppressions_address_lowercase",
+        "n|con|core.suppressions.suppressions_address_lowercase"
+      ],
+      "reads": [
+        "n|tbl|core.suppressions",
+        "n|sch|core",
+        "n|col|core.suppressions.address"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "identity",
+        "directory_users"
+      ],
+      "writes": [
+        "s|ck|identity.directory_users.directory_users_email_lowercase",
+        "n|ck|identity.directory_users.directory_users_email_lowercase",
+        "e|ck|identity.directory_users.directory_users_email_lowercase",
+        "n|con|identity.directory_users.directory_users_email_lowercase"
+      ],
+      "reads": [
+        "n|tbl|identity.directory_users",
+        "n|sch|identity",
+        "n|col|identity.directory_users.email"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "identity",
+        "identities"
+      ],
+      "writes": [
+        "s|ck|identity.identities.identities_email_lowercase",
+        "n|ck|identity.identities.identities_email_lowercase",
+        "e|ck|identity.identities.identities_email_lowercase",
+        "n|con|identity.identities.identities_email_lowercase"
+      ],
+      "reads": [
+        "n|tbl|identity.identities",
+        "n|sch|identity",
+        "n|col|identity.identities.email"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "accounts",
+        "name": "accounts_email_lowercase",
+        "value": "\"email\" = lower(\"email\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "aliases",
+        "name": "aliases_address_lowercase",
+        "value": "\"address\" = lower(\"address\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "required_domains",
+        "name": "required_domains_domain_lowercase",
+        "value": "\"domain\" = lower(\"domain\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "groups",
+        "name": "groups_email_lowercase",
+        "value": "\"email\" is null or \"email\" = lower(\"email\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "delegations",
+        "name": "delegations_name_lowercase",
+        "value": "\"name\" = lower(\"name\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domain_transfers",
+        "name": "domain_transfers_recipient_email_lowercase",
+        "value": "\"recipient_email\" = lower(\"recipient_email\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "domains",
+        "name": "domains_name_lowercase",
+        "value": "\"name\" = lower(\"name\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_domains",
+        "name": "join_domains_name_lowercase",
+        "value": "\"name\" = lower(\"name\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "join_exclusions",
+        "name": "join_exclusions_email_lowercase",
+        "value": "\"email\" = lower(\"email\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_auth_failures",
+        "name": "mailbox_auth_failures_account_lowercase",
+        "value": "\"account\" = lower(\"account\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_jobs",
+        "name": "mailbox_jobs_mailbox_address_lowercase",
+        "value": "\"mailbox_address\" = lower(\"mailbox_address\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "mailbox_usage",
+        "name": "mailbox_usage_address_lowercase",
+        "value": "\"address\" = lower(\"address\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "member_invitations",
+        "name": "member_invitations_email_lowercase",
+        "value": "\"email\" = lower(\"email\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "core",
+        "table": "suppressions",
+        "name": "suppressions_address_lowercase",
+        "value": "\"address\" = lower(\"address\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "identity",
+        "table": "directory_users",
+        "name": "directory_users_email_lowercase",
+        "value": "\"email\" is null or \"email\" = lower(\"email\")",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "identity",
+        "table": "identities",
+        "name": "identities_email_lowercase",
+        "value": "\"email\" is null or \"email\" = lower(\"email\")",
+        "entityType": "checks"
+      }
+    }
+  ]
+}
