@@ -178,7 +178,9 @@ jobs:
           AUTHD_TEST_DATABASE_URL: postgres://authd@127.0.0.1:5432/i10
           AUTHD_TEST_MAILFRONT_DATABASE_URL: postgres://mailfront@127.0.0.1:5432/i10
           AUTHD_TEST_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/i10
-        run: go test -race -count=1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/
+        # mailfront too: its access-change poll and every gate input's path
+        # (paths_db_test.go) are only proven against Postgres.
+        run: go test -race -count=1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/ ./internal/mailfront/
       # ⚠ AND SO DO THE API's. Every apps/api/test/*-db.test.ts skips itself
       # when its variable is unset, so in the `test` matrix job they all skip,
       # and eleven of them sat broken on main unnoticed (#514). The script sets

@@ -534,12 +534,15 @@ func TestTheMailDomainIsTheGatesOwn(t *testing.T) {
 	purge := func() { _, _ = w.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id = $1`, id) }
 	purge()
 	t.Cleanup(purge)
+	// Stored as the server's own lower() makes it, which is what
+	// accounts_email_lowercase accepts. Under a C ctype that keeps the É, which
+	// strings.ToLower would not, so the test still tells the two apart.
 	const email = "Someone@Sub.ÉXAMPLE.Test@extra"
-	if _, err := w.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ($1, $2, true)`, id, email); err != nil {
+	if _, err := w.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ($1, lower($2), true)`, id, email); err != nil {
 		t.Fatal(err)
 	}
 	var want string
-	if err := w.QueryRow(ctx, `SELECT lower(split_part($1, '@', 2))`, email).Scan(&want); err != nil {
+	if err := w.QueryRow(ctx, `SELECT lower(split_part(email, '@', 2)) FROM authd.accounts WHERE clerk_user_id = $1`, id).Scan(&want); err != nil {
 		t.Fatal(err)
 	}
 	store, err := NewPostgres(ctx, dsn)
