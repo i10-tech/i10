@@ -275,7 +275,10 @@ export const identities = identity.table(
     uniqueIndex("identities_connection_subject_unique").on(t.connectionId, t.subject),
     uniqueIndex("identities_connection_user_unique").on(t.connectionId, t.clerkUserId),
     index("identities_user_idx").on(t.clerkUserId),
-    check("identities_email_lowercase", sql`"email" is null or "email" = lower("email")`),
+    check(
+      "identities_email_lowercase",
+      sql`"email" is null or "email" = lower("email")`,
+    ),
     pgPolicy("identities_workspace", {
       for: "all",
       using: sql`${t.tenantId} = current_setting('app.tenant_id')::uuid`,

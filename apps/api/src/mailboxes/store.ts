@@ -503,7 +503,9 @@ export const directoryMail = {
     userId: string,
     wanted: readonly string[],
   ): Promise<{ taken: string[] }> {
-    const normalised = [...new Set(wanted.map((a) => a.trim().toLowerCase()).filter(Boolean))]
+    const normalised = [
+      ...new Set(wanted.map((a) => a.trim().toLowerCase()).filter(Boolean)),
+    ]
     await tx
       .delete(aliases)
       .where(
@@ -519,10 +521,7 @@ export const directoryMail = {
       .select({ email: accounts.email })
       .from(accounts)
       .where(
-        and(
-          inArray(accounts.email, normalised),
-          not(eq(accounts.clerkUserId, userId)),
-        ),
+        and(inArray(accounts.email, normalised), not(eq(accounts.clerkUserId, userId))),
       )
     const blocked = new Set(primaries.map((r) => r.email))
     const free = normalised.filter((a) => !blocked.has(a))
@@ -540,9 +539,7 @@ export const directoryMail = {
     const mine = await tx
       .select({ address: aliases.address })
       .from(aliases)
-      .where(
-        and(eq(aliases.clerkUserId, userId), inArray(aliases.address, normalised)),
-      )
+      .where(and(eq(aliases.clerkUserId, userId), inArray(aliases.address, normalised)))
     const held = new Set(mine.map((r) => r.address))
     return { taken: normalised.filter((a) => !held.has(a)) }
   },

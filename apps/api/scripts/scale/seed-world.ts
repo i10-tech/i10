@@ -8,13 +8,7 @@ import type { Sql } from "postgres"
 import { bulkRows } from "./bulk.js"
 import type { Profile } from "./profiles.js"
 import { apportion, Rng, zipfWeights } from "./rng.js"
-import {
-  clerkId,
-  domainName,
-  localPart,
-  personName,
-  slugOf,
-} from "./values.js"
+import { clerkId, domainName, localPart, personName, slugOf } from "./values.js"
 
 export const OWN_DOMAIN = "i10.tech"
 const DAY = 86_400_000
