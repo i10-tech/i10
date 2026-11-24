@@ -135,6 +135,12 @@ type ChangeBatch struct {
 	Changes []Change
 	// Snapshot is where the next read starts, opaque to the caller.
 	Snapshot string
+	// ServerStart is the server's `pg_postmaster_start_time()` when this batch
+	// was read. A change between polls means the server restarted or failed over;
+	// a lagging replica promoted and then advanced by new commits past the old
+	// xmax would not trip Rewound on xmax alone, so the caller treats a changed
+	// ServerStart as rewound too.
+	ServerStart time.Time
 	// Truncated is true when there were more changes than the read's limit.
 	Truncated bool
 	// Rewound is true when the server's transaction ids are below the position

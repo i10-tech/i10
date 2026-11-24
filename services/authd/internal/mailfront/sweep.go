@@ -109,12 +109,14 @@ type Sweeper struct {
 	// nothing queues behind it.
 	fullSweep chan struct{}
 
-	// The poll's position, read and written only by Poll: the snapshot of its
-	// last successful read ("" for none), when that read began, and the last
+	// The poll's position, read and written only by Poll: the snapshot and
+	// server start time (`pg_postmaster_start_time()`) of its last successful
+	// read ("" / zero for none), when that read began, and the last
 	// registration it covered.
-	since   string
-	sinceAt time.Time
-	seen    uint64
+	since      string
+	sinceStart time.Time
+	sinceAt    time.Time
+	seen       uint64
 
 	pollReport, sweepReport failureLog
 }
@@ -295,8 +297,9 @@ func (s *Sweeper) Sweep(ctx context.Context) SweepStats {
 // A change names a connection by its account (`account`), by the domain of the
 // address it signed in with (`domain`), or by the SSO connection that answers
 // for it (`connection`). A truncated gate table (`all`), more changes than
-// MaxChanges, an unknown kind, a position older than maxPositionAge, or
-// transaction ids that went back (projection.ChangeBatch.Rewound) make it ask
+// MaxChanges, an unknown kind, a position older than maxPositionAge,
+// transaction ids that went back (projection.ChangeBatch.Rewound), or a changed
+// database server start time (projection.ChangeBatch.ServerStart) make it ask
 // the sweep loop for a full sweep instead (Full), which is logged.
 //
 // ⚠ A FULL POLL HANDS EVERYTHING TO THE SWEEP AND KEEPS ITS OWN SECOND. Re-checking
@@ -339,7 +342,7 @@ func (s *Sweeper) Poll(ctx context.Context) SweepStats {
 	st := SweepStats{Live: len(all)}
 	conns := expire(all, &st)
 	if len(conns) == 0 {
-		s.since, s.seen = "", upTo
+		s.since, s.sinceStart, s.seen = "", time.Time{}, upTo
 		st.Total = time.Since(start)
 		return st
 	}
@@ -364,27 +367,31 @@ func (s *Sweeper) Poll(ctx context.Context) SweepStats {
 	switch {
 	case batch.Rewound:
 		st.Full, st.FullWhy = true, "transaction ids went back (a restore, or a failover to a lagging replica)"
+	case since != "" && !batch.ServerStart.Equal(s.sinceStart):
+		st.Full, st.FullWhy = true, "database server start time changed (a restart, restore, or failover)"
 	case batch.Truncated:
 		st.Full, st.FullWhy = true, "more changes than one poll reads"
 	}
-	for _, c := range batch.Changes {
-		switch c.Kind {
-		case projection.ChangeAccount:
-			accounts[c.Key] = true
-		case projection.ChangeDomain:
-			domains[c.Key] = true
-		case projection.ChangeConnection:
-			connections[c.Key] = true
-		default:
-			// `all`, or a kind this front does not know: it cannot tell whom it
-			// names, so it names everyone.
-			st.Full, st.FullWhy = true, "a change for every account ("+string(c.Kind)+")"
+	if !st.Full {
+		for _, c := range batch.Changes {
+			switch c.Kind {
+			case projection.ChangeAccount:
+				accounts[c.Key] = true
+			case projection.ChangeDomain:
+				domains[c.Key] = true
+			case projection.ChangeConnection:
+				connections[c.Key] = true
+			default:
+				// `all`, or a kind this front does not know: it cannot tell whom it
+				// names, so it names everyone.
+				st.Full, st.FullWhy = true, "a change for every account ("+string(c.Kind)+")"
+			}
 		}
 	}
 	if st.Full {
 		s.Log.Warn("poll asked for a full sweep", "why", st.FullWhy, "changes", st.Changes, "live", len(conns))
 		s.requestSweep()
-		s.since, s.sinceAt, s.seen = batch.Snapshot, readAt, upTo
+		s.since, s.sinceStart, s.sinceAt, s.seen = batch.Snapshot, batch.ServerStart, readAt, upTo
 		st.Total = time.Since(start)
 		return st
 	}
@@ -403,7 +410,7 @@ func (s *Sweeper) Poll(ctx context.Context) SweepStats {
 			return st
 		}
 	}
-	s.since, s.sinceAt, s.seen = batch.Snapshot, readAt, upTo
+	s.since, s.sinceStart, s.sinceAt, s.seen = batch.Snapshot, batch.ServerStart, readAt, upTo
 	st.Total = time.Since(start)
 	return st
 }

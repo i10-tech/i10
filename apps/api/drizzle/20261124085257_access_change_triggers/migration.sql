@@ -238,18 +238,21 @@ CREATE TRIGGER "access_changes_trunc" AFTER TRUNCATE ON "core"."join_domains"
 -- ROWS NO READER NEEDS. The front needs a row for about a second, and it sweeps
 -- everything once a minute and after ten minutes without a successful read.
 --
--- ⚠ BY id, BELOW THE OLDEST RECENT ROW, NOT BY `at` WITH A FILTER. `edge` is the
--- smallest id of a row from the last hour; every row below it is older than
--- that, and finding it reads exactly those rows through the primary key, so a
--- call costs what it deletes, with no index on `at`. A row with an old `at` above
+-- ⚠ BY id, BELOW THE OLDEST RECENT ROW IN THIS 10,000-ID WINDOW, NOT BY `at`
+-- ACROSS THE WHOLE LOG. `low` is the smallest id in the table, and `edge` is
+-- the smallest id of a row from the last hour inside `[low, low + 10000)`, or
+-- `low + 10000` when none in that window is that recent. Bounding the search to
+-- the current window keeps each call's cost proportional to one batch rather
+-- than the whole backlog, with no index on `at`. A row with an old `at` above
 -- the edge (a long transaction's) waits for a later call.
 --
--- ⚠ A RANGE OF THE PRIMARY KEY, NOT A JOIN. Ids are unique, so `[low, low +
--- 10000)` holds at most 10,000 rows, and the delete is one index range scan. A
--- join to a list of ids was planned as a hash join over a sequential scan of the
--- whole log (EXPLAIN on 687,041 rows: 94 ms). Gaps in the ids only make a call
--- delete fewer; it deletes nothing only when nothing is older than the edge, and
--- the job calls again until then.
+-- ⚠ A RANGE OF THE PRIMARY KEY, NOT A JOIN. Ids are unique, so `[low, edge)`
+-- holds at most 10,000 rows, and the delete is one index range scan. A join to
+-- a list of ids was planned as a hash join over a sequential scan of the whole
+-- log (EXPLAIN on 687,041 rows: 94 ms). Gaps in the ids only make a call delete
+-- fewer; it deletes nothing (returns 0) only when the table is empty or the
+-- smallest remaining id is already inside the last hour, and the job calls
+-- again until then.
 CREATE FUNCTION "authd"."prune_access_changes"()
 RETURNS integer
 LANGUAGE sql
@@ -257,15 +260,19 @@ VOLATILE
 SECURITY DEFINER
 SET search_path = authd, pg_temp
 AS $$
-  WITH bounds AS (
+  WITH low AS (
+    SELECT min(c.id) AS id FROM authd.access_changes c
+  ), bounds AS (
     SELECT coalesce(
-             (SELECT min(c.id) FROM authd.access_changes c WHERE c.at >= now() - interval '1 hour'),
-             (SELECT max(c.id) + 1 FROM authd.access_changes c)
-           ) AS edge,
-           (SELECT min(c.id) FROM authd.access_changes c) AS low
+             (SELECT min(c.id) FROM authd.access_changes c
+               WHERE c.id >= l.id AND c.id < l.id + 10000
+                 AND c.at >= now() - interval '1 hour'),
+             l.id + 10000
+           ) AS edge
+      FROM low l WHERE l.id IS NOT NULL
   ), gone AS (
     DELETE FROM authd.access_changes c USING bounds b
-     WHERE c.id < b.edge AND c.id < b.low + 10000
+     WHERE c.id < b.edge
     RETURNING 1
   )
   SELECT count(*)::integer FROM gone

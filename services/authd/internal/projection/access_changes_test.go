@@ -73,9 +73,8 @@ func walkSQL(t *testing.T, ctx context.Context, db *pgxpool.Pool, src string, se
 	var texts []string
 
 	var walk func(src string, path []string)
-	// follow resolves schema.name to a table or to functions, and walks the
-	// functions. It reports whether the name was either.
-	follow := func(schema, name string, path []string) bool {
+	// followRel resolves schema.name to a relation and records tables.
+	followRel := func(schema, name string) bool {
 		if systemSchemas[schema] {
 			return false
 		}
@@ -94,10 +93,18 @@ func walkSQL(t *testing.T, ctx context.Context, db *pgxpool.Pool, src string, se
 		case err != nil && err != pgx.ErrNoRows:
 			t.Fatal(err)
 		}
-		rows, err := db.Query(ctx, `SELECT p.oid::int8, p.prosrc, coalesce(p.proconfig, '{}')
+		return false
+	}
+	// followFunc resolves schema.name to SQL/PLpgSQL functions and walks their
+	// full definitions (pg_get_functiondef covers BEGIN ATOMIC bodies too).
+	followFunc := func(schema, name string, path []string) bool {
+		if systemSchemas[schema] {
+			return false
+		}
+		rows, err := db.Query(ctx, `SELECT p.oid::int8, pg_get_functiondef(p.oid), coalesce(p.proconfig, '{}')
 			FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
 			JOIN pg_language l ON l.oid = p.prolang
-			WHERE n.nspname = $1 AND p.proname = $2 AND l.lanname IN ('sql', 'plpgsql')`, schema, name)
+			WHERE n.nspname = $1 AND p.proname = $2 AND l.lanname IN ('sql', 'plpgsql') AND p.prokind IN ('f', 'p')`, schema, name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,6 +123,9 @@ func walkSQL(t *testing.T, ctx context.Context, db *pgxpool.Pool, src string, se
 			f.oid = uint32(oid)
 			fns = append(fns, f)
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		rows.Close()
 		for _, f := range fns {
 			if seenFunc[f.oid] {
@@ -132,8 +142,15 @@ func walkSQL(t *testing.T, ctx context.Context, db *pgxpool.Pool, src string, se
 		for _, m := range sqlName.FindAllString(src, -1) {
 			parts := strings.Split(strings.ToLower(m), ".")
 			if len(parts) == 1 {
+				// Relations and functions have separate namespaces in Postgres,
+				// so resolve each independently across the search path.
 				for _, schema := range path {
-					if follow(schema, parts[0], path) {
+					if followRel(schema, parts[0]) {
+						break
+					}
+				}
+				for _, schema := range path {
+					if followFunc(schema, parts[0], path) {
 						break
 					}
 				}
@@ -146,7 +163,9 @@ func walkSQL(t *testing.T, ctx context.Context, db *pgxpool.Pool, src string, se
 			if !isSchema {
 				continue // alias.column
 			}
-			if !follow(parts[0], parts[1], path) && !systemSchemas[parts[0]] && !isType(t, ctx, db, parts[0], parts[1]) {
+			foundRel := followRel(parts[0], parts[1])
+			foundFunc := followFunc(parts[0], parts[1], path)
+			if !foundRel && !foundFunc && !systemSchemas[parts[0]] && !isType(t, ctx, db, parts[0], parts[1]) {
 				t.Fatalf("the gate's SQL names %s.%s, which is neither a table, a function nor a type", parts[0], parts[1])
 			}
 		}
@@ -200,13 +219,34 @@ func TestTheGateWalkFindsTablesInAnySchemaAndUnqualified(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	drop := func() { _, _ = db.Exec(ctx, `DROP SCHEMA IF EXISTS gate_walk_test CASCADE`) }
+	drop := func() {
+		_, _ = db.Exec(ctx, `DROP SCHEMA IF EXISTS gate_walk_test, gate_walk_test_2 CASCADE`)
+	}
 	drop()
 	t.Cleanup(drop)
 	for _, q := range []string{
 		`CREATE SCHEMA gate_walk_test`,
-		`CREATE FUNCTION gate_walk_test.bare() RETURNS boolean LANGUAGE sql STABLE SET search_path = core, pg_temp
-		 AS $$ SELECT EXISTS (SELECT 1 FROM plans p, tenants t WHERE p.id IS NULL) $$`,
+		`CREATE SCHEMA gate_walk_test_2`,
+		// Same name as a table and a function in one schema (qualified lookup).
+		`CREATE TABLE gate_walk_test.dual (id int)`,
+		`CREATE TABLE gate_walk_test.hidden_by_dual (id int)`,
+		`CREATE FUNCTION gate_walk_test.dual() RETURNS boolean LANGUAGE sql STABLE
+		 AS $$ SELECT EXISTS (SELECT 1 FROM gate_walk_test.hidden_by_dual) $$`,
+		// Unqualified name where schema 1 has a table and schema 2 has a function.
+		`CREATE TABLE gate_walk_test.split_name (id int)`,
+		`CREATE TABLE gate_walk_test_2.hidden_by_split (id int)`,
+		`CREATE FUNCTION gate_walk_test_2.split_name() RETURNS boolean LANGUAGE sql STABLE
+		 AS $$ SELECT EXISTS (SELECT 1 FROM gate_walk_test_2.hidden_by_split) $$`,
+		// Standard SQL BEGIN ATOMIC function (prosrc is empty; body lives in prosqlbody).
+		`CREATE TABLE gate_walk_test.atomic_target (id int)`,
+		`CREATE FUNCTION gate_walk_test.atomic_fn() RETURNS boolean LANGUAGE sql STABLE
+		 BEGIN ATOMIC
+		   SELECT EXISTS (SELECT 1 FROM gate_walk_test.atomic_target);
+		 END`,
+		`CREATE FUNCTION gate_walk_test.bare() RETURNS boolean LANGUAGE sql STABLE
+		 SET search_path = gate_walk_test, gate_walk_test_2, core, pg_temp
+		 AS $$ SELECT split_name() AND gate_walk_test.dual() AND gate_walk_test.atomic_fn()
+		       AND EXISTS (SELECT 1 FROM plans p, tenants t WHERE p.id IS NULL) $$`,
 	} {
 		if _, err := db.Exec(ctx, q); err != nil {
 			t.Fatal(err)
@@ -214,7 +254,18 @@ func TestTheGateWalkFindsTablesInAnySchemaAndUnqualified(t *testing.T) {
 	}
 	_, tables := walkSQL(t, ctx, db, `SELECT a.email, gate_walk_test.bare()
 		FROM authd.accounts a JOIN identity.connections c ON c.id IS NULL`, rootSearchPath)
-	if want := []string{"authd.accounts", "core.plans", "core.tenants", "identity.connections"}; !slices.Equal(tables, want) {
+	want := []string{
+		"authd.accounts",
+		"core.plans",
+		"core.tenants",
+		"gate_walk_test.atomic_target",
+		"gate_walk_test.dual",
+		"gate_walk_test.hidden_by_dual",
+		"gate_walk_test.split_name",
+		"gate_walk_test_2.hidden_by_split",
+		"identity.connections",
+	}
+	if !slices.Equal(tables, want) {
 		t.Fatalf("the walk found %v, want %v", tables, want)
 	}
 }
@@ -245,7 +296,7 @@ func TestEveryTableTheGateReadsLogsItsChanges(t *testing.T) {
 		}
 	}
 	word := func(col string) bool {
-		return regexp.MustCompile(`\b` + regexp.QuoteMeta(col) + `\b`).MatchString(text)
+		return regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(col) + `\b`).MatchString(text)
 	}
 
 	for _, table := range tables {
@@ -261,7 +312,8 @@ func TestEveryTableTheGateReadsLogsItsChanges(t *testing.T) {
 			JOIN pg_class c ON c.oid = t.tgrelid
 			JOIN pg_namespace n ON n.oid = c.relnamespace
 			WHERE n.nspname = $1 AND c.relname = $2 AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
-			  AND t.tgfoid = 'authd.log_access_change()'::regprocedure`, schema, name)
+			  AND t.tgfoid = 'authd.log_access_change()'::regprocedure
+			  AND t.tgqual IS NULL AND cardinality(t.tgattr) = 0`, schema, name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,18 +499,18 @@ func TestAccessChangesReportsTransactionIDsThatWentBack(t *testing.T) {
 	}
 	defer store.Close()
 	now, err := store.AccessChanges(ctx, "", 10)
-	if err != nil || now.Rewound {
-		t.Fatalf("a read with no position = (%+v, %v), want it not rewound", now, err)
+	if err != nil || now.Rewound || now.ServerStart.IsZero() {
+		t.Fatalf("a read with no position = (%+v, %v), want it not rewound with a server start time", now, err)
 	}
-	if b, err := store.AccessChanges(ctx, now.Snapshot, 10); err != nil || b.Rewound {
-		t.Fatalf("a read from the current position = (%+v, %v), want it not rewound", b, err)
+	if b, err := store.AccessChanges(ctx, now.Snapshot, 10); err != nil || b.Rewound || !b.ServerStart.Equal(now.ServerStart) {
+		t.Fatalf("a read from the current position = (%+v, %v), want it not rewound with the same server start time", b, err)
 	}
 	ahead := "9000000000000:9000000000000:"
 	b, err := store.AccessChanges(ctx, ahead, 10)
-	if err != nil || !b.Rewound || b.Snapshot == "" {
+	if err != nil || !b.Rewound || b.Snapshot == "" || !b.ServerStart.Equal(now.ServerStart) {
 		t.Fatalf("a read from a position ahead of the server = (%+v, %v), want Rewound and a fresh position", b, err)
 	}
-	if again, err := store.AccessChanges(ctx, b.Snapshot, 10); err != nil || again.Rewound {
+	if again, err := store.AccessChanges(ctx, b.Snapshot, 10); err != nil || again.Rewound || !again.ServerStart.Equal(now.ServerStart) {
 		t.Fatalf("a read from the fresh position = (%+v, %v), want it not rewound", again, err)
 	}
 }
@@ -508,8 +560,8 @@ func TestTheMailDomainIsTheGatesOwn(t *testing.T) {
 	}
 }
 
-// The prune deletes only rows older than its fixed hour. Who may run it is
-// TestTheMailFrontRoleReadsTheGateAndWritesNothing's.
+// The prune deletes only rows older than its fixed hour, in bounded 10,000-id
+// windows. Who may run it is TestTheMailFrontRoleReadsTheGateAndWritesNothing's.
 func TestThePruneKeepsTheLastHour(t *testing.T) {
 	admin := os.Getenv("AUTHD_TEST_ADMIN_DATABASE_URL")
 	if admin == "" {
@@ -521,27 +573,122 @@ func TestThePruneKeepsTheLastHour(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	// Two rows written by hand, as the superuser, to fake their age. Their ids
-	// are below every real one, so the prune's edge (the smallest id inside the
-	// hour) is the newer of them, whatever else the shared database holds.
+	// Rows written by hand, as the superuser, with negative ids below every real
+	// sequence id (>= 1), so a recent negative id always bounds the prune before
+	// it reaches whatever positive rows the shared database holds.
 	purge := func() {
-		_, _ = w.Exec(ctx, `DELETE FROM authd.access_changes WHERE key LIKE 'prune-test-%'`)
+		_, _ = w.Exec(ctx, `DELETE FROM authd.access_changes WHERE id < 0`)
 	}
 	purge()
 	t.Cleanup(purge)
-	if _, err := w.Exec(ctx, `INSERT INTO authd.access_changes (id, kind, key, at) OVERRIDING SYSTEM VALUE VALUES
-		(-2, 'account', 'prune-test-old', now() - interval '61 minutes'),
-		(-1, 'account', 'prune-test-new', now() - interval '59 minutes')`); err != nil {
-		t.Fatal(err)
+
+	pruneOnce := func(t *testing.T) int {
+		t.Helper()
+		var n int
+		if err := w.QueryRow(ctx, `SELECT authd.prune_access_changes()`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
 	}
-	if _, err := w.Exec(ctx, `SELECT authd.prune_access_changes()`); err != nil {
-		t.Fatal(err)
-	}
-	var keys []string
-	if err := w.QueryRow(ctx, `SELECT coalesce(array_agg(key ORDER BY key), '{}') FROM authd.access_changes WHERE key LIKE 'prune-test-%'`).Scan(&keys); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(keys, []string{"prune-test-new"}) {
-		t.Fatalf("after the prune the test rows are %v, want only the one inside the hour", keys)
-	}
+
+	t.Run("keeps rows inside the last hour", func(t *testing.T) {
+		purge()
+		if _, err := w.Exec(ctx, `INSERT INTO authd.access_changes (id, kind, key, at) OVERRIDING SYSTEM VALUE VALUES
+			(-2, 'account', 'prune-test-old', now() - interval '61 minutes'),
+			(-1, 'account', 'prune-test-new', now() - interval '59 minutes')`); err != nil {
+			t.Fatal(err)
+		}
+		if n := pruneOnce(t); n != 1 {
+			t.Fatalf("first prune deleted %d, want 1", n)
+		}
+		if n := pruneOnce(t); n != 0 {
+			t.Fatalf("second prune deleted %d, want 0", n)
+		}
+		var keys []string
+		if err := w.QueryRow(ctx, `SELECT coalesce(array_agg(key ORDER BY key), '{}') FROM authd.access_changes WHERE id < 0`).Scan(&keys); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(keys, []string{"prune-test-new"}) {
+			t.Fatalf("after the prune the test rows are %v, want only the one inside the hour", keys)
+		}
+	})
+
+	t.Run("drains a backlog larger than one 10000-id batch", func(t *testing.T) {
+		purge()
+		// 12,000 expired rows at ids -20000..-8001, plus 5 recent rows at -8000..-7996.
+		if _, err := w.Exec(ctx, `
+			INSERT INTO authd.access_changes (id, kind, key, at) OVERRIDING SYSTEM VALUE
+			SELECT -20001 + g, 'account', 'prune-backlog-old-' || g, now() - interval '2 hours'
+			  FROM generate_series(1, 12000) g
+			UNION ALL
+			SELECT -8001 + g, 'account', 'prune-backlog-new-' || g, now() - interval '10 minutes'
+			  FROM generate_series(1, 5) g`); err != nil {
+			t.Fatal(err)
+		}
+		if n := pruneOnce(t); n != 10000 {
+			t.Fatalf("first batch deleted %d, want 10000", n)
+		}
+		if n := pruneOnce(t); n != 2000 {
+			t.Fatalf("second batch deleted %d, want 2000", n)
+		}
+		if n := pruneOnce(t); n != 0 {
+			t.Fatalf("third batch deleted %d, want 0", n)
+		}
+		var remaining int
+		if err := w.QueryRow(ctx, `SELECT count(*) FROM authd.access_changes WHERE id < 0`).Scan(&remaining); err != nil {
+			t.Fatal(err)
+		}
+		if remaining != 5 {
+			t.Fatalf("remaining test rows = %d, want 5 recent rows", remaining)
+		}
+	})
+
+	t.Run("handles id gaps wider than a batch", func(t *testing.T) {
+		purge()
+		// Two expired rows in [-50000, -40000), a >10,000 gap, one expired row at
+		// -20000, another gap, and a recent row at -1000.
+		if _, err := w.Exec(ctx, `INSERT INTO authd.access_changes (id, kind, key, at) OVERRIDING SYSTEM VALUE VALUES
+			(-50000, 'account', 'prune-gap-1', now() - interval '2 hours'),
+			(-45000, 'account', 'prune-gap-2', now() - interval '2 hours'),
+			(-20000, 'account', 'prune-gap-3', now() - interval '2 hours'),
+			(-1000,  'account', 'prune-gap-new', now() - interval '15 minutes')`); err != nil {
+			t.Fatal(err)
+		}
+		if n := pruneOnce(t); n != 2 {
+			t.Fatalf("first gap batch deleted %d, want 2", n)
+		}
+		if n := pruneOnce(t); n != 1 {
+			t.Fatalf("second gap batch deleted %d, want 1", n)
+		}
+		if n := pruneOnce(t); n != 0 {
+			t.Fatalf("third gap batch deleted %d, want 0", n)
+		}
+		var keys []string
+		if err := w.QueryRow(ctx, `SELECT coalesce(array_agg(key ORDER BY id), '{}') FROM authd.access_changes WHERE id < 0`).Scan(&keys); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(keys, []string{"prune-gap-new"}) {
+			t.Fatalf("remaining rows = %v, want [prune-gap-new]", keys)
+		}
+	})
+
+	t.Run("stops on an all-recent window", func(t *testing.T) {
+		purge()
+		if _, err := w.Exec(ctx, `INSERT INTO authd.access_changes (id, kind, key, at) OVERRIDING SYSTEM VALUE VALUES
+			(-500, 'account', 'prune-recent-1', now() - interval '50 minutes'),
+			(-400, 'account', 'prune-recent-2', now() - interval '20 minutes'),
+			(-1,   'account', 'prune-recent-3', now() - interval '1 minute')`); err != nil {
+			t.Fatal(err)
+		}
+		if n := pruneOnce(t); n != 0 {
+			t.Fatalf("prune on an all-recent window deleted %d, want 0", n)
+		}
+		var remaining int
+		if err := w.QueryRow(ctx, `SELECT count(*) FROM authd.access_changes WHERE id < 0`).Scan(&remaining); err != nil {
+			t.Fatal(err)
+		}
+		if remaining != 3 {
+			t.Fatalf("remaining rows = %d, want 3", remaining)
+		}
+	})
 }

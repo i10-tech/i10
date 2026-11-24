@@ -39,12 +39,16 @@ type fakeAccounts struct {
 	failAll bool
 	sweeps  int
 	// changes is the access-change log; a snapshot is how many rows it held.
-	changes []projection.Change
-	polls   int
+	changes     []projection.Change
+	serverStart time.Time
+	polls       int
 }
 
 func newFakeAccounts(accts ...projection.Account) *fakeAccounts {
-	f := &fakeAccounts{byLogin: map[string]*projection.Account{}}
+	f := &fakeAccounts{
+		byLogin:     map[string]*projection.Account{},
+		serverStart: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+	}
 	for i := range accts {
 		a := accts[i]
 		f.byLogin[a.Email] = &a
@@ -93,7 +97,7 @@ func (f *fakeAccounts) AccessChanges(_ context.Context, since string, limit int)
 	if f.failAll {
 		return projection.ChangeBatch{}, errors.New("projection unreachable")
 	}
-	b := projection.ChangeBatch{Snapshot: strconv.Itoa(len(f.changes))}
+	b := projection.ChangeBatch{Snapshot: strconv.Itoa(len(f.changes)), ServerStart: f.serverStart}
 	if since == "" {
 		return b, nil
 	}

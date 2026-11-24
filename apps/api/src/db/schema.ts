@@ -544,8 +544,9 @@ const xid8 = customType<{ data: string; driverData: string }>({
  * ⚠ `txid` IS THE ORDER, NOT `id`. Both are taken before commit, so a
  * transaction that commits late lands below rows the front has already read.
  * The front reads by snapshot instead (`projection.AccessChanges`): the rows of
- * every transaction that was not yet visible in its previous snapshot, which an
- * index range scan from that snapshot's xmin finds.
+ * every transaction that was not yet visible in its previous snapshot, found by
+ * an index range scan from that snapshot's xmax (`txid >= xmax`) UNION ALL an
+ * index lookup per in-progress transaction (`txid = ANY(xip)`).
  *
  * ⚠ ROWS LIVE AN HOUR. `authd.prune_access_changes()` deletes older ones from
  * the hourly retention job (retention.ts). The front needs a row for about a

@@ -981,9 +981,12 @@ and no prepared statement.
 point-in-time restore, or a failover to a replica that had not replayed
 everything, the server hands out ids below the previous snapshot's xmax again,
 and a snapshot test would call each of them already seen. The same statement
-compares the server's current xmax with the previous one; when it is lower, the
-poll asks for a full sweep, starts again from the current snapshot, and logs it
-(`TestAccessChangesReportsTransactionIDsThatWentBack`).
+compares the server's current xmax with the previous one and also returns
+`pg_postmaster_start_time()`, which the poll keeps next to the snapshot so a
+promoted lagging replica is still caught even after new commits push its xmax
+past the old one. When xmax went back or the server start time changed, the
+poll asks for a full sweep, starts again from the current snapshot and start
+time, and logs it (`TestAccessChangesReportsTransactionIDsThatWentBack`).
 
 ⚠ **Every connection that signed in since the last poll is re-checked, whatever
 the log says.** Its row was read at sign-in, before it was registered with the
@@ -1023,7 +1026,7 @@ idempotent.
 **Pruning.** Rows live an hour. `authd.prune_access_changes()`, a `SECURITY
 DEFINER` function whose one-hour cutoff is fixed inside it, deletes older rows
 at most 10,000 a call, and the hourly retention job (`apps/api/src/retention.ts`,
-step 0, as `i10_api`) calls it until a call deletes fewer. It is the retention
+step 0, as `i10_api`) calls it until a call returns 0 (up to 100 calls per run). It is the retention
 job and not the front because the triggers write the log wherever the API
 writes, whether or not a front runs to read it, and it keeps the `mailfront`
 role free of any write. The front needs a row for about a second, and re-checks

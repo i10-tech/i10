@@ -178,6 +178,15 @@ func TestAPollAsksForAFullSweepWhenItCannotTellWhom(t *testing.T) {
 			r.accounts.changes = nil
 			r.accounts.mu.Unlock()
 		}},
+		{"database server start time changed after failover past old xmax", func(r *pollRig) {
+			r.accounts.mu.Lock()
+			// Simulate a promoted lagging replica whose new commits have already
+			// moved its position past the old xmax, so Rewound is false, but its
+			// pg_postmaster_start_time() differs from the previous poll's.
+			r.accounts.serverStart = r.accounts.serverStart.Add(time.Minute)
+			r.accounts.changes = append(r.accounts.changes, projection.Change{Kind: projection.ChangeAccount, Key: "user_nobody"})
+			r.accounts.mu.Unlock()
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -302,14 +302,16 @@ var SweepQuery = `
 // point-in-time restore, or a failover to a replica that had not replayed
 // everything, the server hands out ids below `since`'s xmax again, and a
 // snapshot test calls each of them already seen. The same statement compares the
-// current xmax with `since`'s; when it is lower, the caller must re-check
-// everything and start again from the snapshot returned.
+// current xmax with `since`'s and also returns `pg_postmaster_start_time()`
+// (ServerStart), which catches a promoted lagging replica even after new commits
+// push its xmax back past `since`'s. When either trips, the caller must re-check
+// everything and start again from the snapshot and start time returned.
 func (p *Postgres) AccessChanges(ctx context.Context, since string, limit int) (ChangeBatch, error) {
 	var b ChangeBatch
 	var kinds, keys []string
 	var n int
 	took, err := p.queryTimed(ctx, func(conn *pgxpool.Conn) error {
-		return conn.QueryRow(ctx, AccessChangesQuery, nullIfEmpty(since), limit+1).Scan(&b.Snapshot, &b.Rewound, &n, &kinds, &keys)
+		return conn.QueryRow(ctx, AccessChangesQuery, nullIfEmpty(since), limit+1).Scan(&b.Snapshot, &b.ServerStart, &b.Rewound, &n, &kinds, &keys)
 	})
 	b.QueryTime = took
 	if err != nil {
@@ -331,6 +333,7 @@ func (p *Postgres) AccessChanges(ctx context.Context, since string, limit int) (
 // it is NULL) and is never rewound.
 const AccessChangesQuery = `
 	SELECT pg_current_snapshot()::text,
+	       pg_postmaster_start_time(),
 	       coalesce(pg_snapshot_xmax(pg_current_snapshot()) < pg_snapshot_xmax($1::pg_snapshot), false),
 	       count(*)::int, coalesce(array_agg(c.kind), '{}'), coalesce(array_agg(c.key), '{}')
 	FROM (

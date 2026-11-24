@@ -384,6 +384,48 @@ func TestAPollRechecksAConnectionThatSignedInDuringAChangeOnTheDatabase(t *testi
 	}
 }
 
+// A changed server start time (pg_postmaster_start_time()) triggers a full
+// sweep against the real database even when xmax did not move backwards.
+func TestAPollAsksForAFullSweepWhenServerStartChangesOnTheDatabase(t *testing.T) {
+	pw := newPathWorld(t)
+	pw.reset(nil)
+	srv := NewServer(pw.store, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sw := srv.Sweeper(time.Second, 30*time.Second)
+	var mu sync.Mutex
+	closedReason := ""
+	srv.reg.add(pw.signIn(), func(r string) { mu.Lock(); closedReason = r; mu.Unlock() })
+
+	ctx := context.Background()
+	if st := sw.Poll(ctx); st.Err != nil || st.Full || sw.sinceStart.IsZero() {
+		t.Fatalf("first poll %+v (sinceStart=%v), want a non-full poll with server start recorded", st, sw.sinceStart)
+	}
+	recorded := sw.sinceStart
+	// Pretend the saved position came from an older primary before failover,
+	// while keeping the current snapshot so Rewound on xmax is false.
+	sw.sinceStart = recorded.Add(-time.Minute)
+	pw.exec(one(upAlice + `suspended_at = now()` + whAlice))
+
+	st := sw.Poll(ctx)
+	if st.Err != nil || !st.Full || len(sw.fullSweep) != 1 {
+		t.Fatalf("poll after start-time change = %+v (%d requests), want Full and a sweep requested", st, len(sw.fullSweep))
+	}
+	if !sw.sinceStart.Equal(recorded) {
+		t.Fatalf("sinceStart after reset = %v, want server start %v", sw.sinceStart, recorded)
+	}
+	if next := sw.Poll(ctx); next.Err != nil || next.Full {
+		t.Fatalf("poll after reset = %+v, want non-full from the fresh position", next)
+	}
+	if sweep := sw.Sweep(ctx); sweep.Err != nil || sweep.Closed != 1 {
+		t.Fatalf("sweep = %+v, want Alice closed", sweep)
+	}
+	mu.Lock()
+	got := closedReason
+	mu.Unlock()
+	if got != "mailbox_suspended" {
+		t.Fatalf("closed for %q, want mailbox_suspended", got)
+	}
+}
+
 // TestRevocationLatency measures, for every path that closes, the time from
 // COMMIT returning to the connection closing, with the real Sweeper running at
 // its production interval (Run: a poll every second, the backstop every
