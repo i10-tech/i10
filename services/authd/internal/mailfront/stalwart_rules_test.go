@@ -1,7 +1,8 @@
 package mailfront
 
 // A port of how Stalwart v1.1.0 reads a client's bytes, for the fake upstream
-// only. It is written from Stalwart's source (crates/imap-proto/src/
+// only (v1.2.0 reads the same grammar; only its request size accounting
+// changed, which this port does not model). It is written from Stalwart's source (crates/imap-proto/src/
 // receiver.rs, Receiver::parse; crates/smtp-proto, Rfc5321Parser::hashed_value)
 // and on purpose shares NOTHING with the front's own reader: a test can only
 // catch the two disagreeing if they are two different readings.

@@ -1010,6 +1010,199 @@ no persistence.
 Under its 128 MiB cap Keep evicts counters first and never a lock. A counter that
 is evicted restarts from zero.
 
+## Upgrading to 1.2.0
+
+Read from the 1.2.0 changelog and the source of the `v1.1.0` and `v1.2.0` tags,
+and proved on a loopback copy of this setup (2026-11-23): a store built by
+1.1.0 with this plan, upgraded in place to the official `v1.2.0-alpine` image
+(index digest `sha256:2b7dfee66dfd116a903607826e03e4f8af8841207fae28098aa908c568ca919a`),
+with authd and the mail front from the branch. Every `TestLiveProbe` subtest
+passed, `./bootstrap.sh --dry-run` accepted all of `plan.ndjson`, and the
+rollback below was run.
+
+- **No store migration.** `DATABASE_SCHEMA_VERSION_BASE` is 7 in both
+  (`crates/common/src/lib.rs`). 1.2.0 opened the 1.1.0 store as it was.
+- **The mail front is unaffected.** IMAP LOGIN, AUTHENTICATE, SASL, SMTP AUTH,
+  PROXY v2 and the LDAP backend are byte-identical between the tags. The IMAP
+  receiver reads the same grammar and changed only how a request's size is
+  counted (each token now also costs its in-memory size): the front's largest
+  pre-sign-in command, 16 KiB and 64 arguments, stays far under the 64 KiB
+  pre-sign-in limit. Every other assumption the front makes was re-read in the
+  source and re-probed.
+- **Sessions end when an account's permissions or password change, inside
+  Stalwart.** On the next IMAP command or IDLE wake, with
+  `* BYE Account access changed, please log in again.` It sees only changes made
+  in Stalwart (a role edit ended a session on its next NOOP); an authd revocation
+  is not one, and SMTP has nothing like it. The mail front's sweep stays the
+  revocation path for every protocol.
+- **Exchange** (EWS, MAPI, ActiveSync, Autodiscover on the HTTP listener) is off
+  by default (`x:Exchange.enable: false`). The plan pins it off so nothing turns
+  it on before #517 designs it.
+- **Smaller limits**: at most 5 distinct EHLO names per SMTP session (then
+  `421`), AUTH refused during a mail transaction, writes time out when a client
+  stops reading, passwords over 1024 bytes refused by the internal directory
+  only (a bind token is about 95), and limits on FETCH items, SEARCH criteria,
+  sequence sets and flags per command.
+
+### The new permissions, added by the plan
+
+The release asks for `sysMailRule*`, `sysBlockedSender*`, `sysSafeSender*` and
+`sysCalendarSettings*` on the user, group and administrator roles, and
+`sysExchangeGet` and `sysExchangeUpdate` on the administrator role (17 names,
+the only ones the 1.2.0 schema adds). Three `Role` upserts in `plan.ndjson` add
+them to Stalwart's own roles `User` (`b`), `Group` and `System Administrator`,
+matched on `description`, as patch paths (`"enabledPermissions/sysMailRuleGet":
+true`), so every other entry those roles hold is left alone. `i10 User` inherits
+them from `b`.
+
+⚠ **NOT `STALWART_UPDATE_ROLE_PERMISSIONS=true`.** That variable adds the
+missing defaults to the roles `Authentication` names, and here those are ours:
+probed on a copy of the store, it added 15 permissions to `i10 Group`, which is
+meant to hold `emailReceive` alone, and gave `i10 User` the `sysPasskey*` set the
+1.1.0 upgrade deliberately left out (above). It is also a one-off that needs two
+restarts and leaves nothing in git. The plan is idempotent and checked by every
+dry run: after it applies, `Role b`, `Role c` and `Role e` read `unchanged`.
+
+`i10 Group` stays as it is. Groups never sign in, so they do not need the
+permissions.
+
+### ⚠ Required: free/busy is not shared across customers
+
+1.2.0 adds `x:Calendar.shareFreeBusy`, **on by default**
+(`crates/registry/src/schema/structs.rs:917`, default at `structs_impl.rs:9877`).
+It lets every account read every other account's busy times "within the same
+tenant, or across the whole server when tenants are not used". We use no
+Stalwart tenants, so with it on, any user reads any other customer's users'
+busy times. It gates both paths: JMAP `Principal/getAvailability`
+(`crates/groupware/src/calendar/availability.rs:115`) and CalDAV scheduling
+free/busy (`crates/dav/src/calendar/scheduling.rs:414`). The plan sets it to
+`false` on the `Calendar` line.
+
+Probed on the loopback 1.2.0 (2026-11-23) with `alice@i10.test` and
+`carol@other.test` in two different i10 tenants, each with a busy event:
+
+| alice asks for          | Default (on)                                                      | `shareFreeBusy: false`          |
+| ----------------------- | ----------------------------------------------------------------- | ------------------------------- |
+| carol, JMAP             | carol's busy block, 10:00 to 11:00 (no title)                     | `[]`                            |
+| carol, CalDAV free/busy | `2.0;Success`, `FREEBUSY;FBTYPE=BUSY:20261124T100000Z/...110000Z` | `3.8;No authority`              |
+| herself, both           | her busy time (JMAP with the event)                               | the same: her own still answers |
+
+A reload applies it; no restart is needed. The cost: colleagues in the same
+company no longer see each other's free/busy without a calendar share. A
+per-customer setting needs Stalwart tenants, which the Community edition does not
+have.
+
+### ⚠ Automatic forwarding to outside addresses is off
+
+Owner decision (2026-11-23), like Microsoft 365's default: mail rules are on, but
+nothing a user sets up may forward mail automatically to a domain this server
+does not host. Move, copy, flag, mark read, junk, auto-reply, the blocked and
+safe sender lists, and forwards to hosted addresses all keep working.
+
+Stalwart has no setting for this. `x:SieveUserInterpreter` has only
+`maxRedirects` and `allowedNotifyUris`, with nothing per domain
+(`crates/common/src/config/mailstore/scripts.rs:83-101`). The
+`x:MailRule` redirect action has no domain check (`MailRuleRedirect` is
+`addresses` and `keepCopy`), and a forward to an outside address is accepted at
+creation. So the plan enforces it where every automatic message passes,
+**whether a mail rule or hand-written Sieve produced it**: the outbound route.
+
+- Mail rules compile into the `managed` Sieve script: the forward action is Sieve
+  `redirect` and the reply action is Sieve `vacation`
+  (`crates/email/src/sieve/rules/emit.rs:876-945`).
+- Everything Sieve sends is queued as `MessageSource::Autogenerated`
+  (`crates/smtp/src/outbound/local.rs:116-126`,
+  `crates/smtp/src/scripts/event_loop.rs:495-501`). A `redirect` or a `notify`
+  keeps the account as its return path; a `vacation` reply has an empty one.
+- The route expression sees `source` (`"autogenerated"`), `sender` and
+  `rcpt_domain` (`crates/smtp/src/queue/mod.rs:405-457`).
+- `MtaOutboundStrategy.route` gains one branch after `is_local_domain`:
+  `source == 'autogenerated' && !is_empty(sender)` routes to `local`. Local
+  delivery of an address the server does not host fails permanently with
+  `550 5.5.0 Mailbox not found.` (`crates/email/src/message/delivery.rs:180-187`),
+  so the message never leaves. An unknown route name would not do: it falls back
+  to MX delivery (`crates/common/src/network/mta.rs:324-347`).
+- Nothing else is caught. Calendar invitations go through an internal SMTP
+  session (`crates/services/src/task_manager/tasks/imip.rs:255-301`), MDNs and
+  vacation replies have an empty sender, and DSNs are their own source. The
+  other autogenerated sender is enterprise metric alerts, which we do not
+  configure.
+
+Probed on the loopback 1.2.0 (2026-11-23), with a sink SMTP server standing in
+for the outside world (the probe's `else` route; prod's is the `sql_query`
+route):
+
+| Case                                                                     | Result                                                                     |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| Rule forwarding to `x@outside.test`, before the branch                   | Delivered to the sink, `MAIL FROM:<alice@i10.test>`: the hole              |
+| The same rule, after                                                     | Not delivered: `550 5.5.0`, `delivery.dsn-perm-fail`; alice keeps her copy |
+| Hand-written Sieve `redirect :copy` and `notify "mailto:..."` to outside | Neither delivered, the same `550`                                          |
+| Rule forwarding to `carol@other.test` (hosted, another tenant)           | Delivered to carol; alice keeps her copy                                   |
+| Vacation reply to an outside sender                                      | Delivered, `MAIL FROM:<>`, "Out of office"                                 |
+| Ordinary send from a client through the mail front to an outside address | Delivered                                                                  |
+| Calendar invitation to an outside attendee                               | Delivered                                                                  |
+
+⚠ **WHAT THE USER SEES: NOTHING.** A Sieve redirect asks for no DSN (`Notify::Default`
+maps to no flags, `crates/smtp/src/scripts/mod.rs:163-175`), and a permanent
+failure is reported only to recipients that asked (`crates/smtp/src/queue/dsn.rs:560-562`).
+So no bounce comes back. A rule that forwards outside **without keeping a copy
+loses the message**: probed, it reached neither the sink nor alice's mailbox.
+Stalwart cannot refuse such a rule at creation, so i10's own rule editor (the
+webmail, and the HTTP front #517 puts before Exchange and JMAP) must refuse an
+outside forward address before it is saved. The route branch is the backstop for
+anything that gets past it. Today no user can create a rule or a script at all:
+JMAP is not published (`../ingressroute.yaml`) and there is no ManageSieve
+listener.
+
+The vacation reply above ran with the spam filter off on the probe only: the test
+message had no SPF or DKIM, and 1.2.0 no longer answers spam with a vacation
+reply. That is unrelated to the route.
+
+### Rolling it out
+
+1. Check that last night's backup of `stalwart_v1` exists. A downgrade should
+   never need it (below), but it is the fallback.
+2. Merge. Argo rolls both StatefulSets to 1.2.0 (the image and the plan's
+   ConfigMap hash both change). Do not dry-run this branch's plan against a 1.1.0
+   server first: 1.1.0 has no `Exchange` object, and the dry run stops there.
+3. The PostSync Job applies the plan once both nodes are Ready on 1.2.0, and
+   logs `Restart needed for: Role`. A role's permissions are read at startup.
+   (`Exchange` reads `unchanged`: off is already the default.)
+4. On psl-vps, run `./bootstrap.sh` (apply, reload, restart, verify).
+5. Check the roles and the two settings above. `./bootstrap.sh --dry-run` must
+   read `unchanged` on `Role b`, the Group role, the System Administrator role,
+   `Calendar` and `MtaOutboundStrategy`, and nothing else. Then sign in with a
+   real client through the mail front, read, and send one message.
+
+### Rolling it back
+
+The store needs no migration back, but **1.1.0 cannot read a role that holds a
+1.2.0 permission**. On the probe copy every such role answered
+`serverUnavailable`, and every sign-in failed with `NO Internal Server Error`
+after authd had accepted the bind. So take the permissions out while 1.2.0 is
+still running, then roll the image back:
+
+1. Revert the PR in git, **except the `MtaOutboundStrategy` route branch**, and
+   do not let Argo sync it yet. Mail rules made on 1.2.0 leave their `managed`
+   Sieve script in place, so their forwards would leave on 1.1.0 without it.
+   1.1.0 knows the `source` variable and read the stored route back unchanged
+   (probed). The stored `shareFreeBusy` does not stop 1.1.0 reading `Calendar`
+   (probed), and 1.1.0 has no free/busy sharing to turn off.
+2. With 1.2.0 still running, port-forward to 8080 and remove the 17 names from
+   `b`, the Group role and the System Administrator role (find their ids with
+   `x:Role/get`, as in "First boot"). Each one is a `x:Role/set` update setting
+   `enabledPermissions/<name>` to `null`.
+3. Sync. The pods restart on 1.1.0. The stored `Exchange` object is ignored by
+   1.1.0 (probed). The plan's `Exchange`, `shareFreeBusy` and patch lines are
+   gone with the revert. Left in place, the Job's dry run would fail before
+   writing anything.
+4. `./bootstrap.sh --verify`, and sign in once through the mail front.
+
+What it costs: mail rules, blocked and safe senders and calendar settings made
+on 1.2.0 stay in the store as data 1.1.0 does not read. Whether the `managed`
+Sieve script compiled from mail rules keeps running on 1.1.0 was not probed. If
+1.2.0 cannot start at all, step 2 is impossible: restore the backup.
+
 ## The internal relay
 
 The send worker hands direct-route mail to the `relay` listener on **2525**, with

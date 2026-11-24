@@ -63,7 +63,7 @@ const maxServerLine = 64 << 10
 //
 // ⚠ AFTER SIGN-IN, STALWART'S OUTPUT IS STILL WATCHED, AS DEFENCE IN DEPTH ONLY.
 // Stalwart answers UNAUTHENTICATE and then a second LOGIN on the same connection
-// (probed on v1.1.0), so a client could sign in as one account and carry on as
+// (probed on v1.1.0 and v1.2.0), so a client could sign in as one account and carry on as
 // another. The bind token (internal/bindtoken) is what stops that: the second
 // LOGIN reaches authd without a token and is refused. The scan below is not the
 // boundary and can be blinded (round 3, imapServerScan). It stays because,
@@ -219,9 +219,10 @@ func rewriteIMAPCapabilities(unit []byte) []byte {
 // ⚠ WHATEVER THE FIRST WORD IS, `*` AND `+` INCLUDED. Stalwart takes any
 // non-blank bytes as a tag and echoes them on a successful sign-in, so
 // `* LOGIN b pw` after sign-in is answered `* OK [CAPABILITY ...]`. Stalwart
-// v1.1.0 sends the [CAPABILITY code in two places only: the greeting, which is
-// before sign-in, and a sign-in's success (op/authenticate.rs). So after
-// sign-in every such line is a sign-in.
+// v1.1.0 and v1.2.0 send the [CAPABILITY code in two places only: the greeting,
+// which is before sign-in, and a sign-in's success (lib.rs:47,
+// op/authenticate.rs:205). So after sign-in every such line is a sign-in.
+// v1.2.0's `* BYE Account access changed` on a revoked session carries none.
 //
 // Literals Stalwart announces are skipped exactly, so nothing inside a message
 // can be read as such a line, and the text that continues a response after its

@@ -352,7 +352,35 @@ def props_for(c, at_type):
 
 
 def update_kind(props, key):
-    return (props.get(key) or {}).get("update", "mutable")
+    return (props.get(prop_of(key)) or {}).get("update", "mutable")
+
+
+# ⚠ A KEY WITH ONE `/` IS A PATCH PATH (RFC 8620 §5.3): `"enabledPermissions/
+# sysMailRuleGet": true` sets one entry of a map and leaves the rest alone. It
+# is how the plan adds permissions to Stalwart's own default roles, whose 230 to
+# 455 entries the plan does not own and must not replace (config/README.md,
+# "Upgrading to 1.2.0"). Stalwart refuses an entry name it does not know
+# (`invalidPatch`), so a typo fails the apply instead of passing silently.
+def prop_of(key):
+    return key.split("/", 1)[0]
+
+
+def entry_of(current, key):
+    prop, sep, entry = key.partition("/")
+    if not sep:
+        return current.get(key)
+    if "/" in entry:
+        fail(f"`{key}`: only one level of patch path is supported")
+    return (current.get(prop) or {}).get(entry)
+
+
+def patch_into(obj, patch):
+    for k, v in patch.items():
+        prop, sep, entry = k.partition("/")
+        if sep:
+            obj[prop] = {**(obj.get(prop) or {}), entry: v}
+        else:
+            obj[k] = v
 
 
 _limit = None
@@ -452,11 +480,11 @@ def unknown_props(c, at_type, body):
     # matched against anything, so without this a preview reads "would create"
     # and says nothing about a body the server will refuse.
     props = props_for(c, at_type)
-    return sorted(k for k in body if k != "@type" and k not in props) if props else []
+    return sorted(k for k in body if k != "@type" and prop_of(k) not in props) if props else []
 
 
 def changes(current, patch):
-    return sorted(k for k, v in patch.items() if not covers(current.get(k), v))
+    return sorted(k for k, v in patch.items() if not covers(entry_of(current, k), v))
 
 
 def upsert(c, op, cache, dry=False):
@@ -498,6 +526,9 @@ def upsert(c, op, cache, dry=False):
             if patch:
                 to_update.append((sid, patch))
         else:
+            paths = sorted(k for k in body if "/" in k)
+            if paths:
+                fail(f"{label}: `{client_id}` patches {', '.join(paths)} but matches no existing object")
             to_create[client_id] = {
                 k: v for k, v in body.items() if update_kind(props, k) != "serverSet"
             }
@@ -518,7 +549,7 @@ def upsert(c, op, cache, dry=False):
     created = create_objects(c, to_create, known) if to_create else 0
     for sid, patch in to_update:
         update_object(c, sid, patch)
-        next(o for o in known if o.get("id") == sid).update(patch)
+        patch_into(next(o for o in known if o.get("id") == sid), patch)
     return created, len(to_update)
 
 
@@ -533,7 +564,8 @@ def update(c, op, dry=False):
         bad = unknown_props(c, op["value"].get("@type"), op["value"])
         if bad:
             fail(f"{c[2:]}: not properties of {c[2:]}: {', '.join(bad)}")
-        (got,) = jmap([[f"{c}/get", {"ids": [sid], "properties": list(op["value"])}, "g"]])
+        wanted = sorted({prop_of(k) for k in op["value"]})
+        (got,) = jmap([[f"{c}/get", {"ids": [sid], "properties": wanted}, "g"]])
         current = (got.get("list") or [{}])[0]
         diff = changes(current, op["value"])
         print(f"   ~ {c[2:]} {sid}: " + (f"would change {', '.join(diff)}" if diff else "unchanged"))

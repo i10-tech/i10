@@ -13,8 +13,9 @@ import (
 	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 )
 
-// TestLiveProbe runs the review rounds' attacks against a live Stalwart v1.1.0
-// with authd (this branch) as its LDAP directory and the front in front of it
+// TestLiveProbe runs the review rounds' attacks against a live Stalwart (v1.1.0
+// first, v1.2.0 on 2026-11-23: every subtest passed on both) with authd (this
+// branch) as its LDAP directory and the front in front of it
 // (docs/research/mail-device-binding.md section 9, "The bind token, probed").
 // It is skipped unless MAILFRONT_LIVE_PROBE=1, and runs inside Stalwart's
 // network namespace, where Stalwart's own loopback listeners can be reached:
