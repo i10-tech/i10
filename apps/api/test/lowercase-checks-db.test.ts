@@ -4,6 +4,8 @@ import postgres from "postgres"
 import { withTenant, type Database } from "../src/db/client.js"
 import { joinStore } from "../src/console/join.js"
 import { memberStore } from "../src/console/members-db.js"
+import { directoryStore } from "../src/identity/scim-store.js"
+import { identityStore } from "../src/identity/store.js"
 import { mailboxAliases } from "../src/mailboxes/aliases.js"
 import { mailboxJobStore } from "../src/mailboxes/jobs.js"
 import { directoryMail } from "../src/mailboxes/store.js"
@@ -11,6 +13,8 @@ import { applyClerkEvent } from "../src/projection/writer.js"
 import { suppressionStore } from "../src/suppressions/store.js"
 import { teamInboxStore } from "../src/team-inboxes/store.js"
 import { recordMailboxUsageStatement } from "../src/mail/storage.js"
+import { webhookEventOps } from "../src/webhooks/db.js"
+import { accountEventOps } from "../src/webhooks/stalwart-account-db.js"
 
 /**
  * Proves that every lowercase CHECK constraint refuses mixed-case writes at the
@@ -89,9 +93,11 @@ suite("lowercase CHECK constraints", () => {
 
   afterAll(async () => {
     if (owner) {
-      await owner`delete from authd.groups where name like ${`lc-${RUN}%`} or name like ${`fwd-${USER}%`}`
+      await owner`delete from authd.groups where tenant_id = ${TENANT} or name like ${`lc-${RUN}%`} or name like ${`fwd-${USER}%`}`
       await owner`delete from authd.accounts where clerk_user_id like ${`user_lc_${RUN}%`}`
       await owner`delete from authd.webhook_events where event_id like ${`evt_lc_${RUN}%`}`
+      await owner`delete from core.mailbox_jobs where tenant_id = ${TENANT}`
+      await owner`delete from core.message_events where tenant_id = ${TENANT}`
       await owner`delete from core.tenants where id = ${TENANT}`
       await owner.end()
     }
@@ -358,5 +364,195 @@ suite("lowercase CHECK constraints", () => {
       outcome: "upserted",
       email: `ada.proj@${DOMAIN}`,
     })
+
+    // identity/scim-store.ts createUser and editUser
+    const dirStore = directoryStore(db)
+    const scimCreated = await dirStore.createUser(
+      TENANT,
+      DIR,
+      {
+        userName: `Scim.User@${DOMAIN.toUpperCase()}`,
+        externalId: `ext-${RUN}`,
+        displayName: "Scim User",
+        givenName: "Scim",
+        familyName: "User",
+        email: `  Scim.User@${DOMAIN.toUpperCase()} `,
+        active: true,
+        resource: { userName: `Scim.User@${DOMAIN.toUpperCase()}` },
+      },
+      { type: "scim.user.created" },
+    )
+    if (scimCreated === "taken") throw new Error("unexpected scim createUser taken")
+    expect(scimCreated.row.email).toBe(`scim.user@${DOMAIN}`)
+    const [scimRowAfterCreate] = await owner<{ email: string }[]>`
+      select email from identity.directory_users where id = ${scimCreated.row.id}
+    `
+    expect(scimRowAfterCreate?.email).toBe(`scim.user@${DOMAIN}`)
+
+    const scimEdited = await dirStore.editUser(
+      TENANT,
+      DIR,
+      scimCreated.row.id,
+      (before) => ({
+        userName: before.userName,
+        externalId: before.externalId,
+        displayName: before.displayName,
+        givenName: before.givenName,
+        familyName: before.familyName,
+        email: `  Scim.Edited@${DOMAIN.toUpperCase()} `,
+        active: before.active,
+        resource: before.resource,
+      }),
+      () => ({ type: "scim.user.updated" }),
+    )
+    if (!scimEdited || scimEdited === "taken") {
+      throw new Error("unexpected scim editUser result")
+    }
+    expect(scimEdited.row.email).toBe(`scim.edited@${DOMAIN}`)
+    const [scimRowAfterEdit] = await owner<{ email: string }[]>`
+      select email from identity.directory_users where id = ${scimCreated.row.id}
+    `
+    expect(scimRowAfterEdit?.email).toBe(`scim.edited@${DOMAIN}`)
+
+    // identity/store.ts link, touchIdentity, and provisionLocked().link
+    const idStore = identityStore(db, null)
+    const linked = await idStore.link(TENANT, {
+      connectionId: CONN,
+      subject: `sub-link-${RUN}`,
+      clerkUserId: `${USER}_idlink`,
+      email: `  Link.User@${DOMAIN.toUpperCase()} `,
+    })
+    const [linkedRow] = await owner<{ email: string }[]>`
+      select email from identity.identities where id = ${linked.id}
+    `
+    expect(linkedRow?.email).toBe(`link.user@${DOMAIN}`)
+
+    await idStore.touchIdentity(
+      TENANT,
+      linked.id,
+      `  Touched.User@${DOMAIN.toUpperCase()} `,
+      new Date(),
+    )
+    const [touchedRow] = await owner<{ email: string }[]>`
+      select email from identity.identities where id = ${linked.id}
+    `
+    expect(touchedRow?.email).toBe(`touched.user@${DOMAIN}`)
+
+    const locked = await idStore.provisionLocked(
+      TENANT,
+      { connectionId: CONN, email: `locked.user@${DOMAIN}` },
+      (lock) =>
+        lock.link({
+          subject: `sub-locked-${RUN}`,
+          clerkUserId: `${USER}_idlocked`,
+          email: `  Locked.User@${DOMAIN.toUpperCase()} `,
+        }),
+    )
+    const [lockedRow] = await owner<{ email: string }[]>`
+      select email from identity.identities where id = ${locked.id}
+    `
+    expect(lockedRow?.email).toBe(`locked.user@${DOMAIN}`)
+
+    // mailboxes/store.ts directoryMail.setAliases and directoryMail.mirrorGroup
+    const dirAliasResult = await db.transaction((tx) =>
+      directoryMail.setAliases(tx, USER, [`  Dir.Alias@${DOMAIN.toUpperCase()} `]),
+    )
+    expect(dirAliasResult.taken).toEqual([])
+    const [dirAliasRow] = await owner<{ address: string }[]>`
+      select address from authd.aliases
+      where clerk_user_id = ${USER} and source = 'directory'
+    `
+    expect(dirAliasRow?.address).toBe(`dir.alias@${DOMAIN}`)
+
+    const [dirGroup] = await owner<{ id: string }[]>`
+      insert into identity.directory_groups (tenant_id, directory_id, display_name)
+      values (${TENANT}, ${DIR}, ${`LC Group ${RUN}`})
+      returning id
+    `
+    const mirrorStatus = await db.transaction((tx) =>
+      directoryMail.mirrorGroup(tx, {
+        name: `lc-${RUN}-dir-group`,
+        email: `  Dir.Group@${DOMAIN.toUpperCase()} `,
+        description: "Directory Group",
+        directoryGroupId: dirGroup!.id,
+      }),
+    )
+    expect(mirrorStatus).toBe("mirrored")
+    const [mirroredRow] = await owner<{ email: string }[]>`
+      select email from authd.groups where name = ${`lc-${RUN}-dir-group`}
+    `
+    expect(mirroredRow?.email).toBe(`dir.group@${DOMAIN}`)
+
+    // webhooks/db.ts suppressOnly and record
+    const webhookOps = webhookEventOps({ db, queue: {} as never })
+    const whMessageId = crypto.randomUUID()
+    const whNow = new Date()
+    await webhookOps.suppressOnly!({
+      tenantId: TENANT,
+      event: {
+        type: "email.bounced",
+        messageId: whMessageId,
+        occurredAt: whNow,
+        sourceEventId: `sns_lc_${RUN}_suppress_only`,
+        suppress: [
+          {
+            address: `  Bounce.Only@${DOMAIN.toUpperCase()} `,
+            reason: "hard_bounce",
+          },
+        ],
+        data: { from: `sender@${DOMAIN}` },
+        raw: {},
+      },
+    })
+    const [supOnlyRow] = await owner<{ address: string }[]>`
+      select address from core.suppressions
+      where tenant_id = ${TENANT} and address = ${`bounce.only@${DOMAIN}`}
+    `
+    expect(supOnlyRow?.address).toBe(`bounce.only@${DOMAIN}`)
+
+    const recordRes = await webhookOps.record({
+      tenantId: TENANT,
+      messageCreatedAt: whNow,
+      event: {
+        type: "email.complained",
+        messageId: whMessageId,
+        occurredAt: whNow,
+        sourceEventId: `sns_lc_${RUN}_record`,
+        suppress: [
+          {
+            address: `  Complaint.Rec@${DOMAIN.toUpperCase()} `,
+            reason: "complaint",
+          },
+        ],
+        data: { from: `sender@${DOMAIN}` },
+        raw: {},
+      },
+    })
+    expect(recordRes).toEqual({ status: "recorded", deliveries: [] })
+    const [supRecRow] = await owner<{ address: string }[]>`
+      select address from core.suppressions
+      where tenant_id = ${TENANT} and address = ${`complaint.rec@${DOMAIN}`}
+    `
+    expect(supRecRow?.address).toBe(`complaint.rec@${DOMAIN}`)
+
+    // webhooks/stalwart-account-db.ts recordAuthFailure
+    const accountOps = accountEventOps(db)
+    const authFailRes = await accountOps.recordAuthFailure({
+      owner: { clerkUserId: USER, tenantId: TENANT },
+      event: {
+        type: "auth.failed",
+        account: `  Owner.AuthFail@${DOMAIN.toUpperCase()} `,
+        ip: "198.51.100.42",
+        listener: "imap",
+        occurredAt: new Date(),
+        sourceEventId: `evt_lc_${RUN}_authfail`,
+      },
+    })
+    expect(authFailRes).toBe("recorded")
+    const [authFailRow] = await owner<{ account: string }[]>`
+      select account from core.mailbox_auth_failures
+      where tenant_id = ${TENANT} and account = ${`owner.authfail@${DOMAIN}`}
+    `
+    expect(authFailRow?.account).toBe(`owner.authfail@${DOMAIN}`)
   })
 })

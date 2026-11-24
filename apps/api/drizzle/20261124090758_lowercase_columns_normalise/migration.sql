@@ -38,7 +38,7 @@ BEGIN
       HAVING count(*) > 1
     ) c;
     IF n > 0 THEN
-      RAISE EXCEPTION 'cannot lowercase core.suppressions.address: % duplicate (tenant_id, lower(address)) key(s) would collide with suppressions_pkey', n;
+      RAISE EXCEPTION 'cannot lowercase core.suppressions.address: % duplicate (tenant_id, lower(address)) key(s) would collide with suppressions_tenant_id_address_pk', n;
     END IF;
   END IF;
 
@@ -135,7 +135,7 @@ BEGIN
       HAVING count(*) > 1
     ) c;
     IF n > 0 THEN
-      RAISE EXCEPTION 'cannot lowercase core.mailbox_usage.address: % duplicate (tenant_id, lower(address)) key(s) would collide with mailbox_usage_pkey', n;
+      RAISE EXCEPTION 'cannot lowercase core.mailbox_usage.address: % duplicate (tenant_id, lower(address)) key(s) would collide with mailbox_usage_tenant_id_address_pk', n;
     END IF;
   END IF;
 END $$;--> statement-breakpoint

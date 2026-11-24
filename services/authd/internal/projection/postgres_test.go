@@ -2,6 +2,7 @@ package projection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -823,7 +825,7 @@ func TestGroupsByAddress(t *testing.T) {
 	t.Cleanup(w.Close)
 
 	purge := func() {
-		_, _ = w.Exec(ctx, `DELETE FROM authd.groups WHERE name IN ('grp_by_addr_1', 'grp_by_addr_2', 'grp_by_addr_null')`)
+		_, _ = w.Exec(ctx, `DELETE FROM authd.groups WHERE name IN ('grp_by_addr_1', 'grp_by_addr_2', 'grp_by_addr_null', 'grp_by_addr_bad')`)
 		_, _ = w.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id IN ('user_grp_active', 'user_grp_inactive')`)
 	}
 	purge()
@@ -844,8 +846,10 @@ func TestGroupsByAddress(t *testing.T) {
 	}
 
 	// Mixed-case group email is refused by the database CHECK constraint.
-	if _, err := w.Exec(ctx, `INSERT INTO authd.groups (name, email) VALUES ('grp_by_addr_bad', 'Mixed@Grp.Test')`); err == nil {
-		t.Fatal("expected CHECK constraint to refuse mixed-case authd.groups.email")
+	_, err = w.Exec(ctx, `INSERT INTO authd.groups (name, email) VALUES ('grp_by_addr_bad', 'Mixed@Grp.Test')`)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != "groups_email_lowercase" {
+		t.Fatalf("expected CHECK violation (23514 / groups_email_lowercase) for mixed-case authd.groups.email, got %v", err)
 	}
 
 	store, err := NewPostgres(ctx, dsn)
