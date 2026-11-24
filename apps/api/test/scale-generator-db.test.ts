@@ -22,9 +22,21 @@ const scratch: Scratch = { name: "dev", port: Number(PORT), poolerPort: null }
 const ANCHOR = new Date("2026-11-20T12:00:00Z")
 
 /**
+ * Tables compared through a query instead of their raw rows, because the
+ * database, not the generator, picks part of each row. The hourly usage rollup
+ * spreads an hour over slots chosen by the writing backend's pid, so only the
+ * per-hour sum is the seed's.
+ */
+const COMPARED_AS: Record<string, string> = {
+  "core.meter_usage_hourly": `select tenant_id, feature_id, shard, hour, sum(used) as used
+      from core.meter_usage_hourly group by 1, 2, 3, 4`,
+}
+
+/**
  * A content hash of every table, columns filled by volatile defaults left out
- * (`now()`, `uuidv7()`, the clock-seeded credential epoch): those differ by
- * design, everything the generator chose must not.
+ * (`now()`, `uuidv7()`, the clock-seeded credential epoch, the writing
+ * transaction's id) along with identity columns: those differ by design,
+ * everything the generator chose must not.
  */
 async function fingerprint(sql: postgres.Sql): Promise<Record<string, string>> {
   const cols = await sql<{ t: string; c: string }[]>`
@@ -32,15 +44,18 @@ async function fingerprint(sql: postgres.Sql): Promise<Record<string, string>> {
       from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace
       left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
      where n.nspname in ('core', 'identity', 'authd') and c.relkind in ('r', 'p') and not c.relispartition
-       and a.attnum > 0 and not a.attisdropped
-       and coalesce(pg_get_expr(d.adbin, d.adrelid), '') !~ '(now|uuidv7|gen_random_uuid|clock_timestamp|nextval)\\('
+       and a.attnum > 0 and not a.attisdropped and a.attidentity = ''
+       and coalesce(pg_get_expr(d.adbin, d.adrelid), '') !~ '(now|uuidv7|gen_random_uuid|clock_timestamp|nextval|pg_current_xact_id)\\('
      order by 1, a.attnum`
   const byTable = new Map<string, string[]>()
   for (const { t, c } of cols) byTable.set(t, [...(byTable.get(t) ?? []), `"${c}"`])
   const out: Record<string, string> = {}
   for (const [t, cs] of byTable) {
+    const rows = COMPARED_AS[t]
+      ? `select r::text as x from (${COMPARED_AS[t]}) r`
+      : `select row(${cs.join(", ")})::text as x from ${t}`
     const [r] = await sql.unsafe<{ h: string | null }[]>(
-      `select md5(string_agg(x, E'\\n' order by x)) as h from (select row(${cs.join(", ")})::text as x from ${t}) s`,
+      `select md5(string_agg(x, E'\\n' order by x)) as h from (${rows}) s`,
     )
     if (r?.h) out[t] = r.h
   }
