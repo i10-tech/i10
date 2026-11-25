@@ -236,6 +236,14 @@ func TestVerifyClientCertRules(t *testing.T) {
 		t.Fatalf("no cert = (%+v, %v)", got, err)
 	}
 
+	// A resumed session's certificate came from the ticket, not this handshake:
+	// refused on its own, even if the 993 config ever issued tickets again.
+	resumed := makeState(good)
+	resumed.DidResume = true
+	if got, err := verifyClientCert(resumed, roots, time.Now()); err == nil || got != nil {
+		t.Fatalf("resumed session with a good cert = (%+v, %v), want refused", got, err)
+	}
+
 	cases := map[string]tls.Certificate{
 		"untrusted CA": func() tls.Certificate {
 			c, _ := otherCA.issueLeaf(t, "C02OTHER", nil)
