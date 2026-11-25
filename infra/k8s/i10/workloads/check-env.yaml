@@ -46,6 +46,11 @@ spec:
       restartPolicy: Never
       containers:
         # Mirrors the `api` container in api.yaml: keep envFrom and env identical.
+        # The device CA hooks listener's settings (CA_HOOK_TOKEN_HASHES,
+        # CA_HOOK_WEBHOOK_IDS, CA_INTERMEDIATE_NOT_AFTER; #383 PR 3) arrive
+        # through the i10-api Secret below, so this check already validates
+        # them, including that the three are set together. CA_HOOKS_PORT and
+        # the TLS file paths have defaults; the deploy step mounts the files.
         - name: api
           image: ghcr.io/i10-tech/i10-api:prod-6294f1cbe18f03a89db04bf4fcc62444584c369d@sha256:51fbb6694c392e7198e51bd84a0a5d23ab371fd4399a5170e79123988b7f85bd
           imagePullPolicy: Always

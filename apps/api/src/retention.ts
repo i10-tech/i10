@@ -44,7 +44,11 @@ import { mailboxLifecycleStore } from "./mailboxes/lifecycle-store.js"
 import { purgeDueMailboxes } from "./mailboxes/lifecycle.js"
 import { mailboxSweepStore, sweepMailboxJobs } from "./mailboxes/sweep.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
-import { pruneMailDevices } from "./mail-devices/prune.js"
+import {
+  pruneCertBinds,
+  pruneCertPermits,
+  pruneMailDevices,
+} from "./mail-devices/prune.js"
 import { loadEnv } from "./env.js"
 import { unlockEnv } from "./crypto/unlock.js"
 import {
@@ -101,6 +105,8 @@ await withMonitor(
       accessChangesPruned: 0,
       mailDevicesUnusedPruned: 0,
       mailDevicesIdlePruned: 0,
+      certPermitsPruned: 0,
+      certBindsPruned: 0,
       tombstonesPruned: 0,
       partitionsDropped: [] as string[],
       partitionsRefused: [] as string[],
@@ -139,6 +145,23 @@ await withMonitor(
       } catch (error) {
         log.error({ err: error }, "could not prune expired mail device codes")
         captureError(error, { phase: "mail_devices" })
+      }
+
+      // ── 0c. Device certificate permits and Mac liveness rows (#383 PR 3) ──
+      // Permits a day past expiry; liveness rows a day old (authd reads them for
+      // 75 minutes). Batched like the codes, each in its own try so one failing
+      // never stops the other.
+      try {
+        summary.certPermitsPruned = await pruneCertPermits(db)
+      } catch (error) {
+        log.error({ err: error }, "could not prune device certificate permits")
+        captureError(error, { phase: "mail_device_cert_permits" })
+      }
+      try {
+        summary.certBindsPruned = await pruneCertBinds(db)
+      } catch (error) {
+        log.error({ err: error }, "could not prune Mac liveness rows")
+        captureError(error, { phase: "mail_device_cert_binds" })
       }
 
       // ── 1. Partitions ahead ──

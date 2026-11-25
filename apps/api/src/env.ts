@@ -1,4 +1,9 @@
 import { z } from "zod"
+import {
+  parseIntermediateNotAfter,
+  parseTokenHashes,
+  parseWebhookIds,
+} from "./ca-hooks/config.js"
 import { isWrapped, KEY_VARIABLES, type Wrappable } from "./crypto/unlock.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
 import { parseMailDeviceCodeKeys } from "./mail-devices/code.js"
@@ -815,6 +820,60 @@ const schema = z.object({
     }),
 
   /**
+   * The device CA's webhook listener (#383 PR 3, `ca-hooks/listener.ts`): a
+   * second `Bun.serve` that only step-ca's relay sidecar calls.
+   *
+   * ⚠ OFF UNLESS ALL THREE OF THE HOOK SETTINGS BELOW ARE SET AND BOTH TLS FILES
+   * ARE MOUNTED. The code ships inert: with none of them, nothing listens.
+   */
+  CA_HOOKS_PORT: z.coerce.number().int().min(1).max(65535).default(3443),
+  /** Server certificate for `i10-api-ca-hooks.i10-prod.svc`, from the namespace CA. */
+  CA_HOOKS_TLS_CERT_FILE: z.string().min(1).default("/etc/i10/ca-hooks/tls.crt"),
+  CA_HOOKS_TLS_KEY_FILE: z.string().min(1).default("/etc/i10/ca-hooks/tls.key"),
+  /** SHA-256 hex of the relay's bearer token, comma-separated for rotation. */
+  CA_HOOK_TOKEN_HASHES: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      const trimmed = value?.trim()
+      if (!trimmed) return undefined
+      try {
+        return parseTokenHashes(trimmed)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+        return z.NEVER
+      }
+    }),
+  /** `<kind>=<step-ca webhook id>` for each of the four hooks. */
+  CA_HOOK_WEBHOOK_IDS: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      const trimmed = value?.trim()
+      if (!trimmed) return undefined
+      try {
+        return parseWebhookIds(trimmed)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+        return z.NEVER
+      }
+    }),
+  /** The device intermediate's `notAfter`, RFC 3339; no leaf may outlive it. */
+  CA_INTERMEDIATE_NOT_AFTER: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      const trimmed = value?.trim()
+      if (!trimmed) return undefined
+      try {
+        return parseIntermediateNotAfter(trimmed)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+        return z.NEVER
+      }
+    }),
+
+  /**
    * Webhook endpoints being POSTed to at once on the ordered lane, per worker
    * replica; the retry lane gets a quarter of it.
    *
@@ -1487,6 +1546,31 @@ export function intervalToMs(value: string): number | null {
  * report the mistake.
  */
 const validated = schema.superRefine((env, ctx) => {
+  // ⚠ ALL OR NOTHING. A listener with some of its settings would either never
+  // start without saying why, or start with no way to authenticate its caller.
+  const hookSettings = {
+    CA_HOOK_TOKEN_HASHES: env.CA_HOOK_TOKEN_HASHES,
+    CA_HOOK_WEBHOOK_IDS: env.CA_HOOK_WEBHOOK_IDS,
+    CA_INTERMEDIATE_NOT_AFTER: env.CA_INTERMEDIATE_NOT_AFTER,
+  }
+  const unset = Object.entries(hookSettings).filter(([, value]) => value === undefined)
+  if (unset.length > 0 && unset.length < Object.keys(hookSettings).length) {
+    for (const [name] of unset) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name],
+        message: "the CA hook settings are set together or not at all",
+      })
+    }
+  }
+  if (env.CA_HOOKS_PORT === env.PORT) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CA_HOOKS_PORT"],
+      message: "must differ from PORT: the hooks never share the main listener",
+    })
+  }
+
   const staleAfterMs = intervalToMs(env.WORKER_CLAIM_STALE_AFTER)
   if (staleAfterMs !== null && staleAfterMs <= env.WORKER_JOB_TIMEOUT_MS) {
     ctx.addIssue({

@@ -13,6 +13,8 @@ import { tenantLifecycle } from "./tenants/lifecycle.js"
 import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { keyLookup, keyStore } from "./auth/store.js"
+import { createHookHandlers } from "./ca-hooks/handlers.js"
+import { startCaHooksListener } from "./ca-hooks/listener.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { publishRoutingSettings } from "./domains/routing-settings.js"
 import { loadEnv } from "./env.js"
@@ -3013,6 +3015,21 @@ const app = createApp({
 const server = Bun.serve({ fetch: app.fetch, port: env.PORT })
 log.info({ port: server.port, env: env.NODE_ENV }, "i10 api listening")
 
+// The device CA's webhooks (#383 PR 3), on their own listener and their own
+// `fetch`: null (and logged once) until configured and its certificate mounted.
+const caHooks = startCaHooksListener(
+  {
+    port: env.CA_HOOKS_PORT,
+    certFile: env.CA_HOOKS_TLS_CERT_FILE,
+    keyFile: env.CA_HOOKS_TLS_KEY_FILE,
+    tokenHashes: env.CA_HOOK_TOKEN_HASHES,
+    webhookIds: env.CA_HOOK_WEBHOOK_IDS,
+    intermediateNotAfter: env.CA_INTERMEDIATE_NOT_AFTER,
+  },
+  (intermediateNotAfter) => createHookHandlers({ db, intermediateNotAfter }),
+  log,
+)
+
 // Kubernetes sends SIGTERM and then waits terminationGracePeriodSeconds before
 // SIGKILL. Closing the listener lets in-flight sends finish; without this a
 // rolling deploy drops requests that were already accepted.
@@ -3065,7 +3082,9 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
           ),
         ),
     ])
-      .then(() => server.stop())
+      // Both listeners, the CA hooks' included: a hook in flight finishes its
+      // transaction before the pool goes.
+      .then(() => Promise.all([server.stop(), caHooks?.stop()]))
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
       .then(() =>

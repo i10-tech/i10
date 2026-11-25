@@ -75,6 +75,17 @@ export type MailDeviceErrorCode =
   | "sso_required"
   | "managed_no_connection"
   | "connection_inactive"
+  // Binding a certificate key and issuing permits (#383 PR 3).
+  | "device_not_found"
+  | "device_mismatch"
+  | "device_not_macos"
+  | "device_expired"
+  | "device_serial_missing"
+  | "serial_mismatch"
+  | "device_key_bound"
+  | "device_key_changed"
+  | "key_in_use"
+  | "permit_conflict"
 
 export class MailDeviceError extends Error {
   constructor(
