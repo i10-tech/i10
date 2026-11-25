@@ -225,11 +225,17 @@ var gatePaths = []gatePath{
 	{"authd.mail_devices", "the account deleted (cascades the device)", one(mintDevice),
 		one(`DELETE FROM authd.accounts` + whAlice), closes},
 	{"authd.mail_devices", "truncate", one(mintDevice), []string{
-		`CREATE TEMP TABLE md_keep ON COMMIT DROP AS SELECT * FROM authd.mail_devices`,
 		// CASCADE since PR 3: the permits and the Mac liveness rows reference the
 		// table (neither has triggers, so the log sees only this one's TRUNCATE).
 		// ⚠ They are kept and put back too: the other DB packages share this
 		// database and run at the same time in CI, and their rows must survive.
+		// So the tables are locked before the snapshots, in the repo's order
+		// (accounts, then devices, then their children): each snapshot is its
+		// own statement, and without the locks a row committed between them, or
+		// between them and the TRUNCATE, would be lost or break the restore's FKs.
+		`LOCK TABLE authd.accounts IN SHARE MODE`,
+		`LOCK TABLE authd.mail_devices, authd.mail_device_cert_permits, authd.mail_device_cert_binds IN ACCESS EXCLUSIVE MODE`,
+		`CREATE TEMP TABLE md_keep ON COMMIT DROP AS SELECT * FROM authd.mail_devices`,
 		`CREATE TEMP TABLE mp_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_permits`,
 		`CREATE TEMP TABLE mb_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_binds`,
 		`TRUNCATE authd.mail_devices CASCADE`,

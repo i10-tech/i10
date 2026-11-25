@@ -1487,9 +1487,10 @@ go test -race ./...
 
 ## The schema lives elsewhere
 
-authd is a **reader**, with three narrow writes: the shared failure budget
-(`authd.bind_failure_budget`) and a mail device's two clock stamps
-(`first_used_at`, `last_used_at` on `authd.mail_devices`, by column grant). The
+authd is a **reader**, with a few narrow writes: the shared failure budget
+(`authd.bind_failure_budget`), a mail device's two clock stamps
+(`first_used_at`, `last_used_at` on `authd.mail_devices`, by column grant), and
+the Mac liveness rows (`authd.mail_device_cert_binds`, #383 PR 3). The
 `authd.*` tables are defined in Drizzle at
 `apps/api/src/db/schema.ts` and migrated from `apps/api/drizzle/`, because the
 webhook receiver that writes them lives there and two sources of truth for one
