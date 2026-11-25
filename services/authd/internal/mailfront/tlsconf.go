@@ -233,6 +233,11 @@ func IMAPTLSConfig(certs *CertFiles, clientCAs *ClientCAs) *tls.Config {
 		cfg.GetConfigForClient = nil
 		cfg.ClientAuth = tls.RequestClientCert
 		cfg.ClientCAs = pool
+		// ⚠ NO RESUMPTION WHEN A CERTIFICATE MAY BE ASKED FOR. A resumed handshake
+		// gets the first connection's client certificate back from the ticket
+		// with no new proof of the key, so a copied TLS session cache would stand
+		// in for the Secure Enclave key. Every 993 handshake is a full one.
+		cfg.SessionTicketsDisabled = true
 		return cfg, nil
 	}
 	return base
@@ -251,6 +256,7 @@ type verifiedCert struct {
 // but failed any rule (the caller logs and treats it as no certificate).
 //
 // ⚠ STRICT LEAF CHECKS (section 11 + revision 5):
+//   - the handshake was a full one, never a resumption (no key proved);
 //   - chain verifies to roots for ExtKeyUsageClientAuth at now;
 //   - leaf explicitly lists ExtKeyUsageClientAuth in its own ExtKeyUsage
 //     (Go's x509.Verify allows an empty EKU);
@@ -259,6 +265,11 @@ type verifiedCert struct {
 func verifyClientCert(state tls.ConnectionState, roots *x509.CertPool, now time.Time) (*verifiedCert, error) {
 	if roots == nil || len(state.PeerCertificates) == 0 {
 		return nil, nil
+	}
+	if state.DidResume {
+		// The second guard behind SessionTicketsDisabled: a resumed session's
+		// certificate is the ticket's, not one proved on this connection.
+		return nil, errors.New("resumed session: the certificate was not proved on this connection")
 	}
 	leaf := state.PeerCertificates[0]
 	var intermediates *x509.CertPool

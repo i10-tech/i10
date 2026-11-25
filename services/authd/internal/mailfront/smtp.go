@@ -259,6 +259,12 @@ func (s *session) smtpAuth(args string) (*signIn, bool, error) {
 			if dev != nil && dev.Platform == gate.Macos && gate.DeviceRefusal(dev, in.acct, dev.CertKey) == "" {
 				var at netip.Prefix
 				if !s.macSMTPAnyAddress {
+					// ⚠ FAIL CLOSED: a zero prefix is MacLive's "any address", so a
+					// connection with no client address must never reach it.
+					if !s.addr.IsValid() {
+						s.log.Error("sign-in not forwarded: no client address for the Mac SMTP rule")
+						return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
+					}
 					at = projection.MacLivePrefix(s.addr)
 				}
 				live, err := s.macLive(dev.ID, at, dev.CertKey)

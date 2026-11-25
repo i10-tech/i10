@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"net"
@@ -352,6 +353,36 @@ func TestTLSClientCertGatingOn993And465(t *testing.T) {
 		}
 		valid.until("c OK")
 	})
+
+	// ⚠ A RESUMED SESSION PROVES NO KEY. Go restores the first connection's
+	// client certificate on resumption without a new CertificateVerify, so a
+	// copied TLS session cache would stand in for the Secure Enclave key
+	// (independent review of #535). Each version resumes by its own mechanism.
+	for _, version := range []uint16{tls.VersionTLS12, tls.VersionTLS13} {
+		t.Run(fmt.Sprintf("a resumed session without the key is not a certificate (%s)", tls.VersionName(version)), func(t *testing.T) {
+			h := startFrontWithCA(t, IMAP, alice(), ca.bundle(t), nil)
+			cache := tls.NewLRUClientSessionCache(4)
+			first := h.dialTLS(&tls.Config{RootCAs: h.roots, ServerName: "mail.i10.test", MaxVersion: version,
+				ClientSessionCache: cache, Certificates: []tls.Certificate{goodCert}})
+			if g := first.until("* OK"); !strings.Contains(g, "AUTH=EXTERNAL") {
+				t.Fatalf("first connection with the key: greeting %q, want AUTH=EXTERNAL", g)
+			}
+			first.send("a CAPABILITY\r\n") // reads past TLS 1.3's NewSessionTicket
+			first.until("a OK")
+			_ = first.c.Close()
+
+			second := h.dialTLS(&tls.Config{RootCAs: h.roots, ServerName: "mail.i10.test", MaxVersion: version,
+				ClientSessionCache: cache})
+			if g := second.until("* OK"); strings.Contains(g, "AUTH=EXTERNAL") {
+				t.Fatalf("a connection with no key offered EXTERNAL (resumed %v): %q",
+					second.c.ConnectionState().DidResume, g)
+			}
+			second.send("b AUTHENTICATE EXTERNAL =\r\n")
+			if got := second.line(); !strings.HasPrefix(got, "b BAD") {
+				t.Fatalf("EXTERNAL with no key answered %q, want BAD", got)
+			}
+		})
+	}
 
 	t.Run("465 never requests a client certificate", func(t *testing.T) {
 		h := startFrontWithCA(t, SMTP, alice(), ca.bundle(t), nil)

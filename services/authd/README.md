@@ -960,7 +960,11 @@ client ─────▶ :25 and in-cluster :2525 go to Stalwart directly, unch
   `tls.RequestClientCert` and verifies it after the handshake (chain to the
   bundle for `clientAuth`, explicit `clientAuth` EKU on the leaf, no DNS or IP
   SAN, subject CN at most 64 bytes, then `sha256(SPKI)`). Any verification
-  failure is logged and treated as no certificate. With no bundle configured,
+  failure is logged and treated as no certificate. ⚠ While a bundle is loaded,
+  993 issues no session tickets and a resumed session's certificate counts as
+  none: Go restores a resumed session's client certificate from the ticket
+  without a new proof of the key, so a copied TLS session cache would otherwise
+  stand in for the Secure Enclave key. With no bundle configured,
   993 asks for no certificate and never offers `EXTERNAL`. 465 never requests a
   client certificate.
 
@@ -1000,8 +1004,11 @@ PLAIN`'s empty one), handles `*` cancellations (`501 5.7.0`) locally, runs
   liveness `454 4.7.0` is answered only when the account row, `gate.Refusal`,
   the device row and `gate.DeviceRefusal` (person, address, workspace, non-null
   key) all pass and only the liveness row is missing; anything else is forwarded
-  so authd decides. At most 3 such `454`s are allowed per connection, after
-  which the front closes it. `MAILFRONT_MAC_SMTP_SAME_ADDRESS` (default `true`)
+  so authd decides. The front cannot check a code's secret (it holds no
+  device-code keys), so a right device id with a wrong secret also gets this
+  `454` while the Mac is offline: accepted, see the design's section 11, "Found
+  in the step 2 code review". At most 3 such `454`s are allowed per
+  connection, after which the front closes it. `MAILFRONT_MAC_SMTP_SAME_ADDRESS` (default `true`)
   mirrors `AUTHD_MAC_SMTP_SAME_ADDRESS`.
 - **Every IMAP command goes under a random tag of the front's own** (`mf` and
   16 hex digits), and the answer gets the client's tag back. A tagged answer for
