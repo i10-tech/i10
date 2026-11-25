@@ -31,7 +31,9 @@ Apple Mail ──IMAP──▶ Stalwart ──LDAP search──▶ authd ──�
 
 That is the path for an ordinary account. An account an SSO connection manages
 takes the same path with a different verifier: its company's directory instead
-of Clerk (see "Managed accounts" below).
+of Clerk (see "Managed accounts" below). A mail device code takes neither: it is
+i10's own secret, checked against `authd.mail_devices` (see "Mail device codes"
+below).
 
 Searches are answered entirely from a local projection of Clerk, maintained by
 webhook. Only the bind reaches Clerk. That split is load-bearing: Clerk allows
@@ -110,6 +112,7 @@ cached password off at the very next bind:
   | `banned`, `locked` (+ `locked_until`) | the Clerk webhook                                                                                                      | Clerk's `verify_password` answers yes for both (probed 2026-11-07), so authd refuses them itself; a lockout lifts at `locked_until`                                                                                                     |
   | `authd.required_domains`              | an active connection that requires SSO                                                                                 | an account that is not managed, on one of those domains, has no Clerk password to use: `ManagedResolver` refuses it (`sso_required`) until it signs in through SSO                                                                      |
   | `authd.required_exempt`               | the same transaction as any change to a role, the bypass list, the owner exemption or what requires SSO                | NOT a reason to turn a login off but the one way out of the row above: an owner or admin (while the owner exemption is on) or a connection's bypass-listed member keeps their Clerk password, and losing it is refused at the next bind |
+  | `authd.passthrough_versions.active`   | `mirrorPassthrough`, in the statement that moves the connection's version                                              | a managed account whose connection's status is not `active` is refused (`connection_inactive`). Only `false` refuses: null is a row an older API pod wrote, "not known", and refuses nothing                                            |
 
 - **A change in Clerk invalidates it.** Each entry records the account's
   `clerk_updated_at` and stops matching when it moves. Clerk publishes no
@@ -567,6 +570,91 @@ is in `docs/research/mail-device-binding.md`, section 7.
   client certificate. Never probed: i10.tech's Cloud Identity Free has no Secure
   LDAP.
 
+## Mail device codes (#383)
+
+An enrolled iPhone or iPad signs in to IMAP and SMTP with a **device code**
+instead of the person's password: `i10dc1.<device id>.<secret>`, the
+`authd.mail_devices` row's UUID as 32 lowercase hex digits and 32 random bytes
+as 43 characters of unpadded, strict base64url, exactly 83 characters
+(`internal/devicecode`). The API mints it and stores only
+`HMAC-SHA256(key, "i10/mail-device-code/v1" 0x00 | id | secret)` and the key's
+id (`code_hash`, `code_kid`), under `MAIL_DEVICE_CODE_KEYS`, which the API and
+authd hold and the mail front does not. `internal/devicecode/testdata/vectors.json`
+pins the format and the hash for the API's TypeScript minter too.
+
+⚠ **The prefix is reserved.** After the bind token, every password that starts
+`i10dc` goes to the device lane, and one that does not parse exactly is refused
+there (`device_code_malformed`). A truncated or mistyped code never reaches Clerk
+or a company's directory, and never spends a failure-budget slot.
+
+⚠ **The whole gate applies first, `RouteOf` included.** A device code is held by
+everything that holds the password: every row reason in the credential cache's
+table, and `RouteOf`'s refusals (`sso_required`, `managed_no_connection`,
+`connection_inactive`), which the password lane meets inside the resolver and
+the device lane, which never calls the resolver, meets in `handleBind`. When the
+hold lifts the device signs in again; nothing is deleted. An account a company's
+SSO manages, with an active connection and no password lane at all (Entra,
+Google Workspace), signs in with a device code.
+
+**The lane, in order** (`ldapsrv/bind_device.go`). ⚠ The order is a security
+property, and tests assert it:
+
+```
+bind token (its MAC covers the device id) -> account row -> gate.Refusal ->
+per-DN throttle -> parse -> key ring -> row by id -> gate.DeviceRefusal ->
+key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
+```
+
+- **`gate.DeviceRefusal`**, one function for the bind and the front: the row
+  must exist (`device_revoked` in the front; the bind finds no row first and
+  logs `device_unknown`), belong to the person the DN names, carry the
+  account's address now and its workspace (null-safely: i10's own mailboxes
+  have none) (`device_mismatch`), and be an iPhone or iPad
+  (`device_platform_refused`: a Mac's code alone is refused until PR 3 checks
+  its Secure Enclave certificate with it).
+- **Nothing is written before the hash matched.** Then, for a code never used,
+  one UPDATE claims the first use, setting `first_used_at` with a `coalesce`
+  where it is already set or `created_at` is under ten minutes old. No row
+  means the code died unused. ⚠ The `coalesce` is what lets Apple Mail's
+  simultaneous first connections all pass: each waits for the row lock and
+  re-reads a row whose first use is set.
+- **A used code idle past 90 days is refused**, and `last_used_at` moves at most
+  once a day. Both clock rules are judged by the database's `now()`, in the same
+  statements (`projection/devices.go`), never by authd's clock.
+- ⚠ **Our faults are `unavailable`, never `invalidCredentials`:** no key ring
+  (authd starts without `MAIL_DEVICE_CODE_KEYS`, and every device bind is then
+  unavailable, logged at ERROR), a `code_kid` the ring does not hold, a database
+  error. An iPhone told "wrong password" asks its owner for a code they have
+  never seen.
+- **It touches nothing else.** No verifier, no credential cache, no flight, no
+  identical-failure memory, no failure budget: no identity provider knows the
+  code, so none is asked, and nothing here can lock the person's real account.
+  `TestDeviceCodeRefusals` and `TestDeviceLaneFaultsAreUnavailable` assert zero
+  provider calls and zero budget writes for every refusal.
+
+**What authd may write.** `authd.mail_devices` is read through the schema's
+default privileges, and the `authd` role may UPDATE `first_used_at` and
+`last_used_at` and no other column (`*_mail_devices_grants_and_triggers`).
+`TestTheDeviceTableGrants` proves both roles' halves.
+
+**Revoking** is a DELETE (the API's store, `apps/api/src/mail-devices/store.ts`), and the
+foreign key to `authd.accounts` cascades, so every permanent end of a mailbox
+takes its devices. The next bind finds no row; the front closes the open
+sessions at its next poll (below).
+
+**The API side** (`apps/api/src/mail-devices/`). Every API read or write of
+`authd.mail_devices` goes through one module (`mint`, `list`, `revoke`, `endFor`,
+and `pruneMailDevices`), which carries the tenant filter outside RLS (checked in
+CI against a fixed non-RLS allowlist in `apps/api/src/db/rls-allowlist.ts`).
+`mint` locks the `authd.accounts` row (`FOR NO KEY UPDATE`), checks every gate
+hold and the caller's `expectedEpoch`, and inserts with a database-generated
+UUIDv7; every revocation writes `authd.accounts` first and calls `endFor` in the
+same transaction so a mint cannot race a revocation. `apps/api/src/retention.ts`
+prunes expired unused (> 10 minutes) and idle (> 90 days) rows hourly in batches
+of 1,000, and `apps/api/scripts/mail-device.ts` provides a CLI (`mint`, `list`,
+`revoke`) for throwaway-account probes until the user-facing enrollment routes
+land.
+
 ## Suspended mailboxes (#344)
 
 A mailbox a company's directory switched off has `authd.accounts.suspended_at`
@@ -612,12 +700,22 @@ the front's parsers, and each patch was a parser trying to follow Stalwart's.
 carries a token in front of the password (`internal/bindtoken`):
 
 ```
-i10mf1.<base64url: key id | expiry | nonce | HMAC-SHA256>.<the real password>
+i10mf2.<base64url: key id | expiry | nonce | HMAC-SHA256>.<the real password>
 ```
 
 The HMAC, under a key the front shares with authd, covers a fixed domain label,
-the key id, the Clerk user id the front looked the login up as, the expiry (60
-seconds) and a 16-byte nonce. Stalwart passes the password through to authd's
+the key id, the Clerk user id the front looked the login up as, the mail device
+the real password names (its 16-byte id, length-prefixed; nothing when it is
+not a device code), the expiry (60 seconds) and a 16-byte nonce.
+
+⚠ **The device is read, on both sides, from the real password, by the same
+parser** (`devicecode.Of`). So the device the front credits a connection to and
+the device authd verifies are the same by construction: a token minted in front
+of one device's code does not open in front of another's, or in front of a
+password (`TestATokenForOneDeviceDoesNotOpenAnother`). `bindtoken.Unwrap`
+returns the device its MAC covered, and the device lane reads exactly that row.
+v1 tokens (`i10mf1.`) carried no device and are refused: the front and authd
+are one image in one pod and switch together. Stalwart passes the password through to authd's
 LDAP bind unchanged. authd accepts a **person** bind only with a valid token for
 the very user id the bind DN names, takes the token off, and only then checks
 the password the usual way. Whatever Stalwart does after the front lost track,
@@ -630,7 +728,7 @@ end `e NO [AUTHENTICATIONFAILED]`.
   same `uid=<clerk id>,ou=people,...` DN, so the token covers them too. The
   service bind (`cn=stalwart`, Stalwart's delivery lookups) needs none.
 - **No permissive phase, no fallback.** A bind without a valid token is never
-  retried as a raw password, and a password that starts with `i10mf1.` is
+  retried as a raw password, and a password that starts with `i10mf2.` is
   wrapped like any other, so exactly one layer comes off.
 - **A refused bind costs nothing.** authd refuses it right after reading the
   DN: before the projection, the credential cache, the failure budget, the
@@ -713,7 +811,11 @@ it. It only takes the attribution back to where the parsers left it.
 `authd.required_domains`, `authd.required_exempt` and
 `authd.passthrough_versions`, and EXECUTE `core.mailbox_domain_refused`:
 exactly what `projection.accountColumns` reads
-(`apps/api/drizzle/*_mailfront_role_grants`). It may also SELECT the
+(`apps/api/drizzle/*_mailfront_role_grants`). Of `authd.mail_devices` it may
+SELECT five columns, by column grant: `id`, `clerk_user_id`, `email`,
+`tenant_id` and `platform`, what `gate.DeviceRefusal` matches. Never the code's
+hash or key id, the serial, the model, the name or who created it
+(`*_mail_devices_grants_and_triggers`). It may also SELECT the
 access-change log, `authd.access_changes` (`*_access_change_triggers`), and
 nothing else. It writes nothing, not even the log: the retention job prunes it. It is not
 `authd`'s role because `authd` may INSERT and UPDATE `authd.bind_failure_budget`,
@@ -927,17 +1029,31 @@ Either closes a connection whose account:
 - is now answered by a different verifier (Clerk, or another connection);
 - has a different primary address than the one it signed in with: that address
   is the login, and its domain is how the poll finds the connection;
-- has no active row any more.
+- has no active row any more;
+- for a session that signed in with a device code, has a device row that is
+  gone or no longer matches (`gate.DeviceRefusal`, the bind's own rule:
+  `device_revoked`, `device_mismatch`, `device_platform_refused`). A device
+  session closed for the epoch or `clerk_updated_at` reconnects with the code it
+  holds.
+
+**Who the device is.** The front parses the password it forwards with the
+bind token's own parser and records the device in that sign-in attempt's
+`Grant` (`DeviceID`), so it is the device the token covers. ⚠ One per attempt:
+a code refused and then a password accepted on the same connection is a
+password session (`TestAnEarlierAttemptsDeviceIsNeverCreditedToTheSignIn`). The
+re-check reads the device rows of the connections that have one, by
+`id = ANY($2)`, in the same statement as their accounts (`projection.SweepQuery`),
+one row per account however many devices it has.
 
 **The access-change log** (`authd.access_changes`). A statement-level trigger,
 `authd.log_access_change`, on every table the gate reads (`authd.accounts`,
 `authd.managed_accounts`, `authd.passthrough_versions`, `authd.required_domains`,
-`authd.required_exempt`, `core.domains`, `core.join_domains`) inserts one row
+`authd.required_exempt`, `authd.mail_devices`, `core.domains`, `core.join_domains`) inserts one row
 per distinct key a statement touched, in the writer's own transaction:
 
 | Kind         | Key                    | Written by                                                              | Re-checks                                            |
 | ------------ | ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------- |
-| `account`    | Clerk user id          | `accounts`, `managed_accounts`, `required_exempt`                       | the connections of that account                      |
+| `account`    | Clerk user id          | `accounts`, `managed_accounts`, `required_exempt`, `mail_devices`       | the connections of that account                      |
 | `domain`     | lowercased mail domain | `required_domains`, `core.domains`, `core.join_domains` (`lower(name)`) | the connections that signed in with an address there |
 | `connection` | SSO connection id      | `passthrough_versions`                                                  | the connections that connection answers for          |
 | `all`        | (none)                 | a TRUNCATE of any of them                                               | every connection                                     |
@@ -1086,6 +1202,14 @@ already watches. The check needs only the clock, so both the poll and the
 sweep run it first, before any query, and hold it during a database outage too: an expired
 pass-through session is closed even when nothing else can be.
 
+**A device session has a maximum age too: 24 hours, plus up to an hour at
+random** (`DeviceMaxAge`, `DeviceMaxAgeJitter`), logged as `device_max_age`.
+Not for revocation, which reaches the row: so that a device in use re-binds at
+least daily and moves its `last_used_at`. An iPhone in push can hold one IMAP
+session for weeks, and without this its device would look idle to the 90-day
+prune while in use. The pass-through maximum age never applies to a device
+session, even on a managed account: the code is i10's, checked by authd.
+
 What it costs (measured 2026-11-22: 1.033 sign-ins per connection per max-age
 period, against the 1.026 the jitter predicts, with clients that reconnect at
 once). At 15 minutes that is about 4.2 reconnects an hour per open connection.
@@ -1158,7 +1282,9 @@ re-check").
   comparison (10,000 domains: 322 ms).
 - **Revocation latency**: every one of the 43 paths that revokes access closed
   its connection within 882 ms of `COMMIT` (three runs each, at the production
-  one-second interval). The bound is one interval plus one poll.
+  one-second interval). The bound is one interval plus one poll. Rerun
+  2026-11-25 with the device table and `passthrough_versions.active` added:
+  all 50 paths within 871 ms, the seven new ones between 168 and 871 ms.
 - **The front itself** stays near 2% of a core with 10,000 idle connections;
   its limit is memory, about 61 KiB a connection.
 - **Several fronts** each poll and sweep their own connections, so the database
@@ -1274,9 +1400,12 @@ is one that cannot be abused. `TestWriteOperationsAreRefused` asserts it.
 authd speaks plaintext LDAP and will verify any password handed to it; off-pod
 reachability would make it an open oracle.
 
-**No password material anywhere.** Not a hash, not a verifier, not a salt -
-neither in the schema nor in an LDAP attribute. With `bindAuthentication: true`
-Stalwart never reads a password attribute, so there is nothing to serve.
+**No password material anywhere.** Not a hash, not a verifier, not a salt of any
+person's password - neither in the schema nor in an LDAP attribute. With
+`bindAuthentication: true` Stalwart never reads a password attribute, so there
+is nothing to serve. The one secret-derived value authd reads is a device code's
+keyed hash (`authd.mail_devices.code_hash`, "Mail device codes" above): i10's own
+secret, never a password, and never in an LDAP attribute.
 
 **The throttle protects the Clerk budget, not the user.** Since lockout is not
 in play (measured above), its job is to stop one misconfigured client from
@@ -1312,6 +1441,7 @@ Worth reporting upstream.
 | `AUTHD_API_SECRET`          | -                          | Same value as the API's. 32+ characters.              |
 | `AUTHD_API_TIMEOUT`         | `5s`                       | Must be positive and at most `12s`.                   |
 | `AUTHD_BIND_TOKEN_KEYS`     | -                          | `<id>:<base64>`, comma list. Without, no person bind. |
+| `MAIL_DEVICE_CODE_KEYS`     | -                          | `<id>:<base64>`, comma list. Without, no device bind. |
 | `AUTHD_LOG_LEVEL`           | `info`                     | ⚠ `debug` logs every LDAP packet, passwords too.      |
 
 ## Layout
@@ -1324,6 +1454,10 @@ internal/gate        whether an account's row lets it sign in, and who answers;
                      shared by the bind, the resolver and the mail front
 internal/mailfront   the TLS front: IMAP/SMTP before sign-in, PROXY v2, the scan
                      of Stalwart's output, the sweep
+internal/devicecode  the mail device code: the strict parser, the keyed hash, the
+                     key ring, test vectors shared with the API's minter
+internal/keyring     "<id>:<base64>" key lists (bind token and device code keys)
+internal/bindtoken   the front's bind token: the MAC over the person and device
 internal/directory   the LDAP view: entries, DNs, filter evaluation
 internal/verify      the Verifier / Resolver / BudgetStore seam, Outcome
 internal/clerkauth   the Clerk verifier: verify_password and its status mapping
@@ -1337,7 +1471,7 @@ internal/credcache   verified-password cache and the remembered refusals
 internal/inflight    one verification for concurrent identical binds
 internal/budgetstore the shared failure budget in Postgres
 internal/projection  the Clerk read model (Store interface + Postgres)
-internal/ldapsrv     Bind and Search handlers
+internal/ldapsrv     Bind and Search handlers, and the device code lane
 internal/throttle    per-DN token bucket
 ```
 
@@ -1347,7 +1481,10 @@ go test -race ./...
 
 ## The schema lives elsewhere
 
-authd is a **reader**. The `authd.*` tables are defined in Drizzle at
+authd is a **reader**, with three narrow writes: the shared failure budget
+(`authd.bind_failure_budget`) and a mail device's two clock stamps
+(`first_used_at`, `last_used_at` on `authd.mail_devices`, by column grant). The
+`authd.*` tables are defined in Drizzle at
 `apps/api/src/db/schema.ts` and migrated from `apps/api/drizzle/`, because the
 webhook receiver that writes them lives there and two sources of truth for one
 schema is how drift starts.

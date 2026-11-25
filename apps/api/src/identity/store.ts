@@ -44,6 +44,8 @@ import {
   mirrorRequiredDomains,
   unmirrorManaged,
 } from "./authd-mirror.js"
+import { endFor } from "../mail-devices/store.js"
+import { raiseCredentialEpoch } from "../projection/credential-epoch.js"
 
 const toRule = (r: typeof groupRoleRules.$inferSelect): GroupRoleRule => ({
   id: r.id,
@@ -1190,7 +1192,13 @@ export function identityStore(db: Database, secrets: Sealer | null): IdentitySto
             ),
           )
           .returning({ id: managedAccounts.clerkUserId })
-        if (removed.length > 0) await unmirrorManaged(tx, clerkUserId)
+        if (removed.length > 0) {
+          await unmirrorManaged(tx, clerkUserId)
+          // ⚠ LOCK ORDER: `authd.accounts` first (closes the mint race),
+          // `authd.mail_devices` second, scoped to this workspace only.
+          await raiseCredentialEpoch(tx, clerkUserId)
+          await endFor(tx, { tenantId, clerkUserIds: [clerkUserId] })
+        }
         return removed
       })
       return gone.length > 0

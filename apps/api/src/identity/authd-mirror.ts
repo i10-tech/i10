@@ -184,6 +184,14 @@ export async function mirrorRequiredDomains(tx: Tx, tenantId: string): Promise<v
  *
  * ⚠ UNDER ONE LOCK PER WORKSPACE, as `mirrorRequiredExempt` is: two recomputes at
  * once would each hash without the other's uncommitted change.
+ *
+ * ⚠ AND IT WRITES `active` (the connection's status is `active`) IN THE SAME
+ * STATEMENT, whether or not the hash moved. authd's gate refuses a managed
+ * account whose row says `active = false` (`connection_inactive`), which is what
+ * holds its mail device codes. A row an older API pod wrote with no `active` (null,
+ * which refuses nothing) is filled in by the next mirror without a version or
+ * epoch raise: only a moved hash raises them (`old` and `new` in RETURNING,
+ * PostgreSQL 18).
  */
 export async function mirrorPassthrough(tx: Tx, tenantId: string): Promise<void> {
   await tx.execute(
@@ -192,6 +200,7 @@ export async function mirrorPassthrough(tx: Tx, tenantId: string): Promise<void>
   await tx.execute(sql`
     with now_ as (
       select c.id as connection_id,
+             c.status = 'active' as active,
              md5(jsonb_build_array(
                c.status = 'active',
                exists (
@@ -212,18 +221,23 @@ export async function mirrorPassthrough(tx: Tx, tenantId: string): Promise<void>
              )::text) as fingerprint
         from identity.connections c
        where c.tenant_id = ${tenantId}
-    ), moved as (
-      insert into authd.passthrough_versions as pv (connection_id, version, fingerprint, updated_at)
-      select connection_id, 1, fingerprint, now() from now_
+    ), written as (
+      insert into authd.passthrough_versions as pv (connection_id, version, fingerprint, active, updated_at)
+      select connection_id, 1, fingerprint, active, now() from now_
       on conflict (connection_id) do update
-        set version = pv.version + 1, fingerprint = excluded.fingerprint, updated_at = now()
+        set version = case when pv.fingerprint is distinct from excluded.fingerprint
+                           then pv.version + 1 else pv.version end,
+            fingerprint = excluded.fingerprint,
+            active = excluded.active,
+            updated_at = now()
         where pv.fingerprint is distinct from excluded.fingerprint
-      returning pv.connection_id
+           or pv.active is distinct from excluded.active
+      returning pv.connection_id, old.fingerprint is distinct from new.fingerprint as moved
     )
     update authd.accounts a
        set credential_epoch = a.credential_epoch + 1, updated_at = now()
       from authd.managed_accounts m
-      join moved on moved.connection_id = m.connection_id
+      join written on written.connection_id = m.connection_id and written.moved
      where a.clerk_user_id = m.clerk_user_id
   `)
 }

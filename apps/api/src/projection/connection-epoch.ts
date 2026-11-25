@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm"
+import { asc, eq, inArray, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { accounts, authdManagedAccounts } from "../db/schema.js"
 
@@ -15,28 +15,43 @@ import { accounts, authdManagedAccounts } from "../db/schema.js"
  * ⚠ ONE STATEMENT, AND THE INCREMENT IS IN SQL, for the reason `raiseCredentialEpoch`
  * gives: a missed raise is a cached password that survives its revocation.
  *
+ * ⚠ DETERMINISTIC LOCK ORDER: locks target `authd.accounts` rows in ascending
+ * `clerk_user_id` order (`FOR NO KEY UPDATE`) before updating so concurrent bulk
+ * updates (`suspendWorkspace`, `suspendDomain`, `raiseConnectionCredentialEpochs`)
+ * cannot deadlock on overlapping accounts.
+ *
  * ⚠ IT LIVES IN ITS OWN MODULE, NOT IN `writer.ts`, for the reason
  * test/credential-epoch.test.ts gives.
  *
  * Returns the unexecuted statement, to be awaited.
  */
 export function raiseConnectionCredentialEpochs(
-  db: Pick<Database, "update" | "select">,
+  db: Pick<Database, "update" | "select" | "with" | "$with">,
   connectionId: string,
 ) {
+  const locked = db.$with("locked").as(
+    db
+      .select({ id: accounts.clerkUserId })
+      .from(accounts)
+      .where(
+        inArray(
+          accounts.clerkUserId,
+          db
+            .select({ id: authdManagedAccounts.clerkUserId })
+            .from(authdManagedAccounts)
+            .where(eq(authdManagedAccounts.connectionId, connectionId)),
+        ),
+      )
+      .orderBy(asc(accounts.clerkUserId))
+      .for("no key update"),
+  )
   return db
+    .with(locked)
     .update(accounts)
     .set({
       credentialEpoch: sql`${accounts.credentialEpoch} + 1`,
       updatedAt: sql`now()`,
     })
-    .where(
-      inArray(
-        accounts.clerkUserId,
-        db
-          .select({ id: authdManagedAccounts.clerkUserId })
-          .from(authdManagedAccounts)
-          .where(eq(authdManagedAccounts.connectionId, connectionId)),
-      ),
-    )
+    .from(locked)
+    .where(eq(accounts.clerkUserId, locked.id))
 }

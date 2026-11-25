@@ -23,9 +23,11 @@ import (
 // UNTIL IT IS HERE AND HAS ITS TRIGGERS, and its paths belong in gatePaths
 // (internal/mailfront paths_db_test.go).
 var gateLogs = map[string][2]string{
-	"authd.accounts":             {string(ChangeAccount), "clerk_user_id"},
-	"authd.managed_accounts":     {string(ChangeAccount), "clerk_user_id"},
-	"authd.required_exempt":      {string(ChangeAccount), "clerk_user_id"},
+	"authd.accounts":         {string(ChangeAccount), "clerk_user_id"},
+	"authd.managed_accounts": {string(ChangeAccount), "clerk_user_id"},
+	"authd.required_exempt":  {string(ChangeAccount), "clerk_user_id"},
+	// The device rows of open device sessions (SweepQuery), by person.
+	"authd.mail_devices":         {string(ChangeAccount), "clerk_user_id"},
 	"authd.passthrough_versions": {string(ChangeConnection), "connection_id"},
 	"authd.required_domains":     {string(ChangeDomain), "domain"},
 	"core.domains":               {string(ChangeDomain), "name"},
@@ -554,7 +556,7 @@ func TestTheMailDomainIsTheGatesOwn(t *testing.T) {
 	if err != nil || bound == nil {
 		t.Fatalf("AccountByUID = (%v, %v)", bound, err)
 	}
-	swept, _, err := store.AccountsByUIDs(ctx, []string{id})
+	swept, _, err := store.AccountsByUIDs(ctx, []string{id}, nil)
 	if err != nil || len(swept) != 1 {
 		t.Fatalf("AccountsByUIDs = (%v, %v)", swept, err)
 	}

@@ -6,6 +6,9 @@ import "./openapi-first.js"
  * One run, in this order:
  *   0. Prunes the mail front's access-change log (`authd.access_changes`) of
  *      rows older than an hour: the cutoff is fixed inside the function.
+ *   0b. Prunes expired mail device codes (`authd.mail_devices`, #383): unused
+ *      codes older than 10 minutes and used codes idle past 90 days, in batches
+ *      of 1,000 per transaction.
  *   1. Keeps a year of monthly partitions ahead, locked down like 0064's.
  *   2. Deletes every workspace's mail older than its plan keeps it: row, body,
  *      events, webhook deliveries - leaving a tombstone per message.
@@ -41,6 +44,7 @@ import { mailboxLifecycleStore } from "./mailboxes/lifecycle-store.js"
 import { purgeDueMailboxes } from "./mailboxes/lifecycle.js"
 import { mailboxSweepStore, sweepMailboxJobs } from "./mailboxes/sweep.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
+import { pruneMailDevices } from "./mail-devices/prune.js"
 import { loadEnv } from "./env.js"
 import { unlockEnv } from "./crypto/unlock.js"
 import {
@@ -95,6 +99,8 @@ await withMonitor(
       mailboxesPurged: 0,
       mailboxesWaitingForExport: 0,
       accessChangesPruned: 0,
+      mailDevicesUnusedPruned: 0,
+      mailDevicesIdlePruned: 0,
       tombstonesPruned: 0,
       partitionsDropped: [] as string[],
       partitionsRefused: [] as string[],
@@ -121,6 +127,18 @@ await withMonitor(
       } catch (error) {
         log.error({ err: error }, "could not prune the access-change log")
         captureError(error, { phase: "access_changes" })
+      }
+
+      // ── 0b. Mail device codes (#383) ──
+      // Unused codes older than 10 minutes and used codes idle past 90 days.
+      // Batched at 1,000 rows per transaction using the partial indexes.
+      try {
+        const devices = await pruneMailDevices(db)
+        summary.mailDevicesUnusedPruned = devices.unused
+        summary.mailDevicesIdlePruned = devices.idle
+      } catch (error) {
+        log.error({ err: error }, "could not prune expired mail device codes")
+        captureError(error, { phase: "mail_devices" })
       }
 
       // ── 1. Partitions ahead ──

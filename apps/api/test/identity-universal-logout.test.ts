@@ -109,6 +109,7 @@ async function world(
   )
 
   const epoch = { fail: false }
+  const epochTenants: { clerkUserId: string; tenantId: string }[] = []
   const engine = oidcEngine({
     store: store.store,
     fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
@@ -127,9 +128,10 @@ async function world(
       forget: (input) => forgotten.push(input),
       // Recorded in the Clerk call list, so the ORDER against the revocations is
       // something a test can read.
-      raiseCredentialEpoch: async (clerkUserId: string) => {
+      raiseCredentialEpoch: async (clerkUserId: string, tenantId: string) => {
         if (epoch.fail) throw new Error("database down")
         clerk.calls.push(`raiseEpoch:${clerkUserId}`)
+        epochTenants.push({ clerkUserId, tenantId })
       },
       fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
       log,
@@ -301,6 +303,7 @@ async function world(
     replay,
     forgotten,
     epoch,
+    epochTenants,
     bound,
     call,
     live,
@@ -892,5 +895,24 @@ describe("HTTP route POST /sso/universal-logout/:connection", () => {
     })
 
     expect(res.status).toBe(404)
+  })
+})
+
+describe("Okta Universal Logout: mail device workspace scoping (#383)", () => {
+  it("passes the connection's tenantId to raiseCredentialEpoch even when no session is open", async () => {
+    const w = await world()
+    w.store.identities.push({
+      id: "00000000-0000-4000-a000-000000000099",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      subject: "00u_ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+      lastLoginAt: null,
+    })
+    const token = await w.mintOidcToken()
+    const outcome = await w.call({ token })
+    expect(outcome).toEqual({ outcome: "logged_out", revoked: 0 })
+    expect(w.epochTenants).toEqual([{ clerkUserId: "user_ada", tenantId: TENANT }])
   })
 })

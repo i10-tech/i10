@@ -67,6 +67,7 @@ const entry = <A>(e: Entry<A>): Entry => e as unknown as Entry
 
 const PROJECTION = "services/authd/internal/projection/postgres.go"
 const BUDGET = "services/authd/internal/budgetstore/postgres.go"
+const DEVICES = "services/authd/internal/projection/devices.go"
 
 /** Runs authd's queries for one method, in order, with the given parameter per query. */
 const goRun =
@@ -238,6 +239,44 @@ export const REGISTRY: Entry[] = [
     role: "authd",
     cases: [{ name: "a person", arg: async (p) => p.accountId(await p.hugeAccount()) }],
     run: (ctx, uid) => ctx.query(goConst(BUDGET, "reserveSQL"), [uid, 600, 10]),
+  }),
+
+  entry<string>({
+    name: "authd.device_by_id",
+    area: "authd",
+    site: { file: DEVICES, anchor: "func (p *Postgres) DeviceByID(" },
+    source: "go-source",
+    frequency:
+      "every device-code bind (each IMAP and SMTP sign-in of an enrolled iPhone or iPad)",
+    role: "authd",
+    cases: [
+      { name: "a used iPhone", arg: (p) => p.usedDevice(), expect: hasRows(true) },
+      { name: "missing", arg: async () => MISSING_UUID, expect: hasRows(false) },
+    ],
+    run: (ctx, id) => ctx.query(goConst(DEVICES, "DeviceByIDQuery"), [id]),
+  }),
+  entry<string>({
+    name: "authd.claim_device_first_use",
+    area: "authd",
+    site: { file: DEVICES, anchor: "const ClaimDeviceFirstUseQuery" },
+    source: "go-source",
+    frequency: "a device's first sign-ins (once per device, a few at once)",
+    role: "authd",
+    cases: [
+      { name: "a code minted and never used", arg: (p) => p.unusedDevice() },
+      { name: "missing", arg: async () => MISSING_UUID },
+    ],
+    run: (ctx, id) => ctx.query(goConst(DEVICES, "ClaimDeviceFirstUseQuery"), [id]),
+  }),
+  entry<string>({
+    name: "authd.touch_device",
+    area: "authd",
+    site: { file: DEVICES, anchor: "const TouchDeviceQuery" },
+    source: "go-source",
+    frequency: "at most once a day per device, at a bind",
+    role: "authd",
+    cases: [{ name: "a used iPhone", arg: (p) => p.usedDevice() }],
+    run: (ctx, id) => ctx.query(goConst(DEVICES, "TouchDeviceQuery"), [id]),
   }),
 
   // --- API per request ------------------------------------------------------

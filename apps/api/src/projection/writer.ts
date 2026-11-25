@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import { accounts, aliases, webhookEvents } from "../db/schema.js"
 import { mailboxIdCache } from "../mail/jmap-as.js"
+import { reconcileAccountDevices } from "../mail-devices/store.js"
 import { projectUser, type ClerkUser } from "./clerk-user.js"
 
 /**
@@ -231,13 +232,28 @@ async function applyUser(
         sql`excluded.clerk_updated_at >= ${accounts.clerkUpdatedAt}`,
       ),
     })
-    .returning({ email: accounts.email })
+    .returning({
+      email: accounts.email,
+      tenantId: accounts.tenantId,
+      banned: accounts.banned,
+    })
 
   if (updated.length === 0) return { outcome: "stale" }
 
-  if (previous && previous.email !== updated[0]!.email) {
+  const current = updated[0]!
+  if (previous && previous.email !== current.email) {
     mailboxIdCache.forget(previous.email)
   }
+
+  // ⚠ IN THE SAME TRANSACTION, AFTER WRITING `authd.accounts` (lock order).
+  // A Clerk ban ends every mail device; a primary address or workspace change
+  // deletes any device whose address or workspace no longer matches this row.
+  await reconcileAccountDevices(tx, {
+    clerkUserId: mailbox.clerkUserId,
+    email: current.email,
+    tenantId: current.tenantId,
+    banned: current.banned,
+  })
 
   // Aliases are replaced wholesale rather than diffed. The set is small, it is
   // two statements either way, and a diff still has to get removal right.

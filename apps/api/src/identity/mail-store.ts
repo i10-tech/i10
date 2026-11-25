@@ -23,6 +23,7 @@ import {
 import { workspaceRoles } from "../db/core.js"
 import { aliases, groupMembers, groups } from "../db/schema.js"
 import { directoryMail } from "../mailboxes/store.js"
+import { endFor } from "../mail-devices/store.js"
 import type {
   DirectoryMailStore,
   LeaverAction,
@@ -237,7 +238,7 @@ export function directoryMailStore(db: Database): DirectoryMailStore & GroupMail
       )
     },
 
-    async suspend(tenantId, clerkUserId, plan, at, audit) {
+    async suspend(tenantId, clerkUserId, plan, at, audit, options) {
       return withTenant(db, tenantId, async (tx) => {
         const account = await directoryMail.account(tx, tenantId, clerkUserId)
         if (!account) return "no_mailbox" as const
@@ -252,8 +253,18 @@ export function directoryMailStore(db: Database): DirectoryMailStore & GroupMail
           )
           .for("update")
         // ⚠ THE LOGIN IS REFUSED EITHER WAY: a row that says suspended while
-        // the account was not (a repair) is put right, but nothing else moves.
+        // the account was not (a repair) is put right, and `authd.accounts` is
+        // written BEFORE deleting devices (lock order; closes the mint race).
         await directoryMail.suspend(tx, tenantId, clerkUserId, at)
+        // ⚠ HONOURED BEFORE THE "ALREADY SUSPENDED" EARLY RETURN: a mailbox an
+        // admin suspended (KEEP, devices held) whose owner then leaves or is
+        // deprovisioned must still lose its mail devices.
+        if (options.endDevices) {
+          await endFor(tx, { tenantId, clerkUserIds: [clerkUserId] })
+          if (account.tenantId === null) {
+            await endFor(tx, { tenantId: null, clerkUserIds: [clerkUserId] })
+          }
+        }
         if (existing?.state === "suspended") return "already" as const
         const values = {
           address: account.email,

@@ -28,9 +28,17 @@ describe("raising a connection's credential epochs", () => {
     expect(params).toContain("conn-1")
   })
 
+  it("locks target accounts in clerk_user_id order before updating", () => {
+    const { sql: text } = statement()
+    expect(text).toContain(
+      'order by "authd"."accounts"."clerk_user_id" asc for no key update',
+    )
+  })
+
   it("changes nothing else that matters to authd", () => {
     const { sql: text } = statement()
-    const set = text.slice(text.indexOf(" set "), text.indexOf(" where "))
+    const setIdx = text.indexOf(" set ")
+    const set = text.slice(setIdx, text.indexOf(" where ", setIdx))
     expect(set).not.toContain("active")
     expect(set).not.toContain("clerk_updated_at")
     expect(set).not.toContain("suspended")

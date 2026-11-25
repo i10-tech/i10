@@ -222,9 +222,15 @@ export async function assertRlsSubject(
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where n.nspname = 'core' and c.relispartition and c.relkind in ('r', 'p')
           and has_table_privilege(current_user, c.oid, 'SELECT'))      as partitions,
-      (select coalesce(array_agg(p.proname::text order by p.proname), '{}')
+      (select coalesce(array_agg(n.nspname || '.' || p.proname order by n.nspname, p.proname), '{}')
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname in ('core', 'identity') and p.prosecdef
+        where n.nspname not in ('pg_catalog', 'information_schema')
+          and n.nspname not like 'pg_%'
+          and not exists (
+            select 1 from pg_depend d
+             where d.objid = p.oid and d.deptype = 'e'
+          )
+          and p.prosecdef
           and has_function_privilege('public', p.oid, 'EXECUTE'))     as definers
   `
   const holes = [
@@ -238,8 +244,8 @@ export async function assertRlsSubject(
 
   if (holes.length > 0) {
     throw new Error(
-      `Refusing to start: the tenant boundary in core or identity has holes - ${holes.join("; ")}. ` +
-        `Give every table RLS and a tenant policy, revoke direct grants on partitions, ` +
+      `Refusing to start: the database security boundary has holes - ${holes.join("; ")}. ` +
+        `Give every table in core or identity RLS and a tenant policy, revoke direct grants on partitions, ` +
         `and REVOKE EXECUTE ... FROM PUBLIC on definer functions (see migration 0064).`,
     )
   }

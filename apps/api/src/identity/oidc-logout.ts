@@ -205,13 +205,23 @@ export function jwksReader(fetch: OidcFetch, now: () => number = Date.now) {
 // ── The endpoint ─────────────────────────────────────────────────────────
 
 export interface BackchannelDeps {
-  store: Pick<IdentityStore, "connectionForStart" | "revokeSessionRow" | "record">
+  store: Pick<
+    IdentityStore,
+    "connectionForStart" | "revokeSessionRow" | "record" | "identityBySubject"
+  >
   /** Protocol-neutral despite where it lives: the sessions a subject or IdP session names. */
   sessions: Pick<SamlStore, "sessionsForLogout">
   clerk: Pick<ClerkIdentity, "revokeSession">
   replay: ReplayCache
   /** The gate's cache, so a revoked session is refused at once. */
   forget(input: { userId?: string; sessionId?: string }): void
+  /**
+   * Raises the account's `credential_epoch` and ends its mail devices in this
+   * workspace in one transaction (`raiseEpochAndEndDevices`, mail-devices/store.ts).
+   * Called only for a user-wide logout (`sub` with no `sid`), never for a
+   * session-specific logout that carries a `sid`.
+   */
+  raiseCredentialEpoch?: (clerkUserId: string, tenantId: string) => Promise<unknown>
   fetch: OidcFetch
   log: Logger
   now?: () => Date
@@ -398,6 +408,23 @@ export function backchannelLogout(
         sessionIndexes: sid ? [sid] : [],
         at,
       })
+      /*
+       * ⚠ USER-WIDE LOGOUT (`sub` WITHOUT `sid`) ENDS MAIL ACCESS EVEN WITH NO
+       * OPEN CONSOLE SESSION. Resolving through `identityBySubject` reaches a
+       * person who only has a mail client enrolled; a session-specific logout
+       * (`sid` present) is one browser tab signing out and leaves mail devices
+       * alone. Runs inside this `try` so a DB failure releases the `jti` claim.
+       */
+      if (sub && !sid && d.raiseCredentialEpoch) {
+        const linked = await d.store.identityBySubject(
+          connection.tenantId,
+          connection.id,
+          sub,
+        )
+        if (linked) {
+          await d.raiseCredentialEpoch(linked.clerkUserId, connection.tenantId)
+        }
+      }
     } catch (error) {
       // Revoking again is harmless, so the IdP's retry must be allowed in.
       await d.replay

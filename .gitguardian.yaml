@@ -42,3 +42,11 @@ secret:
     # apps/api/test/webhook-deliver.test.ts
     - name: "webhook delivery test vector - synthetic signing key"
       match: 442595b779e5081faf949038affc13c9ace15a5a7e28ce0c1ad5be346a0e9f32
+
+    # The device code test vectors' secret: the 32 bytes 0x10, 0x11 ... 0x2f
+    # written as hex, a counting sequence chosen so both languages' tests can
+    # see it is synthetic. Not a device code, not a key: no code minted in any
+    # environment uses it; the API mints real secrets from a CSPRNG.
+    # services/authd/internal/devicecode/testdata/vectors.json (twice)
+    - name: "device code test vector - bytes 0x10 to 0x2f, a counting sequence"
+      match: b083a8331a769506f0f80ad9e2c064009862a7f02d4754863c83f9143736eb47

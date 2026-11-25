@@ -50,6 +50,28 @@ const (
 	// ManagedNoConnection is an account an SSO connection manages whose
 	// connection is gone. It is refused rather than sent to Clerk.
 	ManagedNoConnection = "managed_no_connection"
+
+	// ConnectionInactive is an account an SSO connection manages while that
+	// connection is not active (disabled, or back to draft or testing). Its
+	// company's password lane has nothing to ask then either; the rule is here
+	// for the device lane, which never asks the API, so a disabled connection
+	// holds its people's device codes until it is active again.
+	ConnectionInactive = "connection_inactive"
+)
+
+// Reasons a device code is refused, or a device session closed, because its
+// row no longer matches the account (DeviceRefusal).
+const (
+	// DeviceRevoked: the device row is gone (a revoke, the account deleted, the
+	// prune), or now belongs to another account.
+	DeviceRevoked = "device_revoked"
+	// DeviceMismatch: the row is there but was minted for another person,
+	// address or workspace than the account has now.
+	DeviceMismatch = "device_mismatch"
+	// DevicePlatformRefused: a platform whose code alone is not enough. A Mac's
+	// code is refused everywhere until the Secure Enclave certificate is checked
+	// with it (PR 3).
+	DevicePlatformRefused = "device_platform_refused"
 )
 
 // RowRefusal names why the account row turns this login away before a verifier
@@ -107,7 +129,8 @@ func (r Route) Clerk() bool { return r.Refusal == "" && r.Connection == "" }
 //
 // ⚠ A MANAGED ACCOUNT IS NEVER ROUTED TO CLERK: its password belongs to its
 // company. Nor is an account that SSO is required for while it is not managed
-// yet, unless SSO itself exempts it (SSOExempt).
+// yet, unless SSO itself exempts it (SSOExempt). A managed account whose
+// connection is not active is refused outright (ConnectionInactive).
 //
 // Whether the connection has pass-through configured and switched on is NOT
 // decided here. It is the API's answer, fetched by the pass-through verifier at
@@ -121,6 +144,8 @@ func RouteOf(a *projection.Account) Route {
 		return Route{}
 	case a.ManagedConnection == "":
 		return Route{Refusal: ManagedNoConnection}
+	case a.ConnectionInactive:
+		return Route{Refusal: ConnectionInactive}
 	}
 	return Route{Connection: a.ManagedConnection}
 }
@@ -132,4 +157,34 @@ func Refusal(a *projection.Account) string {
 		return r
 	}
 	return RouteOf(a).Refusal
+}
+
+// DeviceRefusal names why a device row does not let its code sign in to the
+// account the bind DN names (or keep a device session open), or "". d is nil
+// when there is no such row. The account must already have passed Refusal.
+//
+// ⚠ ONE COPY, FOR THE BIND AND THE FRONT. authd's bind refuses a code with it
+// before the hash is compared, and the mail front closes an open device session
+// with it when the row changes, so a revocation that stops the next sign-in also
+// ends the session that is open.
+//
+// ⚠ THE ROW MUST STILL BELONG TO THIS PERSON, THIS ADDRESS AND THIS WORKSPACE.
+// The code names a row; the row names who it was minted for. A code of person
+// A presented on person B's DN, a device minted for an address the account no
+// longer has, or one minted in a workspace the mailbox has since left, is
+// refused. The workspaces compare null-safely: i10's own mailboxes have none.
+//
+// The clock rules (the first-use window, the idle limit) are not here: they are
+// the bind's alone (projection.DeviceByID). An open session already passed them
+// at its bind, and the first-use stamp is that bind's own write.
+func DeviceRefusal(d *projection.Device, a *projection.Account) string {
+	switch {
+	case d == nil:
+		return DeviceRevoked
+	case d.ClerkUserID != a.ClerkUserID, d.Email != a.Email, d.TenantID != a.TenantID:
+		return DeviceMismatch
+	case d.Platform != "ios" && d.Platform != "ipados":
+		return DevicePlatformRefused
+	}
+	return ""
 }

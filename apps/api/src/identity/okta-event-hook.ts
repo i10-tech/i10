@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { z } from "zod"
 import {
   hashSecret,
@@ -6,7 +7,10 @@ import {
   sameHash,
   type Connection,
 } from "./model.js"
-import type { IdentityStore, Logger } from "./ports.js"
+import { storedOidc } from "./oidc.js"
+import { storedOidcMail } from "./oidc-mail.js"
+import type { IdentityStore, Logger, ReplayCache } from "./ports.js"
+import { ReplayUnavailable } from "./saml.js"
 
 /**
  * Okta Event Hooks (#383, B9 step 2b): Okta tells us a person's Okta account
@@ -39,6 +43,39 @@ import type { IdentityStore, Logger } from "./ports.js"
 export const HOOK_SECRET_PREFIX = "i10_okh_"
 
 /**
+ * User events that end mail device codes in addition to raising the epoch (#383).
+ *
+ * Every one of these means the person's access was ended, forced out, or reset.
+ * Guarded by: `User` targets only (never actor fallback), replay cache on `uuid`,
+ * finite `published` within `MAX_EVENT_AGE_MS` behind and `MAX_EVENT_FUTURE_MS`
+ * ahead, and `created_at < published + DEVICE_CREATED_BEFORE_SKEW_MS`.
+ */
+export const DEVICE_REVOKING_USER_EVENTS: ReadonlySet<string> = new Set([
+  "user.lifecycle.suspend",
+  "user.lifecycle.deactivate",
+  "user.lifecycle.delete.initiated",
+  "user.session.clear",
+  "user.account.reset_password",
+])
+
+/**
+ * User events that raise the credential epoch without deleting mail device codes.
+ *
+ * `user.account.update_password` is a routine password rotation (the person is
+ * still employed and enrolled); `user.account.lock` is a temporary lockout that
+ * protects the password lane. An Okta lock does not reach authd's row, so it
+ * neither holds nor deletes device codes: deleting them would let anybody wipe a
+ * person's phone with ten wrong guesses at their Okta password.
+ */
+export const EPOCH_ONLY_USER_EVENTS: ReadonlySet<string> = new Set([
+  "user.account.update_password",
+  "user.account.lock",
+])
+
+const APP_USER_MEMBERSHIP_REMOVE = "application.user_membership.remove"
+const APP_LIFECYCLE_DEACTIVATE = "application.lifecycle.deactivate"
+
+/**
  * The event types that raise the epoch, and the only ones worth subscribing
  * the hook to. All are event-hook-eligible in Okta's catalog.
  *
@@ -46,17 +83,13 @@ export const HOOK_SECRET_PREFIX = "i10_okh_"
  * sign-out, and a sign-out does not change a password. `user.lifecycle.
  * delete.completed` is not event-hook-eligible, so `delete.initiated` is the
  * delete signal Okta can send. `application.user_membership.remove` is a person
- * losing the app (the User target), which is how an assignment ends.
+ * losing the app (the User target), which ends devices only when an `AppInstance`
+ * target matches this connection's own Okta app.
  */
 export const CREDENTIAL_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "user.account.update_password",
-  "user.account.reset_password",
-  "user.lifecycle.suspend",
-  "user.lifecycle.deactivate",
-  "user.lifecycle.delete.initiated",
-  "user.account.lock",
-  "user.session.clear",
-  "application.user_membership.remove",
+  ...EPOCH_ONLY_USER_EVENTS,
+  ...DEVICE_REVOKING_USER_EVENTS,
+  APP_USER_MEMBERSHIP_REMOVE,
 ])
 
 /**
@@ -107,6 +140,54 @@ export const HOOK_EVENT_TYPES: readonly string[] = [
  * ever.
  */
 export const MAX_EVENT_AGE_MS = 6 * 60 * 60 * 1000
+
+/**
+ * A device-revoking event with `published` further ahead of our clock than this
+ * does not delete devices (still raises the epoch): a future timestamp would
+ * otherwise push `createdBefore` into the future and wipe devices enrolled later.
+ */
+export const MAX_EVENT_FUTURE_MS = 2 * 60 * 1000
+
+/**
+ * Clock-skew margin added to `published` when computing `createdBefore` for
+ * `endFor`: covers clock drift between Okta and Postgres while keeping devices
+ * enrolled after a real re-enrollment intact when Okta delivers late.
+ */
+export const DEVICE_CREATED_BEFORE_SKEW_MS = 60 * 1000
+
+/**
+ * The Okta `AppInstance` ids (`0oa...`) this connection represents.
+ *
+ * Includes:
+ *   - `config.oidc.clientId` when `protocol === "oidc"` (the sign-in OIDC app's
+ *     client id IS its Okta AppInstance id), and
+ *   - the Okta mail app's client id from `config.oidcMail` (preset `"okta"`) or
+ *     legacy `config.oktaMail`, for any protocol (SAML connections can have an
+ *     Okta OIDC mail app too).
+ *
+ * Non-Okta `oidcMail` presets are excluded because their client ids are not
+ * Okta AppInstance ids. For a SAML connection with no Okta mail app, the set is
+ * empty because `config.saml` carries only the SAML key id (`exk...`).
+ */
+export function ownOktaAppIds(
+  connection: Partial<Pick<Connection, "protocol" | "provider" | "config">>,
+): ReadonlySet<string> {
+  const ids = new Set<string>()
+  if (!connection.config) return ids
+  if (connection.protocol === "oidc") {
+    const signInId = storedOidc({ config: connection.config }).clientId?.trim()
+    if (signInId) ids.add(signInId)
+  }
+  const mail = storedOidcMail({
+    config: connection.config,
+    provider: connection.provider ?? "okta",
+  })
+  if (mail.preset === "okta" && typeof mail.clientId === "string") {
+    const mailId = mail.clientId.trim()
+    if (mailId) ids.add(mailId)
+  }
+  return ids
+}
 
 /** Users resolved and raised at once; a batch is bounded by the body limit. */
 const CONCURRENCY = 8
@@ -244,7 +325,42 @@ export type OktaEventHookOutcome =
       connectionRaised: boolean
     }
 
-export interface OktaEventHookDeps {
+/**
+ * Device-revocation wiring for Okta event hooks: either BOTH callbacks and the
+ * replay cache are supplied together, or none of them are. Supplying callbacks
+ * without a replay cache would silently degrade device revocation to epoch-only.
+ */
+export type OktaEventHookDeviceRevocation =
+  | {
+      /**
+       * Raises the account's epoch AND deletes its mail devices created before
+       * `createdBefore` in ONE transaction (`raiseEpochAndEndDevices`).
+       */
+      revokeUserDevices: (input: {
+        tenantId: string
+        clerkUserId: string
+        createdBefore: Date
+      }) => Promise<void>
+      /**
+       * Raises every managed account's epoch on the connection AND deletes their
+       * mail devices created before `createdBefore` in ONE transaction
+       * (`raiseConnectionEpochAndEndDevices`).
+       */
+      revokeConnectionDevices: (input: {
+        tenantId: string
+        connectionId: string
+        createdBefore: Date
+      }) => Promise<void>
+      /** Replay cache on event `uuid` (TTL = `MAX_EVENT_AGE_MS`) for device revocations. */
+      replay: ReplayCache
+    }
+  | {
+      revokeUserDevices?: undefined
+      revokeConnectionDevices?: undefined
+      replay?: undefined
+    }
+
+export type OktaEventHookDeps = {
   store: Pick<IdentityStore, "identityBySubject" | "identityByEmail">
   /** `raiseCredentialEpoch` against the API's database. */
   raiseEpoch(clerkUserId: string): Promise<void>
@@ -252,12 +368,37 @@ export interface OktaEventHookDeps {
   raiseConnection(connectionId: string): Promise<void>
   log: Logger
   now?: () => Date
+} & OktaEventHookDeviceRevocation
+
+interface DeviceRevocationEvent {
+  uuid: string
+  createdBefore: Date
 }
 
 interface Person {
   oktaId: string
   login: string | null
   eventUuids: string[]
+  deviceEvents: DeviceRevocationEvent[]
+}
+
+const deviceClaimKey = (connectionId: string, uuid: string) =>
+  `sso:okta-hook:device:${connectionId}:${createHash("sha256").update(uuid).digest("hex")}`
+
+function validDeviceEvent(
+  uuid: string | null | undefined,
+  published: number,
+  now: number,
+): DeviceRevocationEvent | null {
+  const trimmed = typeof uuid === "string" ? uuid.trim() : ""
+  if (!trimmed) return null
+  if (!Number.isFinite(published)) return null
+  if (now - published > MAX_EVENT_AGE_MS) return null
+  if (published - now > MAX_EVENT_FUTURE_MS) return null
+  return {
+    uuid: trimmed,
+    createdBefore: new Date(published + DEVICE_CREATED_BEFORE_SKEW_MS),
+  }
 }
 
 /**
@@ -267,7 +408,9 @@ interface Person {
  * and one single-statement update, which fits Okta's three seconds; an
  * acknowledged raise that is then lost would be a cached password outliving
  * its revocation, and Okta retries a 5xx. A raise is idempotent, so the retry
- * (or Okta's own at-least-once redelivery) is harmless.
+ * (or Okta's own at-least-once redelivery) is harmless; device revocations are
+ * additionally guarded by `uuid` replay claims and `createdBefore` so a replay
+ * or late delivery cannot wipe a newly enrolled device.
  *
  * ⚠ EVERY LOOKUP IS SCOPED BY THIS CONNECTION AND ITS WORKSPACE. An event
  * names an Okta user, and the only people it can reach are the ones who sign
@@ -275,14 +418,25 @@ interface Person {
  */
 export async function applyOktaEvents(
   d: OktaEventHookDeps,
-  connection: Pick<Connection, "id" | "tenantId">,
+  connection: Pick<Connection, "id" | "tenantId"> &
+    Partial<Pick<Connection, "protocol" | "provider" | "config">>,
   body: unknown,
 ): Promise<OktaEventHookOutcome> {
+  if ((d.revokeUserDevices || d.revokeConnectionDevices) && !d.replay) {
+    throw new Error(
+      "applyOktaEvents requires replay when device revocation callbacks are supplied",
+    )
+  }
   const parsed = Delivery.safeParse(body)
   if (!parsed.success) return { outcome: "malformed" }
   const now = (d.now ?? (() => new Date()))().getTime()
+  const ownAppIds = ownOktaAppIds(connection)
+  const matchesOwnApp = (targets: { id: string; type?: string | null }[]) =>
+    ownAppIds.size > 0 &&
+    targets.some((t) => t.type === "AppInstance" && ownAppIds.has(t.id))
 
   const people = new Map<string, Person>()
+  const connectionDeviceEvents: DeviceRevocationEvent[] = []
   const counts = { relevant: 0, stale: 0, unreadable: 0 }
   let wholeConnection = false
   const events = parsed.data.data.events
@@ -300,64 +454,176 @@ export async function applyOktaEvents(
     }
     const e = event.data
     if (NO_CHANGE_RESULTS.has(e.outcome?.result ?? "")) continue
-    // ⚠ AN UNREADABLE TIMESTAMP ACTS: the bound is for replays, and a missing
-    // date is the doubtful case, which raises.
+    // ⚠ AN UNREADABLE TIMESTAMP STILL RAISES THE EPOCH: the bound is for replays,
+    // and a missing date is the doubtful case, which raises. Device revocations
+    // require a finite timestamp inside `[now - MAX_EVENT_AGE_MS, now + MAX_EVENT_FUTURE_MS]`.
     const published = e.published ? Date.parse(e.published) : Number.NaN
     if (Number.isFinite(published) && now - published > MAX_EVENT_AGE_MS) {
       counts.stale++
       continue
     }
     counts.relevant++
+    const targets = e.target ?? []
     if (ofConnection) {
       wholeConnection = true
+      if (type === APP_LIFECYCLE_DEACTIVATE && matchesOwnApp(targets)) {
+        const devEv = validDeviceEvent(e.uuid, published, now)
+        if (devEv) connectionDeviceEvents.push(devEv)
+      }
       continue
     }
+
+    const isDeviceRevokingType =
+      DEVICE_REVOKING_USER_EVENTS.has(type) ||
+      (type === APP_USER_MEMBERSHIP_REMOVE && matchesOwnApp(targets))
+    const devEv = isDeviceRevokingType ? validDeviceEvent(e.uuid, published, now) : null
+
     /*
-     * The person is the event's User target. Self-service password events can
-     * carry the person only as the actor, so a User actor stands in when no
-     * target is a User; acting for an admin by mistake costs that admin one
-     * provider call.
+     * The person is the event's User target.
+     *
+     * ⚠ NO ACTOR FALLBACK FOR DEVICE-REVOKING EVENTS: a malformed admin event
+     * without a User target has the admin as `actor`, and falling back to
+     * `actor` would wipe the admin's phone. Epoch-only self-service events
+     * (`user.account.update_password`, `user.account.lock`) keep the fallback
+     * because an extra epoch raise costs at most one provider call.
      */
-    const named = (e.target ?? []).filter((t) => t.type === "User")
-    const users = named.length > 0 ? named : e.actor?.type === "User" ? [e.actor] : []
+    const named = targets.filter((t) => t.type === "User")
+    const users =
+      named.length > 0
+        ? named
+        : EPOCH_ONLY_USER_EVENTS.has(type) && e.actor?.type === "User"
+          ? [e.actor]
+          : []
     if (users.length === 0) counts.unreadable++
     for (const user of users) {
       const person = people.get(user.id) ?? {
         oktaId: user.id,
         login: user.alternateId ?? null,
         eventUuids: [],
+        deviceEvents: [],
       }
       person.eventUuids.push(e.uuid ?? "unknown")
+      if (devEv) person.deviceEvents.push(devEv)
       people.set(user.id, person)
     }
   }
 
-  const raised = new Set<string>()
+  // Claim every eligible device-revoking event's `uuid` once before running any
+  // device deletion so replays within MAX_EVENT_AGE_MS never re-delete devices.
+  const newlyClaimed = new Map<string, string>()
+  const uuidsToClaim = new Set<string>()
+  if (d.replay) {
+    for (const person of people.values()) {
+      for (const ev of person.deviceEvents) uuidsToClaim.add(ev.uuid)
+    }
+    for (const ev of connectionDeviceEvents) uuidsToClaim.add(ev.uuid)
+  }
+  for (const uuid of uuidsToClaim) {
+    const claimKey = deviceClaimKey(connection.id, uuid)
+    try {
+      if (await d.replay!.claim(claimKey, MAX_EVENT_AGE_MS)) {
+        newlyClaimed.set(uuid, claimKey)
+      }
+    } catch (error) {
+      if (error instanceof ReplayUnavailable) {
+        for (const held of newlyClaimed.values()) {
+          await d.replay!.release(held).catch(() => {})
+        }
+        return { outcome: "unavailable" }
+      }
+      throw error
+    }
+  }
+
+  const failedClaims = new Set<string>()
+  const markFailedClaims = (deviceEvents: DeviceRevocationEvent[]) => {
+    for (const ev of deviceEvents) {
+      const claimKey = newlyClaimed.get(ev.uuid)
+      if (claimKey) failedClaims.add(claimKey)
+    }
+  }
+
   let unknown = 0
   let failed = 0
+  // Resolve every Okta user first, then merge by Clerk user id so a person
+  // matched via two Okta entries in one delivery gets one write with the latest
+  // valid `createdBefore`.
+  const resolved = new Map<
+    string,
+    { eventUuids: string[]; deviceEvents: DeviceRevocationEvent[] }
+  >()
   const todo = [...people.values()]
   for (let i = 0; i < todo.length; i += CONCURRENCY) {
+    const batch = todo.slice(i, i + CONCURRENCY)
     const settled = await Promise.allSettled(
-      todo.slice(i, i + CONCURRENCY).map(async (person) => {
+      batch.map(async (person) => {
         const clerkUserId = await resolve(d.store, connection, person)
-        if (!clerkUserId) {
-          unknown++
-          return
+        return { person, clerkUserId }
+      }),
+    )
+    for (let j = 0; j < settled.length; j++) {
+      const result = settled[j]!
+      const person = batch[j]!
+      if (result.status === "rejected") {
+        failed++
+        markFailedClaims(person.deviceEvents)
+        d.log.error(
+          {
+            connectionId: connection.id,
+            err: result.reason instanceof Error ? result.reason.name : "unknown",
+          },
+          "could not apply an Okta event to a mail credential epoch",
+        )
+        continue
+      }
+      const { clerkUserId } = result.value
+      if (!clerkUserId) {
+        unknown++
+        continue
+      }
+      const existing = resolved.get(clerkUserId) ?? {
+        eventUuids: [],
+        deviceEvents: [],
+      }
+      existing.eventUuids.push(...person.eventUuids)
+      existing.deviceEvents.push(...person.deviceEvents)
+      resolved.set(clerkUserId, existing)
+    }
+  }
+
+  const raised = new Set<string>()
+  const resolvedEntries = [...resolved.entries()]
+  for (let i = 0; i < resolvedEntries.length; i += CONCURRENCY) {
+    const batch = resolvedEntries.slice(i, i + CONCURRENCY)
+    const settled = await Promise.allSettled(
+      batch.map(async ([clerkUserId, entry]) => {
+        const activeDeviceEvents = entry.deviceEvents.filter((ev) =>
+          newlyClaimed.has(ev.uuid),
+        )
+        if (activeDeviceEvents.length > 0 && d.revokeUserDevices) {
+          const createdBefore = new Date(
+            Math.max(...activeDeviceEvents.map((ev) => ev.createdBefore.getTime())),
+          )
+          await d.revokeUserDevices({
+            tenantId: connection.tenantId,
+            clerkUserId,
+            createdBefore,
+          })
+        } else {
+          await d.raiseEpoch(clerkUserId)
         }
-        // Two Okta users never map to one Clerk user on a connection, but a
-        // changed login might: one raise is enough.
-        if (raised.has(clerkUserId)) return
         raised.add(clerkUserId)
-        await d.raiseEpoch(clerkUserId)
         d.log.info(
-          { connectionId: connection.id, eventUuids: person.eventUuids },
+          { connectionId: connection.id, eventUuids: entry.eventUuids },
           "an Okta event raised a mail credential epoch",
         )
       }),
     )
-    for (const result of settled)
+    for (let j = 0; j < settled.length; j++) {
+      const result = settled[j]!
       if (result.status === "rejected") {
         failed++
+        markFailedClaims(batch[j]![1].deviceEvents)
         d.log.error(
           {
             connectionId: connection.id,
@@ -366,14 +632,31 @@ export async function applyOktaEvents(
           "could not apply an Okta event to a mail credential epoch",
         )
       }
+    }
   }
-  // ONCE however many policy events the delivery holds: one statement covers
-  // every managed account of the connection.
-  if (wholeConnection)
+
+  // ONCE however many policy or app events the delivery holds: one statement
+  // (or one transaction when revoking devices) covers every managed account.
+  if (wholeConnection) {
+    const activeConnEvents = connectionDeviceEvents.filter((ev) =>
+      newlyClaimed.has(ev.uuid),
+    )
     try {
-      await d.raiseConnection(connection.id)
+      if (activeConnEvents.length > 0 && d.revokeConnectionDevices) {
+        const createdBefore = new Date(
+          Math.max(...activeConnEvents.map((ev) => ev.createdBefore.getTime())),
+        )
+        await d.revokeConnectionDevices({
+          tenantId: connection.tenantId,
+          connectionId: connection.id,
+          createdBefore,
+        })
+      } else {
+        await d.raiseConnection(connection.id)
+      }
     } catch (err) {
       failed++
+      markFailedClaims(activeConnEvents)
       d.log.error(
         {
           connectionId: connection.id,
@@ -382,8 +665,24 @@ export async function applyOktaEvents(
         "could not apply an Okta policy event to the connection's mail credential epochs",
       )
     }
+  }
+
+  if (d.replay && failedClaims.size > 0) {
+    for (const key of failedClaims) {
+      await d.replay
+        .release(key)
+        .catch(() =>
+          d.log.warn(
+            { connectionId: connection.id },
+            "could not release an Okta event hook replay claim",
+          ),
+        )
+    }
+  }
+
   // ⚠ ONE FAILURE FAILS THE DELIVERY so Okta sends it again; the people who
-  // were raised are raised again, which changes nothing.
+  // were raised are raised again, which changes nothing, and any failed
+  // device-revocation claim was released so the retry finishes it.
   if (failed > 0) return { outcome: "unavailable" }
 
   const done = {

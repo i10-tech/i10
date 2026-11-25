@@ -109,6 +109,10 @@ import { workspacePolicyStore } from "./identity/workspace-policy-store.js"
 import { backchannelLogout } from "./identity/oidc-logout.js"
 import { universalLogout } from "./identity/universal-logout.js"
 import { raiseCredentialEpoch } from "./projection/credential-epoch.js"
+import {
+  raiseConnectionEpochAndEndDevices,
+  raiseEpochAndEndDevices,
+} from "./mail-devices/store.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
@@ -2339,6 +2343,8 @@ const app = createApp({
                     replay,
                     forget: (input: { userId?: string; sessionId?: string }) =>
                       gateChecker.forget(input),
+                    raiseCredentialEpoch: (clerkUserId: string, tenantId: string) =>
+                      raiseEpochAndEndDevices(db, { tenantId, clerkUserId }),
                     fetch: guardedFetch({
                       vet: (host, signal) =>
                         vetHost(host, { allow: webhookEgressAllow, signal }),
@@ -2360,6 +2366,8 @@ const app = createApp({
                     replay,
                     forget: (input: { userId?: string; sessionId?: string }) =>
                       gateChecker.forget(input),
+                    raiseCredentialEpoch: (clerkUserId: string, tenantId: string) =>
+                      raiseEpochAndEndDevices(db, { tenantId, clerkUserId }),
                     log,
                   },
                 },
@@ -2374,8 +2382,8 @@ const app = createApp({
               replay,
               forget: (input: { userId?: string; sessionId?: string }) =>
                 gateChecker.forget(input),
-              raiseCredentialEpoch: (clerkUserId: string) =>
-                raiseCredentialEpoch(db, clerkUserId),
+              raiseCredentialEpoch: (clerkUserId: string, tenantId: string) =>
+                raiseEpochAndEndDevices(db, { tenantId, clerkUserId }),
               fetch: guardedFetch({
                 vet: (host, signal) =>
                   vetHost(host, { allow: webhookEgressAllow, signal }),
@@ -2439,6 +2447,13 @@ const app = createApp({
     raiseConnection: async (connectionId: string) => {
       await raiseConnectionCredentialEpochs(db, connectionId)
     },
+    revokeUserDevices: async (input) => {
+      await raiseEpochAndEndDevices(db, input)
+    },
+    revokeConnectionDevices: async (input) => {
+      await raiseConnectionEpochAndEndDevices(db, input)
+    },
+    replay,
     take: fixedWindow(cache),
     contextSecret: env.CLIENT_CONTEXT_SECRET,
     edgeSecret: env.EDGE_SECRET,

@@ -124,12 +124,19 @@ export function mailRevocation(d: MailRevocationDeps): MailRevocation {
           actorUserId: null,
           cause,
         })
-      return d.mail.suspend(tenantId, userId, KEEP, now(), {
-        type: "mailbox.suspended",
-        subjectUserId: userId,
-        reason: cause,
-        data: { next: KEEP.next },
-      })
+      return d.mail.suspend(
+        tenantId,
+        userId,
+        KEEP,
+        now(),
+        {
+          type: "mailbox.suspended",
+          subjectUserId: userId,
+          reason: cause,
+          data: { next: KEEP.next },
+        },
+        { endDevices: true },
+      )
     },
 
     async workspaceGone(tenantId, cause) {

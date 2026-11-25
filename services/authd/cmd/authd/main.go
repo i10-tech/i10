@@ -27,6 +27,7 @@ import (
 	"github.com/i10-tech/i10/services/authd/internal/clerkauth"
 	"github.com/i10-tech/i10/services/authd/internal/config"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
+	"github.com/i10-tech/i10/services/authd/internal/devicecode"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
 	"github.com/i10-tech/i10/services/authd/internal/oidc"
 	"github.com/i10-tech/i10/services/authd/internal/passthrough"
@@ -104,11 +105,21 @@ func run() error {
 	if len(tokenKeys) == 0 {
 		log.Error("no bind token keys: every person bind will be refused until AUTHD_BIND_TOKEN_KEYS is set")
 	} else {
-		ids := make([]int, 0, len(tokenKeys))
-		for id := range tokenKeys {
-			ids = append(ids, int(id))
-		}
-		log.Info("bind token keys loaded", "ids", ids)
+		log.Info("bind token keys loaded", "ids", tokenKeys.IDs())
+	}
+
+	// The mail device code keys (internal/devicecode). ⚠ NO KEYS, NO DEVICE
+	// BINDS: each one is answered unavailable and logged at ERROR, and password
+	// binds are unaffected. authd starts either way.
+	deviceKeys, err := devicecode.ParseKeys(cfg.MailDeviceCodeKeys)
+	if err != nil {
+		log.Error("MAIL_DEVICE_CODE_KEYS is unreadable: every device sign-in will be unavailable", slog.Any("err", err))
+		deviceKeys = nil
+	}
+	if len(deviceKeys) == 0 {
+		log.Warn("no mail device code keys: device sign-ins are unavailable until MAIL_DEVICE_CODE_KEYS is set")
+	} else {
+		log.Info("mail device code keys loaded", "ids", deviceKeys.IDs())
 	}
 
 	srv := ldap.NewServer()
@@ -132,11 +143,13 @@ func run() error {
 			Directory: managed,
 			Log:       log,
 		},
-		Budget:        budgetstore.NewPostgres(store.Pool()),
-		Limiter:       limiter,
-		CredCache:     credcache.New(cfg.CredCacheTTL),
-		Logger:        log,
-		BindTokenKeys: tokenKeys,
+		Budget:         budgetstore.NewPostgres(store.Pool()),
+		Limiter:        limiter,
+		CredCache:      credcache.New(cfg.CredCacheTTL),
+		Logger:         log,
+		BindTokenKeys:  tokenKeys,
+		Devices:        store,
+		DeviceCodeKeys: deviceKeys,
 	}).Routes())
 
 	// The listener is created here, on this goroutine, rather than inside

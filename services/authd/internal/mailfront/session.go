@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
+	"github.com/i10-tech/i10/services/authd/internal/devicecode"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 )
 
@@ -248,7 +249,9 @@ var errLookupDown = errors.New("mailfront: the projection lookup failed")
 
 // tokenFor returns how the password of a sign-in looked up as in is forwarded:
 // behind a fresh token for the account the front credits the connection to
-// (internal/bindtoken), which is what authd checks the bind's DN against.
+// (internal/bindtoken), which is what authd checks the bind's DN against. When
+// the password is a device code, it records the device on in: the device the
+// token covers, and the one admit puts in the Grant.
 //
 // ⚠ NO ACCOUNT, NO TOKEN. A login the projection does not know (a `%` master
 // login, Stalwart's recovery admin) or a lookup that failed is forwarded as it
@@ -266,7 +269,12 @@ func (s *session) tokenFor(in *signIn) func(password string) (string, error) {
 		if in == nil || in.acct == nil {
 			return password, nil
 		}
-		return bindtoken.Wrap(*s.bindKey, in.acct.ClerkUserID, password, time.Now())
+		wrapped, err := bindtoken.Wrap(*s.bindKey, in.acct.ClerkUserID, password, time.Now())
+		if err != nil {
+			return "", err
+		}
+		in.device = devicecode.DeviceID(password)
+		return wrapped, nil
 	}
 }
 

@@ -423,7 +423,7 @@ func TestAccountReadsWhetherItsDomainStillHostsMail(t *testing.T) {
 		if err != nil || got == nil {
 			t.Fatalf("AccountByUID(%s) = (%v, %v)", id, got, err)
 		}
-		swept, _, err := store.AccountsByUIDs(ctx, []string{hosted, bare, own})
+		swept, _, err := store.AccountsByUIDs(ctx, []string{hosted, bare, own}, nil)
 		if err != nil || len(swept) != 3 {
 			t.Fatalf("AccountsByUIDs = (%d rows, %v), want 3", len(swept), err)
 		}
@@ -522,7 +522,7 @@ func TestTheMailFrontsReads(t *testing.T) {
 		t.Fatalf("an inactive account resolved: %+v (%v)", got, err)
 	}
 
-	swept, _, err := store.AccountsByUIDs(ctx, append(ids, "user_front_never"))
+	swept, _, err := store.AccountsByUIDs(ctx, append(ids, "user_front_never"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,8 +570,12 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 	if got, err := store.AccountByLogin(ctx, "front-role@front.example"); err != nil || got == nil {
 		t.Fatalf("AccountByLogin as mailfront = (%v, %v)", got, err)
 	}
-	if got, _, err := store.AccountsByUIDs(ctx, []string{"user_front_role"}); err != nil || len(got) != 1 {
+	if got, _, err := store.AccountsByUIDs(ctx, []string{"user_front_role"}, nil); err != nil || len(got) != 1 {
 		t.Fatalf("AccountsByUIDs as mailfront = (%d rows, %v)", len(got), err)
+	}
+	// With device sessions open: the device step reads the columns it is granted.
+	if got, _, err := store.AccountsByUIDs(ctx, []string{"user_front_role"}, []string{"00000000-0000-4000-8000-000000000001"}); err != nil || len(got) != 1 {
+		t.Fatalf("AccountsByUIDs with a device as mailfront = (%d rows, %v)", len(got), err)
 	}
 	// It reads the access-change log, and may neither write it nor prune it.
 	b, err := store.AccessChanges(ctx, "", 10)
@@ -589,6 +593,12 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 		`INSERT INTO authd.access_changes (kind, key) VALUES ('all', '')`,
 		`DELETE FROM authd.access_changes`,
 		`SELECT authd.prune_access_changes()`,
+		// Of the device table it reads five columns and writes nothing
+		// (TestTheDeviceTableGrants has the full list).
+		`SELECT code_hash, code_kid FROM authd.mail_devices`,
+		`SELECT serial, device_name, model, created_by FROM authd.mail_devices`,
+		`UPDATE authd.mail_devices SET last_used_at = now()`,
+		`DELETE FROM authd.mail_devices`,
 	} {
 		if _, err := store.Pool().Exec(ctx, q); err == nil {
 			t.Errorf("the mailfront role may run %q", q)

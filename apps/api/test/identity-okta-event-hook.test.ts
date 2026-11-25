@@ -7,10 +7,16 @@ import { mountIdentity } from "../src/routes/console/identity.js"
 import {
   CONNECTION_EVENT_TYPES,
   CREDENTIAL_EVENT_TYPES,
+  DEVICE_CREATED_BEFORE_SKEW_MS,
+  DEVICE_REVOKING_USER_EVENTS,
+  EPOCH_ONLY_USER_EVENTS,
   HOOK_EVENT_TYPES,
   HOOK_SECRET_PREFIX,
   MAX_EVENT_AGE_MS,
+  MAX_EVENT_FUTURE_MS,
+  applyOktaEvents,
   mintHookSecret,
+  ownOktaAppIds,
   redactedConfig,
   storedOktaHook,
 } from "../src/identity/okta-event-hook.js"
@@ -26,6 +32,7 @@ import {
   TENANT,
   connection,
   memoryClerk,
+  memoryReplay,
   memoryStore,
 } from "./identity-fakes.js"
 
@@ -964,5 +971,437 @@ describe("Okta event hook: turning it off", () => {
     const w = owned()
     expect((await w.owner("user_owner", "DELETE", `${w.base}/secret`)).status).toBe(200)
     expect(w.mem.events).toEqual([])
+  })
+})
+
+describe("Okta event hook: mail device revocation guards (#383)", () => {
+  const wired = async (
+    over: {
+      protocol?: "oidc" | "saml"
+      clientId?: string
+      extraConfig?: Record<string, unknown>
+      failUser?: () => boolean
+      failConn?: () => boolean
+    } = {},
+  ) => {
+    const a = mintHookSecret(NOW)
+    const conn = okta({
+      protocol: over.protocol ?? "oidc",
+      config: {
+        ...((over.protocol ?? "oidc") === "oidc"
+          ? {
+              oktaEventHook: a.stored,
+              oidc: { clientId: over.clientId ?? "0oa_own_app" },
+            }
+          : {
+              oktaEventHook: a.stored,
+              saml: {
+                idpEntityId: "http://www.okta.com/exk123",
+                ssoUrl: "https://acme.okta.com/app/acme_mail/exk123/sso/saml",
+              },
+            }),
+        ...(over.extraConfig ?? {}),
+      },
+    })
+    const mem = memoryStore({ connections: [conn] })
+    await mem.store.link(TENANT, {
+      connectionId: CONNECTION,
+      subject: "00u_ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+    })
+    await mem.store.link(TENANT, {
+      connectionId: CONNECTION,
+      subject: "00u_admin",
+      clerkUserId: "user_okta_admin",
+      email: "admin@acme.test",
+    })
+    const replay = memoryReplay()
+    const epochOnly: string[] = []
+    const connEpochOnly: string[] = []
+    const userDevices: {
+      tenantId: string
+      clerkUserId: string
+      createdBefore: Date
+    }[] = []
+    const connDevices: {
+      tenantId: string
+      connectionId: string
+      createdBefore: Date
+    }[] = []
+    const app = new Hono().route(
+      "/webhooks",
+      createOktaEventHooks({
+        store: mem.store,
+        raiseEpoch: async (id) => {
+          epochOnly.push(id)
+        },
+        raiseConnection: async (id) => {
+          connEpochOnly.push(id)
+        },
+        revokeUserDevices: async (input) => {
+          if (over.failUser?.()) throw new Error("db down")
+          userDevices.push(input)
+        },
+        revokeConnectionDevices: async (input) => {
+          if (over.failConn?.()) throw new Error("db down")
+          connDevices.push(input)
+        },
+        replay: replay.replay,
+        take: fixedWindow(null),
+        contextSecret: undefined,
+        edgeSecret: undefined,
+        log: { info: () => {}, warn: () => {}, error: () => {} },
+        now: () => NOW,
+      }),
+    )
+    const deliver = (events: unknown[]) =>
+      app.request(`/webhooks/okta/${CONNECTION}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: a.secret,
+        },
+        body: JSON.stringify(delivery(events)),
+      })
+    return {
+      deliver,
+      replay,
+      epochOnly,
+      connEpochOnly,
+      userDevices,
+      connDevices,
+      conn,
+    }
+  }
+
+  it("splits device-revoking user events from epoch-only user events", async () => {
+    for (const type of DEVICE_REVOKING_USER_EVENTS) {
+      const w = await wired()
+      const published = ago(30_000)
+      const res = await w.deliver([event(type, { published })])
+      expect(res.status, type).toBe(200)
+      expect(w.userDevices, type).toEqual([
+        {
+          tenantId: TENANT,
+          clerkUserId: "user_ada",
+          createdBefore: new Date(
+            Date.parse(published) + DEVICE_CREATED_BEFORE_SKEW_MS,
+          ),
+        },
+      ])
+      expect(w.epochOnly, type).toEqual([])
+    }
+
+    for (const type of EPOCH_ONLY_USER_EVENTS) {
+      const w = await wired()
+      const res = await w.deliver([event(type)])
+      expect(res.status, type).toBe(200)
+      expect(w.userDevices, type).toEqual([])
+      expect(w.epochOnly, type).toEqual(["user_ada"])
+    }
+  })
+
+  it("never falls back to actor for a device-revoking event without a User target", async () => {
+    const w = await wired()
+    const res = await w.deliver([
+      event("user.lifecycle.suspend", {
+        target: [{ id: "0oa_own_app", type: "AppInstance" }],
+      }),
+    ])
+    expect(res.status).toBe(200)
+    expect(w.userDevices).toEqual([])
+    expect(w.epochOnly).toEqual([])
+  })
+
+  it("enforces replay cache on uuid (TTL = MAX_EVENT_AGE_MS), releases on DB error, and answers 503 when replay is down", async () => {
+    let fail = true
+    const w = await wired({ failUser: () => fail })
+    const ev = event("user.lifecycle.suspend", { uuid: "ev-replay-1" })
+
+    // DB error -> 503 and replay claim released so Okta's retry still deletes devices.
+    expect((await w.deliver([ev])).status).toBe(503)
+    expect(w.userDevices).toEqual([])
+
+    // Retry succeeds and claims the uuid.
+    fail = false
+    expect((await w.deliver([ev])).status).toBe(200)
+    expect(w.userDevices).toHaveLength(1)
+    expect(w.epochOnly).toEqual([])
+
+    // Replayed uuid does NOT delete devices again (falls back to idempotent epoch raise).
+    expect((await w.deliver([ev])).status).toBe(200)
+    expect(w.userDevices).toHaveLength(1)
+    expect(w.epochOnly).toEqual(["user_ada"])
+
+    // Replay outage answers 503 so Okta retries.
+    w.replay.fail.down = true
+    expect(
+      (await w.deliver([event("user.lifecycle.suspend", { uuid: "ev-replay-2" })]))
+        .status,
+    ).toBe(503)
+  })
+
+  it("refuses device deletion when published is missing, unreadable, or more than 2 minutes in the future (still raises epoch)", async () => {
+    for (const published of [
+      undefined,
+      "not-a-date",
+      new Date(NOW.getTime() + MAX_EVENT_FUTURE_MS + 1000).toISOString(),
+    ]) {
+      const w = await wired()
+      const res = await w.deliver([event("user.session.clear", { published })])
+      expect(res.status).toBe(200)
+      expect(w.userDevices).toEqual([])
+      expect(w.epochOnly).toEqual(["user_ada"])
+    }
+
+    // Within +2m skew IS accepted for device revocation.
+    const w = await wired()
+    const nearFuture = new Date(
+      NOW.getTime() + MAX_EVENT_FUTURE_MS - 1000,
+    ).toISOString()
+    expect(
+      (await w.deliver([event("user.session.clear", { published: nearFuture })]))
+        .status,
+    ).toBe(200)
+    expect(w.userDevices).toHaveLength(1)
+  })
+
+  it("matches AppInstance target against OIDC sign-in clientId and Okta mail-app clientId (oidcMail/oktaMail, any protocol), and excludes non-Okta presets", async () => {
+    const wOidc = await wired({ protocol: "oidc", clientId: "0oa_own_app" })
+    expect([...ownOktaAppIds(wOidc.conn)]).toEqual(["0oa_own_app"])
+
+    // Own app membership removal revokes user devices.
+    expect(
+      (
+        await wOidc.deliver([
+          event("application.user_membership.remove", {
+            target: [
+              { id: "00u_ada", type: "User", alternateId: "ada@acme.test" },
+              { id: "0oa_own_app", type: "AppInstance" },
+            ],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wOidc.userDevices).toHaveLength(1)
+
+    // Another app membership removal stays epoch-only.
+    expect(
+      (
+        await wOidc.deliver([
+          event("application.user_membership.remove", {
+            target: [
+              { id: "00u_ada", type: "User", alternateId: "ada@acme.test" },
+              { id: "0oa_other_app", type: "AppInstance" },
+            ],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wOidc.userDevices).toHaveLength(1)
+    expect(wOidc.epochOnly).toEqual(["user_ada"])
+
+    // Own app deactivation revokes connection devices.
+    expect(
+      (
+        await wOidc.deliver([
+          event("application.lifecycle.deactivate", {
+            target: [{ id: "0oa_own_app", type: "AppInstance" }],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wOidc.connDevices).toHaveLength(1)
+    expect(wOidc.connEpochOnly).toEqual([])
+
+    // Another app deactivation stays connection epoch-only.
+    expect(
+      (
+        await wOidc.deliver([
+          event("application.lifecycle.deactivate", {
+            target: [{ id: "0oa_other_app", type: "AppInstance" }],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wOidc.connDevices).toHaveLength(1)
+    expect(wOidc.connEpochOnly).toEqual([CONNECTION])
+
+    // SAML connection with no Okta mail app has no AppInstance id: stays epoch-only.
+    const wSaml = await wired({ protocol: "saml" })
+    expect([...ownOktaAppIds(wSaml.conn)]).toEqual([])
+    expect(
+      (
+        await wSaml.deliver([
+          event("application.user_membership.remove", {
+            target: [
+              { id: "00u_ada", type: "User", alternateId: "ada@acme.test" },
+              { id: "0oa_own_app", type: "AppInstance" },
+            ],
+          }),
+          event("application.lifecycle.deactivate", {
+            target: [{ id: "0oa_own_app", type: "AppInstance" }],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wSaml.userDevices).toEqual([])
+    expect(wSaml.connDevices).toEqual([])
+    expect(wSaml.epochOnly).toEqual(["user_ada"])
+    expect(wSaml.connEpochOnly).toEqual([CONNECTION])
+
+    // SAML connection with an Okta oidcMail app ends devices for the mail app id, not other apps.
+    const wSamlMail = await wired({
+      protocol: "saml",
+      extraConfig: {
+        oidcMail: {
+          preset: "okta",
+          clientId: "0oa_saml_mail_app",
+          issuer: "https://acme.okta.com/oauth2/default",
+          enabled: true,
+        },
+      },
+    })
+    expect([...ownOktaAppIds(wSamlMail.conn)]).toEqual(["0oa_saml_mail_app"])
+    expect(
+      (
+        await wSamlMail.deliver([
+          event("application.user_membership.remove", {
+            target: [
+              { id: "00u_ada", type: "User", alternateId: "ada@acme.test" },
+              { id: "0oa_saml_mail_app", type: "AppInstance" },
+            ],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wSamlMail.userDevices).toHaveLength(1)
+    expect(wSamlMail.epochOnly).toEqual([])
+
+    expect(
+      (
+        await wSamlMail.deliver([
+          event("application.lifecycle.deactivate", {
+            target: [{ id: "0oa_saml_mail_app", type: "AppInstance" }],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wSamlMail.connDevices).toHaveLength(1)
+    expect(wSamlMail.connEpochOnly).toEqual([])
+
+    // Different app id on the same SAML connection stays epoch-only.
+    expect(
+      (
+        await wSamlMail.deliver([
+          event("application.user_membership.remove", {
+            target: [
+              { id: "00u_ada", type: "User", alternateId: "ada@acme.test" },
+              { id: "0oa_unrelated_app", type: "AppInstance" },
+            ],
+          }),
+          event("application.lifecycle.deactivate", {
+            target: [{ id: "0oa_unrelated_app", type: "AppInstance" }],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wSamlMail.userDevices).toHaveLength(1)
+    expect(wSamlMail.connDevices).toHaveLength(1)
+    expect(wSamlMail.epochOnly).toEqual(["user_ada"])
+    expect(wSamlMail.connEpochOnly).toEqual([CONNECTION])
+
+    // Legacy config.oktaMail on SAML is also included via storedOidcMail.
+    const wSamlLegacy = await wired({
+      protocol: "saml",
+      extraConfig: {
+        oktaMail: {
+          clientId: "0oa_legacy_mail",
+          issuer: "https://acme.okta.com/oauth2/default",
+          enabled: true,
+        },
+      },
+    })
+    expect([...ownOktaAppIds(wSamlLegacy.conn)]).toEqual(["0oa_legacy_mail"])
+    expect(
+      (
+        await wSamlLegacy.deliver([
+          event("application.user_membership.remove", {
+            target: [
+              { id: "00u_ada", type: "User", alternateId: "ada@acme.test" },
+              { id: "0oa_legacy_mail", type: "AppInstance" },
+            ],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wSamlLegacy.userDevices).toHaveLength(1)
+
+    // OIDC connection with separate Okta mail app matches BOTH sign-in and mail app ids.
+    const wBoth = await wired({
+      protocol: "oidc",
+      clientId: "0oa_signin_app",
+      extraConfig: {
+        oidcMail: {
+          preset: "okta",
+          clientId: "0oa_mail_app",
+        },
+      },
+    })
+    expect([...ownOktaAppIds(wBoth.conn)].sort()).toEqual([
+      "0oa_mail_app",
+      "0oa_signin_app",
+    ])
+
+    // Non-Okta oidcMail preset's clientId is NOT included.
+    const wNonOktaPreset = await wired({
+      protocol: "saml",
+      extraConfig: {
+        oidcMail: {
+          preset: "keycloak",
+          clientId: "mail-client-kc",
+          issuer: "https://sso.acme.test/realms/acme",
+          enabled: true,
+        },
+      },
+    })
+    expect([...ownOktaAppIds(wNonOktaPreset.conn)]).toEqual([])
+    expect(
+      (
+        await wNonOktaPreset.deliver([
+          event("application.user_membership.remove", {
+            target: [
+              { id: "00u_ada", type: "User", alternateId: "ada@acme.test" },
+              { id: "mail-client-kc", type: "AppInstance" },
+            ],
+          }),
+        ])
+      ).status,
+    ).toBe(200)
+    expect(wNonOktaPreset.userDevices).toEqual([])
+    expect(wNonOktaPreset.epochOnly).toEqual(["user_ada"])
+  })
+
+  it("refuses at runtime when device revocation callbacks are supplied without replay", async () => {
+    const w = world()
+    let err: unknown = null
+    try {
+      await applyOktaEvents(
+        {
+          store: w.mem.store,
+          raiseEpoch: async () => {},
+          raiseConnection: async () => {},
+          revokeUserDevices: async () => {},
+          log: { info: () => {}, warn: () => {}, error: () => {} },
+        } as unknown as Parameters<typeof applyOktaEvents>[0],
+        okta(),
+        delivery([]),
+      )
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toContain("replay")
   })
 })

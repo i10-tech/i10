@@ -286,7 +286,11 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 	if in != nil {
 		acct, lookupErr = in.acct, in.err
 	}
-	grant, reason := admit(acct, lookupErr, s.passthroughUntil(time.Now()))
+	var deviceID string
+	if in != nil {
+		deviceID = in.device
+	}
+	grant, reason := admit(acct, deviceID, lookupErr, s.sessionEnds(time.Now()))
 	if reason != "" {
 		log.Warn("closing a sign-in the front cannot stand behind", "reason", reason, slog.Any("err", lookupErr))
 		sess.close(reason)
@@ -299,7 +303,7 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 	inPreAuth = false
 	_ = client.SetDeadline(time.Time{})
 	_ = up.SetDeadline(time.Time{})
-	log.Info("signed in", "account", grant.AccountID)
+	log.Info("signed in", "account", grant.AccountID, "device", grant.DeviceID)
 
 	sess.spliceClient()
 	<-sess.closed
@@ -360,10 +364,19 @@ func (s *Server) Shutdown(ctx context.Context) {
 	}
 }
 
-// signIn is the account a sign-in was looked up as, before it was forwarded.
+// signIn is one sign-in attempt: the account it was looked up as before it was
+// forwarded, and the device its forwarded password named.
+//
+// ⚠ ONE PER ATTEMPT. A client may try LOGIN several times before one succeeds;
+// each attempt gets a fresh signIn, and the device is set by the tokenFor that
+// wrapped THIS attempt's password, so a device from a failed attempt can never be
+// credited to the one that succeeded.
 type signIn struct {
 	acct *projection.Account
 	err  error
+	// device is devicecode.DeviceID of the password tokenFor wrapped, "" for
+	// none: the same device the token's MAC covers.
+	device string
 }
 
 func (s *session) signInAs(login string) *signIn {
@@ -385,6 +398,11 @@ func remoteIP(c net.Conn) string {
 	return a.IP.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
+// sessionEnds is when a session signed in at signedIn ends, by kind.
+func (s *Server) sessionEnds(signedIn time.Time) sessionEnds {
+	return sessionEnds{passthrough: s.passthroughUntil(signedIn), device: deviceUntil(signedIn)}
+}
+
 // passthroughUntil is when a pass-through session signed in at signedIn ends:
 // PassthroughMaxAge later, less up to a tenth of it at random.
 func (s *Server) passthroughUntil(signedIn time.Time) time.Time {
@@ -393,4 +411,10 @@ func (s *Server) passthroughUntil(signedIn time.Time) time.Time {
 		age -= time.Duration(rand.Int64N(spread))
 	}
 	return signedIn.Add(age)
+}
+
+// deviceUntil is when a device session signed in at signedIn ends: DeviceMaxAge
+// later, plus up to DeviceMaxAgeJitter at random.
+func deviceUntil(signedIn time.Time) time.Time {
+	return signedIn.Add(DeviceMaxAge + time.Duration(rand.Int64N(int64(DeviceMaxAgeJitter))))
 }

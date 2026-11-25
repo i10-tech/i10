@@ -27,6 +27,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import postgres from "postgres"
+import { assertRlsSubject } from "../src/db/client.js"
+import { assertRlsAllowlist } from "../src/db/rls-allowlist.js"
 import { applyMigrations, describe } from "../src/migrate-run.js"
 
 // ⚠ NO DEFAULT AND NO SKIP. A check that quietly passes when it is not
@@ -155,9 +157,25 @@ try {
     )
   }
 
+  // Verify the migrated schema's security boundary as the application role:
+  // `core`/`identity` RLS, partition grants, PUBLIC execute on SECURITY DEFINER
+  // functions across all application schemas, and the explicit non-RLS table
+  // allowlist (`apps/api/src/db/rls-allowlist.ts`).
+  const apiSql = postgres(i10Url("i10_api"), {
+    max: 1,
+    prepare: false,
+    onnotice: () => {},
+  })
+  try {
+    await assertRlsSubject(apiSql)
+    await assertRlsAllowlist(apiSql)
+  } finally {
+    await apiSql.end({ timeout: 5 })
+  }
+
   const seconds = ((performance.now() - started) / 1000).toFixed(1)
   console.log(
-    `all ${applied} migrations applied one at a time, each in a fresh session as ${OWNER} (${seconds}s)`,
+    `all ${applied} migrations applied one at a time, each in a fresh session as ${OWNER}, and RLS/definer checks passed as i10_api (${seconds}s)`,
   )
 } catch (err) {
   console.error(

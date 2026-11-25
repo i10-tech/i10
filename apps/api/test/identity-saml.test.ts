@@ -705,6 +705,67 @@ describe("single logout", () => {
     expect(done).toMatchObject({ outcome: "logged_out", revoked: 0 })
   })
 
+  it("user-wide SLO (no SessionIndex) ends mail devices even with no open session; SessionIndex and attribute-keyed connections do not", async () => {
+    const w = await world()
+    const calls: { clerkUserId: string; tenantId: string }[] = []
+    w.slo.raiseCredentialEpoch = async (clerkUserId, tenantId) => {
+      calls.push({ clerkUserId, tenantId })
+    }
+    w.store.identities.push({
+      id: "00000000-0000-4000-a000-000000000009",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      subject: "persistent:00u-ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+      lastLoginAt: null,
+    })
+
+    // User-wide SLO with no open console session resolves via identityBySubject.
+    const userWide = await finishSlo(w.slo, w.engine, {
+      connectionId: CONNECTION,
+      binding: "redirect",
+      rawQuery: signRedirect(logoutXml({ id: "_lo_all", sessionIndex: null })),
+    })
+    expect(userWide).toMatchObject({ outcome: "logged_out", revoked: 0 })
+    expect(calls).toEqual([{ clerkUserId: "user_ada", tenantId: TENANT }])
+
+    // Session-specific SLO (SessionIndex present) leaves mail devices alone.
+    calls.length = 0
+    const withIndex = await finishSlo(w.slo, w.engine, {
+      connectionId: CONNECTION,
+      binding: "redirect",
+      rawQuery: signRedirect(logoutXml({ id: "_lo_one", sessionIndex: "_sess1" })),
+    })
+    expect(withIndex).toMatchObject({ outcome: "logged_out", revoked: 0 })
+    expect(calls).toEqual([])
+
+    // Attribute-keyed SAML connection cannot resolve a user-wide LogoutRequest.
+    const attrWorld = await world({
+      connection: samlConnection({}, { subjectAttribute: "employeeNumber" }),
+    })
+    const attrCalls: string[] = []
+    attrWorld.slo.raiseCredentialEpoch = async (u) => {
+      attrCalls.push(u)
+    }
+    attrWorld.store.identities.push({
+      id: "00000000-0000-4000-a000-000000000010",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      subject: "attribute:E-42",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+      lastLoginAt: null,
+    })
+    const attrDone = await finishSlo(attrWorld.slo, attrWorld.engine, {
+      connectionId: CONNECTION,
+      binding: "redirect",
+      rawQuery: signRedirect(logoutXml({ id: "_lo_attr", sessionIndex: null })),
+    })
+    expect(attrDone).toMatchObject({ outcome: "logged_out", revoked: 0 })
+    expect(attrCalls).toEqual([])
+  })
+
   const refusals: [string, () => string, string][] = [
     [
       "an unsigned LogoutRequest",

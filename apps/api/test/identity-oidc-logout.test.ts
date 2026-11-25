@@ -589,3 +589,114 @@ describe("POST /sso/oidc/backchannel/:connection", () => {
     expect(total).toBe(429)
   })
 })
+
+describe("OIDC back-channel logout: mail device revocation (#383)", () => {
+  it("raises epoch and ends devices for a user-wide logout (sub without sid) even with no open session", async () => {
+    const idp = await testIssuer()
+    const store = memoryStore({ connections: [oidcConnection()] })
+    const clerk = memoryClerk()
+    const replay = memoryReplay()
+    const saml = memorySaml(store)
+    const calls: { clerkUserId: string; tenantId: string }[] = []
+    store.identities.push({
+      id: "00000000-0000-4000-a000-000000000001",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      subject: "idp|ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+      lastLoginAt: null,
+    })
+    const engine = oidcEngine({
+      store: store.store,
+      fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
+      redirectUri: "https://auth.i10.localhost/sso/callback",
+      google: null,
+      log,
+    })
+    const logout = backchannelLogout(
+      {
+        store: store.store,
+        sessions: saml.saml,
+        clerk: clerk.clerk,
+        replay: replay.replay,
+        forget: () => {},
+        raiseCredentialEpoch: async (clerkUserId, tenantId) => {
+          calls.push({ clerkUserId, tenantId })
+        },
+        fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
+        log,
+      },
+      engine,
+    )
+
+    // No open console session at all: user-wide logout still resolves via identityBySubject.
+    const userWide = await idp.logoutToken({ sub: "idp|ada", sid: undefined })
+    expect(await logout({ connectionId: CONNECTION, logoutToken: userWide })).toEqual({
+      outcome: "logged_out",
+      revoked: 0,
+    })
+    expect(calls).toEqual([{ clerkUserId: "user_ada", tenantId: TENANT }])
+
+    // Session-specific logout (sid present) must NOT touch mail devices.
+    calls.length = 0
+    const sessionOnly = await idp.logoutToken({ sub: "idp|ada", sid: "idp-sess-1" })
+    expect(
+      await logout({ connectionId: CONNECTION, logoutToken: sessionOnly }),
+    ).toEqual({
+      outcome: "logged_out",
+      revoked: 0,
+    })
+    expect(calls).toEqual([])
+  })
+
+  it("releases the jti claim when raiseCredentialEpoch fails so the IdP retry succeeds", async () => {
+    const idp = await testIssuer()
+    const store = memoryStore({ connections: [oidcConnection()] })
+    const clerk = memoryClerk()
+    const replay = memoryReplay()
+    const saml = memorySaml(store)
+    store.identities.push({
+      id: "00000000-0000-4000-a000-000000000002",
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      subject: "idp|ada",
+      clerkUserId: "user_ada",
+      email: "ada@acme.test",
+      lastLoginAt: null,
+    })
+    let fail = true
+    const engine = oidcEngine({
+      store: store.store,
+      fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
+      redirectUri: "https://auth.i10.localhost/sso/callback",
+      google: null,
+      log,
+    })
+    const logout = backchannelLogout(
+      {
+        store: store.store,
+        sessions: saml.saml,
+        clerk: clerk.clerk,
+        replay: replay.replay,
+        forget: () => {},
+        raiseCredentialEpoch: async () => {
+          if (fail) throw new Error("db unavailable")
+        },
+        fetch: guardedFetch({ vet: async () => PUBLIC, fetch: idp.fetch }),
+        log,
+      },
+      engine,
+    )
+
+    const token = await idp.logoutToken({ sub: "idp|ada", sid: undefined })
+    await expect(
+      logout({ connectionId: CONNECTION, logoutToken: token }),
+    ).rejects.toThrow("db unavailable")
+    fail = false
+    expect(await logout({ connectionId: CONNECTION, logoutToken: token })).toEqual({
+      outcome: "logged_out",
+      revoked: 0,
+    })
+  })
+})

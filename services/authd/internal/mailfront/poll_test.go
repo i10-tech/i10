@@ -36,7 +36,7 @@ func newPollRig(t *testing.T, accts ...projection.Account) *pollRig {
 func (r *pollRig) signIn(email string) Grant {
 	r.t.Helper()
 	acct, err := r.accounts.AccountByLogin(context.Background(), email)
-	g, reason := admit(acct, err, time.Now().Add(time.Hour))
+	g, reason := admit(acct, "", err, sessionEnds{passthrough: time.Now().Add(time.Hour)})
 	if reason != "" {
 		r.t.Fatalf("sign-in refused: %s", reason)
 	}
@@ -357,7 +357,7 @@ func TestAPollWithNothingLiveAsksNothing(t *testing.T) {
 		t.Fatalf("%d log reads and %d account reads with nothing live", r.accounts.polls, r.accounts.sweeps)
 	}
 	acct := account("user_alice", "alice@i10.test")
-	g, _ := admit(&acct, nil, time.Time{}) // as signed in before the lock
+	g, _ := admit(&acct, "", nil, sessionEnds{}) // as signed in before the lock
 	r.register(g)
 	if st := r.poll(); st.Closed != 1 {
 		t.Fatalf("poll %+v, want the new connection re-checked and closed", st)

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto"
-import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm"
 import { union } from "drizzle-orm/pg-core"
 import type { Mailbox } from "@repo/contracts"
-import type { Database } from "../db/client.js"
+import { ts, type Database } from "../db/client.js"
 import {
   accounts,
   aliases,
@@ -13,6 +13,7 @@ import {
 import { directoryGroups } from "../db/identity.js"
 import { passthroughFor } from "../identity/ldap.js"
 import type { IdentityStore } from "../identity/ports.js"
+import { endFor } from "../mail-devices/store.js"
 import type { MailboxDirectory, ManagedMailLaneCheck } from "./provision.js"
 
 /**
@@ -272,25 +273,67 @@ export const inWorkspace = (tenantId: string) =>
  * not quietly give back a login. A payment hold is the exception because payment
  * is its whole reason, and it is a column of its own.
  *
- * ⚠ THEY TAKE A WRITER, NOT A TRANSACTION, so a caller with one (the Clerk event
- * that changes membership, say) can make the revocation part of it.
+ * ⚠ MOST TAKE A WRITER, NOT A TRANSACTION, so a caller with one (the Clerk event
+ * that changes membership, say) can make the revocation part of it. The two
+ * exceptions, `suspendWorkspace` and `suspendDomain`, open their own: the
+ * suspension and the mail device delete must commit together, accounts first.
  */
 type Writer = Pick<Database, "update" | "delete" | "select">
 
 export const mailAccess = {
-  /** Every mailbox of the workspace. Returns who was newly suspended. */
-  async suspendWorkspace(db: Writer, tenantId: string, at: Date): Promise<string[]> {
-    const done = await db
-      .update(accounts)
-      .set({ suspendedAt: at, updatedAt: sql`now()` })
-      .where(and(inWorkspace(tenantId), isNull(accounts.suspendedAt)))
-      .returning({ id: accounts.clerkUserId })
-    return done.map((r) => r.id)
+  /**
+   * Every mailbox of the workspace, suspended and its mail devices deleted in
+   * ONE transaction. Writes EVERY matching account row (`coalesce`), already-
+   * suspended ones included, so a concurrent mint or resume cannot slip between
+   * the suspension and the device delete. Returns who was newly suspended.
+   */
+  async suspendWorkspace(
+    db: Pick<Database, "transaction">,
+    tenantId: string,
+    at: Date,
+  ): Promise<string[]> {
+    return db.transaction(async (tx) => {
+      // Lock target accounts in clerk_user_id order before updating (accounts
+      // first, mail_devices second) so concurrent bulk revocations cannot deadlock.
+      const locked = tx
+        .$with("locked")
+        .as(
+          tx
+            .select({ id: accounts.clerkUserId })
+            .from(accounts)
+            .where(inWorkspace(tenantId))
+            .orderBy(asc(accounts.clerkUserId))
+            .for("no key update"),
+        )
+      const done = await tx
+        .with(locked)
+        .update(accounts)
+        .set({
+          suspendedAt: sql`coalesce(${accounts.suspendedAt}, ${ts(at)})`,
+          updatedAt: sql`now()`,
+        })
+        .from(locked)
+        .where(eq(accounts.clerkUserId, locked.id))
+        .returning({
+          id: accounts.clerkUserId,
+          tenantId: accounts.tenantId,
+          newlySuspended: sql<boolean>`old.suspended_at is null`,
+        })
+      const allIds = done.map((r) => r.id)
+      if (allIds.length > 0) {
+        await endFor(tx, { tenantId, clerkUserIds: allIds })
+        const nullTenantIds = done.filter((r) => r.tenantId === null).map((r) => r.id)
+        if (nullTenantIds.length > 0) {
+          await endFor(tx, { tenantId: null, clerkUserIds: nullTenantIds })
+        }
+      }
+      return done.filter((r) => r.newlySuspended).map((r) => r.id)
+    })
   },
 
   /**
    * The mailboxes whose primary address is on a domain the workspace is giving
-   * up, and the aliases on it.
+   * up, their mail devices, and the aliases on it, in ONE transaction.
    *
    * ⚠ THE ALIASES GO, THE ACCOUNTS BEHIND THEM STAY. An alias is a recipient, so
    * one on a domain the workspace gave up would go on receiving mail for a name
@@ -301,43 +344,78 @@ export const mailAccess = {
    * finds no hosted address), which is the existing rule for somebody who gives
    * up their address; the suspension is what closes the login until then.
    *
+   * ⚠ EVERY MATCHING ACCOUNT ROW IS WRITTEN (`coalesce`), already-suspended
+   * ones included, before deleting devices, so a concurrent mint or resume
+   * cannot race the delete.
+   *
    * ⚠ THE CALLER HAS ALREADY CHECKED THAT NO OTHER WORKSPACE HOSTS THE NAME
    * (`holdsName` says whether this one does), so this only reaches its own:
    * `tenant_id` is this workspace's, or null on a name this one hosts - a mailbox
    * from before the column was filled in can only have been theirs.
    */
   async suspendDomain(
-    db: Writer,
+    db: Pick<Database, "transaction">,
     tenantId: string,
     domain: string,
     at: Date,
     holdsName: boolean,
   ): Promise<{ suspended: string[]; aliases: string[] }> {
-    const name = domain.toLowerCase()
-    const mine = holdsName
-      ? or(eq(accounts.tenantId, tenantId), isNull(accounts.tenantId))
-      : eq(accounts.tenantId, tenantId)
-    const suspended = await db
-      .update(accounts)
-      .set({ suspendedAt: at, updatedAt: sql`now()` })
-      .where(and(mine, isNull(accounts.suspendedAt), sql`${domainOfEmail} = ${name}`))
-      .returning({ id: accounts.clerkUserId })
-    const gone = await db
-      .delete(aliases)
-      .where(
-        and(
-          sql`lower(split_part(${aliases.address}, '@', 2)) = ${name}`,
-          inArray(
-            aliases.clerkUserId,
-            db.select({ id: accounts.clerkUserId }).from(accounts).where(mine),
-          ),
-        ),
+    return db.transaction(async (tx) => {
+      const name = domain.toLowerCase()
+      const mine = holdsName
+        ? or(eq(accounts.tenantId, tenantId), isNull(accounts.tenantId))
+        : eq(accounts.tenantId, tenantId)
+      // Lock target accounts in clerk_user_id order before updating (accounts
+      // first, mail_devices second) so concurrent bulk revocations cannot deadlock.
+      const locked = tx.$with("locked").as(
+        tx
+          .select({ id: accounts.clerkUserId })
+          .from(accounts)
+          .where(and(mine, sql`${domainOfEmail} = ${name}`))
+          .orderBy(asc(accounts.clerkUserId))
+          .for("no key update"),
       )
-      .returning({ address: aliases.address })
-    return {
-      suspended: suspended.map((r) => r.id),
-      aliases: gone.map((r) => r.address),
-    }
+      const matched = await tx
+        .with(locked)
+        .update(accounts)
+        .set({
+          suspendedAt: sql`coalesce(${accounts.suspendedAt}, ${ts(at)})`,
+          updatedAt: sql`now()`,
+        })
+        .from(locked)
+        .where(eq(accounts.clerkUserId, locked.id))
+        .returning({
+          id: accounts.clerkUserId,
+          tenantId: accounts.tenantId,
+          newlySuspended: sql<boolean>`old.suspended_at is null`,
+        })
+      const allIds = matched.map((r) => r.id)
+      if (allIds.length > 0) {
+        await endFor(tx, { tenantId, clerkUserIds: allIds })
+        const nullTenantIds = matched
+          .filter((r) => r.tenantId === null)
+          .map((r) => r.id)
+        if (nullTenantIds.length > 0) {
+          await endFor(tx, { tenantId: null, clerkUserIds: nullTenantIds })
+        }
+      }
+      const gone = await tx
+        .delete(aliases)
+        .where(
+          and(
+            sql`lower(split_part(${aliases.address}, '@', 2)) = ${name}`,
+            inArray(
+              aliases.clerkUserId,
+              tx.select({ id: accounts.clerkUserId }).from(accounts).where(mine),
+            ),
+          ),
+        )
+        .returning({ address: aliases.address })
+      return {
+        suspended: matched.filter((r) => r.newlySuspended).map((r) => r.id),
+        aliases: gone.map((r) => r.address),
+      }
+    })
   },
 
   /**
@@ -442,6 +520,7 @@ export const directoryMail = {
     const [row] = await tx
       .select({
         email: accounts.email,
+        tenantId: accounts.tenantId,
         active: accounts.active,
         suspendedAt: accounts.suspendedAt,
         // What else refuses the login, so a resume can say what it did not lift.

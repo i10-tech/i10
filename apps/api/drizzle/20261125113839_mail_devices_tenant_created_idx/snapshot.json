@@ -1,0 +1,73 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "893f2f32-9074-4161-a768-7a8c22d2ffb5",
+  "prevIds": [
+    "f99b42a5-0874-4f81-a7d7-7cb126849677"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_devices",
+        "mail_devices_tenant_created_idx"
+      ],
+      "writes": [
+        "s|idx|authd.mail_devices_tenant_created_idx",
+        "n|idx|authd.mail_devices_tenant_created_idx",
+        "e|idx|authd.mail_devices_tenant_created_idx",
+        "n|rel|authd.mail_devices_tenant_created_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd",
+        "n|col|authd.mail_devices.tenant_id",
+        "n|col|authd.mail_devices.created_at",
+        "n|col|authd.mail_devices.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_devices",
+        "name": "mail_devices_tenant_created_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "tenant_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": false,
+            "nullsFirst": true,
+            "opclass": null
+          },
+          {
+            "value": "id",
+            "isExpression": false,
+            "asc": false,
+            "nullsFirst": true,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    }
+  ]
+}

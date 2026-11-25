@@ -20,6 +20,14 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 	}
 	// authd sits behind PgBouncer in transaction pooling mode, where server-side
 	// prepared statements do not survive between transactions.
+	//
+	// ⚠ IT ALSO KEEPS EVERY PLAN CUSTOM, AND SweepQuery NEEDS THAT. Exec mode
+	// parses an unnamed statement each time, which Postgres plans with the
+	// actual parameters. A named prepared statement switches to a generic plan
+	// after five runs, and SweepQuery's generic plan nests a loop over the
+	// device aggregate: 276 s instead of 0.7 s for 50,000 live accounts and
+	// their 75,000 devices on the scale seed (2026-11-25, PR 2 of #383). Do not
+	// move this pool to a cached or prepared mode without measuring that first.
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 	cfg.MaxConnLifetime = 30 * time.Minute
 
@@ -96,8 +104,7 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 const accountColumns = `a.clerk_user_id, a.email, ` + accountDomain + `, coalesce(a.display_name, ''),
 	coalesce(a.description, ''), a.active, a.clerk_updated_at, a.credential_epoch,
 	(m.clerk_user_id IS NOT NULL), coalesce(m.connection_id::text, ''),
-	coalesce((SELECT pv.version FROM authd.passthrough_versions pv
-	          WHERE pv.connection_id = m.connection_id), 0),
+	coalesce(pv.version, 0), (pv.active IS FALSE),
 	(a.suspended_at IS NOT NULL), (a.payment_hold_at IS NOT NULL), a.banned,
 	(a.locked AND (a.locked_until IS NULL OR a.locked_until > now())),
 	EXISTS (SELECT 1 FROM authd.required_domains rd
@@ -110,7 +117,7 @@ const accountColumns = `a.clerk_user_id, a.email, ` + accountDomain + `, coalesc
 	          AND rd.tenant_id = a.tenant_id
 	          AND ex.clerk_user_id = a.clerk_user_id),
 	` + domainRefused + `,
-	(a.deleting_at IS NOT NULL)`
+	(a.deleting_at IS NOT NULL), coalesce(a.tenant_id::text, '')`
 
 // domainRefused is the account's domain gate (#406), the one column of
 // accountColumns that is not a read of a row: a call per account. The sweep
@@ -120,8 +127,13 @@ const domainRefused = `core.mailbox_domain_refused(a.tenant_id, ` + accountDomai
 // accountDomain is an account's mail domain as every gate query compares it.
 const accountDomain = `lower(split_part(a.email, '@', 2))`
 
+// accountFrom joins what accountColumns reads beside the account: whether it is
+// managed, and its connection's pass-through row (`pv`, by primary key).
 const accountFrom = `FROM authd.accounts a
-		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
+		LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id
+		` + passthroughJoin
+
+const passthroughJoin = `LEFT JOIN authd.passthrough_versions pv ON pv.connection_id = m.connection_id`
 
 // AccountsByAddress resolves the active accounts whose primary address or any
 // alias is in addresses, once each, with their aliases and groups.
@@ -186,25 +198,32 @@ func (p *Postgres) AccountByUID(ctx context.Context, clerkUserID string) (*Accou
 }
 
 // AccountsByUIDs reads the gate's row for many accounts at once, for the mail
-// front's revocation sweep. Missing and inactive ids are simply absent. The
-// duration is the query's own, without the wait for a pooled connection
-// (queryTimed).
+// front's revocation sweep, with each account's devices among deviceIDs (the
+// devices the front's open connections signed in with). Missing and inactive
+// ids are simply absent, and so is a device that is gone or now belongs to
+// another account. The duration is the query's own, without the wait for a
+// pooled connection (queryTimed).
 //
 // ⚠ THE SAME COLUMNS AS A BIND, SO THE SAME GATE. The front decides with
 // internal/gate on exactly what a bind would read. It is one primary-key lookup
 // per id (`= ANY($1)` on accounts_pkey), with no aliases or group membership,
-// which the gate does not need.
-func (p *Postgres) AccountsByUIDs(ctx context.Context, clerkUserIDs []string) ([]Account, time.Duration, error) {
+// which the gate does not need, and one per device (`= ANY($2)` on
+// mail_devices_pkey), in the same statement, so a device is never judged
+// against an account row from another snapshot.
+func (p *Postgres) AccountsByUIDs(ctx context.Context, clerkUserIDs, deviceIDs []string) ([]Account, time.Duration, error) {
 	if len(clerkUserIDs) == 0 {
 		return nil, 0, nil
 	}
+	if deviceIDs == nil {
+		deviceIDs = []string{}
+	}
 	var accounts []Account
 	took, err := p.queryTimed(ctx, func(conn *pgxpool.Conn) error {
-		rows, err := conn.Query(ctx, SweepQuery, clerkUserIDs)
+		rows, err := conn.Query(ctx, SweepQuery, clerkUserIDs, deviceIDs)
 		if err != nil {
 			return err
 		}
-		accounts, err = scanAccounts(rows)
+		accounts, err = scanSwept(rows)
 		return err
 	})
 	if err != nil {
@@ -253,6 +272,13 @@ func (p *Postgres) queryTimed(ctx context.Context, fn func(*pgxpool.Conn) error)
 //
 // ⚠ AN INNER JOIN ON THE VERDICT. An account whose pair found no verdict is
 // dropped, which the front reads as "account gone" and closes: never as hosted.
+//
+// ⚠ THE DEVICES ARE JOINED BY THEIR ACCOUNT. `$2` is the device ids of the open
+// device sessions; each comes back on the row of the account it belongs to NOW,
+// as four parallel arrays ordered by id: one row per account however many
+// devices it has. A device deleted, or moved to another
+// account, is absent from its session's account row, which the front reads as
+// revoked. With no device sessions `$2` is empty and the step reads nothing.
 var SweepQuery = `
 	WITH live AS (
 		SELECT a.*, ` + accountDomain + ` AS domain
@@ -262,11 +288,23 @@ var SweepQuery = `
 		SELECT p.tenant_id, p.domain,
 		       core.mailbox_domain_refused(p.tenant_id, p.domain) AS refused
 		FROM (SELECT DISTINCT tenant_id, domain FROM live) p
+	), devices AS MATERIALIZED (
+		SELECT d.clerk_user_id,
+		       array_agg(d.id::text ORDER BY d.id) AS ids,
+		       array_agg(d.email ORDER BY d.id) AS emails,
+		       array_agg(d.platform ORDER BY d.id) AS platforms,
+		       array_agg(coalesce(d.tenant_id::text, '') ORDER BY d.id) AS tenants
+		FROM authd.mail_devices d
+		WHERE d.id = ANY($2::uuid[])
+		GROUP BY d.clerk_user_id
 	)
-	SELECT ` + strings.ReplaceAll(strings.Replace(accountColumns, domainRefused, `v.refused`, 1), accountDomain, `a.domain`) + `
+	SELECT ` + strings.ReplaceAll(strings.Replace(accountColumns, domainRefused, `v.refused`, 1), accountDomain, `a.domain`) + `,
+	       coalesce(dv.ids, '{}'), coalesce(dv.emails, '{}'), coalesce(dv.platforms, '{}'), coalesce(dv.tenants, '{}')
 	FROM live a
 	JOIN verdicts v ON v.tenant_id IS NOT DISTINCT FROM a.tenant_id AND v.domain = a.domain
-	LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id`
+	LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id
+	` + passthroughJoin + `
+	LEFT JOIN devices dv ON dv.clerk_user_id = a.clerk_user_id`
 
 // AccessChanges reads the access-change log (`authd.access_changes`, written by
 // a trigger on every table the gate reads) for the mail front: every change
@@ -426,11 +464,41 @@ func scanAccounts(rows pgx.Rows) ([]Account, error) {
 	var out []Account
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ClerkUserID, &a.Email, &a.MailDomain, &a.DisplayName,
-			&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
-			&a.Managed, &a.ManagedConnection, &a.PassthroughVersion, &a.Suspended, &a.PaymentHold,
-			&a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt, &a.DomainNotHosted, &a.Deleting); err != nil {
+		if err := rows.Scan(accountDest(&a)...); err != nil {
 			return nil, fmt.Errorf("projection: scan account: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// accountDest is where accountColumns land, in its order.
+func accountDest(a *Account) []any {
+	return []any{&a.ClerkUserID, &a.Email, &a.MailDomain, &a.DisplayName,
+		&a.Description, &a.Active, &a.ClerkUpdatedAt, &a.CredentialEpoch,
+		&a.Managed, &a.ManagedConnection, &a.PassthroughVersion, &a.ConnectionInactive,
+		&a.Suspended, &a.PaymentHold, &a.Banned, &a.Locked, &a.SSORequired, &a.SSOExempt,
+		&a.DomainNotHosted, &a.Deleting, &a.TenantID}
+}
+
+// scanSwept reads SweepQuery's rows: accountColumns, then the account's devices
+// as four parallel arrays.
+func scanSwept(rows pgx.Rows) ([]Account, error) {
+	defer rows.Close()
+	var out []Account
+	for rows.Next() {
+		var a Account
+		var ids, emails, platforms, tenants []string
+		if err := rows.Scan(append(accountDest(&a), &ids, &emails, &platforms, &tenants)...); err != nil {
+			return nil, fmt.Errorf("projection: scan swept account: %w", err)
+		}
+		if len(emails) != len(ids) || len(platforms) != len(ids) || len(tenants) != len(ids) {
+			return nil, fmt.Errorf("projection: device arrays of %d, %d, %d and %d", len(ids), len(emails), len(platforms), len(tenants))
+		}
+		for i := range ids {
+			a.Devices = append(a.Devices, Device{
+				ID: ids[i], ClerkUserID: a.ClerkUserID, Email: emails[i], TenantID: tenants[i], Platform: platforms[i],
+			})
 		}
 		out = append(out, a)
 	}
