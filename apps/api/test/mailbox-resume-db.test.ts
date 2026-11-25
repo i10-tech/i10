@@ -69,7 +69,14 @@ suite("resuming a mailbox, in the store", () => {
     await owner`update authd.accounts set suspended_at = null where clerk_user_id = ${ada}`
     await owner`delete from identity.directory_mailboxes where tenant_id = ${acme}`
     expect(
-      await mail().suspend(acme, ada, KEEP, at, { type: "mailbox.suspended" }),
+      await mail().suspend(
+        acme,
+        ada,
+        KEEP,
+        at,
+        { type: "mailbox.suspended" },
+        { endDevices: false },
+      ),
     ).toBe("suspended")
   }
 

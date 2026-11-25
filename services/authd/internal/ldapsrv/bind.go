@@ -11,6 +11,7 @@ import (
 
 	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
+	"github.com/i10-tech/i10/services/authd/internal/devicecode"
 	"github.com/i10-tech/i10/services/authd/internal/directory"
 	"github.com/i10-tech/i10/services/authd/internal/gate"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
@@ -103,7 +104,7 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	// them back off and retry, as for any other outage of ours. A client gains
 	// nothing from the different code: a token it wrote itself is refused either
 	// way.
-	real, err := bindtoken.Unwrap(s.tokenKeys, uid, password, s.now())
+	real, deviceID, err := bindtoken.Unwrap(s.tokenKeys, uid, password, s.now())
 	if errors.Is(err, bindtoken.ErrNoKeys) || errors.Is(err, bindtoken.ErrUnknownKey) {
 		s.log.Error("bind refused: the mail front's key is not configured here", "reason", err.Error(), "uid", uid)
 		s.respondUnavailable(w, "authentication backend temporarily unavailable")
@@ -134,6 +135,24 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	if reason := gate.RowRefusal(account); reason != "" {
 		s.log.Info("bind rejected", "reason", reason, "uid", uid)
 		w.Write(res)
+		return
+	}
+
+	// ⚠ A DEVICE CODE TAKES ITS OWN LANE, AFTER THE WHOLE GATE (#383). Every
+	// password that starts with the reserved prefix goes to deviceBind, well
+	// formed or not, and nothing in it reaches the resolver, the credential cache
+	// or the failure budget. It is judged by the full gate first, RouteOf
+	// included: an account SSO is required for, or one whose connection is gone
+	// or not active, has its device codes held exactly as its password is. The
+	// resolver is where RouteOf's refusals happen on the password lane; the device
+	// lane never calls it, so it applies them here.
+	if devicecode.HasReservedPrefix(password) {
+		if reason := gate.Refusal(account); reason != "" {
+			s.log.Info("bind rejected", "reason", reason, "uid", uid, "lane", "device")
+			w.Write(res)
+			return
+		}
+		s.deviceBind(ctx, w, dn, account, password, deviceID)
 		return
 	}
 

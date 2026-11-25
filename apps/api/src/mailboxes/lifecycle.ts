@@ -138,13 +138,21 @@ export function mailboxAdminLifecycle(d: MailboxLifecycleDeps): MailboxAdminLife
       // ⚠ KEEP, NOT THE LEAVER POLICY. `suspendMailbox` applies the workspace's
       // default for leavers (forward to a manager, delete after N days); an owner who
       // suspends one mailbox asked for the login to stop and for nothing else.
-      const done = await d.mail.suspend(tenantId, ref.clerkUserId, KEEP, now(), {
-        type: "mailbox.suspended",
-        actorUserId: actorId,
-        subjectUserId: ref.clerkUserId,
-        reason: "owner",
-        data: { next: KEEP.next },
-      })
+      // Devices are held (`endDevices: false`) so resume restores them.
+      const done = await d.mail.suspend(
+        tenantId,
+        ref.clerkUserId,
+        KEEP,
+        now(),
+        {
+          type: "mailbox.suspended",
+          actorUserId: actorId,
+          subjectUserId: ref.clerkUserId,
+          reason: "owner",
+          data: { next: KEEP.next },
+        },
+        { endDevices: false },
+      )
       return done === "no_mailbox" ? "not_found" : done
     },
 

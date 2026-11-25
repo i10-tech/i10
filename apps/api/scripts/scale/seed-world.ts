@@ -315,6 +315,13 @@ export async function seedWorld(
   )
   const emails = new Set<string>()
   const mailboxOwners = new Set<string>()
+  // Every mailbox written, own-domain ones included, for the device rows.
+  const mailboxes: {
+    clerkUserId: string
+    email: string
+    tenantId: string | null
+    active: boolean
+  }[] = []
   let an = 0
   const gate = (r: Rng) => ({
     suspended: r.chance(0.01),
@@ -363,6 +370,7 @@ export async function seedWorld(
         const g = gate(ar)
         const created = ago(anchor, ar.int(0, p.days) * DAY)
         t?.accounts.push({ clerkUserId: user, email, tenantId: t.id, active })
+        mailboxes.push({ clerkUserId: user, email, tenantId: t?.id ?? null, active })
         await w.row([
           user,
           email,
@@ -482,6 +490,9 @@ export async function seedWorld(
   log("plans")
   const endpoints = await seedEndpoints(sql, root.fork(10), p, tenants, weights, anchor)
   log(`webhook endpoints ${endpoints.length}`)
+  // Last, so its fork shifts no earlier table's rows.
+  const devices = await seedDevices(sql, root.fork(11), mailboxes, anchor)
+  log(`mail devices ${devices}`)
 
   const senders = tenants.filter(
     (t) =>
@@ -489,6 +500,113 @@ export async function seedWorld(
       t.domains.some((d) => d.status === "verified" && d.sends),
   )
   return { anchor, tenants, senders, endpoints, apiKeys }
+}
+
+/**
+ * Mail devices (#383): about 1.5 for each active mailbox (none for a fifth, an
+ * iPhone for a quarter, an iPhone and an iPad for most of the rest, three for
+ * some), in the states the hourly prune leaves between runs: mostly used, a few
+ * minted and not used yet, a few past their ten minutes or idle 90 days and
+ * waiting for it. A tenth are Macs, which PR 2 refuses but stores.
+ */
+async function seedDevices(
+  sql: Sql,
+  r: Rng,
+  mailboxes: readonly {
+    clerkUserId: string
+    email: string
+    tenantId: string | null
+    active: boolean
+  }[],
+  anchor: Date,
+): Promise<number> {
+  const MIN = 60_000
+  return bulkRows(
+    sql,
+    "authd.mail_devices",
+    [
+      "id",
+      "clerk_user_id",
+      "email",
+      "tenant_id",
+      "platform",
+      "device_name",
+      "model",
+      "serial",
+      "code_hash",
+      "code_kid",
+      "created_by",
+      "created_at",
+      "first_used_at",
+      "last_used_at",
+    ],
+    async (w) => {
+      for (const m of mailboxes) {
+        if (!m.active) continue
+        const n = r.weighted([
+          [0, 20],
+          [1, 25],
+          [2, 40],
+          [3, 15],
+        ] as const)
+        for (let i = 0; i < n; i++) {
+          const state = r.weighted([
+            ["used today", 60],
+            ["used this month", 25],
+            ["minted, unused", 3],
+            ["unused, expired", 2],
+            ["idle past 90 days", 3],
+            ["used this quarter", 7],
+          ] as const)
+          const usedAgo = {
+            "used today": r.int(1, 24 * 60) * MIN,
+            "used this month": r.int(1, 30) * DAY,
+            "used this quarter": r.int(31, 89) * DAY,
+            "idle past 90 days": r.int(91, 120) * DAY,
+            "minted, unused": 0,
+            "unused, expired": 0,
+          }[state]
+          const used = usedAgo > 0
+          const created = used
+            ? ago(anchor, usedAgo + r.int(0, 180) * DAY)
+            : ago(
+                anchor,
+                state === "minted, unused" ? r.int(0, 9) * MIN : r.int(11, 59) * MIN,
+              )
+          const lastUsed = used ? ago(anchor, usedAgo) : null
+          // First used within ten minutes of the mint, never after the last use.
+          const firstUsed = lastUsed
+            ? new Date(
+                Math.min(created.getTime() + r.int(0, 9) * MIN, lastUsed.getTime()),
+              )
+            : null
+          const platform = r.weighted([
+            ["ios", 70],
+            ["ipados", 20],
+            ["macos", 10],
+          ] as const)
+          await w.row([
+            r.uuid7(created),
+            m.clerkUserId,
+            m.email,
+            m.tenantId,
+            platform,
+            r.chance(0.7)
+              ? { ios: "iPhone", ipados: "iPad", macos: "Mac" }[platform]
+              : null,
+            r.pick(["iPhone17,1", "iPhone16,2", "iPad14,3", "Mac15,6"]),
+            r.token(6).toUpperCase(),
+            `\\x${r.token(32)}`,
+            1,
+            m.clerkUserId,
+            created,
+            firstUsed,
+            lastUsed,
+          ])
+        }
+      }
+    },
+  )
 }
 
 async function seedSso(
@@ -648,6 +766,17 @@ async function seedSso(
     ["clerk_user_id", "connection_id"],
     async (w) => {
       for (const m of managed) await w.row([m.user, r.chance(0.98) ? m.c.id : null])
+    },
+  )
+  // One pass-through version a connection, as the 20261124231147 backfill and
+  // `mirrorPassthrough` leave it: `active` is the connection's status. No random
+  // draw, so no later row moves.
+  await bulkRows(
+    sql,
+    "authd.passthrough_versions",
+    ["connection_id", "version", "fingerprint", "active"],
+    async (w) => {
+      for (const c of conns) await w.row([c.id, 1, "seed", c.status === "active"])
     },
   )
   await bulkRows(

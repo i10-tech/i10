@@ -14,7 +14,7 @@ import (
 // production one.
 type Accounts interface {
 	AccountByLogin(ctx context.Context, login string) (*projection.Account, error)
-	AccountsByUIDs(ctx context.Context, clerkUserIDs []string) ([]projection.Account, time.Duration, error)
+	AccountsByUIDs(ctx context.Context, clerkUserIDs, deviceIDs []string) ([]projection.Account, time.Duration, error)
 	AccessChanges(ctx context.Context, since string, limit int) (projection.ChangeBatch, error)
 }
 
@@ -422,7 +422,7 @@ func expire(all []*live, st *SweepStats) []*live {
 	conns := all[:0:0]
 	for _, c := range all {
 		if c.grant.expired(at) {
-			c.close(ReasonMaxAge)
+			c.close(c.grant.maxAgeReason())
 			st.Closed++
 			continue
 		}
@@ -431,19 +431,27 @@ func expire(all []*live, st *SweepStats) []*live {
 	return conns
 }
 
-// recheck reads the rows of conns' accounts in one query and closes every
-// connection Grant.revoked turns away.
+// recheck reads the rows of conns' accounts, and of the devices their device
+// sessions signed in with, in one query, and closes every connection
+// Grant.revoked turns away.
 func (s *Sweeper) recheck(ctx context.Context, conns []*live, st *SweepStats) error {
 	seen := make(map[string]struct{}, len(conns))
 	ids := make([]string, 0, len(conns))
+	var devices []string
 	for _, c := range conns {
 		if _, ok := seen[c.grant.AccountID]; !ok {
 			seen[c.grant.AccountID] = struct{}{}
 			ids = append(ids, c.grant.AccountID)
 		}
+		if d := c.grant.DeviceID; d != "" {
+			if _, ok := seen["device:"+d]; !ok {
+				seen["device:"+d] = struct{}{}
+				devices = append(devices, d)
+			}
+		}
 	}
 	st.Accounts = len(ids)
-	rows, took, err := s.Accounts.AccountsByUIDs(ctx, ids)
+	rows, took, err := s.Accounts.AccountsByUIDs(ctx, ids, devices)
 	st.Query = took
 	if err != nil {
 		return err

@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { isWrapped, KEY_VARIABLES, type Wrappable } from "./crypto/unlock.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
+import { parseMailDeviceCodeKeys } from "./mail-devices/code.js"
 import { JUDGE_PROVIDERS, judgeSettingsProblems } from "./risk/judge/config.js"
 import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
 import { RULES } from "./risk/rules.js"
@@ -784,6 +785,34 @@ const schema = z.object({
    * sensitivity: it maps a tenant id to a token and nothing else.
    */
   FEEDBACK_ID_KEY: keyVariable("FEEDBACK_ID_KEY"),
+
+  /**
+   * Keyed HMAC ring for mail device codes (#383): `<id>:<base64 >= 32 bytes>`,
+   * comma-separated, id 0 to 255. Shared with `services/authd` (which verifies
+   * codes under every id in the ring); the API mints under the highest id.
+   *
+   * ⚠ OPTIONAL SO THE API STARTS WITHOUT IT, AND MINTING REFUSES WITH A CLEAR
+   * ERROR WHEN ABSENT. Malformed values refuse to boot without quoting secrets.
+   */
+  MAIL_DEVICE_CODE_KEYS: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const trimmed = v?.trim()
+      return trimmed ? trimmed : undefined
+    })
+    .superRefine((value, ctx) => {
+      if (value === undefined) return
+      try {
+        parseMailDeviceCodeKeys(value)
+      } catch (error) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            error instanceof Error ? error.message : "invalid MAIL_DEVICE_CODE_KEYS",
+        })
+      }
+    }),
 
   /**
    * Webhook endpoints being POSTed to at once on the ordered lane, per worker

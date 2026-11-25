@@ -911,6 +911,13 @@ export interface SloDeps {
   replay: ReplayCache
   /** The gate's cache, so a revoked session is refused at once. */
   forget(input: { userId?: string; sessionId?: string }): void
+  /**
+   * Raises the account's `credential_epoch` and ends its mail devices in this
+   * workspace in one transaction (`raiseEpochAndEndDevices`, mail-devices/store.ts).
+   * Called only for a user-wide LogoutRequest (no SessionIndexes) when the
+   * connection keys identities by NameID rather than a subject attribute.
+   */
+  raiseCredentialEpoch?: (clerkUserId: string, tenantId: string) => Promise<unknown>
   log: Logger
   now?: () => Date
 }
@@ -1033,6 +1040,27 @@ export async function finishSlo(
       connectionId: connection.id,
       data: { revoked, sessionIndexes: logout.sessionIndexes.length },
     })
+    /*
+     * ⚠ USER-WIDE SLO (NO `SessionIndex`) ENDS MAIL ACCESS EVEN WITH NO OPEN
+     * CONSOLE SESSION, resolving the person through `identityBySubject`.
+     *
+     * Known limit: an attribute-keyed SAML connection (`settings.subjectAttribute`
+     * set) has `subject === null` here because a SAML LogoutRequest carries only
+     * `<NameID>` and `<SessionIndex>`, never `<AttributeStatement>`. So a
+     * user-wide SLO on an attribute-keyed connection cannot identify the link
+     * without guessing and does not end mail devices (directory suspension,
+     * Okta Universal Logout, or the Okta event hook still cover it).
+     */
+    if (subject && logout.sessionIndexes.length === 0 && d.raiseCredentialEpoch) {
+      const linked = await d.store.identityBySubject(
+        connection.tenantId,
+        connection.id,
+        subject,
+      )
+      if (linked) {
+        await d.raiseCredentialEpoch(linked.clerkUserId, connection.tenantId)
+      }
+    }
   } catch (error) {
     // Revoking again is harmless, so the IdP's retry must be allowed in.
     await d.replay

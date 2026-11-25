@@ -65,6 +65,23 @@ export class Pickers {
       ),
     )
 
+  /** A used iPhone of an active mailbox: the row a device bind reads (#383). */
+  usedDevice = () =>
+    this.one<string>(
+      "usedDevice",
+      `
+      select d.id::text from authd.mail_devices d
+        join authd.accounts a on a.clerk_user_id = d.clerk_user_id and a.active
+       where d.platform = 'ios' and d.first_used_at is not null order by d.id limit 1`,
+    )
+
+  /** A device minted and never used: the row a first sign-in claims. */
+  unusedDevice = () =>
+    this.one<string>(
+      "unusedDevice",
+      `select id::text from authd.mail_devices where first_used_at is null order by created_at desc limit 1`,
+    )
+
   /** A mailbox whose domain requires SSO, in the tenant that requires it. */
   ssoAccount = () =>
     this.one<string>(

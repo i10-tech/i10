@@ -415,6 +415,17 @@ spec:
                   name: i10-mail-bind-token
                   key: AUTHD_BIND_TOKEN_KEYS
                   optional: true
+            # The keys device codes are hashed under (services/authd/README.md,
+            # "Mail device codes"). Optional like the bind token keys: without
+            # it every device code sign-in answers "temporarily unavailable"
+            # and every other bind works as before. ⚠ NEVER IN THE mailfront
+            # CONTAINER: the front reads only a code's device id, not its hash.
+            - name: MAIL_DEVICE_CODE_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-mail-bind-token
+                  key: MAIL_DEVICE_CODE_KEYS
+                  optional: true
 
           resources:
             requests: { cpu: 50m, memory: 64Mi }

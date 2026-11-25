@@ -84,6 +84,14 @@ type Config struct {
 	// search, which Stalwart's delivery needs.
 	BindTokenKeys string
 
+	// MailDeviceCodeKeys is MAIL_DEVICE_CODE_KEYS, the keys mail device codes are
+	// hashed under, "<id>:<base64>,..." (internal/devicecode). The API mints with
+	// one and authd verifies with all; the mail front never holds them. Read by
+	// main, not validated here: ⚠ A MISSING OR BROKEN VALUE IS NOT A STARTUP
+	// FAILURE. authd starts, answers every device bind unavailable and says why,
+	// and every password bind works as before.
+	MailDeviceCodeKeys string
+
 	LogLevel string
 }
 
@@ -172,7 +180,9 @@ func Load() (Config, error) {
 		APIURL:            Env("AUTHD_API_URL", ""),
 		APISecret:         os.Getenv("AUTHD_API_SECRET"),
 		BindTokenKeys:     os.Getenv("AUTHD_BIND_TOKEN_KEYS"),
-		LogLevel:          Env("AUTHD_LOG_LEVEL", "info"),
+		// No AUTHD_ prefix: the API reads the same variable to mint.
+		MailDeviceCodeKeys: os.Getenv("MAIL_DEVICE_CODE_KEYS"),
+		LogLevel:           Env("AUTHD_LOG_LEVEL", "info"),
 	}
 
 	var err error

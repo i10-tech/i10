@@ -35,7 +35,7 @@ import { fixedWindow, trustedClientIp, type Limit } from "../identity/rate-limit
  * connection per connection.
  */
 
-export interface OktaEventHookRouteDeps extends OktaEventHookDeps {
+export type OktaEventHookRouteDeps = OktaEventHookDeps & {
   store: Pick<
     IdentityStore,
     "connectionForStart" | "identityBySubject" | "identityByEmail"

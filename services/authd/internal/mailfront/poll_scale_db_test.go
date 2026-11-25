@@ -151,7 +151,7 @@ func TestChangeDrivenPollScale(t *testing.T) {
 					ids[j] = "bench_" + strconv.Itoa(n+1)
 				}
 				start := time.Now()
-				if _, _, err := store.AccountsByUIDs(ctx, ids); err != nil {
+				if _, _, err := store.AccountsByUIDs(ctx, ids, nil); err != nil {
 					t.Fatal(err)
 				}
 				if i > 0 {

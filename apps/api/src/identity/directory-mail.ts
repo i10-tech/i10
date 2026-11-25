@@ -108,6 +108,11 @@ export interface DirectoryMailStore {
    * Suspends the authd account and writes the row, the routes and the audit
    * event in ONE transaction. `already`: it was suspended (nothing changes, the
    * clock does not restart). `no_mailbox`: this workspace gave them none.
+   *
+   * `options.endDevices`: explicit on every caller. True deletes the person's
+   * mail devices in this workspace inside the same transaction BEFORE the
+   * `already` early return (leaving, deprovision, SCIM/Google deactivation);
+   * false holds them (admin KEEP suspend only).
    */
   suspend(
     tenantId: string,
@@ -115,6 +120,7 @@ export interface DirectoryMailStore {
     plan: Plan,
     at: Date,
     audit: AuditEvent,
+    options: { endDevices: boolean },
   ): Promise<"suspended" | "already" | "no_mailbox">
   /**
    * Lifts it, clears the plan and the routes. `none`: it was not suspended.
@@ -433,18 +439,25 @@ export async function suspendMailbox(
         deleteAt: null,
       }
   }
-  const outcome = await d.store.suspend(t, input.clerkUserId, plan, at, {
-    type: "mailbox.suspended",
-    actorUserId: input.actorUserId,
-    subjectUserId: input.clerkUserId,
-    reason: input.cause,
-    data: {
-      next: plan.next,
-      ...(plan.targetUserId ? { targetUserId: plan.targetUserId } : {}),
-      ...(plan.deleteAt ? { deleteAt: plan.deleteAt.toISOString() } : {}),
-      ...(refused ? { forwardRefused: refused } : {}),
+  const outcome = await d.store.suspend(
+    t,
+    input.clerkUserId,
+    plan,
+    at,
+    {
+      type: "mailbox.suspended",
+      actorUserId: input.actorUserId,
+      subjectUserId: input.clerkUserId,
+      reason: input.cause,
+      data: {
+        next: plan.next,
+        ...(plan.targetUserId ? { targetUserId: plan.targetUserId } : {}),
+        ...(plan.deleteAt ? { deleteAt: plan.deleteAt.toISOString() } : {}),
+        ...(refused ? { forwardRefused: refused } : {}),
+      },
     },
-  })
+    { endDevices: true },
+  )
   if (outcome === "suspended" && plan.deleteAt)
     await scheduleDeletion(d, input, plan.deleteAt)
   return outcome

@@ -21,6 +21,7 @@ import (
 
 	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
+	"github.com/i10-tech/i10/services/authd/internal/devicecode"
 	"github.com/i10-tech/i10/services/authd/internal/inflight"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 	"github.com/i10-tech/i10/services/authd/internal/throttle"
@@ -66,6 +67,13 @@ type Options struct {
 	// PERSON BIND MUST CARRY A VALID TOKEN UNDER ONE OF THEM: with none, every
 	// person bind is refused. The service bind does not use them.
 	BindTokenKeys bindtoken.Keys
+
+	// Devices and DeviceCodeKeys are the device lane (#383): the device rows, and
+	// MAIL_DEVICE_CODE_KEYS, the keys their codes are hashed under. ⚠ WITHOUT
+	// EITHER, EVERY DEVICE BIND IS UNAVAILABLE, never a wrong password, and every
+	// other bind works as before.
+	Devices        DeviceStore
+	DeviceCodeKeys devicecode.Keys
 }
 
 type Server struct {
@@ -82,6 +90,8 @@ type Server struct {
 	log               *slog.Logger
 	opTimeout         time.Duration
 	tokenKeys         bindtoken.Keys
+	devices           DeviceStore
+	deviceKeys        devicecode.Keys
 	now               func() time.Time
 }
 
@@ -108,6 +118,8 @@ func New(opts Options) *Server {
 		log:               log,
 		opTimeout:         timeout,
 		tokenKeys:         opts.BindTokenKeys,
+		devices:           opts.Devices,
+		deviceKeys:        opts.DeviceCodeKeys,
 		now:               time.Now,
 	}
 }

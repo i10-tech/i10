@@ -43,6 +43,17 @@ type Account struct {
 	// (passthrough.Cache). Read in the bind's own query, so it costs no round trip.
 	PassthroughVersion int64
 
+	// ConnectionInactive is true only when ManagedConnection's row in
+	// `authd.passthrough_versions` says `active = false`: the connection's status
+	// is not `active` (disabled, draft, testing). Read in the bind's own query; the
+	// gate refuses a managed account then (gate.ConnectionInactive), which is what
+	// holds its device codes, since the device lane never asks the API.
+	//
+	// ⚠ NULL, OR NO ROW, REFUSES NOTHING. NULL is "not known yet": a row an API
+	// pod from before the column wrote. Reading it as inactive would lock out
+	// every managed account of that connection for a mirror that is merely old.
+	ConnectionInactive bool
+
 	// Suspended is true when a company's directory switched the person off
 	// (#344): the mailbox still exists and still receives mail, so searches
 	// return it, but NO BIND succeeds. It is not Active=false, which would make
@@ -106,8 +117,45 @@ type Account struct {
 	// credential cache.
 	SSOExempt bool
 
+	// TenantID is `authd.accounts.tenant_id` as text, "" when null (i10's own
+	// mailboxes). gate.DeviceRefusal matches a device's workspace against it.
+	TenantID string
+
 	Aliases  []string
 	MemberOf []string // group names, not DNs; the caller renders DNs
+
+	// Devices are the account's mail devices among those AccountsByUIDs was
+	// asked about, for the mail front's re-check (gate.DeviceRefusal). Nothing
+	// else fills it.
+	Devices []Device
+}
+
+// Device is a mail device's row as the gate matches it to its account
+// (`authd.mail_devices`, gate.DeviceRefusal): exactly the columns the mail
+// front's role may read.
+type Device struct {
+	// ID is the row's UUID as Postgres writes it (devicecode.Code.ID).
+	ID          string
+	ClerkUserID string
+	Email       string
+	// TenantID is the workspace the device was minted in, as text, "" when null.
+	TenantID string
+	Platform string
+}
+
+// DeviceCredential is a device row as authd's bind reads it: the row, the keyed
+// hash of its code, and the clock rules judged by the server's clock (the same
+// clock the first-use claim and the touch compare with).
+type DeviceCredential struct {
+	Device
+	CodeHash []byte
+	CodeKID  int
+	// Used is `first_used_at IS NOT NULL`.
+	Used bool
+	// Idle is a used code whose last sign-in is older than DeviceIdleLimit.
+	Idle bool
+	// TouchDue is a used code whose `last_used_at` is older than a day.
+	TouchDue bool
 }
 
 // ChangeKind says what a Change's Key names (`authd.access_changes.kind`).

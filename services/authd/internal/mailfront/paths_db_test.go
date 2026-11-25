@@ -44,12 +44,19 @@ type gatePath struct {
 	want        pathWant
 }
 
+// device reports whether Alice signs in with her device (pathDevice, which the
+// path's setup mints) rather than her password: for every path of the device
+// table.
+func (p gatePath) device() bool { return p.table == "authd.mail_devices" }
+
 // Fixture names. :A and :B are the two workspaces; Alice is in A, on path.test,
 // which A holds by a verified sending-domain proof unless a setup changes that.
 const (
 	pathConnA = "a1111111-1111-4111-8111-111111111111"
 	pathConnB = "b2222222-2222-4222-8222-222222222222"
 	pathAlice = "user_path_alice"
+	// pathDevice is Alice's iPhone, minted by mintDevice.
+	pathDevice = "d0000000-0000-4000-8000-00000000000d"
 )
 
 var pathNames = strings.NewReplacer(
@@ -58,6 +65,7 @@ var pathNames = strings.NewReplacer(
 	":connA", "'"+pathConnA+"'::uuid",
 	":connB", "'"+pathConnB+"'::uuid",
 	":alice", "'"+pathAlice+"'",
+	":device", "'"+pathDevice+"'::uuid",
 )
 
 const (
@@ -77,6 +85,15 @@ const (
 	// but was never proved.
 	txtOnly = `UPDATE core.domains SET status = 'not_started', identity_registered_at = NULL WHERE name = 'path.test'`
 	txtOfA  = `INSERT INTO core.join_domains (tenant_id, name, clerk_org_id, source, verified_at) VALUES (:A, 'path.test', 'org_path', 'txt', now())`
+
+	// Alice's iPhone, as the API's store function mints it, and Bob, whom a
+	// re-pointed device would name.
+	mintDevice = `INSERT INTO authd.mail_devices (id, clerk_user_id, email, tenant_id, platform, code_hash, code_kid, created_by)
+		VALUES (:device, :alice, 'alice@path.test', :A, 'ios', '\x01', 1, 'path')`
+	bobOnA   = `INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id) VALUES ('user_path_bob', 'bob@path.test', true, :A)`
+	upDevice = `UPDATE authd.mail_devices SET `
+	whDevice = ` WHERE id = :device`
+	activeA  = `UPDATE authd.passthrough_versions SET active = true WHERE connection_id = :connA`
 )
 
 func one(s string) []string { return []string{s} }
@@ -132,6 +149,12 @@ var gatePaths = []gatePath{
 	{"authd.passthrough_versions", "insert", []string{managedIdentity, managedByA}, one(versionOfA), rechecks},
 	{"authd.passthrough_versions", "delete", []string{managedIdentity, managedByA, versionOfA},
 		one(`DELETE FROM authd.passthrough_versions WHERE connection_id = :connA`), rechecks},
+	// ⚠ active: false refuses (connection_inactive), and NULL is "unknown", which
+	// refuses nothing.
+	{"authd.passthrough_versions", "active to false", []string{managedIdentity, managedByA, versionOfA, activeA},
+		one(`UPDATE authd.passthrough_versions SET active = false WHERE connection_id = :connA`), closes},
+	{"authd.passthrough_versions", "active to unknown", []string{managedIdentity, managedByA, versionOfA, activeA},
+		one(`UPDATE authd.passthrough_versions SET active = NULL WHERE connection_id = :connA`), rechecks},
 	{"authd.passthrough_versions", "fingerprint (ignored)", []string{managedIdentity, managedByA, versionOfA},
 		one(`UPDATE authd.passthrough_versions SET fingerprint = 'y', updated_at = now() WHERE connection_id = :connA`), ignored},
 	// ⚠ A TRUNCATE, PUT BACK IN THE SAME TRANSACTION so the tests of other
@@ -174,6 +197,33 @@ var gatePaths = []gatePath{
 		one(`INSERT INTO authd.required_exempt (connection_id, tenant_id, clerk_user_id, source) VALUES (:connA, :A, :alice, 'owner_exemption')`), rechecks},
 	{"authd.required_exempt", "updated_at (ignored)", []string{requiredByA, exemptOnA},
 		one(`UPDATE authd.required_exempt SET updated_at = now() WHERE clerk_user_id = :alice`), ignored},
+
+	// authd.mail_devices: by person, for Alice signed in with her device.
+	{"authd.mail_devices", "delete (a revoke)", one(mintDevice),
+		one(`DELETE FROM authd.mail_devices` + whDevice), closes},
+	{"authd.mail_devices", "email", one(mintDevice),
+		one(upDevice + `email = 'old-alice@path.test'` + whDevice), closes},
+	{"authd.mail_devices", "tenant_id", one(mintDevice),
+		one(upDevice + `tenant_id = :B` + whDevice), closes},
+	{"authd.mail_devices", "clerk_user_id (the old key)", []string{bobOnA, mintDevice},
+		one(upDevice + `clerk_user_id = 'user_path_bob'` + whDevice), closes},
+	{"authd.mail_devices", "platform", one(mintDevice),
+		one(upDevice + `platform = 'macos'` + whDevice), closes},
+	{"authd.mail_devices", "code_hash (not the gate's, still logged)", one(mintDevice),
+		one(upDevice + `code_hash = '\x02'` + whDevice), rechecks},
+	{"authd.mail_devices", "insert (another device)", one(mintDevice),
+		one(`INSERT INTO authd.mail_devices (clerk_user_id, email, tenant_id, platform, code_hash, code_kid, created_by)
+			VALUES (:alice, 'alice@path.test', :A, 'ipados', '\x03', 1, 'path')`), rechecks},
+	{"authd.mail_devices", "the clock stamps and the descriptive columns (ignored)", one(mintDevice),
+		one(upDevice + `first_used_at = now(), last_used_at = now(), device_name = 'Phone', model = 'iPhone17,1',
+			serial = 'S', created_by = 'someone', cert_sha256 = '\x04'` + whDevice), ignored},
+	{"authd.mail_devices", "the account deleted (cascades the device)", one(mintDevice),
+		one(`DELETE FROM authd.accounts` + whAlice), closes},
+	{"authd.mail_devices", "truncate", one(mintDevice), []string{
+		`CREATE TEMP TABLE md_keep ON COMMIT DROP AS SELECT * FROM authd.mail_devices`,
+		`TRUNCATE authd.mail_devices`,
+		`INSERT INTO authd.mail_devices SELECT * FROM md_keep`,
+	}, sweepsAll},
 
 	// core.domains: by domain name, through core.mailbox_domain_refused.
 	{"core.domains", "hosts_mailboxes", nil, one(upDomain + `hosts_mailboxes = false` + whDomainA), closes},
@@ -288,11 +338,16 @@ func (pw *pathWorld) exec(stmts []string) {
 	}
 }
 
-// signIn reads Alice's row as the front does before it forwards a sign-in.
-func (pw *pathWorld) signIn() Grant {
+// signIn reads Alice's row as the front does before it forwards a sign-in,
+// with her device's code when device is set.
+func (pw *pathWorld) signIn(device bool) Grant {
 	pw.t.Helper()
 	acct, err := pw.store.AccountByLogin(context.Background(), "alice@path.test")
-	g, reason := admit(acct, err, time.Now().Add(time.Hour))
+	deviceID := ""
+	if device {
+		deviceID = pathDevice
+	}
+	g, reason := admit(acct, deviceID, err, sessionEnds{passthrough: time.Now().Add(time.Hour), device: time.Now().Add(time.Hour)})
 	if reason != "" {
 		pw.t.Fatalf("the setup does not let Alice sign in: %s", reason)
 	}
@@ -313,7 +368,7 @@ func TestEveryGateInputReachesThePoll(t *testing.T) {
 			sw := srv.Sweeper(time.Second, 30*time.Second)
 			var mu sync.Mutex
 			reason := ""
-			srv.reg.add(pw.signIn(), func(r string) { mu.Lock(); reason = r; mu.Unlock() })
+			srv.reg.add(pw.signIn(p.device()), func(r string) { mu.Lock(); reason = r; mu.Unlock() })
 
 			ctx := context.Background()
 			if st := sw.Poll(ctx); st.Err != nil || st.Accounts != 1 || st.Closed != 0 {
@@ -365,11 +420,11 @@ func TestAPollRechecksAConnectionThatSignedInDuringAChangeOnTheDatabase(t *testi
 	sw := srv.Sweeper(time.Second, 30*time.Second)
 	ctx := context.Background()
 	acct, err := pw.store.AccountByLogin(ctx, "bob@path.test")
-	bob, _ := admit(acct, err, time.Time{})
+	bob, _ := admit(acct, "", err, sessionEnds{})
 	srv.reg.add(bob, func(string) {})
 	sw.Poll(ctx)
 
-	alice := pw.signIn()
+	alice := pw.signIn(false)
 	pw.exec(one(upAlice + `suspended_at = now()` + whAlice))
 	if st := sw.Poll(ctx); st.Err != nil || st.Changes == 0 || st.Closed != 0 {
 		t.Fatalf("poll %+v, want the change read and nobody closed", st)
@@ -393,7 +448,7 @@ func TestAPollAsksForAFullSweepWhenServerStartChangesOnTheDatabase(t *testing.T)
 	sw := srv.Sweeper(time.Second, 30*time.Second)
 	var mu sync.Mutex
 	closedReason := ""
-	srv.reg.add(pw.signIn(), func(r string) { mu.Lock(); closedReason = r; mu.Unlock() })
+	srv.reg.add(pw.signIn(false), func(r string) { mu.Lock(); closedReason = r; mu.Unlock() })
 
 	ctx := context.Background()
 	if st := sw.Poll(ctx); st.Err != nil || st.Full || sw.sinceStart.IsZero() {
@@ -457,7 +512,7 @@ func TestRevocationLatency(t *testing.T) {
 			srv := NewServer(pw.store, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			sw := srv.Sweeper(time.Second, 30*time.Second)
 			closed := make(chan time.Time, 1)
-			srv.reg.add(pw.signIn(), func(string) {
+			srv.reg.add(pw.signIn(p.device()), func(string) {
 				select {
 				case closed <- time.Now():
 				default:

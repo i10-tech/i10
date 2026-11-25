@@ -42,6 +42,8 @@ type fakeAccounts struct {
 	changes     []projection.Change
 	serverStart time.Time
 	polls       int
+	// devices are the `authd.mail_devices` rows, by id.
+	devices map[string]projection.Device
 }
 
 func newFakeAccounts(accts ...projection.Account) *fakeAccounts {
@@ -70,7 +72,7 @@ func (f *fakeAccounts) AccountByLogin(_ context.Context, login string) (*project
 	return &cp, nil
 }
 
-func (f *fakeAccounts) AccountsByUIDs(_ context.Context, ids []string) ([]projection.Account, time.Duration, error) {
+func (f *fakeAccounts) AccountsByUIDs(_ context.Context, ids, deviceIDs []string) ([]projection.Account, time.Duration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sweeps++
@@ -84,10 +86,37 @@ func (f *fakeAccounts) AccountsByUIDs(_ context.Context, ids []string) ([]projec
 	var out []projection.Account
 	for _, a := range f.byLogin {
 		if want[a.ClerkUserID] && a.Active {
-			out = append(out, *a)
+			cp := *a
+			cp.Devices = nil
+			for _, id := range deviceIDs {
+				if d, ok := f.devices[id]; ok && d.ClerkUserID == a.ClerkUserID {
+					cp.Devices = append(cp.Devices, d)
+				}
+			}
+			out = append(out, cp)
 		}
 	}
 	return out, 0, nil
+}
+
+// addDevice puts a device row in, as the API's store function would.
+func (f *fakeAccounts) addDevice(d projection.Device) {
+	f.mu.Lock()
+	if f.devices == nil {
+		f.devices = map[string]projection.Device{}
+	}
+	f.devices[d.ID] = d
+	f.changes = append(f.changes, projection.Change{Kind: projection.ChangeAccount, Key: d.ClerkUserID})
+	f.mu.Unlock()
+}
+
+// deleteDevice is a revoke, logged as the table's trigger logs it.
+func (f *fakeAccounts) deleteDevice(id string) {
+	f.mu.Lock()
+	d := f.devices[id]
+	delete(f.devices, id)
+	f.changes = append(f.changes, projection.Change{Kind: projection.ChangeAccount, Key: d.ClerkUserID})
+	f.mu.Unlock()
 }
 
 func (f *fakeAccounts) AccessChanges(_ context.Context, since string, limit int) (projection.ChangeBatch, error) {
@@ -186,6 +215,10 @@ type fakeStalwart struct {
 	conns     []net.Conn
 	tokensFor []string // the account of every valid token, in order
 	raw       int      // sign-ins whose password carried no valid token
+	// devicesFor is the device every valid token covered, for a device code.
+	devicesFor []string
+	// refuseDevices makes authd's device lane refuse every code.
+	refuseDevices bool
 }
 
 func startFakeStalwart(t *testing.T, proto Protocol) *fakeStalwart {
@@ -279,7 +312,7 @@ func (f *fakeStalwart) check(login, pass string) (string, bool) {
 	f.mu.Lock()
 	uid := f.uidOf[strings.ToLower(strings.TrimSpace(login))]
 	f.mu.Unlock()
-	pw, err := bindtoken.Unwrap(bindtoken.Keys{testBindKey.ID: testBindKey.Secret}, uid, pass, time.Now())
+	pw, device, err := bindtoken.Unwrap(bindtoken.Keys{testBindKey.ID: testBindKey.Secret}, uid, pass, time.Now())
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err != nil {
@@ -287,6 +320,13 @@ func (f *fakeStalwart) check(login, pass string) (string, bool) {
 		return pass, false
 	}
 	f.tokensFor = append(f.tokensFor, uid)
+	if device != "" {
+		// authd's device lane, which is tested on its own (internal/ldapsrv):
+		// here any well-formed code signs in, and the device the token covered
+		// is recorded.
+		f.devicesFor = append(f.devicesFor, device)
+		return pw, !f.refuseDevices
+	}
 	return pw, pw == rightPassword
 }
 

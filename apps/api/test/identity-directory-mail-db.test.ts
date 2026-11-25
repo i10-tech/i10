@@ -77,16 +77,34 @@ suite("directory mail", () => {
     ).map((r) => r.type as string)
 
   it("suspension keeps the account ACTIVE (delivery) and sets suspended_at (login), with row and audit together", async () => {
-    expect(await mail().suspend(rival, ada, KEEP, at, { type: "x" })).toBe("no_mailbox")
+    expect(
+      await mail().suspend(rival, ada, KEEP, at, { type: "x" }, { endDevices: true }),
+    ).toBe("no_mailbox")
     expect((await acct(ada)).suspended_at).toBeNull()
     expect(
-      await mail().suspend(acme, ada, KEEP, at, { type: "mailbox.suspended" }),
+      await mail().suspend(
+        acme,
+        ada,
+        KEEP,
+        at,
+        { type: "mailbox.suspended" },
+        { endDevices: true },
+      ),
     ).toBe("suspended")
     expect(await acct(ada)).toMatchObject({ active: true })
     expect((await acct(ada)).suspended_at).not.toBeNull()
     expect((await mail().mailbox(acme, ada))?.state).toBe("suspended")
     expect(await types()).toContain("mailbox.suspended")
-    expect(await mail().suspend(acme, ada, KEEP, at, { type: "again" })).toBe("already")
+    expect(
+      await mail().suspend(
+        acme,
+        ada,
+        KEEP,
+        at,
+        { type: "again" },
+        { endDevices: true },
+      ),
+    ).toBe("already")
     expect(await types()).not.toContain("again")
   })
 
@@ -110,7 +128,14 @@ suite("directory mail", () => {
       days: 7,
       deleteAt: new Date(at.getTime() + 7 * 86400_000),
     }
-    await mail().suspend(acme, ada, plan, at, { type: "mailbox.suspended" })
+    await mail().suspend(
+      acme,
+      ada,
+      plan,
+      at,
+      { type: "mailbox.suspended" },
+      { endDevices: true },
+    )
     expect(
       await mail().remove(acme, ada, new Date(at.getTime() + 86400_000), { type: "d" }),
     ).toBe("not_due")
@@ -154,7 +179,14 @@ suite("directory mail", () => {
       days: null,
       deleteAt: null,
     }
-    await mail().suspend(acme, bob, plan, at, { type: "mailbox.suspended" })
+    await mail().suspend(
+      acme,
+      bob,
+      plan,
+      at,
+      { type: "mailbox.suspended" },
+      { endDevices: true },
+    )
     const g = await owner`select email from authd.groups where name = ${`fwd-${bob}`}`
     expect(g[0]?.email).toBe(`bob@${domain}`)
     const members =

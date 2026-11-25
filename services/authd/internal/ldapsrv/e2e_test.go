@@ -18,6 +18,7 @@ import (
 
 	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/credcache"
+	"github.com/i10-tech/i10/services/authd/internal/devicecode"
 	"github.com/i10-tech/i10/services/authd/internal/directory"
 	"github.com/i10-tech/i10/services/authd/internal/ldapsrv"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
@@ -225,6 +226,9 @@ type fixtureOptions struct {
 	// noKeys means none at all.
 	keys   bindtoken.Keys
 	noKeys bool
+	// devices and deviceKeys are the device lane's; nil, nil leaves it off.
+	devices    ldapsrv.DeviceStore
+	deviceKeys devicecode.Keys
 }
 
 func (o fixtureOptions) tokenKeys() bindtoken.Keys {
@@ -272,6 +276,8 @@ func newFixtureOpts(t *testing.T, o fixtureOptions) string {
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OpTimeout:         opTimeout,
 		BindTokenKeys:     o.tokenKeys(),
+		Devices:           o.devices,
+		DeviceCodeKeys:    o.deviceKeys,
 	}).Routes())
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

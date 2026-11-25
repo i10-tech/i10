@@ -143,6 +143,12 @@ suite("a pass-through change ends the sign-ins made under the old answer", () =>
     // Nobody the connection does not manage is touched.
     expect(await epoch(other)).toBe(10)
   }
+  /** `authd.passthrough_versions.active`: true, false, null, or undefined for no row. */
+  const active = async (connectionId: string) => {
+    const [row] =
+      await owner`select active from authd.passthrough_versions where connection_id = ${connectionId}`
+    return row ? (row.active as boolean | null) : undefined
+  }
   const now = async (connectionId: string, ada: string) => ({
     epoch: await epoch(ada),
     version: await version(connectionId),
@@ -225,8 +231,12 @@ suite("a pass-through change ends the sign-ins made under the old answer", () =>
     })
 
     // The console's status route (routes/console/identity.ts), active to disabled.
+    // ⚠ And `active` follows, in the same statement: authd's gate refuses the
+    // connection's managed accounts on it (`connection_inactive`), which is what
+    // holds their mail device codes.
     it("the connection stopping being active", async () => {
       const { connectionId, ada } = await setUp()
+      expect(await active(connectionId)).toBe(true)
       const before = await now(connectionId, ada)
       const res = await call(
         "user_owner",
@@ -238,6 +248,18 @@ suite("a pass-through change ends the sign-ins made under the old answer", () =>
       )
       expect(res.status).toBe(200)
       await expectRaised(connectionId, ada, before)
+      expect(await active(connectionId)).toBe(false)
+
+      const disabled = await now(connectionId, ada)
+      expect(
+        (
+          await call("user_owner", "PATCH", `/identity/connections/${connectionId}`, {
+            status: "active",
+          })
+        ).status,
+      ).toBe(200)
+      await expectRaised(connectionId, ada, disabled)
+      expect(await active(connectionId)).toBe(true)
     })
 
     it("the OIDC lane's settings changing", async () => {
@@ -268,6 +290,18 @@ suite("a pass-through change ends the sign-ins made under the old answer", () =>
       config: { ...rest, oidcMail: ldap },
     })
     await expectRaised(connectionId, ada, before)
+  })
+
+  // ⚠ A ROW AN OLDER API POD WROTE has no `active` (null, which authd reads as
+  // "unknown" and refuses nothing). The next mirror fills it in, and since the
+  // answer did not move, raises neither the version nor anybody's epoch.
+  it("fills in a row with no active without a raise", async () => {
+    const { connectionId, ada } = await setUp()
+    await owner`update authd.passthrough_versions set active = null where connection_id = ${connectionId}`
+    const before = await now(connectionId, ada)
+    await withTenant(database, acme, (tx) => mirrorPassthrough(tx, acme))
+    expect(await active(connectionId)).toBe(true)
+    expect(await now(connectionId, ada)).toEqual(before)
   })
 
   describe("changes that do not move the answer", () => {
@@ -303,6 +337,9 @@ suite("a pass-through change ends the sign-ins made under the old answer", () =>
         lookup: only(name, () => []),
       })
       await expectRaised(connectionId, ada, before)
+      // `active` is the status alone: a lapsed proof is pass-through's answer
+      // (the version moved), not the connection's status.
+      expect(await active(connectionId)).toBe(true)
 
       const lapsed = await now(connectionId, ada)
       await recheckAccessDomains({

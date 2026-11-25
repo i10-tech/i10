@@ -123,14 +123,15 @@ export interface UniversalLogoutDeps {
   forget(input: { userId?: string; sessionId?: string }): void
   /**
    * Makes authd ask the identity provider again for this person's mail password
-   * (`raiseCredentialEpoch`, projection/credential-epoch.ts).
+   * and ends their mail devices in this workspace in one transaction
+   * (`raiseEpochAndEndDevices`, mail-devices/store.ts).
    *
    * ⚠ OPTIONAL, AND ITS ABSENCE LEAVES A LOGGED-OUT PERSON'S CACHED MAIL PASSWORD
-   * GOOD FOR HOURS. A universal logout ends sessions; authd's cache of a verified
-   * mail password is none of those, so nothing else reaches it. index.ts always
-   * passes it.
+   * AND MAIL DEVICE CODES GOOD. A universal logout ends sessions; authd's cache
+   * and `authd.mail_devices` are neither of those, so nothing else reaches them.
+   * index.ts always passes it.
    */
-  raiseCredentialEpoch?: (clerkUserId: string) => Promise<unknown>
+  raiseCredentialEpoch?: (clerkUserId: string, tenantId: string) => Promise<unknown>
   fetch?: OidcFetch
   log: Logger
   endpointUrl?: (connectionId: string) => string
@@ -440,7 +441,7 @@ export function universalLogout(
        * released and the IdP's retry does both again.
        */
       if (resolvedUserId && d.raiseCredentialEpoch)
-        await d.raiseCredentialEpoch(resolvedUserId)
+        await d.raiseCredentialEpoch(resolvedUserId, connection.tenantId)
       return { outcome: "logged_out", revoked }
     } catch (error) {
       await d.replay

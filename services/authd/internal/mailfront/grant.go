@@ -22,9 +22,24 @@ type Grant struct {
 	UpdatedAt *time.Time
 	Route     gate.Route
 
-	// Until is when a session on a pass-through lane is closed whatever the row
-	// says (PassthroughMaxAge); zero for Clerk, whose changes reach the row.
+	// DeviceID is the mail device the session signed in with (#383), "" for a
+	// password session: the device the bind token covered, read from the
+	// forwarded password with devicecode.DeviceID, the same parser authd uses.
+	// The re-check closes the session when that device's row is gone or no
+	// longer matches (gate.DeviceRefusal).
+	DeviceID string
+
+	// Until is when the session is closed whatever the row says: a device
+	// session at DeviceMaxAge, a session on a pass-through lane at
+	// PassthroughMaxAge; zero for a Clerk password session, whose changes reach
+	// the row.
 	Until time.Time
+}
+
+// sessionEnds is when a session that signs in now ends whatever its row says,
+// by kind (Grant.Until).
+type sessionEnds struct {
+	passthrough, device time.Time
 }
 
 // DefaultPassthroughMaxAge is how long a session signed in through a company's
@@ -40,6 +55,21 @@ type Grant struct {
 // lanes have one bound. A Clerk-routed session is not affected: a Clerk change
 // moves clerk_updated_at, which the sweep already watches.
 const DefaultPassthroughMaxAge = 15 * time.Minute
+
+// DeviceMaxAge and DeviceMaxAgeJitter bound a device session: it is closed
+// between DeviceMaxAge and DeviceMaxAge plus DeviceMaxAgeJitter after sign-in,
+// at random, and the client signs in again with the code it holds.
+//
+// ⚠ SO A DEVICE IN USE IS NEVER PRUNED AS IDLE. A device's `last_used_at` moves
+// only at a bind (at most once a day), and the prune deletes a used code 90 days
+// after it. An iPhone in push holds one IMAP session for as long as the network
+// lets it; without a maximum age it could hold one past 90 days, and its device
+// would be deleted under it. Re-binding daily keeps the stamp fresh. Not the
+// revocation bound: a revoke is a DELETE, which the next poll sees.
+const (
+	DeviceMaxAge       = 24 * time.Hour
+	DeviceMaxAgeJitter = time.Hour
+)
 
 // Reasons a connection is closed. Stable log reason codes.
 const (
@@ -57,6 +87,7 @@ const (
 	ReasonShutdown       = "shutdown"
 	ReasonPreAuthLimits  = "preauth_limit"
 	ReasonMaxAge         = "passthrough_max_age"
+	ReasonDeviceMaxAge   = "device_max_age"
 )
 
 // admit decides whether an authenticated session may continue, from the row
@@ -74,9 +105,10 @@ const (
 // is one it could never close on a revocation. It is closed now. A failed lookup
 // also means authd's own lookup is failing, so the sign-in is refused anyway.
 //
-// until is when the session must end if it signed in through a pass-through
-// lane; it is ignored for a Clerk-routed one.
-func admit(acct *projection.Account, lookupErr error, until time.Time) (Grant, string) {
+// deviceID is the device the forwarded password named ("" for none), and ends
+// is when the session must end if it is a device session or one on a
+// pass-through lane; neither applies to a Clerk password session.
+func admit(acct *projection.Account, deviceID string, lookupErr error, ends sessionEnds) (Grant, string) {
 	switch {
 	case lookupErr != nil:
 		return Grant{}, ReasonLookupFailed
@@ -93,9 +125,15 @@ func admit(acct *projection.Account, lookupErr error, until time.Time) (Grant, s
 		Epoch:     acct.CredentialEpoch,
 		UpdatedAt: acct.ClerkUpdatedAt,
 		Route:     gate.RouteOf(acct),
+		DeviceID:  deviceID,
 	}
-	if !g.Route.Clerk() {
-		g.Until = until
+	switch {
+	case deviceID != "":
+		// Not a pass-through session even on a managed account: the code is
+		// i10's, checked by authd, and its revocations reach the row.
+		g.Until = ends.device
+	case !g.Route.Clerk():
+		g.Until = ends.passthrough
 	}
 	return g, ""
 }
@@ -109,7 +147,7 @@ func admit(acct *projection.Account, lookupErr error, until time.Time) (Grant, s
 // be answered from the entry that admitted this session:
 //
 //   - credential_epoch: the API's general revocation (Okta Universal Logout, a
-//     connection's OIDC settings changing, and from later PRs a device revoked);
+//     connection's OIDC settings changing);
 //   - clerk_updated_at: any change in Clerk, a password change included. It fires
 //     on every profile change, so a renamed person reconnects once; the client
 //     does that with the password it already has;
@@ -120,6 +158,11 @@ func admit(acct *projection.Account, lookupErr error, until time.Time) (Grant, s
 // session whose address moved is closed rather than watched under a domain it
 // is no longer on. The client's saved login is the old address, which no longer
 // signs in either, so this only brings forward what its next sign-in would meet.
+//
+// And for a device session, the device's row (gate.DeviceRefusal, the bind's
+// own rule): deleted, or minted for another person, address or workspace than
+// the account has now. A device session closed for the epoch or clerk_updated_at
+// reconnects with the code it holds.
 func (g Grant) revoked(now *projection.Account) string {
 	if now == nil {
 		return ReasonAccountGone
@@ -137,7 +180,21 @@ func (g Grant) revoked(now *projection.Account) string {
 	case now.Email != g.Email:
 		return ReasonAddressChanged
 	}
+	if g.DeviceID != "" {
+		return gate.DeviceRefusal(deviceIn(now, g.DeviceID), now)
+	}
 	return ""
+}
+
+// deviceIn is the device id among the rows read with a, or nil when it is not
+// there (deleted, or now another account's).
+func deviceIn(a *projection.Account, id string) *projection.Device {
+	for i := range a.Devices {
+		if a.Devices[i].ID == id {
+			return &a.Devices[i]
+		}
+	}
+	return nil
 }
 
 // expired reports whether a pass-through session is past its Until at the
@@ -145,6 +202,14 @@ func (g Grant) revoked(now *projection.Account) string {
 // reads no row, so it holds while the projection cannot be read.
 func (g Grant) expired(at time.Time) bool {
 	return !g.Until.IsZero() && !at.Before(g.Until)
+}
+
+// maxAgeReason is why an expired session is closed.
+func (g Grant) maxAgeReason() string {
+	if g.DeviceID != "" {
+		return ReasonDeviceMaxAge
+	}
+	return ReasonMaxAge
 }
 
 func sameInstant(a, b *time.Time) bool {

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
+  bytea,
   check,
   customType,
   foreignKey,
@@ -9,8 +10,10 @@ import {
   integer,
   pgSchema,
   primaryKey,
+  smallint,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
 import { tenants } from "./core.js"
@@ -515,6 +518,24 @@ export const authdPassthroughVersions = authd.table(
     connectionId: uuid("connection_id").primaryKey(),
     version: bigint("version", { mode: "number" }).notNull(),
     fingerprint: text("fingerprint").notNull(),
+    /**
+     * Whether the connection's status is `active`, written by `mirrorPassthrough`
+     * in the statement that already moves `version`. authd's gate refuses a
+     * managed account whose connection is not active (`connection_inactive`), and
+     * that is what holds the account's mail device codes, because the device lane
+     * never asks the API (services/authd README, "Mail device codes").
+     *
+     * ⚠ NULLABLE, AND NULL REFUSES NOTHING. Null is "not known": a row written by
+     * an API pod from before this column, during a rollout. Read as inactive it
+     * would lock out every managed person of the connection over a mirror that is
+     * merely old; read as unknown it leaves today's behaviour, and the next mirror
+     * writes it. Only `false` refuses.
+     *
+     * ⚠ THE STATUS ONLY, NOT THE DOMAIN PROOF. A proof lapsing reaches this mirror
+     * only on some paths, not in their transaction, and a stale `false` (or
+     * `true`) would be worse than none.
+     */
+    active: boolean("active"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -523,6 +544,103 @@ export const authdPassthroughVersions = authd.table(
       columns: [t.connectionId],
       foreignColumns: [connections.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * One enrolled mail device (#383): an iPhone or iPad that signs in to IMAP and
+ * SMTP with a device code instead of the person's password.
+ *
+ * ⚠ THE ONE TABLE IN THIS SCHEMA THAT HOLDS CREDENTIAL MATERIAL: a keyed hash of
+ * each code (`code_hash`, HMAC-SHA256 under `MAIL_DEVICE_CODE_KEYS` key
+ * `code_kid`), never the code. The code is 256 random bits, shown or sealed to
+ * the device once, and verified by authd (services/authd/internal/devicecode).
+ * The mail front's role reads only `id`, `clerk_user_id`, `email`, `tenant_id`
+ * and `platform`, by column grant; the hash, the serial and the name are not
+ * among them.
+ *
+ * ⚠ A SIGN-IN MATCHES THE ROW TO THE ACCOUNT NOW. authd refuses a code whose row
+ * names another person, another address or another workspace than the account
+ * the bind is for (gate.DeviceRefusal), and the mail front closes an open session
+ * on the same rule. A revoke is a DELETE.
+ *
+ * ⚠ `id` IS NEVER SUPPLIED BY A CALLER: the column's own `uuidv7()`, so a deleted
+ * device never comes back under its old id. The foreign key cascades on delete,
+ * so every permanent end of an account takes its devices, and refuses an update
+ * of the person id under a device (`on update no action`).
+ *
+ * ⚠ ONE WRITER: the API's device store. authd may write `first_used_at` and
+ * `last_used_at` and nothing else (column grant).
+ */
+export const mailDevices = authd.table(
+  "mail_devices",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The mailbox address at mint, lowercase. A sign-in needs it to equal the account's now. */
+    email: text("email").notNull(),
+    /** The account's workspace at mint (null for i10's own mailboxes). */
+    tenantId: uuid("tenant_id"),
+    platform: text("platform").notNull(),
+    /** The editable name. */
+    deviceName: text("device_name"),
+    /** Attested identity, from Apple's signature (PR 4). */
+    model: text("model"),
+    serial: text("serial"),
+    /** The Secure Enclave certificate's SHA-256, from PR 3. */
+    certSha256: bytea("cert_sha256"),
+    codeHash: bytea("code_hash").notNull(),
+    codeKid: smallint("code_kid").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Set by authd's bind, never by the API. An unused code dies ten minutes after
+     * `created_at`; a used one ninety days after `last_used_at`, which authd moves
+     * at most once a day.
+     */
+    firstUsedAt: timestamp("first_used_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: "mail_devices_account_fk",
+      columns: [t.clerkUserId],
+      foreignColumns: [accounts.clerkUserId],
+    })
+      .onDelete("cascade")
+      .onUpdate("no action"),
+    check("mail_devices_email_lowercase", sql`${t.email} = lower(${t.email})`),
+    check(
+      "mail_devices_platform_check",
+      sql`${t.platform} in ('ios', 'ipados', 'macos')`,
+    ),
+    check("mail_devices_code_kid_check", sql`${t.codeKid} between 0 and 255`),
+    check(
+      "mail_devices_used_together",
+      sql`(${t.firstUsedAt} is null) = (${t.lastUsedAt} is null)`,
+    ),
+    uniqueIndex("mail_devices_cert_sha256_unique")
+      .on(t.certSha256)
+      .where(sql`${t.certSha256} is not null`),
+    // A person's devices: the revocations that end them all, and PR 5's listing.
+    index("mail_devices_account_idx").on(t.clerkUserId),
+    // Workspace-wide device listing (`list`) and workspace-wide device deletion (`endFor`).
+    // Explicit `.nullsFirst()` matches PostgreSQL's `ORDER BY created_at DESC, id DESC`
+    // default so the planner avoids a full-tenant bitmap scan and sort.
+    index("mail_devices_tenant_created_idx").on(
+      t.tenantId,
+      t.createdAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
+    ),
+    // The prune: unused codes past their ten minutes, used ones idle 90 days.
+    index("mail_devices_unused_idx")
+      .on(t.createdAt)
+      .where(sql`${t.firstUsedAt} is null`),
+    index("mail_devices_last_used_idx")
+      .on(t.lastUsedAt)
+      .where(sql`${t.lastUsedAt} is not null`),
   ],
 )
 
@@ -604,9 +722,11 @@ export const webhookEvents = authd.table("webhook_events", {
  * opened, keyed by Clerk user id. Anything derived from the password stays in
  * authd's memory (`internal/credcache`).
  *
- * ⚠ THE ONLY TABLE IN `authd` THAT THE `authd` ROLE WRITES. Everything else is
- * the API's; 0138 grants authd INSERT and UPDATE on this one table and nothing
- * more. Not a foreign key to `accounts`: a budget outliving a re-created account
+ * ⚠ THE ONLY TABLE IN `authd` THAT THE `authd` ROLE WRITES WHOLE ROWS OF.
+ * Everything else is the API's; 0138 grants authd INSERT and UPDATE on this one
+ * table, and the only other write authd may make is a mail device's two clock
+ * stamps (`mailDevices`: UPDATE of `first_used_at` and `last_used_at`, by
+ * column grant). Not a foreign key to `accounts`: a budget outliving a re-created account
  * is harmless, and the role has no business depending on that table's rows.
  *
  * Inert for Clerk, whose verify_password was measured not to feed lockout. It is

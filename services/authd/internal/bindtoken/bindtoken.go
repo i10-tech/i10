@@ -16,7 +16,7 @@
 //
 // The format, as it sits in the LDAP simple-bind password:
 //
-//	i10mf1.<payload>.<the real password>
+//	i10mf2.<payload>.<the real password>
 //
 // payload is base64url (no padding) of
 //
@@ -24,20 +24,31 @@
 //
 // and mac is HMAC-SHA256 under key kid of
 //
-//	label | kid | uint16 length of uid | uid | expiry | nonce
+//	label | kid | uint16 length of uid | uid | uint8 length of device | device | expiry | nonce
 //
-// with label the fixed domain-separation string below. The real password is
-// everything after the second dot, dots included.
+// with label the fixed domain-separation string below, and device the 16 bytes
+// of the mail device id the real password names (internal/devicecode), or
+// nothing when it names none. The real password is everything after the second
+// dot, dots included.
 //
-// ⚠ THE TOKEN DOES NOT COVER THE PASSWORD, AND DOES NOT NEED TO. It says which
-// account the front credited and that the bind came through the front; whether
+// ⚠ THE DEVICE IS IN THE MAC, AND NEITHER SIDE IS TOLD IT. Wrap and Unwrap both
+// read it out of the real password with devicecode.Of, so the device the
+// front credits a connection to (its Grant) and the device authd verifies are
+// the same by construction: a token minted for one device's code does not open
+// behind another's, or behind an ordinary password. v1 tokens (`i10mf1.`) had no
+// device and are refused: the front and authd ship in one image, in one pod, and
+// switch together.
+//
+// ⚠ THE TOKEN DOES NOT COVER THE PASSWORD, AND DOES NOT NEED TO, beyond which
+// device it names. It says which account (and device) the front credited and
+// that the bind came through the front; whether
 // the password is right is still the provider's answer, checked by authd after
 // the token is taken off. Nothing a client sends ever reaches authd with a
 // token the client chose: the front mints it, and only on the way to Stalwart.
 //
 // ⚠ NO PASSWORD IS EVER READ AS A TOKEN BY ACCIDENT, OR THE OTHER WAY ROUND.
 // authd requires the token on every person bind, so a password that happens to
-// start with "i10mf1." is still wrapped by the front, and exactly one layer is
+// start with "i10mf2." is still wrapped by the front, and exactly one layer is
 // taken off. There is no fallback to treating a bind as a raw password.
 package bindtoken
 
@@ -49,13 +60,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/i10-tech/i10/services/authd/internal/devicecode"
+	"github.com/i10-tech/i10/services/authd/internal/keyring"
 )
 
 // Prefix starts every token.
-const Prefix = "i10mf1."
+const Prefix = "i10mf2."
 
 // TTL is how long a token is good for. The front mints one per sign-in and
 // Stalwart binds with it within milliseconds; the front, Stalwart and authd
@@ -66,9 +79,8 @@ const TTL = 60 * time.Second
 // accepted, for clocks that are not quite the same.
 const skew = 5 * time.Second
 
-// MinKeyLen is the shortest key accepted: an HMAC-SHA256 key shorter than its
-// output is a key that can be guessed sooner than the MAC.
-const MinKeyLen = 32
+// MinKeyLen is the shortest key accepted.
+const MinKeyLen = keyring.MinLen
 
 const urlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
@@ -76,7 +88,7 @@ const urlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 const maxUIDLen = 256
 
 const (
-	label      = "i10-mailfront-bind-token/v1\x00"
+	label      = "i10-mailfront-bind-token/v2\x00"
 	nonceLen   = 16
 	macLen     = sha256.Size
 	payloadLen = 1 + 8 + nonceLen + macLen
@@ -93,60 +105,20 @@ var (
 )
 
 // Key is one signing key and its id.
-type Key struct {
-	ID     byte
-	Secret []byte
-}
+type Key = keyring.Key
 
 // Keys is every key a verifier accepts, by id. The front signs with one; authd
 // accepts the current and the previous one while a rotation is under way.
-type Keys map[byte][]byte
+type Keys = keyring.Ring
 
 // ParseKey reads one key as "<id>:<base64 secret>", id 0 to 255.
-func ParseKey(s string) (Key, error) {
-	id, secret, ok := strings.Cut(strings.TrimSpace(s), ":")
-	if !ok {
-		return Key{}, errors.New("bindtoken: a key is <id>:<base64 secret>")
-	}
-	n, err := strconv.ParseUint(id, 10, 8)
-	if err != nil {
-		// ⚠ NEVER QUOTE IT: a key written the wrong way round (`<secret>:<id>`)
-		// would put the secret in the ERROR log.
-		return Key{}, fmt.Errorf("bindtoken: the key id (%d bytes) is not 0 to 255", len(id))
-	}
-	raw, err := base64.StdEncoding.DecodeString(secret)
-	if err != nil {
-		if raw, err = base64.RawURLEncoding.DecodeString(secret); err != nil {
-			return Key{}, fmt.Errorf("bindtoken: key %d is not base64", n)
-		}
-	}
-	if len(raw) < MinKeyLen {
-		return Key{}, fmt.Errorf("bindtoken: key %d is %d bytes, need at least %d", n, len(raw), MinKeyLen)
-	}
-	return Key{ID: byte(n), Secret: raw}, nil
-}
+func ParseKey(s string) (Key, error) { return keyring.ParseKey("bindtoken", s) }
 
 // ParseKeys reads a comma-separated list of keys. Ids must be distinct.
-func ParseKeys(s string) (Keys, error) {
-	keys := Keys{}
-	for _, part := range strings.Split(s, ",") {
-		if strings.TrimSpace(part) == "" {
-			continue
-		}
-		k, err := ParseKey(part)
-		if err != nil {
-			return nil, err
-		}
-		if _, dup := keys[k.ID]; dup {
-			return nil, fmt.Errorf("bindtoken: key id %d appears twice", k.ID)
-		}
-		keys[k.ID] = k.Secret
-	}
-	return keys, nil
-}
+func ParseKeys(s string) (Keys, error) { return keyring.ParseRing("bindtoken", s) }
 
-// Wrap puts a fresh token for uid in front of password, under k, valid until
-// now plus TTL.
+// Wrap puts a fresh token for uid, and for the device password names if it is a
+// device code, in front of password, under k, valid until now plus TTL.
 func Wrap(k Key, uid, password string, now time.Time) (string, error) {
 	if uid == "" || len(uid) > maxUIDLen {
 		return "", fmt.Errorf("bindtoken: a user id of %d bytes", len(uid))
@@ -166,41 +138,55 @@ func wrapWith(k Key, uid, password string, expires time.Time, nonce [nonceLen]by
 	payload = append(payload, k.ID)
 	payload = binary.BigEndian.AppendUint64(payload, uint64(expires.Unix()))
 	payload = append(payload, nonce[:]...)
-	payload = append(payload, mac(k.Secret, k.ID, uid, payload[1:9], nonce[:])...)
+	payload = append(payload, mac(k.Secret, k.ID, uid, deviceOf(password), payload[1:9], nonce[:])...)
 	return Prefix + base64.RawURLEncoding.EncodeToString(payload) + "." + password
 }
 
-// Unwrap checks the token in front of a bind's password for uid and returns
-// the real password behind it. Any failure is an error and no password: the
+// Unwrap checks the token in front of a bind's password for uid, and for the
+// device the real password names, and returns the real password and that device
+// (its UUID text, "" for none). Any failure is an error and no password: the
 // caller refuses the bind, it never retries the whole string as a password.
-func Unwrap(keys Keys, uid, bindPassword string, now time.Time) (string, error) {
+//
+// ⚠ THE DEVICE RETURNED IS THE ONE THE MAC COVERED. The caller verifies a
+// device code against exactly this id, so the device authd checks is the one
+// the front put in the token.
+func Unwrap(keys Keys, uid, bindPassword string, now time.Time) (password, deviceID string, err error) {
 	if len(keys) == 0 {
-		return "", ErrNoKeys
+		return "", "", ErrNoKeys
 	}
 	if uid == "" || len(uid) > maxUIDLen {
-		return "", ErrMalformed
+		return "", "", ErrMalformed
 	}
 	t, password, err := parse(bindPassword)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	secret, ok := keys[t.kid]
 	if !ok {
-		return "", ErrUnknownKey
+		return "", "", ErrUnknownKey
+	}
+	code, isCode := devicecode.Of(password)
+	var device []byte
+	if isCode {
+		id := code.IDBytes()
+		device = id[:]
 	}
 	// ⚠ THE MAC FIRST, THE CLOCK AFTER: an expiry is only worth reading once it is
 	// known to be ours.
-	if !hmac.Equal(t.mac, mac(secret, t.kid, uid, t.expiry, t.nonce)) {
-		return "", ErrBadMAC
+	if !hmac.Equal(t.mac, mac(secret, t.kid, uid, device, t.expiry, t.nonce)) {
+		return "", "", ErrBadMAC
 	}
 	exp := time.Unix(int64(binary.BigEndian.Uint64(t.expiry)), 0)
 	if !now.Before(exp) || exp.After(now.Add(TTL+skew)) {
-		return "", ErrExpired
+		return "", "", ErrExpired
 	}
 	if password == "" {
-		return "", ErrMalformed
+		return "", "", ErrMalformed
 	}
-	return password, nil
+	if isCode {
+		deviceID = code.ID()
+	}
+	return password, deviceID, nil
 }
 
 type token struct {
@@ -236,7 +222,7 @@ func parse(s string) (token, string, error) {
 	}, password, nil
 }
 
-func mac(secret []byte, kid byte, uid string, expiry, nonce []byte) []byte {
+func mac(secret []byte, kid byte, uid string, device, expiry, nonce []byte) []byte {
 	m := hmac.New(sha256.New, secret)
 	m.Write([]byte(label))
 	m.Write([]byte{kid})
@@ -244,7 +230,20 @@ func mac(secret []byte, kid byte, uid string, expiry, nonce []byte) []byte {
 	binary.BigEndian.PutUint16(n[:], uint16(len(uid))) // at most maxUIDLen
 	m.Write(n[:])
 	m.Write([]byte(uid))
+	m.Write([]byte{byte(len(device))}) // 0 or 16
+	m.Write(device)
 	m.Write(expiry)
 	m.Write(nonce)
 	return m.Sum(nil)
+}
+
+// deviceOf is the device a real password names, as the MAC covers it: the 16
+// bytes of its id, or none.
+func deviceOf(password string) []byte {
+	c, ok := devicecode.Of(password)
+	if !ok {
+		return nil
+	}
+	id := c.IDBytes()
+	return id[:]
 }
