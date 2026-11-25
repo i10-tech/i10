@@ -228,8 +228,14 @@ var gatePaths = []gatePath{
 		`CREATE TEMP TABLE md_keep ON COMMIT DROP AS SELECT * FROM authd.mail_devices`,
 		// CASCADE since PR 3: the permits and the Mac liveness rows reference the
 		// table (neither has triggers, so the log sees only this one's TRUNCATE).
+		// ⚠ They are kept and put back too: the other DB packages share this
+		// database and run at the same time in CI, and their rows must survive.
+		`CREATE TEMP TABLE mp_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_permits`,
+		`CREATE TEMP TABLE mb_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_binds`,
 		`TRUNCATE authd.mail_devices CASCADE`,
 		`INSERT INTO authd.mail_devices SELECT * FROM md_keep`,
+		`INSERT INTO authd.mail_device_cert_permits SELECT * FROM mp_keep`,
+		`INSERT INTO authd.mail_device_cert_binds SELECT * FROM mb_keep`,
 	}, sweepsAll},
 
 	// core.domains: by domain name, through core.mailbox_domain_refused.

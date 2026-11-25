@@ -786,9 +786,11 @@ export const mailDeviceCertPermits = authd.table(
       "mail_device_cert_permits_expiry_check",
       sql`${t.expiresAt} > ${t.createdAt}`,
     ),
-    // ACME AUTHORIZING carries only the attested serial: one open permit per
-    // serial tells it which row the Mac's key belongs to. Creating a permit
-    // first marks an expired open one for the serial `expired`, through this.
+    // ACME AUTHORIZING finds its permit by the attested serial (one open permit
+    // per serial tells it which row the Mac's key belongs to), then checks the
+    // certificate's `OU` nonce against `nonce_sha256`. Creating a permit first
+    // marks `expired` any open permit for the serial that has expired, and the
+    // same person's own open one, so a retried enrollment is never blocked.
     uniqueIndex("mail_device_cert_permits_open_acme_serial")
       .on(t.serial)
       .where(sql`${t.kind} = 'acme' and ${t.status} = 'open'`),

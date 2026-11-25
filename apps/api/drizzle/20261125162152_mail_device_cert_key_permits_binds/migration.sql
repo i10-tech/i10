@@ -1,10 +1,12 @@
--- ⚠ A LOCK TIMEOUT FIRST. The rename, the index drop/rebuild and the new CHECK
--- take ACCESS EXCLUSIVE on `authd.mail_devices`, and the three foreign keys take
--- SHARE ROW EXCLUSIVE on `authd.mail_devices` and `authd.accounts`, which is read
--- and written on every sign-in. Each waits behind any open writer and blocks
--- every later one while it waits; five seconds and the batch fails (the Job
--- retries) instead of stalling sign-ins (PostgreSQL docs, 13.3.1 "Table-Level
--- Locks").
+-- ⚠ A LOCK TIMEOUT FIRST. The column rename, the index drop and the new CHECK
+-- take ACCESS EXCLUSIVE on `authd.mail_devices` (the index rebuild takes SHARE,
+-- already covered), so every read of the table, sign-ins included, waits behind
+-- them. The three foreign keys take SHARE ROW EXCLUSIVE on `authd.mail_devices`
+-- and `authd.accounts`: that blocks the API's writes to `authd.accounts`, not
+-- authd's and the front's reads of it. Each lock waits behind any open
+-- conflicting transaction and blocks later ones while it waits; five seconds and
+-- the batch fails (the Job retries) instead of stalling sign-ins (PostgreSQL docs,
+-- 13.3.1 "Table-Level Locks").
 --
 -- Nothing here scans anything that grows yet: the two new tables are empty, and
 -- `authd.mail_devices` holds at most a few operator-made rows (no enrollment

@@ -15,8 +15,9 @@ ALTER TABLE "authd"."mail_device_cert_binds" SET (fillfactor = 80);
 -- (20260901120426) give `authd` SELECT on every new `authd` table; a permit's
 -- serial, nonce hash and challenge hash are what a forged webhook body would
 -- need, and neither authd nor the front ever reads one. REVOKE ALL, from both,
--- so a later grant elsewhere cannot widen it unseen: TestTheDeviceTableGrants
--- asserts that neither role can read the table. `mailfront` has no default
+-- clears what the defaults gave; it cannot stop a later GRANT, which
+-- TestTheDeviceTableGrants catches by asserting that neither role can read the
+-- table. `mailfront` has no default
 -- privileges (20261121202840), so its REVOKE only states the rule. The API keeps
 -- DML through its own default privileges (20260901170445).
 REVOKE ALL ON "authd"."mail_device_cert_permits" FROM authd, mailfront;
