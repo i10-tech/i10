@@ -404,7 +404,7 @@ func FuzzUnwrap(f *testing.F) {
 	}{
 		{c: Claims{Password: "pw", Mode: ModePassword, Attest: imap4}},
 		{c: Claims{Password: code, Mode: ModeDeviceCode, Attest: macCert, DeviceID: devicecode.DeviceID(code)}},
-		{c: Claims{Password: "i10dc-junk", Mode: ModeDeviceCode, Attest: smtp6}},
+		{c: Claims{Password: devicecode.ReservedPrefix + "-junk", Mode: ModeDeviceCode, Attest: smtp6}},
 		{c: Claims{Mode: ModeExternal, Attest: macCert, DeviceID: devA}},
 	}
 	for i := range seeds {
@@ -433,18 +433,19 @@ func FuzzUnwrap(f *testing.F) {
 			}
 			// The token does not cover the password beyond its mode and device:
 			// what follows may change only within the partition.
+			pw, dev := got.Password, got.DeviceID
 			switch got.Mode {
 			case ModePassword:
-				if got.Password == "" || devicecode.HasReservedPrefix(got.Password) || got.DeviceID != "" {
-					t.Fatalf("password mode accepted %q, device %q", got.Password, got.DeviceID)
+				if pw == "" || devicecode.HasReservedPrefix(pw) || dev != "" {
+					t.Fatalf("password mode accepted %q, device %q", pw, dev)
 				}
 			case ModeDeviceCode:
-				if !devicecode.HasReservedPrefix(got.Password) || got.DeviceID != want.DeviceID || got.DeviceID != devicecode.DeviceID(got.Password) {
-					t.Fatalf("device_code accepted %q for device %q, minted for %q", got.Password, got.DeviceID, want.DeviceID)
+				if !devicecode.HasReservedPrefix(pw) || dev != want.DeviceID || dev != devicecode.DeviceID(pw) {
+					t.Fatalf("device_code accepted %q for device %q, minted for %q", pw, dev, want.DeviceID)
 				}
 			case ModeExternal:
-				if got.Password != "" || got.DeviceID != want.DeviceID {
-					t.Fatalf("external accepted %q for device %q", got.Password, got.DeviceID)
+				if pw != "" || dev != want.DeviceID {
+					t.Fatalf("external accepted %q for device %q", pw, dev)
 				}
 			}
 			return
