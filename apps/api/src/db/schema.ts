@@ -4,6 +4,7 @@ import {
   boolean,
   bytea,
   check,
+  cidr,
   customType,
   foreignKey,
   index,
@@ -555,9 +556,9 @@ export const authdPassthroughVersions = authd.table(
  * each code (`code_hash`, HMAC-SHA256 under `MAIL_DEVICE_CODE_KEYS` key
  * `code_kid`), never the code. The code is 256 random bits, shown or sealed to
  * the device once, and verified by authd (services/authd/internal/devicecode).
- * The mail front's role reads only `id`, `clerk_user_id`, `email`, `tenant_id`
- * and `platform`, by column grant; the hash, the serial and the name are not
- * among them.
+ * The mail front's role reads only `id`, `clerk_user_id`, `email`, `tenant_id`,
+ * `platform` and `cert_key_sha256`, by column grant; the hash, the serial and
+ * the name are not among them.
  *
  * ⚠ A SIGN-IN MATCHES THE ROW TO THE ACCOUNT NOW. authd refuses a code whose row
  * names another person, another address or another workspace than the account
@@ -589,8 +590,14 @@ export const mailDevices = authd.table(
     /** Attested identity, from Apple's signature (PR 4). */
     model: text("model"),
     serial: text("serial"),
-    /** The Secure Enclave certificate's SHA-256, from PR 3. */
-    certSha256: bytea("cert_sha256"),
+    /**
+     * SHA-256 of the bound certificate key's SubjectPublicKeyInfo DER (PR 3). The
+     * binding is the key, never a certificate: the mail front honours a client
+     * certificate only when its key is bound to a live row, and clearing or
+     * changing this column is the revocation (docs/research/mail-device-binding.md
+     * section 11).
+     */
+    certKeySha256: bytea("cert_key_sha256"),
     codeHash: bytea("code_hash").notNull(),
     codeKid: smallint("code_kid").notNull(),
     createdBy: text("created_by").notNull(),
@@ -621,9 +628,14 @@ export const mailDevices = authd.table(
       "mail_devices_used_together",
       sql`(${t.firstUsedAt} is null) = (${t.lastUsedAt} is null)`,
     ),
-    uniqueIndex("mail_devices_cert_sha256_unique")
-      .on(t.certSha256)
-      .where(sql`${t.certSha256} is not null`),
+    check(
+      "mail_devices_cert_key_sha256_length",
+      sql`${t.certKeySha256} is null or octet_length(${t.certKeySha256}) = 32`,
+    ),
+    // One device per key: the front's `AUTHENTICATE EXTERNAL` reads the row by it.
+    uniqueIndex("mail_devices_cert_key_sha256_unique")
+      .on(t.certKeySha256)
+      .where(sql`${t.certKeySha256} is not null`),
     // A person's devices: the revocations that end them all, and PR 5's listing.
     index("mail_devices_account_idx").on(t.clerkUserId),
     // Workspace-wide device listing (`list`) and workspace-wide device deletion (`endFor`).
@@ -641,6 +653,221 @@ export const mailDevices = authd.table(
     index("mail_devices_last_used_idx")
       .on(t.lastUsedAt)
       .where(sql`${t.lastUsedAt} is not null`),
+  ],
+)
+
+/**
+ * Certificate permits (#383 PR 3): the device CA's only way to issue. step-ca asks
+ * the API's webhook handlers before every issuance, and they say yes only to an
+ * open, unexpired permit here (docs/research/mail-device-binding.md section 11,
+ * "Certificate permits"). Written by the API (PR 4's enrollment; the operator
+ * script until then), read only by those handlers. authd and the mail front get
+ * no access at all (an explicit REVOKE, with a grant test).
+ *
+ * The life of a permit, which the CHECKs below hold to:
+ *
+ *   acme: open -> authorized                  (AUTHORIZING binds the key)
+ *   scep: open -> challenged -> authorized -> notified
+ *         (SCEPCHALLENGE sets the transaction id and key, NOTIFYING the
+ *         certificate's hash, best effort)
+ *   either: any -> expired                    (past `expires_at`, or replaced)
+ *
+ * ⚠ THE CHECKS HOLD THE SHAPE OF EACH STATE, NOT THE ORDER OF STATES. An ACME
+ * permit always names its device and its nonce and never a challenge; a SCEP
+ * permit the reverse; every state past `open` holds the key it was claimed with,
+ * and a SCEP one its transaction id. `expired` keeps whatever its last state
+ * held. Which state may follow which is the handlers' `WHERE status = ...`.
+ *
+ * ⚠ LOCK ORDER (the handlers, after PR 2's): read the permit unlocked, then lock
+ * `authd.accounts`, then `authd.mail_devices`, then the permit, and re-check it.
+ * No network call while a lock is held.
+ */
+export const mailDeviceCertPermits = authd.table(
+  "mail_device_cert_permits",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /**
+     * ACME only. PR 4's SCEP step runs before the device row (and its code)
+     * exists, so a SCEP permit names only the person.
+     */
+    deviceId: uuid("device_id"),
+    kind: text("kind").notNull(),
+    status: text("status").notNull().default("open"),
+    /** The serial Apple signed in enrollment phase 2 (PR 4). */
+    serial: text("serial").notNull(),
+    /** ACME only: SHA-256 of the per-permit `OU` nonce the certificate must carry. */
+    nonceSha256: bytea("nonce_sha256"),
+    /** SCEP only: SHA-256 of the 32-byte challenge, never the challenge. */
+    challengeHash: bytea("challenge_hash"),
+    /** SHA-256 of the CSR key's SubjectPublicKeyInfo: how a retry is recognised. */
+    keySha256: bytea("key_sha256"),
+    /** SCEP only, the client's choice, from `SCEPCHALLENGE`. */
+    transactionId: text("transaction_id"),
+    /** SCEP only, from `NOTIFYING`, best effort (step-ca ignores its failure). */
+    issuedCertSha256: bytea("issued_cert_sha256"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "mail_device_cert_permits_account_fk",
+      columns: [t.clerkUserId],
+      foreignColumns: [accounts.clerkUserId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "mail_device_cert_permits_device_fk",
+      columns: [t.deviceId],
+      foreignColumns: [mailDevices.id],
+    }).onDelete("cascade"),
+    check("mail_device_cert_permits_kind_check", sql`${t.kind} in ('acme', 'scep')`),
+    check(
+      "mail_device_cert_permits_status_check",
+      sql`${t.status} in ('open', 'challenged', 'authorized', 'notified', 'expired')`,
+    ),
+    // `challenged` and `notified` are SCEP's own steps; ACME has no NOTIFYING.
+    check(
+      "mail_device_cert_permits_status_kind",
+      sql`${t.kind} = 'scep' or ${t.status} in ('open', 'authorized', 'expired')`,
+    ),
+    check("mail_device_cert_permits_serial_check", sql`${t.serial} <> ''`),
+    // An ACME permit binds a key to an existing device row and needs the nonce;
+    // a SCEP one runs before the row exists and is found by its challenge.
+    check(
+      "mail_device_cert_permits_device_kind",
+      sql`(${t.kind} = 'acme') = (${t.deviceId} is not null)`,
+    ),
+    check(
+      "mail_device_cert_permits_nonce_kind",
+      sql`(${t.kind} = 'acme') = (${t.nonceSha256} is not null)`,
+    ),
+    check(
+      "mail_device_cert_permits_challenge_kind",
+      sql`(${t.kind} = 'scep') = (${t.challengeHash} is not null)`,
+    ),
+    // The key is claimed by the step that leaves `open`, and kept from then on.
+    check(
+      "mail_device_cert_permits_key_state",
+      sql`case ${t.status} when 'open' then ${t.keySha256} is null
+                           when 'expired' then true
+                           else ${t.keySha256} is not null end`,
+    ),
+    // SCEP: the transaction id arrives with the key at SCEPCHALLENGE.
+    check(
+      "mail_device_cert_permits_transaction_state",
+      sql`case when ${t.kind} = 'acme' or ${t.status} = 'open' then ${t.transactionId} is null
+               when ${t.status} = 'expired' then true
+               else ${t.transactionId} is not null end`,
+    ),
+    // SCEP: the issued certificate's hash is what `notified` means.
+    check(
+      "mail_device_cert_permits_issued_state",
+      sql`case ${t.status} when 'notified' then ${t.issuedCertSha256} is not null
+                           when 'expired' then ${t.kind} = 'scep' or ${t.issuedCertSha256} is null
+                           else ${t.issuedCertSha256} is null end`,
+    ),
+    check(
+      "mail_device_cert_permits_hash_lengths",
+      sql`(${t.nonceSha256} is null or octet_length(${t.nonceSha256}) = 32)
+          and (${t.challengeHash} is null or octet_length(${t.challengeHash}) = 32)
+          and (${t.keySha256} is null or octet_length(${t.keySha256}) = 32)
+          and (${t.issuedCertSha256} is null or octet_length(${t.issuedCertSha256}) = 32)`,
+    ),
+    // The client chooses it (step-ca `scep/api/api.go`); bounded so a hostile
+    // one is a refused write, not an oversized unique-index entry.
+    check(
+      "mail_device_cert_permits_transaction_length",
+      sql`${t.transactionId} is null or octet_length(${t.transactionId}) between 1 and 255`,
+    ),
+    check(
+      "mail_device_cert_permits_expiry_check",
+      sql`${t.expiresAt} > ${t.createdAt}`,
+    ),
+    // ACME AUTHORIZING carries only the attested serial: one open permit per
+    // serial tells it which row the Mac's key belongs to. Creating a permit
+    // first marks an expired open one for the serial `expired`, through this.
+    uniqueIndex("mail_device_cert_permits_open_acme_serial")
+      .on(t.serial)
+      .where(sql`${t.kind} = 'acme' and ${t.status} = 'open'`),
+    // ACME "different key on an authorized permit" detection finds the permit
+    // by its nonce so a caller without the nonce cannot clear a bound key.
+    uniqueIndex("mail_device_cert_permits_nonce_unique")
+      .on(t.nonceSha256)
+      .where(sql`${t.nonceSha256} is not null`),
+    // SCEPCHALLENGE finds its permit by the challenge's hash.
+    uniqueIndex("mail_device_cert_permits_challenge_unique")
+      .on(t.challengeHash)
+      .where(sql`${t.challengeHash} is not null`),
+    // SCEP AUTHORIZING, and every retry, find the permit by the key.
+    uniqueIndex("mail_device_cert_permits_key_unique")
+      .on(t.keySha256)
+      .where(sql`${t.keySha256} is not null`),
+    // SCEP NOTIFYING finds its permit by the transaction id. Scoped to active
+    // SCEP states only: the id is client-chosen, so an expired or notified row
+    // kept for a day must not collide with a later enrollment.
+    uniqueIndex("mail_device_cert_permits_transaction_unique")
+      .on(t.transactionId)
+      .where(
+        sql`${t.transactionId} is not null and ${t.status} in ('challenged', 'authorized')`,
+      ),
+    // The cascades: an account's end and a device's delete each find their
+    // permits by index, never by scanning.
+    index("mail_device_cert_permits_account_idx").on(t.clerkUserId),
+    index("mail_device_cert_permits_device_idx")
+      .on(t.deviceId)
+      .where(sql`${t.deviceId} is not null`),
+    // The retention job: permits a day past expiry.
+    index("mail_device_cert_permits_expires_idx").on(t.expiresAt),
+  ],
+)
+
+/**
+ * "The Mac is online" (#383 PR 3), shared by every Stalwart pod's authd through
+ * Postgres: a row per device and client network (/32 or /64) where a
+ * certificate-verified IMAP bind of that device, under that key, succeeded. A Mac
+ * may send with its code only from a network listed here within 75 minutes, and
+ * only while the row's key is still the device's (docs/research/mail-device-binding.md
+ * section 11, "How every pod knows 'the Mac is online'").
+ *
+ * ⚠ LOCK ORDER: authd writes this only in single autocommit statements, never in
+ * a transaction that also touches `authd.mail_devices`. The ACME handler and the
+ * operator script lock the device row and then delete these rows; the reverse
+ * order would deadlock.
+ *
+ * No access-change triggers: a row here gates a new SMTP bind, never an open
+ * session. A key change on the device row is what closes sessions, and that is
+ * logged there.
+ */
+export const mailDeviceCertBinds = authd.table(
+  "mail_device_cert_binds",
+  {
+    deviceId: uuid("device_id").notNull(),
+    /** The client's network: the IPv4 address as a /32, or the IPv6 /64. */
+    addr: cidr("addr").notNull(),
+    keySha256: bytea("key_sha256").notNull(),
+    /** Moved at most once every five minutes per row. */
+    boundAt: timestamp("bound_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // `device_id` leads: the cascade from a deleted device, and the per-device
+    // cap of eight rows, use it.
+    primaryKey({ name: "mail_device_cert_binds_pkey", columns: [t.deviceId, t.addr] }),
+    foreignKey({
+      name: "mail_device_cert_binds_device_fk",
+      columns: [t.deviceId],
+      foreignColumns: [mailDevices.id],
+    }).onDelete("cascade"),
+    check(
+      "mail_device_cert_binds_addr_check",
+      sql`(family(${t.addr}) = 4 and masklen(${t.addr}) = 32)
+          or (family(${t.addr}) = 6 and masklen(${t.addr}) = 64)`,
+    ),
+    check("mail_device_cert_binds_key_length", sql`octet_length(${t.keySha256}) = 32`),
+    // The API's prune: rows older than a day.
+    index("mail_device_cert_binds_bound_at_idx").on(t.boundAt),
   ],
 )
 
@@ -722,7 +949,8 @@ export const webhookEvents = authd.table("webhook_events", {
  * opened, keyed by Clerk user id. Anything derived from the password stays in
  * authd's memory (`internal/credcache`).
  *
- * ⚠ THE ONLY TABLE IN `authd` THAT THE `authd` ROLE WRITES WHOLE ROWS OF.
+ * ⚠ ONE OF TWO TABLES IN `authd` THAT THE `authd` ROLE WRITES WHOLE ROWS OF
+ * (the other is `mail_device_cert_binds`, for Mac SMTP liveness).
  * Everything else is the API's; 0138 grants authd INSERT and UPDATE on this one
  * table, and the only other write authd may make is a mail device's two clock
  * stamps (`mailDevices`: UPDATE of `first_used_at` and `last_used_at`, by

@@ -216,12 +216,19 @@ var gatePaths = []gatePath{
 			VALUES (:alice, 'alice@path.test', :A, 'ipados', '\x03', 1, 'path')`), rechecks},
 	{"authd.mail_devices", "the clock stamps and the descriptive columns (ignored)", one(mintDevice),
 		one(upDevice + `first_used_at = now(), last_used_at = now(), device_name = 'Phone', model = 'iPhone17,1',
-			serial = 'S', created_by = 'someone', cert_sha256 = '\x04'` + whDevice), ignored},
+			serial = 'S', created_by = 'someone'` + whDevice), ignored},
+	// The bound key is an access input since PR 3: binding, changing or clearing
+	// it is logged. Until the front's code reads it (step 2), a logged change
+	// re-checks the session and keeps it.
+	{"authd.mail_devices", "cert_key_sha256 (bound, logged)", one(mintDevice),
+		one(upDevice + `cert_key_sha256 = '\x0404040404040404040404040404040404040404040404040404040404040404'` + whDevice), rechecks},
 	{"authd.mail_devices", "the account deleted (cascades the device)", one(mintDevice),
 		one(`DELETE FROM authd.accounts` + whAlice), closes},
 	{"authd.mail_devices", "truncate", one(mintDevice), []string{
 		`CREATE TEMP TABLE md_keep ON COMMIT DROP AS SELECT * FROM authd.mail_devices`,
-		`TRUNCATE authd.mail_devices`,
+		// CASCADE since PR 3: the permits and the Mac liveness rows reference the
+		// table (neither has triggers, so the log sees only this one's TRUNCATE).
+		`TRUNCATE authd.mail_devices CASCADE`,
 		`INSERT INTO authd.mail_devices SELECT * FROM md_keep`,
 	}, sweepsAll},
 
