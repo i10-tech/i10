@@ -294,9 +294,9 @@ func TestRunAnswersAFullPollAtOnceAndKeepsPolling(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	r.accounts.silently("alice@i10.test", func(a *projection.Account) { a.Suspended = true })
-	for range 3 {
-		r.accounts.logChange(projection.ChangeAccount, "user_nobody")
-	}
+	// One commit's worth: a poll that read the log between separate appends
+	// would see at most MaxChanges and never ask for the sweep (a CI flake on #535).
+	r.accounts.logBurst(projection.ChangeAccount, "user_nobody", 3)
 	waitFor(t, "alice closed by the sweep the burst asked for", func() bool { return r.isClosed("user_alice") })
 	r.accounts.update("bob@i10.test", func(a *projection.Account) { a.Banned = true })
 	waitFor(t, "bob closed by the next poll", func() bool { return r.isClosed("user_bob") })

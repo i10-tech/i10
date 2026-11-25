@@ -235,9 +235,15 @@ func (f *fakeAccounts) silently(email string, fn func(*projection.Account)) {
 }
 
 // logChange appends a change to the log, as a trigger on another table would.
-func (f *fakeAccounts) logChange(kind projection.ChangeKind, key string) {
+func (f *fakeAccounts) logChange(kind projection.ChangeKind, key string) { f.logBurst(kind, key, 1) }
+
+// logBurst appends n copies of a change as one commit would, under one lock, so
+// no poll can read the log between them.
+func (f *fakeAccounts) logBurst(kind projection.ChangeKind, key string, n int) {
 	f.mu.Lock()
-	f.changes = append(f.changes, projection.Change{Kind: kind, Key: key})
+	for range n {
+		f.changes = append(f.changes, projection.Change{Kind: kind, Key: key})
+	}
 	f.mu.Unlock()
 }
 
