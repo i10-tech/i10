@@ -157,8 +157,8 @@ var gatePaths = []gatePath{
 		one(`UPDATE authd.passthrough_versions SET active = NULL WHERE connection_id = :connA`), rechecks},
 	{"authd.passthrough_versions", "fingerprint (ignored)", []string{managedIdentity, managedByA, versionOfA},
 		one(`UPDATE authd.passthrough_versions SET fingerprint = 'y', updated_at = now() WHERE connection_id = :connA`), ignored},
-	// ⚠ A TRUNCATE, PUT BACK IN THE SAME TRANSACTION so the tests of other
-	// packages that share the database see the same rows after it.
+	// ⚠ A TRUNCATE, PUT BACK IN THE SAME TRANSACTION so rows other packages
+	// left in the shared database are the same after it.
 	{"authd.passthrough_versions", "truncate", []string{managedIdentity, managedByA, versionOfA}, []string{
 		`CREATE TEMP TABLE pv_keep ON COMMIT DROP AS SELECT * FROM authd.passthrough_versions`,
 		`TRUNCATE authd.passthrough_versions`,
@@ -227,8 +227,9 @@ var gatePaths = []gatePath{
 	{"authd.mail_devices", "truncate", one(mintDevice), []string{
 		// CASCADE since PR 3: the permits and the Mac liveness rows reference the
 		// table (neither has triggers, so the log sees only this one's TRUNCATE).
-		// They are kept and put back too, so this package's other tests keep
-		// their rows. ⚠ No LOCK TABLE here: locking these tables (and
+		// They are kept and put back too, so rows already in the shared test
+		// database (another package's, run before this one) survive the
+		// truncate. ⚠ No LOCK TABLE here: locking these tables (and
 		// `authd.accounts`) inside the shared test database queued other
 		// sessions behind this one and could hang or deadlock them (review of
 		// #533). The other DB packages never run beside this one: CI runs them

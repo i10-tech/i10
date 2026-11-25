@@ -185,7 +185,8 @@ jobs:
         # writes the shared access-change log (and truncates gate tables) while
         # projection's reads it with exact limits (#534), and locking around
         # that from a test only moved the problem into deadlocks (#533). Tests
-        # inside each package still run in parallel.
+        # inside a package already run one at a time (none calls t.Parallel);
+        # a DB test that ever does brings the same races back.
         run: go test -race -count=1 -p 1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/ ./internal/mailfront/
       # ⚠ AND SO DO THE API's. Every apps/api/test/*-db.test.ts skips itself
       # when its variable is unset, so in the `test` matrix job they all skip,
