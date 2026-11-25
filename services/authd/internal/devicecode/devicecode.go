@@ -114,10 +114,29 @@ func DeviceID(password string) string {
 	return ""
 }
 
-// ID is the device id as the UUID text Postgres writes (8-4-4-4-12, lowercase).
-func (c Code) ID() string {
-	h := hex.EncodeToString(c.id[:])
+// ID is the device id as the UUID text Postgres writes (IDText).
+func (c Code) ID() string { return IDText(c.id) }
+
+// IDText is a device id as the UUID text Postgres writes (8-4-4-4-12,
+// lowercase): the one spelling every package here passes a device id in.
+func IDText(id [idLen]byte) string {
+	h := hex.EncodeToString(id[:])
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+}
+
+// ParseIDText reads a device id in exactly IDText's spelling, and nothing else:
+// no upper case, braces or missing hyphens.
+func ParseIDText(s string) ([idLen]byte, bool) {
+	var id [idLen]byte
+	if len(s) != 36 {
+		return id, false
+	}
+	raw, err := hex.DecodeString(s[0:8] + s[9:13] + s[14:18] + s[19:23] + s[24:36])
+	if err != nil || len(raw) != idLen {
+		return id, false
+	}
+	copy(id[:], raw)
+	return id, IDText(id) == s
 }
 
 // IDBytes is the device id's 16 bytes.

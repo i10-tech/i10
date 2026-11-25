@@ -28,7 +28,11 @@
 // pass-through verifier with a secret only authd holds. See Route.
 package gate
 
-import "github.com/i10-tech/i10/services/authd/internal/projection"
+import (
+	"crypto/hmac"
+
+	"github.com/i10-tech/i10/services/authd/internal/projection"
+)
 
 // Reasons a login is refused. They are log reason codes, so they are stable.
 const (
@@ -68,11 +72,21 @@ const (
 	// DeviceMismatch: the row is there but was minted for another person,
 	// address or workspace than the account has now.
 	DeviceMismatch = "device_mismatch"
-	// DevicePlatformRefused: a platform whose code alone is not enough. A Mac's
-	// code is refused everywhere until the Secure Enclave certificate is checked
-	// with it (PR 3).
+	// DevicePlatformRefused: a platform this build does not sign in.
 	DevicePlatformRefused = "device_platform_refused"
+	// DeviceCertMissing: a Mac whose row has no certificate key bound (never
+	// bound, or cleared by `unbind-key` or a re-enrollment). A Mac signs in only
+	// with its certificate, so every session of it ends, SMTP included.
+	DeviceCertMissing = "device_cert_missing"
+	// DeviceKeyChanged: the certificate key the session or bind stands on is not
+	// the row's key now (rebound to another key), or a session that stands on a
+	// key meets a row that is not a Mac, or a Mac row meets a session that stands
+	// on none.
+	DeviceKeyChanged = "device_key_changed"
 )
+
+// Macos is the platform whose devices sign in with a certificate.
+const Macos = "macos"
 
 // RowRefusal names why the account row turns this login away before a verifier
 // is even chosen, or "". A nil account is one the projection does not have as
@@ -174,17 +188,37 @@ func Refusal(a *projection.Account) string {
 // longer has, or one minted in a workspace the mailbox has since left, is
 // refused. The workspaces compare null-safely: i10's own mailboxes have none.
 //
+// ⚠ A MAC STANDS ON ITS CERTIFICATE KEY (#383 PR 3). held is the key the
+// session or bind stands on: the key the front proved in the TLS handshake (an
+// `external` sign-in, or a Mac's code on IMAP), or for a Mac's SMTP session the
+// row's key when it was admitted; nil for an iPhone or iPad. A Mac row must have
+// a key (DeviceCertMissing), and held must be exactly it; a row that is not a
+// Mac must meet no key at all (DeviceKeyChanged). So binding a new key, clearing
+// it, or a row that stops being a Mac ends every session that stood on the old
+// one, through the same rule a bind uses. authd's bind names its refusals more
+// finely (device_cert_required, device_cert_mismatch) from this reason.
+//
 // The clock rules (the first-use window, the idle limit) are not here: they are
 // the bind's alone (projection.DeviceByID). An open session already passed them
 // at its bind, and the first-use stamp is that bind's own write.
-func DeviceRefusal(d *projection.Device, a *projection.Account) string {
+func DeviceRefusal(d *projection.Device, a *projection.Account, held []byte) string {
 	switch {
 	case d == nil:
 		return DeviceRevoked
 	case d.ClerkUserID != a.ClerkUserID, d.Email != a.Email, d.TenantID != a.TenantID:
 		return DeviceMismatch
+	case d.Platform == Macos:
+		if len(d.CertKey) == 0 {
+			return DeviceCertMissing
+		}
+		// Lengths first: hmac.Equal of two empty slices is true.
+		if len(held) != len(d.CertKey) || !hmac.Equal(held, d.CertKey) {
+			return DeviceKeyChanged
+		}
 	case d.Platform != "ios" && d.Platform != "ipados":
 		return DevicePlatformRefused
+	case len(held) != 0:
+		return DeviceKeyChanged
 	}
 	return ""
 }

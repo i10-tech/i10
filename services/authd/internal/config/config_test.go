@@ -167,4 +167,23 @@ func TestDefaultCredCacheTTLIsTwoHours(t *testing.T) {
 	if c.CredCacheTTL != 2*time.Hour {
 		t.Fatalf("default CredCacheTTL = %s, want 2h", c.CredCacheTTL)
 	}
+	if !c.MacSMTPSameAddress {
+		t.Fatal("default MacSMTPSameAddress = false, want true")
+	}
+}
+
+func TestMacSMTPSameAddressConfig(t *testing.T) {
+	t.Setenv("AUTHD_SERVICE_BIND_DN", "cn=stalwart,ou=services,dc=i10,dc=tech")
+	t.Setenv("AUTHD_SERVICE_BIND_SECRET", "s")
+	t.Setenv("AUTHD_DATABASE_URL", "postgres://localhost/i10")
+	t.Setenv("AUTHD_CLERK_SECRET_KEY", "sk_test_x")
+	t.Setenv("AUTHD_MAC_SMTP_SAME_ADDRESS", "false")
+	c, err := Load()
+	if err != nil || c.MacSMTPSameAddress {
+		t.Fatalf("false: %v, %v", c.MacSMTPSameAddress, err)
+	}
+	t.Setenv("AUTHD_MAC_SMTP_SAME_ADDRESS", "not-a-bool")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid bool accepted")
+	}
 }

@@ -230,3 +230,17 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+func TestIDTextHasOneSpelling(t *testing.T) {
+	const id = "01234567-89ab-cdef-0123-456789abcdef"
+	raw, ok := ParseIDText(id)
+	if !ok || IDText(raw) != id {
+		t.Fatalf("ParseIDText(%q) = %x, %v", id, raw, ok)
+	}
+	for _, bad := range []string{"", id[:35], strings.ToUpper(id), strings.ReplaceAll(id, "-", "_"),
+		"{" + id[1:35] + "}", "0123456789abcdef0123456789abcdef0123", "01234567-89ab-cdef-0123-456789abcdeg"} {
+		if _, ok := ParseIDText(bad); ok {
+			t.Errorf("ParseIDText(%q) accepted", bad)
+		}
+	}
+}

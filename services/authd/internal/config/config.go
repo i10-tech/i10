@@ -92,6 +92,12 @@ type Config struct {
 	// and every password bind works as before.
 	MailDeviceCodeKeys string
 
+	// MacSMTPSameAddress is AUTHD_MAC_SMTP_SAME_ADDRESS (default true): a Mac's
+	// SMTP bind requires a recent certificate-verified IMAP session from the
+	// same /32 or /64. Set false (in lockstep with MAILFRONT_MAC_SMTP_SAME_ADDRESS)
+	// to drop the address match if real dual-stack networks split IMAP and SMTP.
+	MacSMTPSameAddress bool
+
 	LogLevel string
 }
 
@@ -198,16 +204,32 @@ func Load() (Config, error) {
 	if c.CredCacheTTL, err = EnvDuration("AUTHD_CRED_CACHE_TTL", 2*time.Hour); err != nil {
 		return c, err
 	}
+	if c.MacSMTPSameAddress, err = EnvBool("AUTHD_MAC_SMTP_SAME_ADDRESS", true); err != nil {
+		return c, err
+	}
 	return c, c.Validate()
 }
 
 // Env reads a trimmed variable, or fallback when it is unset or blank. The
-// mail front loads its own settings with the same three helpers.
+// mail front loads its own settings with the same helpers.
 func Env(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
 	}
 	return fallback
+}
+
+// EnvBool reads a boolean variable, or fallback when it is unset or blank.
+func EnvBool(key string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
+	}
+	return v, nil
 }
 
 // EnvInt reads an integer variable, or fallback when it is unset.

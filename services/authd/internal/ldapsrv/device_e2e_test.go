@@ -1,8 +1,10 @@
 package ldapsrv_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
@@ -48,10 +50,80 @@ type fakeDevices struct {
 	claims    int
 	touches   int
 	lastTouch string
+
+	// live are the Mac liveness rows, by device id and address: the key they are
+	// under. records are RecordMacLive's calls; liveErr and recordErr fail them.
+	live      map[string]map[netip.Prefix][]byte
+	records   []liveRecord
+	liveErr   error
+	recordErr error
+}
+
+type liveRecord struct {
+	device string
+	at     netip.Prefix
+	key    []byte
 }
 
 func newFakeDevices() *fakeDevices {
-	return &fakeDevices{rows: map[string]*projection.DeviceCredential{}, unclaim: map[string]bool{}}
+	return &fakeDevices{rows: map[string]*projection.DeviceCredential{}, unclaim: map[string]bool{},
+		live: map[string]map[netip.Prefix][]byte{}}
+}
+
+func (f *fakeDevices) RecordMacLive(_ context.Context, id string, at netip.Prefix, key []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records = append(f.records, liveRecord{id, at, key})
+	if f.recordErr != nil {
+		return f.recordErr
+	}
+	f.setLive(id, at, key)
+	return nil
+}
+
+// setLive puts a liveness row in, as a certificate session's bind would. The
+// caller holds f.mu, or owns f.
+func (f *fakeDevices) setLive(id string, at netip.Prefix, key []byte) {
+	if f.live[id] == nil {
+		f.live[id] = map[netip.Prefix][]byte{}
+	}
+	f.live[id][at] = key
+}
+
+func (f *fakeDevices) MacLive(_ context.Context, id string, at netip.Prefix, key []byte) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.liveErr != nil {
+		return false, f.liveErr
+	}
+	for p, k := range f.live[id] {
+		if (!at.IsValid() || p == at) && bytes.Equal(k, key) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeDevices) MacLiveFamilies(_ context.Context, id string, key []byte) ([]int32, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []int32
+	for p, k := range f.live[id] {
+		if bytes.Equal(k, key) {
+			fam := int32(6)
+			if p.Addr().Is4() {
+				fam = 4
+			}
+			out = append(out, fam)
+		}
+	}
+	return out, f.liveErr
+}
+
+func (f *fakeDevices) recorded() []liveRecord {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]liveRecord(nil), f.records...)
 }
 
 // add stores a device for c, as the API's store function would mint it for
@@ -220,8 +292,10 @@ func TestDeviceCodeRefusals(t *testing.T) {
 		"minted in another workspace": {password: alicesCode.String(), readsRow: true, setup: func(r *deviceRig) {
 			r.devices.add(alicesCode, "user_alice", aliceEmail, func(d *projection.DeviceCredential) { d.TenantID = "t-other" })
 		}},
-		"a Mac's code (PR 3 adds its certificate)": {password: alicesCode.String(), readsRow: true, setup: func(r *deviceRig) {
-			r.devices.add(alicesCode, "user_alice", aliceEmail, func(d *projection.DeviceCredential) { d.Platform = "macos" })
+		"a Mac's code alone, on IMAP": {password: alicesCode.String(), readsRow: true, setup: func(r *deviceRig) {
+			r.devices.add(alicesCode, "user_alice", aliceEmail, func(d *projection.DeviceCredential) {
+				d.Platform, d.CertKey = "macos", bytes.Repeat([]byte{1}, 32)
+			})
 		}},
 		"the right id with another secret": {password: forgeSecret(alicesCode), readsRow: true, setup: func(r *deviceRig) {
 			r.devices.add(alicesCode, "user_alice", aliceEmail)
@@ -322,7 +396,7 @@ func TestATokenForOneDeviceDoesNotOpenAnother(t *testing.T) {
 	r.devices.add(a, "user_alice", aliceEmail)
 	r.devices.add(b, "user_alice", aliceEmail)
 
-	forA, err := bindtoken.Wrap(testTokenKey, "user_alice", a.String(), time.Now())
+	forA, err := bindtoken.Wrap(testTokenKey, "user_alice", a.String(), imapAt, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

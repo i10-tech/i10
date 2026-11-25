@@ -10,11 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/devicecode"
+	"github.com/i10-tech/i10/services/authd/internal/gate"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 )
 
@@ -50,12 +52,13 @@ var DefaultLimits = Limits{
 }
 
 var (
-	errLineTooLong    = errors.New("line too long")
-	errLiteralTooLong = errors.New("literal too long")
-	errCommandTooLong = errors.New("command too long")
-	errTooManyCmds    = errors.New("too many commands before sign-in")
-	errUpstreamGone   = errors.New("upstream closed")
-	errProtocol       = errors.New("protocol error")
+	errLineTooLong      = errors.New("line too long")
+	errLiteralTooLong   = errors.New("literal too long")
+	errCommandTooLong   = errors.New("command too long")
+	errTooManyCmds      = errors.New("too many commands before sign-in")
+	errTooManyTempFails = errors.New("too many temporary authentication failures")
+	errUpstreamGone     = errors.New("upstream closed")
+	errProtocol         = errors.New("protocol error")
 )
 
 // event is what the server side reports to the client side before sign-in.
@@ -72,17 +75,22 @@ type event struct {
 
 // session is one client connection and its upstream connection to Stalwart.
 type session struct {
-	id       uint64
-	log      *slog.Logger
-	client   net.Conn // the TLS connection
-	raw      net.Conn // the TCP connection under it
-	cr       *bufio.Reader
-	cw       *syncWriter
-	up       net.Conn
-	ur       *bufio.Reader
-	lim      Limits
-	accounts Accounts
-	bindKey  *bindtoken.Key
+	id                uint64
+	log               *slog.Logger
+	proto             Protocol
+	addr              netip.Addr
+	cert              *verifiedCert
+	macSMTPAnyAddress bool
+	macTempFails      int
+	client            net.Conn // the TLS connection
+	raw               net.Conn // the TCP connection under it
+	cr                *bufio.Reader
+	cw                *syncWriter
+	up                net.Conn
+	ur                *bufio.Reader
+	lim               Limits
+	accounts          Accounts
+	bindKey           *bindtoken.Key
 
 	events chan event
 	// upDone is closed when the server side stops reading before sign-in.
@@ -229,6 +237,31 @@ func (s *session) lookup(login string) (*projection.Account, error) {
 	return s.accounts.AccountByLogin(ctx, login)
 }
 
+func (s *session) deviceGate(id string) (*projection.Device, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	defer cancel()
+	return s.accounts.DeviceGate(ctx, id)
+}
+
+func (s *session) deviceByCertKey(key []byte) (*projection.Device, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	defer cancel()
+	return s.accounts.DeviceByCertKey(ctx, key)
+}
+
+func (s *session) macLive(deviceID string, at netip.Prefix, key []byte) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	defer cancel()
+	return s.accounts.MacLive(ctx, deviceID, at, key)
+}
+
+func (s *session) bindProtocol() bindtoken.Protocol {
+	if s.proto == SMTP {
+		return bindtoken.SMTP
+	}
+	return bindtoken.IMAP
+}
+
 // startTLSAnswer is the front's own answer to STARTTLS on both ports (the client
 // is already on TLS, with the front). Stalwart words its answer differently
 // ("Already in TLS mode."), so this text is how infra/k8s/i10/stalwart/
@@ -269,11 +302,35 @@ func (s *session) tokenFor(in *signIn) func(password string) (string, error) {
 		if in == nil || in.acct == nil {
 			return password, nil
 		}
-		wrapped, err := bindtoken.Wrap(*s.bindKey, in.acct.ClerkUserID, password, time.Now())
+		if password == "" {
+			// Empty password is not wrapped: authd refuses it as empty_password
+			// before bindtoken.Unwrap (RFC 4513 §5.1.2).
+			return "", nil
+		}
+		at := bindtoken.Attest{
+			Protocol: s.bindProtocol(),
+			Addr:     s.addr,
+		}
+		devID := devicecode.DeviceID(password)
+		// ⚠ REVISION 5: only a macos device_code carries the client certificate
+		// on IMAP. Password sign-ins and iPhone/iPad codes ignore any presented
+		// certificate completely, and SMTP tokens never carry a certificate key.
+		if s.proto == IMAP && s.cert != nil && devID != "" {
+			dev, err := s.deviceGate(devID)
+			if err != nil {
+				return "", errLookupDown
+			}
+			if dev != nil && dev.Platform == gate.Macos {
+				at.CertKey = s.cert.key
+				at.CertCN = s.cert.cn
+				in.certKey = bytes.Clone(s.cert.key)
+			}
+		}
+		wrapped, err := bindtoken.Wrap(*s.bindKey, in.acct.ClerkUserID, password, at, time.Now())
 		if err != nil {
 			return "", err
 		}
-		in.device = devicecode.DeviceID(password)
+		in.device = devID
 		return wrapped, nil
 	}
 }

@@ -82,7 +82,9 @@ func (s *session) pumpIMAP() {
 		}
 		r := classifyIMAP(first)
 		if r.capability {
-			unit = rewriteIMAPCapabilities(unit)
+			// Offer AUTH=EXTERNAL only on pre-auth capability lines (greeting and
+			// CAPABILITY) when the client presented a verified certificate.
+			unit = rewriteIMAPCapabilities(unit, s.cert != nil && r.tag == "")
 		}
 		if r.preauth {
 			// A session Stalwart signed in without a sign-in.
@@ -184,12 +186,15 @@ func classifyIMAP(line []byte) imapResponse {
 // rewriteIMAPCapabilities drops every AUTH= mechanism the front cannot
 // attribute from a capability list (the greeting's code, CAPABILITY's answer,
 // or the code on the sign-in's OK), and COMPRESS, which would hide Stalwart's
-// output from imapServerScan.
-func rewriteIMAPCapabilities(unit []byte) []byte {
+// output from imapServerScan. When offerExternal is true, AUTH=EXTERNAL is
+// inserted right after AUTH=PLAIN (only when a verified client certificate
+// arrived in the handshake: Apple Mail prefers EXTERNAL whenever advertised).
+func rewriteIMAPCapabilities(unit []byte, offerExternal bool) []byte {
 	body := trimEOL(unit)
 	eol := unit[len(body):]
 	words := strings.Split(string(body), " ")
-	kept := words[:0]
+	kept := make([]string, 0, len(words)+1)
+	addedExternal := false
 	for _, w := range words {
 		bare := strings.TrimSuffix(strings.TrimPrefix(w, "["), "]")
 		up := strings.ToUpper(bare)
@@ -204,6 +209,15 @@ func rewriteIMAPCapabilities(unit []byte) []byte {
 			if strings.HasSuffix(w, "]") && len(kept) > 0 {
 				kept[len(kept)-1] += "]"
 			}
+			continue
+		}
+		if offerExternal && !addedExternal && up == "AUTH=PLAIN" {
+			if strings.HasSuffix(w, "]") {
+				kept = append(kept, strings.TrimSuffix(w, "]"), "AUTH=EXTERNAL]")
+			} else {
+				kept = append(kept, w, "AUTH=EXTERNAL")
+			}
+			addedExternal = true
 			continue
 		}
 		kept = append(kept, w)

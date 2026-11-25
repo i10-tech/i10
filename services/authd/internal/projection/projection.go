@@ -141,6 +141,9 @@ type Device struct {
 	// TenantID is the workspace the device was minted in, as text, "" when null.
 	TenantID string
 	Platform string
+	// CertKey is `cert_key_sha256`: SHA-256 of the SubjectPublicKeyInfo of the
+	// certificate key bound to a Mac (#383 PR 3), nil when none is bound.
+	CertKey []byte
 }
 
 // DeviceCredential is a device row as authd's bind reads it: the row, the keyed
@@ -148,6 +151,9 @@ type Device struct {
 // clock the first-use claim and the touch compare with).
 type DeviceCredential struct {
 	Device
+	// Serial is the serial Apple attested ("" when none is recorded): a Mac's
+	// certificate CN must equal it. The mail front's role cannot read it.
+	Serial   string
 	CodeHash []byte
 	CodeKID  int
 	// Used is `first_used_at IS NOT NULL`.

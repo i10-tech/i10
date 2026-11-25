@@ -2,12 +2,23 @@ package mailfront
 
 import (
 	"bufio"
+	"bytes"
 	"log/slog"
+	"net/netip"
 	"strconv"
 	"strings"
+
+	"github.com/i10-tech/i10/services/authd/internal/devicecode"
+	"github.com/i10-tech/i10/services/authd/internal/gate"
+	"github.com/i10-tech/i10/services/authd/internal/projection"
 )
 
-const smtpPending = "smtp-auth"
+const (
+	smtpPending = "smtp-auth"
+	// maxMacTempFails caps how many Mac liveness 454 answers the front sends on
+	// one SMTP connection before closing it (revision 5).
+	maxMacTempFails = 3
+)
 
 // smtpPreAuth runs the client side of SMTP submission until AUTH succeeds.
 //
@@ -118,6 +129,15 @@ func validHeloName(s string) bool {
 }
 
 // smtpAuth runs one AUTH exchange: PLAIN or LOGIN, initial response or not.
+//
+// ⚠ THE FRONT OWNS THE WHOLE EXCHANGE AND FORWARDS ONCE (#383 PR 3). Answering
+// every 334 locally means nothing reaches Stalwart until the credentials have
+// arrived and every pre-check (the login lookup, a Mac's device row and its
+// liveness row) has run. Our own faults and a missing Mac liveness row can
+// therefore be answered 454 4.7.0 cleanly, whereas cancelling a mid-exchange
+// AUTH LOGIN against Stalwart produced a permanent 501. Once ready, the front
+// forwards ONE AUTH PLAIN <initial response> of its own (LOGIN rewritten as
+// PLAIN).
 func (s *session) smtpAuth(args string) (*signIn, bool, error) {
 	mech, ir, hasIR := strings.Cut(args, " ")
 	mech = strings.ToUpper(mech)
@@ -128,86 +148,166 @@ func (s *session) smtpAuth(args string) (*signIn, bool, error) {
 		return nil, false, s.cw.WriteString("504 5.5.4 Unrecognized authentication type.\r\n")
 	}
 
-	var in *signIn
-	// step 0 is the response that names the user: PLAIN's only one, LOGIN's
-	// first. respond turns a client response into what is forwarded: the
-	// password, wherever it is, goes behind the token authd requires. An error
-	// is the front having no key to sign it with.
-	respond := func(step int, resp string) (string, error) {
-		if resp == "*" {
-			return "*", nil
+	readResp := func() (resp string, cancelled bool, err error) {
+		line, err := readLine(s.cr, s.lim.MaxLine)
+		if err != nil {
+			return "", false, err
 		}
-		if step > 0 {
-			if mech == mechLogin && step == 1 {
-				// LOGIN's password. Not logged.
-				return passwordWithToken(resp, s.tokenFor(in))
+		body := trimEOL(line)
+		for _, c := range body {
+			if isCtl(c) {
+				_ = s.cw.WriteString("500 5.5.2 Invalid command.\r\n")
+				return "", false, errAmbiguous
 			}
-			return canonicalB64(resp), nil
 		}
-		var res saslResult
-		if mech == mechPlain {
-			res = parsePlain(resp)
-		} else {
-			res = parseLoginUser(resp)
+		resp = strings.TrimSpace(string(body))
+		if resp == "*" {
+			return "", true, nil
 		}
-		if !res.ok || res.foreignAuthzid {
-			return "*", nil
+		return resp, false, nil
+	}
+
+	var authzid, authcid, password string
+	switch mech {
+	case mechPlain:
+		resp := strings.TrimSpace(ir)
+		if !hasIR {
+			if err := s.cw.WriteString("334 \r\n"); err != nil {
+				return nil, false, err
+			}
+			var cancelled bool
+			var err error
+			resp, cancelled, err = readResp()
+			if err != nil {
+				return nil, false, err
+			}
+			if cancelled {
+				return nil, false, s.cw.WriteString("501 5.7.0 Authentication cancelled.\r\n")
+			}
 		}
-		in = s.signInAs(res.authcid)
-		if mech == mechPlain {
-			return plainWithToken(resp, s.tokenFor(in))
+		var ok, foreign bool
+		authzid, authcid, password, ok, foreign = decodePlain(resp)
+		if !ok || foreign {
+			return nil, false, s.cw.WriteString("535 5.7.8 Authentication credentials invalid.\r\n")
 		}
-		return canonicalB64(resp), nil
+	case mechLogin:
+		userResp := strings.TrimSpace(ir)
+		if !hasIR {
+			if err := s.cw.WriteString("334 VXNlcm5hbWU6\r\n"); err != nil {
+				return nil, false, err
+			}
+			var cancelled bool
+			var err error
+			userResp, cancelled, err = readResp()
+			if err != nil {
+				return nil, false, err
+			}
+			if cancelled {
+				return nil, false, s.cw.WriteString("501 5.7.0 Authentication cancelled.\r\n")
+			}
+		}
+		ures := parseLoginUser(userResp)
+		if !ures.ok {
+			return nil, false, s.cw.WriteString("535 5.7.8 Authentication credentials invalid.\r\n")
+		}
+		if err := s.cw.WriteString("334 UGFzc3dvcmQ6\r\n"); err != nil {
+			return nil, false, err
+		}
+		passResp, cancelled, err := readResp()
+		if err != nil {
+			return nil, false, err
+		}
+		if cancelled {
+			return nil, false, s.cw.WriteString("501 5.7.0 Authentication cancelled.\r\n")
+		}
+		rawPass, ok := decodeSASL(passResp)
+		if !ok || len(rawPass) == 0 || bytes.IndexByte(rawPass, 0) >= 0 {
+			clear(rawPass)
+			return nil, false, s.cw.WriteString("535 5.7.8 Authentication credentials invalid.\r\n")
+		}
+		authcid = ures.authcid
+		password = string(rawPass)
+		clear(rawPass)
+	}
+
+	if password == "" {
+		return nil, false, s.cw.WriteString("535 5.7.8 Authentication credentials invalid.\r\n")
+	}
+	if s.bindKey == nil {
+		s.log.Error("sign-in not forwarded", slog.Any("err", errNoBindKey))
+		return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
+	}
+
+	in := s.signInAs(authcid)
+	if in.err != nil {
+		s.log.Error("sign-in not forwarded", slog.Any("err", in.err))
+		return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
+	}
+
+	// ⚠ MAC LIVENESS PRE-CHECK (revision 5): the front answers 454 ONLY when
+	// the account row, gate.Refusal, the device row and gate.DeviceRefusal
+	// (person, address, workspace, non-null key) all pass and ONLY the liveness
+	// row is missing. Everything else is forwarded so authd's throttle and
+	// refusal decide, and an unknown device id looks like any wrong password.
+	if in.acct != nil && gate.Refusal(in.acct) == "" {
+		if devID := devicecode.DeviceID(password); devID != "" {
+			dev, err := s.deviceGate(devID)
+			if err != nil {
+				s.log.Error("sign-in not forwarded", slog.Any("err", err))
+				return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
+			}
+			if dev != nil && dev.Platform == gate.Macos && gate.DeviceRefusal(dev, in.acct, dev.CertKey) == "" {
+				var at netip.Prefix
+				if !s.macSMTPAnyAddress {
+					at = projection.MacLivePrefix(s.addr)
+				}
+				live, err := s.macLive(dev.ID, at, dev.CertKey)
+				if err != nil {
+					s.log.Error("sign-in not forwarded", slog.Any("err", err))
+					return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
+				}
+				if !live {
+					s.macTempFails++
+					s.log.Info("smtp auth deferred: mac certificate session missing",
+						"account", in.acct.ClerkUserID, "device", dev.ID,
+						"sameAddress", !s.macSMTPAnyAddress, "attempts", s.macTempFails)
+					if err := s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n"); err != nil {
+						return nil, false, err
+					}
+					if s.macTempFails >= maxMacTempFails {
+						return nil, false, errTooManyTempFails
+					}
+					return nil, false, nil
+				}
+				// Record the row's key at admission so a key change closes this
+				// SMTP session at the next poll, and it ends at cert_session_max_age.
+				in.certKey = bytes.Clone(dev.CertKey)
+			}
+		}
+	}
+
+	fwd, err := s.tokenFor(in)(password)
+	if err != nil {
+		s.log.Error("sign-in not forwarded", slog.Any("err", err))
+		return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
 	}
 
 	s.setPending(smtpPending)
-	cmd := "AUTH " + mech
-	step := 0
-	if hasIR {
-		fwd, err := respond(step, strings.TrimSpace(ir))
-		if err != nil {
-			s.setPending("")
-			s.log.Error("sign-in not forwarded", slog.Any("err", err))
-			return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
-		}
-		if fwd == "*" {
-			s.setPending("")
-			return nil, false, s.cw.WriteString("535 5.7.8 Authentication credentials invalid.\r\n")
-		}
-		cmd += " " + fwd
-		step++
-	}
-	if err := s.forward([]byte(cmd + "\r\n")); err != nil {
+	if err := s.forward([]byte("AUTH PLAIN " + encodePlain(authzid, authcid, fwd) + "\r\n")); err != nil {
 		return nil, false, err
 	}
-	for ; ; step++ {
+	for {
 		ev, err := s.await()
 		if err != nil {
 			return nil, false, err
 		}
-		if ev.code != 334 {
-			return in, ev.code == 235, nil
-		}
-		if step > 3 {
-			// Neither mechanism has this many steps.
+		if ev.code == 334 {
 			if err := s.forward([]byte("*\r\n")); err != nil {
 				return nil, false, err
 			}
 			continue
 		}
-		line, err := readLine(s.cr, s.lim.MaxLine)
-		if err != nil {
-			return nil, false, err
-		}
-		fwd, err := respond(step, strings.TrimSpace(string(trimEOL(line))))
-		if err != nil {
-			// No key to sign with: cancel, and Stalwart answers.
-			s.log.Error("sign-in not forwarded", slog.Any("err", err))
-			fwd = "*"
-		}
-		if err := s.forward([]byte(fwd + "\r\n")); err != nil {
-			return nil, false, err
-		}
+		return in, ev.code == 235, nil
 	}
 }
 

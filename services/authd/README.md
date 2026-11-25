@@ -609,9 +609,33 @@ key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
   must exist (`device_revoked` in the front; the bind finds no row first and
   logs `device_unknown`), belong to the person the DN names, carry the
   account's address now and its workspace (null-safely: i10's own mailboxes
-  have none) (`device_mismatch`), and be an iPhone or iPad
-  (`device_platform_refused`: a Mac's code alone is refused until PR 3 checks
-  its Secure Enclave certificate with it).
+  have none) (`device_mismatch`), and be an iPhone, iPad or Mac. A `macos` row
+  must carry a bound certificate key (`cert_key_sha256`, refused as
+  `device_cert_missing` when absent), and the key the session or bind stands on
+  must equal it in constant time (`device_key_changed`, refined by authd to
+  `device_cert_required` or `device_cert_mismatch`). A certificate key on a
+  non-`macos` row is refused.
+- **Mac rules (#383 PR 3, `ldapsrv/bind_device.go`):**
+  - **IMAP, `external` (`source: cert`):** the front verified the client
+    certificate on 993 and minted an `external` token. authd requires the row to
+    be `macos`, its `cert_key_sha256` to equal the token's key, and the token's
+    subject CN to equal `serial` whenever the row records one (no code parsing,
+    no key ring).
+  - **IMAP, `device_code`:** a Mac's code on IMAP still requires the Mac's
+    verified certificate key (and serial when recorded); a code alone is refused
+    (`device_cert_required`).
+  - **IMAP liveness write:** every successful `macos` IMAP bind with a key
+    upserts `authd.mail_device_cert_binds` (client address as `/32` or IPv6
+    `/64`, at most one write per row every 5 minutes) and caps each device at 8
+    rows in a separate autocommit `DELETE`, never inside a transaction that
+    touches `authd.mail_devices`.
+  - **SMTP, `device_code`:** after the code hash matches, authd requires a
+    liveness row for this device under its current `cert_key_sha256` within 75
+    minutes from the same `/32` or `/64` (`device_cert_session_missing`,
+    answered `unavailable`). `AUTHD_MAC_SMTP_SAME_ADDRESS=false` drops the
+    address check (set in lockstep with `MAILFRONT_MAC_SMTP_SAME_ADDRESS`).
+  - **Row upkeep:** every successful `macos` bind (IMAP or SMTP) claims first
+    use if still unclaimed and touches `last_used_at` daily.
 - **Nothing is written before the hash matched.** Then, for a code never used,
   one UPDATE claims the first use, setting `first_used_at` with a `coalesce`
   where it is already set or `created_at` is under ten minutes old. No row
@@ -704,35 +728,52 @@ the front's parsers, and each patch was a parser trying to follow Stalwart's.
 carries a token in front of the password (`internal/bindtoken`):
 
 ```
-i10mf2.<base64url: key id | expiry | nonce | HMAC-SHA256>.<the real password>
+i10mf3.<base64url: 195-byte fixed binary payload>.<the real password>
 ```
 
-The HMAC, under a key the front shares with authd, covers a fixed domain label,
-the key id, the Clerk user id the front looked the login up as, the mail device
-the real password names (its 16-byte id, length-prefixed; nothing when it is
-not a device code), the expiry (60 seconds) and a 16-byte nonce.
+The fixed-length payload has no optional encodings (unused tails and 4 reserved
+bytes must be zero): key id (1), expiry (8), nonce (16), mode (1: `password`,
+`device_code` or `external`), protocol (1: `imap` or `smtp`), client address
+family (1) and address (16; IPv4-mapped IPv6 refused), certificate key presence
+(1) and SHA-256 of SPKI (32), certificate subject CN length (1) and bytes (64),
+device presence (1) and 16-byte UUID, reserved (4), and HMAC-SHA256 (32). The
+HMAC covers the fixed label `i10-mailfront-bind-token/v3\x00`, the length-
+prefixed Clerk user id, and every preceding payload byte.
+
+`bindtoken.Unwrap` enforces a strict mode partition:
+
+| Mode          | Real password                   | Device                                                                 | Certificate key                 | Protocol |
+| ------------- | ------------------------------- | ---------------------------------------------------------------------- | ------------------------------- | -------- |
+| `password`    | non-empty, not starting `i10dc` | absent                                                                 | absent                          | any      |
+| `device_code` | starts `i10dc`                  | present and equal to `devicecode.DeviceID(pw)`, or absent if malformed | present (IMAP `macos`) / absent | any      |
+| `external`    | exactly empty                   | present (the `macos` row found by key)                                 | present                         | IMAP     |
+
+A malformed `i10dc` password travels in `device_code` mode with no device, and
+authd refuses it as `device_code_malformed` under the throttle. A certificate
+key on an SMTP token is always refused.
 
 ⚠ **The device is read, on both sides, from the real password, by the same
-parser** (`devicecode.Of`). So the device the front credits a connection to and
+parser** (`devicecode.Of`) for codes, and from the verified client certificate's
+SPKI hash for `external`. So the device the front credits a connection to and
 the device authd verifies are the same by construction: a token minted in front
 of one device's code does not open in front of another's, or in front of a
 password (`TestATokenForOneDeviceDoesNotOpenAnother`). `bindtoken.Unwrap`
-returns the device its MAC covered, and the device lane reads exactly that row.
-v1 tokens (`i10mf1.`) carried no device and are refused: the front and authd
-are one image in one pod and switch together. Stalwart passes the password through to authd's
-LDAP bind unchanged. authd accepts a **person** bind only with a valid token for
-the very user id the bind DN names, takes the token off, and only then checks
-the password the usual way. Whatever Stalwart does after the front lost track,
-a second sign-in carries what the client typed: a raw password, or a token the
-client cannot make. authd refuses it. Probed against a live Stalwart v1.1.0
-(`docs/research/mail-device-binding.md` section 9): round 3's exact bytes now
-end `e NO [AUTHENTICATIONFAILED]`.
+returns the claims its MAC covered, and the device lane checks exactly that row.
+Older tokens (`i10mf1.`, `i10mf2.`) are refused: the front and authd are one
+image in one pod and switch together. Stalwart passes the password through to
+authd's LDAP bind unchanged. authd accepts a **person** bind only with a valid
+token for the very user id the bind DN names, takes the token off, and only then
+checks the password or certificate claims. Whatever Stalwart does after the
+front lost track, a second sign-in carries what the client typed: a raw
+password, or a token the client cannot make. authd refuses it. Probed against a
+live Stalwart v1.1.0 (`docs/research/mail-device-binding.md` section 9): round
+3's exact bytes now end `e NO [AUTHENTICATIONFAILED]`.
 
 - **Every person DN, every lane.** Pass-through accounts (LDAP, OIDC) have the
   same `uid=<clerk id>,ou=people,...` DN, so the token covers them too. The
   service bind (`cn=stalwart`, Stalwart's delivery lookups) needs none.
 - **No permissive phase, no fallback.** A bind without a valid token is never
-  retried as a raw password, and a password that starts with `i10mf2.` is
+  retried as a raw password, and a password that starts with `i10mf3.` is
   wrapped like any other, so exactly one layer comes off.
 - **A refused bind costs nothing.** authd refuses it right after reading the
   DN: before the projection, the credential cache, the failure budget, the
@@ -774,9 +815,18 @@ bytes>`. In the `prod_mail_bind_token` Doppler config:
    sessions are not affected; the next sign-in uses the new key.
 4. Remove `1:<old>` from `AUTHD_BIND_TOKEN_KEYS` and restart once more.
 
-Each restart drops every connection, which clients take as a reconnect. A key
-leak alone signs nobody in: a token still needs the person's password behind
-it. It only takes the attribution back to where the parsers left it.
+Each restart drops every connection, which clients take as a reconnect.
+
+⚠ **`EXTERNAL` moves part of the authentication into the front.** A password or
+device code is checked by authd. A Mac's certificate is proved by the TLS
+handshake on 993, which only the front sees, so for `external` authd trusts the
+front's MAC that the key was proved. PR 1's "a key leak alone signs nobody in"
+therefore no longer holds for Macs: the bind-token key plus a connection to
+Stalwart's loopback listeners signs in any bound Mac without waiting for it to
+connect. Those listeners are reachable only inside the pod, where the key
+already lives, so the attacker this adds is one who runs code in the pod (who
+already sees every password in transit). For password and iPhone/iPad accounts,
+a key leak still signs nobody in without the password or device code.
 
 **Outside the token design, on purpose:**
 
@@ -897,13 +947,22 @@ client ─────▶ :25 and in-cluster :2525 go to Stalwart directly, unch
   never Stalwart's 2000.
 - **The SSL TLV is required.** Without it Stalwart treats the connection as
   cleartext: IMAP says LOGINDISABLED, SMTP offers no AUTH.
-- **TLS is what Stalwart served.** Measured against Stalwart v1.1.0 and the front
-  with the same RSA certificate: TLS 1.2 and 1.3 only, for 1.2 only
-  `ECDHE-RSA-AES128-GCM-SHA256`, `-AES256-GCM-SHA384` and `-CHACHA20-POLY1305`,
-  all three TLS 1.3 suites, and X25519MLKEM768 as the group. The front reloads
-  the mounted certificate files every 30 seconds, so a renewal reaches 993 and
-  465 without a restart. Port 25 is still Stalwart's and still needs
-  `cert-reload.yaml`.
+- **TLS is what Stalwart served, with client certificates on 993 only.**
+  Measured against Stalwart v1.1.0 and the front with the same RSA certificate:
+  TLS 1.2 and 1.3 only, for 1.2 only `ECDHE-RSA-AES128-GCM-SHA256`,
+  `-AES256-GCM-SHA384` and `-CHACHA20-POLY1305`, all three TLS 1.3 suites, and
+  X25519MLKEM768 as the group. The front reloads the mounted certificate files
+  every 30 seconds, so a renewal reaches 993 and 465 without a restart. Port 25
+  is still Stalwart's and still needs `cert-reload.yaml`. 993 and 465 use
+  separate `tls.Config`s: when `MAILFRONT_DEVICE_CA_BUNDLE` is set and its file
+  contains PEM certificates (reloaded every 30 seconds via `atomic.Pointer` and
+  `GetConfigForClient`), 993 asks for a client certificate with
+  `tls.RequestClientCert` and verifies it after the handshake (chain to the
+  bundle for `clientAuth`, explicit `clientAuth` EKU on the leaf, no DNS or IP
+  SAN, subject CN at most 64 bytes, then `sha256(SPKI)`). Any verification
+  failure is logged and treated as no certificate. With no bundle configured,
+  993 asks for no certificate and never offers `EXTERNAL`. 465 never requests a
+  client certificate.
 
 ### What it parses, and where it stops
 
@@ -914,14 +973,36 @@ and sends Stalwart the next only after Stalwart has answered the last
 **Nothing a client sends reaches Stalwart as sent.** The front reads each
 command, then sends Stalwart a command it wrote itself, from what it read:
 
-- **IMAP:** only `CAPABILITY`, `NOOP`, `LOGOUT`, `ID`, `LOGIN` and
-  `AUTHENTICATE PLAIN`. `LOGIN`'s two arguments and every `ID` string go as
-  LITERAL+ literals, and a SASL response as freshly encoded base64. Every other
-  command (`SELECT`, `ENABLE`, anything unknown) is answered `BAD` by the front
-  and never forwarded; `STARTTLS` is answered too, since the client is already
-  on TLS. `ID` fields are logged (device naming, later PRs).
-- **SMTP:** only `EHLO`/`HELO` (with one domain word), `NOOP`, `RSET`, `QUIT`
-  and `AUTH PLAIN` / `AUTH LOGIN`. Anything else is answered `503` before AUTH.
+- **IMAP:** only `CAPABILITY`, `NOOP`, `LOGOUT`, `ID`, `LOGIN`,
+  `AUTHENTICATE PLAIN` and (only on a connection whose client certificate
+  verified) `AUTHENTICATE EXTERNAL`. `AUTH=EXTERNAL` is added to the greeting
+  and `CAPABILITY` only when the client certificate verified (Apple Mail prefers
+  `EXTERNAL` whenever advertised). `AUTHENTICATE EXTERNAL` accepts an initial
+  response (including RFC 4959's `=`) or a continuation (`+ `, empty line for
+  empty authzid, `*` cancels; NUL in the authzid is refused), looks up the
+  `macos` device by `sha256(SPKI)` (`projection.DeviceByCertKey`) and its
+  account, enforces `gate.Refusal` and `gate.DeviceRefusal`, and forwards an
+  `AUTHENTICATE PLAIN` carrying an `external` bind token. `LOGIN`'s two
+  arguments and every `ID` string go as LITERAL+ literals, and a SASL response
+  as freshly encoded base64. Every other command (`SELECT`, `ENABLE`, anything
+  unknown) is answered `BAD` by the front and never forwarded; `STARTTLS` is
+  answered too, since the client is already on TLS. `ID` fields are logged
+  (device naming, later PRs).
+- **SMTP (front-owned AUTH exchange):** only `EHLO`/`HELO` (with one domain
+  word), `NOOP`, `RSET`, `QUIT` and `AUTH PLAIN` / `AUTH LOGIN`. Anything else
+  is answered `503` before AUTH. The front owns the entire SMTP AUTH exchange:
+  it sends every `334` prompt itself (`AUTH LOGIN`'s two prompts and `AUTH
+PLAIN`'s empty one), handles `*` cancellations (`501 5.7.0`) locally, runs
+  every pre-check (login lookup; for a `macos` code, its device row and
+  `authd.mail_device_cert_binds` liveness row), and only then forwards ONE
+  `AUTH PLAIN <initial response>` to Stalwart (`AUTH LOGIN` is rewritten as
+  `PLAIN`). Our own faults answer `454 4.7.0` and forward nothing. The Mac
+  liveness `454 4.7.0` is answered only when the account row, `gate.Refusal`,
+  the device row and `gate.DeviceRefusal` (person, address, workspace, non-null
+  key) all pass and only the liveness row is missing; anything else is forwarded
+  so authd decides. At most 3 such `454`s are allowed per connection, after
+  which the front closes it. `MAILFRONT_MAC_SMTP_SAME_ADDRESS` (default `true`)
+  mirrors `AUTHD_MAC_SMTP_SAME_ADDRESS`.
 - **Every IMAP command goes under a random tag of the front's own** (`mf` and
   16 hex digits), and the answer gets the client's tag back. A tagged answer for
   any tag the front did not just use ends the session.
@@ -1036,15 +1117,19 @@ Either closes a connection whose account:
 - has a different primary address than the one it signed in with: that address
   is the login, and its domain is how the poll finds the connection;
 - has no active row any more;
-- for a session that signed in with a device code, has a device row that is
-  gone or no longer matches (`gate.DeviceRefusal`, the bind's own rule:
-  `device_revoked`, `device_mismatch`, `device_platform_refused`). A device
-  session closed for the epoch or `clerk_updated_at` reconnects with the code it
-  holds.
+- for a session that signed in with a device code or `EXTERNAL`, has a device
+  row that is gone or no longer matches (`gate.DeviceRefusal`, the bind's own
+  rule: `device_revoked`, `device_mismatch`, `device_platform_refused`,
+  `device_cert_missing`, `device_key_changed`). A device session closed for the
+  epoch or `clerk_updated_at` reconnects with the credential it holds.
 
 **Who the device is.** The front parses the password it forwards with the
-bind token's own parser and records the device in that sign-in attempt's
-`Grant` (`DeviceID`), so it is the device the token covers. ⚠ One per attempt:
+bind token's own parser (or resolves the `macos` row by SPKI hash for
+`EXTERNAL`) and records the device in that sign-in attempt's `Grant`
+(`DeviceID`), so it is the device the token covers. Only `external` and `macos`
+`device_code` sessions record `CertKey` on `Grant` (a `macos` SMTP session
+records the row's key at admission); password sessions and iPhone/iPad codes
+ignore any presented client certificate. ⚠ One per attempt:
 a code refused and then a password accepted on the same connection is a
 password session (`TestAnEarlierAttemptsDeviceIsNeverCreditedToTheSignIn`). The
 re-check reads the device rows of the connections that have one, by
@@ -1213,8 +1298,13 @@ random** (`DeviceMaxAge`, `DeviceMaxAgeJitter`), logged as `device_max_age`.
 Not for revocation, which reaches the row: so that a device in use re-binds at
 least daily and moves its `last_used_at`. An iPhone in push can hold one IMAP
 session for weeks, and without this its device would look idle to the 90-day
-prune while in use. The pass-through maximum age never applies to a device
-session, even on a managed account: the code is i10's, checked by authd.
+prune while in use. **A Mac session (IMAP with a certificate, or SMTP under a
+Mac's code) ends at `cert_session_max_age`: 60 minutes, plus up to 5 minutes at
+random** (`CertSessionMaxAge`, `CertSessionMaxAgeJitter`), keeping every open
+certificate session inside authd's 75-minute liveness window and bounding Mac
+SMTP sessions without relying on Stalwart's `maxDuration`. The pass-through
+maximum age never applies to a device session, even on a managed account: the
+credential is i10's, checked by authd.
 
 What it costs (measured 2026-11-22: 1.033 sign-ins per connection per max-age
 period, against the 1.026 the jitter predicts, with clients that reconnect at
@@ -1341,24 +1431,62 @@ the reconnects.
 
 ### Configuration
 
-| Variable                        | Default                      |                                                  |
-| ------------------------------- | ---------------------------- | ------------------------------------------------ |
-| `MAILFRONT_LISTEN_IPS`          | -                            | The pod's addresses. Never a wildcard/loopback.  |
-| `MAILFRONT_IMAP_PORT`           | `993`                        |                                                  |
-| `MAILFRONT_SMTP_PORT`           | `465`                        |                                                  |
-| `MAILFRONT_IMAP_UPSTREAM`       | `127.0.0.1:993`              | Must be loopback.                                |
-| `MAILFRONT_SMTP_UPSTREAM`       | `127.0.0.1:465`              | Must be loopback.                                |
-| `MAILFRONT_TLS_CERT_FILE`       | `/etc/mailfront/tls/tls.crt` | Re-read every 30 s.                              |
-| `MAILFRONT_TLS_KEY_FILE`        | `/etc/mailfront/tls/tls.key` |                                                  |
-| `MAILFRONT_DATABASE_URL`        | -                            | The `mailfront` role.                            |
-| `MAILFRONT_BIND_TOKEN_KEY`      | -                            | `<id>:<base64>`. Without it, no sign-ins.        |
-| `MAILFRONT_MAX_CONNECTIONS`     | `6000`                       | Sized with the memory limit; raise together.     |
-| `MAILFRONT_MAX_PREAUTH`         | `2000`                       | Not signed in yet. Bounds a sign-in surge.       |
-| `MAILFRONT_MAX_PREAUTH_PER_IP`  | `32`                         | Per address; per /64 for IPv6.                   |
-| `MAILFRONT_PREAUTH_TIMEOUT`     | `2m`                         | 10 s to 10 m.                                    |
-| `MAILFRONT_SWEEP_INTERVAL`      | `1s`                         | 200 ms to 10 s. The poll: the revocation window. |
-| `MAILFRONT_PASSTHROUGH_MAX_AGE` | `15m`                        | 1 m to 24 h. Ends pass-through sessions.         |
-| `MAILFRONT_LOG_LEVEL`           | `info`                       | `debug` logs every sweep's timings.              |
+| Variable                          | Default                      |                                                         |
+| --------------------------------- | ---------------------------- | ------------------------------------------------------- |
+| `MAILFRONT_LISTEN_IPS`            | -                            | The pod's addresses. Never a wildcard/loopback.         |
+| `MAILFRONT_IMAP_PORT`             | `993`                        |                                                         |
+| `MAILFRONT_SMTP_PORT`             | `465`                        |                                                         |
+| `MAILFRONT_IMAP_UPSTREAM`         | `127.0.0.1:993`              | Must be loopback.                                       |
+| `MAILFRONT_SMTP_UPSTREAM`         | `127.0.0.1:465`              | Must be loopback.                                       |
+| `MAILFRONT_TLS_CERT_FILE`         | `/etc/mailfront/tls/tls.crt` | Re-read every 30 s.                                     |
+| `MAILFRONT_TLS_KEY_FILE`          | `/etc/mailfront/tls/tls.key` |                                                         |
+| `MAILFRONT_DEVICE_CA_BUNDLE`      | -                            | Optional PEM bundle for 993 client certs. Re-read 30 s. |
+| `MAILFRONT_DATABASE_URL`          | -                            | The `mailfront` role.                                   |
+| `MAILFRONT_BIND_TOKEN_KEY`        | -                            | `<id>:<base64>`. Without it, no sign-ins.               |
+| `MAILFRONT_MAX_CONNECTIONS`       | `6000`                       | Sized with the memory limit; raise together.            |
+| `MAILFRONT_MAX_PREAUTH`           | `2000`                       | Not signed in yet. Bounds a sign-in surge.              |
+| `MAILFRONT_MAX_PREAUTH_PER_IP`    | `32`                         | Per address; per /64 for IPv6.                          |
+| `MAILFRONT_PREAUTH_TIMEOUT`       | `2m`                         | 10 s to 10 m.                                           |
+| `MAILFRONT_SWEEP_INTERVAL`        | `1s`                         | 200 ms to 10 s. The poll: the revocation window.        |
+| `MAILFRONT_PASSTHROUGH_MAX_AGE`   | `15m`                        | 1 m to 24 h. Ends pass-through sessions.                |
+| `MAILFRONT_MAC_SMTP_SAME_ADDRESS` | `true`                       | Mirror of `AUTHD_MAC_SMTP_SAME_ADDRESS`.                |
+| `MAILFRONT_LOG_LEVEL`             | `info`                       | `debug` logs every sweep's timings.                     |
+
+## CA webhook relay (`cmd/cahookrelay`, #383 PR 3)
+
+`cmd/cahookrelay` is the third binary in this image, run as a loopback TLS
+sidecar in the step-ca pod. step-ca serves its webhook URLs on the
+unauthenticated `GET /provisioners` endpoint, logs full webhook URLs on
+transport errors, and drops `Webhook.Secret` and `BearerToken` written in
+`ca.json` when no admin database is enabled. Putting the bearer token in this
+relay keeps every secret out of step-ca's config.
+
+- **Loopback TLS only:** listens on `127.0.0.1:<port>` (default `9443`) with a
+  certificate carrying `IP:127.0.0.1` and `DNS:localhost`, reloaded every 30
+  seconds from mounted files.
+- **Exact four paths:** `POST` to `/acme-authorize`, `/scep-challenge`,
+  `/scep-authorize`, `/scep-notify` with no query string; anything else gets
+  `404` (non-`POST` gets `405`).
+- **Bounded and verified:** caps request and response bodies at 64 KiB, adds
+  `Authorization: Bearer <token>` from a mounted file reloaded every 30 seconds,
+  preserves only `X-Smallstep-Signature`, `X-Smallstep-Webhook-ID` and
+  `Content-Type`, and verifies the upstream API `:3443` listener's TLS strictly
+  against the configured CA file (no redirects, no environment proxy).
+- **No secret logging:** logs only the fixed path, status code, duration and
+  transport errors; never the token, request/response bodies or headers.
+
+### Configuration (`cahookrelay`)
+
+| Variable                       | Default                        |                                                |
+| ------------------------------ | ------------------------------ | ---------------------------------------------- |
+| `CAHOOKRELAY_LISTEN`           | `127.0.0.1:9443`               | Must be loopback.                              |
+| `CAHOOKRELAY_TLS_CERT_FILE`    | `/etc/cahookrelay/tls/tls.crt` | Re-read every 30 s. `IP:127.0.0.1, localhost`. |
+| `CAHOOKRELAY_TLS_KEY_FILE`     | `/etc/cahookrelay/tls/tls.key` |                                                |
+| `CAHOOKRELAY_UPSTREAM_URL`     | -                              | Required `https://` base URL (API `:3443`).    |
+| `CAHOOKRELAY_UPSTREAM_CA_FILE` | -                              | Required PEM CA file to verify upstream TLS.   |
+| `CAHOOKRELAY_TOKEN_FILE`       | -                              | Required bearer token file. Re-read every 30s. |
+| `CAHOOKRELAY_UPSTREAM_TIMEOUT` | `10s`                          | 1 s to 30 s.                                   |
+| `CAHOOKRELAY_LOG_LEVEL`        | `info`                         |                                                |
 
 ## The one rule you must not break
 
@@ -1431,30 +1559,32 @@ Worth reporting upstream.
 
 ## Configuration
 
-| Variable                    | Default                    |                                                       |
-| --------------------------- | -------------------------- | ----------------------------------------------------- |
-| `AUTHD_LISTEN`              | `127.0.0.1:3893`           | Must be loopback.                                     |
-| `AUTHD_BASE_DN`             | `dc=i10,dc=tech`           |                                                       |
-| `AUTHD_SERVICE_BIND_DN`     | -                          | Stalwart's own bind, needed even in bind-auth mode.   |
-| `AUTHD_SERVICE_BIND_SECRET` | -                          |                                                       |
-| `AUTHD_DATABASE_URL`        | -                          | The projection. Goes through PgBouncer.               |
-| `AUTHD_CLERK_SECRET_KEY`    | -                          |                                                       |
-| `AUTHD_CLERK_BASE_URL`      | `https://api.clerk.com/v1` |                                                       |
-| `AUTHD_CLERK_TIMEOUT`       | `5s`                       | Must be positive and at most `12s`.                   |
-| `AUTHD_BINDS_PER_MINUTE`    | `30`                       | Per DN, burst equal to one minute.                    |
-| `AUTHD_CRED_CACHE_TTL`      | `2h`                       | Verified passwords only. `0` disables; max `3h`.      |
-| `AUTHD_API_URL`             | -                          | The API, for pass-through settings. Both or neither.  |
-| `AUTHD_API_SECRET`          | -                          | Same value as the API's. 32+ characters.              |
-| `AUTHD_API_TIMEOUT`         | `5s`                       | Must be positive and at most `12s`.                   |
-| `AUTHD_BIND_TOKEN_KEYS`     | -                          | `<id>:<base64>`, comma list. Without, no person bind. |
-| `MAIL_DEVICE_CODE_KEYS`     | -                          | `<id>:<base64>`, comma list. Without, no device bind. |
-| `AUTHD_LOG_LEVEL`           | `info`                     | ⚠ `debug` logs every LDAP packet, passwords too.      |
+| Variable                      | Default                    |                                                       |
+| ----------------------------- | -------------------------- | ----------------------------------------------------- |
+| `AUTHD_LISTEN`                | `127.0.0.1:3893`           | Must be loopback.                                     |
+| `AUTHD_BASE_DN`               | `dc=i10,dc=tech`           |                                                       |
+| `AUTHD_SERVICE_BIND_DN`       | -                          | Stalwart's own bind, needed even in bind-auth mode.   |
+| `AUTHD_SERVICE_BIND_SECRET`   | -                          |                                                       |
+| `AUTHD_DATABASE_URL`          | -                          | The projection. Goes through PgBouncer.               |
+| `AUTHD_CLERK_SECRET_KEY`      | -                          |                                                       |
+| `AUTHD_CLERK_BASE_URL`        | `https://api.clerk.com/v1` |                                                       |
+| `AUTHD_CLERK_TIMEOUT`         | `5s`                       | Must be positive and at most `12s`.                   |
+| `AUTHD_BINDS_PER_MINUTE`      | `30`                       | Per DN, burst equal to one minute.                    |
+| `AUTHD_CRED_CACHE_TTL`        | `2h`                       | Verified passwords only. `0` disables; max `3h`.      |
+| `AUTHD_API_URL`               | -                          | The API, for pass-through settings. Both or neither.  |
+| `AUTHD_API_SECRET`            | -                          | Same value as the API's. 32+ characters.              |
+| `AUTHD_API_TIMEOUT`           | `5s`                       | Must be positive and at most `12s`.                   |
+| `AUTHD_BIND_TOKEN_KEYS`       | -                          | `<id>:<base64>`, comma list. Without, no person bind. |
+| `MAIL_DEVICE_CODE_KEYS`       | -                          | `<id>:<base64>`, comma list. Without, no device bind. |
+| `AUTHD_MAC_SMTP_SAME_ADDRESS` | `true`                     | Require same /32 or /64 for Mac SMTP liveness.        |
+| `AUTHD_LOG_LEVEL`             | `info`                     | ⚠ `debug` logs every LDAP packet, passwords too.      |
 
 ## Layout
 
 ```
 cmd/authd            entrypoint, signal handling, readiness
 cmd/mailfront        the mail front's entrypoint: listeners, the sweep, shutdown
+cmd/cahookrelay      loopback TLS webhook relay sidecar for step-ca
 internal/config      env loading, the loopback guard, the shared logger
 internal/gate        whether an account's row lets it sign in, and who answers;
                      shared by the bind, the resolver and the mail front

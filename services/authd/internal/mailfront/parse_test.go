@@ -133,6 +133,77 @@ func TestConfigBoundsThePassthroughMaxAge(t *testing.T) {
 	}
 }
 
+func TestConfigDeviceCABundleAndMacSMTPSameAddress(t *testing.T) {
+	t.Setenv("MAILFRONT_DATABASE_URL", "postgres://x")
+	t.Setenv("MAILFRONT_LISTEN_IPS", "10.42.0.7")
+	c, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if c.DeviceCABundle != "" || !c.MacSMTPSameAddress {
+		t.Fatalf("defaults = bundle %q, sameAddr %v; want empty and true", c.DeviceCABundle, c.MacSMTPSameAddress)
+	}
+	t.Setenv("MAILFRONT_DEVICE_CA_BUNDLE", "/etc/mailfront/device-ca/ca.pem")
+	t.Setenv("MAILFRONT_MAC_SMTP_SAME_ADDRESS", "false")
+	c, err = LoadConfig()
+	if err != nil || c.DeviceCABundle != "/etc/mailfront/device-ca/ca.pem" || c.MacSMTPSameAddress {
+		t.Fatalf("override = bundle %q, sameAddr %v, err %v", c.DeviceCABundle, c.MacSMTPSameAddress, err)
+	}
+	t.Setenv("MAILFRONT_MAC_SMTP_SAME_ADDRESS", "maybe")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("invalid bool accepted")
+	}
+}
+
+func TestParseExternal(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        string
+		isInitial bool
+		want      string
+		ok        bool
+	}{
+		{"RFC 4959 empty initial", "=", true, "", true},
+		{"empty initial without =", "", true, "", false},
+		{"empty continuation", "", false, "", true},
+		{"= on continuation is invalid base64", "=", false, "", false},
+		{"own address initial", b64("alice@i10.test"), true, "alice@i10.test", true},
+		{"own address continuation", b64("alice@i10.test"), false, "alice@i10.test", true},
+		{"NUL in authzid refused (initial)", b64("alice\x00bob"), true, "", false},
+		{"NUL in authzid refused (continuation)", b64("\x00"), false, "", false},
+		{"CR in base64 refused", b64("a")[:2] + "\r" + b64("a")[2:], true, "", false},
+		{"bad base64", "!!!", true, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseExternal(tc.in, tc.isInitial)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("parseExternal(%q, %v) = (%q, %v), want (%q, %v)", tc.in, tc.isInitial, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestRewriteIMAPCapabilities(t *testing.T) {
+	greet := "* OK [CAPABILITY IMAP4rev2 AUTH=PLAIN AUTH=XOAUTH2] ready\r\n"
+	if got := string(rewriteIMAPCapabilities([]byte(greet), false)); got != "* OK [CAPABILITY IMAP4rev2 AUTH=PLAIN] ready\r\n" {
+		t.Fatalf("without cert: %q", got)
+	}
+	if got := string(rewriteIMAPCapabilities([]byte(greet), true)); got != "* OK [CAPABILITY IMAP4rev2 AUTH=PLAIN AUTH=EXTERNAL] ready\r\n" {
+		t.Fatalf("with cert: %q", got)
+	}
+	// Closing bracket on AUTH=PLAIN itself stays on AUTH=EXTERNAL.
+	plainLast := "* OK [CAPABILITY IMAP4rev2 AUTH=PLAIN] ready\r\n"
+	if got := string(rewriteIMAPCapabilities([]byte(plainLast), true)); got != "* OK [CAPABILITY IMAP4rev2 AUTH=PLAIN AUTH=EXTERNAL] ready\r\n" {
+		t.Fatalf("AUTH=PLAIN last: %q", got)
+	}
+	// Post-auth OK has no AUTH=PLAIN, so AUTH=EXTERNAL is never added.
+	postAuth := "a1 OK [CAPABILITY IMAP4rev2 IDLE] Authentication successful\r\n"
+	if got := string(rewriteIMAPCapabilities([]byte(postAuth), true)); got != postAuth {
+		t.Fatalf("post-auth: %q", got)
+	}
+}
+
 // ── fuzzing ──────────────────────────────────────────────────────────────────
 
 // FuzzReadIMAPRequest: anything a client sends before signing in is read
@@ -300,6 +371,50 @@ func FuzzParsePlain(f *testing.F) {
 		r := parsePlain(in)
 		if r.ok && r.authcid == "" {
 			t.Fatal("ok with no identity")
+		}
+		_, authcid, _, ok, _ := decodePlain(in)
+		if ok != r.ok || (ok && authcid != r.authcid) {
+			t.Fatalf("parsePlain=%+v vs decodePlain=(%q,%v)", r, authcid, ok)
+		}
+	})
+}
+
+func FuzzParseExternal(f *testing.F) {
+	f.Add("=", true)
+	f.Add("", false)
+	f.Add(b64("alice@i10.test"), true)
+	f.Add(b64("alice\x00bob"), false)
+	f.Fuzz(func(t *testing.T, in string, isInitial bool) {
+		got, ok := parseExternal(in, isInitial)
+		if ok && strings.IndexByte(got, 0) >= 0 {
+			t.Fatalf("accepted NUL in authzid: %q", got)
+		}
+	})
+}
+
+func FuzzParseSMTPCommand(f *testing.F) {
+	for _, s := range []string{
+		"EHLO me.example\r\n",
+		"AUTH PLAIN " + plain("", "a@b", "p") + "\r\n",
+		"AUTH LOGIN\r\n",
+		" AUTH PLAIN x\r\n",
+		"AU\rTH PLAIN x\r\n",
+		"AUTH\tPLAIN x\r\n",
+	} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, in []byte) {
+		v, args, ok := parseSMTPCommand(in)
+		if !ok {
+			return
+		}
+		if v == "" || len(v) > 16 || strings.HasPrefix(args, " ") {
+			t.Fatalf("accepted bad command (%q, %q)", v, args)
+		}
+		for _, c := range []byte(args) {
+			if isCtl(c) {
+				t.Fatalf("control byte in args %q", args)
+			}
 		}
 	})
 }

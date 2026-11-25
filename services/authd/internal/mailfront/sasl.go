@@ -16,17 +16,16 @@ import (
 // client uses them (Stalwart's OAuth endpoints are not published, and the OAuth
 // lane is not being built), so refusing them breaks nothing that works today.
 const (
-	mechPlain = "PLAIN"
-	mechLogin = "LOGIN"
+	mechPlain    = "PLAIN"
+	mechLogin    = "LOGIN"
+	mechExternal = "EXTERNAL"
 )
 
 // saslResult is what a client's SASL response said about who is signing in.
 type saslResult struct {
 	// authcid is the identity whose password is checked, as typed.
 	authcid string
-	// ok is false when the response could not be read. It is forwarded anyway:
-	// Stalwart refuses it, and an OK the front could not attribute closes the
-	// connection.
+	// ok is false when the response could not be read.
 	ok bool
 	// foreignAuthzid is true when the client asked to act as someone other than
 	// the identity it authenticates as (PLAIN's authzid). The front cancels that
@@ -36,8 +35,12 @@ type saslResult struct {
 }
 
 // decodeSASL decodes one base64 client response. "=" is the empty response
-// (RFC 4954, RFC 4959). It never returns the password.
+// (RFC 4954, RFC 4959). Rejects embedded CR and LF, which Go's base64 decoder
+// would silently skip.
 func decodeSASL(s string) ([]byte, bool) {
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, false
+	}
 	s = strings.TrimSpace(s)
 	if s == "=" {
 		return nil, true
@@ -63,6 +66,61 @@ func parsePlain(b64 string) saslResult {
 		ok:             true,
 		foreignAuthzid: authzid != "" && !strings.EqualFold(normaliseLogin(authzid), normaliseLogin(authcid)),
 	}
+}
+
+// decodePlain decodes a PLAIN response into its three parts for the front-owned
+// SMTP AUTH exchange, clearing the temporary buffer.
+func decodePlain(b64 string) (authzid, authcid, password string, ok, foreign bool) {
+	raw, decOK := decodeSASL(b64)
+	if !decOK {
+		return "", "", "", false, false
+	}
+	defer clear(raw)
+	parts := bytes.SplitN(raw, []byte{0}, 3)
+	if len(parts) != 3 || len(parts[1]) == 0 {
+		return "", "", "", false, false
+	}
+	authzid, authcid, password = string(parts[0]), string(parts[1]), string(parts[2])
+	foreign = authzid != "" && !strings.EqualFold(normaliseLogin(authzid), normaliseLogin(authcid))
+	return authzid, authcid, password, true, foreign
+}
+
+// encodePlain builds a freshly base64-encoded PLAIN response, clearing its
+// working buffer.
+func encodePlain(authzid, authcid, password string) string {
+	out := make([]byte, 0, len(authzid)+len(authcid)+len(password)+2)
+	out = append(append(append(append(out, authzid...), 0), authcid...), 0)
+	out = append(out, password...)
+	defer clear(out)
+	return base64.StdEncoding.EncodeToString(out)
+}
+
+// parseExternal decodes an AUTHENTICATE EXTERNAL response (RFC 4422 appendix A,
+// RFC 4959). As an initial response, "=" is the empty authorization identity;
+// as a continuation line, an empty line is the empty authorization identity.
+// A NUL byte in the authorization identity is refused (revision 5).
+func parseExternal(resp string, isInitial bool) (authzid string, ok bool) {
+	if strings.ContainsAny(resp, "\r\n") {
+		return "", false
+	}
+	if isInitial {
+		if resp == "=" {
+			return "", true
+		}
+		if resp == "" {
+			return "", false
+		}
+	} else if resp == "" {
+		return "", true
+	}
+	raw, err := base64.StdEncoding.DecodeString(resp)
+	if err != nil {
+		return "", false
+	}
+	if bytes.IndexByte(raw, 0) >= 0 {
+		return "", false
+	}
+	return string(raw), true
 }
 
 // parseLoginUser reads the LOGIN mechanism's first response, the user name.
@@ -117,24 +175,5 @@ func plainWithToken(b64 string, token func(string) (string, error)) (string, err
 	if err != nil {
 		return "", err
 	}
-	out := make([]byte, 0, len(parts[0])+len(parts[1])+len(pw)+2)
-	out = append(append(append(append(out, parts[0]...), 0), parts[1]...), 0)
-	out = append(out, pw...)
-	defer clear(out)
-	return base64.StdEncoding.EncodeToString(out), nil
-}
-
-// passwordWithToken re-encodes a LOGIN mechanism's password response the same
-// way.
-func passwordWithToken(b64 string, token func(string) (string, error)) (string, error) {
-	raw, ok := decodeSASL(b64)
-	if !ok {
-		return "", errAmbiguous
-	}
-	defer clear(raw)
-	pw, err := token(string(raw))
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString([]byte(pw)), nil
+	return encodePlain(string(parts[0]), string(parts[1]), pw), nil
 }
