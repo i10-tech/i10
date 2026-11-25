@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -227,8 +228,9 @@ type fixtureOptions struct {
 	keys   bindtoken.Keys
 	noKeys bool
 	// devices and deviceKeys are the device lane's; nil, nil leaves it off.
-	devices    ldapsrv.DeviceStore
-	deviceKeys devicecode.Keys
+	devices       ldapsrv.DeviceStore
+	deviceKeys    devicecode.Keys
+	macAnyAddress bool
 }
 
 func (o fixtureOptions) tokenKeys() bindtoken.Keys {
@@ -278,6 +280,7 @@ func newFixtureOpts(t *testing.T, o fixtureOptions) string {
 		BindTokenKeys:     o.tokenKeys(),
 		Devices:           o.devices,
 		DeviceCodeKeys:    o.deviceKeys,
+		MacSMTPAnyAddress: o.macAnyAddress,
 	}).Routes())
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -327,14 +330,18 @@ func defaultStore() *fakeStore {
 // testTokenKey is the mail front's key in these tests.
 var testTokenKey = bindtoken.Key{ID: 1, Secret: []byte("0123456789abcdef0123456789abcdef")}
 
+// imapAt is what the front attests for an IMAP sign-in with no certificate.
+var imapAt = bindtoken.Attest{Protocol: bindtoken.IMAP, Addr: netip.MustParseAddr("203.0.113.7")}
+
 // tokenConn is a connection that binds the way Stalwart does behind the mail
 // front: a person bind's password carries a fresh token for the account its DN
 // names. RawBind binds without one, as a sign-in from anywhere else would.
 type tokenConn struct{ *goldapclient.Conn }
 
 func (c *tokenConn) Bind(dn, password string) error {
-	if uid := directory.UIDFromDN(dn, baseDN); uid != "" {
-		wrapped, err := bindtoken.Wrap(testTokenKey, uid, password, time.Now())
+	// An empty password is no sign-in the front forwards: it reaches authd raw.
+	if uid := directory.UIDFromDN(dn, baseDN); uid != "" && password != "" {
+		wrapped, err := bindtoken.Wrap(testTokenKey, uid, password, imapAt, time.Now())
 		if err != nil {
 			return err
 		}

@@ -1,6 +1,7 @@
 package mailfront
 
 import (
+	"bytes"
 	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/gate"
@@ -24,22 +25,29 @@ type Grant struct {
 
 	// DeviceID is the mail device the session signed in with (#383), "" for a
 	// password session: the device the bind token covered, read from the
-	// forwarded password with devicecode.DeviceID, the same parser authd uses.
+	// forwarded password with devicecode.DeviceID, the same parser authd uses,
+	// or resolved by certificate key for AUTHENTICATE EXTERNAL.
 	// The re-check closes the session when that device's row is gone or no
 	// longer matches (gate.DeviceRefusal).
 	DeviceID string
 
-	// Until is when the session is closed whatever the row says: a device
-	// session at DeviceMaxAge, a session on a pass-through lane at
-	// PassthroughMaxAge; zero for a Clerk password session, whose changes reach
-	// the row.
+	// CertKey is SHA-256 of the SubjectPublicKeyInfo that a Mac session stands
+	// on (#383 PR 3): the verified client certificate's key for IMAP (external
+	// or a Mac's device_code), or the row's key at admission for a Mac's SMTP
+	// session. Nil for password sessions and iPhone/iPad sessions.
+	CertKey []byte
+
+	// Until is when the session is closed whatever the row says: a Mac
+	// certificate session at CertSessionMaxAge, an iPhone/iPad device session
+	// at DeviceMaxAge, a session on a pass-through lane at PassthroughMaxAge;
+	// zero for a Clerk password session, whose changes reach the row.
 	Until time.Time
 }
 
 // sessionEnds is when a session that signs in now ends whatever its row says,
 // by kind (Grant.Until).
 type sessionEnds struct {
-	passthrough, device time.Time
+	passthrough, device, cert time.Time
 }
 
 // DefaultPassthroughMaxAge is how long a session signed in through a company's
@@ -69,6 +77,14 @@ const DefaultPassthroughMaxAge = 15 * time.Minute
 const (
 	DeviceMaxAge       = 24 * time.Hour
 	DeviceMaxAgeJitter = time.Hour
+
+	// CertSessionMaxAge and CertSessionMaxAgeJitter bound a Mac session (both
+	// IMAP with a certificate and SMTP under a Mac's code): 60 minutes plus up
+	// to 5 minutes of jitter, so an open certificate session always re-binds
+	// inside authd's 75-minute liveness window, and a Mac SMTP session never
+	// relies on Stalwart's maxDuration.
+	CertSessionMaxAge       = 60 * time.Minute
+	CertSessionMaxAgeJitter = 5 * time.Minute
 )
 
 // Reasons a connection is closed. Stable log reason codes.
@@ -88,6 +104,7 @@ const (
 	ReasonPreAuthLimits  = "preauth_limit"
 	ReasonMaxAge         = "passthrough_max_age"
 	ReasonDeviceMaxAge   = "device_max_age"
+	ReasonCertMaxAge     = "cert_session_max_age"
 )
 
 // admit decides whether an authenticated session may continue, from the row
@@ -108,7 +125,7 @@ const (
 // deviceID is the device the forwarded password named ("" for none), and ends
 // is when the session must end if it is a device session or one on a
 // pass-through lane; neither applies to a Clerk password session.
-func admit(acct *projection.Account, deviceID string, lookupErr error, ends sessionEnds) (Grant, string) {
+func admit(acct *projection.Account, deviceID string, certKey []byte, lookupErr error, ends sessionEnds) (Grant, string) {
 	switch {
 	case lookupErr != nil:
 		return Grant{}, ReasonLookupFailed
@@ -126,8 +143,11 @@ func admit(acct *projection.Account, deviceID string, lookupErr error, ends sess
 		UpdatedAt: acct.ClerkUpdatedAt,
 		Route:     gate.RouteOf(acct),
 		DeviceID:  deviceID,
+		CertKey:   bytes.Clone(certKey),
 	}
 	switch {
+	case len(g.CertKey) > 0:
+		g.Until = ends.cert
 	case deviceID != "":
 		// Not a pass-through session even on a managed account: the code is
 		// i10's, checked by authd, and its revocations reach the row.
@@ -181,7 +201,7 @@ func (g Grant) revoked(now *projection.Account) string {
 		return ReasonAddressChanged
 	}
 	if g.DeviceID != "" {
-		return gate.DeviceRefusal(deviceIn(now, g.DeviceID), now)
+		return gate.DeviceRefusal(deviceIn(now, g.DeviceID), now, g.CertKey)
 	}
 	return ""
 }
@@ -197,8 +217,7 @@ func deviceIn(a *projection.Account, id string) *projection.Device {
 	return nil
 }
 
-// expired reports whether a pass-through session is past its Until at the
-// sweep's clock: for what the row can never show (DefaultPassthroughMaxAge). It
+// expired reports whether a session is past its Until at the sweep's clock. It
 // reads no row, so it holds while the projection cannot be read.
 func (g Grant) expired(at time.Time) bool {
 	return !g.Until.IsZero() && !at.Before(g.Until)
@@ -206,10 +225,14 @@ func (g Grant) expired(at time.Time) bool {
 
 // maxAgeReason is why an expired session is closed.
 func (g Grant) maxAgeReason() string {
-	if g.DeviceID != "" {
+	switch {
+	case len(g.CertKey) > 0:
+		return ReasonCertMaxAge
+	case g.DeviceID != "":
 		return ReasonDeviceMaxAge
+	default:
+		return ReasonMaxAge
 	}
-	return ReasonMaxAge
 }
 
 func sameInstant(a, b *time.Time) bool {

@@ -104,7 +104,7 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	// them back off and retry, as for any other outage of ours. A client gains
 	// nothing from the different code: a token it wrote itself is refused either
 	// way.
-	real, deviceID, err := bindtoken.Unwrap(s.tokenKeys, uid, password, s.now())
+	claims, err := bindtoken.Unwrap(s.tokenKeys, uid, password, s.now())
 	if errors.Is(err, bindtoken.ErrNoKeys) || errors.Is(err, bindtoken.ErrUnknownKey) {
 		s.log.Error("bind refused: the mail front's key is not configured here", "reason", err.Error(), "uid", uid)
 		s.respondUnavailable(w, "authentication backend temporarily unavailable")
@@ -115,7 +115,7 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		w.Write(res)
 		return
 	}
-	password = real
+	password = claims.Password
 
 	account, err := s.store.AccountByUID(ctx, uid)
 	if err != nil {
@@ -138,21 +138,23 @@ func (s *Server) handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 		return
 	}
 
-	// ⚠ A DEVICE CODE TAKES ITS OWN LANE, AFTER THE WHOLE GATE (#383). Every
-	// password that starts with the reserved prefix goes to deviceBind, well
-	// formed or not, and nothing in it reaches the resolver, the credential cache
-	// or the failure budget. It is judged by the full gate first, RouteOf
-	// included: an account SSO is required for, or one whose connection is gone
-	// or not active, has its device codes held exactly as its password is. The
-	// resolver is where RouteOf's refusals happen on the password lane; the device
-	// lane never calls it, so it applies them here.
-	if devicecode.HasReservedPrefix(password) {
+	// ⚠ A DEVICE TAKES ITS OWN LANE, AFTER THE WHOLE GATE (#383). The token's
+	// mode says which lane, and bindtoken.Unwrap has already checked that it fits
+	// the password: every password that starts with the reserved prefix is
+	// device_code, well formed or not, and a Mac's AUTHENTICATE EXTERNAL is
+	// external, with no password at all. Nothing in either reaches the resolver,
+	// the credential cache, a flight or the failure budget. Both are judged by the
+	// full gate first, RouteOf included: an account SSO is required for, or one
+	// whose connection is gone or not active, has its devices held exactly as its
+	// password is. The resolver is where RouteOf's refusals happen on the
+	// password lane; the device lane never calls it, so it applies them here.
+	if claims.Mode != bindtoken.ModePassword || devicecode.HasReservedPrefix(password) {
 		if reason := gate.Refusal(account); reason != "" {
-			s.log.Info("bind rejected", "reason", reason, "uid", uid, "lane", "device")
+			s.log.Info("bind rejected", "reason", reason, "uid", uid, "lane", "device", "mode", claims.Mode.String())
 			w.Write(res)
 			return
 		}
-		s.deviceBind(ctx, w, dn, account, password, deviceID)
+		s.deviceBind(ctx, w, dn, account, claims)
 		return
 	}
 

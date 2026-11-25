@@ -143,11 +143,17 @@ func TestADeviceSessionClosesWhenItsRowGoesOrStopsMatching(t *testing.T) {
 			d.TenantID = "t-other"
 			f.addDevice(d)
 		}, gate.DeviceMismatch},
-		"turned into a Mac": {func(f *fakeAccounts) {
+		"turned into a Mac with no key": {func(f *fakeAccounts) {
 			d := aliceDevice(code)
 			d.Platform = "macos"
 			f.addDevice(d)
-		}, gate.DevicePlatformRefused},
+		}, gate.DeviceCertMissing},
+		"turned into a Mac with a key": {func(f *fakeAccounts) {
+			d := aliceDevice(code)
+			d.Platform = "macos"
+			d.CertKey = make([]byte, 32)
+			f.addDevice(d)
+		}, gate.DeviceKeyChanged},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -213,7 +219,7 @@ func TestADeviceSessionEndsAtTheDeviceMaxAge(t *testing.T) {
 	managed := account("user_alice", "alice@i10.test")
 	managed.Managed, managed.ManagedConnection = true, "conn-1"
 	soon, later := time.Now().Add(time.Minute), time.Now().Add(50*time.Millisecond)
-	g, reason := admit(&managed, "d-1", nil, sessionEnds{passthrough: soon, device: later})
+	g, reason := admit(&managed, "d-1", nil, nil, sessionEnds{passthrough: soon, device: later})
 	if reason != "" || g.Until != later || g.DeviceID != "d-1" {
 		t.Fatalf("admit = %+v, %q; want the device max age", g, reason)
 	}

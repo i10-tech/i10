@@ -31,13 +31,20 @@ type Config struct {
 	SMTPUpstream string
 
 	CertFile, KeyFile string
-	DatabaseURL       string
+	// DeviceCABundle is MAILFRONT_DEVICE_CA_BUNDLE: optional PEM bundle of CAs
+	// trusted to issue Mac client certificates on 993. Empty (or absent file):
+	// 993 requests no certificate and never offers EXTERNAL.
+	DeviceCABundle string
+	DatabaseURL    string
 
 	MaxConns, MaxPreAuth, MaxPreAuthPerIP int
 	PreAuthTimeout                        time.Duration
 	SweepInterval                         time.Duration
 	PassthroughMaxAge                     time.Duration
-	LogLevel                              string
+	// MacSMTPSameAddress is MAILFRONT_MAC_SMTP_SAME_ADDRESS (default true),
+	// mirroring AUTHD_MAC_SMTP_SAME_ADDRESS in lockstep.
+	MacSMTPSameAddress bool
+	LogLevel           string
 
 	// BindTokenKey is MAILFRONT_BIND_TOKEN_KEY, "<id>:<base64>", the key the
 	// front signs every forwarded sign-in's token with (internal/bindtoken).
@@ -51,12 +58,13 @@ type Config struct {
 // LoadConfig reads MAILFRONT_* from the environment.
 func LoadConfig() (Config, error) {
 	c := Config{
-		IMAPUpstream: config.Env("MAILFRONT_IMAP_UPSTREAM", "127.0.0.1:993"),
-		SMTPUpstream: config.Env("MAILFRONT_SMTP_UPSTREAM", "127.0.0.1:465"),
-		CertFile:     config.Env("MAILFRONT_TLS_CERT_FILE", "/etc/mailfront/tls/tls.crt"),
-		KeyFile:      config.Env("MAILFRONT_TLS_KEY_FILE", "/etc/mailfront/tls/tls.key"),
-		DatabaseURL:  os.Getenv("MAILFRONT_DATABASE_URL"),
-		LogLevel:     config.Env("MAILFRONT_LOG_LEVEL", "info"),
+		IMAPUpstream:   config.Env("MAILFRONT_IMAP_UPSTREAM", "127.0.0.1:993"),
+		SMTPUpstream:   config.Env("MAILFRONT_SMTP_UPSTREAM", "127.0.0.1:465"),
+		CertFile:       config.Env("MAILFRONT_TLS_CERT_FILE", "/etc/mailfront/tls/tls.crt"),
+		KeyFile:        config.Env("MAILFRONT_TLS_KEY_FILE", "/etc/mailfront/tls/tls.key"),
+		DeviceCABundle: config.Env("MAILFRONT_DEVICE_CA_BUNDLE", ""),
+		DatabaseURL:    os.Getenv("MAILFRONT_DATABASE_URL"),
+		LogLevel:       config.Env("MAILFRONT_LOG_LEVEL", "info"),
 	}
 	for _, raw := range strings.FieldsFunc(os.Getenv("MAILFRONT_LISTEN_IPS"), func(r rune) bool { return r == ',' || r == ' ' }) {
 		ip, err := netip.ParseAddr(raw)
@@ -88,6 +96,9 @@ func LoadConfig() (Config, error) {
 		return c, err
 	}
 	if c.PassthroughMaxAge, err = config.EnvDuration("MAILFRONT_PASSTHROUGH_MAX_AGE", DefaultPassthroughMaxAge); err != nil {
+		return c, err
+	}
+	if c.MacSMTPSameAddress, err = config.EnvBool("MAILFRONT_MAC_SMTP_SAME_ADDRESS", true); err != nil {
 		return c, err
 	}
 	if raw := os.Getenv("MAILFRONT_BIND_TOKEN_KEY"); raw == "" {

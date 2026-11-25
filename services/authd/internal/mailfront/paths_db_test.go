@@ -1,6 +1,7 @@
 package mailfront
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -49,6 +50,14 @@ type gatePath struct {
 // table.
 func (p gatePath) device() bool { return p.table == "authd.mail_devices" }
 
+// mac reports whether Alice signs in as a Mac certificate session (pathDevice
+// standing on pathMacKey).
+func (p gatePath) mac() bool {
+	return p.table == "authd.mail_devices" && strings.Contains(p.name, "macos")
+}
+
+var pathMacKey = bytes.Repeat([]byte{0x04}, 32)
+
 // Fixture names. :A and :B are the two workspaces; Alice is in A, on path.test,
 // which A holds by a verified sending-domain proof unless a setup changes that.
 const (
@@ -90,6 +99,8 @@ const (
 	// re-pointed device would name.
 	mintDevice = `INSERT INTO authd.mail_devices (id, clerk_user_id, email, tenant_id, platform, code_hash, code_kid, created_by)
 		VALUES (:device, :alice, 'alice@path.test', :A, 'ios', '\x01', 1, 'path')`
+	mintMacDevice = `INSERT INTO authd.mail_devices (id, clerk_user_id, email, tenant_id, platform, cert_key_sha256, code_hash, code_kid, created_by)
+		VALUES (:device, :alice, 'alice@path.test', :A, 'macos', '\x0404040404040404040404040404040404040404040404040404040404040404', '\x01', 1, 'path')`
 	bobOnA   = `INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id) VALUES ('user_path_bob', 'bob@path.test', true, :A)`
 	upDevice = `UPDATE authd.mail_devices SET `
 	whDevice = ` WHERE id = :device`
@@ -218,10 +229,14 @@ var gatePaths = []gatePath{
 		one(upDevice + `first_used_at = now(), last_used_at = now(), device_name = 'Phone', model = 'iPhone17,1',
 			serial = 'S', created_by = 'someone'` + whDevice), ignored},
 	// The bound key is an access input since PR 3: binding, changing or clearing
-	// it is logged. Until the front's code reads it (step 2), a logged change
-	// re-checks the session and keeps it.
-	{"authd.mail_devices", "cert_key_sha256 (bound, logged)", one(mintDevice),
+	// it is logged. On an iPhone row it re-checks and keeps it; on a Mac session
+	// changing or clearing it closes the open session at the next poll.
+	{"authd.mail_devices", "cert_key_sha256 (bound on ios, logged)", one(mintDevice),
 		one(upDevice + `cert_key_sha256 = '\x0404040404040404040404040404040404040404040404040404040404040404'` + whDevice), rechecks},
+	{"authd.mail_devices", "cert_key_sha256 (changed on macos)", one(mintMacDevice),
+		one(upDevice + `cert_key_sha256 = '\x0505050505050505050505050505050505050505050505050505050505050505'` + whDevice), closes},
+	{"authd.mail_devices", "cert_key_sha256 (cleared on macos)", one(mintMacDevice),
+		one(upDevice + `cert_key_sha256 = NULL` + whDevice), closes},
 	{"authd.mail_devices", "the account deleted (cascades the device)", one(mintDevice),
 		one(`DELETE FROM authd.accounts` + whAlice), closes},
 	{"authd.mail_devices", "truncate", one(mintDevice), []string{
@@ -357,15 +372,23 @@ func (pw *pathWorld) exec(stmts []string) {
 }
 
 // signIn reads Alice's row as the front does before it forwards a sign-in,
-// with her device's code when device is set.
-func (pw *pathWorld) signIn(device bool) Grant {
+// with her device's code when device is set (and Mac cert key when mac is set).
+func (pw *pathWorld) signIn(device, mac bool) Grant {
 	pw.t.Helper()
 	acct, err := pw.store.AccountByLogin(context.Background(), "alice@path.test")
 	deviceID := ""
+	var certKey []byte
 	if device {
 		deviceID = pathDevice
 	}
-	g, reason := admit(acct, deviceID, err, sessionEnds{passthrough: time.Now().Add(time.Hour), device: time.Now().Add(time.Hour)})
+	if mac {
+		certKey = pathMacKey
+	}
+	g, reason := admit(acct, deviceID, certKey, err, sessionEnds{
+		passthrough: time.Now().Add(time.Hour),
+		device:      time.Now().Add(time.Hour),
+		cert:        time.Now().Add(time.Hour),
+	})
 	if reason != "" {
 		pw.t.Fatalf("the setup does not let Alice sign in: %s", reason)
 	}
@@ -386,7 +409,7 @@ func TestEveryGateInputReachesThePoll(t *testing.T) {
 			sw := srv.Sweeper(time.Second, 30*time.Second)
 			var mu sync.Mutex
 			reason := ""
-			srv.reg.add(pw.signIn(p.device()), func(r string) { mu.Lock(); reason = r; mu.Unlock() })
+			srv.reg.add(pw.signIn(p.device(), p.mac()), func(r string) { mu.Lock(); reason = r; mu.Unlock() })
 
 			ctx := context.Background()
 			if st := sw.Poll(ctx); st.Err != nil || st.Accounts != 1 || st.Closed != 0 {
@@ -438,11 +461,11 @@ func TestAPollRechecksAConnectionThatSignedInDuringAChangeOnTheDatabase(t *testi
 	sw := srv.Sweeper(time.Second, 30*time.Second)
 	ctx := context.Background()
 	acct, err := pw.store.AccountByLogin(ctx, "bob@path.test")
-	bob, _ := admit(acct, "", err, sessionEnds{})
+	bob, _ := admit(acct, "", nil, err, sessionEnds{})
 	srv.reg.add(bob, func(string) {})
 	sw.Poll(ctx)
 
-	alice := pw.signIn(false)
+	alice := pw.signIn(false, false)
 	pw.exec(one(upAlice + `suspended_at = now()` + whAlice))
 	if st := sw.Poll(ctx); st.Err != nil || st.Changes == 0 || st.Closed != 0 {
 		t.Fatalf("poll %+v, want the change read and nobody closed", st)
@@ -466,7 +489,7 @@ func TestAPollAsksForAFullSweepWhenServerStartChangesOnTheDatabase(t *testing.T)
 	sw := srv.Sweeper(time.Second, 30*time.Second)
 	var mu sync.Mutex
 	closedReason := ""
-	srv.reg.add(pw.signIn(false), func(r string) { mu.Lock(); closedReason = r; mu.Unlock() })
+	srv.reg.add(pw.signIn(false, false), func(r string) { mu.Lock(); closedReason = r; mu.Unlock() })
 
 	ctx := context.Background()
 	if st := sw.Poll(ctx); st.Err != nil || st.Full || sw.sinceStart.IsZero() {
@@ -530,7 +553,7 @@ func TestRevocationLatency(t *testing.T) {
 			srv := NewServer(pw.store, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			sw := srv.Sweeper(time.Second, 30*time.Second)
 			closed := make(chan time.Time, 1)
-			srv.reg.add(pw.signIn(p.device()), func(string) {
+			srv.reg.add(pw.signIn(p.device(), p.mac()), func(string) {
 				select {
 				case closed <- time.Now():
 				default:

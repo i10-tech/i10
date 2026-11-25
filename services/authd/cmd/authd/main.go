@@ -143,13 +143,14 @@ func run() error {
 			Directory: managed,
 			Log:       log,
 		},
-		Budget:         budgetstore.NewPostgres(store.Pool()),
-		Limiter:        limiter,
-		CredCache:      credcache.New(cfg.CredCacheTTL),
-		Logger:         log,
-		BindTokenKeys:  tokenKeys,
-		Devices:        store,
-		DeviceCodeKeys: deviceKeys,
+		Budget:            budgetstore.NewPostgres(store.Pool()),
+		Limiter:           limiter,
+		CredCache:         credcache.New(cfg.CredCacheTTL),
+		Logger:            log,
+		BindTokenKeys:     tokenKeys,
+		Devices:           store,
+		DeviceCodeKeys:    deviceKeys,
+		MacSMTPAnyAddress: !cfg.MacSMTPSameAddress,
 	}).Routes())
 
 	// The listener is created here, on this goroutine, rather than inside

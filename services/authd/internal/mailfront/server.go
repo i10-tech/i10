@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,9 +49,17 @@ func (p Protocol) String() string {
 // poll and its backstop sweep) over all of them.
 type Server struct {
 	Accounts Accounts
-	TLS      *tls.Config
-	Log      *slog.Logger
-	Limits   Limits
+	// TLS is the server TLS config for 465 (and for 993 when IMAPTLS is nil).
+	// It never asks for a client certificate.
+	TLS *tls.Config
+	// IMAPTLS is the separate TLS config for 993 (IMAPTLSConfig), requesting a
+	// client certificate when ClientCAs holds a trust pool. Nil falls back to TLS.
+	IMAPTLS *tls.Config
+	// ClientCAs holds the device CA trust pool used to verify client certificates
+	// after the 993 handshake. Nil (or empty pool) disables client certs and EXTERNAL.
+	ClientCAs *ClientCAs
+	Log       *slog.Logger
+	Limits    Limits
 
 	// MaxConns caps every connection on this front; MaxPreAuth caps the ones
 	// that have not signed in, and MaxPreAuthPerIP the ones from one address.
@@ -69,6 +78,11 @@ type Server struct {
 	// sooner, at random, so clients that signed in together do not all come back
 	// together; none outlives it.
 	PassthroughMaxAge time.Duration
+
+	// MacSMTPAnyAddress drops the address part of the Mac SMTP liveness check
+	// (MAILFRONT_MAC_SMTP_SAME_ADDRESS=false), in lockstep with authd's
+	// AUTHD_MAC_SMTP_SAME_ADDRESS.
+	MacSMTPAnyAddress bool
 
 	reg *registry
 
@@ -212,7 +226,11 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 
 	deadline := start.Add(s.Limits.PreAuth)
 	_ = raw.SetDeadline(deadline)
-	client := tls.Server(raw, s.TLS)
+	tlsConf := s.TLS
+	if proto == IMAP && s.IMAPTLS != nil {
+		tlsConf = s.IMAPTLS
+	}
+	client := tls.Server(raw, tlsConf)
 	hctx, cancel := context.WithTimeout(context.Background(), s.Limits.Handshake)
 	err := client.HandshakeContext(hctx)
 	cancel()
@@ -220,6 +238,17 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 		_ = raw.Close()
 		log.Debug("tls handshake failed", slog.Any("err", err))
 		return
+	}
+
+	var cert *verifiedCert
+	if proto == IMAP && s.ClientCAs != nil {
+		if roots := s.ClientCAs.Pool(); roots != nil {
+			var cerr error
+			cert, cerr = verifyClientCert(client.ConnectionState(), roots, time.Now())
+			if cerr != nil {
+				log.Info("client certificate rejected, treating connection as without one", slog.Any("err", cerr))
+			}
+		}
 	}
 
 	up, err := net.DialTimeout("tcp", upstream, s.DialTimeout)
@@ -243,20 +272,24 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 	}
 
 	sess := &session{
-		id:       id,
-		log:      log,
-		client:   client,
-		raw:      raw,
-		cr:       bufio.NewReaderSize(client, 4096),
-		cw:       &syncWriter{w: client},
-		up:       up,
-		ur:       bufio.NewReaderSize(up, 4096),
-		lim:      s.Limits,
-		accounts: s.Accounts,
-		bindKey:  s.BindTokenKey,
-		events:   make(chan event, 8),
-		upDone:   make(chan struct{}),
-		closed:   make(chan struct{}),
+		id:                id,
+		log:               log,
+		proto:             proto,
+		addr:              clientAddr(raw),
+		cert:              cert,
+		macSMTPAnyAddress: s.MacSMTPAnyAddress,
+		client:            client,
+		raw:               raw,
+		cr:                bufio.NewReaderSize(client, 4096),
+		cw:                &syncWriter{w: client},
+		up:                up,
+		ur:                bufio.NewReaderSize(up, 4096),
+		lim:               s.Limits,
+		accounts:          s.Accounts,
+		bindKey:           s.BindTokenKey,
+		events:            make(chan event, 8),
+		upDone:            make(chan struct{}),
+		closed:            make(chan struct{}),
 	}
 	if !s.track(sess) {
 		sess.close(ReasonShutdown)
@@ -283,14 +316,12 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 	// Signed in. Attribute it, or end it.
 	var acct *projection.Account
 	var lookupErr error
-	if in != nil {
-		acct, lookupErr = in.acct, in.err
-	}
 	var deviceID string
+	var certKey []byte
 	if in != nil {
-		deviceID = in.device
+		acct, lookupErr, deviceID, certKey = in.acct, in.err, in.device, in.certKey
 	}
-	grant, reason := admit(acct, deviceID, lookupErr, s.sessionEnds(time.Now()))
+	grant, reason := admit(acct, deviceID, certKey, lookupErr, s.sessionEnds(time.Now()))
 	if reason != "" {
 		log.Warn("closing a sign-in the front cannot stand behind", "reason", reason, slog.Any("err", lookupErr))
 		sess.close(reason)
@@ -314,7 +345,8 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 // the session.
 func (sess *session) preAuthFailed(err error) {
 	limit := errors.Is(err, errLineTooLong) || errors.Is(err, errLiteralTooLong) ||
-		errors.Is(err, errCommandTooLong) || errors.Is(err, errTooManyCmds)
+		errors.Is(err, errCommandTooLong) || errors.Is(err, errTooManyCmds) ||
+		errors.Is(err, errTooManyTempFails)
 	if limit {
 		sess.close(ReasonPreAuthLimits)
 		return
@@ -374,14 +406,30 @@ func (s *Server) Shutdown(ctx context.Context) {
 type signIn struct {
 	acct *projection.Account
 	err  error
-	// device is devicecode.DeviceID of the password tokenFor wrapped, "" for
-	// none: the same device the token's MAC covers.
+	// device is devicecode.DeviceID of the password tokenFor wrapped, or the
+	// device resolved by cert key for AUTHENTICATE EXTERNAL, "" for none: the
+	// same device the token's MAC covers.
 	device string
+	// certKey is the certificate key the session stands on: set only for
+	// external mode, an IMAP device_code whose row is macos, or a macos SMTP
+	// session (the row's key at admission). Nil for passwords and iPhone/iPad.
+	certKey []byte
 }
 
 func (s *session) signInAs(login string) *signIn {
 	a, err := s.lookup(login)
 	return &signIn{acct: a, err: err}
+}
+
+// clientAddr extracts the client's IP as IPv4 or plain IPv6 with no zone, for
+// bindtoken.Attest and Mac liveness checks.
+func clientAddr(c net.Conn) netip.Addr {
+	if a, ok := c.RemoteAddr().(*net.TCPAddr); ok {
+		if ip, ok := netip.AddrFromSlice(a.IP); ok {
+			return ip.Unmap().WithZone("")
+		}
+	}
+	return netip.Addr{}
 }
 
 // remoteIP is the key the per-address pre-auth cap counts by: the address for
@@ -400,7 +448,11 @@ func remoteIP(c net.Conn) string {
 
 // sessionEnds is when a session signed in at signedIn ends, by kind.
 func (s *Server) sessionEnds(signedIn time.Time) sessionEnds {
-	return sessionEnds{passthrough: s.passthroughUntil(signedIn), device: deviceUntil(signedIn)}
+	return sessionEnds{
+		passthrough: s.passthroughUntil(signedIn),
+		device:      deviceUntil(signedIn),
+		cert:        certUntil(signedIn),
+	}
 }
 
 // passthroughUntil is when a pass-through session signed in at signedIn ends:
@@ -417,4 +469,11 @@ func (s *Server) passthroughUntil(signedIn time.Time) time.Time {
 // later, plus up to DeviceMaxAgeJitter at random.
 func deviceUntil(signedIn time.Time) time.Time {
 	return signedIn.Add(DeviceMaxAge + time.Duration(rand.Int64N(int64(DeviceMaxAgeJitter))))
+}
+
+// certUntil is when a Mac session (IMAP with a certificate, or SMTP under a
+// Mac's code) ends: CertSessionMaxAge later, plus up to CertSessionMaxAgeJitter
+// at random (60 to 65 minutes).
+func certUntil(signedIn time.Time) time.Time {
+	return signedIn.Add(CertSessionMaxAge + time.Duration(rand.Int64N(int64(CertSessionMaxAgeJitter))))
 }

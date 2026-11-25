@@ -60,6 +60,16 @@ func run() error {
 	}
 	go certs.Watch(ctx, 30*time.Second)
 
+	var clientCAs *mailfront.ClientCAs
+	if cfg.DeviceCABundle != "" {
+		clientCAs = &mailfront.ClientCAs{File: cfg.DeviceCABundle, Log: log}
+		if err := clientCAs.Load(); err != nil {
+			// Optional bundle: keep running inert until the mounted file parses.
+			log.Warn("device CA bundle could not be loaded at start, client certificates disabled until reload", slog.Any("err", err))
+		}
+		go clientCAs.Watch(ctx, 30*time.Second)
+	}
+
 	var store *projection.Postgres
 	if err := retry(ctx, log, "connect to the projection", func() error {
 		var err error
@@ -72,6 +82,9 @@ func run() error {
 	log.Info("projection connected")
 
 	srv := mailfront.NewServer(store, mailfront.TLSConfig(certs), log)
+	srv.IMAPTLS = mailfront.IMAPTLSConfig(certs, clientCAs)
+	srv.ClientCAs = clientCAs
+	srv.MacSMTPAnyAddress = !cfg.MacSMTPSameAddress
 	srv.Limits.PreAuth = cfg.PreAuthTimeout
 	srv.MaxConns, srv.MaxPreAuth, srv.MaxPreAuthPerIP = cfg.MaxConns, cfg.MaxPreAuth, cfg.MaxPreAuthPerIP
 	srv.PassthroughMaxAge = cfg.PassthroughMaxAge

@@ -2,13 +2,17 @@ package mailfront
 
 import (
 	"bufio"
-	"encoding/base64"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
+	"github.com/i10-tech/i10/services/authd/internal/gate"
 )
 
 // ── reading one client command before sign-in, by Stalwart's grammar ─────────
@@ -447,18 +451,37 @@ func (s *session) imapPreAuth() (*signIn, error) {
 			}
 			s.setPending("")
 		case "AUTHENTICATE":
-			mech, _ := req.str(0)
-			if len(req.args) < 1 || len(req.args) > 2 || !supportedMech(mech, false) {
+			mech, ok := req.str(0)
+			if !ok || len(req.args) < 1 || len(req.args) > 2 {
 				if err := s.cw.WriteString(tag + " BAD Unsupported mechanism.\r\n"); err != nil {
 					return nil, err
 				}
 				continue
 			}
-			in, ok, err := s.imapAuthPlain(tag, req)
-			if err != nil || ok {
-				return in, err
+			switch strings.ToUpper(mech) {
+			case mechPlain:
+				in, ok, err := s.imapAuthPlain(tag, req)
+				if err != nil || ok {
+					return in, err
+				}
+				s.setPending("")
+			case mechExternal:
+				if s.cert == nil {
+					if err := s.cw.WriteString(tag + " BAD Unsupported mechanism.\r\n"); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				in, ok, err := s.imapAuthExternal(tag, req)
+				if err != nil || ok {
+					return in, err
+				}
+				s.setPending("")
+			default:
+				if err := s.cw.WriteString(tag + " BAD Unsupported mechanism.\r\n"); err != nil {
+					return nil, err
+				}
 			}
-			s.setPending("")
 		case "STARTTLS":
 			// The client is already on TLS, with the front. Stalwart's listener
 			// has none to offer.
@@ -489,7 +512,11 @@ func (s *session) sendAs(up, clientTag, cmd string) (bool, error) {
 // imapAuthPlain runs AUTHENTICATE PLAIN, with SASL-IR or with a continuation.
 func (s *session) imapAuthPlain(tag string, req *imapRequest) (*signIn, bool, error) {
 	up := newUpstreamTag()
-	if ir, ok := req.str(1); ok {
+	if len(req.args) == 2 {
+		ir, ok := req.str(1)
+		if !ok {
+			return nil, false, s.cw.WriteString(tag + " BAD Invalid arguments.\r\n")
+		}
 		res := parsePlain(ir)
 		if !res.ok || res.foreignAuthzid {
 			// Not a response the front can stand behind. Nothing is sent.
@@ -501,7 +528,7 @@ func (s *session) imapAuthPlain(tag string, req *imapRequest) (*signIn, bool, er
 			return nil, false, s.signInUnavailable(tag, err)
 		}
 		s.setPending(up)
-		ok, err := s.sendAs(up, tag, "AUTHENTICATE PLAIN "+fwd)
+		ok, err = s.sendAs(up, tag, "AUTHENTICATE PLAIN "+fwd)
 		return in, ok, err
 	}
 
@@ -556,6 +583,79 @@ func (s *session) imapAuthPlain(tag string, req *imapRequest) (*signIn, bool, er
 	}
 }
 
+// imapAuthExternal runs AUTHENTICATE EXTERNAL for a 993 connection whose client
+// certificate verified (#383 PR 3). It supports both an initial response
+// (including RFC 4959's "=") and a continuation ("+ " then one line; "*"
+// cancels). It looks up the device by SPKI hash and its account, enforces the
+// gate and Mac platform, and forwards an AUTHENTICATE PLAIN of its own carrying
+// an external bind token.
+func (s *session) imapAuthExternal(tag string, req *imapRequest) (*signIn, bool, error) {
+	var authzid string
+	if len(req.args) == 2 {
+		ir, ok := req.str(1)
+		if !ok {
+			return nil, false, s.cw.WriteString(tag + " BAD Invalid arguments.\r\n")
+		}
+		authzid, ok = parseExternal(ir, true)
+		if !ok {
+			return nil, false, s.cw.WriteString(tag + " NO [AUTHENTICATIONFAILED] Authentication failed.\r\n")
+		}
+	} else {
+		if err := s.cw.WriteString("+ \r\n"); err != nil {
+			return nil, false, err
+		}
+		line, err := readLine(s.cr, s.lim.MaxLine)
+		if err != nil {
+			return nil, false, err
+		}
+		resp := string(trimEOL(line))
+		if resp == "*" {
+			return nil, false, s.cw.WriteString(tag + " BAD Authentication cancelled.\r\n")
+		}
+		var ok bool
+		authzid, ok = parseExternal(resp, false)
+		if !ok {
+			return nil, false, s.cw.WriteString(tag + " NO [AUTHENTICATIONFAILED] Authentication failed.\r\n")
+		}
+	}
+
+	dev, err := s.deviceByCertKey(s.cert.key)
+	if err != nil {
+		return nil, false, s.signInUnavailable(tag, err)
+	}
+	if dev == nil || dev.Platform != gate.Macos {
+		return nil, false, s.cw.WriteString(tag + " NO [AUTHENTICATIONFAILED] Authentication failed.\r\n")
+	}
+	acct, err := s.lookup(dev.Email)
+	if err != nil {
+		return nil, false, s.signInUnavailable(tag, err)
+	}
+	if acct == nil || gate.Refusal(acct) != "" || gate.DeviceRefusal(dev, acct, s.cert.key) != "" {
+		return nil, false, s.cw.WriteString(tag + " NO [AUTHENTICATIONFAILED] Authentication failed.\r\n")
+	}
+	if authzid != "" && normaliseLogin(authzid) != normaliseLogin(acct.Email) {
+		return nil, false, s.cw.WriteString(tag + " NO [AUTHENTICATIONFAILED] Authentication failed.\r\n")
+	}
+	if s.bindKey == nil {
+		return nil, false, s.signInUnavailable(tag, errNoBindKey)
+	}
+	tok, err := bindtoken.WrapExternal(*s.bindKey, acct.ClerkUserID, dev.ID, bindtoken.Attest{
+		Protocol: bindtoken.IMAP,
+		Addr:     s.addr,
+		CertKey:  s.cert.key,
+		CertCN:   s.cert.cn,
+	}, time.Now())
+	if err != nil {
+		return nil, false, s.signInUnavailable(tag, err)
+	}
+
+	in := &signIn{acct: acct, device: dev.ID, certKey: bytes.Clone(s.cert.key)}
+	up := newUpstreamTag()
+	s.setPending(up)
+	ok, err := s.sendAs(up, tag, "AUTHENTICATE PLAIN "+encodePlain("", acct.Email, tok))
+	return in, ok, err
+}
+
 // awaitTagged waits for the tagged completion of up, the front's own tag,
 // ignoring continuations. It reports whether it was OK.
 func (s *session) awaitTagged(up string) (bool, error) {
@@ -573,21 +673,6 @@ func (s *session) awaitTagged(up string) (bool, error) {
 func (s *session) forward(b []byte) error {
 	_, err := s.up.Write(b)
 	return err
-}
-
-// canonicalB64 re-encodes a base64 response the front has already decoded, so
-// Stalwart decodes the bytes the front read and nothing else.
-func canonicalB64(s string) string {
-	raw, ok := decodeSASL(s)
-	if !ok {
-		return "*"
-	}
-	if len(raw) == 0 {
-		return "="
-	}
-	out := base64.StdEncoding.EncodeToString(raw)
-	clear(raw)
-	return out
 }
 
 // logID records the client's IMAP ID fields (RFC 2971), which later PRs name

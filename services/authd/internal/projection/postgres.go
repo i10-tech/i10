@@ -2,6 +2,7 @@ package projection
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -275,10 +276,15 @@ func (p *Postgres) queryTimed(ctx context.Context, fn func(*pgxpool.Conn) error)
 //
 // ⚠ THE DEVICES ARE JOINED BY THEIR ACCOUNT. `$2` is the device ids of the open
 // device sessions; each comes back on the row of the account it belongs to NOW,
-// as four parallel arrays ordered by id: one row per account however many
+// as five parallel arrays ordered by id: one row per account however many
 // devices it has. A device deleted, or moved to another
 // account, is absent from its session's account row, which the front reads as
 // revoked. With no device sessions `$2` is empty and the step reads nothing.
+//
+// ⚠ THE CERTIFICATE KEY TRAVELS AS HEX, ” FOR NONE (#383 PR 3). An array of
+// bytea cannot carry the NULL of an iPhone's row into a Go []string, so it is
+// encoded, and the front's re-check compares it with the key a Mac session
+// stands on (gate.DeviceRefusal).
 var SweepQuery = `
 	WITH live AS (
 		SELECT a.*, ` + accountDomain + ` AS domain
@@ -293,13 +299,15 @@ var SweepQuery = `
 		       array_agg(d.id::text ORDER BY d.id) AS ids,
 		       array_agg(d.email ORDER BY d.id) AS emails,
 		       array_agg(d.platform ORDER BY d.id) AS platforms,
-		       array_agg(coalesce(d.tenant_id::text, '') ORDER BY d.id) AS tenants
+		       array_agg(coalesce(d.tenant_id::text, '') ORDER BY d.id) AS tenants,
+		       array_agg(coalesce(encode(d.cert_key_sha256, 'hex'), '') ORDER BY d.id) AS cert_keys
 		FROM authd.mail_devices d
 		WHERE d.id = ANY($2::uuid[])
 		GROUP BY d.clerk_user_id
 	)
 	SELECT ` + strings.ReplaceAll(strings.Replace(accountColumns, domainRefused, `v.refused`, 1), accountDomain, `a.domain`) + `,
-	       coalesce(dv.ids, '{}'), coalesce(dv.emails, '{}'), coalesce(dv.platforms, '{}'), coalesce(dv.tenants, '{}')
+	       coalesce(dv.ids, '{}'), coalesce(dv.emails, '{}'), coalesce(dv.platforms, '{}'), coalesce(dv.tenants, '{}'),
+	       coalesce(dv.cert_keys, '{}')
 	FROM live a
 	JOIN verdicts v ON v.tenant_id IS NOT DISTINCT FROM a.tenant_id AND v.domain = a.domain
 	LEFT JOIN authd.managed_accounts m ON m.clerk_user_id = a.clerk_user_id
@@ -482,23 +490,30 @@ func accountDest(a *Account) []any {
 }
 
 // scanSwept reads SweepQuery's rows: accountColumns, then the account's devices
-// as four parallel arrays.
+// as five parallel arrays.
 func scanSwept(rows pgx.Rows) ([]Account, error) {
 	defer rows.Close()
 	var out []Account
 	for rows.Next() {
 		var a Account
-		var ids, emails, platforms, tenants []string
-		if err := rows.Scan(append(accountDest(&a), &ids, &emails, &platforms, &tenants)...); err != nil {
+		var ids, emails, platforms, tenants, keys []string
+		if err := rows.Scan(append(accountDest(&a), &ids, &emails, &platforms, &tenants, &keys)...); err != nil {
 			return nil, fmt.Errorf("projection: scan swept account: %w", err)
 		}
-		if len(emails) != len(ids) || len(platforms) != len(ids) || len(tenants) != len(ids) {
-			return nil, fmt.Errorf("projection: device arrays of %d, %d, %d and %d", len(ids), len(emails), len(platforms), len(tenants))
+		if len(emails) != len(ids) || len(platforms) != len(ids) || len(tenants) != len(ids) || len(keys) != len(ids) {
+			return nil, fmt.Errorf("projection: device arrays of %d, %d, %d, %d and %d",
+				len(ids), len(emails), len(platforms), len(tenants), len(keys))
 		}
 		for i := range ids {
-			a.Devices = append(a.Devices, Device{
-				ID: ids[i], ClerkUserID: a.ClerkUserID, Email: emails[i], TenantID: tenants[i], Platform: platforms[i],
-			})
+			d := Device{ID: ids[i], ClerkUserID: a.ClerkUserID, Email: emails[i], TenantID: tenants[i], Platform: platforms[i]}
+			if keys[i] != "" {
+				k, err := hex.DecodeString(keys[i])
+				if err != nil || len(k) != 32 {
+					return nil, fmt.Errorf("projection: device %s has a certificate key that is not 32 bytes of hex", ids[i])
+				}
+				d.CertKey = k
+			}
+			a.Devices = append(a.Devices, d)
 		}
 		out = append(out, a)
 	}

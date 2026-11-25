@@ -3,21 +3,27 @@ package ldapsrv
 import (
 	"context"
 	"log/slog"
+	"net/netip"
 
 	ldap "github.com/vjeantet/ldapserver"
 
+	"github.com/i10-tech/i10/services/authd/internal/bindtoken"
 	"github.com/i10-tech/i10/services/authd/internal/devicecode"
 	"github.com/i10-tech/i10/services/authd/internal/gate"
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 )
 
 // DeviceStore is what the device lane reads and writes (*projection.Postgres in
-// production): the device row by id, and the two clock stamps the `authd` role
-// may write (`first_used_at`, `last_used_at`, and no other column).
+// production): the device row by id, the two clock stamps the `authd` role
+// may write (`first_used_at`, `last_used_at`, and no other column of the row),
+// and a Mac's liveness rows (`authd.mail_device_cert_binds`).
 type DeviceStore interface {
 	DeviceByID(ctx context.Context, id string) (*projection.DeviceCredential, error)
 	ClaimDeviceFirstUse(ctx context.Context, id string) (bool, error)
 	TouchDevice(ctx context.Context, id string) error
+	RecordMacLive(ctx context.Context, deviceID string, at netip.Prefix, key []byte) error
+	MacLive(ctx context.Context, deviceID string, at netip.Prefix, key []byte) (bool, error)
+	MacLiveFamilies(ctx context.Context, deviceID string, key []byte) ([]int32, error)
 }
 
 // Reasons the device lane refuses a bind, beside gate's. Stable log reason codes.
@@ -26,40 +32,66 @@ const (
 	reasonDeviceBadCode = "device_code_bad"
 	reasonDeviceExpired = "device_code_expired_unused"
 	reasonDeviceIdle    = "device_code_idle"
+
+	// The Mac rules (#383 PR 3, docs/research/mail-device-binding.md section 11).
+	// reasonCertMismatch: the token's certificate key is not the row's, or the
+	// row is not a Mac.
+	reasonCertMismatch = "device_cert_mismatch"
+	// reasonCertRequired: a Mac's code on IMAP with no certificate behind it. A
+	// code alone never reads a Mac's mail.
+	reasonCertRequired = "device_cert_required"
+	// reasonCertSerial: the certificate's subject CN is not the serial Apple
+	// attested for the row (revision 5): a key written into a row by someone
+	// with the API's database role still needs a certificate for that Mac.
+	reasonCertSerial = "device_cert_serial_mismatch"
+	// reasonCertSessionMissing: a Mac's code on SMTP with no certificate-verified
+	// IMAP session of that Mac, under its current key, recently enough (and from
+	// the same address while AUTHD_MAC_SMTP_SAME_ADDRESS is on). Unavailable, not
+	// invalid credentials: Mail should keep the message and retry.
+	reasonCertSessionMissing = "device_cert_session_missing"
 )
 
-// deviceBind answers a person bind whose password starts with the reserved
-// device code prefix (#383). The bind token, the account row and gate.Refusal
-// have all passed before it is called; deviceID is the device the token's MAC
-// covered (bindtoken.Unwrap), "" when the password is not a well-formed code.
+// deviceBind answers a person bind whose token is in device_code or external
+// mode (#383). The bind token, the account row and gate.Refusal have all passed
+// before it is called; claims are what the token's MAC covered
+// (bindtoken.Unwrap), the device among them: for a code, the one the password
+// names ("" when it is not a well-formed code); for external, the row the front
+// found by the certificate's key.
 //
 // ⚠ IT NEVER REACHES A VERIFIER, THE CREDENTIAL CACHE, A FLIGHT, THE
 // IDENTICAL-FAILURE MEMORY OR THE FAILURE BUDGET. A device code is i10's own
-// secret: no identity provider knows it, so none is asked, and nothing it does
-// can lock out the person's real account. A malformed one is refused here, so a
-// truncated code never reaches Clerk or a company's directory either.
+// secret and a Mac's certificate is proved to the front: no identity provider
+// knows either, so none is asked, and nothing here can lock out the person's
+// real account. A malformed code is refused here, so a truncated code never
+// reaches Clerk or a company's directory either.
 //
 // ⚠ THE ORDER IS A SECURITY PROPERTY:
 //
-//	per-DN throttle -> parse -> key ring -> row by id -> gate.DeviceRefusal ->
-//	key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
+//	device_code: per-DN throttle -> parse -> key ring -> row by id ->
+//	  gate.DeviceRefusal (with the certificate key the token carries) -> serial ->
+//	  key id -> constant-time hash compare -> SMTP liveness (a Mac) ->
+//	  first-use claim -> idle limit -> touch -> IMAP liveness write (a Mac)
+//	external:    per-DN throttle -> row by id -> gate.DeviceRefusal (with the
+//	  token's key) -> serial -> first-use claim -> idle limit -> touch ->
+//	  IMAP liveness write
 //
-// Nothing is written before the hash matched, so a wrong code changes no row;
-// the first-use claim is what starts a code's life, and only a code that opened
-// may start it.
+// Nothing is written before every check passed, so a refused bind changes no
+// row; the first-use claim is what starts a code's life, and only a bind that
+// opened may start it.
 //
 // ⚠ OUR FAULTS ARE UNAVAILABLE, NEVER INVALID CREDENTIALS. No ring, a key id the
 // ring does not hold, or a database error says nothing about the code, and an
 // iPhone told "wrong password" asks its owner for a code they have never seen.
 func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn string, account *projection.Account,
-	password, deviceID string) {
-	uid := account.ClerkUserID
-	refuse := func(reason string) {
-		s.log.Info("bind rejected", "reason", reason, "uid", uid, "device", deviceID)
+	claims bindtoken.Claims) {
+	uid, deviceID := account.ClerkUserID, claims.DeviceID
+	attrs := []any{"uid", uid, "device", deviceID, "mode", claims.Mode.String(), "proto", claims.Protocol.String()}
+	refuse := func(reason string, extra ...any) {
+		s.log.Info("bind rejected", append(append([]any{"reason", reason}, attrs...), extra...)...)
 		w.Write(ldap.NewBindResponse(ldap.LDAPResultInvalidCredentials))
 	}
-	unavailable := func(msg string, attrs ...any) {
-		s.log.Error(msg, append([]any{"uid", uid, "device", deviceID}, attrs...)...)
+	unavailable := func(msg string, extra ...any) {
+		s.log.Error(msg, append(append([]any{}, attrs...), extra...)...)
 		s.respondUnavailable(w, "authentication backend temporarily unavailable")
 	}
 
@@ -70,15 +102,20 @@ func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn strin
 		w.Write(res)
 		return
 	}
-	code, err := devicecode.Parse(password)
-	if err != nil || deviceID == "" {
-		refuse(devicecode.ErrMalformed.Error())
-		return
-	}
-	if len(s.deviceKeys) == 0 {
-		unavailable("bind: no device code keys (MAIL_DEVICE_CODE_KEYS): device sign-ins are unavailable",
-			"reason", "device_code_no_keys")
-		return
+	external := claims.Mode == bindtoken.ModeExternal
+	var code devicecode.Code
+	if !external {
+		var err error
+		code, err = devicecode.Parse(claims.Password)
+		if err != nil || deviceID == "" {
+			refuse(devicecode.ErrMalformed.Error())
+			return
+		}
+		if len(s.deviceKeys) == 0 {
+			unavailable("bind: no device code keys (MAIL_DEVICE_CODE_KEYS): device sign-ins are unavailable",
+				"reason", "device_code_no_keys")
+			return
+		}
 	}
 	if s.devices == nil {
 		unavailable("bind: no device store: device sign-ins are unavailable", "reason", "device_store_missing")
@@ -94,25 +131,57 @@ func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn strin
 		refuse(reasonDeviceUnknown)
 		return
 	}
-	if reason := gate.DeviceRefusal(&dev.Device, account); reason != "" {
+	mac := dev.Platform == gate.Macos
+
+	// ⚠ THE KEY A BIND STANDS ON (gate.DeviceRefusal's held): on IMAP, the
+	// certificate key the front proved, carried in the token; on SMTP, which
+	// never carries one, the row's own key for a Mac, which the liveness rule
+	// below then requires a recent certificate session under.
+	held := claims.CertKey
+	if claims.Protocol == bindtoken.SMTP && mac {
+		held = dev.CertKey
+	}
+	if reason := gate.DeviceRefusal(&dev.Device, account, held); reason != "" {
+		if reason == gate.DeviceKeyChanged {
+			reason = reasonCertMismatch
+			if claims.CertKey == nil {
+				// Only an IMAP code on a Mac gets here with no key: a code alone.
+				reason = reasonCertRequired
+			}
+		}
 		refuse(reason)
 		return
 	}
-	var key []byte
-	if dev.CodeKID >= 0 && dev.CodeKID <= 255 {
-		key = s.deviceKeys[byte(dev.CodeKID)]
-	}
-	if key == nil {
-		unavailable("bind: a device code is hashed under a key this authd does not hold",
-			"reason", "device_code_unknown_key", "kid", dev.CodeKID)
+	// ⚠ THE SERIAL, WHENEVER A CERTIFICATE IS BEHIND THE BIND AND THE ROW HAS ONE.
+	if claims.CertKey != nil && dev.Serial != "" && claims.CertCN != dev.Serial {
+		refuse(reasonCertSerial)
 		return
 	}
-	// The hash covers the id the code names, so it opens only for the row the
-	// token named: deviceID and code.ID() are the same string, read by the same
-	// parser, and a row whose id differed would not match its own hash.
-	if !devicecode.Matches(key, code, dev.CodeHash) {
-		refuse(reasonDeviceBadCode)
-		return
+
+	if !external {
+		var key []byte
+		if dev.CodeKID >= 0 && dev.CodeKID <= 255 {
+			key = s.deviceKeys[byte(dev.CodeKID)]
+		}
+		if key == nil {
+			unavailable("bind: a device code is hashed under a key this authd does not hold",
+				"reason", "device_code_unknown_key", "kid", dev.CodeKID)
+			return
+		}
+		// The hash covers the id the code names, so it opens only for the row the
+		// token named: deviceID and code.ID() are the same string, read by the same
+		// parser, and a row whose id differed would not match its own hash.
+		if !devicecode.Matches(key, code, dev.CodeHash) {
+			refuse(reasonDeviceBadCode)
+			return
+		}
+	}
+
+	if mac && claims.Protocol == bindtoken.SMTP {
+		if !s.macSMTPLive(ctx, dev, claims, attrs) {
+			s.respondUnavailable(w, "authentication backend temporarily unavailable")
+			return
+		}
 	}
 
 	if !dev.Used {
@@ -140,6 +209,61 @@ func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn strin
 			}
 		}
 	}
-	s.log.Info("bind succeeded", "uid", uid, "mail", account.Email, "source", "device", "device", deviceID)
+
+	// ⚠ A MAC'S CERTIFICATE SESSION IS WHAT LETS IT SEND, so a successful IMAP
+	// bind with a key records it. Best effort: the bind is already right, and a
+	// failed write costs only the next SMTP bind, which the next IMAP bind (Mail
+	// reconnects within the hour) repairs.
+	if mac && claims.Protocol == bindtoken.IMAP {
+		if err := s.devices.RecordMacLive(ctx, deviceID, projection.MacLivePrefix(claims.Addr), dev.CertKey); err != nil {
+			s.log.Warn("bind: could not record a Mac's certificate session", append(attrs, slog.Any("err", err))...)
+		}
+	}
+	source := "device"
+	if external {
+		source = "cert"
+	}
+	s.log.Info("bind succeeded", "uid", uid, "mail", account.Email, "source", source, "device", deviceID,
+		"proto", claims.Protocol.String(), "family", family(claims.Addr))
 	w.Write(ldap.NewBindResponse(ldap.LDAPResultSuccess))
+}
+
+// macSMTPLive is the SMTP rule for a Mac's code: a certificate-verified IMAP
+// bind of this device under its current key, within projection.MacLiveWindow,
+// from the same /32 or /64 unless the same-address part is switched off
+// (AUTHD_MAC_SMTP_SAME_ADDRESS=false). It answers false when the bind must be
+// refused unavailable, having logged why.
+func (s *Server) macSMTPLive(ctx context.Context, dev *projection.DeviceCredential, claims bindtoken.Claims, attrs []any) bool {
+	var at netip.Prefix
+	if !s.macSMTPAnyAddress {
+		at = projection.MacLivePrefix(claims.Addr)
+	}
+	live, err := s.devices.MacLive(ctx, dev.ID, at, dev.CertKey)
+	if err != nil {
+		s.log.Error("bind: could not read a Mac's certificate sessions", append(attrs, slog.Any("err", err))...)
+		return false
+	}
+	if live {
+		return true
+	}
+	// ⚠ LOGGED WITH THE FAMILIES SEEN, so the real-device probe can tell a
+	// dual-stack split (IMAP over IPv6, SMTP over IPv4) from a Mac that is offline.
+	fams, err := s.devices.MacLiveFamilies(ctx, dev.ID, dev.CertKey)
+	extra := []any{"reason", reasonCertSessionMissing, "family", family(claims.Addr), "liveFamilies", fams,
+		"sameAddress", !s.macSMTPAnyAddress}
+	if err != nil {
+		extra = append(extra, slog.Any("familiesErr", err))
+	}
+	s.log.Info("bind refused unavailable", append(attrs, extra...)...)
+	return false
+}
+
+func family(a netip.Addr) int {
+	switch {
+	case a.Is4():
+		return 4
+	case a.Is6():
+		return 6
+	}
+	return 0
 }

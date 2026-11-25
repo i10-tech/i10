@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"math/big"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,6 +45,10 @@ type fakeAccounts struct {
 	polls       int
 	// devices are the `authd.mail_devices` rows, by id.
 	devices map[string]projection.Device
+	// macLive maps device id -> prefix -> key_sha256.
+	macLive    map[string]map[netip.Prefix][]byte
+	failDevice bool
+	failLive   bool
 }
 
 func newFakeAccounts(accts ...projection.Account) *fakeAccounts {
@@ -119,6 +124,75 @@ func (f *fakeAccounts) deleteDevice(id string) {
 	f.mu.Unlock()
 }
 
+func (f *fakeAccounts) DeviceGate(_ context.Context, id string) (*projection.Device, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failAll || f.failDevice {
+		return nil, errors.New("projection unreachable")
+	}
+	d, ok := f.devices[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := d
+	cp.CertKey = bytes.Clone(d.CertKey)
+	return &cp, nil
+}
+
+func (f *fakeAccounts) DeviceByCertKey(_ context.Context, key []byte) (*projection.Device, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failAll || f.failDevice {
+		return nil, errors.New("projection unreachable")
+	}
+	if len(key) != 32 {
+		return nil, nil
+	}
+	for _, d := range f.devices {
+		if len(d.CertKey) == 32 && bytes.Equal(d.CertKey, key) {
+			cp := d
+			cp.CertKey = bytes.Clone(d.CertKey)
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeAccounts) setMacLive(deviceID string, at netip.Prefix, key []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.macLive == nil {
+		f.macLive = map[string]map[netip.Prefix][]byte{}
+	}
+	if f.macLive[deviceID] == nil {
+		f.macLive[deviceID] = map[netip.Prefix][]byte{}
+	}
+	f.macLive[deviceID][at] = bytes.Clone(key)
+}
+
+func (f *fakeAccounts) clearMacLive(deviceID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.macLive, deviceID)
+}
+
+func (f *fakeAccounts) MacLive(_ context.Context, deviceID string, at netip.Prefix, key []byte) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failAll || f.failLive {
+		return false, errors.New("projection unreachable")
+	}
+	if len(key) == 0 {
+		return false, nil
+	}
+	for p, k := range f.macLive[deviceID] {
+		if (!at.IsValid() || p == at) && bytes.Equal(k, key) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeAccounts) AccessChanges(_ context.Context, since string, limit int) (projection.ChangeBatch, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -161,9 +235,15 @@ func (f *fakeAccounts) silently(email string, fn func(*projection.Account)) {
 }
 
 // logChange appends a change to the log, as a trigger on another table would.
-func (f *fakeAccounts) logChange(kind projection.ChangeKind, key string) {
+func (f *fakeAccounts) logChange(kind projection.ChangeKind, key string) { f.logBurst(kind, key, 1) }
+
+// logBurst appends n copies of a change as one commit would, under one lock, so
+// no poll can read the log between them.
+func (f *fakeAccounts) logBurst(kind projection.ChangeKind, key string, n int) {
 	f.mu.Lock()
-	f.changes = append(f.changes, projection.Change{Kind: kind, Key: key})
+	for range n {
+		f.changes = append(f.changes, projection.Change{Kind: kind, Key: key})
+	}
 	f.mu.Unlock()
 }
 
@@ -215,9 +295,11 @@ type fakeStalwart struct {
 	conns     []net.Conn
 	tokensFor []string // the account of every valid token, in order
 	raw       int      // sign-ins whose password carried no valid token
-	// devicesFor is the device every valid token covered, for a device code.
+	// devicesFor is the device every valid token covered, for a device code or external.
 	devicesFor []string
-	// refuseDevices makes authd's device lane refuse every code.
+	// claimsSeen records every valid bind token's unwrapped claims.
+	claimsSeen []bindtoken.Claims
+	// refuseDevices makes authd's device lane refuse every code/external.
 	refuseDevices bool
 }
 
@@ -312,7 +394,7 @@ func (f *fakeStalwart) check(login, pass string) (string, bool) {
 	f.mu.Lock()
 	uid := f.uidOf[strings.ToLower(strings.TrimSpace(login))]
 	f.mu.Unlock()
-	pw, device, err := bindtoken.Unwrap(bindtoken.Keys{testBindKey.ID: testBindKey.Secret}, uid, pass, time.Now())
+	c, err := bindtoken.Unwrap(bindtoken.Keys{testBindKey.ID: testBindKey.Secret}, uid, pass, time.Now())
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err != nil {
@@ -320,14 +402,28 @@ func (f *fakeStalwart) check(login, pass string) (string, bool) {
 		return pass, false
 	}
 	f.tokensFor = append(f.tokensFor, uid)
-	if device != "" {
+	f.claimsSeen = append(f.claimsSeen, c)
+	if c.Mode == bindtoken.ModeExternal {
+		f.devicesFor = append(f.devicesFor, c.DeviceID)
+		return "", !f.refuseDevices
+	}
+	if c.Mode == bindtoken.ModeDeviceCode {
+		if c.DeviceID == "" {
+			return c.Password, false
+		}
 		// authd's device lane, which is tested on its own (internal/ldapsrv):
 		// here any well-formed code signs in, and the device the token covered
 		// is recorded.
-		f.devicesFor = append(f.devicesFor, device)
-		return pw, !f.refuseDevices
+		f.devicesFor = append(f.devicesFor, c.DeviceID)
+		return c.Password, !f.refuseDevices
 	}
-	return pw, pw == rightPassword
+	return c.Password, c.Password == rightPassword
+}
+
+func (f *fakeStalwart) claims() []bindtoken.Claims {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bindtoken.Claims(nil), f.claimsSeen...)
 }
 
 // checkPlain is check for a PLAIN response: the response with the token taken
@@ -620,7 +716,12 @@ type client struct {
 
 func (h *harness) dial() *client {
 	h.t.Helper()
-	c, err := tls.Dial("tcp", h.addr, &tls.Config{RootCAs: h.roots, ServerName: "mail.i10.test"})
+	return h.dialTLS(&tls.Config{RootCAs: h.roots, ServerName: "mail.i10.test"})
+}
+
+func (h *harness) dialTLS(cfg *tls.Config) *client {
+	h.t.Helper()
+	c, err := tls.Dial("tcp", h.addr, cfg)
 	if err != nil {
 		h.t.Fatal(err)
 	}

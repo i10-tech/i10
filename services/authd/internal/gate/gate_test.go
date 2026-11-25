@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/i10-tech/i10/services/authd/internal/projection"
@@ -56,27 +57,41 @@ func TestDeviceRefusal(t *testing.T) {
 	acct := &projection.Account{ClerkUserID: "user_a", Email: "a@x.test", TenantID: "t1"}
 	ok := projection.Device{ID: "d", ClerkUserID: "user_a", Email: "a@x.test", TenantID: "t1", Platform: "ios"}
 	with := func(f func(*projection.Device)) *projection.Device { d := ok; f(&d); return &d }
+	key, other := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+	mac := with(func(d *projection.Device) { d.Platform, d.CertKey = "macos", key })
 	cases := []struct {
 		name string
 		dev  *projection.Device
 		acct *projection.Account
+		held []byte
 		want string
 	}{
-		{"an iPhone of this account", &ok, acct, ""},
-		{"an iPad", with(func(d *projection.Device) { d.Platform = "ipados" }), acct, ""},
-		{"no row", nil, acct, DeviceRevoked},
-		{"another person's device", with(func(d *projection.Device) { d.ClerkUserID = "user_b" }), acct, DeviceMismatch},
-		{"minted for another address", with(func(d *projection.Device) { d.Email = "old@x.test" }), acct, DeviceMismatch},
-		{"minted in another workspace", with(func(d *projection.Device) { d.TenantID = "t2" }), acct, DeviceMismatch},
+		{"an iPhone of this account", &ok, acct, nil, ""},
+		{"an iPad", with(func(d *projection.Device) { d.Platform = "ipados" }), acct, nil, ""},
+		{"no row", nil, acct, nil, DeviceRevoked},
+		{"another person's device", with(func(d *projection.Device) { d.ClerkUserID = "user_b" }), acct, nil, DeviceMismatch},
+		{"minted for another address", with(func(d *projection.Device) { d.Email = "old@x.test" }), acct, nil, DeviceMismatch},
+		{"minted in another workspace", with(func(d *projection.Device) { d.TenantID = "t2" }), acct, nil, DeviceMismatch},
 		{"minted in a workspace, mailbox has none now", with(func(d *projection.Device) { d.TenantID = "t1" }),
-			&projection.Account{ClerkUserID: "user_a", Email: "a@x.test"}, DeviceMismatch},
+			&projection.Account{ClerkUserID: "user_a", Email: "a@x.test"}, nil, DeviceMismatch},
 		{"no workspace on either side (i10's own)", with(func(d *projection.Device) { d.TenantID = "" }),
-			&projection.Account{ClerkUserID: "user_a", Email: "a@x.test"}, ""},
-		{"a Mac", with(func(d *projection.Device) { d.Platform = "macos" }), acct, DevicePlatformRefused},
-		{"a platform this build does not know", with(func(d *projection.Device) { d.Platform = "android" }), acct, DevicePlatformRefused},
+			&projection.Account{ClerkUserID: "user_a", Email: "a@x.test"}, nil, ""},
+		{"a platform this build does not know", with(func(d *projection.Device) { d.Platform = "android" }), acct, nil, DevicePlatformRefused},
+		// A Mac stands on its key.
+		{"a Mac, on its own key", mac, acct, key, ""},
+		{"a Mac with no key bound", with(func(d *projection.Device) { d.Platform = "macos" }), acct, key, DeviceCertMissing},
+		{"a Mac with no key bound, nothing held", with(func(d *projection.Device) { d.Platform = "macos" }), acct, nil, DeviceCertMissing},
+		{"a Mac whose key an empty slice", with(func(d *projection.Device) { d.Platform, d.CertKey = "macos", []byte{} }), acct, []byte{}, DeviceCertMissing},
+		{"a Mac rebound to another key", mac, acct, other, DeviceKeyChanged},
+		{"a Mac, standing on no key", mac, acct, nil, DeviceKeyChanged},
+		{"a Mac, standing on a key prefix", mac, acct, key[:31], DeviceKeyChanged},
+		{"a key held on an iPhone row", &ok, acct, key, DeviceKeyChanged},
+		{"a key held on an iPhone row that has one", with(func(d *projection.Device) { d.CertKey = key }), acct, key, DeviceKeyChanged},
+		// The person, address and workspace come first, for a Mac too.
+		{"another person's Mac", with(func(d *projection.Device) { d.Platform, d.CertKey, d.ClerkUserID = "macos", key, "user_b" }), acct, key, DeviceMismatch},
 	}
 	for _, c := range cases {
-		if got := DeviceRefusal(c.dev, c.acct); got != c.want {
+		if got := DeviceRefusal(c.dev, c.acct, c.held); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}

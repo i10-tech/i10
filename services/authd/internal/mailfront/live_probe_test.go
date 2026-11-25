@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -118,12 +119,13 @@ func TestLiveProbe(t *testing.T) {
 	// Without the front, straight to Stalwart's loopback listener with a PROXY
 	// header: a raw password is refused by authd, and only the front's token
 	// for the right account signs in.
+	probeAt := bindtoken.Attest{Protocol: bindtoken.IMAP, Addr: netip.MustParseAddr("203.0.113.7")}
 	t.Run("straight to Stalwart: raw, another account's token, the right token", func(t *testing.T) {
 		raw := liveStalwart(t, "127.0.0.1:993", true)
 		raw.cmd("a1 LOGIN alice@i10.test \"right horse\"", "a1 NO")
-		bobs, _ := bindtoken.Wrap(key, "user_bob", "right horse", time.Now())
+		bobs, _ := bindtoken.Wrap(key, "user_bob", "right horse", probeAt, time.Now())
 		raw.cmd(fmt.Sprintf("a2 LOGIN alice@i10.test {%d+}\r\n%s", len(bobs), bobs), "a2 NO")
-		alices, _ := bindtoken.Wrap(key, "user_alice", "right horse", time.Now())
+		alices, _ := bindtoken.Wrap(key, "user_alice", "right horse", probeAt, time.Now())
 		raw.cmd(fmt.Sprintf("a3 LOGIN alice@i10.test {%d+}\r\n%s", len(alices), alices), "a3 OK")
 	})
 
@@ -147,10 +149,10 @@ func TestLiveProbe(t *testing.T) {
 	t.Run("Stalwart's own mechanisms, without the SSL TLV", func(t *testing.T) {
 		c := liveStalwart(t, "127.0.0.1:993", false)
 		c.cmd("a1 CAPABILITY", "a1 OK")
-		alices, _ := bindtoken.Wrap(key, "user_alice", "right horse", time.Now())
+		alices, _ := bindtoken.Wrap(key, "user_alice", "right horse", probeAt, time.Now())
 		c.cmd(fmt.Sprintf("a2 LOGIN alice@i10.test {%d+}\r\n%s", len(alices), alices), "a2 ")
 		c2 := liveStalwart(t, "127.0.0.1:993", false)
-		plainTok, _ := bindtoken.Wrap(key, "user_alice", "right horse", time.Now())
+		plainTok, _ := bindtoken.Wrap(key, "user_alice", "right horse", probeAt, time.Now())
 		c2.cmd("b1 AUTHENTICATE PLAIN "+plain("", "alice@i10.test", plainTok), "b1 ")
 		c3 := liveStalwart(t, "127.0.0.1:993", false)
 		c3.cmd("x1 AUTHENTICATE XOAUTH2 "+b64("user=alice@i10.test\x01auth=Bearer x\x01\x01"), "x1 ")

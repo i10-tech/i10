@@ -74,6 +74,13 @@ type Options struct {
 	// other bind works as before.
 	Devices        DeviceStore
 	DeviceCodeKeys devicecode.Keys
+
+	// MacSMTPAnyAddress drops the address part of the Mac SMTP rule: a Mac's
+	// code sends while a certificate session of it lives from ANY address, not
+	// only its own /32 or /64. AUTHD_MAC_SMTP_SAME_ADDRESS=false sets it (the
+	// zero value is the strict rule), in lockstep with the front's
+	// MAILFRONT_MAC_SMTP_SAME_ADDRESS.
+	MacSMTPAnyAddress bool
 }
 
 type Server struct {
@@ -92,6 +99,7 @@ type Server struct {
 	tokenKeys         bindtoken.Keys
 	devices           DeviceStore
 	deviceKeys        devicecode.Keys
+	macSMTPAnyAddress bool
 	now               func() time.Time
 }
 
@@ -120,6 +128,7 @@ func New(opts Options) *Server {
 		tokenKeys:         opts.BindTokenKeys,
 		devices:           opts.Devices,
 		deviceKeys:        opts.DeviceCodeKeys,
+		macSMTPAnyAddress: opts.MacSMTPAnyAddress,
 		now:               time.Now,
 	}
 }

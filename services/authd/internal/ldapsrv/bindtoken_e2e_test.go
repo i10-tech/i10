@@ -30,11 +30,11 @@ func TestAPersonBindNeedsAValidTokenForItsOwnAccount(t *testing.T) {
 		t.Fatalf("a bind through the front was refused: %v", err)
 	}
 
-	bobsToken, _ := bindtoken.Wrap(testTokenKey, "user_bob", alicePass, time.Now())
-	stale, _ := bindtoken.Wrap(testTokenKey, "user_alice", alicePass, time.Now().Add(-2*bindtoken.TTL))
+	bobsToken, _ := bindtoken.Wrap(testTokenKey, "user_bob", alicePass, imapAt, time.Now())
+	stale, _ := bindtoken.Wrap(testTokenKey, "user_alice", alicePass, imapAt, time.Now().Add(-2*bindtoken.TTL))
 	otherKey := bindtoken.Key{ID: 9, Secret: []byte(strings.Repeat("k", 32))}
-	foreign, _ := bindtoken.Wrap(otherKey, "user_alice", alicePass, time.Now())
-	alicesToken, _ := bindtoken.Wrap(testTokenKey, "user_alice", alicePass, time.Now())
+	foreign, _ := bindtoken.Wrap(otherKey, "user_alice", alicePass, imapAt, time.Now())
+	alicesToken, _ := bindtoken.Wrap(testTokenKey, "user_alice", alicePass, imapAt, time.Now())
 	for name, password := range map[string]string{
 		"the right password, raw":        alicePass,
 		"a token for another account":    bobsToken,
@@ -144,7 +144,7 @@ func TestBothKeysAreAcceptedDuringARotation(t *testing.T) {
 	if err := dial(t, addr).Bind(aliceDN, alicePass); err != nil {
 		t.Fatalf("the old key: %v", err)
 	}
-	wrapped, _ := bindtoken.Wrap(next, "user_alice", alicePass, time.Now())
+	wrapped, _ := bindtoken.Wrap(next, "user_alice", alicePass, imapAt, time.Now())
 	if err := dial(t, addr).RawBind(aliceDN, wrapped); err != nil {
 		t.Fatalf("the new key: %v", err)
 	}

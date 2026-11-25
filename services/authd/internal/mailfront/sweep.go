@@ -3,20 +3,26 @@ package mailfront
 import (
 	"context"
 	"log/slog"
+	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/projection"
 )
 
-// Accounts is the projection as the front reads it: by login at sign-in, the
-// access-change log and by id for the re-checks. *projection.Postgres is the
-// production one.
+// Accounts is the projection as the front reads it: by login at sign-in, device
+// and Mac liveness lookups, the access-change log and by id for the re-checks.
+// *projection.Postgres is the production one.
 type Accounts interface {
 	AccountByLogin(ctx context.Context, login string) (*projection.Account, error)
 	AccountsByUIDs(ctx context.Context, clerkUserIDs, deviceIDs []string) ([]projection.Account, time.Duration, error)
 	AccessChanges(ctx context.Context, since string, limit int) (projection.ChangeBatch, error)
+	DeviceGate(ctx context.Context, id string) (*projection.Device, error)
+	DeviceByCertKey(ctx context.Context, key []byte) (*projection.Device, error)
+	MacLive(ctx context.Context, deviceID string, at netip.Prefix, key []byte) (bool, error)
 }
+
+var _ Accounts = (*projection.Postgres)(nil)
 
 // live is one authenticated connection the sweeper watches.
 type live struct {

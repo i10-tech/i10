@@ -1,9 +1,14 @@
 package projection
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"fmt"
+	"net/netip"
 	"os"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -392,5 +397,109 @@ func TestTheDeviceTableConstraints(t *testing.T) {
 	}
 	if n := count(`SELECT count(*) FROM authd.mail_device_cert_permits WHERE clerk_user_id = $1`, devicePrefix+"erin"); n != 0 {
 		t.Fatalf("the account's delete left %d permits", n)
+	}
+}
+
+func TestMacLiveRowsConstantMatchesSQL(t *testing.T) {
+	if macLiveRowsSQL != strconv.Itoa(MacLiveRowsPerDevice) {
+		t.Fatalf("macLiveRowsSQL = %q, MacLiveRowsPerDevice = %d", macLiveRowsSQL, MacLiveRowsPerDevice)
+	}
+}
+
+func TestMacLivePrefix(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"203.0.113.7", "203.0.113.7/32"},
+		{"::ffff:203.0.113.7", "203.0.113.7/32"},
+		{"2001:db8:1:2:abcd:ef01:2345:6789", "2001:db8:1:2::/64"},
+		{"fe80::1%eth0", "fe80::/64"},
+	}
+	for _, tc := range cases {
+		got := MacLivePrefix(netip.MustParseAddr(tc.in))
+		if got.String() != tc.want {
+			t.Errorf("MacLivePrefix(%s) = %s, want %s", tc.in, got, tc.want)
+		}
+	}
+}
+
+// DeviceByCertKey, DeviceGate, SweepQuery's cert_key_sha256, and the Mac
+// liveness rows (RecordMacLive, MacLive, MacLiveFamilies) against Postgres as
+// the real roles.
+func TestMacDeviceQueriesAndLiveness(t *testing.T) {
+	dw := newDeviceWorld(t)
+	dw.account("mac", "mac@dev.test", tenantA)
+	id := dw.device("mac", "mac@dev.test", tenantA, "macos")
+	key1, _ := hex.DecodeString(key32[2:])
+	key2, _ := hex.DecodeString(key32b[2:])
+	dw.exec(`UPDATE authd.mail_devices SET cert_key_sha256 = $2::bytea WHERE id = $1::uuid`, id, key32)
+
+	front := dw.store("AUTHD_TEST_MAILFRONT_DATABASE_URL")
+	authd := dw.store("AUTHD_TEST_DATABASE_URL")
+
+	// DeviceByCertKey and DeviceGate as mailfront.
+	if d, err := front.DeviceByCertKey(dw.ctx, key1); err != nil || d == nil || d.ID != id || !bytes.Equal(d.CertKey, key1) {
+		t.Fatalf("DeviceByCertKey(key1) = %+v, %v", d, err)
+	}
+	if d, err := front.DeviceByCertKey(dw.ctx, key2); err != nil || d != nil {
+		t.Fatalf("DeviceByCertKey(unbound) = %+v, %v", d, err)
+	}
+	if d, err := front.DeviceByCertKey(dw.ctx, []byte{1, 2}); err != nil || d != nil {
+		t.Fatalf("DeviceByCertKey(short) = %+v, %v", d, err)
+	}
+	if d, err := front.DeviceGate(dw.ctx, id); err != nil || d == nil || !bytes.Equal(d.CertKey, key1) {
+		t.Fatalf("DeviceGate(id) = %+v, %v", d, err)
+	}
+	if d, err := front.DeviceGate(dw.ctx, "not-a-uuid"); err != nil || d != nil {
+		t.Fatalf("DeviceGate(not-a-uuid) = %+v, %v; want nil, nil", d, err)
+	}
+
+	// SweepQuery returns the bound key on the account's device slice.
+	rows, _, err := front.AccountsByUIDs(dw.ctx, []string{devicePrefix + "mac"}, []string{id})
+	if err != nil || len(rows) != 1 || len(rows[0].Devices) != 1 || !bytes.Equal(rows[0].Devices[0].CertKey, key1) {
+		t.Fatalf("AccountsByUIDs = %+v, %v", rows, err)
+	}
+
+	// RecordMacLive writes as authd; MacLive reads as mailfront and authd.
+	p4 := MacLivePrefix(netip.MustParseAddr("198.51.100.5"))
+	p6 := MacLivePrefix(netip.MustParseAddr("2001:db8:abcd:1::42"))
+	if err := authd.RecordMacLive(dw.ctx, id, p4, key1); err != nil {
+		t.Fatal(err)
+	}
+	if live, err := front.MacLive(dw.ctx, id, p4, key1); err != nil || !live {
+		t.Fatalf("MacLive(p4, key1) = %v, %v", live, err)
+	}
+	if live, err := front.MacLive(dw.ctx, id, p4, key2); err != nil || live {
+		t.Fatalf("MacLive(p4, key2) = %v, %v", live, err)
+	}
+	if live, err := front.MacLive(dw.ctx, id, p6, key1); err != nil || live {
+		t.Fatalf("MacLive(p6, key1) = %v, %v", live, err)
+	}
+	// Any-address mode (zero Prefix).
+	if live, err := front.MacLive(dw.ctx, id, netip.Prefix{}, key1); err != nil || !live {
+		t.Fatalf("MacLive(any, key1) = %v, %v", live, err)
+	}
+	if err := authd.RecordMacLive(dw.ctx, id, p6, key1); err != nil {
+		t.Fatal(err)
+	}
+	fams, err := authd.MacLiveFamilies(dw.ctx, id, key1)
+	slices.Sort(fams)
+	if err != nil || !slices.Equal(fams, []int32{4, 6}) {
+		t.Fatalf("MacLiveFamilies = %v, %v; want [4 6]", fams, err)
+	}
+
+	// Cap at 8 rows, keeping the newest.
+	for i := 1; i <= 10; i++ {
+		p := MacLivePrefix(netip.MustParseAddr(fmt.Sprintf("198.51.100.%d", 20+i)))
+		if err := authd.RecordMacLive(dw.ctx, id, p, key1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	if err := dw.admin.QueryRow(dw.ctx, `SELECT count(*) FROM authd.mail_device_cert_binds WHERE device_id = $1::uuid`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != MacLiveRowsPerDevice {
+		t.Fatalf("capped count = %d, want %d", n, MacLiveRowsPerDevice)
 	}
 }
