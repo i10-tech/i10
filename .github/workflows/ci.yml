@@ -180,7 +180,13 @@ jobs:
           AUTHD_TEST_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/i10
         # mailfront too: its access-change poll and every gate input's path
         # (paths_db_test.go) are only proven against Postgres.
-        run: go test -race -count=1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/ ./internal/mailfront/
+        # ⚠ -p 1: ONE PACKAGE AT A TIME. All four share this one database and
+        # were not written to run beside each other: mailfront's gate-path test
+        # writes the shared access-change log (and truncates gate tables) while
+        # projection's reads it with exact limits (#534), and locking around
+        # that from a test only moved the problem into deadlocks (#533). Tests
+        # inside each package still run in parallel.
+        run: go test -race -count=1 -p 1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/ ./internal/mailfront/
       # ⚠ AND SO DO THE API's. Every apps/api/test/*-db.test.ts skips itself
       # when its variable is unset, so in the `test` matrix job they all skip,
       # and eleven of them sat broken on main unnoticed (#514). The script sets
