@@ -606,7 +606,8 @@ key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
 ```
 
 - **`gate.DeviceRefusal`**, one function for the bind and the front: the row
-  must exist (`device_revoked`), belong to the person the DN names, carry the
+  must exist (`device_revoked` in the front; the bind finds no row first and
+  logs `device_unknown`), belong to the person the DN names, carry the
   account's address now and its workspace (null-safely: i10's own mailboxes
   have none) (`device_mismatch`), and be an iPhone or iPad
   (`device_platform_refused`: a Mac's code alone is refused until PR 3 checks

@@ -18,8 +18,9 @@ import { endFor, mintRefusal, type MintGateAccount } from "../src/mail-devices/s
 import { parseMailDeviceArgs, requireOperatorEnv } from "../scripts/mail-device.js"
 
 /**
- * Mail device code format, keyed HMAC, key-ring parsing, Drizzle SQL pinning,
- * and operator CLI argument checks (#383).
+ * Mail device code format, keyed HMAC, key-ring parsing, mint's gate decisions
+ * (`mintRefusal`), `endFor`'s null-tenant guard, and operator CLI argument
+ * checks (#383).
  *
  * Every format and hash vector is loaded directly from Go's canonical fixture
  * `services/authd/internal/devicecode/testdata/vectors.json` so TypeScript and

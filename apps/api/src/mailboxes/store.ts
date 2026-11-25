@@ -273,8 +273,10 @@ export const inWorkspace = (tenantId: string) =>
  * not quietly give back a login. A payment hold is the exception because payment
  * is its whole reason, and it is a column of its own.
  *
- * ⚠ THEY TAKE A WRITER, NOT A TRANSACTION, so a caller with one (the Clerk event
- * that changes membership, say) can make the revocation part of it.
+ * ⚠ MOST TAKE A WRITER, NOT A TRANSACTION, so a caller with one (the Clerk event
+ * that changes membership, say) can make the revocation part of it. The two
+ * exceptions, `suspendWorkspace` and `suspendDomain`, open their own: the
+ * suspension and the mail device delete must commit together, accounts first.
  */
 type Writer = Pick<Database, "update" | "delete" | "select">
 
