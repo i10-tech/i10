@@ -635,6 +635,10 @@ key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
 **What authd may write.** `authd.mail_devices` is read through the schema's
 default privileges, and the `authd` role may UPDATE `first_used_at` and
 `last_used_at` and no other column (`*_mail_devices_grants_and_triggers`).
+Since #383 PR 3 it also keeps the Mac liveness rows,
+`authd.mail_device_cert_binds` (SELECT, INSERT, UPDATE, DELETE), and may not
+read the certificate permits, `authd.mail_device_cert_permits`, at all
+(`*_mail_device_cert_grants_and_triggers`).
 `TestTheDeviceTableGrants` proves both roles' halves.
 
 **Revoking** is a DELETE (the API's store, `apps/api/src/mail-devices/store.ts`), and the
@@ -812,12 +816,14 @@ it. It only takes the attribution back to where the parsers left it.
 `authd.passthrough_versions`, and EXECUTE `core.mailbox_domain_refused`:
 exactly what `projection.accountColumns` reads
 (`apps/api/drizzle/*_mailfront_role_grants`). Of `authd.mail_devices` it may
-SELECT five columns, by column grant: `id`, `clerk_user_id`, `email`,
-`tenant_id` and `platform`, what `gate.DeviceRefusal` matches. Never the code's
+SELECT six columns, by column grant: `id`, `clerk_user_id`, `email`,
+`tenant_id` and `platform`, what `gate.DeviceRefusal` matches, and
+`cert_key_sha256`, the bound certificate key (#383 PR 3). Never the code's
 hash or key id, the serial, the model, the name or who created it
-(`*_mail_devices_grants_and_triggers`). It may also SELECT the
-access-change log, `authd.access_changes` (`*_access_change_triggers`), and
-nothing else. It writes nothing, not even the log: the retention job prunes it. It is not
+(`*_mail_devices_grants_and_triggers`, `*_mail_device_cert_grants_and_triggers`).
+It may also SELECT the access-change log, `authd.access_changes`
+(`*_access_change_triggers`), and the Mac liveness rows,
+`authd.mail_device_cert_binds`, and nothing else; never the certificate permits. It writes nothing, not even the log: the retention job prunes it. It is not
 `authd`'s role because `authd` may INSERT and UPDATE `authd.bind_failure_budget`,
 and a bug in a parser of internet bytes must not be able to reset or exhaust
 anyone's failure budget. `TestTheMailFrontRoleReadsTheGateAndWritesNothing`
@@ -1481,9 +1487,10 @@ go test -race ./...
 
 ## The schema lives elsewhere
 
-authd is a **reader**, with three narrow writes: the shared failure budget
-(`authd.bind_failure_budget`) and a mail device's two clock stamps
-(`first_used_at`, `last_used_at` on `authd.mail_devices`, by column grant). The
+authd is a **reader**, with a few narrow writes: the shared failure budget
+(`authd.bind_failure_budget`), a mail device's two clock stamps
+(`first_used_at`, `last_used_at` on `authd.mail_devices`, by column grant), and
+the Mac liveness rows (`authd.mail_device_cert_binds`, #383 PR 3). The
 `authd.*` tables are defined in Drizzle at
 `apps/api/src/db/schema.ts` and migrated from `apps/api/drizzle/`, because the
 webhook receiver that writes them lives there and two sources of truth for one

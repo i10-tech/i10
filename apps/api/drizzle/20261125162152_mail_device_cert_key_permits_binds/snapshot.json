@@ -1,0 +1,1172 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "7c60b6fc-f47c-4d51-b55d-a87da3b16f1d",
+  "prevIds": [
+    "893f2f32-9074-4161-a768-7a8c22d2ffb5"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_cert_binds"
+      ],
+      "writes": [
+        "s|tbl|authd.mail_device_cert_binds",
+        "n|tbl|authd.mail_device_cert_binds",
+        "e|tbl|authd.mail_device_cert_binds",
+        "n|rel|authd.mail_device_cert_binds",
+        "n|type|authd.mail_device_cert_binds",
+        "n|rel|authd.mail_device_cert_binds_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_cert_permits"
+      ],
+      "writes": [
+        "s|tbl|authd.mail_device_cert_permits",
+        "n|tbl|authd.mail_device_cert_permits",
+        "e|tbl|authd.mail_device_cert_permits",
+        "n|rel|authd.mail_device_cert_permits",
+        "n|type|authd.mail_device_cert_permits",
+        "n|rel|authd.mail_device_cert_permits_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "mail_devices",
+        "cert_sha256"
+      ],
+      "writes": [
+        "s|col|authd.mail_devices.cert_sha256",
+        "n|col|authd.mail_devices.cert_sha256",
+        "s|col|authd.mail_devices.cert_key_sha256",
+        "n|col|authd.mail_devices.cert_key_sha256"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_devices",
+        "mail_devices_cert_sha256_unique"
+      ],
+      "writes": [
+        "s|idx|authd.mail_devices_cert_sha256_unique",
+        "n|idx|authd.mail_devices_cert_sha256_unique",
+        "n|rel|authd.mail_devices_cert_sha256_unique",
+        "s|idx|authd.mail_devices_cert_key_sha256_unique",
+        "n|idx|authd.mail_devices_cert_key_sha256_unique",
+        "n|rel|authd.mail_devices_cert_key_sha256_unique"
+      ],
+      "reads": [
+        "e|tbl|authd.mail_devices",
+        "n|sch|authd",
+        "e|col|authd.mail_devices.cert_key_sha256"
+      ]
+    },
+    {
+      "statementType": "recreate_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_devices",
+        "mail_devices_cert_key_sha256_unique"
+      ],
+      "writes": [
+        "s|idx|authd.mail_devices_cert_key_sha256_unique",
+        "n|idx|authd.mail_devices_cert_key_sha256_unique",
+        "e|idx|authd.mail_devices_cert_key_sha256_unique",
+        "n|rel|authd.mail_devices_cert_key_sha256_unique"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd",
+        "n|col|authd.mail_devices.cert_key_sha256"
+      ],
+      "sharedWrites": [],
+      "sqlHash": "2909b9115096eecd"
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_binds",
+        "mail_device_cert_binds_bound_at_idx"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_binds_bound_at_idx",
+        "n|idx|authd.mail_device_cert_binds_bound_at_idx",
+        "e|idx|authd.mail_device_cert_binds_bound_at_idx",
+        "n|rel|authd.mail_device_cert_binds_bound_at_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_binds",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_binds.bound_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_open_acme_serial"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_open_acme_serial",
+        "n|idx|authd.mail_device_cert_permits_open_acme_serial",
+        "e|idx|authd.mail_device_cert_permits_open_acme_serial",
+        "n|rel|authd.mail_device_cert_permits_open_acme_serial"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.serial"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_nonce_unique"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_nonce_unique",
+        "n|idx|authd.mail_device_cert_permits_nonce_unique",
+        "e|idx|authd.mail_device_cert_permits_nonce_unique",
+        "n|rel|authd.mail_device_cert_permits_nonce_unique"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.nonce_sha256"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_challenge_unique"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_challenge_unique",
+        "n|idx|authd.mail_device_cert_permits_challenge_unique",
+        "e|idx|authd.mail_device_cert_permits_challenge_unique",
+        "n|rel|authd.mail_device_cert_permits_challenge_unique"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.challenge_hash"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_key_unique"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_key_unique",
+        "n|idx|authd.mail_device_cert_permits_key_unique",
+        "e|idx|authd.mail_device_cert_permits_key_unique",
+        "n|rel|authd.mail_device_cert_permits_key_unique"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.key_sha256"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_transaction_unique"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_transaction_unique",
+        "n|idx|authd.mail_device_cert_permits_transaction_unique",
+        "e|idx|authd.mail_device_cert_permits_transaction_unique",
+        "n|rel|authd.mail_device_cert_permits_transaction_unique"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.transaction_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_account_idx"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_account_idx",
+        "n|idx|authd.mail_device_cert_permits_account_idx",
+        "e|idx|authd.mail_device_cert_permits_account_idx",
+        "n|rel|authd.mail_device_cert_permits_account_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.clerk_user_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_device_idx"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_device_idx",
+        "n|idx|authd.mail_device_cert_permits_device_idx",
+        "e|idx|authd.mail_device_cert_permits_device_idx",
+        "n|rel|authd.mail_device_cert_permits_device_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.device_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_device_cert_permits",
+        "mail_device_cert_permits_expires_idx"
+      ],
+      "writes": [
+        "s|idx|authd.mail_device_cert_permits_expires_idx",
+        "n|idx|authd.mail_device_cert_permits_expires_idx",
+        "e|idx|authd.mail_device_cert_permits_expires_idx",
+        "n|rel|authd.mail_device_cert_permits_expires_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.expires_at"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_cert_binds"
+      ],
+      "writes": [
+        "s|fk|authd.mail_device_cert_binds.mail_device_cert_binds_device_fk",
+        "n|fk|authd.mail_device_cert_binds.mail_device_cert_binds_device_fk",
+        "e|fk|authd.mail_device_cert_binds.mail_device_cert_binds_device_fk",
+        "n|con|authd.mail_device_cert_binds.mail_device_cert_binds_device_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_binds",
+        "n|sch|authd",
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_binds.device_id",
+        "n|col|authd.mail_devices.id",
+        "e|uniqueness|authd.mail_devices.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_cert_permits"
+      ],
+      "writes": [
+        "s|fk|authd.mail_device_cert_permits.mail_device_cert_permits_account_fk",
+        "n|fk|authd.mail_device_cert_permits.mail_device_cert_permits_account_fk",
+        "e|fk|authd.mail_device_cert_permits.mail_device_cert_permits_account_fk",
+        "n|con|authd.mail_device_cert_permits.mail_device_cert_permits_account_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|tbl|authd.accounts",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.clerk_user_id",
+        "n|col|authd.accounts.clerk_user_id",
+        "e|uniqueness|authd.accounts.clerk_user_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_cert_permits"
+      ],
+      "writes": [
+        "s|fk|authd.mail_device_cert_permits.mail_device_cert_permits_device_fk",
+        "n|fk|authd.mail_device_cert_permits.mail_device_cert_permits_device_fk",
+        "e|fk|authd.mail_device_cert_permits.mail_device_cert_permits_device_fk",
+        "n|con|authd.mail_device_cert_permits.mail_device_cert_permits_device_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd",
+        "n|col|authd.mail_device_cert_permits.device_id",
+        "n|col|authd.mail_devices.id",
+        "e|uniqueness|authd.mail_devices.id"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_devices"
+      ],
+      "writes": [
+        "s|ck|authd.mail_devices.mail_devices_cert_key_sha256_length",
+        "n|ck|authd.mail_devices.mail_devices_cert_key_sha256_length",
+        "e|ck|authd.mail_devices.mail_devices_cert_key_sha256_length",
+        "n|con|authd.mail_devices.mail_devices_cert_key_sha256_length"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd",
+        "n|col|authd.mail_devices.cert_key_sha256"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"authd\",\"mail_devices\",\"cert_sha256\"]",
+      "set": {
+        "name": "cert_key_sha256"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"authd\",\"mail_devices_cert_sha256_unique\"]",
+      "set": {
+        "name": "mail_devices_cert_key_sha256_unique"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "mail_device_cert_binds",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "mail_device_cert_permits",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "device_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "addr",
+        "type": "cidr",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "key_sha256",
+        "type": "bytea",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "bound_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "clerk_user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "device_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "kind",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "status",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'open'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "serial",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "nonce_sha256",
+        "type": "bytea",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "challenge_hash",
+        "type": "bytea",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "key_sha256",
+        "type": "bytea",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "transaction_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "issued_cert_sha256",
+        "type": "bytea",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "expires_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "mail_device_cert_binds_bound_at_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "bound_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_open_acme_serial",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "serial",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"kind\" = 'acme' and \"status\" = 'open'",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_nonce_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "nonce_sha256",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"nonce_sha256\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_challenge_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "challenge_hash",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"challenge_hash\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_key_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "key_sha256",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"key_sha256\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_transaction_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "transaction_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"transaction_id\" is not null and \"status\" in ('challenged', 'authorized')",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_account_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "clerk_user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_device_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "device_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"device_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_expires_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "expires_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "mail_device_cert_binds_device_fk",
+        "nameExplicit": true,
+        "columns": [
+          "device_id"
+        ],
+        "schemaTo": "authd",
+        "tableTo": "mail_devices",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_account_fk",
+        "nameExplicit": true,
+        "columns": [
+          "clerk_user_id"
+        ],
+        "schemaTo": "authd",
+        "tableTo": "accounts",
+        "columnsTo": [
+          "clerk_user_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_device_fk",
+        "nameExplicit": true,
+        "columns": [
+          "device_id"
+        ],
+        "schemaTo": "authd",
+        "tableTo": "mail_devices",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "mail_device_cert_binds_pkey",
+        "columns": [
+          "device_id",
+          "addr"
+        ],
+        "nameExplicit": true,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "mail_device_cert_binds_addr_check",
+        "value": "(family(\"addr\") = 4 and masklen(\"addr\") = 32)\n          or (family(\"addr\") = 6 and masklen(\"addr\") = 64)",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_binds",
+        "name": "mail_device_cert_binds_key_length",
+        "value": "octet_length(\"key_sha256\") = 32",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_kind_check",
+        "value": "\"kind\" in ('acme', 'scep')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_status_check",
+        "value": "\"status\" in ('open', 'challenged', 'authorized', 'notified', 'expired')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_status_kind",
+        "value": "\"kind\" = 'scep' or \"status\" in ('open', 'authorized', 'expired')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_serial_check",
+        "value": "\"serial\" <> ''",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_device_kind",
+        "value": "(\"kind\" = 'acme') = (\"device_id\" is not null)",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_nonce_kind",
+        "value": "(\"kind\" = 'acme') = (\"nonce_sha256\" is not null)",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_challenge_kind",
+        "value": "(\"kind\" = 'scep') = (\"challenge_hash\" is not null)",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_key_state",
+        "value": "case \"status\" when 'open' then \"key_sha256\" is null\n                           when 'expired' then true\n                           else \"key_sha256\" is not null end",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_transaction_state",
+        "value": "case when \"kind\" = 'acme' or \"status\" = 'open' then \"transaction_id\" is null\n               when \"status\" = 'expired' then true\n               else \"transaction_id\" is not null end",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_issued_state",
+        "value": "case \"status\" when 'notified' then \"issued_cert_sha256\" is not null\n                           when 'expired' then \"kind\" = 'scep' or \"issued_cert_sha256\" is null\n                           else \"issued_cert_sha256\" is null end",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_hash_lengths",
+        "value": "(\"nonce_sha256\" is null or octet_length(\"nonce_sha256\") = 32)\n          and (\"challenge_hash\" is null or octet_length(\"challenge_hash\") = 32)\n          and (\"key_sha256\" is null or octet_length(\"key_sha256\") = 32)\n          and (\"issued_cert_sha256\" is null or octet_length(\"issued_cert_sha256\") = 32)",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_transaction_length",
+        "value": "\"transaction_id\" is null or octet_length(\"transaction_id\") between 1 and 255",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_device_cert_permits",
+        "name": "mail_device_cert_permits_expiry_check",
+        "value": "\"expires_at\" > \"created_at\"",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_devices",
+        "name": "mail_devices_cert_key_sha256_length",
+        "value": "\"cert_key_sha256\" is null or octet_length(\"cert_key_sha256\") = 32",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "indexes\u0000[\"authd\",\"mail_devices_cert_key_sha256_unique\"]",
+      "set": {
+        "where": "\"cert_key_sha256\" is not null"
+      }
+    }
+  ]
+}

@@ -585,6 +585,12 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 	if _, err := store.AccessChanges(ctx, b.Snapshot, 10); err != nil {
 		t.Fatalf("AccessChanges from a position as mailfront: %v", err)
 	}
+	// The Mac liveness rows (PR 3): the front answers SMTP AUTH's 454 itself when
+	// a Mac has none, so it reads them, and writes none (authd keeps them).
+	if _, err := store.Pool().Exec(ctx, `SELECT key_sha256 FROM authd.mail_device_cert_binds
+		WHERE device_id = '00000000-0000-4000-8000-000000000001' AND addr = '192.0.2.0/32'`); err != nil {
+		t.Fatalf("the Mac liveness read as mailfront: %v", err)
+	}
 	for _, q := range []string{
 		`INSERT INTO authd.bind_failure_budget (clerk_user_id, window_start, count) VALUES ('user_front_role', now(), 0)`,
 		`UPDATE authd.accounts SET credential_epoch = credential_epoch + 1 WHERE clerk_user_id = 'user_front_role'`,
@@ -593,12 +599,16 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 		`INSERT INTO authd.access_changes (kind, key) VALUES ('all', '')`,
 		`DELETE FROM authd.access_changes`,
 		`SELECT authd.prune_access_changes()`,
-		// Of the device table it reads five columns and writes nothing
+		// Of the device table it reads six columns and writes nothing
 		// (TestTheDeviceTableGrants has the full list).
 		`SELECT code_hash, code_kid FROM authd.mail_devices`,
 		`SELECT serial, device_name, model, created_by FROM authd.mail_devices`,
 		`UPDATE authd.mail_devices SET last_used_at = now()`,
 		`DELETE FROM authd.mail_devices`,
+		`UPDATE authd.mail_devices SET cert_key_sha256 = NULL`,
+		`DELETE FROM authd.mail_device_cert_binds`,
+		`UPDATE authd.mail_device_cert_binds SET bound_at = now()`,
+		`SELECT 1 FROM authd.mail_device_cert_permits LIMIT 1`,
 	} {
 		if _, err := store.Pool().Exec(ctx, q); err == nil {
 			t.Errorf("the mailfront role may run %q", q)

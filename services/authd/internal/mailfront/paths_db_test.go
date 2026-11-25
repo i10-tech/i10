@@ -157,8 +157,8 @@ var gatePaths = []gatePath{
 		one(`UPDATE authd.passthrough_versions SET active = NULL WHERE connection_id = :connA`), rechecks},
 	{"authd.passthrough_versions", "fingerprint (ignored)", []string{managedIdentity, managedByA, versionOfA},
 		one(`UPDATE authd.passthrough_versions SET fingerprint = 'y', updated_at = now() WHERE connection_id = :connA`), ignored},
-	// ⚠ A TRUNCATE, PUT BACK IN THE SAME TRANSACTION so the tests of other
-	// packages that share the database see the same rows after it.
+	// ⚠ A TRUNCATE, PUT BACK IN THE SAME TRANSACTION so rows other packages
+	// left in the shared database are the same after it.
 	{"authd.passthrough_versions", "truncate", []string{managedIdentity, managedByA, versionOfA}, []string{
 		`CREATE TEMP TABLE pv_keep ON COMMIT DROP AS SELECT * FROM authd.passthrough_versions`,
 		`TRUNCATE authd.passthrough_versions`,
@@ -216,13 +216,31 @@ var gatePaths = []gatePath{
 			VALUES (:alice, 'alice@path.test', :A, 'ipados', '\x03', 1, 'path')`), rechecks},
 	{"authd.mail_devices", "the clock stamps and the descriptive columns (ignored)", one(mintDevice),
 		one(upDevice + `first_used_at = now(), last_used_at = now(), device_name = 'Phone', model = 'iPhone17,1',
-			serial = 'S', created_by = 'someone', cert_sha256 = '\x04'` + whDevice), ignored},
+			serial = 'S', created_by = 'someone'` + whDevice), ignored},
+	// The bound key is an access input since PR 3: binding, changing or clearing
+	// it is logged. Until the front's code reads it (step 2), a logged change
+	// re-checks the session and keeps it.
+	{"authd.mail_devices", "cert_key_sha256 (bound, logged)", one(mintDevice),
+		one(upDevice + `cert_key_sha256 = '\x0404040404040404040404040404040404040404040404040404040404040404'` + whDevice), rechecks},
 	{"authd.mail_devices", "the account deleted (cascades the device)", one(mintDevice),
 		one(`DELETE FROM authd.accounts` + whAlice), closes},
 	{"authd.mail_devices", "truncate", one(mintDevice), []string{
+		// CASCADE since PR 3: the permits and the Mac liveness rows reference the
+		// table (neither has triggers, so the log sees only this one's TRUNCATE).
+		// They are kept and put back too, so rows already in the shared test
+		// database (another package's, run before this one) survive the
+		// truncate. ⚠ No LOCK TABLE here: locking these tables (and
+		// `authd.accounts`) inside the shared test database queued other
+		// sessions behind this one and could hang or deadlock them (review of
+		// #533). The other DB packages never run beside this one: CI runs them
+		// one package at a time (`-p 1`, .github/workflows/ci.yml).
 		`CREATE TEMP TABLE md_keep ON COMMIT DROP AS SELECT * FROM authd.mail_devices`,
-		`TRUNCATE authd.mail_devices`,
+		`CREATE TEMP TABLE mp_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_permits`,
+		`CREATE TEMP TABLE mb_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_binds`,
+		`TRUNCATE authd.mail_devices CASCADE`,
 		`INSERT INTO authd.mail_devices SELECT * FROM md_keep`,
+		`INSERT INTO authd.mail_device_cert_permits SELECT * FROM mp_keep`,
+		`INSERT INTO authd.mail_device_cert_binds SELECT * FROM mb_keep`,
 	}, sweepsAll},
 
 	// core.domains: by domain name, through core.mailbox_domain_refused.
