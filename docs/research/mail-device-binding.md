@@ -680,7 +680,7 @@ This is revision 1, before its adversarial review.
 
 ```
 dash.i10.tech (console, PR 5)        API (:3001)                         enrolld (own Deployment)
-  POST /console/mail-devices/enrollments  -> enrollment row, token      
+  POST /console/mail-devices/enrollments  -> enrollment row, token
   shows QR / link https://ca.i10.tech/enroll/apple/<token>
 device Safari GET  /enroll/apple/<token> ----------------------------> peek (API :3443) -> phase 1 profile
 device POST /enroll/apple/profile (signed by Apple) -----------------> attest (API :3443) -> SCEP permit -> SCEP-only profile
@@ -692,20 +692,20 @@ device POST /enroll/apple/profile (signed by the SCEP key) ----------> finish (A
 
 ### The enrollment row, `authd.mail_device_enrollments`
 
-| Column                                         | Notes                                                                                                                         |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `id` uuid                                      | `uuidv7()`                                                                                                                    |
-| `clerk_user_id` text not null                  | FK `authd.accounts` ON DELETE CASCADE                                                                                         |
-| `email` text not null, `tenant_id` uuid        | the account's at creation; every later step requires the account to still match (null-safe), as the device lane does          |
-| `expected_epoch` bigint not null               | the account's `credential_epoch` read with the dash session; attest, the SCEP hooks and the mint refuse when it moved         |
-| `token_sha256` bytea not null unique           | SHA-256 of the 32-byte base64url token in the link; the token is never stored                                                |
-| `status` text                                  | `open` → `attested` → `sealed`, or `refused`, `expired`, `cancelled`; CHECK                                                    |
-| `refusal` text                                 | a fixed word for the console (`mac_not_apple_silicon`, `macos_too_old`, `unsupported_product`, a gate code)                  |
-| `serial`, `product`, `os_version`, `device_name` text | from Apple's signed attributes at attest, bounded; the first attest binds the serial                                  |
-| `udid_sha256`, `apple_signer_sha256` bytea     | bound at attest; a retried attest must match both, a phase 4 that echoes a UDID must match                                    |
-| `platform` text                                | `ios`, `ipados`, `macos`, decided at attest from `product`                                                                    |
-| `device_id` uuid                               | FK `authd.mail_devices` ON DELETE SET NULL, set at seal                                                                       |
-| `created_by` text, `created_at`, `expires_at`, `updated_at` | `expires_at` = creation + 10 minutes; an attest moves it to attest + 10 minutes, the SCEP permit's own life      |
+| Column                                                      | Notes                                                                                                                 |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `id` uuid                                                   | `uuidv7()`                                                                                                            |
+| `clerk_user_id` text not null                               | FK `authd.accounts` ON DELETE CASCADE                                                                                 |
+| `email` text not null, `tenant_id` uuid                     | the account's at creation; every later step requires the account to still match (null-safe), as the device lane does  |
+| `expected_epoch` bigint not null                            | the account's `credential_epoch` read with the dash session; attest, the SCEP hooks and the mint refuse when it moved |
+| `token_sha256` bytea not null unique                        | SHA-256 of the 32-byte base64url token in the link; the token is never stored                                         |
+| `status` text                                               | `open` → `attested` → `sealed`, or `refused`, `expired`, `cancelled`; CHECK                                           |
+| `refusal` text                                              | a fixed word for the console (`mac_not_apple_silicon`, `macos_too_old`, `unsupported_product`, a gate code)           |
+| `serial`, `product`, `os_version`, `device_name` text       | from Apple's signed attributes at attest, bounded; the first attest binds the serial                                  |
+| `udid_sha256`, `apple_signer_sha256` bytea                  | bound at attest; a retried attest must match both, a phase 4 that echoes a UDID must match                            |
+| `platform` text                                             | `ios`, `ipados`, `macos`, decided at attest from `product`                                                            |
+| `device_id` uuid                                            | FK `authd.mail_devices` ON DELETE SET NULL, set at seal                                                               |
+| `created_by` text, `created_at`, `expires_at`, `updated_at` | `expires_at` = creation + 10 minutes; an attest moves it to attest + 10 minutes, the SCEP permit's own life           |
 
 Indexes: unique `token_sha256`; `clerk_user_id` where `status in ('open','attested')`; `expires_at` for retention (deleted a day past expiry, like permits). `authd.mail_device_cert_permits` gains `enrollment_id` (FK ON DELETE CASCADE, CHECK: not null exactly for `scep`, indexed). Grants: the API's role only; an explicit REVOKE from `authd` and `mailfront`, grant tests assert it. On the CI non-RLS allowlist with its reason. No access-change triggers: an enrollment opens no session.
 
