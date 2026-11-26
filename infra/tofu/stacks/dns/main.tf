@@ -449,7 +449,7 @@ resource "cloudflare_dns_record" "dmarc" {
 # that until 2026-09-02.
 #
 # ⚠ `priority` IS SET TWICE ON PURPOSE: in `data`, where the SRV record keeps
-# it, and at the top level, because Cloudflare echoes it there too. With only
+# it, and at the top level, because Cloudflare returns it there too. With only
 # the `data` one, every plan showed four `priority 0 -> null` changes, so the
 # stack never planned empty.
 
