@@ -141,6 +141,45 @@ resource "cloudflare_dns_record" "smtp" {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# THE DEVICE CA - grey cloud, both families (#383 PR 3)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# ca.i10.tech is where Apple devices enroll: step-ca's ACME `apple` and SCEP
+# `apple-scep` endpoints, through Traefik, path-scoped to those two and nothing
+# else (infra/k8s/i10/device-ca/ingressroute.yaml).
+#
+# ⚠ proxied = false, AND IT MUST STAY FALSE. Under the proxied wildcard,
+# Apple's enrollment clients would meet Cloudflare's bot rules, and Traefik's
+# rate limits would key on Cloudflare's addresses instead of the device's. The
+# same machine as mail.i10.tech: Traefik holds :443 there by hostPort. The cost
+# is the same as for mail: the origin address is published, and it already is.
+#
+# ⚠ CREATED HERE, NOT IMPORTED: these records did not exist. So the first plan
+# after this change shows exactly two additions, and the empty-plan contract
+# above holds again once they are applied. ⚠ APPLY LAST, after step-ca, the
+# relay and the hooks listener are healthy (device-ca/README.md, "Rollout").
+
+resource "cloudflare_dns_record" "ca_v4" {
+  zone_id = var.zone_id
+  name    = "ca.${local.domain}"
+  type    = "A"
+  content = var.mail_host_ipv4
+  ttl     = 60
+  proxied = false
+  comment = module.labels.comment
+}
+
+resource "cloudflare_dns_record" "ca_v6" {
+  zone_id = var.zone_id
+  name    = "ca.${local.domain}"
+  type    = "AAAA"
+  content = var.mail_host_ipv6
+  ttl     = 60
+  proxied = false
+  comment = module.labels.comment
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # ROUTING
 # ═══════════════════════════════════════════════════════════════════════════
 

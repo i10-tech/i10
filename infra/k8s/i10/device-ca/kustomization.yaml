@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: i10-prod
+
+# The device CA (#383 PR 3). README.md says what each file is and the order
+# they come up in.
+resources:
+  - hooks-tls.yaml
+  - trust.yaml
+  - deployment.yaml
+  - networkpolicy.yaml
+  - ingressroute.yaml
+
+# ⚠ HASHED, SO AN EDIT ROLLS THE POD. step-ca reads ca.json and the templates
+# at start; a plain ConfigMap would change the files under a running CA and
+# leave it on the old configuration until something happened to restart it.
+#
+# ⚠ NOTHING SECRET MAY BE IN THESE FILES. A ConfigMap is readable by anything
+# with `get` on the namespace, and `GET /provisioners` serves ca.json's
+# provisioners to anyone who reaches step-ca. The keys are files from the
+# `i10-device-ca` Secret; the webhook URLs carry no token (the relay adds it).
+configMapGenerator:
+  - name: i10-device-ca-config
+    files:
+      - config/ca.json
+      - config/apple.tpl
+      - config/apple-scep.tpl

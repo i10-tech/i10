@@ -426,6 +426,11 @@ spec:
                   name: i10-mail-bind-token
                   key: MAIL_DEVICE_CODE_KEYS
                   optional: true
+            # ⚠ IN LOCKSTEP WITH MAILFRONT_MAC_SMTP_SAME_ADDRESS BELOW (design
+            # section 11, "Revision 5 rules"): a Mac's SMTP sign-in needs a
+            # certificate IMAP sign-in from the same /32 or /64. `true` is the
+            # default; it is written out so the two are changed together.
+            - { name: AUTHD_MAC_SMTP_SAME_ADDRESS, value: "true" }
 
           resources:
             requests: { cpu: 50m, memory: 64Mi }
@@ -533,6 +538,16 @@ spec:
             # (they retry) before either is. Raise all three together.
             - { name: MAILFRONT_MAX_CONNECTIONS, value: "6000" }
             - { name: GOMEMLIMIT, value: "450MiB" }
+            # The device CA's root and intermediate (#383 PR 3,
+            # device-ca/trust.yaml). With it, 993 asks for a client certificate
+            # and offers AUTHENTICATE EXTERNAL to one that verifies; without the
+            # file (the volume below is optional), 993 asks for nothing, exactly
+            # as before. Re-read every 30 seconds, so the bundle arriving, or
+            # changing at the year-7 rotation, needs no restart.
+            - name: MAILFRONT_DEVICE_CA_BUNDLE
+              value: /etc/mailfront/device-ca/bundle.pem
+            # In lockstep with AUTHD_MAC_SMTP_SAME_ADDRESS above.
+            - { name: MAILFRONT_MAC_SMTP_SAME_ADDRESS, value: "true" }
 
           resources:
             requests: { cpu: 20m, memory: 64Mi }
@@ -540,6 +555,11 @@ spec:
 
           volumeMounts:
             - { name: mailfront-tls, mountPath: /etc/mailfront/tls, readOnly: true }
+            - {
+                name: device-ca-trust,
+                mountPath: /etc/mailfront/device-ca,
+                readOnly: true,
+              }
 
           # ⚠ NO PROBES, AND WHAT THAT DOES AND DOES NOT BUY. A tcpSocket probe on
           # the pod IP cannot tell the front from Stalwart (on the first rollout
@@ -588,6 +608,19 @@ spec:
             items:
               - { key: KEEP_NODE_KEY, path: node.key }
               - { key: KEEP_SERVERS_PEM, path: servers.pem }
+        # ⚠ OPTIONAL, AND ONLY bundle.pem. The device CA's public certificates
+        # for the mail front (device-ca/trust.yaml). Missing, the front's 993
+        # behaves as it did before PR 3 and the pod starts as before, so this
+        # is safe whichever Application syncs first. Not a subPath, so the
+        # kubelet updates the file in place and the front's 30-second reload
+        # sees it. ⚠ KEEP IT LAST: ../internal removes it by position (that
+        # node has no front).
+        - name: device-ca-trust
+          configMap:
+            name: i10-device-ca-trust
+            optional: true
+            items:
+              - { key: bundle.pem, path: bundle.pem }
 
   # Metadata lives in Postgres and blobs in R2, so this volume holds only what
   # the server keeps locally. It is small on purpose; growing it is not the

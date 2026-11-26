@@ -50,7 +50,12 @@ spec:
         # CA_HOOK_WEBHOOK_IDS, CA_INTERMEDIATE_NOT_AFTER; #383 PR 3) arrive
         # through the i10-api Secret below, so this check already validates
         # them, including that the three are set together. CA_HOOKS_PORT and
-        # the TLS file paths have defaults; the deploy step mounts the files.
+        # the TLS file paths are in `env`, as in api.yaml.
+        #
+        # ⚠ THE LISTENER'S CERTIFICATE IS NOT MOUNTED HERE, ON PURPOSE. The
+        # environment check reads no file (the listener checks for the files
+        # when it starts), so a mount would put the listener's private key in a
+        # second pod for nothing.
         - name: api
           image: ghcr.io/i10-tech/i10-api:prod-707d888ff07bc080ebad4cf66431394f65ae8b93@sha256:97251b244e6f13615a45eca9c6196dd36367e18d3d42b418e7a27a4e89eb6b12
           imagePullPolicy: Always
@@ -77,6 +82,13 @@ spec:
               value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
             - name: TEMPLATE_RENDERER_URL
               value: http://i10-template-renderer.i10-prod.svc.cluster.local
+            # The device CA's hooks listener. These are the defaults, written
+            # out so the port, the Service and the mount below are read in one
+            # place. Its three secrets (CA_HOOK_TOKEN_HASHES,
+            # CA_HOOK_WEBHOOK_IDS, CA_INTERMEDIATE_NOT_AFTER) come from i10-api.
+            - { name: CA_HOOKS_PORT, value: "3443" }
+            - { name: CA_HOOKS_TLS_CERT_FILE, value: /etc/i10/ca-hooks/tls.crt }
+            - { name: CA_HOOKS_TLS_KEY_FILE, value: /etc/i10/ca-hooks/tls.key }
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 256Mi }

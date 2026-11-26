@@ -58,3 +58,11 @@ patches:
         value: mailfront
       - op: remove
         path: /spec/template/spec/containers/2
+      # ⚠ AND NO DEVICE CA TRUST BUNDLE (#383 PR 3). Only the front reads it,
+      # so the node without a front has no reason to mount it. The test fails
+      # the patch, rather than remove another volume, if ../node's order changes.
+      - op: test
+        path: /spec/template/spec/volumes/4/name
+        value: device-ca-trust
+      - op: remove
+        path: /spec/template/spec/volumes/4

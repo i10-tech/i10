@@ -22,3 +22,36 @@ spec:
   dnsNames:
     - i10.tech
     - "*.i10.tech"
+---
+# The device CA hooks listener's server certificate (#383 PR 3), for the name
+# the relay dials (`i10-api-ca-hooks.i10-prod.svc`, the Service in api.yaml).
+#
+# ⚠ FROM THE HOOKS TRANSPORT CA, NOT LET'S ENCRYPT AND NOT THE DEVICE CA. The
+# Issuer is defined in device-ca/hooks-tls.yaml, beside the relay certificate it
+# also signs; the relay trusts that CA and nothing else for this hop. Until the
+# Issuer exists this Certificate waits, the Secret is absent, and the API's
+# optional mount leaves the listener off.
+#
+# ⚠ TEN YEARS, BECAUSE `Bun.serve` CANNOT RELOAD `tls`. The API reads these
+# files once at start. A short leaf would expire inside a long-running pod, and
+# every renewal would need a restart anyway. cert-manager reissues at two
+# thirds of the life (about year 7); restart the API then.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: i10-api-ca-hooks-tls
+  namespace: i10-prod
+spec:
+  secretName: i10-api-ca-hooks-tls
+  commonName: i10-api-ca-hooks.i10-prod.svc
+  dnsNames:
+    - i10-api-ca-hooks.i10-prod.svc
+  usages: [server auth]
+  duration: 87600h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: i10-hooks-tls
+    kind: Issuer

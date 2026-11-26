@@ -1,0 +1,69 @@
+# What may reach the device CA pod, and what it may reach (#383 PR 3).
+#
+# ⚠ POLICIES ONLY ADD, SO THE INGRESS HALF HERE NARROWS NOTHING. The psl repo
+# gives i10-prod `allow-traefik` and `allow-cnpg-operator`: every pod in the
+# `traefik` and `cnpg-system` namespaces may reach every port of every pod here,
+# this one included. So step-ca's 9000 is reachable from Traefik (as intended)
+# AND from the CNPG operator, whatever this file says. What keeps the CA safe is
+# not this file: the public routes are path-scoped (ingressroute.yaml), step-ca
+# holds no admin surface (`enableAdmin` off, no JWK or admin provisioner), the
+# relay listens on loopback only, and every issuance asks the API, which binds
+# a key only to an open permit. The same is true of the API's 3443 (see
+# api-ca-hooks-clients in workloads/networkpolicy.yaml): reachable by those two
+# namespaces too, and useless to them without the relay's bearer token.
+#
+# ⚠ AND TRAEFIK ALREADY HOLDS THE TOKEN. The Traefik chart's cluster-wide RBAC lets it
+# get/list/watch every Secret, and its CRD provider keeps an informer of them, so the
+# internet-facing proxy has CA_HOOK_TOKEN and the device intermediate key in memory, and
+# it terminates TLS for ca.i10.tech, so it sees the permit nonce in a CSR. A Traefik
+# compromise is therefore in the design's "anyone who can read Secrets in i10-prod" set
+# (section 11), as it already is for every database password. The token keeps every
+# OTHER pod out. Narrowing Traefik's RBAC to its TLS Secrets is a psl-repo follow-up.
+#
+# ⚠ THE EGRESS HALF IS REAL. With `Egress` in policyTypes, this pod may open
+# connections to the API's hooks listener and to cluster DNS, and nowhere else:
+# no internet, no Postgres, no Kubernetes API. The relay shares the pod's
+# network namespace, so this is its egress too, and step-ca's own webhook calls
+# go to 127.0.0.1, which no policy governs. Replies to accepted connections and
+# the kubelet's probes are not affected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: i10-device-ca
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-device-ca
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Traefik, for ca.i10.tech. The container port: the Service's 443 is
+    # rewritten to 9000 before the policy sees the packet.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - { protocol: TCP, port: 9000 }
+  egress:
+    # The relay's upstream, the API's hooks listener. The container port again.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-api
+      ports:
+        - { protocol: TCP, port: 3443 }
+    # The relay resolves `i10-api-ca-hooks.i10-prod.svc` through CoreDNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
