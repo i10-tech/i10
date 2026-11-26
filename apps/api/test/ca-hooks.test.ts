@@ -2,10 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { leafKeySha256, parseMailDeviceArgs } from "../scripts/mail-device.js"
+import { parseMailDeviceArgs, readLeaf } from "../scripts/mail-device.js"
 import {
+  acmeAuthorizeBody as acmeAuthorizeSchema,
   acmeMaxNotAfter,
   parseGoTime,
+  permanentIdentifierSanDer,
+  scepAuthorizeBody as scepAuthorizeSchema,
   scepMaxNotAfter,
   templateRefusal,
   type CertificateTemplate,
@@ -20,12 +23,18 @@ import {
 import { createHookHandlers, type HookHandler } from "../src/ca-hooks/handlers.js"
 import {
   createCaHooksFetch,
+  HANDLER_DEADLINE_MS,
   MAX_BODY_BYTES,
   startCaHooksListener,
+  WARN_WINDOW_MS,
   type HookLog,
 } from "../src/ca-hooks/listener.js"
 import { loadEnv } from "../src/env.js"
-import { sha256, type HookDecision } from "../src/mail-devices/permits.js"
+import {
+  HookDeadlineExceeded,
+  sha256,
+  type HookDecision,
+} from "../src/mail-devices/permits.js"
 import {
   acmeBody,
   freshKey,
@@ -51,6 +60,7 @@ const IDS = {
   "scep-notify": "wh-scep-notify",
 } as const satisfies Record<CaHookKind, string>
 const NOW = new Date("2026-11-26T12:00:00Z")
+const DEADLINE = new Date(NOW.getTime() + HANDLER_DEADLINE_MS)
 const INTERMEDIATE_NOT_AFTER = new Date("2036-11-26T00:00:00Z")
 
 const hex = (value: string) => sha256(value).toString("hex")
@@ -181,13 +191,13 @@ function listener(
   options: { timeoutMs?: number; now?: () => Date } = {},
 ) {
   const { log, lines } = recordingLog()
-  const calls: { kind: CaHookKind; body: unknown }[] = []
+  const calls: { kind: CaHookKind; body: unknown; now: Date; deadline: Date }[] = []
   const wrapped = Object.fromEntries(
     CA_HOOK_KINDS.map((kind) => [
       kind,
-      async (body: unknown, now: Date) => {
-        calls.push({ kind, body })
-        return (handlers[kind] ?? allowAll)(body, now)
+      async (body: unknown, now: Date, deadline: Date) => {
+        calls.push({ kind, body, now, deadline })
+        return (handlers[kind] ?? allowAll)(body, now, deadline)
       },
     ]),
   ) as Record<CaHookKind, HookHandler>
@@ -453,6 +463,57 @@ describe("the CA hooks listener", () => {
       "not_found",
     ])
   })
+
+  it("gives each handler one deadline, 4 seconds after the request was read", async () => {
+    const { fetch, calls } = listener()
+    await fetch(hookRequest("/scep-challenge"))
+    expect(calls[0]?.now).toEqual(NOW)
+    expect(calls[0]?.deadline).toEqual(DEADLINE)
+    expect(DEADLINE.getTime() - NOW.getTime()).toBeLessThan(5000)
+  })
+
+  it("answers a handler past its deadline as a timeout", async () => {
+    const { fetch, lines } = listener({
+      "acme-authorize": async () => {
+        throw new HookDeadlineExceeded()
+      },
+    })
+    expect((await fetch(hookRequest("/acme-authorize"))).status).toBe(503)
+    expect(lines.at(-1)?.fields).toMatchObject({ outcome: "timeout" })
+  })
+
+  it("writes one warn line per outcome per window for a burst, then counts what it dropped", async () => {
+    let clock = NOW.getTime()
+    const { fetch, lines } = listener({}, { now: () => new Date(clock) })
+    for (let i = 0; i < 50; i++) {
+      await fetch(
+        hookRequest("/acme-authorize", { token: "wrong-token-but-long-enough" }),
+      )
+      await fetch(hookRequest("/nope"))
+    }
+    expect(lines.map((l) => l.fields)).toEqual([
+      { hook: "acme-authorize", outcome: "unauthenticated" },
+      { hook: "unknown", outcome: "not_found" },
+    ])
+
+    clock += WARN_WINDOW_MS - 1
+    await fetch(hookRequest("/nope"))
+    expect(lines).toHaveLength(2)
+
+    clock += 1
+    await fetch(hookRequest("/nope"))
+    expect(lines.at(-1)?.fields).toEqual({
+      hook: "unknown",
+      outcome: "not_found",
+      suppressed: 50,
+    })
+    // An authenticated request is never throttled.
+    await fetch(hookRequest("/scep-notify"))
+    expect(lines.at(-1)).toMatchObject({
+      level: "info",
+      fields: { outcome: "allowed" },
+    })
+  })
 })
 
 describe("starting the listener", () => {
@@ -549,6 +610,34 @@ describe("starting the listener", () => {
         expect(await ok.json()).toEqual({ allow: true })
         expect((await post("/health")).status).toBe(404)
         expect((await post("/v1/emails")).status).toBe(404)
+
+        // ⚠ THE ONE ANSWER THAT IS NOT A 404: Bun's `maxRequestBodySize` sends
+        // a bare 413 itself, declared length or streamed, without a token.
+        const oversize = await fetch(`https://127.0.0.1:${started!.port}/scep-notify`, {
+          method: "POST",
+          body: "x".repeat(MAX_BODY_BYTES + 1),
+          tls: { rejectUnauthorized: false },
+        })
+        expect(oversize.status).toBe(413)
+        expect(await oversize.text()).toBe("")
+        const chunk = new Uint8Array(16 * 1024).fill(0x20)
+        let sent = 0
+        const streamed = await fetch(`https://127.0.0.1:${started!.port}/scep-notify`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${TOKEN}`,
+            "x-smallstep-webhook-id": IDS["scep-notify"],
+          },
+          body: new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (sent++ < 8) controller.enqueue(chunk)
+              else controller.close()
+            },
+          }),
+          tls: { rejectUnauthorized: false },
+        })
+        expect(streamed.status).toBe(413)
+        expect(await streamed.text()).toBe("")
         expect(seen).toEqual(["scep-notify"])
       } finally {
         await started!.stop()
@@ -576,6 +665,7 @@ describe("the template rules", () => {
   const nonce = "nonce-0123456789abcdefgh"
   const acmeRules = {
     serial,
+    keyUsage: ["digitalSignature"],
     extKeyUsage: ["clientAuth"],
     permanentIdentifierSan: true,
     maxNotAfter: acmeMaxNotAfter(NOW),
@@ -584,6 +674,7 @@ describe("the template rules", () => {
   }
   const scepRules = {
     ...acmeRules,
+    keyUsage: ["digitalSignature", "keyEncipherment"],
     extKeyUsage: ["emailProtection"],
     permanentIdentifierSan: false,
     maxNotAfter: scepMaxNotAfter(NOW),
@@ -608,30 +699,46 @@ describe("the template rules", () => {
         ...overrides,
       },
       NOW,
+      DEADLINE,
     )
   }
   async function scep(certificate: Record<string, unknown> = {}) {
     return handlers["scep-authorize"](
       scepAuthorizeBody({ commonName: serial, spki: key.spki, now: NOW, certificate }),
       NOW,
+      DEADLINE,
     )
   }
 
+  const sanExtension = (of: string) => ({
+    id: "2.5.29.17",
+    critical: false,
+    value: permanentIdentifierSanDer(of).toString("base64"),
+  })
   const iso = (offsetMs: number, from = NOW) =>
     goTime(new Date(from.getTime() + offsetMs))
   const minute = 60 * 1000
   const day = 24 * 60 * minute
 
-  it("passes the apple template as step-ca renders it", () => {
-    const parsed = acmeBody({ serial, nonce, spki: key.spki, now: NOW })
-      .x509Certificate as never
-    const cert = {
-      ...(parsed as Record<string, unknown>),
-      publicKey: key.spki,
-      notBefore: new Date(NOW.getTime() - minute),
-      notAfter: new Date(NOW.getTime() + 3 * 365 * day),
-    } as unknown as CertificateTemplate
-    expect(templateRefusal(cert, acmeRules)).toBeNull()
+  it("encodes the permanent identifier SAN byte for byte as x509util v0.77.1 does", () => {
+    // `x509util.NewCertificate` with the apple template, serial C02ZK1ABCDEF.
+    expect(permanentIdentifierSanDer("C02ZK1ABCDEF").toString("base64")).toBe(
+      "MB6gHAYIKwYBBQUHCAOgEDAODAxDMDJaSzFBQkNERUY=",
+    )
+  })
+
+  it("passes the apple and apple-scep templates as step-ca renders them", () => {
+    const acmeParsed = acmeAuthorizeSchema.safeParse(
+      acmeBody({ serial, nonce, spki: key.spki, now: NOW }),
+    )
+    expect(acmeParsed.success).toBe(true)
+    expect(templateRefusal(acmeParsed.data!.x509Certificate, acmeRules)).toBeNull()
+
+    const scepParsed = scepAuthorizeSchema.safeParse(
+      scepAuthorizeBody({ commonName: serial, spki: key.spki, now: NOW }),
+    )
+    expect(scepParsed.success).toBe(true)
+    expect(templateRefusal(scepParsed.data!.x509Certificate, scepRules)).toBeNull()
   })
 
   it.each([
@@ -652,17 +759,88 @@ describe("the template rules", () => {
       { sans: [{ type: "permanentIdentifier", value: "OTHER" }] },
     ],
     [
-      "a raw SAN extension",
+      "a subjectAltName extension that is not the serial's",
       { extensions: [{ id: "2.5.29.17", critical: false, value: "MAA=" }] },
     ],
     [
-      "a raw EKU extension",
-      { extensions: [{ id: "2.5.29.37", critical: false, value: "MAA=" }] },
+      "another serial's subjectAltName extension",
+      { extensions: [sanExtension("OTHER")] },
     ],
     [
-      "a raw basic constraints extension",
-      { extensions: [{ id: "2.5.29.19", critical: true, value: "MAA=" }] },
+      "the serial's subjectAltName extension marked critical",
+      { extensions: [{ ...sanExtension(serial), critical: true }] },
     ],
+    [
+      "an extension beside the subjectAltName",
+      {
+        extensions: [
+          sanExtension(serial),
+          { id: "1.2.3.4", critical: false, value: "MAA=" },
+        ],
+      },
+    ],
+    [
+      "a raw EKU extension",
+      {
+        extensions: [
+          sanExtension(serial),
+          { id: "2.5.29.37", critical: false, value: "MAA=" },
+        ],
+      },
+    ],
+    ["no extension for its SAN", { extensions: null }],
+    [
+      "the SAN twice",
+      {
+        sans: [
+          { type: "permanentIdentifier", value: serial },
+          { type: "permanentIdentifier", value: serial },
+        ],
+      },
+    ],
+    [
+      "a SAN with an asn1Value, which overrides its value",
+      {
+        sans: [
+          {
+            type: "permanentIdentifier",
+            value: serial,
+            asn1Value: { identifier: "OTHER" },
+          },
+        ],
+      },
+    ],
+    [
+      "extraNames, whose 2.5.4.3 would replace the CN",
+      {
+        subject: {
+          commonName: serial,
+          organizationalUnit: [nonce],
+          extraNames: [{ type: "2.5.4.3", value: "OTHER" }],
+        },
+      },
+    ],
+    [
+      "another subject field",
+      {
+        subject: {
+          commonName: serial,
+          organizationalUnit: [nonce],
+          organization: ["x"],
+        },
+      },
+    ],
+    [
+      "keyEncipherment beside digitalSignature",
+      { keyUsage: ["digitalSignature", "keyEncipherment"] },
+    ],
+    ["certSign", { keyUsage: ["digitalSignature", "certSign"] }],
+    ["no key usage", { keyUsage: null }],
+    ["an OCSP server", { ocspServer: ["http://ocsp.example.com"] }],
+    ["a policy", { policyIdentifiers: ["1.2.3.4"] }],
+    ["a subject key id", { subjectKeyId: "AAEC" }],
+    ["a signature algorithm", { signatureAlgorithm: "SHA1-RSA" }],
+    ["a field x509util does not have", { unexpected: true }],
     ["serverAuth beside clientAuth", { extKeyUsage: ["clientAuth", "serverAuth"] }],
     ["no EKU at all", { extKeyUsage: null }],
     ["emailProtection instead", { extKeyUsage: ["emailProtection"] }],
@@ -705,6 +883,7 @@ describe("the template rules", () => {
     const decision = await local["acme-authorize"](
       acmeBody({ serial, nonce, spki: key.spki, now: NOW }),
       NOW,
+      DEADLINE,
     )
     expect(decision).toEqual({ allow: false, outcome: "bad_template" })
   })
@@ -718,12 +897,21 @@ describe("the template rules", () => {
     const decision = await handlers["acme-authorize"](
       acmeBody({ serial: odd, nonce, spki: key.spki, now: NOW }),
       NOW,
+      DEADLINE,
     )
     expect(decision).toEqual({ allow: false, outcome: "bad_template" })
   })
 
   it.each([
     ["clientAuth", { extKeyUsage: ["clientAuth"] }],
+    [
+      "any extension",
+      { extensions: [{ id: "1.2.3.4", critical: false, value: "MAA=" }] },
+    ],
+    ["digitalSignature alone", { keyUsage: ["digitalSignature"] }],
+    ["no key usage", { keyUsage: null }],
+    ["extraNames", { subject: { commonName: serial, extraNames: [] } }],
+    ["a field x509util does not have", { unexpected: true }],
     [
       "clientAuth beside emailProtection",
       { extKeyUsage: ["emailProtection", "clientAuth"] },
@@ -746,6 +934,7 @@ describe("the template rules", () => {
   it("checks the SCEP rules apart from the handler, too", () => {
     const cert = {
       subject: { commonName: serial },
+      keyUsage: ["keyEncipherment", "digitalSignature"],
       extKeyUsage: ["emailProtection"],
       publicKey: key.spki,
       notBefore: new Date(NOW.getTime() - minute),
@@ -762,6 +951,7 @@ describe("the template rules", () => {
       await handlers["scep-notify"](
         scepNotifyBody({ transactionId: "txn", der: null, now: NOW }),
         NOW,
+        DEADLINE,
       ),
     ).toEqual({ allow: false, outcome: "notify_failure" })
     expect(
@@ -772,6 +962,7 @@ describe("the template rules", () => {
           now: NOW,
         }),
         NOW,
+        DEADLINE,
       ),
     ).toEqual({ allow: false, outcome: "bad_template" })
   })
@@ -786,7 +977,7 @@ describe("the template rules", () => {
         publicKey: key.spki.toString("base64"),
       },
     }
-    expect(await handlers["scep-challenge"](body, NOW)).toEqual({
+    expect(await handlers["scep-challenge"](body, NOW, DEADLINE)).toEqual({
       allow: false,
       outcome: "bad_body",
     })
@@ -795,7 +986,7 @@ describe("the template rules", () => {
       scepTransactionID: "t",
       x509CertificateRequest: { subject: {}, publicKey: key.spki.toString("base64") },
     }
-    expect(await handlers["scep-challenge"](noCn, NOW)).toEqual({
+    expect(await handlers["scep-challenge"](noCn, NOW, DEADLINE)).toEqual({
       allow: false,
       outcome: "bad_template",
     })
@@ -812,7 +1003,16 @@ describe("the operator script's certificate commands", () => {
       action: "bind-key",
       id,
       certificatePath: "/tmp/leaf.pem",
+      replace: false,
     })
+    expect(parseMailDeviceArgs(["bind-key", id, "/tmp/leaf.pem", "--replace"])).toEqual(
+      {
+        action: "bind-key",
+        id,
+        certificatePath: "/tmp/leaf.pem",
+        replace: true,
+      },
+    )
     expect(parseMailDeviceArgs(["unbind-key", id])).toEqual({
       action: "unbind-key",
       id,
@@ -834,12 +1034,37 @@ describe("the operator script's certificate commands", () => {
     )
   })
 
-  it("hashes the leaf's SubjectPublicKeyInfo, the first certificate in the file", () => {
-    const leaf = throwawayCertificate("/CN=leaf")
+  const clientAuth = ["extendedKeyUsage=clientAuth"]
+
+  it("hashes the leaf's SubjectPublicKeyInfo and reads its CN, from the first certificate in the file", () => {
+    const leaf = throwawayCertificate("/CN=C02ZK1ABCDEF/O=Probe", clientAuth)
     const other = throwawayCertificate("/CN=issuer")
-    expect(leafKeySha256(`${leaf.certPem}${other.certPem}`).equals(leaf.spkiSha)).toBe(
-      true,
-    )
-    expect(() => leafKeySha256("no certificate here")).toThrow(/no PEM certificate/)
+    const read = readLeaf(`${leaf.certPem}${other.certPem}`)
+    expect(read.keySha256.equals(leaf.spkiSha)).toBe(true)
+    expect(read.commonName).toBe("C02ZK1ABCDEF")
+    expect(
+      readLeaf(throwawayCertificate("/O=NoName", clientAuth).certPem).commonName,
+    ).toBeNull()
+    expect(() => readLeaf("no certificate here")).toThrow(/no PEM certificate/)
+  })
+
+  it.each([
+    ["no EKU at all", []],
+    ["serverAuth only", ["extendedKeyUsage=serverAuth"]],
+    ["emailProtection only", ["extendedKeyUsage=emailProtection"]],
+  ])(
+    "refuses a leaf with %s: the front would never sign it in",
+    (_label, extensions) => {
+      const leaf = throwawayCertificate("/CN=C02ZK1ABCDEF", extensions)
+      expect(() => readLeaf(leaf.certPem)).toThrow(/no clientAuth/)
+    },
+  )
+
+  it.each([
+    ["a DNS SAN", "subjectAltName=DNS:mail.example.com"],
+    ["an IP SAN", "subjectAltName=IP:192.0.2.1"],
+  ])("refuses a leaf with %s, which no ACME leaf has", (_label, san) => {
+    const leaf = throwawayCertificate("/CN=C02ZK1ABCDEF", [...clientAuth, san])
+    expect(() => readLeaf(leaf.certPem)).toThrow(/DNS or IP/)
   })
 })

@@ -82,16 +82,41 @@ const PERMIT_COLUMNS = sql`
 
 type Tx = Pick<Database, "execute">
 
+/** The handler's deadline passed before it could commit; nothing was written. */
+export class HookDeadlineExceeded extends Error {
+  constructor() {
+    super("ca hook deadline exceeded")
+  }
+}
+
+/** Milliseconds left before `deadline`, or a throw when none are. */
+function timeLeft(deadline: Date): number {
+  const left = deadline.getTime() - Date.now()
+  if (left <= 0) throw new HookDeadlineExceeded()
+  return left
+}
+
 /**
- * ⚠ BOUNDED INSIDE POSTGRES, NOT ONLY BY THE LISTENER'S TIMER. A handler the
- * listener has already answered must not commit later behind a lock queue.
+ * ⚠ ONE DEADLINE FOR THE WHOLE HANDLER, BOUNDED INSIDE POSTGRES. A handler the
+ * listener has already answered must never commit later: the key would be
+ * bound and the permit authorized while step-ca issued nothing. So before
+ * every statement, `lock_timeout` and `statement_timeout` are set to the time
+ * left (at least 1 ms: 0 means no limit), and the waits share one budget
+ * instead of each getting its own. The deadline starts when the listener read
+ * the request, so the wait for a pooled connection counts against it too.
+ *
  * `set_config(..., true)` is transaction-local, so PgBouncer never carries it
  * to the next client.
  */
-async function bounded(tx: Tx) {
-  await tx.execute(sql`
-    select set_config('lock_timeout', '2s', true),
-           set_config('statement_timeout', '4s', true)`)
+function budgeted(tx: Tx, deadline: Date): Tx {
+  const execute = async (query: Parameters<Tx["execute"]>[0]) => {
+    const ms = String(Math.max(1, Math.floor(timeLeft(deadline))))
+    await tx.execute(sql`
+      select set_config('lock_timeout', ${ms}, true),
+             set_config('statement_timeout', ${ms}, true)`)
+    return tx.execute(query)
+  }
+  return { execute } as unknown as Tx
 }
 
 async function lockPermit(tx: Tx, id: string): Promise<PermitRow | null> {
@@ -105,15 +130,24 @@ async function lockPermit(tx: Tx, id: string): Promise<PermitRow | null> {
 const sameBytes = (a: Buffer | null, b: Buffer) =>
   a !== null && a.length === b.length && timingSafeEqual(a, b)
 
-/** Runs one handler transaction; a unique violation is a refusal, never a 500. */
+/**
+ * Runs one handler transaction inside `deadline` (see `budgeted`); a unique
+ * violation is a refusal, never a 500.
+ *
+ * ⚠ THE CLOCK IS READ AGAIN BEFORE THE COMMIT. A last statement can finish
+ * inside its limit and still leave the deadline behind it; throwing here
+ * rolls the transaction back, so a late handler writes nothing.
+ */
 async function decide(
   db: Pick<Database, "transaction">,
+  deadline: Date,
   run: (tx: Tx) => Promise<HookDecision>,
 ): Promise<HookDecision> {
   try {
     return await db.transaction(async (tx) => {
-      await bounded(tx)
-      return run(tx)
+      const decision = await run(budgeted(tx, deadline))
+      timeLeft(deadline)
+      return decision
     })
   } catch (error) {
     if (isUniqueViolation(error)) return refuse("duplicate")
@@ -147,8 +181,8 @@ export interface AcmeAuthorizeRequest {
 type AcmeMode = "first" | "retry" | "conflict"
 
 /**
- * What a permit found by its nonce means for this request. `conflict` is an
- * authorized permit asked for a different key: either a real Mac arriving after
+ * What a permit found by its nonce means for this request. `conflict` is a
+ * live authorized permit asked for a different key: either a real Mac arriving after
  * someone who knew its nonce, or a second order from the same profile.
  */
 function acmeMode(permit: PermitRow, req: AcmeAuthorizeRequest): AcmeMode | null {
@@ -157,8 +191,10 @@ function acmeMode(permit: PermitRow, req: AcmeAuthorizeRequest): AcmeMode | null
   }
   if (permit.status === "open") return permit.live ? "first" : null
   if (permit.status !== "authorized") return null
-  if (!sameBytes(permit.key_sha256, req.keySha256)) return "conflict"
-  return permit.live ? "retry" : null
+  // ⚠ ONLY WHILE THE PERMIT LIVES. Past `expires_at` a second key is no
+  // permit at all: it changes nothing and clears nothing.
+  if (!permit.live) return null
+  return sameBytes(permit.key_sha256, req.keySha256) ? "retry" : "conflict"
 }
 
 /**
@@ -172,8 +208,9 @@ function acmeMode(permit: PermitRow, req: AcmeAuthorizeRequest): AcmeMode | null
 export async function authorizeAcme(
   db: Pick<Database, "transaction">,
   req: AcmeAuthorizeRequest,
+  deadline: Date,
 ): Promise<HookDecision> {
-  return decide(db, async (tx) => {
+  return decide(db, deadline, async (tx) => {
     const [seen] = (await tx.execute(sql`
       select ${PERMIT_COLUMNS} from authd.mail_device_cert_permits
        where nonce_sha256 = ${req.nonceSha256} and kind = 'acme'`)) as unknown as PermitRow[]
@@ -320,6 +357,9 @@ function scepChallengeMode(permit: PermitRow, req: ScepChallengeRequest) {
 async function lockScepPermit(tx: Tx, seen: PermitRow) {
   const [account] = await lockGateAccount(tx, seen.clerk_user_id)
   const permit = await lockPermit(tx, seen.id)
+  // ⚠ THE WORKSPACE CHECK IS A NO-OP HERE: it compares the account with
+  // itself, because a SCEP permit has no tenant until PR 4 stores one. The
+  // rest of the gate (active, every hold) is what this call is for.
   const refusal = bindRefusal(account, account?.tenant_id ?? null)
   return {
     permit: permit?.clerk_user_id === seen.clerk_user_id ? permit : null,
@@ -336,8 +376,9 @@ async function lockScepPermit(tx: Tx, seen: PermitRow) {
 export async function challengeScep(
   db: Pick<Database, "transaction">,
   req: ScepChallengeRequest,
+  deadline: Date,
 ): Promise<HookDecision> {
-  return decide(db, async (tx) => {
+  return decide(db, deadline, async (tx) => {
     const [seen] = (await tx.execute(sql`
       select ${PERMIT_COLUMNS} from authd.mail_device_cert_permits
        where challenge_hash = ${req.challengeSha256} and kind = 'scep'`)) as unknown as PermitRow[]
@@ -381,8 +422,9 @@ function scepAuthorizeMode(permit: PermitRow, req: ScepAuthorizeRequest) {
 export async function authorizeScep(
   db: Pick<Database, "transaction">,
   req: ScepAuthorizeRequest,
+  deadline: Date,
 ): Promise<HookDecision> {
-  return decide(db, async (tx) => {
+  return decide(db, deadline, async (tx) => {
     const [seen] = (await tx.execute(sql`
       select ${PERMIT_COLUMNS} from authd.mail_device_cert_permits
        where key_sha256 = ${req.keySha256} and kind = 'scep'`)) as unknown as PermitRow[]
@@ -410,8 +452,9 @@ export async function authorizeScep(
 export async function notifyScep(
   db: Pick<Database, "transaction">,
   req: { transactionId: string; keySha256: Buffer; certSha256: Buffer },
+  deadline: Date,
 ): Promise<HookDecision> {
-  return decide(db, async (tx) => {
+  return decide(db, deadline, async (tx) => {
     const updated = (await tx.execute(sql`
       update authd.mail_device_cert_permits
          set status = 'notified', issued_cert_sha256 = ${req.certSha256}, updated_at = now()

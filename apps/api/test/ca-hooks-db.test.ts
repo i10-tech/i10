@@ -1,10 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import type { SQL } from "drizzle-orm"
+import { PgDialect } from "drizzle-orm/pg-core"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { createHookHandlers } from "../src/ca-hooks/handlers.js"
+import { HANDLER_DEADLINE_MS } from "../src/ca-hooks/listener.js"
 import type { Database } from "../src/db/client.js"
 import { MailDeviceError } from "../src/mail-devices/code.js"
-import { createAcmePermit, sha256 } from "../src/mail-devices/permits.js"
+import {
+  createAcmePermit,
+  HookDeadlineExceeded,
+  sha256,
+} from "../src/mail-devices/permits.js"
 import { pruneCertBinds, pruneCertPermits } from "../src/mail-devices/prune.js"
 import { bindKey, unbindKey } from "../src/mail-devices/store.js"
 import {
@@ -36,10 +43,32 @@ const suite = URL ? describe : describe.skip
 let owner: ReturnType<typeof postgres>
 let api: ReturnType<typeof postgres>
 let db: Database
-let hooks: ReturnType<typeof createHookHandlers>
+type Handlers = ReturnType<typeof createHookHandlers>
+/** The handlers, with the listener's deadline unless a test names one. */
+let hooks: {
+  [K in keyof Handlers]: (
+    body: unknown,
+    now: Date,
+    deadline?: Date,
+  ) => ReturnType<Handlers[K]>
+}
+
+/** The listener's deadline for a request read now. */
+const deadlineFromNow = (ms = HANDLER_DEADLINE_MS) => new Date(Date.now() + ms)
+
+function withDeadlines(handlers: Handlers): typeof hooks {
+  return Object.fromEntries(
+    Object.entries(handlers).map(([kind, handler]) => [
+      kind,
+      (body: unknown, now: Date, deadline?: Date) =>
+        handler(body, now, deadline ?? deadlineFromNow()),
+    ]),
+  ) as typeof hooks
+}
 
 const sfx = crypto.randomUUID().slice(0, 8)
 const people: string[] = []
+const tenants: string[] = []
 const INTERMEDIATE_NOT_AFTER = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000)
 
 interface DeviceState {
@@ -128,20 +157,50 @@ async function enrolling(options: Parameters<typeof mac>[0] = {}) {
   return { ...m, ...opened, key, body }
 }
 
-const acme = (body: unknown) => hooks["acme-authorize"](body, new Date())
+const acme = (body: unknown, deadline?: Date) =>
+  hooks["acme-authorize"](body, new Date(), deadline)
+
+/** The operator's bind-key for `m`, with the CN its own certificate would carry. */
+const bind = (
+  m: { deviceId: string; serial: string },
+  keySha256: Buffer,
+  options: { commonName?: string | null; replace?: boolean } = {},
+) =>
+  bindKey(db, {
+    deviceId: m.deviceId,
+    keySha256,
+    commonName: options.commonName === undefined ? m.serial : options.commonName,
+    replace: options.replace ?? false,
+  })
+
+/** What a failed handler call threw: its SQLSTATE, the deadline, or the message. */
+async function hookFailure(run: Promise<unknown>): Promise<string> {
+  return run.then(
+    () => "returned",
+    (error: unknown) =>
+      error instanceof HookDeadlineExceeded
+        ? "deadline"
+        : String((error as { cause?: { code?: string } }).cause?.code ?? error),
+  )
+}
 
 suite("device CA webhook handlers against Postgres", () => {
   beforeAll(async () => {
     owner = postgres(URL!, { max: 3, onnotice: () => {} })
     api = postgres(API_URL!, { max: 8, onnotice: () => {} })
     db = drizzle({ client: api }) as unknown as Database
-    hooks = createHookHandlers({ db, intermediateNotAfter: INTERMEDIATE_NOT_AFTER })
+    hooks = withDeadlines(
+      createHookHandlers({ db, intermediateNotAfter: INTERMEDIATE_NOT_AFTER }),
+    )
   })
 
   afterAll(async () => {
     // Each account's delete cascades to its devices, permits and liveness rows.
     if (people.length > 0) {
       await owner`delete from authd.accounts where clerk_user_id = any(${`{${people.join(",")}}`}::text[])`
+    }
+    if (tenants.length > 0) {
+      await owner`delete from core.tenants where id = any(${`{${tenants.join(",")}}`}::uuid[])`
     }
     await api.end({ timeout: 5 })
     await owner.end({ timeout: 5 })
@@ -345,7 +404,7 @@ suite("device CA webhook handlers against Postgres", () => {
       const e = await enrolling()
       await acme(e.body())
       const operatorKey = freshKey()
-      await bindKey(db, { deviceId: e.deviceId, keySha256: operatorKey.sha })
+      await bind(e, operatorKey.sha, { replace: true })
       expect(await acme(e.body(freshKey()))).toMatchObject({
         allow: false,
         outcome: "key_conflict",
@@ -353,6 +412,25 @@ suite("device CA webhook handlers against Postgres", () => {
       expect((await device(e.deviceId)).cert_key_sha256?.equals(operatorKey.sha)).toBe(
         true,
       )
+    })
+
+    it("past the permit's ten minutes, a second key is no permit: it clears nothing and changes nothing", async () => {
+      const e = await enrolling()
+      await acme(e.body())
+      await liveness(e.deviceId)
+      await owner`update authd.mail_device_cert_permits
+                     set created_at = now() - interval '20 minutes', expires_at = now() - interval '1 second'
+                   where id = ${e.permitId}`
+      const before = await device(e.deviceId)
+      expect(await acme(e.body(freshKey()))).toEqual({
+        allow: false,
+        outcome: "no_permit",
+      })
+      const after = await device(e.deviceId)
+      expect(after.cert_key_sha256?.equals(e.key.sha)).toBe(true)
+      expect(after).toEqual(before)
+      expect(after.binds).toBe(1)
+      expect((await permit(e.permitId)).status).toBe("authorized")
     })
   })
 
@@ -417,7 +495,7 @@ suite("device CA webhook handlers against Postgres", () => {
         ),
       ).toBe("device_expired")
       const bound = await mac()
-      await bindKey(db, { deviceId: bound.deviceId, keySha256: freshKey().sha })
+      await bind(bound, freshKey().sha)
       expect(
         await failure(() => createAcmePermit(db, { deviceId: bound.deviceId })),
       ).toBe("device_key_bound")
@@ -631,7 +709,7 @@ suite("device CA webhook handlers against Postgres", () => {
       const m = await mac()
       await liveness(m.deviceId)
       const key = freshKey()
-      await bindKey(db, { deviceId: m.deviceId, keySha256: key.sha })
+      await bind(m, key.sha)
       let d = await device(m.deviceId)
       expect(d.cert_key_sha256?.equals(key.sha)).toBe(true)
       expect(d.first_used_at).not.toBeNull()
@@ -646,34 +724,20 @@ suite("device CA webhook handlers against Postgres", () => {
     })
 
     it("refuses a non-Mac, a dead code (without reviving it), a key in use and a missing device", async () => {
-      expect(
-        await failure(async () =>
-          bindKey(db, {
-            deviceId: (await mac({ platform: "ios" })).deviceId,
-            keySha256: freshKey().sha,
-          }),
-        ),
-      ).toBe("device_not_macos")
+      const ios = await mac({ platform: "ios" })
+      expect(await failure(() => bind(ios, freshKey().sha))).toBe("device_not_macos")
       const dead = await mac({ createdMinutesAgo: 11 })
-      expect(
-        await failure(() =>
-          bindKey(db, { deviceId: dead.deviceId, keySha256: freshKey().sha }),
-        ),
-      ).toBe("device_expired")
+      expect(await failure(() => bind(dead, freshKey().sha))).toBe("device_expired")
       expect((await device(dead.deviceId)).first_used_at).toBeNull()
 
       const key = freshKey()
-      await bindKey(db, { deviceId: (await mac()).deviceId, keySha256: key.sha })
+      await bind(await mac(), key.sha)
       const other = await mac()
-      expect(
-        await failure(() =>
-          bindKey(db, { deviceId: other.deviceId, keySha256: key.sha }),
-        ),
-      ).toBe("key_in_use")
+      expect(await failure(() => bind(other, key.sha))).toBe("key_in_use")
       expect((await device(other.deviceId)).cert_key_sha256).toBeNull()
       expect(
         await failure(() =>
-          bindKey(db, { deviceId: crypto.randomUUID(), keySha256: key.sha }),
+          bind({ deviceId: crypto.randomUUID(), serial: "X" }, key.sha),
         ),
       ).toBe("device_not_found")
       expect(await failure(() => unbindKey(db, { deviceId: "not-a-uuid" }))).toBe(
@@ -686,10 +750,70 @@ suite("device CA webhook handlers against Postgres", () => {
       await owner`update authd.mail_devices set first_used_at = now() - interval '3 days',
                          last_used_at = now() - interval '2 days' where id = ${m.deviceId}`
       const before = await device(m.deviceId)
-      await bindKey(db, { deviceId: m.deviceId, keySha256: freshKey().sha })
+      await bind(m, freshKey().sha)
       const after = await device(m.deviceId)
       expect(after.first_used_at).toEqual(before.first_used_at)
       expect(after.last_used_at).toEqual(before.last_used_at)
+    })
+
+    it("refuses a row that already has a key, unless --replace", async () => {
+      const m = await mac()
+      const first = freshKey()
+      await bind(m, first.sha)
+      await liveness(m.deviceId)
+      expect(await failure(() => bind(m, freshKey().sha))).toBe("device_key_bound")
+      expect((await device(m.deviceId)).cert_key_sha256?.equals(first.sha)).toBe(true)
+      expect((await device(m.deviceId)).binds).toBe(1)
+
+      const second = freshKey()
+      await bind(m, second.sha, { replace: true })
+      const d = await device(m.deviceId)
+      expect(d.cert_key_sha256?.equals(second.sha)).toBe(true)
+      expect(d.binds).toBe(0)
+    })
+
+    it("refuses a certificate whose CN is not the row's serial, and checks none when the row has no serial", async () => {
+      const m = await mac()
+      expect(
+        await failure(() => bind(m, freshKey().sha, { commonName: "C02OTHER" })),
+      ).toBe("serial_mismatch")
+      expect(await failure(() => bind(m, freshKey().sha, { commonName: null }))).toBe(
+        "serial_mismatch",
+      )
+      expect((await device(m.deviceId)).cert_key_sha256).toBeNull()
+
+      const unnamed = await mac({ serial: null })
+      await bind(unnamed, freshKey().sha, { commonName: "anything" })
+      expect((await device(unnamed.deviceId)).cert_key_sha256).not.toBeNull()
+    })
+
+    it.each([
+      ["suspended", "suspended_at = now()", "mailbox_suspended"],
+      ["on payment hold", "payment_hold_at = now()", "payment_hold"],
+      ["banned", "banned = true", "account_banned"],
+      ["inactive", "active = false", "account_inactive"],
+    ] as const)(
+      "runs the account gate: refuses an account that is %s",
+      async (_l, set, code) => {
+        const m = await mac()
+        await owner.unsafe(
+          `update authd.accounts set ${set} where clerk_user_id = $1`,
+          [m.person],
+        )
+        expect(await failure(() => bind(m, freshKey().sha))).toBe(code)
+        expect((await device(m.deviceId)).cert_key_sha256).toBeNull()
+      },
+    )
+
+    it("refuses a row whose workspace is no longer its account's", async () => {
+      const m = await mac()
+      const tenant = crypto.randomUUID()
+      tenants.push(tenant)
+      await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id)
+                  values (${tenant}, ${`cah-${label()}`}, 'cah', ${m.person})`
+      await owner`update authd.accounts set tenant_id = ${tenant} where clerk_user_id = ${m.person}`
+      expect(await failure(() => bind(m, freshKey().sha))).toBe("tenant_mismatch")
+      expect((await device(m.deviceId)).cert_key_sha256).toBeNull()
     })
   })
 
@@ -818,25 +942,126 @@ suite("device CA webhook handlers against Postgres", () => {
       }
     })
 
-    it("a lock held past the bound ends the transaction inside Postgres, not later", async () => {
+    it("a lock held past the deadline ends the transaction inside Postgres, not later", async () => {
       const e = await enrolling()
       const holder = await owner.reserve()
       try {
         await holder`begin`
         await holder`select 1 from authd.accounts where clerk_user_id = ${e.person} for update`
         const started = Date.now()
-        const outcome = await acme(e.body()).then(
-          () => "returned",
-          (error: unknown) =>
-            String((error as { cause?: { code?: string } }).cause?.code ?? error),
+        // Either limit may fire first: both are set to the time left.
+        expect(["55P03", "57014"]).toContain(
+          await hookFailure(acme(e.body(), deadlineFromNow(800))),
         )
-        expect(outcome).toBe("55P03")
-        expect(Date.now() - started).toBeLessThan(4000)
+        expect(Date.now() - started).toBeLessThan(1500)
       } finally {
         await holder`rollback`
         holder.release()
       }
       expect((await device(e.deviceId)).cert_key_sha256).toBeNull()
+    })
+
+    it("several waits share one deadline: each under a lock limit of its own, together past it, commit nothing", async () => {
+      const e = await enrolling()
+      const accountHolder = await owner.reserve()
+      const deviceHolder = await owner.reserve()
+      try {
+        await accountHolder`begin`
+        await accountHolder`select 1 from authd.accounts where clerk_user_id = ${e.person} for update`
+        await deviceHolder`begin`
+        await deviceHolder`select 1 from authd.mail_devices where id = ${e.deviceId} for update`
+        const started = Date.now()
+        let endedAt = 0
+        const pending = hookFailure(acme(e.body(), deadlineFromNow(1000))).finally(
+          () => {
+            endedAt = Date.now()
+          },
+        )
+        // 600 ms on the account and 600 more on the device: each far under the
+        // old 2 s per statement, together past the 1 s deadline.
+        await Bun.sleep(600)
+        await accountHolder`commit`
+        await Bun.sleep(600)
+        await deviceHolder`commit`
+        expect(["55P03", "57014"]).toContain(await pending)
+        // It ended at the deadline, while the device lock was still held.
+        expect(endedAt - started).toBeLessThan(1150)
+      } finally {
+        accountHolder.release()
+        deviceHolder.release()
+      }
+      expect((await device(e.deviceId)).cert_key_sha256).toBeNull()
+      expect((await permit(e.permitId)).status).toBe("open")
+    })
+
+    it("a handler that waits past its deadline for a pooled connection commits nothing", async () => {
+      const e = await enrolling()
+      const one = postgres(API_URL!, { max: 1, onnotice: () => {} })
+      try {
+        const busy = drizzle({ client: one }) as unknown as Database
+        const slow = withDeadlines(
+          createHookHandlers({
+            db: busy,
+            intermediateNotAfter: INTERMEDIATE_NOT_AFTER,
+          }),
+        )
+        // The pool's only connection is busy for 700 ms, past the 500 ms deadline.
+        // `.execute()` sends it now; a postgres.js query otherwise waits to be awaited.
+        const hog = one`select pg_sleep(0.7)`.execute()
+        await Bun.sleep(50)
+        const outcome = await hookFailure(
+          slow["acme-authorize"](e.body(), new Date(), deadlineFromNow(500)),
+        )
+        await hog
+        expect(outcome).toBe("deadline")
+      } finally {
+        await one.end({ timeout: 5 })
+      }
+      expect((await device(e.deviceId)).cert_key_sha256).toBeNull()
+      expect((await permit(e.permitId)).status).toBe("open")
+    })
+
+    it("a handler whose last statement ends after the deadline rolls back before it commits", async () => {
+      const e = await enrolling()
+      const deadline = deadlineFromNow(60_000)
+      const dialect = new PgDialect()
+      const realNow = Date.now
+      let late = false
+      // The permit's last write runs inside its limit; only then does the clock
+      // pass the deadline, as a slow reply on the way back would.
+      const watched = {
+        transaction: (run: (tx: unknown) => Promise<unknown>) =>
+          db.transaction((tx) =>
+            run({
+              execute: async (query: SQL) => {
+                const result = await tx.execute(query)
+                if (
+                  dialect.sqlToQuery(query).sql.includes("set status = 'authorized'")
+                ) {
+                  late = true
+                }
+                return result
+              },
+            }),
+          ),
+      } as unknown as Database
+      const handlers = withDeadlines(
+        createHookHandlers({
+          db: watched,
+          intermediateNotAfter: INTERMEDIATE_NOT_AFTER,
+        }),
+      )
+      try {
+        Date.now = () => (late ? deadline.getTime() + 1 : realNow())
+        expect(
+          await hookFailure(handlers["acme-authorize"](e.body(), new Date(), deadline)),
+        ).toBe("deadline")
+      } finally {
+        Date.now = realNow
+      }
+      expect(late).toBe(true)
+      expect((await device(e.deviceId)).cert_key_sha256).toBeNull()
+      expect((await permit(e.permitId)).status).toBe("open")
     })
   })
 })

@@ -688,27 +688,38 @@ export function isUniqueViolation(error: unknown): boolean {
 /**
  * The operator's `bind-key` (#383 PR 3, for a probe until PR 4): binds a
  * certificate key to a Mac in one transaction, accounts first, then the device.
- * Refuses a missing, non-`macos` or expired row, and a key another device holds.
+ *
+ * ⚠ IT CHECKS WHAT THE HOOKS WOULD, so a prod probe cannot bind what no real
+ * enrollment could: the account gate (`bindRefusal`), then the device rules
+ * (`deviceKeyRefusal`: the same person, address and workspace, `macos`, a
+ * code still alive, and the certificate's CN as the row's serial when the row
+ * has one). A row that already has a key is refused unless `replace`, and a
+ * key another device holds always is.
  */
 export async function bindKey(
   db: Pick<Database, "transaction">,
-  input: { deviceId: string; keySha256: Buffer },
+  input: {
+    deviceId: string
+    keySha256: Buffer
+    /** The leaf's subject CN, or null when it has none. */
+    commonName: string | null
+    replace: boolean
+  },
 ): Promise<void> {
   if (input.keySha256.length !== 32) throw new Error("keySha256 must be 32 bytes")
   try {
     await db.transaction(async (tx) => {
-      const device = await lockOwnedDevice(tx, input.deviceId)
-      if (device.platform !== "macos") {
-        throw new MailDeviceError(
-          "device_not_macos",
-          "Only a Mac binds a certificate key.",
-        )
-      }
+      const { account, device } = await lockOwnedDevice(tx, input.deviceId)
       // ⚠ NEVER RESURRECTS A DEAD CODE: binding claims the first use, so a code
       // that died unused (or idle) would otherwise come back to life.
-      if (!device.alive) {
-        throw new MailDeviceError("device_expired", "Mail device code has expired.")
-      }
+      const refusal =
+        bindRefusal(account, device.tenant_id) ??
+        deviceKeyRefusal(device, account!, {
+          // `replace` expects the key the row holds now, so only that check moves.
+          key: input.replace ? device.cert_key_sha256 : null,
+          serial: device.serial === null ? undefined : (input.commonName ?? ""),
+        })
+      if (refusal) throw refusal
       await setDeviceKey(tx, device.id, input.keySha256)
     })
   } catch (error) {
@@ -725,7 +736,7 @@ export async function unbindKey(
   input: { deviceId: string },
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
-    const device = await lockOwnedDevice(tx, input.deviceId)
+    const { device } = await lockOwnedDevice(tx, input.deviceId)
     return clearDeviceKey(tx, device.id)
   })
 }
@@ -734,11 +745,11 @@ export async function unbindKey(
 async function lockOwnedDevice(tx: Pick<Database, "execute">, deviceId: string) {
   const owner = await deviceOwner(tx, deviceId)
   if (owner) {
-    await lockGateAccount(tx, owner)
+    const [account] = await lockGateAccount(tx, owner)
     const device = await lockDevice(tx, deviceId)
     // The person id can never move under a device (`on update no action`), so
     // a changed owner here means the row was deleted and is gone.
-    if (device && device.clerk_user_id === owner) return device
+    if (device && device.clerk_user_id === owner) return { account, device }
   }
   throw new MailDeviceError("device_not_found", `No mail device ${deviceId}.`)
 }

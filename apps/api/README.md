@@ -21,16 +21,21 @@ request logger never sees a hook.
   compared in constant time against every hash in `CA_HOOK_TOKEN_HASHES`; the
   `X-Smallstep-Webhook-ID` configured for that path; and a body `timestamp`
   within 60 seconds of now. The headers are checked before any of the body is
-  read. Any failure, a wrong path or method, or a body over 64 KiB is a bare
-  `404`.
+  read. Any failure, or a wrong path or method, is a bare `404`. The one
+  exception is a body over 64 KiB: Bun's `maxRequestBodySize` answers it with a
+  bare `413` itself, before the listener runs when the length is declared.
 - **Answers:** `{"allow": true}` or `{"allow": false}`, the shape of step-ca's
   `webhook.ResponseBody`, never with an `error` a device could read. A fault of
-  ours is a `500`, and a handler past 5 seconds a `503`. step-ca retries once on
-  a 5xx and then refuses; it never issues on one. Each handler transaction also
-  sets `lock_timeout` 2 s and `statement_timeout` 4 s, so it cannot commit after
-  the listener has answered.
+  ours is a `500`, and a handler past its deadline or 5 seconds a `503`. step-ca
+  retries once on a 5xx and then refuses; it never issues on one.
+- **One deadline per hook:** 4 seconds from when the request was read, so it
+  counts the wait for a pooled connection too. Before every statement the
+  transaction sets `lock_timeout` and `statement_timeout` to the time left
+  (at least 1 ms), and it checks the clock again before it commits, so a
+  handler can never commit after the listener has answered.
 - **Logs:** the hook kind and the outcome only, never a header, the body or the
-  token. A second key for an authorized ACME permit is logged at `ERROR` with
+  token. The `not_found` and `unauthenticated` warnings are throttled to one
+  line per outcome per 10 seconds, the next one carrying a `suppressed` count. A second key for an authorized ACME permit is logged at `ERROR` with
   the permit's id.
 - **Off by default.** It starts only when all three hook settings are set and
   both TLS files exist. Otherwise it logs once why it is off
@@ -80,19 +85,28 @@ hash in the list, so the token rotates without an outage:
 any database work. Field names come from step-ca v0.30.2's source
 (`src/ca-hooks/body.ts`). `src/mail-devices/permits.ts` holds the transactions.
 
-| Hook             | Finds the permit by        | Refuses unless                                                                                                                                                                                                                                                                                                                                           | Then                                                                                                   |
-| ---------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `acme-authorize` | its `OU` nonce             | CN and attested serial are the permit's serial; one `OU`; no DNS, IP, email or URI name; only a permanent identifier SAN for the serial; no raw SAN, EKU or constraint extension; EKU `clientAuth` only; not a CA; `notBefore` within 5 minutes, `notAfter` at most 3 years and 5 minutes ahead and inside the intermediate; the account and device gate | binds the key, claims the device's first use, deletes its liveness rows, marks the permit `authorized` |
-| `scep-challenge` | the challenge's SHA-256    | the CSR's CN is the serial; the account passes the gate                                                                                                                                                                                                                                                                                                  | `challenged`, with the transaction id and the CSR key                                                  |
-| `scep-authorize` | the key                    | a `challenged` permit; the template as above but with no SANs, EKU `emailProtection` only, 7 days                                                                                                                                                                                                                                                        | `authorized`                                                                                           |
-| `scep-notify`    | transaction id and the key | an `authorized` permit                                                                                                                                                                                                                                                                                                                                   | `notified`, with the certificate's hash. A failure notice (no certificate) changes nothing             |
+| Hook             | Finds the permit by        | Refuses unless                                                                                                                                                                                                                                                                                                                                                                                                                         | Then                                                                                                   |
+| ---------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `acme-authorize` | its `OU` nonce             | CN and attested serial are the permit's serial; one `OU`; no DNS, IP, email or URI name; at most one SAN, a permanent identifier for the serial; no extension but the subjectAltName x509util encodes for it, byte for byte; key usage `digitalSignature` only; EKU `clientAuth` only; not a CA; `notBefore` within 5 minutes, `notAfter` at most 3 years and 5 minutes ahead and inside the intermediate; the account and device gate | binds the key, claims the device's first use, deletes its liveness rows, marks the permit `authorized` |
+| `scep-challenge` | the challenge's SHA-256    | the CSR's CN is the serial; the account passes the gate                                                                                                                                                                                                                                                                                                                                                                                | `challenged`, with the transaction id and the CSR key                                                  |
+| `scep-authorize` | the key                    | a `challenged` permit; the template as above but with no SANs and no extension, key usage `digitalSignature` and `keyEncipherment`, EKU `emailProtection` only, 7 days                                                                                                                                                                                                                                                                 | `authorized`                                                                                           |
+| `scep-notify`    | transaction id and the key | an `authorized` permit                                                                                                                                                                                                                                                                                                                                                                                                                 | `notified`, with the certificate's hash. A failure notice (no certificate) changes nothing             |
+
+The template is parsed strictly over the fields `x509util.Certificate` v0.77.1
+has: an unknown field, a subject field other than `commonName` and
+`organizationalUnit` (so never `extraNames`), or a SAN's `asn1Value` is
+refused, not dropped. Fields our templates never set (`serialNumber`,
+`subjectKeyId`, `authorityKeyId`, `ocspServer`, `issuingCertificateURL`,
+`crlDistributionPoints`, `policyIdentifiers`, `signatureAlgorithm`) must be
+empty.
 
 Every retry from step-ca re-runs every check. A unique violation (a key or a
 transaction id another permit holds) is `allow: false`, never a 5xx.
 
-An ACME request with the right nonce but a different key from the one an
+An ACME request with the right nonce but a different key from the one a live
 `authorized` permit bound clears that key from the device, deletes its
-liveness rows and expires the permit. So a real Mac arriving second undoes
+liveness rows and expires the permit. Once the permit's ten minutes are over,
+the same request is `no_permit` and changes nothing. So a real Mac arriving second undoes
 anyone who arrived first with its nonce. Without the nonce, no request can
 reach this path.
 
@@ -108,16 +122,20 @@ and PR 5 ship enrollment and management. Only `mint` needs
 `MAIL_DEVICE_CODE_KEYS`; every command needs `DATABASE_URL`.
 
 ```sh
-bun scripts/mail-device.ts bind-key <device id> <certificate.pem>
+bun scripts/mail-device.ts bind-key <device id> <certificate.pem> [--replace]
 bun scripts/mail-device.ts unbind-key <device id>
 bun scripts/mail-device.ts acme-permit <device id>
 ```
 
 - `bind-key` hashes the first certificate in the file (the leaf's
   SubjectPublicKeyInfo). It sets the key, claims the first use and deletes the
-  device's liveness rows, in one transaction, accounts first. It refuses a
-  missing row, a row that is not `macos`, and a code that has expired (so a
-  bind can never revive one). It also refuses a key another device holds.
+  device's liveness rows, in one transaction, accounts first. It checks what
+  the hooks would: a leaf with a `clientAuth` EKU and no DNS or IP SAN, whose
+  subject CN is the row's serial when the row has one; the account gate (active,
+  the device's workspace, no hold); a `macos` row that still matches its
+  account; and a code that has not expired (so a bind can never revive one). It
+  refuses a row that already has a key unless `--replace` is given, and a key
+  another device holds.
 - `unbind-key` clears the key and deletes the liveness rows. The mail front
   then closes the Mac's sessions at its next poll.
 - `acme-permit` opens a 10-minute ACME permit for a Mac that has a serial and

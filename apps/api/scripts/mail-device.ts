@@ -13,7 +13,7 @@
  *   bun scripts/mail-device.ts mint --email <addr> --platform <ios|ipados|macos> --name <n> [--model <m>] [--serial <s>]
  *   bun scripts/mail-device.ts list --email <addr>
  *   bun scripts/mail-device.ts revoke --id <uuid>
- *   bun scripts/mail-device.ts bind-key <device id> <certificate.pem>
+ *   bun scripts/mail-device.ts bind-key <device id> <certificate.pem> [--replace]
  *   bun scripts/mail-device.ts unbind-key <device id>
  *   bun scripts/mail-device.ts acme-permit <device id>
  *
@@ -23,6 +23,8 @@
  * `bind-key` and `unbind-key` (#383 PR 3) set or clear a Mac's certificate key
  * (SHA-256 of the leaf's SubjectPublicKeyInfo), claim the first use (bind only)
  * and delete the device's liveness rows, in one transaction, accounts first.
+ * `bind-key` checks what the hooks would (README, "Operator commands"), and
+ * replaces a key the row already has only with `--replace`.
  * `acme-permit` opens the permit step-ca's ACME `AUTHORIZING` hook needs; the
  * nonce goes in the certificate's `OU`.
  */
@@ -54,7 +56,7 @@ export type MailDeviceCommand =
     }
   | { action: "list"; email: string }
   | { action: "revoke"; id: string }
-  | { action: "bind-key"; id: string; certificatePath: string }
+  | { action: "bind-key"; id: string; certificatePath: string; replace: boolean }
   | { action: "unbind-key"; id: string }
   | { action: "acme-permit"; id: string }
 
@@ -62,7 +64,7 @@ const USAGE = `Usage:
   bun scripts/mail-device.ts mint --email <addr> --platform <ios|ipados|macos> --name <n> [--model <m>] [--serial <s>]
   bun scripts/mail-device.ts list --email <addr>
   bun scripts/mail-device.ts revoke --id <uuid>
-  bun scripts/mail-device.ts bind-key <device id> <certificate.pem>
+  bun scripts/mail-device.ts bind-key <device id> <certificate.pem> [--replace]
   bun scripts/mail-device.ts unbind-key <device id>
   bun scripts/mail-device.ts acme-permit <device id>`
 
@@ -82,15 +84,38 @@ function positional(action: string, rest: readonly string[], names: readonly str
   return rest
 }
 
+const CLIENT_AUTH = "1.3.6.1.5.5.7.3.2"
+
 /**
- * SHA-256 of the FIRST certificate's SubjectPublicKeyInfo DER in a PEM file:
- * the leaf, which is how a chain file is ordered.
+ * The FIRST certificate in a PEM file (the leaf, which is how a chain file is
+ * ordered): the SHA-256 of its SubjectPublicKeyInfo DER and its subject CN.
+ *
+ * ⚠ REFUSES A LEAF NO HOOK WOULD SIGN: one without a `clientAuth` EKU, which
+ * the front's TLS check needs, or with a DNS or IP SAN, which a server
+ * certificate has and an ACME leaf never does.
  */
-export function leafKeySha256(pem: string): Buffer {
+export function readLeaf(pem: string): {
+  keySha256: Buffer
+  commonName: string | null
+} {
   const first = /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/.exec(pem)
   if (!first) throw new Error("no PEM certificate found")
   const leaf = new X509Certificate(first[0])
-  return sha256(leaf.publicKey.export({ type: "spki", format: "der" }))
+  if (!(leaf.keyUsage ?? []).includes(CLIENT_AUTH)) {
+    throw new Error("the certificate has no clientAuth extended key usage")
+  }
+  const names = (leaf.subjectAltName ?? "").split(", ")
+  if (names.some((name) => name.startsWith("DNS:") || name.startsWith("IP Address:"))) {
+    throw new Error("the certificate has a DNS or IP subject alternative name")
+  }
+  const cn = leaf.subject
+    .split("\n")
+    .find((part) => part.startsWith("CN="))
+    ?.slice("CN=".length)
+  return {
+    keySha256: sha256(leaf.publicKey.export({ type: "spki", format: "der" })),
+    commonName: cn ?? null,
+  }
 }
 
 function takeFlags(argv: readonly string[]): Record<string, string> {
@@ -117,11 +142,13 @@ export function parseMailDeviceArgs(argv: readonly string[]): MailDeviceCommand 
     throw new Error(USAGE)
   }
   if (action === "bind-key") {
-    const [id, certificatePath] = positional(action, rest, [
-      "device id",
-      "certificate.pem",
-    ])
-    return { action, id: id!.toLowerCase(), certificatePath: certificatePath! }
+    const replace = rest.includes("--replace")
+    const [id, certificatePath] = positional(
+      action,
+      rest.filter((arg) => arg !== "--replace"),
+      ["device id", "certificate.pem"],
+    )
+    return { action, id: id!.toLowerCase(), certificatePath: certificatePath!, replace }
   }
   if (action === "unbind-key" || action === "acme-permit") {
     const [id] = positional(action, rest, ["device id"])
@@ -210,8 +237,15 @@ async function main() {
   const { sql, db } = createDb(databaseUrl)
   try {
     if (command.action === "bind-key") {
-      const keySha256 = leafKeySha256(readFileSync(command.certificatePath, "utf8"))
-      await bindKey(db, { deviceId: command.id, keySha256 })
+      const { keySha256, commonName } = readLeaf(
+        readFileSync(command.certificatePath, "utf8"),
+      )
+      await bindKey(db, {
+        deviceId: command.id,
+        keySha256,
+        commonName,
+        replace: command.replace,
+      })
       console.log(`Bound key ${keySha256.toString("hex")} to mail device ${command.id}`)
       return
     }

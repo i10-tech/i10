@@ -48,31 +48,82 @@ const goTime = z.string().transform((value, ctx) => {
 })
 const names = z.array(z.string()).nullish()
 
-const subject = z
+/**
+ * A CSR's subject, as the device sent it. Lenient: a CSR is never signed as
+ * it stands, only read for its CN and key.
+ */
+const requestSubject = z
+  .object({
+    commonName: z.string().optional(),
+  })
+  .nullish()
+
+/**
+ * A rendered template's subject. ⚠ STRICT: x509util writes every other field
+ * with `omitempty` (`x509util/name.go`), so our templates never send one, and
+ * `extraNames` (whose `2.5.4.3` would replace the CN) is refused.
+ */
+const templateSubject = z
   .object({
     commonName: z.string().optional(),
     organizationalUnit: names,
   })
+  .strict()
   .nullish()
 
-/** `x509util.Certificate` plus the leaf's validity and key: the AUTHORIZING body. */
-const certificateTemplate = z.object({
-  subject,
-  rawSubject: z.string().nullish(),
-  dnsNames: names,
-  emailAddresses: names,
-  ipAddresses: names,
-  uris: names,
-  sans: z.array(z.object({ type: z.string(), value: z.string() })).nullish(),
-  extensions: z.array(z.object({ id: z.string() })).nullish(),
-  extKeyUsage: names,
-  unknownExtKeyUsage: names,
-  basicConstraints: z.object({ isCA: z.boolean() }).nullish(),
-  nameConstraints: z.unknown().nullish(),
-  publicKey: base64Bytes,
-  notBefore: goTime,
-  notAfter: goTime,
-})
+/** A value our templates never set: null, absent, or empty. */
+const unset = z
+  .union([z.null(), z.literal(""), z.array(z.unknown()).length(0)])
+  .optional()
+
+/**
+ * `x509util.Certificate` v0.77.1 (`x509util/certificate.go`) plus the leaf's
+ * validity and key (`webhook.X509Certificate`): the AUTHORIZING body.
+ *
+ * ⚠ STRICT, OVER EXACTLY THOSE FIELDS: an unknown key is refused rather than
+ * dropped, so nothing that changes the signed certificate can pass unread.
+ * `version`, `issuer` and `publicKeyAlgorithm` are accepted as they come:
+ * `Certificate.GetCertificate` never copies them into the leaf.
+ */
+const certificateTemplate = z
+  .object({
+    version: z.number().optional(),
+    subject: templateSubject,
+    rawSubject: z.string().nullish(),
+    issuer: z.unknown().optional(),
+    serialNumber: unset,
+    dnsNames: names,
+    emailAddresses: names,
+    ipAddresses: names,
+    uris: names,
+    // ⚠ STRICT: `asn1Value` overrides `value` when the SAN is encoded.
+    sans: z.array(z.object({ type: z.string(), value: z.string() }).strict()).nullish(),
+    extensions: z
+      .array(
+        z
+          .object({ id: z.string(), critical: z.boolean(), value: base64Bytes })
+          .strict(),
+      )
+      .nullish(),
+    keyUsage: names,
+    extKeyUsage: names,
+    unknownExtKeyUsage: names,
+    subjectKeyId: unset,
+    authorityKeyId: unset,
+    ocspServer: unset,
+    issuingCertificateURL: unset,
+    crlDistributionPoints: unset,
+    policyIdentifiers: unset,
+    basicConstraints: z.object({ isCA: z.boolean() }).nullish(),
+    nameConstraints: z.unknown().nullish(),
+    signatureAlgorithm: z.literal("").optional(),
+    publicKey: base64Bytes,
+    publicKeyAlgorithm: z.string().optional(),
+    notBefore: goTime,
+    notAfter: goTime,
+    raw: z.null().optional(),
+  })
+  .strict()
 export type CertificateTemplate = z.infer<typeof certificateTemplate>
 
 const envelope = z.object({ timestamp: goTime })
@@ -85,7 +136,7 @@ export const acmeAuthorizeBody = envelope.extend({
 export const scepChallengeBody = envelope.extend({
   scepChallenge: z.string().min(1).max(255),
   scepTransactionID: z.string().min(1).max(255),
-  x509CertificateRequest: z.object({ subject, publicKey: base64Bytes }),
+  x509CertificateRequest: z.object({ subject: requestSubject, publicKey: base64Bytes }),
 })
 
 export const scepAuthorizeBody = envelope.extend({
@@ -134,21 +185,11 @@ export function issuedCertificate(
 
 export const SKEW_MS = 5 * 60 * 1000
 
-/**
- * Raw extensions a template must never add: they would carry a name or a usage
- * past the checks on `sans` and `extKeyUsage` (SAN, EKU, basic constraints,
- * name constraints).
- */
-const RAW_EXTENSIONS_REFUSED = new Set([
-  "2.5.29.17",
-  "2.5.29.37",
-  "2.5.29.19",
-  "2.5.29.30",
-])
-
 export interface TemplateRules {
   /** The serial the subject CN must equal (and a permanent identifier SAN, when allowed). */
   serial: string
+  /** The exact key usage list, as x509util names them (order does not matter). */
+  keyUsage: readonly string[]
   /** The exact EKU list, as step-ca names them. */
   extKeyUsage: readonly string[]
   /** ACME only: the `device-attest-01` permanent identifier SAN. */
@@ -161,6 +202,65 @@ export interface TemplateRules {
 
 const isEmpty = (list: readonly unknown[] | null | undefined) =>
   !list || list.length === 0
+
+/** The same names in any order; null or absent is the empty list. */
+function sameNames(
+  got: readonly string[] | null | undefined,
+  wanted: readonly string[],
+) {
+  const a = [...(got ?? [])].sort()
+  const b = [...wanted].sort()
+  return a.length === b.length && a.every((name, i) => name === b[i])
+}
+
+const SUBJECT_ALT_NAME = "2.5.29.17"
+
+/** DER with a short-form length: a bounded serial never needs a longer one. */
+function der(tag: number, content: Buffer): Buffer {
+  if (content.length > 127) throw new Error("content too long for a short length")
+  return Buffer.concat([Buffer.from([tag, content.length]), content])
+}
+
+/** `1.3.6.1.5.5.7.8.3`, `id-on-permanentIdentifier` (RFC 4043). */
+const PERMANENT_IDENTIFIER_OID = Buffer.from("06082b06010505070803", "hex")
+
+/**
+ * The subjectAltName extension value x509util v0.77.1 writes for one
+ * `permanentIdentifier` SAN (`createSubjectAltNameExtension`, `marshalOtherName`):
+ * `SEQUENCE { [0] { OID, [0] { SEQUENCE { UTF8String serial } } } }`.
+ */
+export function permanentIdentifierSanDer(serial: string): Buffer {
+  const identifier = der(0x30, der(0x0c, Buffer.from(serial, "utf8")))
+  const otherName = der(
+    0xa0,
+    Buffer.concat([PERMANENT_IDENTIFIER_OID, der(0xa0, identifier)]),
+  )
+  return der(0x30, otherName)
+}
+
+/**
+ * Whether `extensions` is exactly what x509util adds by itself for the checked
+ * `sans`, and nothing else.
+ *
+ * ⚠ A TEMPLATE MAY ADD NO EXTENSION. The one a rendered template carries is
+ * the subjectAltName x509util encodes for a `permanentIdentifier` SAN
+ * (`newCertificateWithOptions`, because Go's library cannot), and the signed
+ * certificate then takes its names from that extension and not from `sans`
+ * (`GetCertificate`). So its bytes are compared with our own encoding of the
+ * serial, never just its id.
+ */
+function extensionsAllowed(cert: CertificateTemplate, serial: string): boolean {
+  const extensions = cert.extensions ?? []
+  if (isEmpty(cert.sans)) return extensions.length === 0
+  const [only] = extensions
+  return (
+    extensions.length === 1 &&
+    only !== undefined &&
+    only.id === SUBJECT_ALT_NAME &&
+    !only.critical &&
+    only.value.equals(permanentIdentifierSanDer(serial))
+  )
+}
 
 /**
  * Why a rendered template may not be signed, or null when it may. A fixed
@@ -183,21 +283,18 @@ export function templateRefusal(
   ) {
     return "names"
   }
-  for (const san of cert.sans ?? []) {
+  const sans = cert.sans ?? []
+  if (sans.length > 1) return "sans"
+  for (const san of sans) {
     const allowed =
       rules.permanentIdentifierSan &&
       san.type === "permanentIdentifier" &&
       san.value === rules.serial
     if (!allowed) return "sans"
   }
-  if ((cert.extensions ?? []).some((ext) => RAW_EXTENSIONS_REFUSED.has(ext.id))) {
-    return "raw_extension"
-  }
-  const ekus = [...(cert.extKeyUsage ?? [])].sort()
-  const wanted = [...rules.extKeyUsage].sort()
-  if (ekus.length !== wanted.length || ekus.some((eku, i) => eku !== wanted[i])) {
-    return "ext_key_usage"
-  }
+  if (!extensionsAllowed(cert, rules.serial)) return "extension"
+  if (!sameNames(cert.keyUsage, rules.keyUsage)) return "key_usage"
+  if (!sameNames(cert.extKeyUsage, rules.extKeyUsage)) return "ext_key_usage"
   if (!isEmpty(cert.unknownExtKeyUsage)) return "ext_key_usage"
   if (cert.basicConstraints?.isCA || cert.nameConstraints) return "ca"
 

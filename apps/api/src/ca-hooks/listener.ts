@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs"
 import { timingSafeEqual } from "node:crypto"
-import { sha256, type HookDecision } from "../mail-devices/permits.js"
+import {
+  HookDeadlineExceeded,
+  sha256,
+  type HookDecision,
+} from "../mail-devices/permits.js"
 import { bodyTimestamp } from "./body.js"
 import { CA_HOOK_KINDS, type CaHookKind } from "./config.js"
 import type { HookHandler } from "./handlers.js"
@@ -15,8 +19,14 @@ import type { HookHandler } from "./handlers.js"
  *
  * ⚠ EVERY AUTHENTICATION FAILURE IS THE SAME BARE 404, checked before a byte of
  * the body is read: a wrong path or method, a missing or wrong bearer token, a
- * webhook id that is not this path's, a body past 64 KiB, a body that is not
- * JSON, or a `timestamp` more than 60 seconds from now. Nothing says which.
+ * webhook id that is not this path's, a body that is not JSON, or a
+ * `timestamp` more than 60 seconds from now. Nothing says which.
+ *
+ * ⚠ THE ONE EXCEPTION: A BODY PAST 64 KiB. `maxRequestBodySize` makes Bun
+ * answer a bare 413 itself, before this `fetch` runs when the length is
+ * declared, and while the body streams in when it is not. It says nothing a
+ * caller did not send, and it keeps a large body from ever being buffered.
+ * `readCapped` still answers 404 for one that reaches it.
  *
  * ⚠ IT LOGS THE HOOK KIND AND THE OUTCOME, NEVER A HEADER, THE BODY OR THE TOKEN.
  */
@@ -24,6 +34,14 @@ import type { HookHandler } from "./handlers.js"
 export const MAX_BODY_BYTES = 64 * 1024
 export const TIMESTAMP_WINDOW_MS = 60 * 1000
 export const HANDLER_TIMEOUT_MS = 5 * 1000
+/**
+ * When a handler's transaction must have ended, from the moment the request
+ * was read: inside the listener's own 5 s, so a handler is never still able
+ * to commit after its caller was answered (permits.ts `decide`).
+ */
+export const HANDLER_DEADLINE_MS = 4 * 1000
+/** At most one warn line per outcome in this window; the rest are counted. */
+export const WARN_WINDOW_MS = 10 * 1000
 /** A bearer token is one header-safe word; anything longer is not ours. */
 const BEARER = /^Bearer ([\x21-\x7e]{16,512})$/
 
@@ -43,6 +61,28 @@ export interface CaHooksDeps {
 }
 
 const notFound = () => new Response(null, { status: 404 })
+
+/**
+ * The unauthenticated outcomes, which anyone who reaches the port can cause:
+ * one line per outcome per window, the next carrying how many were dropped,
+ * so a scan cannot flood the log.
+ */
+function throttledWarn(log: HookLog, now: () => Date) {
+  const windows = new Map<string, { since: number; suppressed: number }>()
+  return (fields: { hook: string; outcome: string }) => {
+    const at = now().getTime()
+    const seen = windows.get(fields.outcome)
+    if (seen && at - seen.since < WARN_WINDOW_MS) {
+      seen.suppressed++
+      return
+    }
+    windows.set(fields.outcome, { since: at, suppressed: 0 })
+    log.warn(
+      seen?.suppressed ? { ...fields, suppressed: seen.suppressed } : fields,
+      "ca hook",
+    )
+  }
+}
 
 /**
  * True when one of the token hashes matches. Compares against EVERY hash, so
@@ -112,12 +152,13 @@ export function createCaHooksFetch(
 ): (request: Request) => Promise<Response> {
   const now = deps.now ?? (() => new Date())
   const timeoutMs = deps.timeoutMs ?? HANDLER_TIMEOUT_MS
+  const warnUnauthenticated = throttledWarn(deps.log, now)
 
   return async (request) => {
     const url = new URL(request.url)
     const kind = url.search === "" ? KIND_BY_PATH.get(url.pathname) : undefined
     if (!kind || request.method !== "POST") {
-      deps.log.warn({ hook: "unknown", outcome: "not_found" }, "ca hook")
+      warnUnauthenticated({ hook: "unknown", outcome: "not_found" })
       return notFound()
     }
     // ⚠ BOTH CHECKS RUN, so a right token with a wrong id costs the same as neither.
@@ -127,7 +168,7 @@ export function createCaHooksFetch(
       deps.webhookIds[kind],
     )
     if (!tokenOk || !idOk) {
-      deps.log.warn({ hook: kind, outcome: "unauthenticated" }, "ca hook")
+      warnUnauthenticated({ hook: kind, outcome: "unauthenticated" })
       return notFound()
     }
 
@@ -142,16 +183,21 @@ export function createCaHooksFetch(
 
     let decision: HookDecision
     try {
-      decision = await withTimeout(deps.handlers[kind](body, started), timeoutMs)
+      const deadline = new Date(started.getTime() + HANDLER_DEADLINE_MS)
+      decision = await withTimeout(
+        deps.handlers[kind](body, started, deadline),
+        timeoutMs,
+      )
     } catch (error) {
       // ⚠ NEVER THE ERROR OBJECT. A driver error can carry the query's
       // parameters (key hashes, a serial); its SQLSTATE is all a reader needs.
       const code = error as { code?: unknown; cause?: { code?: unknown } } | null
       const sqlstate = typeof code?.code === "string" ? code.code : code?.cause?.code
-      const outcome = error instanceof HookTimeout ? "timeout" : "error"
+      const late = error instanceof HookTimeout || error instanceof HookDeadlineExceeded
+      const outcome = late ? "timeout" : "error"
       deps.log.error({ hook: kind, outcome, sqlstate }, "ca hook failed")
       // A 5xx, which step-ca retries once and then refuses: it never issues on one.
-      return new Response(null, { status: error instanceof HookTimeout ? 503 : 500 })
+      return new Response(null, { status: late ? 503 : 500 })
     }
 
     if (
@@ -222,6 +268,7 @@ export function startCaHooksListener(
     server = Bun.serve({
       port: config.port,
       tls: { cert: readFileSync(config.certFile), key: readFileSync(config.keyFile) },
+      // Bun's own bare 413 past this, the one answer that is not a 404 (above).
       maxRequestBodySize: MAX_BODY_BYTES,
       fetch,
       // Never Bun's default error page, which prints the error.
