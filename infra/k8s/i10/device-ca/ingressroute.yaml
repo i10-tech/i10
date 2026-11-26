@@ -37,6 +37,11 @@ spec:
     average: 30
     period: 1m
     burst: 30
+    # One IPv6 subscriber is a /64 (the mail front counts the same way), so a
+    # single host cannot become 2^64 clients and spend the host-wide budget.
+    sourceCriterion:
+      ipStrategy:
+        ipv6Subnet: 64
 ---
 # ⚠ FOR THE WHOLE HOST, WHICH IS WHAT BOUNDS THE VOLUME. A per-address limit
 # alone lets many addresses fill badger: every new-nonce, new-account and
@@ -67,6 +72,9 @@ metadata:
 spec:
   inFlightReq:
     amount: 4
+    sourceCriterion:
+      ipStrategy:
+        ipv6Subnet: 64
 ---
 # Every hook can hold a request for up to the API's 4-second deadline (twice,
 # with step-ca's retry), so slow requests are what would pile up.

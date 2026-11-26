@@ -151,6 +151,18 @@ admin surface and every issuance asks the API; the API's listener answers
 anything without the relay's token with a bare 404. The egress half is real:
 this pod reaches nothing else.
 
+⚠ **Traefik is not kept out by the token.** The Traefik chart's cluster-wide RBAC
+lets it read every Secret, and its CRD provider caches them, so the public proxy
+holds `CA_HOOK_TOKEN` and the device intermediate key in memory. It also
+terminates TLS for `ca.i10.tech`, so it sees the permit nonce in a CSR, and so
+does Cloudflare while `ca.i10.tech` is still served by the proxied wildcard.
+A Traefik compromise can therefore bind a key to a Mac that is enrolling at that
+moment, exactly like the design's "anyone who can read Secrets in `i10-prod`"
+(it already has every database password). The token keeps every other pod out.
+The fix is on the psl side: namespaced RBAC for Traefik with
+`rbac.secretResourceNames` limited to its TLS Secrets, and a port-scoped
+`allow-traefik` for `i10-prod`.
+
 ## Rollout
 
 The manifests are safe in any order Argo syncs them; the list below is the

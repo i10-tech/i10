@@ -204,6 +204,14 @@ spec:
 # The listener does not rely on this file: it answers anything without the
 # relay's bearer token, the right webhook id and a fresh timestamp with a bare
 # 404, and no IngressRoute names its Service.
+#
+# ⚠ AND TRAEFIK ALREADY HOLDS THE TOKEN. The Traefik chart's cluster-wide RBAC lets it
+# get/list/watch every Secret, and its CRD provider keeps an informer of them, so the
+# internet-facing proxy has CA_HOOK_TOKEN and the device intermediate key in memory, and
+# it terminates TLS for ca.i10.tech, so it sees the permit nonce in a CSR. A Traefik
+# compromise is therefore in the design's "anyone who can read Secrets in i10-prod" set
+# (section 11), as it already is for every database password. The token keeps every
+# OTHER pod out. Narrowing Traefik's RBAC to its TLS Secrets is a psl-repo follow-up.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

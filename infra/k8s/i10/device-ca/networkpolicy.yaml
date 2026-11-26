@@ -10,7 +10,15 @@
 # relay listens on loopback only, and every issuance asks the API, which binds
 # a key only to an open permit. The same is true of the API's 3443 (see
 # api-ca-hooks-clients in workloads/networkpolicy.yaml): reachable by those two
-# namespaces too, and useless without the relay's bearer token.
+# namespaces too, and useless to them without the relay's bearer token.
+#
+# ⚠ AND TRAEFIK ALREADY HOLDS THE TOKEN. The Traefik chart's cluster-wide RBAC lets it
+# get/list/watch every Secret, and its CRD provider keeps an informer of them, so the
+# internet-facing proxy has CA_HOOK_TOKEN and the device intermediate key in memory, and
+# it terminates TLS for ca.i10.tech, so it sees the permit nonce in a CSR. A Traefik
+# compromise is therefore in the design's "anyone who can read Secrets in i10-prod" set
+# (section 11), as it already is for every database password. The token keeps every
+# OTHER pod out. Narrowing Traefik's RBAC to its TLS Secrets is a psl-repo follow-up.
 #
 # ⚠ THE EGRESS HALF IS REAL. With `Egress` in policyTypes, this pod may open
 # connections to the API's hooks listener and to cluster DNS, and nowhere else:

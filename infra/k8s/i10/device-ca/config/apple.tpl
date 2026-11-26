@@ -2,8 +2,10 @@
   The `apple` ACME provisioner's certificate: a Mac's Secure Enclave key,
   attested by device-attest-01. README.md, "The two templates".
 
-  CN is the attested serial (the order's one permanent identifier, which the
-  challenge checked against Apple's attestation), and the CSR's one OU is the
+  CN is the order's one permanent identifier, which the challenge checked
+  against Apple's attestation. step-ca's `apple` format accepts the serial OR
+  the UDID there (acme/challenge.go); the API binds only when it equals the
+  permit's serial, so PR 4's payload must name the serial. The CSR's one OU is the
   permit's nonce. The permanent identifier is the only SAN: never the CSR's DNS
   names. clientAuth only. The API's AUTHORIZING hook refuses anything else
   (apps/api/src/ca-hooks/body.ts).
