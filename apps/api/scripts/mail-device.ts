@@ -37,15 +37,19 @@ import { createDb } from "../src/db/client.js"
 import { MailDeviceError, parseMailDeviceCodeKeys } from "../src/mail-devices/code.js"
 import { createAcmePermit, sha256 } from "../src/mail-devices/permits.js"
 import {
+  DEVICE_PAGE_MAX,
   MAIL_DEVICE_PLATFORMS,
   accountByEmail,
+  decodeDeviceCursor,
   bindKey,
-  deviceTenantForOperator,
-  list,
+  deviceOwner,
+  listDevices,
   mint,
   revoke,
   unbindKey,
+  type DeviceCursor,
   type MailDevicePlatform,
+  type MailDeviceRow,
 } from "../src/mail-devices/store.js"
 
 export type MailDeviceCommand =
@@ -308,10 +312,18 @@ async function main() {
         console.error(`No authd.accounts row found for ${command.email}`)
         process.exit(1)
       }
-      const devices = await list(db, {
-        tenantId: account.tenantId,
-        clerkUserId: account.clerkUserId,
-      })
+      // Every device of this person, not just the first page.
+      const devices: MailDeviceRow[] = []
+      let cursor: DeviceCursor | null = null
+      do {
+        const page = await listDevices(db, {
+          scope: { kind: "own", clerkUserId: account.clerkUserId },
+          cursor,
+          limit: DEVICE_PAGE_MAX,
+        })
+        devices.push(...page.devices)
+        cursor = page.nextCursor === null ? null : decodeDeviceCursor(page.nextCursor)
+      } while (cursor)
       console.log(
         JSON.stringify(
           devices.map((d) => ({
@@ -334,14 +346,14 @@ async function main() {
     }
 
     if (command.action === "revoke") {
-      const lookup = await deviceTenantForOperator(db, command.id)
-      if (!lookup.exists) {
+      const owner = await deviceOwner(db, command.id)
+      if (!owner) {
         console.error(`No mail device found with id ${command.id}`)
         process.exit(1)
       }
       const deleted = await revoke(db, {
-        tenantId: lookup.tenantId,
         deviceId: command.id,
+        scope: { kind: "own", clerkUserId: owner },
       })
       if (!deleted) {
         console.error(`Mail device ${command.id} was already revoked`)

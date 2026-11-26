@@ -2,6 +2,13 @@ import { defineShape } from "@/lib/shapes"
 import { MAX_SKELETON_ROWS } from "@/lib/list-counts"
 import { aliasNotes, type MailboxAliasList } from "@/lib/mailbox-aliases"
 import {
+  DEVICES_FALLBACK,
+  devicesShapeOf,
+  parseDevicesShape,
+  type DevicesRead,
+  type DevicesShape,
+} from "@/lib/mail-devices"
+import {
   exportView,
   importView,
   type ExportView,
@@ -28,6 +35,8 @@ export interface MailboxDetailData {
   /** The domains the workspace hosts mailboxes on, for Add alias. Admins only. */
   domains: readonly string[]
   transfer: TransferSnapshot
+  /** The devices that sign in to this mailbox: its owner's and admins' to see. */
+  devices: DevicesRead
   isAdmin: boolean
   /** From the server, so the render and its hydration agree on the clock. */
   renderedAt: string
@@ -35,7 +44,7 @@ export interface MailboxDetailData {
 
 export type TransferShapeState = "hidden" | "unavailable" | "unreadable" | "ok"
 
-export interface MailboxDetailShape {
+export interface MailboxDetailShape extends DevicesShape {
   admin: boolean
   /** The hero's button: suspend or resume, for an admin of a live mailbox. */
   action: "none" | "suspend" | "resume"
@@ -144,12 +153,13 @@ const mailboxDetailFallback: MailboxDetailShape = {
   exportKind: "none",
   importKind: "none",
   danger: true,
+  ...DEVICES_FALLBACK,
 }
 
 export const mailboxDetailShape = defineShape<MailboxDetailShape, MailboxDetailData>({
   page: "mailbox-detail",
   fallback: mailboxDetailFallback,
-  of: ({ mailbox, aliases, domains, transfer, isAdmin, renderedAt }) => {
+  of: ({ mailbox, aliases, domains, transfer, devices, isAdmin, renderedAt }) => {
     const notes = aliasNotes({ mailbox, list: aliases, domains, isAdmin })
     const ok = transfer.state === "ok"
     return {
@@ -162,6 +172,7 @@ export const mailboxDetailShape = defineShape<MailboxDetailShape, MailboxDetailD
       transfer: transferState(transfer),
       exportKind: exportView(ok ? transfer.export : null).kind,
       importKind: importView(ok ? transfer.import : null).kind,
+      ...devicesShapeOf(devices),
     }
   },
   parse: (raw) => {
@@ -177,7 +188,16 @@ export const mailboxDetailShape = defineShape<MailboxDetailShape, MailboxDetailD
     const transfer = pick(r.transfer, TRANSFER_STATES)
     const exportKind = pick(r.exportKind, EXPORT_KINDS)
     const importKind = pick(r.importKind, IMPORT_KINDS)
-    if (!action || !note || !aliases || !transfer || !exportKind || !importKind) {
+    const devices = parseDevicesShape(r)
+    if (
+      !action ||
+      !note ||
+      !aliases ||
+      !transfer ||
+      !exportKind ||
+      !importKind ||
+      !devices
+    ) {
       return null
     }
     return {
@@ -195,6 +215,7 @@ export const mailboxDetailShape = defineShape<MailboxDetailShape, MailboxDetailD
       exportKind,
       importKind,
       danger: r.danger === true,
+      ...devices,
     }
   },
 })

@@ -123,6 +123,7 @@ export const PAGE_VIEWS = [
           settings: { providers: [], passkeys: false, minLength: 8 },
           billing: null,
           clerkEnabled: false,
+          devices: { state: "hidden" as const },
         }),
       },
     ],

@@ -21,6 +21,7 @@ import { RememberShape, useRecordShape } from "@/components/list/remembered-shap
 import { useMailboxActions } from "@/components/mailbox-actions"
 import { MailboxAliases } from "@/components/mailbox-aliases"
 import { MailboxTransfer } from "@/components/mailbox-transfer"
+import { MailDevices } from "@/components/mail-devices"
 import { Time } from "@/components/time"
 import {
   availableActions,
@@ -220,6 +221,12 @@ export function MailboxDetailView({
                   isAdmin,
                 }
               }
+            />
+
+            <MailDevices
+              on="mailbox"
+              shape={shape}
+              data={data && { read: data.devices, address: data.mailbox.address }}
             />
 
             <MailboxTransfer

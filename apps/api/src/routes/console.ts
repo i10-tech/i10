@@ -14,6 +14,7 @@ import { mountMailboxes } from "./console/mailboxes.js"
 import { mountMailDeviceEnrollments } from "./console/mail-device-enrollments.js"
 import { mountMailboxAdmin } from "./console/mailbox-admin.js"
 import { mountMailboxAliases } from "./console/mailbox-aliases.js"
+import { mountMailDevices } from "./console/mail-devices.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountTemplates } from "./console/templates.js"
@@ -268,9 +269,10 @@ export function createConsole(deps?: ConsoleDeps) {
   mountMailboxAdmin(app, d)
   mountMailboxAliases(app, d)
   mountMailboxes(app, d)
-  // ⚠ BEFORE any `/mail-devices/:id` route (PR 5 adds routes/console/mail-devices.ts),
+  // ⚠ BEFORE the `/mail-devices/:id` routes (routes/console/mail-devices.ts),
   // so `/mail-devices/enrollments` never matches `:id`.
   mountMailDeviceEnrollments(app, d)
+  mountMailDevices(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)

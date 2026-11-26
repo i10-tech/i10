@@ -27,7 +27,7 @@ import {
 import { pruneMailDevices } from "../src/mail-devices/prune.js"
 import {
   endFor,
-  list,
+  listDevices,
   mint,
   raiseConnectionEpochAndEndDevices,
   raiseEpochAndEndDevices,
@@ -144,6 +144,20 @@ suite("mail device store and revocation paths against Postgres", () => {
       await owner`select id::text as id from authd.mail_devices where clerk_user_id = ${userId} order by id`
     ).map((r) => r.id as string)
 
+  const workspaceDevices = async (tenantId: string, clerkUserId?: string) =>
+    (
+      await listDevices(db, {
+        scope: { kind: "workspace", tenantId, ...(clerkUserId ? { clerkUserId } : {}) },
+        limit: 100,
+      })
+    ).devices
+  const ownDevices = async (clerkUserId: string) =>
+    (await listDevices(db, { scope: { kind: "own", clerkUserId }, limit: 100 })).devices
+  const revokeIn = async (tenantId: string, deviceId: string) =>
+    (await revoke(db, { deviceId, scope: { kind: "workspace", tenantId } })) !== null
+  const revokeOwn = async (clerkUserId: string, deviceId: string) =>
+    (await revoke(db, { deviceId, scope: { kind: "own", clerkUserId } })) !== null
+
   const seedAccounts = async () => {
     await owner`delete from authd.mail_devices where clerk_user_id = any(${allUsers})`
     await owner`delete from authd.managed_accounts where clerk_user_id = any(${allUsers})`
@@ -199,17 +213,17 @@ suite("mail device store and revocation paths against Postgres", () => {
     ).toBe(true)
 
     // Tenant boundary on list & revoke: rival cannot see or delete acme's device.
-    expect(await list(db, { tenantId: acme, clerkUserId: ada })).toHaveLength(1)
-    expect(await list(db, { tenantId: rival, clerkUserId: ada })).toHaveLength(0)
-    expect(await revoke(db, { tenantId: rival, deviceId: device.id })).toBe(false)
-    expect(await list(db, { tenantId: acme, clerkUserId: ada })).toHaveLength(1)
+    expect(await workspaceDevices(acme, ada)).toHaveLength(1)
+    expect(await workspaceDevices(rival, ada)).toHaveLength(0)
+    expect(await revokeIn(rival, device.id)).toBe(false)
+    expect(await workspaceDevices(acme, ada)).toHaveLength(1)
 
     // Null-tenant boundary: systemUser (tenant_id = null) is isolated from acme.
     const sysDev = await mintFor(systemUser, null, "Sys iPad")
-    expect(await list(db, { tenantId: null, clerkUserId: systemUser })).toHaveLength(1)
-    expect(await list(db, { tenantId: acme, clerkUserId: systemUser })).toHaveLength(0)
-    expect(await revoke(db, { tenantId: acme, deviceId: sysDev.device.id })).toBe(false)
-    expect(await revoke(db, { tenantId: null, deviceId: sysDev.device.id })).toBe(true)
+    expect(await ownDevices(systemUser)).toHaveLength(1)
+    expect(await workspaceDevices(acme, systemUser)).toHaveLength(0)
+    expect(await revokeIn(acme, sysDev.device.id)).toBe(false)
+    expect(await revokeOwn(systemUser, sysDev.device.id)).toBe(true)
 
     // Mint refusals.
     const expectRefusal = async (
@@ -293,9 +307,7 @@ suite("mail device store and revocation paths against Postgres", () => {
     await expectRefusal(() => mintFor(ada, acme), "account_locked")
     await owner`update authd.accounts set locked_until = now() - interval '1 minute' where clerk_user_id = ${ada}`
     const afterExpiredLock = await mintFor(ada, acme, "After Expired Lock")
-    expect(
-      await revoke(db, { tenantId: acme, deviceId: afterExpiredLock.device.id }),
-    ).toBe(true)
+    expect(await revokeIn(acme, afterExpiredLock.device.id)).toBe(true)
     await owner`update authd.accounts set locked = false, locked_until = null where clerk_user_id = ${ada}`
 
     // Domain not hosted
@@ -304,8 +316,8 @@ suite("mail device store and revocation paths against Postgres", () => {
     await owner`update core.domains set hosts_mailboxes = true where tenant_id = ${acme} and name = ${acmeDomain}`
 
     // Revoke works for owning tenant.
-    expect(await revoke(db, { tenantId: acme, deviceId: device.id })).toBe(true)
-    expect(await revoke(db, { tenantId: acme, deviceId: device.id })).toBe(false)
+    expect(await revokeIn(acme, device.id)).toBe(true)
+    expect(await revokeIn(acme, device.id)).toBe(false)
   })
 
   it("directoryMailStore.suspend: admin KEEP preserves devices; memberLeft/deprovision/closeMailbox delete them even when already suspended", async () => {
@@ -1022,9 +1034,7 @@ suite("mail device store and revocation paths against Postgres", () => {
     await owner`insert into authd.required_exempt (connection_id, tenant_id, clerk_user_id, source)
                 values (${conn.id}, ${acme}, ${ada}, 'bypass')`
     const exemptDev = await mintFor(ada, acme, "Exempt iPhone")
-    expect(await revoke(db, { tenantId: acme, deviceId: exemptDev.device.id })).toBe(
-      true,
-    )
+    expect(await revokeIn(acme, exemptDev.device.id)).toBe(true)
     await owner`delete from authd.required_exempt where tenant_id = ${acme}`
     await owner`delete from authd.required_domains where tenant_id = ${acme}`
 
@@ -1064,16 +1074,12 @@ suite("mail device store and revocation paths against Postgres", () => {
     // active = null -> passes (NULL refuses nothing)
     await owner`update authd.passthrough_versions set active = null where connection_id = ${conn2.id}`
     const nullActiveDev = await mintFor(ada, acme, "Null Active iPhone")
-    expect(
-      await revoke(db, { tenantId: acme, deviceId: nullActiveDev.device.id }),
-    ).toBe(true)
+    expect(await revokeIn(acme, nullActiveDev.device.id)).toBe(true)
 
     // active = true -> passes
     await owner`update authd.passthrough_versions set active = true where connection_id = ${conn2.id}`
     const activeDev = await mintFor(ada, acme, "Active Conn iPhone")
-    expect(await revoke(db, { tenantId: acme, deviceId: activeDev.device.id })).toBe(
-      true,
-    )
+    expect(await revokeIn(acme, activeDev.device.id)).toBe(true)
   })
 
   it("endFor deletes workspace-wide when clerkUserIds is omitted, batches > 1,000 ids, respects createdBefore, and rejects null tenant without ids", async () => {
@@ -1084,7 +1090,7 @@ suite("mail device store and revocation paths against Postgres", () => {
     await owner`update authd.mail_devices set created_at = now() - interval '10 minutes' where id = ${d1.device.id}`
 
     // Workspace-wide list returns newest first and respects tenant boundary.
-    const acmeDevices = await list(db, { tenantId: acme })
+    const acmeDevices = await workspaceDevices(acme)
     expect(acmeDevices.map((d) => d.id)).toEqual([d2.device.id, d1.device.id])
 
     const removed = await db.transaction((tx) =>

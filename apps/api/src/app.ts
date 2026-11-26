@@ -49,6 +49,8 @@ import { trustedTemplateRoutes } from "./routes/trusted-templates.js"
 import type { TrustedTemplateStore } from "./risk/trusted.js"
 import { domains } from "./routes/domains.js"
 import { mailboxes } from "./routes/mailboxes.js"
+import { mailDevices } from "./routes/mail-devices.js"
+import type { MailDeviceService } from "./mail-devices/service.js"
 import {
   mailboxMigration,
   type MailboxMigrationDeps,
@@ -205,6 +207,8 @@ export interface AppDeps {
    * Omitted in tests and in the OpenAPI generator, where the routes answer 501.
    */
   mailboxes?: MailboxProvisioning
+  /** The caller's own mail devices (#383 PR 5), for `/mail-devices`. */
+  mailDevices?: MailDeviceService
   /** Mailbox export and import jobs (#385). */
   mailboxMigration?: MailboxMigrationDeps
   /** SES delivery events over SNS. Unauthenticated; signature-verified. */
@@ -351,6 +355,7 @@ export function createApp(deps: AppDeps = {}) {
     deps.sessionAuth ||
     deps.freshAuth ||
     deps.mailboxes ||
+    deps.mailDevices ||
     deps.ssoGate ||
     deps.apiKeyNetwork
   ) {
@@ -367,6 +372,7 @@ export function createApp(deps: AppDeps = {}) {
     const sessions = deps.sessionAuth
     const freshAuth = deps.freshAuth
     const mailboxStore = deps.mailboxes
+    const deviceService = deps.mailDevices
     const gate = deps.ssoGate
     const network = deps.apiKeyNetwork
     const migrationDeps = deps.mailboxMigration
@@ -384,6 +390,7 @@ export function createApp(deps: AppDeps = {}) {
       if (sessions) c.set("sessionAuth", sessions)
       if (freshAuth) c.set("freshAuth", freshAuth)
       if (mailboxStore) c.set("mailboxes", mailboxStore)
+      if (deviceService) c.set("mailDevices", deviceService)
       if (gate) c.set("ssoGate", gate)
       if (network) c.set("apiKeyNetwork", network)
       if (migrationDeps) c.set("mailboxMigration", migrationDeps)
@@ -561,6 +568,7 @@ export function createApp(deps: AppDeps = {}) {
   // middleware/session.ts.
   app.route("/mailboxes", mailboxes)
   app.route("/mailboxes", mailboxMigration)
+  app.route("/mail-devices", mailDevices)
 
   // ⚠ API-key authenticated, like everything above it - which is exactly why it
   // cannot issue a tenant's first key. See routes/api-keys.ts.

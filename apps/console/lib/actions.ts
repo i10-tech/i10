@@ -547,6 +547,37 @@ export async function removeMailboxAlias(address: string, alias: string) {
   )
 }
 
+/** Where mail devices are listed, so a revoke re-renders whichever is open. */
+const MAIL_DEVICE_PAGES = ["/account", "/mailboxes/[address]"]
+
+/**
+ * Revokes one mail device: the caller's own, or for an owner or admin any of
+ * the workspace's. No step-up, on purpose: it only removes access, and a lost
+ * phone must be signed out at once (apps/api/src/mail-devices/service.ts).
+ */
+export async function revokeMailDevice(id: string) {
+  return run(
+    () =>
+      api<{ deleted: true; id: string }>(
+        `/console/mail-devices/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      ),
+    MAIL_DEVICE_PAGES,
+  )
+}
+
+/** Signs out every device of the caller, or with `address` of one mailbox (admins). */
+export async function revokeAllMailDevices(address?: string) {
+  return run(
+    () =>
+      api<{ object: "mail_devices_revoked"; revoked: number }>(
+        "/console/mail-devices/revoke-all",
+        { method: "POST", body: address ? { address } : {} },
+      ),
+    MAIL_DEVICE_PAGES,
+  )
+}
+
 /**
  * Offers a domain to whoever holds an email address. Moves nothing yet.
  *

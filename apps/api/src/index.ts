@@ -125,6 +125,7 @@ import {
   raiseConnectionEpochAndEndDevices,
   raiseEpochAndEndDevices,
 } from "./mail-devices/store.js"
+import { dbDeviceStore, mailDeviceService } from "./mail-devices/service.js"
 import type { Engine } from "./identity/bridge.js"
 import type { Protocol } from "./identity/model.js"
 import { testEngine, testEngineOn } from "./identity/test-engine.js"
@@ -2063,6 +2064,9 @@ const siemSchedulerHandle = siemRows
     })
   : null
 
+// One service for the console's routes and the public `/mail-devices` (#383 PR 5).
+const mailDevices = mailDeviceService({ store: dbDeviceStore(db), log })
+
 const app = createApp({
   suppressions,
   trustedTemplates: risk.trustedTemplates,
@@ -2717,6 +2721,7 @@ const app = createApp({
       db,
       isAdmin: (tenantId, userId) => canAllocateStorage(userId, tenantId),
     }),
+    mailDevices,
     mailboxes: consoleMailboxes({
       store: consoleMailboxStore(db),
       roles: roleRows,
@@ -2955,6 +2960,7 @@ const app = createApp({
     log,
   },
   mailboxes: mailboxService,
+  mailDevices,
   ...(secrets && webhookQueue
     ? {
         webhookEndpoints: webhookEndpointStore(db, secrets, endpointVetting),

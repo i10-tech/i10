@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { AccountView } from "@/components/account-view"
 import { accountSettings } from "@/lib/clerk-environment"
 import { tryApi } from "@/lib/api"
+import { devicesReadOf, type MailDeviceList } from "@/lib/mail-devices"
 import { accountShape, type AccountData } from "@/lib/shapes/account"
 import type { Me } from "@/lib/types"
 
@@ -33,6 +34,7 @@ export default async function AccountPage({
       settings: { providers: [], passkeys: false, minLength: 8 },
       billing: null,
       clerkEnabled: false,
+      devices: { state: "hidden" },
     }
     return <AccountView shape={accountShape.of(noClerkData)} data={noClerkData} />
   }
@@ -44,10 +46,12 @@ export default async function AccountPage({
    * everybody when the plan cannot be read, rather than leaving the page blank
    * over a billing query.
    */
-  const [me, settings, params] = await Promise.all([
+  const [me, settings, params, devices] = await Promise.all([
     tryApi<Me>("/console/me"),
     accountSettings(),
     searchParams,
+    // ⚠ A FAILURE HIDES THE LIST, NOT THE PAGE: the section says it could not load.
+    tryApi<MailDeviceList>("/console/mail-devices", { query: { scope: "mine" } }),
   ])
 
   const data: AccountData = {
@@ -55,6 +59,7 @@ export default async function AccountPage({
     billing: me.ok ? me.data.billing : null,
     tab: params.tab,
     clerkEnabled: true,
+    devices: devicesReadOf(devices),
   }
 
   return <AccountView shape={accountShape.of(data)} data={data} />
