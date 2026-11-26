@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm"
+import { sql, type SQL } from "drizzle-orm"
 import { ts, type Database } from "../db/client.js"
 
 /**
@@ -98,4 +98,94 @@ export async function pruneMailDevices(
   }
 
   return { unused, idle, batches }
+}
+
+/** How long a permit and a liveness row outlive what they record. */
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+/** Upper bound on transactions per run, so a stuck DELETE never loops forever. */
+const MAX_PRUNE_BATCHES = 1000
+
+/**
+ * Deletes certificate permits a day past `expires_at` (#383 PR 3), through
+ * `mail_device_cert_permits_expires_idx`, `batchSize` rows per transaction.
+ * A permit only matters during an enrollment; the day keeps it for the
+ * operator to read after one.
+ *
+ * Locks only the permit rows it deletes (`SKIP LOCKED`: one a handler holds is
+ * left for the next run), so it never joins the handlers' lock order.
+ */
+export async function pruneCertPermits(
+  db: Pick<Database, "transaction">,
+  options: { batchSize?: number; now?: Date } = {},
+): Promise<number> {
+  const cutoff = options.now
+    ? ts(new Date(options.now.getTime() - ONE_DAY_MS))
+    : sql`now() - interval '1 day'`
+  return pruneInBatches(
+    db,
+    options.batchSize,
+    (limit) => sql`
+    with picked as (
+      select id from authd.mail_device_cert_permits
+       where expires_at < ${cutoff}
+       order by expires_at
+       limit ${limit}
+         for update skip locked
+    )
+    delete from authd.mail_device_cert_permits p
+     using picked
+     where p.id = picked.id
+    returning p.id`,
+  )
+}
+
+/**
+ * Deletes "the Mac is online" rows (`authd.mail_device_cert_binds`) older than a
+ * day, through `mail_device_cert_binds_bound_at_idx`. authd reads a row only
+ * within 75 minutes of `bound_at`, so an older one opens nothing.
+ *
+ * ⚠ THE OUTER DELETE RE-CHECKS `bound_at`. authd refreshes a row in place
+ * (autocommit upsert), and a refreshed row must survive.
+ */
+export async function pruneCertBinds(
+  db: Pick<Database, "transaction">,
+  options: { batchSize?: number; now?: Date } = {},
+): Promise<number> {
+  const cutoff = options.now
+    ? ts(new Date(options.now.getTime() - ONE_DAY_MS))
+    : sql`now() - interval '1 day'`
+  return pruneInBatches(
+    db,
+    options.batchSize,
+    (limit) => sql`
+    with picked as (
+      select device_id, addr from authd.mail_device_cert_binds
+       where bound_at < ${cutoff}
+       order by bound_at
+       limit ${limit}
+         for update skip locked
+    )
+    delete from authd.mail_device_cert_binds b
+     using picked
+     where b.device_id = picked.device_id and b.addr = picked.addr
+       and b.bound_at < ${cutoff}
+    returning b.device_id`,
+  )
+}
+
+async function pruneInBatches(
+  db: Pick<Database, "transaction">,
+  requested: number | undefined,
+  statement: (limit: number) => SQL,
+): Promise<number> {
+  const batchSize = Math.max(1, Math.min(requested ?? PRUNE_BATCH_SIZE, 10_000))
+  let deleted = 0
+  for (let batch = 0; batch < MAX_PRUNE_BATCHES; batch++) {
+    const rows = await db.transaction(
+      async (tx) => (await tx.execute(statement(batchSize))) as unknown as unknown[],
+    )
+    deleted += rows.length
+    if (rows.length < batchSize) break
+  }
+  return deleted
 }

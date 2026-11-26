@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { timingSafeEqual } from "node:crypto"
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
 import { ts, type Database } from "../db/client.js"
 import { accounts, mailDevices } from "../db/schema.js"
 import { raiseConnectionCredentialEpochs } from "../projection/connection-epoch.js"
@@ -13,9 +14,11 @@ import { MailDeviceError, mintCode, type MailDeviceCodeKeys } from "./code.js"
  * workspaces), so the tenant filter in `mint`, `list`, `revoke` and `endFor`
  * IS the tenant boundary.
  *
- * Lock order across every revocation and mint:
+ * Lock order across every revocation, mint and key write:
  *   1. `authd.accounts` first
  *   2. `authd.mail_devices` second
+ *   3. then `authd.mail_device_cert_permits` (permits.ts) and
+ *      `authd.mail_device_cert_binds`, the rows that hang off a device
  *
  * `mint` locks the account row (`FOR NO KEY UPDATE OF a`) and checks the gate
  * and `expectedEpoch` before inserting; every revocation writes `authd.accounts`
@@ -152,6 +155,35 @@ export function mintRefusal(
       "Account credential epoch changed; re-authenticate and retry.",
     )
   }
+  return holdRefusal(account)
+}
+
+/**
+ * The gate for binding a certificate key (#383 PR 3): `mintRefusal` without the
+ * epoch, which the CA's webhooks have no caller to read. The account must still
+ * be the device's workspace, active, and free of every hold.
+ */
+export function bindRefusal(
+  account: MintGateAccount | null | undefined,
+  tenantId: string | null,
+): MailDeviceError | null {
+  if (!account) {
+    return new MailDeviceError("account_not_found", "Mailbox account not found.")
+  }
+  if ((account.tenant_id ?? null) !== (tenantId ?? null)) {
+    return new MailDeviceError(
+      "tenant_mismatch",
+      "Account does not belong to this workspace.",
+    )
+  }
+  if (!account.active) {
+    return new MailDeviceError("account_inactive", "Mailbox account is not active.")
+  }
+  return holdRefusal(account)
+}
+
+/** Every hold and route refusal, in `gate.RowRefusal` then `gate.RouteOf` order. */
+function holdRefusal(account: MintGateAccount): MailDeviceError | null {
   if (account.suspended) {
     return new MailDeviceError("mailbox_suspended", "Mailbox is suspended.")
   }
@@ -219,7 +251,48 @@ export async function mint(
     // ⚠ LOCK `authd.accounts` FIRST (`FOR NO KEY UPDATE OF a`) so a concurrent
     // revocation either commits before us (and we see the hold or moved epoch
     // and refuse) or waits for us (and deletes the row we insert).
-    const rows = (await tx.execute(sql`
+    const [account] = await lockGateAccount<AccountGateRow>(
+      tx,
+      input.clerkUserId,
+      sql`, uuidv7()::text as next_device_id`,
+    )
+    const refusal = mintRefusal(account, input)
+    if (refusal) throw refusal
+
+    const allowed = account!
+    const minted = mintCode(keys, allowed.next_device_id)
+    const [inserted] = await tx
+      .insert(mailDevices)
+      .values({
+        id: allowed.next_device_id,
+        clerkUserId: allowed.clerk_user_id,
+        email: allowed.email.toLowerCase(),
+        tenantId: allowed.tenant_id,
+        platform: input.platform,
+        deviceName: input.deviceName ?? null,
+        model: input.model ?? null,
+        serial: input.serial ?? null,
+        codeHash: minted.codeHash,
+        codeKid: minted.codeKid,
+        createdBy: input.createdBy,
+      })
+      .returning(deviceColumns)
+
+    return { device: toRow(inserted!), code: minted.code }
+  })
+}
+
+/**
+ * Locks one account row (`FOR NO KEY UPDATE OF a`, the first lock of every
+ * device write) and reads everything the gate decides on. `extra` appends
+ * columns to the select list.
+ */
+export async function lockGateAccount<Row extends MintGateAccount = MintGateAccount>(
+  tx: Pick<Database, "execute">,
+  clerkUserId: string,
+  extra: SQL = sql``,
+): Promise<Row[]> {
+  return (await tx.execute(sql`
       select a.clerk_user_id,
              a.email,
              a.active,
@@ -247,40 +320,14 @@ export async function mint(
                 where rd.domain = lower(split_part(a.email, '@', 2))
                   and rd.tenant_id = a.tenant_id
                   and ex.clerk_user_id = a.clerk_user_id
-             ) as sso_exempt,
-             uuidv7()::text as next_device_id
+             ) as sso_exempt
+             ${extra}
         from authd.accounts a
         left join authd.managed_accounts m on m.clerk_user_id = a.clerk_user_id
         left join authd.passthrough_versions pv on pv.connection_id = m.connection_id
-       where a.clerk_user_id = ${input.clerkUserId}
+       where a.clerk_user_id = ${clerkUserId}
          for no key update of a
-    `)) as unknown as AccountGateRow[]
-
-    const account = rows[0]
-    const refusal = mintRefusal(account, input)
-    if (refusal) throw refusal
-
-    const allowed = account!
-    const minted = mintCode(keys, allowed.next_device_id)
-    const [inserted] = await tx
-      .insert(mailDevices)
-      .values({
-        id: allowed.next_device_id,
-        clerkUserId: allowed.clerk_user_id,
-        email: allowed.email.toLowerCase(),
-        tenantId: allowed.tenant_id,
-        platform: input.platform,
-        deviceName: input.deviceName ?? null,
-        model: input.model ?? null,
-        serial: input.serial ?? null,
-        codeHash: minted.codeHash,
-        codeKid: minted.codeKid,
-        createdBy: input.createdBy,
-      })
-      .returning(deviceColumns)
-
-    return { device: toRow(inserted!), code: minted.code }
-  })
+    `)) as unknown as Row[]
 }
 
 /** Lists mail devices for one workspace, optionally narrowed to one person. */
@@ -476,6 +523,235 @@ export async function raiseConnectionEpochAndEndDevices(
     })
     return { accountsRaised: clerkUserIds.length, devicesEnded }
   })
+}
+
+/**
+ * A device row as the certificate-key writers see it, locked. `alive` is the
+ * code's own clock: unused and inside its ten minutes, or used and inside its
+ * ninety idle days (the prune's two rules, by the server's clock).
+ */
+export interface LockedDevice {
+  id: string
+  clerk_user_id: string
+  email: string
+  tenant_id: string | null
+  platform: string
+  serial: string | null
+  cert_key_sha256: Buffer | null
+  alive: boolean
+}
+
+/** The person a device belongs to, read WITHOUT a lock: it says which account to lock first. */
+export async function deviceOwner(
+  tx: Pick<Database, "execute">,
+  deviceId: string,
+): Promise<string | null> {
+  if (!UUID.test(deviceId)) return null
+  const [row] = (await tx.execute(sql`
+    select clerk_user_id from authd.mail_devices where id = ${deviceId}
+  `)) as unknown as { clerk_user_id: string }[]
+  return row?.clerk_user_id ?? null
+}
+
+/**
+ * Locks one device row, the second lock of every device write. Call only while
+ * holding its account's lock (`lockGateAccount`).
+ *
+ * ⚠ `FOR NO KEY UPDATE`: the key column's unique index is partial, so Postgres
+ * does not count it as a key, and writing it never needs `FOR UPDATE`.
+ */
+export async function lockDevice(
+  tx: Pick<Database, "execute">,
+  deviceId: string,
+): Promise<LockedDevice | null> {
+  const [row] = (await tx.execute(sql`
+    select id::text, clerk_user_id, email, tenant_id::text as tenant_id, platform,
+           serial, cert_key_sha256,
+           case when first_used_at is null
+                then created_at > now() - interval '10 minutes'
+                else last_used_at > now() - interval '90 days' end as alive
+      from authd.mail_devices
+     where id = ${deviceId}
+       for no key update
+  `)) as unknown as LockedDevice[]
+  return row ?? null
+}
+
+/**
+ * Why a locked device may not take (`key: null`) or keep (`key`: the key it
+ * should hold) a certificate key for `account`, or null when it may. The same
+ * person, address and workspace as the account now (authd's
+ * `gate.DeviceRefusal`), a Mac, alive, the expected serial when one is named,
+ * and the key state asked for.
+ */
+export function deviceKeyRefusal(
+  device: LockedDevice | null,
+  account: MintGateAccount,
+  expect: { key: Buffer | null; serial?: string },
+): MailDeviceError | null {
+  if (!device) {
+    return new MailDeviceError("device_not_found", "Mail device not found.")
+  }
+  if (
+    device.clerk_user_id !== account.clerk_user_id ||
+    device.email !== account.email.toLowerCase() ||
+    (device.tenant_id ?? null) !== (account.tenant_id ?? null)
+  ) {
+    return new MailDeviceError(
+      "device_mismatch",
+      "Mail device no longer matches its account.",
+    )
+  }
+  if (device.platform !== "macos") {
+    return new MailDeviceError(
+      "device_not_macos",
+      "Only a Mac binds a certificate key.",
+    )
+  }
+  if (!device.alive) {
+    return new MailDeviceError("device_expired", "Mail device code has expired.")
+  }
+  if (expect.serial !== undefined && device.serial !== expect.serial) {
+    return new MailDeviceError("serial_mismatch", "Mail device serial does not match.")
+  }
+  if (expect.key === null) {
+    return device.cert_key_sha256
+      ? new MailDeviceError("device_key_bound", "Mail device already has a key.")
+      : null
+  }
+  const bound = device.cert_key_sha256
+  if (
+    !bound ||
+    bound.length !== expect.key.length ||
+    !timingSafeEqual(bound, expect.key)
+  ) {
+    return new MailDeviceError(
+      "device_key_changed",
+      "Mail device key is not the expected one.",
+    )
+  }
+  return null
+}
+
+/**
+ * Binds `keySha256` to a locked device, claims its first use (both clocks
+ * together, as the CHECK requires; a used device keeps its own), and drops its
+ * liveness rows. A key already bound to another device is a unique violation
+ * (`isUniqueViolation`), which the caller refuses.
+ */
+export async function setDeviceKey(
+  tx: Pick<Database, "execute">,
+  deviceId: string,
+  keySha256: Buffer,
+): Promise<void> {
+  await tx.execute(sql`
+    update authd.mail_devices
+       set cert_key_sha256 = ${keySha256},
+           first_used_at = coalesce(first_used_at, now()),
+           last_used_at = coalesce(last_used_at, now())
+     where id = ${deviceId}
+  `)
+  await deleteLiveness(tx, deviceId)
+}
+
+/** Clears a locked device's key and drops its liveness rows. Returns whether it had one. */
+export async function clearDeviceKey(
+  tx: Pick<Database, "execute">,
+  deviceId: string,
+): Promise<boolean> {
+  const cleared = (await tx.execute(sql`
+    update authd.mail_devices set cert_key_sha256 = null
+     where id = ${deviceId} and cert_key_sha256 is not null
+    returning id
+  `)) as unknown as { id: string }[]
+  await deleteLiveness(tx, deviceId)
+  return cleared.length > 0
+}
+
+/**
+ * ⚠ ONLY AFTER THE DEVICE ROW'S LOCK. authd writes these rows in autocommit
+ * statements and never while holding a device row, so device first, liveness
+ * second is the one order both sides take.
+ */
+async function deleteLiveness(tx: Pick<Database, "execute">, deviceId: string) {
+  await tx.execute(
+    sql`delete from authd.mail_device_cert_binds where device_id = ${deviceId}`,
+  )
+}
+
+/** A Postgres unique violation (23505), wherever the driver put it. */
+export function isUniqueViolation(error: unknown): boolean {
+  const e = error as { code?: string; cause?: { code?: string } } | null
+  return e?.code === "23505" || e?.cause?.code === "23505"
+}
+
+/**
+ * The operator's `bind-key` (#383 PR 3, for a probe until PR 4): binds a
+ * certificate key to a Mac in one transaction, accounts first, then the device.
+ *
+ * ⚠ IT CHECKS WHAT THE HOOKS WOULD, so a prod probe cannot bind what no real
+ * enrollment could: the account gate (`bindRefusal`), then the device rules
+ * (`deviceKeyRefusal`: the same person, address and workspace, `macos`, a
+ * code still alive, and the certificate's CN as the row's serial when the row
+ * has one). A row that already has a key is refused unless `replace`, and a
+ * key another device holds always is.
+ */
+export async function bindKey(
+  db: Pick<Database, "transaction">,
+  input: {
+    deviceId: string
+    keySha256: Buffer
+    /** The leaf's subject CN, or null when it has none. */
+    commonName: string | null
+    replace: boolean
+  },
+): Promise<void> {
+  if (input.keySha256.length !== 32) throw new Error("keySha256 must be 32 bytes")
+  try {
+    await db.transaction(async (tx) => {
+      const { account, device } = await lockOwnedDevice(tx, input.deviceId)
+      // ⚠ NEVER RESURRECTS A DEAD CODE: binding claims the first use, so a code
+      // that died unused (or idle) would otherwise come back to life.
+      const refusal =
+        bindRefusal(account, device.tenant_id) ??
+        deviceKeyRefusal(device, account!, {
+          // `replace` expects the key the row holds now, so only that check moves.
+          key: input.replace ? device.cert_key_sha256 : null,
+          serial: device.serial === null ? undefined : (input.commonName ?? ""),
+        })
+      if (refusal) throw refusal
+      await setDeviceKey(tx, device.id, input.keySha256)
+    })
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new MailDeviceError("key_in_use", "That key is bound to another device.")
+    }
+    throw error
+  }
+}
+
+/** The operator's `unbind-key`: clears a device's key. Returns whether it had one. */
+export async function unbindKey(
+  db: Pick<Database, "transaction">,
+  input: { deviceId: string },
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const { device } = await lockOwnedDevice(tx, input.deviceId)
+    return clearDeviceKey(tx, device.id)
+  })
+}
+
+/** Account lock, then device lock, for a device named only by its id. */
+async function lockOwnedDevice(tx: Pick<Database, "execute">, deviceId: string) {
+  const owner = await deviceOwner(tx, deviceId)
+  if (owner) {
+    const [account] = await lockGateAccount(tx, owner)
+    const device = await lockDevice(tx, deviceId)
+    // The person id can never move under a device (`on update no action`), so
+    // a changed owner here means the row was deleted and is gone.
+    if (device && device.clerk_user_id === owner) return { account, device }
+  }
+  throw new MailDeviceError("device_not_found", `No mail device ${deviceId}.`)
 }
 
 /**
