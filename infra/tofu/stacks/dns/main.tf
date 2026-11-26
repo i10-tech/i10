@@ -447,6 +447,11 @@ resource "cloudflare_dns_record" "dmarc" {
 # the internet. Publishing an SRV for a protocol that is not exposed offers
 # clients an account that can never connect - POP3 on 995 was doing exactly
 # that until 2026-09-02.
+#
+# ⚠ `priority` IS SET TWICE ON PURPOSE: in `data`, where the SRV record keeps
+# it, and at the top level, because Cloudflare echoes it there too. With only
+# the `data` one, every plan showed four `priority 0 -> null` changes, so the
+# stack never planned empty.
 
 import {
   to = cloudflare_dns_record.srv_imaps
@@ -454,11 +459,12 @@ import {
 }
 
 resource "cloudflare_dns_record" "srv_imaps" {
-  zone_id = var.zone_id
-  name    = "_imaps._tcp.${local.domain}"
-  type    = "SRV"
-  ttl     = 3600
-  comment = "RFC 6186 client autoconfiguration"
+  zone_id  = var.zone_id
+  name     = "_imaps._tcp.${local.domain}"
+  type     = "SRV"
+  priority = 0
+  ttl      = 3600
+  comment  = "RFC 6186 client autoconfiguration"
   data = {
     priority = 0
     weight   = 1
@@ -473,11 +479,12 @@ import {
 }
 
 resource "cloudflare_dns_record" "srv_submissions" {
-  zone_id = var.zone_id
-  name    = "_submissions._tcp.${local.domain}"
-  type    = "SRV"
-  ttl     = 3600
-  comment = "RFC 6186 client autoconfiguration"
+  zone_id  = var.zone_id
+  name     = "_submissions._tcp.${local.domain}"
+  type     = "SRV"
+  priority = 0
+  ttl      = 3600
+  comment  = "RFC 6186 client autoconfiguration"
   data = {
     priority = 0
     weight   = 1
@@ -497,11 +504,12 @@ import {
 }
 
 resource "cloudflare_dns_record" "srv_imap_none" {
-  zone_id = var.zone_id
-  name    = "_imap._tcp.${local.domain}"
-  type    = "SRV"
-  ttl     = 3600
-  comment = "RFC 6186 - no STARTTLS IMAP on 143"
+  zone_id  = var.zone_id
+  name     = "_imap._tcp.${local.domain}"
+  type     = "SRV"
+  priority = 0
+  ttl      = 3600
+  comment  = "RFC 6186 - no STARTTLS IMAP on 143"
   data = {
     priority = 0
     weight   = 0
@@ -516,11 +524,12 @@ import {
 }
 
 resource "cloudflare_dns_record" "srv_submission_none" {
-  zone_id = var.zone_id
-  name    = "_submission._tcp.${local.domain}"
-  type    = "SRV"
-  ttl     = 3600
-  comment = "RFC 6186 - no submission on 587"
+  zone_id  = var.zone_id
+  name     = "_submission._tcp.${local.domain}"
+  type     = "SRV"
+  priority = 0
+  ttl      = 3600
+  comment  = "RFC 6186 - no submission on 587"
   data = {
     priority = 0
     weight   = 0
