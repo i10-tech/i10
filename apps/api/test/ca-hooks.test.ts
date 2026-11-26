@@ -392,7 +392,7 @@ describe("the CA hooks listener", () => {
     const failing = listener({
       "scep-authorize": async () => {
         throw Object.assign(new Error(`query failed with ${TOKEN} body-marker`), {
-          code: "57014",
+          code: "08006",
         })
       },
     })
@@ -400,8 +400,23 @@ describe("the CA hooks listener", () => {
     expect(failing.lines.at(-1)?.fields).toEqual({
       hook: "scep-authorize",
       outcome: "error",
-      sqlstate: "57014",
+      sqlstate: "08006",
     })
+
+    // Postgres ending a statement on the deadline's budget is a late answer.
+    for (const sqlstate of ["57014", "55P03"]) {
+      const cut = listener({
+        "scep-authorize": async () => {
+          throw Object.assign(new Error("canceled"), { code: sqlstate })
+        },
+      })
+      expect((await cut.fetch(hookRequest("/scep-authorize"))).status).toBe(503)
+      expect(cut.lines.at(-1)?.fields).toEqual({
+        hook: "scep-authorize",
+        outcome: "timeout",
+        sqlstate,
+      })
+    }
 
     const slow = listener(
       { "scep-notify": () => new Promise<HookDecision>(() => {}) },
@@ -724,6 +739,10 @@ describe("the template rules", () => {
     // `x509util.NewCertificate` with the apple template, serial C02ZK1ABCDEF.
     expect(permanentIdentifierSanDer("C02ZK1ABCDEF").toString("base64")).toBe(
       "MB6gHAYIKwYBBQUHCAOgEDAODAxDMDJaSzFBQkNERUY=",
+    )
+    // Rendered by the #536 re-check, independently of this encoder.
+    expect(permanentIdentifierSanDer("C02XYZ123ABC").toString("base64")).toBe(
+      "MB6gHAYIKwYBBQUHCAOgEDAODAxDMDJYWVoxMjNBQkM=",
     )
   })
 
@@ -1063,8 +1082,10 @@ describe("the operator script's certificate commands", () => {
   it.each([
     ["a DNS SAN", "subjectAltName=DNS:mail.example.com"],
     ["an IP SAN", "subjectAltName=IP:192.0.2.1"],
+    ["an email SAN", "subjectAltName=email:probe@example.com"],
+    ["a URI SAN", "subjectAltName=URI:https://example.com/"],
   ])("refuses a leaf with %s, which no ACME leaf has", (_label, san) => {
     const leaf = throwawayCertificate("/CN=C02ZK1ABCDEF", [...clientAuth, san])
-    expect(() => readLeaf(leaf.certPem)).toThrow(/DNS or IP/)
+    expect(() => readLeaf(leaf.certPem)).toThrow(/subject alternative name/)
   })
 })

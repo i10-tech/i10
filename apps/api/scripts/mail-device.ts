@@ -23,8 +23,11 @@
  * `bind-key` and `unbind-key` (#383 PR 3) set or clear a Mac's certificate key
  * (SHA-256 of the leaf's SubjectPublicKeyInfo), claim the first use (bind only)
  * and delete the device's liveness rows, in one transaction, accounts first.
- * `bind-key` checks what the hooks would (README, "Operator commands"), and
- * replaces a key the row already has only with `--replace`.
+ * `bind-key` runs the account and device gate the hooks run, and refuses a
+ * leaf the front or authd would never sign in: no `clientAuth` EKU, a name
+ * other than the permanent identifier, a CN that is not the row's serial. It
+ * does not check the issuer, key usage or validity (README, "Operator
+ * commands"), and replaces a key the row already has only with `--replace`.
  * `acme-permit` opens the permit step-ca's ACME `AUTHORIZING` hook needs; the
  * nonce goes in the certificate's `OU`.
  */
@@ -104,9 +107,14 @@ export function readLeaf(pem: string): {
   if (!(leaf.keyUsage ?? []).includes(CLIENT_AUTH)) {
     throw new Error("the certificate has no clientAuth extended key usage")
   }
-  const names = (leaf.subjectAltName ?? "").split(", ")
-  if (names.some((name) => name.startsWith("DNS:") || name.startsWith("IP Address:"))) {
-    throw new Error("the certificate has a DNS or IP subject alternative name")
+  // An ACME leaf's only name is its permanent identifier, an otherName. Any
+  // other kind (DNS, IP, email, URI, directory, registered id) is not ours.
+  const names = (leaf.subjectAltName ?? "").split(", ").filter(Boolean)
+  const foreign = names.find((name) => !/^othername:/i.test(name))
+  if (foreign) {
+    throw new Error(
+      `the certificate has a ${foreign.split(":")[0]} subject alternative name`,
+    )
   }
   const cn = leaf.subject
     .split("\n")

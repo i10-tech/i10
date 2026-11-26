@@ -193,7 +193,13 @@ export function createCaHooksFetch(
       // parameters (key hashes, a serial); its SQLSTATE is all a reader needs.
       const code = error as { code?: unknown; cause?: { code?: unknown } } | null
       const sqlstate = typeof code?.code === "string" ? code.code : code?.cause?.code
-      const late = error instanceof HookTimeout || error instanceof HookDeadlineExceeded
+      // Postgres ending a statement on the deadline's budget (57014 statement,
+      // 55P03 lock) is the same late answer as the timer.
+      const late =
+        error instanceof HookTimeout ||
+        error instanceof HookDeadlineExceeded ||
+        sqlstate === "57014" ||
+        sqlstate === "55P03"
       const outcome = late ? "timeout" : "error"
       deps.log.error({ hook: kind, outcome, sqlstate }, "ca hook failed")
       // A 5xx, which step-ca retries once and then refuses: it never issues on one.
