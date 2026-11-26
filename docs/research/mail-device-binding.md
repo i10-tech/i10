@@ -749,6 +749,93 @@ On the `:3443` listener (PR 3), with its own fetch branch: paths `/enrolld/peek`
 - **On prod, with a throwaway account:** an enrollment from the console route; phase 1 served; a synthetic phase 2 signed by a test key is refused (the pinned CA is real); `peek`, `attest` and `finish` refuse every wrong token, permit, key and state; the SCEP hooks refuse a challenge for another enrollment; retention removes expired rows.
 - **Only a real device (PR 6, or the owner's iPhone and Mac earlier if a step stalls):** Apple's actual signature algorithms and attribute set in phase 2 and phase 4, SCEP through step-ca with the real challenge, the AES-256-CBC profile opening, the Mac's ACME `device-attest-01` binding through PR 3's hook, and Mail signing in with the sealed code.
 
+### Review 1 rules
+
+From the first independent review (2026-11-26: no CRITICAL, 3 HIGH, 7 MEDIUM). Each rule overrides the text above where they differ.
+
+**A device probe gates the merge (H1, H3, L5).** Three facts above come from Apple's 2018 guide or are inferred, and only real bytes settle them:
+
+- Phase 2's real chain and hashes. The probe's own verifier (`verify.go`, added after the device runs in #504) checks dates against Apple Root CA, which a chain that expired in 2014 would fail, and nobody reconciled the two.
+- Whether Apple's SCEP client enrolls against `ca.i10.tech` with **no** i10 root trusted on the device, when step-ca signs the response with the ECDSA P-256 intermediate. Apple's guide says the device must trust the CA. The probe's devices trusted a test CA for its TLS, and it ran SCEP over plain HTTP.
+- Whether Apple's ACME client puts the `OU` nonce in its CSR.
+
+Before PR 4 merges, an iPhone and an Apple silicon Mac run the probe against **prod's** step-ca. It uses a SCEP permit made by the operator script, a responder with a publicly trusted certificate, and nothing i10 installed on the device. The raw phase 2 and phase 4 requests it saves become enrolld's golden tests, and the pin is taken from those bytes. If SCEP needs a trusted root, the flow is redesigned before merge. `CAFingerprint` is added only if the probe shows it helps.
+
+**Phase 2 verification (H1).**
+
+- There must be exactly one SignerInfo.
+- The signer certificate is the one its `IssuerAndSerialNumber` names. That one object is used for the CA check, the hashes, the CN and the recipient.
+- enrolld checks the signer info itself: the content-type attribute, the `messageDigest` attribute, the DER re-encoding of the signed attributes as a SET, and `Certificate.CheckSignature`.
+- No library call that compares `signingTime` with the leaf's dates is used. Dates are ignored on the Apple path only.
+- Phase 2 attributes are **claims made by whoever holds an Apple-activated key** (a jailbroken device can sign any serial). Only ACME's `device-attest-01` re-verifies a Mac's serial with Apple. Nothing below treats a phase 2 serial as proven.
+
+**The link token (H2).**
+
+- **It is not single-use until attest.** It is bound to the first attested serial, UDID and Apple signer, and the text above that says "single-use" means only that.
+- **It is kept out of every log we control.** The Traefik router for `/enroll/apple/` turns off access logging (per-router `observability.accessLogs: false`). The build checks that the cluster's Traefik version supports it, or uses a separate entry point with no access log.
+- **The person is told.** After a seal, the API sends the person an email with the attested model and the last 4 characters of the serial, and a link to the devices page. A device the person did not enroll is then one tap from revoked. That makes a stolen QR code something the person sees, not something silent.
+
+**The API seals; enrolld never sees a code (M1).** `finish` takes the phase 4 signer certificate's DER instead of only its hashes. The API computes the hashes itself, checks the certificate as enrolld did (below), and builds the CMS EnvelopedData: AES-256-CBC, RSA PKCS#1 v1.5 key transport, DER written in the API and tested by `openssl cms -decrypt`. It returns the **complete** final profile. enrolld relays bytes it cannot read, and holds no pkcs7 encryption code.
+
+**A lost response is retryable (M2).**
+
+- `finish` matches the SCEP permit by **key only**, never by `issued_cert_sha256`. A lost CertRep makes step-ca sign a second certificate for the same key, and NOTIFYING keeps only the first.
+- The sealed profile, encrypted to the device's key and so readable only by it, is stored on the enrollment (`sealed_profile` bytea) until `expires_at`.
+- A repeat `finish` from the same key, for a `sealed` row within its life, returns the same bytes and mints nothing.
+- Retention deletes the row, profile included.
+
+**A profile builder of its own (M3).**
+
+- `apple-profile.ts`'s passwordless builder stays as it is. A separate sealed builder writes the payload list, with identifiers derived from the **device row id** (`tech.i10.mail-device.<id>`).
+- A re-enrollment therefore adds a profile beside the old one, which section 11's Mac renewal needs (the old row works until the person revokes it).
+- Apple's key is `OutgoingPasswordSameAsIncomingPassword`. The existing builder's `OutgoingPasswordSameAsIncoming` is fixed in this PR.
+
+**Windows (M4, L2).**
+
+- **Attest window.** An enrollment can be attested up to 15 minutes after creation. Every attest retry expires the enrollment's live SCEP permits and makes one new one. Its life is capped at creation plus 30 minutes, whatever the retries.
+- **Stolen Device Protection set to "Always"** (about an hour) does not fit. The console says so on a timeout.
+- **The 10-minute unused-code rule is kept.** The final profile installs as the last step of the flow the person already approved, so Mail should connect within seconds. The probe measures the time from phase 4 to the first sign-in, and the rule changes only if that measurement says it must.
+
+**Database (M5, M6).**
+
+- **Enrollment indexes.** The `clerk_user_id` index is full (the account cascade uses it). `device_id` has its own index (ON DELETE SET NULL scans otherwise). No CHECK ties `device_id` to `status`.
+- **One live enrollment per person.** This is a partial UNIQUE index on `clerk_user_id` where status is `open` or `attested`. The POST cancels the person's live one in the same transaction, before it inserts.
+- **The permit column.** On the existing permits table, `enrollment_id`'s FK and CHECK are added `NOT VALID` and validated as db-guard says.
+- **Hash lengths.** `octet_length` CHECKs on every hash column.
+- **Per-person ACME permits (M6).** The one-open-ACME-permit-per-serial unique index becomes per `(serial, clerk_user_id)`. The ACME hook finds a permit by its nonce, so it never needed the serial alone to be unique. `createAcmePermit` no longer refuses another person's live permit for the same serial. Without that change, a forged phase 2 for a victim's serial would block their Mac indefinitely, and two people sharing a Mac would collide.
+
+**Lock order everywhere (L3):** `authd.accounts`, then `mail_device_enrollments`, then `mail_devices`, then `mail_device_cert_permits`, then `mail_device_cert_binds`. An unlocked read only chooses what to lock.
+
+- The SCEP hooks lock account, enrollment, permit.
+- `finish` locks account, enrollment, device (insert), permits.
+- The ACME hook is unchanged (account, device, permit).
+- Retention's cascade takes enrollment before permit, which is the same direction.
+
+**enrolld's network (M7).**
+
+- An ingress rule for enrolld on the API's 3443 in `api-ca-hooks-clients`.
+- An egress policy for enrolld: the API's 3443 and DNS only.
+- Ingress from Traefik only.
+- The namespace hooks CA is mounted into enrolld as the only root it trusts.
+
+**Phase 4 signer (L1).** The certificate must meet all of these, or the request is refused:
+
+- issued by the device **intermediate** (the decrypter certificate, issued straight from the root with no EKU, is refused);
+- EKU explicitly includes `emailProtection`;
+- **no SAN extension at all** (ACME certificates carry an otherName SAN Go does not parse);
+- verified with `x509.Verify` against the device root.
+
+**Smaller rules.**
+
+- The SCEP payload sets `KeyIsExtractable` false.
+- Phase 1 sends `Challenge` as a `<string>`. The attribute parser accepts `CHALLENGE` as `<string>` or `<data>`, and nothing else as `<data>`.
+- **POST response.** `Cache-Control: no-store`.
+- **Workspace.** The POST is workspace-optional and uses the account's own `tenant_id` (null for an i10.tech mailbox), whatever workspace the session has open: it is the person's own mailbox.
+- **DELETE of a sealed enrollment** is `409 already_sealed`.
+- **SCEP hook refusals are shown.** A refusal from the SCEP hooks marks the enrollment `refused` with its code, in the hook's transaction, so the console shows it rather than waiting for the expiry.
+- **Logged serials** are a keyed hash (HMAC under a random per-process key), never a plain prefix.
+- **Signed profiles** (L4: unsigned profiles teach people to install "Not Verified" ones) need a publicly trusted signing certificate. They are a follow-up issue.
+
 ---
 
 ## Sources
