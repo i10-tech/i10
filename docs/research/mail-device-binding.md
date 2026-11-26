@@ -662,6 +662,93 @@ From the fourth review; each overrides the text above where they differ.
 - **The address rule stays**, with the switch above, until real devices say otherwise.
 - **step-ca's `device-attest-01` skips its nonce check when Apple's attestation lacks the nonce extension** (`acme/challenge.go:864`). Apple's always carries it, and the chain, serial and key are still verified; noted for upstream.
 
+## 12. PR 4: the enrollment service (design, 2026-11-26)
+
+PR 4 runs section 4's over-the-air flow for real: a person starts it on dash.i10.tech, their iPhone, iPad or Apple silicon Mac proves itself with Apple's signature, enrolls an identity through step-ca's SCEP provisioner, and receives a profile, encrypted to that identity, that holds the mail account with a sealed device code and, on a Mac, the ACME payload for its Secure Enclave key. It reuses PR 2's mint and PR 3's permits and handlers; it adds one table, one Go binary and four API routes.
+
+This is revision 1, before its adversarial review.
+
+### What was read, not assumed
+
+- **Apple's device CA is SHA-1, RSA-1024, and expired in 2014.** The phase 2 signer is issued by `Apple iPhone Device CA` (Apple's OTA guide, read 2026-11-26), whose certificate is `sha1WithRSAEncryption` with a 1024-bit key, valid 2007-04-16 to 2014-04-16. Apple's guide says: "When device certificates signed 'Apple iPhone Device CA' are evaluated their validity dates should be ignored." Go's `x509.Verify` and `CheckSignatureFrom` refuse SHA-1 and an expired chain, so enrolld **pins that one certificate** (its DER, embedded) and checks the leaf's signature by hand with `Certificate.CheckSignature`, which still allows SHA-1 for a direct check. Validity dates are not checked for this chain only. The CMS signer-info signature (the device key over the attributes) is checked the same way. Which hash the device uses for each signature is for the real device to show (both SHA-1 and SHA-256 with RSA are accepted; nothing else).
+- **Apple's phase 4 request echoes neither `CHALLENGE` nor `SERIAL`** (section 4), so it is resolved by the SCEP certificate's key, as PR 3's permits already allow (`key_sha256` has its own unique index).
+- **The SCEP challenge hash is SHA-256 of the exact string sent** (PR 3's `challengeScep`), and ACME's `ClientIdentifier` and `CN` are the serial, never the UDID (section 4, PR 3's `authorizeAcme`).
+- **The API already builds Apple mail payloads** (`apps/api/src/autoconfig/apple-profile.ts`, deterministic `PayloadIdentifier` and `PayloadUUID` per address, so a reinstall replaces). The sealed profile reuses that builder, so one function decides what an i10 mail account looks like.
+- **Go has no CMS.** enrolld uses `github.com/smallstep/pkcs7` (the fork step-ca itself uses) for SignedData parsing and EnvelopedData with AES-256-CBC and RSA key transport. It parses untrusted bytes, so the body is capped before parsing, the parse runs under a recover, and the parse path is fuzzed.
+
+### The shape
+
+```
+dash.i10.tech (console, PR 5)        API (:3001)                         enrolld (own Deployment)
+  POST /console/mail-devices/enrollments  -> enrollment row, token      
+  shows QR / link https://ca.i10.tech/enroll/apple/<token>
+device Safari GET  /enroll/apple/<token> ----------------------------> peek (API :3443) -> phase 1 profile
+device POST /enroll/apple/profile (signed by Apple) -----------------> attest (API :3443) -> SCEP permit -> SCEP-only profile
+device <-> step-ca SCEP (PR 3's three hooks gate it on that permit)
+device POST /enroll/apple/profile (signed by the SCEP key) ----------> finish (API :3443) -> mint (+ ACME permit) -> sealed profile
+```
+
+**enrolld holds no database credentials and no device-code keys.** It verifies Apple's and step-ca's signatures, parses attributes, and encrypts. Every decision (who, which mailbox, platform rules, the gate, the epoch, minting) is the API's, through PR 2's and PR 3's store functions. Its only secret is a bearer token for the API's internal listener. A compromise of enrolld buys what any device on the internet has (the three internal calls), plus the sealed payloads passing through it during an enrollment; it cannot mint for a person who did not start an enrollment.
+
+### The enrollment row, `authd.mail_device_enrollments`
+
+| Column                                         | Notes                                                                                                                         |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `id` uuid                                      | `uuidv7()`                                                                                                                    |
+| `clerk_user_id` text not null                  | FK `authd.accounts` ON DELETE CASCADE                                                                                         |
+| `email` text not null, `tenant_id` uuid        | the account's at creation; every later step requires the account to still match (null-safe), as the device lane does          |
+| `expected_epoch` bigint not null               | the account's `credential_epoch` read with the dash session; attest, the SCEP hooks and the mint refuse when it moved         |
+| `token_sha256` bytea not null unique           | SHA-256 of the 32-byte base64url token in the link; the token is never stored                                                |
+| `status` text                                  | `open` → `attested` → `sealed`, or `refused`, `expired`, `cancelled`; CHECK                                                    |
+| `refusal` text                                 | a fixed word for the console (`mac_not_apple_silicon`, `macos_too_old`, `unsupported_product`, a gate code)                  |
+| `serial`, `product`, `os_version`, `device_name` text | from Apple's signed attributes at attest, bounded; the first attest binds the serial                                  |
+| `udid_sha256`, `apple_signer_sha256` bytea     | bound at attest; a retried attest must match both, a phase 4 that echoes a UDID must match                                    |
+| `platform` text                                | `ios`, `ipados`, `macos`, decided at attest from `product`                                                                    |
+| `device_id` uuid                               | FK `authd.mail_devices` ON DELETE SET NULL, set at seal                                                                       |
+| `created_by` text, `created_at`, `expires_at`, `updated_at` | `expires_at` = creation + 10 minutes; an attest moves it to attest + 10 minutes, the SCEP permit's own life      |
+
+Indexes: unique `token_sha256`; `clerk_user_id` where `status in ('open','attested')`; `expires_at` for retention (deleted a day past expiry, like permits). `authd.mail_device_cert_permits` gains `enrollment_id` (FK ON DELETE CASCADE, CHECK: not null exactly for `scep`, indexed). Grants: the API's role only; an explicit REVOKE from `authd` and `mailfront`, grant tests assert it. On the CI non-RLS allowlist with its reason. No access-change triggers: an enrollment opens no session.
+
+**PR 3's SCEP hooks gate on the enrollment.** `lockScepPermit` compared the account with itself ("a no-op until PR 4 stores one"). It now locks the account, then the permit, then the permit's enrollment, and refuses unless the enrollment is `attested` and unexpired and `mintRefusal` passes against the enrollment's workspace and `expected_epoch`, on the first call and on every retry. So a revocation, hold or epoch raise between the console click and SCEP stops the enrollment at the CA, before a code exists.
+
+**Lock order** is unchanged: account, then device, then permit, then the enrollment (it hangs off the account, like a permit). Every write that reads an enrollment first reads it unlocked to learn the account, locks the account, then locks the enrollment and re-checks it.
+
+### The console's routes (the contract PR 5 calls)
+
+All under the console's session, workspace-scoped, the signed-in person's **own** mailbox only (no admin enrolls a device into someone else's mailbox).
+
+- **`POST /console/mail-devices/enrollments`**, behind `requireFreshAuth` (the step-up dialog, as API-key deletion). Body `{}`. Reads the person's `authd.accounts` row and its epoch, runs `mintRefusal`, cancels the person's other `open` or `attested` enrollments, inserts the row. **201** `{ "id", "url", "expiresAt" }`, `url` = `https://ca.i10.tech/enroll/apple/<token>`, shown once (QR code and an "open on this device" link). **409** `{ "error": { "code" } }` with `no_mailbox` or a `mintRefusal` code; **503** `keys_not_configured`.
+- **`GET /console/mail-devices/enrollments/:id`**: the person's own enrollment. **200** `{ "id", "status", "expiresAt", "refusal", "platform", "model", "deviceName", "deviceId", "needsMailSetup" }`. `status` is `open`, `attested`, `sealed`, `refused`, `expired` (an `open`/`attested` row past `expires_at` reads `expired`) or `cancelled`. `needsMailSetup` is true for a sealed Mac (the two clicks of section 5). **404** otherwise. The console polls it every 2 seconds while open.
+- **`DELETE /console/mail-devices/enrollments/:id`**: cancels an `open` or `attested` enrollment (and expires its SCEP permit). **204**; **404** when not the person's.
+
+### The internal calls (enrolld to API)
+
+On the `:3443` listener (PR 3), with its own fetch branch: paths `/enrolld/peek`, `/enrolld/attest`, `/enrolld/finish`, `POST`, JSON, `Authorization: Bearer` checked against `ENROLLD_TOKEN_HASHES` (SHA-256 hex, comma-separated for rotation, as `CA_HOOK_TOKEN_HASHES`). The CA hook token never opens these paths and this token never opens a hook. Every authentication failure is a bare 404; 64 KiB cap; one 4-second deadline inside Postgres per call (PR 3's `decide`). A refusal is a 200 with `outcome: "refused"`; only our faults are 5xx.
+
+- **`peek`** `{ token }` → `{ live }`. Read-only.
+- **`attest`** `{ token, udid, serial, product, version, deviceName?, model?, appleSignerSha256 }`. Finds the enrollment by the token's hash, locks the account, then the enrollment: `open` (or `attested` with the same serial, UDID and signer: a retry), unexpired, `mintRefusal` with `expected_epoch`, the account still the enrollment's person, address and workspace. Then the platform rules:
+  - `iPhone*` → `ios`, `iPad*` → `ipados`; a Mac identifier → `macos` only when it is Apple silicon (`MacBookPro17,1`, `MacBookPro18,*`, `MacBookAir10,1`, `Macmini9,1`, `iMac21,*`, `Mac13,*` and above) and the build (`version`) is macOS 14 or later (build major 23 and above); anything else is refused with its word and the row turns `refused`.
+  - Creates the SCEP permit: 32 random bytes as base64url, stored as SHA-256 of that exact string, `serial`, `enrollment_id`, 10 minutes. A retry expires the earlier open permit and makes a new one.
+  - → `{ outcome: "scep", serial, challenge }`.
+- **`finish`** `{ keySha256, certSha256, commonName, udid? }`, both hashes hex. Finds the SCEP permit by `key_sha256` (`authorized` or `notified`, unexpired, CN equal to its serial, `issued_cert_sha256` equal when NOTIFYING recorded one), its enrollment `attested` and unexpired, a UDID when echoed equal to the bound one. In **one transaction**, lock order kept: mint through PR 2's store (the same function `mint`, refactored to run inside a caller's transaction, `expectedEpoch` from the row, platform, `model` = product, `serial`, `deviceName`, `createdBy` = the enrollment's creator), for `macos` create the ACME permit the same way (PR 3's `createAcmePermit`, in that transaction), mark the SCEP permit `expired` and the enrollment `sealed` with the device id. Builds the inner payload list: the mail account from `apple-profile.ts` with the code as `IncomingPassword` and `OutgoingPassword`, and for `macos` the ACME payload (`DirectoryURL` `https://ca.i10.tech/acme/apple/directory`, `ClientIdentifier` and `CN` the serial, `OU` the permit's nonce, `ECSECPrimeRandom` 384, `HardwareBound`, `Attest`, EKU `clientAuth`). → `{ outcome: "sealed", inner, identifier, uuid, displayName, scope }`, `inner` being the plist the outer profile encrypts, `scope` `System` for iPhone and iPad, `User` for a Mac.
+  - **Single use.** A second `finish` for a sealed enrollment is refused: the code is not stored, so it cannot be sent again. The device row it minted dies unused after ten minutes (PR 2's rule), and the person starts over.
+
+### enrolld
+
+- `cmd/enrolld` in the authd module, the same image, its own Deployment and ServiceAccount (no token mounted), non-root, read-only root, no capabilities. Plain HTTP on one port behind Traefik, which terminates TLS for `ca.i10.tech` and routes `PathPrefix(/enroll/apple/)` to it, with the existing rate-limit and in-flight middlewares. `ReadHeaderTimeout` 5 s, `ReadTimeout` 10 s, `WriteTimeout` 15 s, 64 KiB body cap, a bound on concurrent requests.
+- **`GET /enroll/apple/<token>`**: the token must be exactly 43 base64url characters, else 404 without calling the API. `peek`; live → the phase 1 Profile Service profile (`URL` `https://ca.i10.tech/enroll/apple/profile`, `DeviceAttributes` UDID, VERSION, PRODUCT, SERIAL, DEVICE_NAME, MODEL, `Challenge` the token), `Content-Type: application/x-apple-aspen-config`; not live → 404. The token never reaches a log (a 4-byte hash prefix at most). Traefik's access log sees the path; the token is single-use, ten minutes and bound to the first serial.
+- **`POST /enroll/apple/profile`**: the phase is decided by **who signed**, never by what the attributes say:
+  - signer issued by the pinned Apple iPhone Device CA (issuer bytes equal and `CheckSignature` by its key) → phase 2. The attributes plist is parsed by a strict parser of its own (a flat `dict` of `key`/`string` pairs, nothing else, each value bounded), `CHALLENGE` required, then `attest`; `scep` → the SCEP-only profile (`URL` `https://ca.i10.tech/scep/apple-scep`, `Subject` CN the serial, `Challenge`, RSA 2048, `Key Usage` 5; nothing else in it, section 4).
+  - signer chaining by `x509.Verify` to the device root through the intermediate (both from the front's public trust bundle), EKU `emailProtection`, no SANs → phase 4, `finish` with `sha256(SPKI)`, `sha256(DER)`, the CN and the UDID if echoed; `sealed` → encrypt `inner` to that certificate (AES-256-CBC, RSA PKCS#1 v1.5 key transport), wrap it as `EncryptedPayloadContent` in a `Configuration` profile with the identifier, UUID, name and scope from the API.
+  - anything else, or a refusal: 400 with no body worth reading. The person sees why on the console.
+- **Never** logs a token, a challenge, the inner plist or a code. It logs the phase, the outcome, the product and a hash prefix of the serial.
+- The final profile is not signed: no key that Apple devices trust is available to it (the public wildcard key lives in Traefik). iOS shows it as not verified; signing it is a later step.
+
+### What PR 4 proves alone, and what waits for a device
+
+- **On prod, with a throwaway account:** an enrollment from the console route; phase 1 served; a synthetic phase 2 signed by a test key is refused (the pinned CA is real); `peek`, `attest` and `finish` refuse every wrong token, permit, key and state; the SCEP hooks refuse a challenge for another enrollment; retention removes expired rows.
+- **Only a real device (PR 6, or the owner's iPhone and Mac earlier if a step stalls):** Apple's actual signature algorithms and attribute set in phase 2 and phase 4, SCEP through step-ca with the real challenge, the AES-256-CBC profile opening, the Mac's ACME `device-attest-01` binding through PR 3's hook, and Mail signing in with the sealed code.
+
 ---
 
 ## Sources
