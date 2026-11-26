@@ -64,7 +64,11 @@ APP="${I10_APP:-i10-workloads}"
 # would re-couple this check to unrelated failures - exactly what §2 stopped
 # doing. Refreshing them costs nothing, removes the three-minute wait, and §3
 # then waits for the workloads themselves, which is the honest bar.
-APPS="${I10_APPS:-$APP i10-stalwart}"
+#
+# ⚠ i10-device-ca TOO (#383 PR 3): its relay sidecar runs the same i10-authd
+# image, so an authd build pins it as well. Without the nudge, the relay would
+# pick the new digest up only at Argo's own poll, after this check had passed.
+APPS="${I10_APPS:-$APP i10-stalwart i10-device-ca}"
 
 # ⚠ THE BUDGETS ARE SPLIT, BECAUSE THE TWO WAITS FAIL FOR DIFFERENT REASONS.
 # Argo not syncing is a control-plane problem; pods not becoming ready is an

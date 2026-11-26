@@ -149,7 +149,9 @@ silently underneath a lock tuned to something else's horizon.
 covers every web surface - `dash`, `auth`, `api`, `docs` - and stays
 hand-managed in Cloudflare. Tofu owns the mail half: the host Stalwart answers
 on, the MX, SPF, DKIM, DMARC, the RFC 6186 client-provisioning records and the
-MTA-STS policy id - twenty-two records in all.
+MTA-STS policy id - twenty-two records in all - and, since #383 PR 3, the
+grey-cloud `ca.i10.tech` pair for the device CA (created rather than imported:
+the first plan after it shows exactly those two additions).
 
 The split is by blast radius. A wrong web record is a 522 somebody notices in a
 minute. A wrong SPF or DKIM record fails DMARC **silently**, while damaging

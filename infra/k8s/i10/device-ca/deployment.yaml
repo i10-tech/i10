@@ -1,0 +1,278 @@
+# The device CA: step-ca, with the webhook relay as a sidecar (#383 PR 3).
+#
+# Read README.md before changing anything here, and
+# docs/research/mail-device-binding.md section 11 for why it is shaped this way.
+# This pod holds the device intermediate's private key. Everything below is
+# written for a reader who wants that key, or wants step-ca to sign for them.
+#
+# ⚠ ITS SERVICE MUST BE CALLED `i10-device-ca`, IN `i10-prod`. The intermediate
+# is name-constrained (critical) to `i10-device-ca.i10-prod.svc` and
+# `i10-device-ca.i10-prod.svc.cluster.local`, and step-ca's own TLS certificate
+# is cut from it for `ca.json`'s `dnsNames`. Under any other name Traefik cannot
+# verify step-ca, and nothing on ca.i10.tech answers.
+---
+# ACME accounts, orders and unredeemed nonces, which step-ca keeps with no
+# expiry (Apple's payload has no external account binding). Nothing in here is
+# needed once an enrollment ends, so the volume may be wiped: scale the
+# Deployment to 0, delete the PVC, and let Argo recreate both. The Traefik
+# middlewares in ingressroute.yaml are what stop an outsider filling it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: i10-device-ca-db
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-device-ca
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: psl-zfs
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-device-ca
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-device-ca
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: i10-device-ca
+  # ⚠ step-ca's port only. The relay listens on 127.0.0.1 and has no Service.
+  ports:
+    - { name: https, port: 443, targetPort: https, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-device-ca
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-device-ca
+spec:
+  # ⚠ ONE REPLICA, RECREATE. Badger takes a lock on its directory and the volume
+  # is ReadWriteOnce, so a second pod, or a rolling update's surge pod, would
+  # sit unable to open the database. An enrollment that meets the few seconds of
+  # a rollout retries.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-device-ca
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-device-ca
+        app.kubernetes.io/part-of: i10-device-ca
+    spec:
+      # ⚠ NO SERVICE ACCOUNT TOKEN. Nothing in this pod talks to the Kubernetes
+      # API, and a token would let a compromised step-ca list what the default
+      # service account can see.
+      automountServiceAccountToken: false
+      # No `I10_API_SERVICE_HOST`-style variables for every Service in the
+      # namespace: step-ca reads none of them.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        # ⚠ NUMERIC. The image declares `USER step` by name, and the kubelet
+        # cannot check a name against runAsNonRoot. 1000 is that account's uid
+        # and gid, from the image's own build (`adduser -u ${STEPUID}`,
+        # STEPUID=1000).
+        runAsUser: 1000
+        runAsGroup: 1000
+        # Group of every mounted Secret file (mode 0440 below), and a
+        # supplementary group of both containers, so the relay (uid 65532) can
+        # read its own files. Each container still sees only its own mounts.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # ⚠ WITHOUT THIS, step-ca CANNOT START WITH EVERY CAPABILITY DROPPED.
+        # The image's binary carries a file capability (its Dockerfile runs
+        # `setcap CAP_NET_BIND_SERVICE=+eip bin/step-ca`, so it can bind :443
+        # as non-root). Linux refuses to exec a binary whose file capabilities
+        # cannot be granted, so with `drop: [ALL]` the container fails with
+        # `exec /usr/local/bin/step-ca: operation not permitted` and
+        # crash-loops. Measured on this digest, 2026-11-26 (README.md, "What
+        # was run locally").
+        #
+        # A plain copy has no file capability, and step-ca listens on 9000, so
+        # it needs none. The copy comes from the same pinned image, and the
+        # step-ca container mounts it read-only. The alternative,
+        # `add: [NET_BIND_SERVICE]`, would give the process that holds the
+        # intermediate key a capability it has no use for.
+        - name: copy-step-ca
+          image: smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270
+          imagePullPolicy: IfNotPresent
+          command: ["cp", "/usr/local/bin/step-ca", "/opt/step-ca/step-ca"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          volumeMounts:
+            - { name: bin, mountPath: /opt/step-ca }
+      containers:
+        # ── step-ca ──────────────────────────────────────────────────────────
+        - name: step-ca
+          # ⚠ PINNED BY DIGEST: the multi-arch index of smallstep/step-ca:0.30.2
+          # (README.md, "The image"). A tag alone could change what signs
+          # people's certificates with no commit to point at. Keep the init
+          # container above on the same digest: it supplies the binary.
+          image: smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270
+          imagePullPolicy: IfNotPresent
+          # ⚠ NOT THE IMAGE'S ENTRYPOINT. /entrypoint.sh runs `step ca init` when
+          # it finds no ca.json, which would mint a CA of its own with a JWK
+          # admin provisioner. Started directly, a missing config is an exit.
+          # No --password-file: the intermediate key is stored unencrypted in
+          # Doppler (README.md, "Where the keys are"). The binary is the
+          # capability-free copy (initContainers above).
+          command: ["/opt/step-ca/step-ca"]
+          args: ["/home/step/config/ca.json"]
+          env:
+            # ⚠ BOTH, OR STEP-CA TRUSTS THE WHOLE PUBLIC WEB FOR ITS WEBHOOKS.
+            # Go reads SSL_CERT_FILE INSTEAD of the default bundle file, but it
+            # still reads every file in the default directories
+            # (/etc/ssl/certs) unless SSL_CERT_DIR names others
+            # (crypto/x509/root.go, loadOnDiskRoots). Pointed at the mount
+            # below, the only root step-ca adds to its own is the namespace CA
+            # that signs the relay's `localhost` certificate. Read once at
+            # start: a new namespace CA needs a restart.
+            - { name: SSL_CERT_FILE, value: /etc/step-ca/hooks-ca/ca.crt }
+            - { name: SSL_CERT_DIR, value: /etc/step-ca/hooks-ca }
+          ports:
+            - { name: https, containerPort: 9000, protocol: TCP }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          # ⚠ /health OVER HTTPS, FROM THE KUBELET ONLY. Traefik never routes it
+          # (ingressroute.yaml). The kubelet does not verify the certificate, so
+          # the probe works without the device root.
+          readinessProbe:
+            httpGet: { path: /health, port: https, scheme: HTTPS }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /health, port: https, scheme: HTTPS }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: bin, mountPath: /opt/step-ca, readOnly: true }
+            # ca.json and the two templates, from the hashed ConfigMap
+            # (kustomization.yaml), so an edit rolls the pod.
+            - { name: config, mountPath: /home/step/config, readOnly: true }
+            - { name: keys, mountPath: /home/step/secrets, readOnly: true }
+            - { name: hooks-ca, mountPath: /etc/step-ca/hooks-ca, readOnly: true }
+            - { name: db, mountPath: /home/step/db }
+            - { name: tmp, mountPath: /tmp }
+
+        # ── the webhook relay ────────────────────────────────────────────────
+        - name: cahookrelay
+          # ⚠ THE i10-authd IMAGE, ON authd's PIN. pin-image.py rewrites every
+          # i10-authd reference under infra/k8s on each authd build, this one
+          # included. A digest older than #535 has no /usr/local/bin/cahookrelay.
+          image: ghcr.io/i10-tech/i10-authd:prod-dd20f806dfbee111005200ea2719e193478566a0@sha256:6d7cc16fa28dcdb240b9cf543afbbce5a3bf96df25853ea209b34d4d0c85dc1e
+          command: ["/usr/local/bin/cahookrelay"]
+          # services/authd/README.md, "Configuration (cahookrelay)". Every
+          # variable is set, defaults included, so this file says what runs.
+          env:
+            # ⚠ LOOPBACK ONLY. The relay refuses any other address, and the
+            # webhook URLs in ca.json name this one.
+            - { name: CAHOOKRELAY_LISTEN, value: "127.0.0.1:9443" }
+            - { name: CAHOOKRELAY_TLS_CERT_FILE, value: /etc/cahookrelay/tls/tls.crt }
+            - { name: CAHOOKRELAY_TLS_KEY_FILE, value: /etc/cahookrelay/tls/tls.key }
+            # The API's hooks listener (workloads/api.yaml), verified against the
+            # namespace CA that signed it, which is also the `ca.crt` of the
+            # relay's own certificate Secret.
+            - name: CAHOOKRELAY_UPSTREAM_URL
+              value: https://i10-api-ca-hooks.i10-prod.svc:3443
+            - { name: CAHOOKRELAY_UPSTREAM_CA_FILE, value: /etc/cahookrelay/tls/ca.crt }
+            - { name: CAHOOKRELAY_TOKEN_FILE, value: /etc/cahookrelay/token/token }
+            # Above the API's own 4-second deadline per hook, so the API, not
+            # the relay, decides when a hook has taken too long.
+            - { name: CAHOOKRELAY_UPSTREAM_TIMEOUT, value: "10s" }
+            - { name: CAHOOKRELAY_LOG_LEVEL, value: "info" }
+          securityContext:
+            # The distroless image's `nonroot`.
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 5m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          volumeMounts:
+            - { name: relay-tls, mountPath: /etc/cahookrelay/tls, readOnly: true }
+            - { name: relay-token, mountPath: /etc/cahookrelay/token, readOnly: true }
+          # ⚠ NO PROBES, for the reason authd has none (stalwart/node/
+          # statefulset.yaml): the relay binds 127.0.0.1 only and the kubelet
+          # probes the pod IP. If it exits, the pod goes NotReady and the
+          # kubelet restarts it; step-ca meanwhile meets a transport error on
+          # every hook and refuses the device. It never issues on an error.
+
+      volumes:
+        - name: config
+          configMap:
+            name: i10-device-ca-config
+        # ⚠ ONLY THE FOUR NAMED KEYS, NEVER THE WHOLE SECRET. The Doppler config
+        # shadows the root `prod` config's five inherited keys with empty values
+        # (README.md, "Where the keys are"), but a key added to root `prod`
+        # later would inherit again. `items` keeps anything not named here out
+        # of the pod. The decrypter's certificate is public and lives in ca.json
+        # (step-ca has no file option for it).
+        - name: keys
+          secret:
+            secretName: i10-device-ca
+            defaultMode: 0440
+            items:
+              - { key: DEVICE_CA_ROOT_CRT, path: root.crt }
+              - { key: DEVICE_CA_INTERMEDIATE_CRT, path: intermediate.crt }
+              - { key: DEVICE_CA_INTERMEDIATE_KEY, path: intermediate.key }
+              - { key: DEVICE_CA_SCEP_DECRYPTER_KEY, path: decrypter.key }
+        # The namespace CA's certificate only, from the relay's certificate
+        # Secret: never its `tls.key`, which is the relay's alone.
+        - name: hooks-ca
+          secret:
+            secretName: i10-cahookrelay-tls
+            defaultMode: 0440
+            items:
+              - { key: ca.crt, path: ca.crt }
+        - name: relay-tls
+          secret:
+            secretName: i10-cahookrelay-tls
+            defaultMode: 0440
+            items:
+              - { key: tls.crt, path: tls.crt }
+              - { key: tls.key, path: tls.key }
+              - { key: ca.crt, path: ca.crt }
+        # ⚠ THE BEARER TOKEN, MOUNTED ONLY INTO THE RELAY. step-ca never sees
+        # it, so neither `GET /provisioners` nor step-ca's logs can carry it.
+        - name: relay-token
+          secret:
+            secretName: i10-device-ca-hooks
+            defaultMode: 0440
+            items:
+              - { key: CA_HOOK_TOKEN, path: token }
+        - name: db
+          persistentVolumeClaim:
+            claimName: i10-device-ca-db
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+        # The capability-free copy of the step-ca binary (about 50 MB).
+        - name: bin
+          emptyDir: { sizeLimit: 128Mi }

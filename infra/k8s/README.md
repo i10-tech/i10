@@ -61,6 +61,7 @@ i10/
   redis/             The queues' Redis, i10's own
   stalwart/          the mail engine (kustomize, for config hashing)
   bulwark/           JMAP webmail - AGPL-3.0, read the header before editing
+  device-ca/         step-ca for Mac mail certificates, ca.i10.tech - read its README
   workloads/         api, console, web, docs, and the TLS certificate
 ```
 

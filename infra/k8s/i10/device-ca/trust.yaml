@@ -1,0 +1,77 @@
+# The device CA's PUBLIC certificates, for the two processes that trust it
+# (#383 PR 3, README.md, "Who trusts the device CA"). No key is here, and no
+# device is ever told to trust these: they are trust anchors only inside i10.
+#
+#   ca.crt      the device root alone. Traefik's ServersTransport
+#               (ingressroute.yaml) verifies step-ca's TLS certificate with it.
+#   bundle.pem  the root AND the intermediate, for the mail front's 993
+#               (MAILFRONT_DEVICE_CA_BUNDLE, stalwart/node/statefulset.yaml).
+#
+# ⚠ THE FRONT'S BUNDLE CARRIES THE INTERMEDIATE ON PURPOSE. 993's certificate
+# request lists the bundle's subjects as the acceptable CAs, and a Mac picks an
+# identity whose issuer is in that list: the leaf's issuer is the intermediate.
+# It also lets a client that sends its leaf without the chain verify. Both a
+# root-only and a root-plus-intermediate bundle were proved to verify a Mac leaf
+# (2026-11-26).
+#
+# ⚠ PEM AND NOTHING ELSE INSIDE EACH VALUE. The front refuses a bundle with any
+# non-certificate bytes and keeps 993 inert (ParseCertPool, tlsconf.go), so a
+# comment typed into the value turns client certificates off.
+#
+# Fingerprints (SHA-256 of the DER), from the made-CA note of 2026-11-26:
+#   root          26:4D:11:DA:...:B0:E2:37:B2  O=i10, CN=i10 Device Root CA 2026, until 2046-11-26
+#   intermediate  55:9B:89:6F:...:52:66:03:CE  O=i10, CN=i10 Device Intermediate CA 2026, until 2036-11-26
+#
+# ⚠ A PLAIN ConfigMap, NOT A HASHED ONE, because two other Applications' pods
+# name it: a generated name would change under them. Nothing restarts on an
+# edit, and nothing needs to: the front re-reads its bundle every 30 seconds,
+# and Traefik watches ConfigMaps. At the year-7 rotation, ADD the new root to
+# ca.crt and the new root and intermediate to bundle.pem, beside the old ones,
+# before step-ca cuts over; see README.md, "Rotation".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: i10-device-ca-trust
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-device-ca
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBpDCCAUqgAwIBAgIUbg/jcjABx/LJGJjThW33lfLc+44wCgYIKoZIzj0EAwIw
+    MDEMMAoGA1UECgwDaTEwMSAwHgYDVQQDDBdpMTAgRGV2aWNlIFJvb3QgQ0EgMjAy
+    NjAeFw0yNjExMjYwMzA0MzhaFw00NjExMjYwMzA0MzhaMDAxDDAKBgNVBAoMA2kx
+    MDEgMB4GA1UEAwwXaTEwIERldmljZSBSb290IENBIDIwMjYwWTATBgcqhkjOPQIB
+    BggqhkjOPQMBBwNCAARjsTDZS96CBo7qGiGMhmDbZBDXWyHhhL0ADFPDM/0OOvzP
+    vOsd9aBnduOsl9bCHQi/lDz6EUWSBqBWQnoxpdz0o0IwQDAPBgNVHRMBAf8EBTAD
+    AQH/MA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUT5ZSi1Vul+xsMkV0n+/4+9jg
+    zY8wCgYIKoZIzj0EAwIDSAAwRQIhALmzhWoTQ36rwh0jTieZ8taXXwz5CcupFKtd
+    /B2MxDRoAiAzArz7KhsGAJd7VTjFar483moDsLIw1Kf5OWzyTYr41Q==
+    -----END CERTIFICATE-----
+  bundle.pem: |
+    -----BEGIN CERTIFICATE-----
+    MIIBpDCCAUqgAwIBAgIUbg/jcjABx/LJGJjThW33lfLc+44wCgYIKoZIzj0EAwIw
+    MDEMMAoGA1UECgwDaTEwMSAwHgYDVQQDDBdpMTAgRGV2aWNlIFJvb3QgQ0EgMjAy
+    NjAeFw0yNjExMjYwMzA0MzhaFw00NjExMjYwMzA0MzhaMDAxDDAKBgNVBAoMA2kx
+    MDEgMB4GA1UEAwwXaTEwIERldmljZSBSb290IENBIDIwMjYwWTATBgcqhkjOPQIB
+    BggqhkjOPQMBBwNCAARjsTDZS96CBo7qGiGMhmDbZBDXWyHhhL0ADFPDM/0OOvzP
+    vOsd9aBnduOsl9bCHQi/lDz6EUWSBqBWQnoxpdz0o0IwQDAPBgNVHRMBAf8EBTAD
+    AQH/MA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUT5ZSi1Vul+xsMkV0n+/4+9jg
+    zY8wCgYIKoZIzj0EAwIDSAAwRQIhALmzhWoTQ36rwh0jTieZ8taXXwz5CcupFKtd
+    /B2MxDRoAiAzArz7KhsGAJd7VTjFar483moDsLIw1Kf5OWzyTYr41Q==
+    -----END CERTIFICATE-----
+    -----BEGIN CERTIFICATE-----
+    MIICYTCCAgagAwIBAgIUdNqJRn0hMMpzZmKgWH48THkQDxwwCgYIKoZIzj0EAwIw
+    MDEMMAoGA1UECgwDaTEwMSAwHgYDVQQDDBdpMTAgRGV2aWNlIFJvb3QgQ0EgMjAy
+    NjAeFw0yNjExMjYwMzA0MzhaFw0zNjExMjYwMzA0MzhaMDgxDDAKBgNVBAoMA2kx
+    MDEoMCYGA1UEAwwfaTEwIERldmljZSBJbnRlcm1lZGlhdGUgQ0EgMjAyNjBZMBMG
+    ByqGSM49AgEGCCqGSM49AwEHA0IABGt0Cj+uZwrtOXZr9HOv8YsqzTYnb9ovR5Mx
+    YogfhEOnmIvPLwwj6xLKqq8RN1JEx/SVLM67LUFymOWRAc3gSUyjgfUwgfIwEgYD
+    VR0TAQH/BAgwBgEB/wIBADAOBgNVHQ8BAf8EBAMCAYYwHQYDVR0OBBYEFPPoidOD
+    zl0YtrGi5IgjNPN2XAccMB8GA1UdIwQYMBaAFE+WUotVbpfsbDJFdJ/v+PvY4M2P
+    MIGLBgNVHR4BAf8EgYAwfqBKMByCGmkxMC1kZXZpY2UtY2EuaTEwLXByb2Quc3Zj
+    MCqCKGkxMC1kZXZpY2UtY2EuaTEwLXByb2Quc3ZjLmNsdXN0ZXIubG9jYWyhMDAK
+    hwgAAAAAAAAAADAihyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAK
+    BggqhkjOPQQDAgNJADBGAiEAnZlfBaBYz27oqHBrFvqVABBXSL87xkww3WhKz7oK
+    ELMCIQDx1CioutZ0bCBP9ZBeoOja90ezHBLmJxabjvQ+XIbbsQ==
+    -----END CERTIFICATE-----
