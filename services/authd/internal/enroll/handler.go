@@ -132,7 +132,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeBareError(w, http.StatusNotFound)
 			return
 		}
-		h.withConcurrency(w, r, h.handleProfilePost)
+		// ⚠ THE BODY IS READ BEFORE THE REQUEST TAKES A CONCURRENCY SLOT. A
+		// client that sends its body slowly then holds only its own connection
+		// (until the server's ReadTimeout), never a slot a real device needs.
+		start := h.now()
+		body, ok := h.readProfileBody(w, r)
+		if !ok {
+			return
+		}
+		h.withConcurrency(w, r, func(w http.ResponseWriter, r *http.Request) {
+			h.handleProfilePost(w, r, body, start)
+		})
 		return
 	}
 
@@ -185,22 +195,26 @@ func (h *Handler) handlePhase1Get(w http.ResponseWriter, r *http.Request, token 
 	h.log.Info("enrollment request handled", "phase", 1, "outcome", "ok", "duration", dur)
 }
 
-func (h *Handler) handleProfilePost(w http.ResponseWriter, r *http.Request) {
-	start := h.now()
+// readProfileBody reads the capped POST body, answering the refusal itself
+// when it is too large or cannot be read.
+func (h *Handler) readProfileBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			h.log.Warn("enrollment request rejected", "outcome", "body_too_large")
-			writeBareError(w, http.StatusRequestEntityTooLarge)
-			return
-		}
-		h.log.Warn("enrollment request rejected", "outcome", "body_read_error")
-		writeBareError(w, http.StatusBadRequest)
-		return
+	if err == nil {
+		return body, true
 	}
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		h.log.Warn("enrollment request rejected", "outcome", "body_too_large")
+		writeBareError(w, http.StatusRequestEntityTooLarge)
+		return nil, false
+	}
+	h.log.Warn("enrollment request rejected", "outcome", "body_read_error")
+	writeBareError(w, http.StatusBadRequest)
+	return nil, false
+}
 
+func (h *Handler) handleProfilePost(w http.ResponseWriter, r *http.Request, body []byte, start time.Time) {
 	cms, err := ParseAndVerifyCMS(body)
 	if err != nil {
 		h.log.Info("enrollment request rejected", "outcome", "cms_invalid")

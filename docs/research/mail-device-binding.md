@@ -830,7 +830,7 @@ Before PR 4 merges, an iPhone and an Apple silicon Mac run the probe against **p
 - The SCEP payload sets `KeyIsExtractable` false.
 - Phase 1 sends `Challenge` as a `<string>`. The attribute parser accepts `CHALLENGE` as `<string>` or `<data>`, and nothing else as `<data>`.
 - **POST response.** `Cache-Control: no-store`.
-- **Workspace.** The POST is workspace-optional and uses the account's own `tenant_id` (null for an i10.tech mailbox), whatever workspace the session has open: it is the person's own mailbox.
+- **Workspace.** The POST is workspace-optional and uses the account's own `tenant_id` (null for an i10.tech mailbox), whatever workspace the session has open: it is the person's own mailbox. ⚠ That workspace's console policies (SSO, second factor, IP allowlist, session age) still run on the session before the enrollment starts, because it ends in a credential for the workspace's mailbox. The gate can call Clerk, so the route runs it before the transaction, and the transaction refuses `tenant_mismatch` if the mailbox moved in between (found in the PR 4 security review).
 - **DELETE of a sealed enrollment** is `409 already_sealed`.
 - **SCEP hook refusals are shown.** A refusal from the SCEP hooks marks the enrollment `refused` with its code, in the hook's transaction, so the console shows it rather than waiting for the expiry.
 - **Logged serials** are a keyed hash (HMAC under a random per-process key), never a plain prefix.
@@ -842,6 +842,7 @@ An iPhone (`iPhone17,2`, iOS 27.2) and an Apple silicon Mac (`MacBookPro18,3`, m
 
 - **The iPhone works end to end.** Phase 2, SCEP, phase 4, then the sealed profile (AES-256-CBC, RSA PKCS#1 v1.5) installed. Mail signed in with the sealed code through the front (`source: device`) 7 s after the seal. enrolld's verifier accepts all five real phase 2 requests and the phase 4 request: the pinned Apple CA is right, and Apple's signed attributes come in DER order.
 - **SCEP works with no i10 root on the device, but only with the decrypter alone.** iOS refuses a GetCACert answer in which it cannot pick a CA ("The Registration Authority's response is invalid"). It also checks the CertRep against the certificate marked `digitalSignature`, which is the intermediate, while step-ca 0.30.2 always signs the CertRep with the provisioner's decrypter key ("The SCEP server returned an invalid response"). Sending decrypter plus root, without the intermediate, is refused too, because no certificate is marked for signing. The one answer that works is the decrypter certificate alone, as `application/x-x509-ca-cert`. In step-ca that is `"excludeIntermediate": true` on `apple-scep`, with `includeRoot` left off. The deploy PR sets it.
+- **The real requests stay out of the repository.** They carry a real serial and UDID, and they are signed, so neither can be removed. They are the env-gated test `ENROLL_PROBE_REF` (`internal/enroll/probe_ref_test.go`) run before merge, and CI runs synthetic fixtures built to the same shapes (signed attributes in DER order, no signed attributes, the boolean key). This replaces "become enrolld's golden tests" above.
 - **A Mac signs both requests without signed attributes** (RFC 5652 5.4: the signature covers the content), with sha1WithRSA and a four-certificate Apple chain. Its attributes add `MODEL`, `MODELNUMBER`, `DEVICE_NAME`, `SOFTWARE_UPDATE_DEVICE_ID`, `UserID`, `UserShortName`, `UserLongName` and a boolean `NotOnConsole`. enrolld accepts both forms and the boolean. Every other rule stays.
 - **The Mac's ACME certificate works.** step-ca issued the Secure Enclave certificate with CN = serial and OU = the permit's nonce (L5 settled).
 - **macOS checks the mail account while it installs the profile**, over IMAP `LOGIN` with the code and over SMTP `AUTH`, with no certificate. PR 3 refuses both for a Mac (`device_cert_required`, and the front's `454`), so the whole install failed with "Unable to verify account name or password".
@@ -850,7 +851,7 @@ An iPhone (`iPhone17,2`, iOS 27.2) and an Apple silicon Mac (`MacBookPro18,3`, m
 
 - the row is `macos` and its ACME key is bound (`cert_key_sha256` set);
 - the id's embedded time (`uuidv7()`) is between 10 minutes ago and 1 minute ahead, so the front needs no new column grant and a future-dated id cannot make the grace permanent;
-- no certificate session was ever recorded for it (no `authd.mail_device_cert_binds` row).
+- no certificate session is recorded under its current key (no `authd.mail_device_cert_binds` row). Binding a new key deletes those rows, so a Mac whose key is bound again inside its first 10 minutes is in grace again until the window ends. Only the Mac itself can bind a key (the ACME hook checks the serial Apple attested), and the window still runs from the device's creation.
 
 A grace bind passes every other gate rule, never writes a liveness row, and logs `grace: true`. Every code-only session admitted under it ends when the grace does. After that, PR 3's rules apply unchanged: the code alone is refused until the two clicks in Mail. The cost: a code lifted from that Mac in its first 10 minutes signs in alone until the grace ends.
 

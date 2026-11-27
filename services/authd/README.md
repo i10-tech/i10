@@ -622,7 +622,8 @@ key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
     row is in grace while `platform = 'macos'`, `cert_key_sha256 IS NOT NULL`,
     `uuid_extract_timestamp(id)` is within `[now() - 10 minutes, now() + 1 minute]`
     by Postgres's clock, and no row exists in `authd.mail_device_cert_binds` for
-    the device. During that grace, a `device_code` bind with no certificate in
+    the device (binding a new key deletes those rows, so a rebind inside the
+    window reopens the grace until the window ends). During that grace, a `device_code` bind with no certificate in
     the token is accepted on IMAP (without writing a liveness row) and on SMTP
     (without requiring one), still checked against every other gate rule
     (account, tenant, epoch, revocation, bound key, code hash, first-use claim,

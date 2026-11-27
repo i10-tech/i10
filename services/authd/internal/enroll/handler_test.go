@@ -589,6 +589,36 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 	}
 }
 
+func TestASlowBodyNeverHoldsAConcurrencySlot(t *testing.T) {
+	h, _, _, _ := newHandlerFixture(t, 1)
+	body, sender := io.Pipe()
+	done := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/enroll/apple/profile", body))
+		done <- rec.Code
+	}()
+	// A pipe write returns only once the handler has read it, so the POST is
+	// now mid-body, the way a client that stalls after one byte leaves it.
+	if _, err := sender.Write([]byte{0x30}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := len(h.sem); n != 0 {
+		t.Fatalf("a POST still reading its body holds %d slots, want 0", n)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/enroll/apple/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("phase 1 GET beside a stalled POST = %d, want 200", rec.Code)
+	}
+
+	sender.Close()
+	if code := <-done; code != http.StatusBadRequest {
+		t.Fatalf("the one-byte POST = %d, want 400", code)
+	}
+}
+
 func TestHandlerConcurrencyLimitAndHealthzBypass(t *testing.T) {
 	h, _, state, _ := newHandlerFixture(t, 1)
 	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
