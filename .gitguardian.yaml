@@ -50,3 +50,11 @@ secret:
     # services/authd/internal/devicecode/testdata/vectors.json (twice)
     - name: "device code test vector - bytes 0x10 to 0x2f, a counting sequence"
       match: b083a8331a769506f0f80ad9e2c064009862a7f02d4754863c83f9143736eb47
+
+    # A made-up UDID in enrolld's log-redaction test: the constant is named
+    # `secretUDID` because the test asserts it never reaches a log line, and its
+    # value says SECRET in capitals so a leak is easy to spot. A UDID is a device
+    # identifier, not a credential, and no device has this one.
+    # services/authd/internal/enroll/handler_test.go
+    - name: "enrolld log-redaction test - a made-up UDID, not a credential"
+      match: 014b970848584dec4eb6fc48f002087229c305d088be8f7d2d401f4322c4dc21

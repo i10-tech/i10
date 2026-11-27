@@ -154,6 +154,12 @@ func (f *fakeDevices) DeviceByID(_ context.Context, id string) (*projection.Devi
 		return nil, nil
 	}
 	cp := *d
+	// Mirror Postgres MacInstallGraceSQL: once any liveness row exists for the
+	// device, the install grace is over.
+	if len(f.live[id]) > 0 {
+		cp.MacInstallGrace = false
+		cp.MacInstallGraceLeft = 0
+	}
 	return &cp, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/devicecode"
 	"github.com/i10-tech/i10/services/authd/internal/gate"
@@ -244,11 +245,12 @@ func (s *session) smtpAuth(args string) (*signIn, bool, error) {
 		return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
 	}
 
-	// ⚠ MAC LIVENESS PRE-CHECK (revision 5): the front answers 454 ONLY when
-	// the account row, gate.Refusal, the device row and gate.DeviceRefusal
-	// (person, address, workspace, non-null key) all pass and ONLY the liveness
-	// row is missing. Everything else is forwarded so authd's throttle and
-	// refusal decide, and an unknown device id looks like any wrong password.
+	// ⚠ MAC LIVENESS PRE-CHECK (revision 5 + PR 4 install grace): the front
+	// answers 454 ONLY when the account row, gate.Refusal, the device row and
+	// gate.DeviceRefusal (person, address, workspace, non-null key) all pass,
+	// the Mac is outside its initial 10-minute install grace, and ONLY the
+	// liveness row is missing. Everything else is forwarded so authd's throttle
+	// and refusal decide, and an unknown device id looks like any wrong password.
 	if in.acct != nil && gate.Refusal(in.acct) == "" {
 		if devID := devicecode.DeviceID(password); devID != "" {
 			dev, err := s.deviceGate(devID)
@@ -257,36 +259,17 @@ func (s *session) smtpAuth(args string) (*signIn, bool, error) {
 				return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
 			}
 			if dev != nil && dev.Platform == gate.Macos && gate.DeviceRefusal(dev, in.acct, dev.CertKey) == "" {
-				var at netip.Prefix
-				if !s.macSMTPAnyAddress {
-					// ⚠ FAIL CLOSED: a zero prefix is MacLive's "any address", so a
-					// connection with no client address must never reach it.
-					if !s.addr.IsValid() {
-						s.log.Error("sign-in not forwarded: no client address for the Mac SMTP rule")
-						return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
-					}
-					at = projection.MacLivePrefix(s.addr)
-				}
-				live, err := s.macLive(dev.ID, at, dev.CertKey)
-				if err != nil {
-					s.log.Error("sign-in not forwarded", slog.Any("err", err))
-					return nil, false, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
-				}
-				if !live {
-					s.macTempFails++
-					s.log.Info("smtp auth deferred: mac certificate session missing",
-						"account", in.acct.ClerkUserID, "device", dev.ID,
-						"sameAddress", !s.macSMTPAnyAddress, "attempts", s.macTempFails)
-					if err := s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n"); err != nil {
-						return nil, false, err
-					}
-					if s.macTempFails >= maxMacTempFails {
-						return nil, false, errTooManyTempFails
-					}
-					return nil, false, nil
+				if dev.MacInstallGrace {
+					// A new Mac with no certificate session yet forwards its code
+					// so macOS account validation succeeds, for at most the time
+					// left in its grace window.
+					in.graceUntil = graceDeadline(time.Now(), dev.MacInstallGraceLeft)
+				} else if answered, err := s.deferWithoutMacLiveness(dev, in.acct); answered {
+					return nil, false, err
 				}
 				// Record the row's key at admission so a key change closes this
-				// SMTP session at the next poll, and it ends at cert_session_max_age.
+				// SMTP session at the next poll, and it ends at cert_session_max_age
+				// (or the end of the install grace).
 				in.certKey = bytes.Clone(dev.CertKey)
 			}
 		}
@@ -315,6 +298,42 @@ func (s *session) smtpAuth(args string) (*signIn, bool, error) {
 		}
 		return in, ev.code == 235, nil
 	}
+}
+
+// deferWithoutMacLiveness answers 454 when a Mac outside its install grace has
+// no recent certificate session under its current key. answered is true when it
+// wrote a reply, and the sign-in must not be forwarded; err is that write's
+// error, or errTooManyTempFails once the Mac has been deferred too often.
+func (s *session) deferWithoutMacLiveness(dev *projection.Device, acct *projection.Account) (answered bool, err error) {
+	var at netip.Prefix
+	if !s.macSMTPAnyAddress {
+		// ⚠ FAIL CLOSED: a zero prefix is MacLive's "any address", so a
+		// connection with no client address must never reach it.
+		if !s.addr.IsValid() {
+			s.log.Error("sign-in not forwarded: no client address for the Mac SMTP rule")
+			return true, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
+		}
+		at = projection.MacLivePrefix(s.addr)
+	}
+	live, err := s.macLive(dev.ID, at, dev.CertKey)
+	if err != nil {
+		s.log.Error("sign-in not forwarded", slog.Any("err", err))
+		return true, s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n")
+	}
+	if live {
+		return false, nil
+	}
+	s.macTempFails++
+	s.log.Info("smtp auth deferred: mac certificate session missing",
+		"account", acct.ClerkUserID, "device", dev.ID,
+		"sameAddress", !s.macSMTPAnyAddress, "attempts", s.macTempFails)
+	if err := s.cw.WriteString("454 4.7.0 Temporary authentication failure.\r\n"); err != nil {
+		return true, err
+	}
+	if s.macTempFails >= maxMacTempFails {
+		return true, errTooManyTempFails
+	}
+	return true, nil
 }
 
 // pumpSMTP reads Stalwart's replies. Before AUTH succeeds it reads whole

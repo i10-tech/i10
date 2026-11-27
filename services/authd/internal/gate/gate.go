@@ -75,8 +75,9 @@ const (
 	// DevicePlatformRefused: a platform this build does not sign in.
 	DevicePlatformRefused = "device_platform_refused"
 	// DeviceCertMissing: a Mac whose row has no certificate key bound (never
-	// bound, or cleared by `unbind-key` or a re-enrollment). A Mac signs in only
-	// with its certificate, so every session of it ends, SMTP included.
+	// bound, or cleared by `unbind-key` or a re-enrollment). Even during the
+	// initial install grace a Mac row must have its ACME key bound, so clearing
+	// the key ends every session of it, IMAP and SMTP included.
 	DeviceCertMissing = "device_cert_missing"
 	// DeviceKeyChanged: the certificate key the session or bind stands on is not
 	// the row's key now (rebound to another key), or a session that stands on a
@@ -190,10 +191,12 @@ func Refusal(a *projection.Account) string {
 //
 // ⚠ A MAC STANDS ON ITS CERTIFICATE KEY (#383 PR 3). held is the key the
 // session or bind stands on: the key the front proved in the TLS handshake (an
-// `external` sign-in, or a Mac's code on IMAP), or for a Mac's SMTP session the
-// row's key when it was admitted; nil for an iPhone or iPad. A Mac row must have
-// a key (DeviceCertMissing), and held must be exactly it; a row that is not a
-// Mac must meet no key at all (DeviceKeyChanged). So binding a new key, clearing
+// `external` sign-in, or a Mac's code on IMAP with a certificate), or the row's
+// key at admission for a Mac's SMTP session and for a Mac code-only install-
+// grace session (IMAP or SMTP, before its first certificate session is
+// recorded); nil for an iPhone or iPad. A Mac row must have a key
+// (DeviceCertMissing), and held must be exactly it; a row that is not a Mac
+// must meet no key at all (DeviceKeyChanged). So binding a new key, clearing
 // it, or a row that stops being a Mac ends every session that stood on the old
 // one, through the same rule a bind uses. authd's bind names its refusals more
 // finely (device_cert_required, device_cert_mismatch) from this reason.

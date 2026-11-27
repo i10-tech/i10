@@ -48,7 +48,8 @@ describe("the Apple configuration profile", () => {
   it("uses the address as the username on both servers", () => {
     expect(plistValueOf(xml, "IncomingMailServerUsername")).toBe("mohamed@i10.tech")
     expect(plistValueOf(xml, "OutgoingMailServerUsername")).toBe("mohamed@i10.tech")
-    expect(xml).toMatch(/<key>OutgoingPasswordSameAsIncoming<\/key>\s*<true\/>/)
+    expect(xml).toMatch(/<key>OutgoingPasswordSameAsIncomingPassword<\/key>\s*<true\/>/)
+    expect(xml).not.toContain("<key>OutgoingPasswordSameAsIncoming</key>")
   })
 
   // ⚠ THE ONE THAT MATTERS. A password here would be a live mailbox credential

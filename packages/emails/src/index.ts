@@ -33,6 +33,9 @@ import SsoDirectorySyncFailed, {
 import SsoRelinkRequested, {
   ssoRelinkRequestedSubject,
 } from "./templates/sso-relink-requested.js"
+import MailDeviceEnrolled, {
+  mailDeviceEnrolledSubject,
+} from "./templates/mail-device-enrolled.js"
 
 export { NOT_OURS, SLUG } from "./slugs.js"
 export type { KnownSlug } from "./slugs.js"
@@ -492,6 +495,24 @@ export async function renderSsoRelinkRequested(
   const element = SsoRelinkRequested(props)
   return {
     subject: ssoRelinkRequestedSubject(props.count, props.connection),
+    html: await render(element),
+    text: await render(element, { plainText: true }),
+  }
+}
+
+export { mailDeviceEnrolledSubject }
+
+/**
+ * Sent to the person after an Apple device completes OTA enrollment (#383 PR 4),
+ * naming the attested model, the last 4 characters of the serial, and a link to
+ * `/account#mail-devices` so an unexpected device can be revoked right away.
+ */
+export async function renderMailDeviceEnrolled(
+  props: React.ComponentProps<typeof MailDeviceEnrolled>,
+): Promise<RenderedEmail> {
+  const element = MailDeviceEnrolled(props)
+  return {
+    subject: mailDeviceEnrolledSubject(props.model),
     html: await render(element),
     text: await render(element, { plainText: true }),
   }

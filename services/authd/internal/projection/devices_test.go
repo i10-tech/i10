@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -370,8 +371,15 @@ func TestTheDeviceTableConstraints(t *testing.T) {
 		dw.exec(`INSERT INTO authd.mail_device_cert_permits (clerk_user_id, device_id, kind, serial, nonce_sha256, expires_at)
 			VALUES ($1, $2::uuid, 'acme', $3, $4::bytea, now() + interval '10 minutes')`, devicePrefix+"erin", dev, "SER-"+dev, nonce)
 	}
-	dw.exec(`INSERT INTO authd.mail_device_cert_permits (clerk_user_id, kind, serial, challenge_hash, expires_at)
-		VALUES ($1, 'scep', 'S', $2::bytea, now() + interval '10 minutes')`, devicePrefix+"erin", key32)
+	var enrollID string
+	if err := dw.admin.QueryRow(dw.ctx, `INSERT INTO authd.mail_device_enrollments
+		(clerk_user_id, email, expected_epoch, token_sha256, created_by, expires_at)
+		VALUES ($1, 'erin@dev.test', 0, $2::bytea, 'test', now() + interval '10 minutes')
+		RETURNING id::text`, devicePrefix+"erin", key32).Scan(&enrollID); err != nil {
+		t.Fatal(err)
+	}
+	dw.exec(`INSERT INTO authd.mail_device_cert_permits (clerk_user_id, enrollment_id, kind, serial, challenge_hash, expires_at)
+		VALUES ($1, $2::uuid, 'scep', 'S', $3::bytea, now() + interval '10 minutes')`, devicePrefix+"erin", enrollID, key32)
 	count := func(q string, args ...any) int {
 		t.Helper()
 		var n int
@@ -403,6 +411,16 @@ func TestTheDeviceTableConstraints(t *testing.T) {
 func TestMacLiveRowsConstantMatchesSQL(t *testing.T) {
 	if macLiveRowsSQL != strconv.Itoa(MacLiveRowsPerDevice) {
 		t.Fatalf("macLiveRowsSQL = %q, MacLiveRowsPerDevice = %d", macLiveRowsSQL, MacLiveRowsPerDevice)
+	}
+}
+
+func TestMacInstallGraceConstantsMatchSQL(t *testing.T) {
+	if want := strconv.FormatInt(MacInstallGraceDuration.Milliseconds(), 10); macInstallGraceMaxMS != want {
+		t.Fatalf("macInstallGraceMaxMS = %q, want %q", macInstallGraceMaxMS, want)
+	}
+	wantWindow := fmt.Sprintf("interval '%d minutes'", int(MacInstallGraceDuration/time.Minute))
+	if MacInstallGraceWindow != wantWindow {
+		t.Fatalf("MacInstallGraceWindow = %q, want %q", MacInstallGraceWindow, wantWindow)
 	}
 }
 
@@ -501,5 +519,108 @@ func TestMacDeviceQueriesAndLiveness(t *testing.T) {
 	}
 	if n != MacLiveRowsPerDevice {
 		t.Fatalf("capped count = %d, want %d", n, MacLiveRowsPerDevice)
+	}
+}
+
+// TestMacInstallGraceSQL verifies the shared MacInstallGraceSQL expression
+// through both authd's DeviceByID and mailfront's DeviceGate against Postgres
+// 18's uuidv7() / uuid_extract_timestamp() and database clock.
+func TestMacInstallGraceSQL(t *testing.T) {
+	dw := newDeviceWorld(t)
+	dw.account("grace", "grace@dev.test", tenantA)
+	front := dw.store("AUTHD_TEST_MAILFRONT_DATABASE_URL")
+	authd := dw.store("AUTHD_TEST_DATABASE_URL")
+
+	// insertRow inserts a device with an explicit SQL expression for its UUID id
+	// and an optional 32-byte cert_key_sha256 literal ("" -> NULL).
+	insertRow := func(idExpr, platform, keyHex string) string {
+		t.Helper()
+		keySQL := "NULL"
+		if keyHex != "" {
+			keySQL = `'` + keyHex + `'::bytea`
+		}
+		var id string
+		q := `INSERT INTO authd.mail_devices
+			(id, clerk_user_id, email, tenant_id, platform, cert_key_sha256, code_hash, code_kid, created_by)
+			VALUES (` + idExpr + `, $1, 'grace@dev.test', $2::uuid, $3, ` + keySQL + `, '\x01'::bytea, 1, 'test')
+			RETURNING id::text`
+		if err := dw.admin.QueryRow(dw.ctx, q, devicePrefix+"grace", tenantA, platform).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		return id
+	}
+	uniqueKey := func(b byte) string {
+		return `\x` + hex.EncodeToString(bytes.Repeat([]byte{b}, 32))
+	}
+
+	// 1. Fresh Mac with bound key and no cert_binds row -> in grace (~10m left).
+	freshMac := insertRow(`uuidv7()`, "macos", uniqueKey(0x11))
+	// 2. Mac created 4 minutes ago -> in grace (~6m left).
+	midMac := insertRow(`uuidv7(-interval '4 minutes')`, "macos", uniqueKey(0x12))
+	// 3. Slightly future-dated Mac (+30s, inside 1m clock skew) -> in grace, clamped <= 10m.
+	skewMac := insertRow(`uuidv7(interval '30 seconds')`, "macos", uniqueKey(0x13))
+	// 4. Too old (> 10 minutes) -> NOT in grace.
+	oldMac := insertRow(`uuidv7(-interval '10 minutes 5 seconds')`, "macos", uniqueKey(0x14))
+	// 5. Future-dated beyond +1 minute -> NOT in grace.
+	futureMac := insertRow(`uuidv7(interval '2 minutes')`, "macos", uniqueKey(0x15))
+	// 6. Fresh Mac with a cert_binds row (even expired) -> NOT in grace.
+	withLiveMac := insertRow(`uuidv7()`, "macos", uniqueKey(0x16))
+	dw.exec(`INSERT INTO authd.mail_device_cert_binds (device_id, addr, key_sha256, bound_at)
+		VALUES ($1::uuid, '198.51.100.1/32', $2::bytea, now() - interval '2 hours')`, withLiveMac, uniqueKey(0x16))
+	// 7. Not macos (ios / ipados), even with fresh uuidv7 and a key -> NOT in grace.
+	iosDev := insertRow(`uuidv7()`, "ios", uniqueKey(0x17))
+	ipadosDev := insertRow(`uuidv7()`, "ipados", "")
+	// 8. Mac with no cert key bound -> NOT in grace.
+	noKeyMac := insertRow(`uuidv7()`, "macos", "")
+	// 9. Non-v7 UUID (UUIDv4: uuid_extract_timestamp returns NULL) -> NOT in grace, never errors on Scan.
+	v4Mac := insertRow(`gen_random_uuid()`, "macos", uniqueKey(0x18))
+
+	cases := []struct {
+		name      string
+		id        string
+		wantGrace bool
+		minLeft   time.Duration
+		maxLeft   time.Duration
+	}{
+		{"fresh mac in grace", freshMac, true, 9*time.Minute + 30*time.Second, MacInstallGraceDuration},
+		{"mid-window mac in grace", midMac, true, 5*time.Minute + 30*time.Second, 6*time.Minute + 5*time.Second},
+		{"within 1m future skew clamped to 10m", skewMac, true, MacInstallGraceDuration - time.Second, MacInstallGraceDuration},
+		{"too old (>10m)", oldMac, false, 0, 0},
+		{"future-dated beyond 1m", futureMac, false, 0, 0},
+		{"cert_binds row present (even expired)", withLiveMac, false, 0, 0},
+		{"ios not macos", iosDev, false, 0, 0},
+		{"ipados not macos", ipadosDev, false, 0, 0},
+		{"macos with no cert key", noKeyMac, false, 0, 0},
+		{"non-v7 uuid (v4)", v4Mac, false, 0, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ad, err := authd.DeviceByID(dw.ctx, tc.id)
+			if err != nil || ad == nil {
+				t.Fatalf("DeviceByID(%s) = (%v, %v)", tc.id, ad, err)
+			}
+			if ad.MacInstallGrace != tc.wantGrace {
+				t.Fatalf("DeviceByID.MacInstallGrace = %v, want %v", ad.MacInstallGrace, tc.wantGrace)
+			}
+
+			fd, err := front.DeviceGate(dw.ctx, tc.id)
+			if err != nil || fd == nil {
+				t.Fatalf("DeviceGate(%s) = (%v, %v)", tc.id, fd, err)
+			}
+			if fd.MacInstallGrace != tc.wantGrace {
+				t.Fatalf("DeviceGate.MacInstallGrace = %v, want %v", fd.MacInstallGrace, tc.wantGrace)
+			}
+			if !tc.wantGrace {
+				if fd.MacInstallGraceLeft != 0 {
+					t.Fatalf("DeviceGate.MacInstallGraceLeft = %s, want 0", fd.MacInstallGraceLeft)
+				}
+			} else {
+				if fd.MacInstallGraceLeft < tc.minLeft || fd.MacInstallGraceLeft > tc.maxLeft {
+					t.Fatalf("DeviceGate.MacInstallGraceLeft = %s, want in [%s, %s]",
+						fd.MacInstallGraceLeft, tc.minLeft, tc.maxLeft)
+				}
+			}
+		})
 	}
 }

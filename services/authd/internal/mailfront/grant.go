@@ -33,14 +33,17 @@ type Grant struct {
 
 	// CertKey is SHA-256 of the SubjectPublicKeyInfo that a Mac session stands
 	// on (#383 PR 3): the verified client certificate's key for IMAP (external
-	// or a Mac's device_code), or the row's key at admission for a Mac's SMTP
-	// session. Nil for password sessions and iPhone/iPad sessions.
+	// or a Mac's device_code with a certificate), or the row's key at admission
+	// for a Mac's SMTP session and for a Mac code-only install-grace session
+	// (IMAP or SMTP). Nil for password sessions and iPhone/iPad sessions.
 	CertKey []byte
 
 	// Until is when the session is closed whatever the row says: a Mac
-	// certificate session at CertSessionMaxAge, an iPhone/iPad device session
-	// at DeviceMaxAge, a session on a pass-through lane at PassthroughMaxAge;
-	// zero for a Clerk password session, whose changes reach the row.
+	// certificate session at CertSessionMaxAge (or the time remaining in the
+	// 10-minute install grace for a Mac code-only grace session), an iPhone/iPad
+	// device session at DeviceMaxAge, a session on a pass-through lane at
+	// PassthroughMaxAge; zero for a Clerk password session, whose changes reach
+	// the row.
 	Until time.Time
 }
 
@@ -82,7 +85,9 @@ const (
 	// IMAP with a certificate and SMTP under a Mac's code): 60 minutes plus up
 	// to 5 minutes of jitter, so an open certificate session always re-binds
 	// inside authd's 75-minute liveness window, and a Mac SMTP session never
-	// relies on Stalwart's maxDuration.
+	// relies on Stalwart's maxDuration. A Mac code-only install-grace session
+	// (IMAP or SMTP) reuses ReasonCertMaxAge with a shorter cap equal to the
+	// time remaining in the 10-minute grace window (graceDeadline).
 	CertSessionMaxAge       = 60 * time.Minute
 	CertSessionMaxAgeJitter = 5 * time.Minute
 )
@@ -240,4 +245,17 @@ func sameInstant(a, b *time.Time) bool {
 		return a == nil && b == nil
 	}
 	return a.Equal(*b)
+}
+
+// graceDeadline caps a Mac code-only install-grace session (IMAP or SMTP) to
+// the time remaining in its grace window, clamped to
+// [0, projection.MacInstallGraceDuration] so it can never outlive the grace.
+func graceDeadline(now time.Time, left time.Duration) time.Time {
+	if left < 0 {
+		left = 0
+	}
+	if left > projection.MacInstallGraceDuration {
+		left = projection.MacInstallGraceDuration
+	}
+	return now.Add(left)
 }

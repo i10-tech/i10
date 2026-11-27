@@ -28,7 +28,7 @@ ARG GIT_SHA=dev
 RUN CGO_ENABLED=0 go build \
         -trimpath \
         -ldflags="-s -w -X main.version=${GIT_SHA}" \
-        -o /out/ ./cmd/authd ./cmd/mailfront ./cmd/cahookrelay
+        -o /out/ ./cmd/authd ./cmd/mailfront ./cmd/cahookrelay ./cmd/enrolld
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
@@ -40,6 +40,8 @@ COPY --from=build /out/authd /usr/local/bin/authd
 COPY --from=build /out/mailfront /usr/local/bin/mailfront
 # Loopback TLS webhook relay sidecar for step-ca (#383 PR 3).
 COPY --from=build /out/cahookrelay /usr/local/bin/cahookrelay
+# Apple over-the-air enrollment HTTP service (#383 PR 4).
+COPY --from=build /out/enrolld /usr/local/bin/enrolld
 
 # Loopback only. The pod spec must not publish this port, and the Service must
 # not select it - Stalwart reaches authd over localhost inside the same pod.

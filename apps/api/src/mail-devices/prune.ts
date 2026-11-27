@@ -106,6 +106,42 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const MAX_PRUNE_BATCHES = 1000
 
 /**
+ * Deletes mail device enrollments a day past `expires_at` (#383 PR 4,
+ * docs/research/mail-device-binding.md section 12, Review 1 M2 & L3),
+ * including `sealed_profile`, through `mail_device_enrollments_expires_idx`,
+ * `batchSize` rows per transaction.
+ *
+ * The FK cascade removes any remaining SCEP permits of the enrollment in the
+ * global lock order (enrollment before permit). `SKIP LOCKED` leaves any row a
+ * handler holds for the next run, and the outer DELETE re-checks `expires_at`.
+ */
+export async function pruneMailDeviceEnrollments(
+  db: Pick<Database, "transaction">,
+  options: { batchSize?: number; now?: Date } = {},
+): Promise<number> {
+  const cutoff = options.now
+    ? ts(new Date(options.now.getTime() - ONE_DAY_MS))
+    : sql`now() - interval '1 day'`
+  return pruneInBatches(
+    db,
+    options.batchSize,
+    (limit) => sql`
+    with picked as (
+      select id from authd.mail_device_enrollments
+       where expires_at < ${cutoff}
+       order by expires_at
+       limit ${limit}
+         for update skip locked
+    )
+    delete from authd.mail_device_enrollments e
+     using picked
+     where e.id = picked.id
+       and e.expires_at < ${cutoff}
+    returning e.id`,
+  )
+}
+
+/**
  * Deletes certificate permits a day past `expires_at` (#383 PR 3), through
  * `mail_device_cert_permits_expires_idx`, `batchSize` rows per transaction.
  * A permit only matters during an enrollment; the day keeps it for the

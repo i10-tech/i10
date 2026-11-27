@@ -615,25 +615,43 @@ key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
   must equal it in constant time (`device_key_changed`, refined by authd to
   `device_cert_required` or `device_cert_mismatch`). A certificate key on a
   non-`macos` row is refused.
-- **Mac rules (#383 PR 3, `ldapsrv/bind_device.go`):**
-  - **IMAP, `external` (`source: cert`):** the front verified the client
-    certificate on 993 and minted an `external` token. authd requires the row to
-    be `macos`, its `cert_key_sha256` to equal the token's key, and the token's
-    subject CN to equal `serial` whenever the row records one (no code parsing,
-    no key ring).
-  - **IMAP, `device_code`:** a Mac's code on IMAP still requires the Mac's
-    verified certificate key (and serial when recorded); a code alone is refused
+- **Mac rules (#383 PR 3, `ldapsrv/bind_device.go`, plus the PR 4 install grace):**
+  - **Install grace (`projection.MacInstallGraceSQL`):** macOS validates a new
+    mail account during profile installation by signing in to IMAP and SMTP with
+    the device code alone before the client certificate is configured in Mail. A
+    row is in grace while `platform = 'macos'`, `cert_key_sha256 IS NOT NULL`,
+    `uuid_extract_timestamp(id)` is within `[now() - 10 minutes, now() + 1 minute]`
+    by Postgres's clock, and no row exists in `authd.mail_device_cert_binds` for
+    the device (binding a new key deletes those rows, so a rebind inside the
+    window reopens the grace until the window ends). During that grace, a `device_code` bind with no certificate in
+    the token is accepted on IMAP (without writing a liveness row) and on SMTP
+    (without requiring one), still checked against every other gate rule
+    (account, tenant, epoch, revocation, bound key, code hash, first-use claim,
+    idle) and logged as `source: device` with `grace: true`. Once the 10-minute
+    window elapses or the first certificate session is recorded, PR 3's rules
+    below apply in full.
+  - **IMAP, `external` (`source: cert`):** unchanged by the grace. The front
+    verified the client certificate on 993 and minted an `external` token. authd
+    requires the row to be `macos`, its `cert_key_sha256` to equal the token's
+    key, and the token's subject CN to equal `serial` whenever the row records
+    one (no code parsing, no key ring).
+  - **IMAP, `device_code`:** outside the install grace (or whenever a
+    certificate is presented in the token), a Mac's code on IMAP requires the
+    Mac's verified certificate key (and serial when recorded); once the grace
+    ends or a certificate session has been recorded, a code alone is refused
     (`device_cert_required`).
-  - **IMAP liveness write:** every successful `macos` IMAP bind with a key
-    upserts `authd.mail_device_cert_binds` (client address as `/32` or IPv6
-    `/64`, at most one write per row every 5 minutes) and caps each device at 8
-    rows in a separate autocommit `DELETE`, never inside a transaction that
-    touches `authd.mail_devices`.
-  - **SMTP, `device_code`:** after the code hash matches, authd requires a
-    liveness row for this device under its current `cert_key_sha256` within 75
-    minutes from the same `/32` or `/64` (`device_cert_session_missing`,
-    answered `unavailable`). `AUTHD_MAC_SMTP_SAME_ADDRESS=false` drops the
-    address check (set in lockstep with `MAILFRONT_MAC_SMTP_SAME_ADDRESS`).
+  - **IMAP liveness write:** every successful `macos` IMAP bind with a proved
+    certificate key upserts `authd.mail_device_cert_binds` (client address as
+    `/32` or IPv6 `/64`, at most one write per row every 5 minutes) and caps
+    each device at 8 rows in a separate autocommit `DELETE`, never inside a
+    transaction that touches `authd.mail_devices`. A code-only grace IMAP bind
+    never writes a liveness row.
+  - **SMTP, `device_code`:** after the code hash matches, outside the install
+    grace authd requires a liveness row for this device under its current
+    `cert_key_sha256` within 75 minutes from the same `/32` or `/64`
+    (`device_cert_session_missing`, answered `unavailable`).
+    `AUTHD_MAC_SMTP_SAME_ADDRESS=false` drops the address check (set in lockstep
+    with `MAILFRONT_MAC_SMTP_SAME_ADDRESS`).
   - **Row upkeep:** every successful `macos` bind (IMAP or SMTP) claims first
     use if still unclaimed and touches `last_used_at` daily.
 - **Nothing is written before the hash matched.** Then, for a code never used,
@@ -997,15 +1015,17 @@ command, then sends Stalwart a command it wrote itself, from what it read:
   is answered `503` before AUTH. The front owns the entire SMTP AUTH exchange:
   it sends every `334` prompt itself (`AUTH LOGIN`'s two prompts and `AUTH
 PLAIN`'s empty one), handles `*` cancellations (`501 5.7.0`) locally, runs
-  every pre-check (login lookup; for a `macos` code, its device row and
-  `authd.mail_device_cert_binds` liveness row), and only then forwards ONE
-  `AUTH PLAIN <initial response>` to Stalwart (`AUTH LOGIN` is rewritten as
-  `PLAIN`). Our own faults answer `454 4.7.0` and forward nothing. The Mac
-  liveness `454 4.7.0` is answered only when the account row, `gate.Refusal`,
-  the device row and `gate.DeviceRefusal` (person, address, workspace, non-null
-  key) all pass and only the liveness row is missing; anything else is forwarded
-  so authd decides. The front cannot check a code's secret (it holds no
-  device-code keys), so a right device id with a wrong secret also gets this
+  every pre-check (login lookup; for a `macos` code, its device row and, outside
+  its initial 10-minute install grace, its `authd.mail_device_cert_binds`
+  liveness row), and only then forwards ONE `AUTH PLAIN <initial response>` to
+  Stalwart (`AUTH LOGIN` is rewritten as `PLAIN`). During the Mac install grace
+  (`projection.MacInstallGraceSQL`), SMTP AUTH is forwarded instead of answered
+  `454`. Our own faults answer `454 4.7.0` and forward nothing. The Mac liveness
+  `454 4.7.0` is answered only when the account row, `gate.Refusal`, the device
+  row and `gate.DeviceRefusal` (person, address, workspace, non-null key) all
+  pass, the device is not in its install grace, and only the liveness row is
+  missing; anything else is forwarded so authd decides. The front cannot check
+  a code's secret (it holds no device-code keys), so a right device id with a wrong secret also gets this
   `454` while the Mac is offline: accepted, see the design's section 11, "Found
   in the step 2 code review". At most 3 such `454`s are allowed per
   connection, after which the front closes it. `MAILFRONT_MAC_SMTP_SAME_ADDRESS` (default `true`)
@@ -1134,10 +1154,10 @@ Either closes a connection whose account:
 bind token's own parser (or resolves the `macos` row by SPKI hash for
 `EXTERNAL`) and records the device in that sign-in attempt's `Grant`
 (`DeviceID`), so it is the device the token covers. Only `external` and `macos`
-`device_code` sessions record `CertKey` on `Grant` (a `macos` SMTP session
-records the row's key at admission); password sessions and iPhone/iPad codes
-ignore any presented client certificate. ⚠ One per attempt:
-a code refused and then a password accepted on the same connection is a
+`device_code` sessions record `CertKey` on `Grant` (a `macos` SMTP session and a
+`macos` code-only install-grace session record the row's key at admission);
+password sessions and iPhone/iPad codes ignore any presented client
+certificate. ⚠ One per attempt: a code refused and then a password accepted on the same connection is a
 password session (`TestAnEarlierAttemptsDeviceIsNeverCreditedToTheSignIn`). The
 re-check reads the device rows of the connections that have one, by
 `id = ANY($2)`, in the same statement as their accounts (`projection.SweepQuery`),
@@ -1309,9 +1329,12 @@ prune while in use. **A Mac session (IMAP with a certificate, or SMTP under a
 Mac's code) ends at `cert_session_max_age`: 60 minutes, plus up to 5 minutes at
 random** (`CertSessionMaxAge`, `CertSessionMaxAgeJitter`), keeping every open
 certificate session inside authd's 75-minute liveness window and bounding Mac
-SMTP sessions without relying on Stalwart's `maxDuration`. The pass-through
-maximum age never applies to a device session, even on a managed account: the
-credential is i10's, checked by authd.
+SMTP sessions without relying on Stalwart's `maxDuration`. **A Mac code-only
+session admitted under the initial install grace (IMAP or SMTP)** uses the same
+`cert_session_max_age` mechanism with a shorter cap equal to the time remaining
+in the grace window (never more than 10 minutes), so a code-only session cannot
+outlive the grace. The pass-through maximum age never applies to a device
+session, even on a managed account: the credential is i10's, checked by authd.
 
 What it costs (measured 2026-11-22: 1.033 sign-ins per connection per max-age
 period, against the 1.026 the jitter predicts, with clients that reconnect at
@@ -1495,6 +1518,61 @@ relay keeps every secret out of step-ca's config.
 | `CAHOOKRELAY_UPSTREAM_TIMEOUT` | `10s`                          | 1 s to 30 s.                                   |
 | `CAHOOKRELAY_LOG_LEVEL`        | `info`                         |                                                |
 
+## Enrollment service (`cmd/enrolld`, #383 PR 4)
+
+`cmd/enrolld` is the fourth binary in this image, run in its own Deployment
+behind Traefik (which terminates TLS for `ca.i10.tech` and routes only
+`/enroll/apple/`). It implements Apple's over-the-air Profile Service flow
+(`docs/research/mail-device-binding.md` section 12): serving the phase 1
+profile, verifying phase 2 and phase 4 CMS `SignedData` requests and their
+attributes plists, serving the phase 2 SCEP-only profile, and relaying the
+API's sealed phase 4 profile unchanged.
+
+- **What it holds:** no database credentials, no device-code keys, and no CMS
+  encryption or signing keys. Its only secret is `ENROLLD_API_TOKEN` (from one
+  named Secret key) for calling the API's `:3443` listener, plus public CA
+  certificates on disk.
+- **What it trusts:**
+  - Phase 2: the embedded pinned `Apple iPhone Device CA` certificate (checked
+    by issuer bytes and `Certificate.CheckSignature` for `SHA1WithRSA` and
+    `SHA256WithRSA` only, ignoring dates on this chain only). SignerInfo
+    verification is performed directly without `pkcs7.Verify*` so `signingTime`
+    is never compared against expired leaf dates.
+  - Phase 4: the mounted device CA public trust bundle
+    (`ENROLLD_DEVICE_CA_BUNDLE`, reloaded every 30 s). Leaves must verify via
+    `x509.Verify` to a mounted root through a mounted intermediate (refusing
+    root-issued certificates such as the SCEP decrypter), carry explicit
+    `emailProtection` EKU, and carry no SAN extension at all (including unparsed
+    `otherName` SANs).
+  - API calls: HTTPS to `ENROLLD_API_URL` pinned strictly to
+    `ENROLLD_API_CA_FILE` (never the system root pool, no redirects, no proxy).
+- **What it logs:** structured JSON carrying phase, outcome, `product`, API
+  refusal reason, duration, and a truncated HMAC-SHA256 of the serial under a
+  random per-process key. Never logs tokens, challenges, other attributes,
+  inner plists, sealed profiles, or device codes.
+- **Threat model:** `enrolld` parses untrusted bytes from the internet (capped
+  at 64 KiB, concurrency-bounded, panic-guarded, strict flat XML parser). A
+  compromise gives an attacker only what any device on the internet can reach
+  on `/enrolld/{peek,attest,finish}` plus unencrypted phase 2 attributes and
+  already-encrypted phase 4 profiles passing through. It cannot mint a code for
+  someone who did not start an enrollment, and it never sees a plaintext device
+  code (the API seals the final profile).
+
+### Configuration (`enrolld`)
+
+| Variable                   | Default                                      |                                                       |
+| -------------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| `ENROLLD_LISTEN`           | `:8080`                                      | Plain HTTP on one port; Traefik terminates TLS.       |
+| `ENROLLD_API_URL`          | `https://i10-api-ca-hooks.i10-prod.svc:3443` | Required `https://` base URL for `/enrolld/*`.        |
+| `ENROLLD_API_CA_FILE`      | -                                            | Required PEM CA file (only trusted root for API TLS). |
+| `ENROLLD_API_TOKEN`        | -                                            | Required bearer token (single named Secret key).      |
+| `ENROLLD_DEVICE_CA_BUNDLE` | -                                            | Required device CA root + intermediate PEM bundle.    |
+| `ENROLLD_PROFILE_URL`      | `https://ca.i10.tech/enroll/apple/profile`   | Phase 1 `Profile Service` POST URL.                   |
+| `ENROLLD_SCEP_URL`         | `https://ca.i10.tech/scep/apple-scep`        | Phase 2 SCEP payload URL.                             |
+| `ENROLLD_API_TIMEOUT`      | `10s`                                        | 1 s to 30 s.                                          |
+| `ENROLLD_MAX_CONCURRENT`   | `16`                                         | 1 to 256 concurrent enrollment requests.              |
+| `ENROLLD_LOG_LEVEL`        | `info`                                       |                                                       |
+
 ## The one rule you must not break
 
 > A Clerk outage must never be reported as `invalidCredentials`.
@@ -1592,6 +1670,7 @@ Worth reporting upstream.
 cmd/authd            entrypoint, signal handling, readiness
 cmd/mailfront        the mail front's entrypoint: listeners, the sweep, shutdown
 cmd/cahookrelay      loopback TLS webhook relay sidecar for step-ca
+cmd/enrolld          Apple over-the-air enrollment HTTP service
 internal/config      env loading, the loopback guard, the shared logger
 internal/gate        whether an account's row lets it sign in, and who answers;
                      shared by the bind, the resolver and the mail front
@@ -1610,6 +1689,7 @@ internal/oidc        the OIDC password grant: the preset table, validation, the
                      vetted dial, the answer mapping (oidctest is its fake
                      endpoint, with one fixture per preset)
 internal/egress      which addresses authd may connect to for a tenant
+internal/enroll      OTA CMS verification, phase routing, plist parser, profiles, API client
 internal/credcache   verified-password cache and the remembered refusals
 internal/inflight    one verification for concurrent identical binds
 internal/budgetstore the shared failure budget in Postgres

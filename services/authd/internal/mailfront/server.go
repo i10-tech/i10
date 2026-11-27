@@ -318,10 +318,15 @@ func (s *Server) handle(raw net.Conn, ip string, proto Protocol, upstream string
 	var lookupErr error
 	var deviceID string
 	var certKey []byte
+	var graceUntil time.Time
 	if in != nil {
-		acct, lookupErr, deviceID, certKey = in.acct, in.err, in.device, in.certKey
+		acct, lookupErr, deviceID, certKey, graceUntil = in.acct, in.err, in.device, in.certKey, in.graceUntil
 	}
-	grant, reason := admit(acct, deviceID, certKey, lookupErr, s.sessionEnds(time.Now()))
+	ends := s.sessionEnds(time.Now())
+	if !graceUntil.IsZero() && graceUntil.Before(ends.cert) {
+		ends.cert = graceUntil
+	}
+	grant, reason := admit(acct, deviceID, certKey, lookupErr, ends)
 	if reason != "" {
 		log.Warn("closing a sign-in the front cannot stand behind", "reason", reason, slog.Any("err", lookupErr))
 		sess.close(reason)
@@ -411,9 +416,14 @@ type signIn struct {
 	// same device the token's MAC covers.
 	device string
 	// certKey is the certificate key the session stands on: set only for
-	// external mode, an IMAP device_code whose row is macos, or a macos SMTP
-	// session (the row's key at admission). Nil for passwords and iPhone/iPad.
+	// external mode, an IMAP device_code whose row is macos (with a verified
+	// certificate or in its install grace), or a macos SMTP session (the row's
+	// key at admission). Nil for passwords and iPhone/iPad.
 	certKey []byte
+	// graceUntil, when non-zero, caps a Mac code-only install-grace session
+	// (IMAP or SMTP) to the time left in its 10-minute grace window so it
+	// cannot outlive the grace.
+	graceUntil time.Time
 }
 
 func (s *session) signInAs(login string) *signIn {
