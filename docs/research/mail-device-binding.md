@@ -836,6 +836,24 @@ Before PR 4 merges, an iPhone and an Apple silicon Mac run the probe against **p
 - **Logged serials** are a keyed hash (HMAC under a random per-process key), never a plain prefix.
 - **Signed profiles** (L4: unsigned profiles teach people to install "Not Verified" ones) need a publicly trusted signing certificate. They are a follow-up issue.
 
+### The device probe (2026-11-27), and what it changed
+
+An iPhone (`iPhone17,2`, iOS 27.2) and an Apple silicon Mac (`MacBookPro18,3`, macOS 27.3) ran the whole flow against prod step-ca, through a probe server standing in for enrolld and the API, with a throwaway account (deleted afterwards). These rules override anything above that they contradict.
+
+- **The iPhone works end to end.** Phase 2, SCEP, phase 4, then the sealed profile (AES-256-CBC, RSA PKCS#1 v1.5) installed. Mail signed in with the sealed code through the front (`source: device`) 7 s after the seal. enrolld's verifier accepts all five real phase 2 requests and the phase 4 request: the pinned Apple CA is right, and Apple's signed attributes come in DER order.
+- **SCEP works with no i10 root on the device, but only with the decrypter alone.** iOS refuses a GetCACert answer in which it cannot pick a CA ("The Registration Authority's response is invalid"). It also checks the CertRep against the certificate marked `digitalSignature`, which is the intermediate, while step-ca 0.30.2 always signs the CertRep with the provisioner's decrypter key ("The SCEP server returned an invalid response"). Sending decrypter plus root, without the intermediate, is refused too, because no certificate is marked for signing. The one answer that works is the decrypter certificate alone, as `application/x-x509-ca-cert`. In step-ca that is `"excludeIntermediate": true` on `apple-scep`, with `includeRoot` left off. The deploy PR sets it.
+- **A Mac signs both requests without signed attributes** (RFC 5652 5.4: the signature covers the content), with sha1WithRSA and a four-certificate Apple chain. Its attributes add `MODEL`, `MODELNUMBER`, `DEVICE_NAME`, `SOFTWARE_UPDATE_DEVICE_ID`, `UserID`, `UserShortName`, `UserLongName` and a boolean `NotOnConsole`. enrolld accepts both forms and the boolean. Every other rule stays.
+- **The Mac's ACME certificate works.** step-ca issued the Secure Enclave certificate with CN = serial and OU = the permit's nonce (L5 settled).
+- **macOS checks the mail account while it installs the profile**, over IMAP `LOGIN` with the code and over SMTP `AUTH`, with no certificate. PR 3 refuses both for a Mac (`device_cert_required`, and the front's `454`), so the whole install failed with "Unable to verify account name or password".
+
+**The Mac install grace (owner's decision, 2026-11-27).** A new Mac's code works alone, on IMAP and SMTP, while the device is in grace:
+
+- the row is `macos` and its ACME key is bound (`cert_key_sha256` set);
+- the id's embedded time (`uuidv7()`) is between 10 minutes ago and 1 minute ahead, so the front needs no new column grant and a future-dated id cannot make the grace permanent;
+- no certificate session was ever recorded for it (no `authd.mail_device_cert_binds` row).
+
+A grace bind passes every other gate rule, never writes a liveness row, and logs `grace: true`. Every code-only session admitted under it ends when the grace does. After that, PR 3's rules apply unchanged: the code alone is refused until the two clicks in Mail. The cost: a code lifted from that Mac in its first 10 minutes signs in alone until the grace ends.
+
 ---
 
 ## Sources
