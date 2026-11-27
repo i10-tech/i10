@@ -199,6 +199,7 @@ import {
   paymentHold,
 } from "./mailboxes/store.js"
 import { mailboxCreationStore } from "./mailboxes/creation-mode.js"
+import { autoForwardingStore } from "./mailboxes/auto-forwarding.js"
 import { onMailJoinEvent } from "./mailboxes/on-join.js"
 import { consoleMailboxStore, consoleMailboxes } from "./mailboxes/console.js"
 import { mailRevocation, onMailAccessEvent } from "./mailboxes/revoke.js"
@@ -1438,6 +1439,8 @@ const canAllocateStorage = async (userId: string, tenantId: string) => {
 
 // Who creates mailboxes in a workspace: admins, members, or everyone on joining.
 const mailboxCreation = mailboxCreationStore(db)
+// Who Sieve-generated automatic forwards may target (#526).
+const autoForwarding = autoForwardingStore(db)
 
 // Shared addresses (B8). The Sent copy runs in its own CronJob (team-sent.ts).
 const teamInboxService = teamInboxesFor({
@@ -2715,6 +2718,11 @@ const app = createApp({
       isAdmin: (tenantId: string, userId: string) =>
         canAllocateStorage(userId, tenantId),
       isMember: isWorkspaceMember,
+    },
+    autoForwarding: {
+      store: autoForwarding,
+      isAdmin: (tenantId: string, userId: string) =>
+        can(roleRows, tenantId, userId, "members:manage"),
     },
     mailboxLifecycle: mailboxLifecycleAdmin,
     mailboxAliases: mailboxAliases({

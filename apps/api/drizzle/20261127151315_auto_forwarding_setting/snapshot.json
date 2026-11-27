@@ -1,0 +1,239 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "35820bd4-0816-4785-8a56-1284e250111b",
+  "prevIds": [
+    "dc85ddae-ea87-4e50-be7e-bb5b40f66b2e"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_enum",
+      "statementTarget": [
+        "enum",
+        "identity",
+        "auto_forwarding_mode"
+      ],
+      "writes": [
+        "s|enum|identity.auto_forwarding_mode",
+        "n|enum|identity.auto_forwarding_mode",
+        "e|enum|identity.auto_forwarding_mode",
+        "n|type|identity.auto_forwarding_mode"
+      ],
+      "reads": [
+        "n|sch|identity"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "user_emails"
+      ],
+      "writes": [
+        "s|tbl|authd.user_emails",
+        "n|tbl|authd.user_emails",
+        "e|tbl|authd.user_emails",
+        "n|rel|authd.user_emails",
+        "n|type|authd.user_emails",
+        "n|rel|authd.user_emails_pkey"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "identity",
+        "workspace_settings",
+        "auto_forwarding"
+      ],
+      "writes": [
+        "s|col|identity.workspace_settings.auto_forwarding",
+        "n|col|identity.workspace_settings.auto_forwarding",
+        "e|col|identity.workspace_settings.auto_forwarding"
+      ],
+      "reads": [
+        "n|tbl|identity.workspace_settings",
+        "n|sch|identity",
+        "n|enum|identity.auto_forwarding_mode"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "user_emails",
+        "user_emails_email_idx"
+      ],
+      "writes": [
+        "s|idx|authd.user_emails_email_idx",
+        "n|idx|authd.user_emails_email_idx",
+        "e|idx|authd.user_emails_email_idx",
+        "n|rel|authd.user_emails_email_idx"
+      ],
+      "reads": [
+        "n|tbl|authd.user_emails",
+        "n|sch|authd",
+        "n|col|authd.user_emails.email"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "name": "user_emails",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "identity",
+        "name": "auto_forwarding_mode",
+        "values": [
+          "workspace",
+          "workspace_and_members",
+          "anywhere",
+          "off"
+        ],
+        "entityType": "enums"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "user_emails",
+        "name": "clerk_user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "user_emails",
+        "name": "email",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "user_emails",
+        "name": "clerk_updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "user_emails",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "identity",
+        "table": "workspace_settings",
+        "name": "auto_forwarding",
+        "type": "auto_forwarding_mode",
+        "typeSchema": "identity",
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'workspace'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "user_emails",
+        "name": "user_emails_email_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "email",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "user_emails",
+        "name": "user_emails_pkey",
+        "columns": [
+          "clerk_user_id",
+          "email"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "user_emails",
+        "name": "user_emails_email_lowercase",
+        "value": "\"email\" = lower(\"email\")",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

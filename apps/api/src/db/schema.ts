@@ -1114,3 +1114,30 @@ export const bindFailureBudget = authd.table("bind_failure_budget", {
   windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
   count: integer("count").notNull(),
 })
+
+/**
+ * Verified Clerk sign-in email addresses for every user, hosted or not (#526).
+ *
+ * ⚠ SEPARATE FROM `authd.accounts`, WHICH MUST ONLY HOLD HOSTED DOMAINS.
+ * Most users sign in with an external address such as Gmail; projecting those
+ * into `accounts` would make Stalwart treat gmail.com as a local recipient.
+ * Keeping them here lets `core.auto_forward_allowed` allow `workspace_and_members`
+ * forwards to current workspace members' sign-in addresses (joined with
+ * `core.workspace_roles`) without ever exposing them to authd's directory.
+ */
+export const userEmails = authd.table(
+  "user_emails",
+  {
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Stored lowercased; compared lowercased. */
+    email: text("email").notNull(),
+    /** Clerk's `updated_at`, for out-of-order webhook protection. */
+    clerkUpdatedAt: timestamp("clerk_updated_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.clerkUserId, t.email] }),
+    index("user_emails_email_idx").on(t.email),
+    check("user_emails_email_lowercase", sql`"email" = lower("email")`),
+  ],
+)

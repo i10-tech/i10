@@ -1,5 +1,7 @@
 import type { AccessDomain } from "@/lib/actions"
 import type {
+  AutoForwardingMode,
+  AutoForwardingSettings,
   BypassEntry,
   CreatedSetupLink,
   DeprovisionedPerson,
@@ -2275,6 +2277,20 @@ export function ssoRoutes(notFound: unknown): Route[] {
           return saved
         }
         return IP_ALLOWLIST
+      },
+    ],
+    [
+      /^\/console\/workspace\/auto-forwarding$/,
+      (_m, _query, method, body) => {
+        if (method === "PATCH") {
+          const input = (body ?? {}) as { mode?: AutoForwardingMode }
+          const saved: AutoForwardingSettings = {
+            mode: input.mode ?? "workspace",
+          }
+          return saved
+        }
+        const answer: AutoForwardingSettings = { mode: "workspace" }
+        return answer
       },
     ],
     [

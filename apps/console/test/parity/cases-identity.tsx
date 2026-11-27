@@ -26,6 +26,7 @@ import type {
   TemplateFolderShape,
 } from "@/lib/shapes/template-folder"
 import type {
+  AutoForwardingSettings,
   IdentityEvent,
   IpAllowlist,
   OwnerExemption,
@@ -61,6 +62,7 @@ const securityData =
     siem: api<SiemSettingsAnswer>("/console/identity/siem"),
     allowlist: api<IpAllowlist>("/console/identity/ip-allowlist"),
     exemption: { enabled: true, pending: null } as OwnerExemption,
+    autoForwarding: api<AutoForwardingSettings>("/console/workspace/auto-forwarding"),
     ...over,
   })
 
@@ -124,6 +126,10 @@ export const IDENTITY_VIEWS = [
             },
           },
         }),
+      },
+      {
+        name: "automatic forwarding set to anywhere",
+        fixture: securityData({ autoForwarding: { mode: "anywhere" } }),
       },
       {
         name: "a member (cannot manage)",

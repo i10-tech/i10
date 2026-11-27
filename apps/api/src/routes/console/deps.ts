@@ -46,6 +46,7 @@ import type { TeamInboxes } from "../../team-inboxes/service.js"
 import type { StorageAllocations } from "../../mailboxes/allocation.js"
 import type { ConsoleMailboxes } from "../../mailboxes/console.js"
 import type { MailboxAdmin } from "../../mailboxes/creation-mode.js"
+import type { AutoForwardingConsoleDeps } from "../../mailboxes/auto-forwarding.js"
 import type { MailboxAliases } from "../../mailboxes/aliases.js"
 import type { MailboxAdminLifecycle } from "../../mailboxes/lifecycle.js"
 import type { MailDeviceService } from "../../mail-devices/service.js"
@@ -296,6 +297,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * setting for who creates them. Optional; without it the routes answer 501.
    */
   mailboxAdmin?: MailboxAdmin
+  /**
+   * Per-workspace automatic forwarding policy (#526), for owners and admins.
+   * Optional; without it the routes answer 501.
+   */
+  autoForwarding?: AutoForwardingConsoleDeps
   /**
    * Suspending, resuming, deleting and restoring a mailbox. Optional; without it
    * the routes answer 501.

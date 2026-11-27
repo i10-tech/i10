@@ -13,6 +13,7 @@ import { mountMailboxStorage } from "./console/mailbox-storage.js"
 import { mountMailboxes } from "./console/mailboxes.js"
 import { mountMailDeviceEnrollments } from "./console/mail-device-enrollments.js"
 import { mountMailboxAdmin } from "./console/mailbox-admin.js"
+import { mountAutoForwarding } from "./console/auto-forwarding.js"
 import { mountMailboxAliases } from "./console/mailbox-aliases.js"
 import { mountMailDevices } from "./console/mail-devices.js"
 import { mountAudience } from "./console/audience.js"
@@ -267,6 +268,7 @@ export function createConsole(deps?: ConsoleDeps) {
   mountTeamInboxes(app, d)
   mountMailboxStorage(app, d)
   mountMailboxAdmin(app, d)
+  mountAutoForwarding(app, d)
   mountMailboxAliases(app, d)
   mountMailboxes(app, d)
   // ⚠ BEFORE the `/mail-devices/:id` routes (routes/console/mail-devices.ts),

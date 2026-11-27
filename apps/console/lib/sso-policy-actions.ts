@@ -4,6 +4,8 @@ import { api } from "@/lib/api"
 import type { SiemBody } from "@/lib/siem"
 import { run } from "@/lib/sso-run"
 import type {
+  AutoForwardingMode,
+  AutoForwardingSettings,
   DirectoryGroup,
   IpAllowlist,
   LeaverDefault,
@@ -137,6 +139,24 @@ export async function saveIpAllowlist(input: {
   return run(() =>
     api<SavedIpAllowlist>("/console/identity/ip-allowlist", {
       method: "PUT",
+      body: input,
+    }),
+  )
+}
+
+// ── Automatic forwarding (#526) ─────────────────────────────────────────────
+
+export async function autoForwarding() {
+  return run(() => api<AutoForwardingSettings>("/console/workspace/auto-forwarding"))
+}
+
+export async function saveAutoForwarding(input: {
+  mode: AutoForwardingMode
+  confirm_anywhere?: boolean
+}) {
+  return run(() =>
+    api<AutoForwardingSettings>("/console/workspace/auto-forwarding", {
+      method: "PATCH",
       body: input,
     }),
   )

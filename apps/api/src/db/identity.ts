@@ -44,6 +44,18 @@ import { joinDomains, tenants } from "./core.js"
 export const identity = pgSchema("identity")
 
 /**
+ * Who a workspace's mailboxes may automatically forward mail to through Sieve
+ * rules (Outlook Rules and Alerts, JMAP mail rules, or hand-written Sieve).
+ * Enforced in Stalwart's outbound route via `core.auto_forward_allowed`.
+ */
+export const autoForwardingMode = identity.enum("auto_forwarding_mode", [
+  "workspace",
+  "workspace_and_members",
+  "anywhere",
+  "off",
+])
+
+/**
  * One SSO connection of a workspace.
  *
  * ⚠ ONLY `active` SIGNS ANYBODY IN, AND ONLY `active` KEEPS A BOUND SESSION
@@ -935,6 +947,13 @@ export const workspaceSettings = identity.table(
      * when they join). A workspace with no row is `admins`.
      */
     mailboxCreation: text("mailbox_creation").notNull().default("admins"),
+    /**
+     * Who Sieve-generated forwards from this workspace's mailboxes may target
+     * (#526). A workspace with no row is `workspace`.
+     */
+    autoForwarding: autoForwardingMode("auto_forwarding")
+      .notNull()
+      .default("workspace"),
     updatedBy: text("updated_by"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
