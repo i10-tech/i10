@@ -40,6 +40,25 @@ async function gatedMailbox(
   return { mailbox }
 }
 
+/**
+ * A refusal in the console's usual envelope, with the refusal word as `name`,
+ * so the console reads it the way it reads every other route's error.
+ */
+const refused = (statusCode: 409 | 503, name: string, message: string) => ({
+  statusCode,
+  name,
+  message,
+})
+
+const MESSAGES: Record<string, string> = {
+  no_mailbox: "This account has no mailbox to add a device to.",
+  already_sealed:
+    "That device is already set up. Revoke it from the device list instead.",
+  keys_not_configured: "Device setup is not available right now.",
+}
+const messageFor = (code: string) =>
+  MESSAGES[code] ?? "This mailbox cannot add a device right now."
+
 export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
   app.post("/mail-devices/enrollments", requireFreshAuth, async (c) => {
     const enrollments = d.mailDeviceEnrollments
@@ -65,14 +84,18 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
     const gated = await gatedMailbox(c, enrollments, userId)
     if ("refused" in gated) return gated.refused
     const { mailbox } = gated
-    if (!mailbox) return c.json({ error: { code: "no_mailbox" } }, 409)
+    if (!mailbox)
+      return c.json(refused(409, "no_mailbox", messageFor("no_mailbox")), 409)
 
     const result = await enrollments.create({
       clerkUserId: userId,
       tenantId: mailbox.tenantId,
     })
     if (!result.ok) {
-      return c.json({ error: { code: result.code } }, result.status)
+      return c.json(
+        refused(result.status, result.code, messageFor(result.code)),
+        result.status,
+      )
     }
 
     return c.json(
@@ -130,7 +153,7 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
       return c.json(notFound("Enrollment not found."), 404)
     }
     if (outcome === "already_sealed") {
-      return c.json({ error: { code: "already_sealed" } }, 409)
+      return c.json(refused(409, "already_sealed", messageFor("already_sealed")), 409)
     }
     return c.body(null, 204)
   })
