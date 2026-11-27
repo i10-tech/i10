@@ -1495,6 +1495,61 @@ relay keeps every secret out of step-ca's config.
 | `CAHOOKRELAY_UPSTREAM_TIMEOUT` | `10s`                          | 1 s to 30 s.                                   |
 | `CAHOOKRELAY_LOG_LEVEL`        | `info`                         |                                                |
 
+## Enrollment service (`cmd/enrolld`, #383 PR 4)
+
+`cmd/enrolld` is the fourth binary in this image, run in its own Deployment
+behind Traefik (which terminates TLS for `ca.i10.tech` and routes only
+`/enroll/apple/`). It implements Apple's over-the-air Profile Service flow
+(`docs/research/mail-device-binding.md` section 12): serving the phase 1
+profile, verifying phase 2 and phase 4 CMS `SignedData` requests and their
+attributes plists, serving the phase 2 SCEP-only profile, and relaying the
+API's sealed phase 4 profile unchanged.
+
+- **What it holds:** no database credentials, no device-code keys, and no CMS
+  encryption or signing keys. Its only secret is `ENROLLD_API_TOKEN` (from one
+  named Secret key) for calling the API's `:3443` listener, plus public CA
+  certificates on disk.
+- **What it trusts:**
+  - Phase 2: the embedded pinned `Apple iPhone Device CA` certificate (checked
+    by issuer bytes and `Certificate.CheckSignature` for `SHA1WithRSA` and
+    `SHA256WithRSA` only, ignoring dates on this chain only). SignerInfo
+    verification is performed directly without `pkcs7.Verify*` so `signingTime`
+    is never compared against expired leaf dates.
+  - Phase 4: the mounted device CA public trust bundle
+    (`ENROLLD_DEVICE_CA_BUNDLE`, reloaded every 30 s). Leaves must verify via
+    `x509.Verify` to a mounted root through a mounted intermediate (refusing
+    root-issued certificates such as the SCEP decrypter), carry explicit
+    `emailProtection` EKU, and carry no SAN extension at all (including unparsed
+    `otherName` SANs).
+  - API calls: HTTPS to `ENROLLD_API_URL` pinned strictly to
+    `ENROLLD_API_CA_FILE` (never the system root pool, no redirects, no proxy).
+- **What it logs:** structured JSON carrying phase, outcome, `product`, API
+  refusal reason, duration, and a truncated HMAC-SHA256 of the serial under a
+  random per-process key. Never logs tokens, challenges, other attributes,
+  inner plists, sealed profiles, or device codes.
+- **Threat model:** `enrolld` parses untrusted bytes from the internet (capped
+  at 64 KiB, concurrency-bounded, panic-guarded, strict flat XML parser). A
+  compromise gives an attacker only what any device on the internet can reach
+  on `/enrolld/{peek,attest,finish}` plus unencrypted phase 2 attributes and
+  already-encrypted phase 4 profiles passing through. It cannot mint a code for
+  someone who did not start an enrollment, and it never sees a plaintext device
+  code (the API seals the final profile).
+
+### Configuration (`enrolld`)
+
+| Variable                   | Default                                      |                                                       |
+| -------------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| `ENROLLD_LISTEN`           | `:8080`                                      | Plain HTTP on one port; Traefik terminates TLS.       |
+| `ENROLLD_API_URL`          | `https://i10-api-ca-hooks.i10-prod.svc:3443` | Required `https://` base URL for `/enrolld/*`.        |
+| `ENROLLD_API_CA_FILE`      | -                                            | Required PEM CA file (only trusted root for API TLS). |
+| `ENROLLD_API_TOKEN`        | -                                            | Required bearer token (single named Secret key).      |
+| `ENROLLD_DEVICE_CA_BUNDLE` | -                                            | Required device CA root + intermediate PEM bundle.    |
+| `ENROLLD_PROFILE_URL`      | `https://ca.i10.tech/enroll/apple/profile`   | Phase 1 `Profile Service` POST URL.                   |
+| `ENROLLD_SCEP_URL`         | `https://ca.i10.tech/scep/apple-scep`        | Phase 2 SCEP payload URL.                             |
+| `ENROLLD_API_TIMEOUT`      | `10s`                                        | 1 s to 30 s.                                          |
+| `ENROLLD_MAX_CONCURRENT`   | `16`                                         | 1 to 256 concurrent enrollment requests.              |
+| `ENROLLD_LOG_LEVEL`        | `info`                                       |                                                       |
+
 ## The one rule you must not break
 
 > A Clerk outage must never be reported as `invalidCredentials`.
@@ -1592,6 +1647,7 @@ Worth reporting upstream.
 cmd/authd            entrypoint, signal handling, readiness
 cmd/mailfront        the mail front's entrypoint: listeners, the sweep, shutdown
 cmd/cahookrelay      loopback TLS webhook relay sidecar for step-ca
+cmd/enrolld          Apple over-the-air enrollment HTTP service
 internal/config      env loading, the loopback guard, the shared logger
 internal/gate        whether an account's row lets it sign in, and who answers;
                      shared by the bind, the resolver and the mail front
@@ -1610,6 +1666,7 @@ internal/oidc        the OIDC password grant: the preset table, validation, the
                      vetted dial, the answer mapping (oidctest is its fake
                      endpoint, with one fixture per preset)
 internal/egress      which addresses authd may connect to for a tenant
+internal/enroll      OTA CMS verification, phase routing, plist parser, profiles, API client
 internal/credcache   verified-password cache and the remembered refusals
 internal/inflight    one verification for concurrent identical binds
 internal/budgetstore the shared failure budget in Postgres
