@@ -24,8 +24,13 @@ const (
 // ParseAttributesPlist strictly parses an Apple OTA device attributes plist.
 //
 // Only a flat <plist version="1.0"><dict>...</dict></plist> of <key>/<string>
-// pairs is accepted, with one Review 1 exception: CHALLENGE may be either
-// <string> or <data> (base64-encoded UTF-8), and nothing else may be <data>.
+// pairs is accepted, with two narrow allowances:
+//   - CHALLENGE may be either <string> or <data> (base64-encoded UTF-8), and
+//     nothing else may be <data> (Review 1);
+//   - empty boolean elements (<true/> and <false/>, such as macOS's
+//     NotOnConsole) are accepted and ignored so they never stand in for a
+//     string attribute, while still counting toward maxPlistKeys and duplicate
+//     key checks.
 //
 // Hostile XML constructs are refused outright:
 //   - CDATA sections (<![CDATA[...]]>, which encoding/xml would otherwise merge
@@ -33,8 +38,9 @@ const (
 //   - DTD internal subsets and entity declarations (<!ENTITY, [, ]);
 //   - custom XML entities (dec.Strict = true, dec.Entity = nil);
 //   - comments and extra processing instructions;
-//   - nested dicts/arrays, non-string types, attributes on inner tags,
-//     duplicate keys, empty keys, NUL bytes, invalid UTF-8 and oversized inputs.
+//   - nested dicts/arrays, non-string/non-boolean types (integer, real, date),
+//     non-empty <true>/<false> elements, attributes on inner tags, duplicate
+//     keys, empty keys, NUL bytes, invalid UTF-8 and oversized inputs.
 func ParseAttributesPlist(raw []byte) (map[string]string, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("enroll: empty attributes plist")
@@ -103,8 +109,10 @@ inPlist:
 		return nil, err
 	}
 
-	// 3. Inside <dict>: flat <key>/<string> pairs (or <data> only for CHALLENGE).
-	attrs := make(map[string]string, 8)
+	// 3. Inside <dict>: flat <key>/<string> pairs (or <data> only for CHALLENGE,
+	// or empty <true/>/<false/> booleans which are ignored).
+	attrs := make(map[string]string, 16)
+	seen := make(map[string]struct{}, 16)
 	for {
 		tok, err := nextNonWhitespaceToken(dec)
 		if err != nil {
@@ -127,12 +135,13 @@ inPlist:
 			if key == "" {
 				return nil, errors.New("enroll: empty plist key")
 			}
-			if _, dup := attrs[key]; dup {
+			if _, dup := seen[key]; dup {
 				return nil, fmt.Errorf("enroll: duplicate plist key %q", key)
 			}
-			if len(attrs) >= maxPlistKeys {
+			if len(seen) >= maxPlistKeys {
 				return nil, fmt.Errorf("enroll: too many plist keys (max %d)", maxPlistKeys)
 			}
+			seen[key] = struct{}{}
 
 			valTok, err := nextNonWhitespaceToken(dec)
 			if err != nil {
@@ -143,13 +152,13 @@ inPlist:
 				return nil, fmt.Errorf("enroll: invalid value element for key %q", key)
 			}
 
-			var val string
 			switch valStart.Name.Local {
 			case "string":
-				val, err = readSimpleText(dec, "string", maxPlistValueLen)
+				val, err := readSimpleText(dec, "string", maxPlistValueLen)
 				if err != nil {
 					return nil, err
 				}
+				attrs[key] = val
 			case "data":
 				if key != "CHALLENGE" {
 					return nil, fmt.Errorf("enroll: <data> value not allowed for key %q", key)
@@ -158,14 +167,18 @@ inPlist:
 				if err != nil {
 					return nil, err
 				}
-				val, err = decodeChallengeData(rawB64)
+				val, err := decodeChallengeData(rawB64)
 				if err != nil {
+					return nil, err
+				}
+				attrs[key] = val
+			case "true", "false":
+				if err := expectEmptyElement(dec, valStart.Name.Local); err != nil {
 					return nil, err
 				}
 			default:
 				return nil, fmt.Errorf("enroll: disallowed value type <%s> for key %q", valStart.Name.Local, key)
 			}
-			attrs[key] = val
 		default:
 			return nil, errors.New("enroll: unexpected token inside <dict>")
 		}
@@ -256,6 +269,20 @@ func nextNonWhitespaceToken(dec *xml.Decoder) (xml.Token, error) {
 			return tok, nil
 		}
 	}
+}
+
+// expectEmptyElement consumes the immediate </tag> for an EMPTY plist element
+// (<true/> or <false/>), refusing any character data, nested element or comment.
+func expectEmptyElement(dec *xml.Decoder, tag string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return fmt.Errorf("enroll: read <%s/>: %w", tag, err)
+	}
+	end, ok := tok.(xml.EndElement)
+	if !ok || end.Name.Local != tag || end.Name.Space != "" {
+		return fmt.Errorf("enroll: <%s/> must be empty", tag)
+	}
+	return nil
 }
 
 // readSimpleText reads character data until </tag>, refusing any nested element,

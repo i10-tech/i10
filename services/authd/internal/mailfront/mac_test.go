@@ -964,3 +964,211 @@ func TestCertSessionsEndAtCertSessionMaxAge(t *testing.T) {
 		t.Fatalf("2000 cert sessions ended within %s: not spread", hi-lo)
 	}
 }
+
+func TestMacInstallGraceInFront(t *testing.T) {
+	macKey := bytes.Repeat([]byte{0x88}, 32)
+	otherKey := bytes.Repeat([]byte{0x89}, 32)
+	otherPrefix := projection.MacLivePrefix(netip.MustParseAddr("198.51.100.9"))
+
+	t.Run("graceDeadline clamps to [0, MacInstallGraceDuration]", func(t *testing.T) {
+		now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+		if got := graceDeadline(now, -time.Minute); !got.Equal(now) {
+			t.Fatalf("negative left = %v, want %v", got, now)
+		}
+		if got := graceDeadline(now, 3*time.Minute); !got.Equal(now.Add(3 * time.Minute)) {
+			t.Fatalf("3m left = %v, want +3m", got)
+		}
+		if got := graceDeadline(now, 20*time.Minute); !got.Equal(now.Add(projection.MacInstallGraceDuration)) {
+			t.Fatalf("20m left = %v, want clamped +10m", got)
+		}
+	})
+
+	t.Run("SMTP forwarded in grace (PLAIN and LOGIN), capped to time left, key change closes it", func(t *testing.T) {
+		for _, mech := range []string{"PLAIN", "LOGIN"} {
+			t.Run(mech, func(t *testing.T) {
+				code := testCode(0x2a)
+				accts := alice()
+				d := aliceMac(code, macKey)
+				d.MacInstallGrace = true
+				d.MacInstallGraceLeft = 4 * time.Minute
+				accts.addDevice(d)
+				h := startFront(t, SMTP, accts, nil)
+				c := h.dial()
+				c.until("220")
+				if mech == "PLAIN" {
+					c.send("AUTH PLAIN " + plain("", "alice@i10.test", code.String()) + "\r\n")
+				} else {
+					c.send("AUTH LOGIN\r\n")
+					c.until("334")
+					c.send(b64("alice@i10.test") + "\r\n")
+					c.until("334")
+					c.send(b64(code.String()) + "\r\n")
+				}
+				if got := c.line(); !strings.HasPrefix(got, "235") {
+					t.Fatalf("grace SMTP %s answered %q, want 235", mech, got)
+				}
+				waitFor(t, "watched", func() bool { return h.srv.Live() == 1 })
+				g := grants(h)[0]
+				if g.DeviceID != code.ID() || !bytes.Equal(g.CertKey, macKey) {
+					t.Fatalf("grace SMTP grant = %+v", g)
+				}
+				if left := time.Until(g.Until); left < 3*time.Minute+30*time.Second || left > 4*time.Minute+time.Second {
+					t.Fatalf("grace SMTP grant until = %s, want ~4m", left)
+				}
+				cl := h.upstream.claims()
+				if len(cl) != 1 || cl[0].Protocol != bindtoken.SMTP || cl[0].Mode != bindtoken.ModeDeviceCode || cl[0].CertKey != nil {
+					t.Fatalf("grace SMTP claims = %+v", cl)
+				}
+				// Key change closes the grace session at the next poll.
+				accts.addDevice(aliceMac(code, otherKey))
+				if st := h.sweeper.Poll(context.Background()); st.Closed != 1 {
+					t.Fatalf("poll after key change closed %d, want 1", st.Closed)
+				}
+				if !c.closed(time.Second) {
+					t.Fatal("grace SMTP session stayed open after key change")
+				}
+			})
+		}
+	})
+
+	t.Run("SMTP out of grace or after liveness row recorded answers 454", func(t *testing.T) {
+		code := testCode(0x2b)
+		accts := alice()
+		d := aliceMac(code, macKey)
+		d.MacInstallGrace = true
+		d.MacInstallGraceLeft = 5 * time.Minute
+		accts.addDevice(d)
+		// Recording a liveness row from another address ends grace in DeviceGate.
+		accts.setMacLive(code.ID(), otherPrefix, macKey)
+		h := startFront(t, SMTP, accts, nil)
+		c := h.dial()
+		c.until("220")
+		c.send("AUTH PLAIN " + plain("", "alice@i10.test", code.String()) + "\r\n")
+		if got := c.line(); !strings.HasPrefix(got, "454 4.7.0") {
+			t.Fatalf("after liveness recorded answered %q, want 454 4.7.0", got)
+		}
+		if len(h.upstream.commands()) != 0 {
+			t.Fatalf("forwarded %v when out of grace", h.upstream.commands())
+		}
+	})
+
+	t.Run("IMAP code-only in grace has no cert in token, capped to time left, expires at cert_session_max_age", func(t *testing.T) {
+		code := testCode(0x2c)
+		logs := &lockedBuffer{}
+		accts := alice()
+		d := aliceMac(code, macKey)
+		d.MacInstallGrace = true
+		d.MacInstallGraceLeft = 60 * time.Millisecond
+		accts.addDevice(d)
+		h := startFront(t, IMAP, accts, func(s *Server) {
+			s.Log = slog.New(slog.NewTextHandler(logs, nil))
+		})
+		c := h.dial()
+		c.until("* OK")
+		c.send(`a LOGIN alice@i10.test "` + code.String() + `"` + "\r\n")
+		if got := c.until("a "); !strings.HasPrefix(got, "a OK") {
+			t.Fatalf("grace IMAP LOGIN answered %q", got)
+		}
+		waitFor(t, "watched", func() bool { return h.srv.Live() == 1 })
+		g := grants(h)[0]
+		if g.DeviceID != code.ID() || !bytes.Equal(g.CertKey, macKey) {
+			t.Fatalf("grace IMAP grant = %+v", g)
+		}
+		if left := time.Until(g.Until); left > 100*time.Millisecond {
+			t.Fatalf("grace IMAP grant until = %s, want <= 60ms", left)
+		}
+		cl := h.upstream.claims()
+		if len(cl) != 1 || cl[0].Mode != bindtoken.ModeDeviceCode || cl[0].Protocol != bindtoken.IMAP || cl[0].CertKey != nil {
+			t.Fatalf("grace IMAP claims carried cert or wrong mode: %+v", cl)
+		}
+		// Initial poll before expiry keeps the grace session open (Grant.CertKey matches row).
+		if st := h.sweeper.Poll(context.Background()); st.Closed != 0 {
+			t.Fatalf("poll before grace expiry closed %d, want 0", st.Closed)
+		}
+		// Once the grace window elapses, the session closes even if the DB is down.
+		accts.failAll = true
+		time.Sleep(80 * time.Millisecond)
+		if st := h.sweeper.Poll(context.Background()); st.Closed != 1 {
+			t.Fatalf("poll after grace expiry closed %d, want 1", st.Closed)
+		}
+		if !c.closed(time.Second) {
+			t.Fatal("grace IMAP session stayed open past grace cap")
+		}
+		waitFor(t, "cert_session_max_age", func() bool { return strings.Contains(logs.String(), "reason="+ReasonCertMaxAge) })
+	})
+
+	t.Run("SMTP grace session expires at cert_session_max_age and clamps >10m to 10m", func(t *testing.T) {
+		code1 := testCode(0x2d)
+		logs := &lockedBuffer{}
+		accts := alice()
+		d1 := aliceMac(code1, macKey)
+		d1.MacInstallGrace = true
+		d1.MacInstallGraceLeft = 50 * time.Millisecond
+		accts.addDevice(d1)
+		h := startFront(t, SMTP, accts, func(s *Server) {
+			s.Log = slog.New(slog.NewTextHandler(logs, nil))
+		})
+		c1 := h.dial()
+		c1.until("220")
+		c1.send("AUTH PLAIN " + plain("", "alice@i10.test", code1.String()) + "\r\n")
+		if got := c1.line(); !strings.HasPrefix(got, "235") {
+			t.Fatalf("grace SMTP answered %q", got)
+		}
+		waitFor(t, "watched", func() bool { return h.srv.Live() == 1 })
+		accts.failAll = true
+		time.Sleep(70 * time.Millisecond)
+		if st := h.sweeper.Poll(context.Background()); st.Closed != 1 {
+			t.Fatalf("poll after SMTP grace expiry closed %d, want 1", st.Closed)
+		}
+		if !c1.closed(time.Second) {
+			t.Fatal("grace SMTP session stayed open past grace cap")
+		}
+		waitFor(t, "cert_session_max_age", func() bool { return strings.Contains(logs.String(), "reason="+ReasonCertMaxAge) })
+
+		// Remaining time > 10m is clamped to never exceed 10 minutes.
+		accts.failAll = false
+		code2 := testCode(0x2e)
+		d2 := aliceMac(code2, macKey)
+		d2.MacInstallGrace = true
+		d2.MacInstallGraceLeft = 30 * time.Minute
+		accts.addDevice(d2)
+		c2 := h.dial()
+		c2.until("220")
+		c2.send("AUTH PLAIN " + plain("", "alice@i10.test", code2.String()) + "\r\n")
+		if got := c2.line(); !strings.HasPrefix(got, "235") {
+			t.Fatalf("clamped grace SMTP answered %q", got)
+		}
+		waitFor(t, "watched 2", func() bool { return h.srv.Live() == 1 })
+		if left := time.Until(grants(h)[0].Until); left > projection.MacInstallGraceDuration+time.Second {
+			t.Fatalf("clamped grace session ends in %s, want <= %s", left, projection.MacInstallGraceDuration)
+		}
+	})
+
+	t.Run("IMAP with verified cert during grace keeps full cert_session_max_age", func(t *testing.T) {
+		ca := newTestDeviceCA(t)
+		macCert, certKey := ca.issueLeaf(t, "C02GRACECERT", nil)
+		code := testCode(0x2f)
+		accts := alice()
+		d := aliceMac(code, certKey)
+		d.MacInstallGrace = true
+		d.MacInstallGraceLeft = 2 * time.Minute
+		accts.addDevice(d)
+		h := startFrontWithCA(t, IMAP, accts, ca.bundle(t), nil)
+
+		c := h.dialTLS(&tls.Config{RootCAs: h.roots, ServerName: "mail.i10.test", Certificates: []tls.Certificate{macCert}})
+		c.until("* OK")
+		c.send(`a LOGIN alice@i10.test "` + code.String() + `"` + "\r\n")
+		if got := c.until("a "); !strings.HasPrefix(got, "a OK") {
+			t.Fatalf("cert IMAP LOGIN answered %q", got)
+		}
+		waitFor(t, "watched", func() bool { return h.srv.Live() == 1 })
+		g := grants(h)[0]
+		if left := time.Until(g.Until); left < CertSessionMaxAge-time.Minute {
+			t.Fatalf("cert-backed IMAP during grace got shortened cap %s, want ~60m", left)
+		}
+		cl := h.upstream.claims()
+		if len(cl) != 1 || !bytes.Equal(cl[0].CertKey, certKey) || cl[0].CertCN != "C02GRACECERT" {
+			t.Fatalf("cert-backed IMAP claims = %+v", cl)
+		}
+	})
+}

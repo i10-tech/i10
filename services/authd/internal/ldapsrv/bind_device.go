@@ -37,17 +37,20 @@ const (
 	// reasonCertMismatch: the token's certificate key is not the row's, or the
 	// row is not a Mac.
 	reasonCertMismatch = "device_cert_mismatch"
-	// reasonCertRequired: a Mac's code on IMAP with no certificate behind it. A
-	// code alone never reads a Mac's mail.
+	// reasonCertRequired: a Mac's code on IMAP with no certificate behind it,
+	// outside its initial 10-minute install grace (once the grace ends or the
+	// first certificate session is recorded, a code alone never reads a Mac's
+	// mail).
 	reasonCertRequired = "device_cert_required"
 	// reasonCertSerial: the certificate's subject CN is not the serial Apple
 	// attested for the row (revision 5): a key written into a row by someone
 	// with the API's database role still needs a certificate for that Mac.
 	reasonCertSerial = "device_cert_serial_mismatch"
-	// reasonCertSessionMissing: a Mac's code on SMTP with no certificate-verified
-	// IMAP session of that Mac, under its current key, recently enough (and from
-	// the same address while AUTHD_MAC_SMTP_SAME_ADDRESS is on). Unavailable, not
-	// invalid credentials: Mail should keep the message and retry.
+	// reasonCertSessionMissing: a Mac's code on SMTP outside its initial
+	// 10-minute install grace with no certificate-verified IMAP session of that
+	// Mac, under its current key, recently enough (and from the same address
+	// while AUTHD_MAC_SMTP_SAME_ADDRESS is on). Unavailable, not invalid
+	// credentials: Mail should keep the message and retry.
 	reasonCertSessionMissing = "device_cert_session_missing"
 )
 
@@ -68,9 +71,11 @@ const (
 // ⚠ THE ORDER IS A SECURITY PROPERTY:
 //
 //	device_code: per-DN throttle -> parse -> key ring -> row by id ->
-//	  gate.DeviceRefusal (with the certificate key the token carries) -> serial ->
-//	  key id -> constant-time hash compare -> SMTP liveness (a Mac) ->
-//	  first-use claim -> idle limit -> touch -> IMAP liveness write (a Mac)
+//	  gate.DeviceRefusal (with the certificate key the token carries, or the
+//	  row's key for SMTP or a code-only Mac install-grace bind) -> serial ->
+//	  key id -> constant-time hash compare -> SMTP liveness (a Mac outside
+//	  install grace) -> first-use claim -> idle limit -> touch -> IMAP liveness
+//	  write (a Mac with a proved certificate; never on a grace bind)
 //	external:    per-DN throttle -> row by id -> gate.DeviceRefusal (with the
 //	  token's key) -> serial -> first-use claim -> idle limit -> touch ->
 //	  IMAP liveness write
@@ -132,20 +137,31 @@ func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn strin
 		return
 	}
 	mac := dev.Platform == gate.Macos
+	// Mac install grace: a newly enrolled Mac with a bound ACME key, inside its
+	// 10-minute UUIDv7 window and before its first certificate session is
+	// recorded, may sign in with its code alone (no certificate in the token) on
+	// IMAP and SMTP so macOS profile install verification succeeds. Once the
+	// grace expires or any certificate session is recorded, PR 3's rules apply
+	// in full. An external bind or a bind that carries a certificate is never
+	// treated as a grace bind.
+	grace := mac && !external && claims.CertKey == nil && dev.MacInstallGrace
 
 	// ⚠ THE KEY A BIND STANDS ON (gate.DeviceRefusal's held): on IMAP, the
-	// certificate key the front proved, carried in the token; on SMTP, which
-	// never carries one, the row's own key for a Mac, which the liveness rule
-	// below then requires a recent certificate session under.
+	// certificate key the front proved, carried in the token; on SMTP (which
+	// never carries one) or a code-only Mac bind in install grace, the row's own
+	// key so every other gate rule (account, address, workspace, bound key,
+	// revocation) still applies. Outside the grace, the SMTP liveness rule below
+	// requires a recent certificate session under that key.
 	held := claims.CertKey
-	if claims.Protocol == bindtoken.SMTP && mac {
+	if mac && (claims.Protocol == bindtoken.SMTP || grace) {
 		held = dev.CertKey
 	}
 	if reason := gate.DeviceRefusal(&dev.Device, account, held); reason != "" {
 		if reason == gate.DeviceKeyChanged {
 			reason = reasonCertMismatch
 			if claims.CertKey == nil {
-				// Only an IMAP code on a Mac gets here with no key: a code alone.
+				// Only an IMAP code on a Mac outside its install grace gets
+				// here with no key: a code alone.
 				reason = reasonCertRequired
 			}
 		}
@@ -177,7 +193,7 @@ func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn strin
 		}
 	}
 
-	if mac && claims.Protocol == bindtoken.SMTP {
+	if mac && claims.Protocol == bindtoken.SMTP && !grace {
 		if !s.macSMTPLive(ctx, dev, claims, attrs) {
 			s.respondUnavailable(w, "authentication backend temporarily unavailable")
 			return
@@ -211,10 +227,11 @@ func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn strin
 	}
 
 	// ⚠ A MAC'S CERTIFICATE SESSION IS WHAT LETS IT SEND, so a successful IMAP
-	// bind with a key records it. Best effort: the bind is already right, and a
-	// failed write costs only the next SMTP bind, which the next IMAP bind (Mail
-	// reconnects within the hour) repairs.
-	if mac && claims.Protocol == bindtoken.IMAP {
+	// bind with a proved certificate records it. A grace bind has no proved
+	// certificate and MUST NOT write a liveness row. Best effort: the bind is
+	// already right, and a failed write costs only the next SMTP bind, which the
+	// next IMAP bind (Mail reconnects within the hour) repairs.
+	if mac && claims.Protocol == bindtoken.IMAP && claims.CertKey != nil {
 		if err := s.devices.RecordMacLive(ctx, deviceID, projection.MacLivePrefix(claims.Addr), dev.CertKey); err != nil {
 			s.log.Warn("bind: could not record a Mac's certificate session", append(attrs, slog.Any("err", err))...)
 		}
@@ -223,8 +240,12 @@ func (s *Server) deviceBind(ctx context.Context, w ldap.ResponseWriter, dn strin
 	if external {
 		source = "cert"
 	}
-	s.log.Info("bind succeeded", "uid", uid, "mail", account.Email, "source", source, "device", deviceID,
-		"proto", claims.Protocol.String(), "family", family(claims.Addr))
+	logAttrs := []any{"uid", uid, "mail", account.Email, "source", source, "device", deviceID,
+		"proto", claims.Protocol.String(), "family", family(claims.Addr)}
+	if grace {
+		logAttrs = append(logAttrs, "grace", true)
+	}
+	s.log.Info("bind succeeded", logAttrs...)
 	w.Write(ldap.NewBindResponse(ldap.LDAPResultSuccess))
 }
 

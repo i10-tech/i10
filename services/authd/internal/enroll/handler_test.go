@@ -3,6 +3,7 @@ package enroll
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -409,6 +410,73 @@ func TestHandlerPhase2AndPhase4EndToEndAndLogRedaction(t *testing.T) {
 	h2, _, _, _ := newHandlerFixture(t, 2)
 	if h2.hashSerial(secretSerial) == wantHMAC {
 		t.Fatal("two handlers produced identical serial HMAC (per-process random key failed)")
+	}
+}
+
+func TestHandlerMacNoSignedAttrsEndToEnd(t *testing.T) {
+	h, pki, state, _ := newHandlerFixture(t, 4)
+	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+	const (
+		udid       = "11111111-2222-3333-4444-555555555555"
+		serial     = "C02SECRET999"
+		deviceName = "Test MacBook Pro"
+		model      = "MacBook Pro"
+		product    = "Mac15,6"
+		version    = "26C5047e"
+	)
+
+	// Phase 2: Mac CMS with no signedAttrs (SHA1WithRSA) and full Mac plist with <false/> NotOnConsole.
+	appleLeaf := pki.issueAppleLeaf(t, pki.appleCA1, "mac-apple-leaf", x509.SHA1WithRSA, 1024, nil)
+	p2Plist := makeMacAttributesPlist(validTok, udid, serial, product, version, deviceName, model, false)
+	p2CMS := signWithoutSignedAttrs(t, appleLeaf, oidDigestSHA1, oidSigRSASHA1, crypto.SHA1, p2Plist, pki.appleCA1.cert)
+
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodPost, "/enroll/apple/profile", bytes.NewReader(p2CMS)))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("Mac phase 2 = %d, want 200", rec2.Code)
+	}
+	if state.lastAttest.Token != validTok || state.lastAttest.UDID != udid ||
+		state.lastAttest.Serial != serial || state.lastAttest.Product != product ||
+		state.lastAttest.Version != version {
+		t.Fatalf("unexpected attest request: %+v", state.lastAttest)
+	}
+	if state.lastAttest.DeviceName == nil || *state.lastAttest.DeviceName != deviceName {
+		t.Fatalf("deviceName = %v, want %q", state.lastAttest.DeviceName, deviceName)
+	}
+	if state.lastAttest.Model == nil || *state.lastAttest.Model != model {
+		t.Fatalf("model = %v, want %q", state.lastAttest.Model, model)
+	}
+
+	// Phase 4: Mac SCEP CMS with no signedAttrs (SHA1WithRSA) and Mac plist without CHALLENGE.
+	scepLeaf := pki.issueSCEPLeaf(t, pki.deviceInter, serial, nil)
+	p4Plist := makeMacAttributesPlist("", udid, serial, product, version, deviceName, model, false)
+	p4CMS := signWithoutSignedAttrs(t, scepLeaf, oidDigestSHA1, oidSigRSASHA1, crypto.SHA1, p4Plist)
+
+	rec4 := httptest.NewRecorder()
+	h.ServeHTTP(rec4, httptest.NewRequest(http.MethodPost, "/enroll/apple/profile", bytes.NewReader(p4CMS)))
+	if rec4.Code != http.StatusOK {
+		t.Fatalf("Mac phase 4 = %d, want 200", rec4.Code)
+	}
+	if state.lastFinish.UDID == nil || *state.lastFinish.UDID != udid {
+		t.Fatalf("finish udid = %v, want %q", state.lastFinish.UDID, udid)
+	}
+	if state.lastFinish.CertDER != base64.StdEncoding.EncodeToString(scepLeaf.cert.Raw) {
+		t.Fatal("finish certDer mismatch")
+	}
+
+	// A boolean value cannot spoof a required string attribute such as SERIAL.
+	spoofedPlist := []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>` +
+		`<key>CHALLENGE</key><string>` + validTok + `</string>` +
+		`<key>UDID</key><string>` + udid + `</string>` +
+		`<key>SERIAL</key><true/>` +
+		`<key>PRODUCT</key><string>` + product + `</string>` +
+		`<key>VERSION</key><string>` + version + `</string>` +
+		`</dict></plist>`)
+	spoofCMS := signWithoutSignedAttrs(t, appleLeaf, oidDigestSHA1, oidSigRSASHA1, crypto.SHA1, spoofedPlist)
+	recSpoof := httptest.NewRecorder()
+	h.ServeHTTP(recSpoof, httptest.NewRequest(http.MethodPost, "/enroll/apple/profile", bytes.NewReader(spoofCMS)))
+	if recSpoof.Code != http.StatusBadRequest {
+		t.Fatalf("boolean SERIAL spoof = %d, want 400", recSpoof.Code)
 	}
 }
 

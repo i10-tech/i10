@@ -3,7 +3,10 @@ package ldapsrv_test
 import (
 	"bytes"
 	"errors"
+	"log/slog"
 	"net/netip"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,8 +108,9 @@ func TestAMacSignsInWithItsCertificate(t *testing.T) {
 	}
 }
 
-// ⚠ A MAC'S CODE ON IMAP NEEDS ITS CERTIFICATE BEHIND IT, AND ONLY ITS OWN: a code
-// dug out of Keychain reads nothing alone.
+// ⚠ OUTSIDE ITS INITIAL 10-MINUTE INSTALL GRACE (AND ONCE ITS FIRST CERTIFICATE
+// SESSION IS RECORDED), A MAC'S CODE ON IMAP NEEDS ITS CERTIFICATE BEHIND IT,
+// AND ONLY ITS OWN: a code dug out of Keychain reads nothing alone.
 func TestAMacsCodeOnIMAPSignsInOnlyWithItsCertificate(t *testing.T) {
 	r := newDeviceRig(t, defaultStore())
 	c := newCode(0x63)
@@ -349,4 +353,207 @@ func TestExternalNeedsNoDeviceCodeKeys(t *testing.T) {
 	if got := r.external(t, c.ID(), macIMAP(macKey, macSerial, macAddr)); got != 0 {
 		t.Fatalf("result = %d, want success", got)
 	}
+}
+
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) Reset() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	s := b.buf.String()
+	b.buf.Reset()
+	return s
+}
+
+// TestMacInstallGrace exercises the Mac install grace in the device lane:
+// code-only IMAP (no liveness write) and SMTP succeed and log source=device
+// grace=true while in grace; all other gate/code rules still hold; no cert key
+// is refused; a recorded liveness row immediately restores PR 3's rules; and
+// external binds are unchanged.
+func TestMacInstallGrace(t *testing.T) {
+	newLoggedRig := func(t *testing.T, store *fakeStore) (*deviceRig, *syncLogBuffer) {
+		t.Helper()
+		logs := &syncLogBuffer{}
+		r := newDeviceRig(t, store, func(o *fixtureOptions) {
+			o.log = slog.New(slog.NewTextHandler(logs, nil))
+		})
+		return r, logs
+	}
+
+	t.Run("grace IMAP succeeds with no liveness write and logs grace=true", func(t *testing.T) {
+		r, logs := newLoggedRig(t, defaultStore())
+		c := newCode(0x6a)
+		r.addMac(c, func(d *projection.DeviceCredential) { d.MacInstallGrace = true })
+
+		if got := r.code(t, c.String(), imapAt); got != goldapclient.LDAPResultSuccess {
+			t.Fatalf("grace IMAP code-only: result = %d, want success", got)
+		}
+		if rec := r.devices.recorded(); len(rec) != 0 {
+			t.Fatalf("grace IMAP wrote liveness rows %+v, want none", rec)
+		}
+		out := logs.Reset()
+		if !strings.Contains(out, "source=device") || !strings.Contains(out, "grace=true") {
+			t.Fatalf("grace IMAP log = %q, want source=device and grace=true", out)
+		}
+		r.untouched(t)
+	})
+
+	t.Run("grace SMTP succeeds without liveness and logs grace=true", func(t *testing.T) {
+		r, logs := newLoggedRig(t, defaultStore())
+		c := newCode(0x6b)
+		r.addMac(c, func(d *projection.DeviceCredential) { d.MacInstallGrace = true })
+
+		if got := r.code(t, c.String(), smtpFrom(macAddr)); got != goldapclient.LDAPResultSuccess {
+			t.Fatalf("grace SMTP code-only: result = %d, want success", got)
+		}
+		if rec := r.devices.recorded(); len(rec) != 0 {
+			t.Fatalf("grace SMTP wrote liveness rows %+v, want none", rec)
+		}
+		out := logs.Reset()
+		if !strings.Contains(out, "source=device") || !strings.Contains(out, "grace=true") {
+			t.Fatalf("grace SMTP log = %q, want source=device and grace=true", out)
+		}
+		r.untouched(t)
+	})
+
+	t.Run("out of grace is refused as today", func(t *testing.T) {
+		r, logs := newLoggedRig(t, defaultStore())
+		c := newCode(0x6c)
+		r.addMac(c, func(d *projection.DeviceCredential) { d.MacInstallGrace = false })
+
+		if got := r.code(t, c.String(), imapAt); got != goldapclient.LDAPResultInvalidCredentials {
+			t.Fatalf("out-of-grace IMAP: result = %d, want invalidCredentials", got)
+		}
+		if out := logs.Reset(); !strings.Contains(out, "reason=device_cert_required") {
+			t.Fatalf("out-of-grace IMAP log = %q, want reason=device_cert_required", out)
+		}
+		if got := r.code(t, c.String(), smtpFrom(macAddr)); got != goldapclient.LDAPResultUnavailable {
+			t.Fatalf("out-of-grace SMTP: result = %d, want unavailable", got)
+		}
+		r.untouchedRow(t)
+	})
+
+	t.Run("grace with no cert key is refused device_cert_missing", func(t *testing.T) {
+		r, logs := newLoggedRig(t, defaultStore())
+		c := newCode(0x6d)
+		r.addMac(c, func(d *projection.DeviceCredential) {
+			d.CertKey = nil
+			d.MacInstallGrace = true
+		})
+
+		if got := r.code(t, c.String(), imapAt); got != goldapclient.LDAPResultInvalidCredentials {
+			t.Fatalf("grace IMAP no key: result = %d, want invalidCredentials", got)
+		}
+		if out := logs.Reset(); !strings.Contains(out, "reason=device_cert_missing") {
+			t.Fatalf("grace IMAP no key log = %q, want reason=device_cert_missing", out)
+		}
+		if got := r.code(t, c.String(), smtpFrom(macAddr)); got != goldapclient.LDAPResultInvalidCredentials {
+			t.Fatalf("grace SMTP no key: result = %d, want invalidCredentials", got)
+		}
+		r.untouchedRow(t)
+	})
+
+	t.Run("grace still enforces code hash, wrong cert, account/tenant/idle rules", func(t *testing.T) {
+		cases := map[string]struct {
+			setup func(r *deviceRig, s *fakeStore, c devicecode.Code)
+			bind  func(t *testing.T, r *deviceRig, c devicecode.Code) uint16
+		}{
+			"wrong code secret": {
+				bind: func(t *testing.T, r *deviceRig, c devicecode.Code) uint16 {
+					return r.code(t, forgeSecret(c), imapAt)
+				},
+			},
+			"wrong certificate presented in token": {
+				bind: func(t *testing.T, r *deviceRig, c devicecode.Code) uint16 {
+					return r.code(t, c.String(), macIMAP(otherKey, macSerial, macAddr))
+				},
+			},
+			"wrong workspace": {
+				setup: func(r *deviceRig, _ *fakeStore, c devicecode.Code) {
+					r.devices.rows[c.ID()].TenantID = "t-other"
+				},
+				bind: func(t *testing.T, r *deviceRig, c devicecode.Code) uint16 {
+					return r.code(t, c.String(), imapAt)
+				},
+			},
+			"account suspended": {
+				setup: func(_ *deviceRig, s *fakeStore, _ devicecode.Code) {
+					s.accounts[0].Suspended = true
+				},
+				bind: func(t *testing.T, r *deviceRig, c devicecode.Code) uint16 {
+					return r.code(t, c.String(), imapAt)
+				},
+			},
+			"idle device": {
+				setup: func(r *deviceRig, _ *fakeStore, c devicecode.Code) {
+					r.devices.rows[c.ID()].Idle = true
+				},
+				bind: func(t *testing.T, r *deviceRig, c devicecode.Code) uint16 {
+					return r.code(t, c.String(), imapAt)
+				},
+			},
+		}
+		for name, tc := range cases {
+			t.Run(name, func(t *testing.T) {
+				store := defaultStore()
+				r := newDeviceRig(t, store)
+				c := newCode(0x6e)
+				r.addMac(c, func(d *projection.DeviceCredential) { d.MacInstallGrace = true })
+				if tc.setup != nil {
+					tc.setup(r, store, c)
+				}
+				if got := tc.bind(t, r, c); got != goldapclient.LDAPResultInvalidCredentials {
+					t.Fatalf("%s: result = %d, want invalidCredentials", name, got)
+				}
+				r.untouchedRow(t)
+			})
+		}
+	})
+
+	t.Run("liveness row present restores PR 3 rules and external is unchanged", func(t *testing.T) {
+		r, logs := newLoggedRig(t, defaultStore())
+		c := newCode(0x6f)
+		r.addMac(c, func(d *projection.DeviceCredential) { d.MacInstallGrace = true })
+
+		// EXTERNAL while in grace is unchanged: logs source=cert (no grace=true)
+		// and records a liveness row, which ends the grace immediately.
+		if got := r.external(t, c.ID(), macIMAP(macKey, macSerial, macAddr)); got != goldapclient.LDAPResultSuccess {
+			t.Fatalf("EXTERNAL during grace: result = %d, want success", got)
+		}
+		out := logs.Reset()
+		if !strings.Contains(out, "source=cert") || strings.Contains(out, "grace=true") {
+			t.Fatalf("EXTERNAL log = %q, want source=cert without grace=true", out)
+		}
+		if rec := r.devices.recorded(); len(rec) != 1 {
+			t.Fatalf("EXTERNAL liveness writes = %+v, want 1", rec)
+		}
+
+		// Now that a liveness row is present, PR 3 rules apply:
+		// 1. Code-only IMAP is refused device_cert_required.
+		if got := r.code(t, c.String(), imapAt); got != goldapclient.LDAPResultInvalidCredentials {
+			t.Fatalf("code-only IMAP after cert bind: result = %d, want invalidCredentials", got)
+		}
+		// 2. SMTP from another address is refused unavailable.
+		if got := r.code(t, c.String(), smtpFrom(elseAddr)); got != goldapclient.LDAPResultUnavailable {
+			t.Fatalf("SMTP from another addr after cert bind: result = %d, want unavailable", got)
+		}
+		// 3. SMTP from the live address succeeds under normal rules (no grace=true).
+		logs.Reset()
+		if got := r.code(t, c.String(), smtpFrom(macAddr)); got != goldapclient.LDAPResultSuccess {
+			t.Fatalf("SMTP from live addr: result = %d, want success", got)
+		}
+		out = logs.Reset()
+		if !strings.Contains(out, "source=device") || strings.Contains(out, "grace=true") {
+			t.Fatalf("normal SMTP log = %q, want source=device without grace=true", out)
+		}
+	})
 }

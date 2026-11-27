@@ -312,18 +312,31 @@ func (s *session) tokenFor(in *signIn) func(password string) (string, error) {
 			Addr:     s.addr,
 		}
 		devID := devicecode.DeviceID(password)
-		// ⚠ REVISION 5: only a macos device_code carries the client certificate
-		// on IMAP. Password sign-ins and iPhone/iPad codes ignore any presented
-		// certificate completely, and SMTP tokens never carry a certificate key.
-		if s.proto == IMAP && s.cert != nil && devID != "" {
+		// ⚠ REVISION 5 + MAC INSTALL GRACE:
+		// On IMAP, a macos device_code carries the verified client certificate
+		// when one arrived in the TLS handshake. When no certificate arrived
+		// and the Mac is still inside its initial 10-minute install grace (no
+		// certificate session recorded yet), the token stays without a
+		// certificate (so authd applies grace rules and writes no liveness row),
+		// while the Grant still stands on the row's key and caps session age to
+		// the time remaining in the grace window. Password sign-ins and
+		// iPhone/iPad codes ignore any presented certificate completely, and
+		// SMTP tokens never carry a certificate key.
+		if s.proto == IMAP && devID != "" {
 			dev, err := s.deviceGate(devID)
 			if err != nil {
 				return "", errLookupDown
 			}
 			if dev != nil && dev.Platform == gate.Macos {
-				at.CertKey = s.cert.key
-				at.CertCN = s.cert.cn
-				in.certKey = bytes.Clone(s.cert.key)
+				switch {
+				case s.cert != nil:
+					at.CertKey = s.cert.key
+					at.CertCN = s.cert.cn
+					in.certKey = bytes.Clone(s.cert.key)
+				case dev.MacInstallGrace && len(dev.CertKey) > 0:
+					in.certKey = bytes.Clone(dev.CertKey)
+					in.graceUntil = graceDeadline(time.Now(), dev.MacInstallGraceLeft)
+				}
 			}
 		}
 		wrapped, err := bindtoken.Wrap(*s.bindKey, in.acct.ClerkUserID, password, at, time.Now())

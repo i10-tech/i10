@@ -615,25 +615,42 @@ key id -> constant-time hash compare -> first-use claim -> idle limit -> touch
   must equal it in constant time (`device_key_changed`, refined by authd to
   `device_cert_required` or `device_cert_mismatch`). A certificate key on a
   non-`macos` row is refused.
-- **Mac rules (#383 PR 3, `ldapsrv/bind_device.go`):**
-  - **IMAP, `external` (`source: cert`):** the front verified the client
-    certificate on 993 and minted an `external` token. authd requires the row to
-    be `macos`, its `cert_key_sha256` to equal the token's key, and the token's
-    subject CN to equal `serial` whenever the row records one (no code parsing,
-    no key ring).
-  - **IMAP, `device_code`:** a Mac's code on IMAP still requires the Mac's
-    verified certificate key (and serial when recorded); a code alone is refused
+- **Mac rules (#383 PR 3, `ldapsrv/bind_device.go`, plus the PR 4 install grace):**
+  - **Install grace (`projection.MacInstallGraceSQL`):** macOS validates a new
+    mail account during profile installation by signing in to IMAP and SMTP with
+    the device code alone before the client certificate is configured in Mail. A
+    row is in grace while `platform = 'macos'`, `cert_key_sha256 IS NOT NULL`,
+    `uuid_extract_timestamp(id)` is within `[now() - 10 minutes, now() + 1 minute]`
+    by Postgres's clock, and no row exists in `authd.mail_device_cert_binds` for
+    the device. During that grace, a `device_code` bind with no certificate in
+    the token is accepted on IMAP (without writing a liveness row) and on SMTP
+    (without requiring one), still checked against every other gate rule
+    (account, tenant, epoch, revocation, bound key, code hash, first-use claim,
+    idle) and logged as `source: device` with `grace: true`. Once the 10-minute
+    window elapses or the first certificate session is recorded, PR 3's rules
+    below apply in full.
+  - **IMAP, `external` (`source: cert`):** unchanged by the grace. The front
+    verified the client certificate on 993 and minted an `external` token. authd
+    requires the row to be `macos`, its `cert_key_sha256` to equal the token's
+    key, and the token's subject CN to equal `serial` whenever the row records
+    one (no code parsing, no key ring).
+  - **IMAP, `device_code`:** outside the install grace (or whenever a
+    certificate is presented in the token), a Mac's code on IMAP requires the
+    Mac's verified certificate key (and serial when recorded); once the grace
+    ends or a certificate session has been recorded, a code alone is refused
     (`device_cert_required`).
-  - **IMAP liveness write:** every successful `macos` IMAP bind with a key
-    upserts `authd.mail_device_cert_binds` (client address as `/32` or IPv6
-    `/64`, at most one write per row every 5 minutes) and caps each device at 8
-    rows in a separate autocommit `DELETE`, never inside a transaction that
-    touches `authd.mail_devices`.
-  - **SMTP, `device_code`:** after the code hash matches, authd requires a
-    liveness row for this device under its current `cert_key_sha256` within 75
-    minutes from the same `/32` or `/64` (`device_cert_session_missing`,
-    answered `unavailable`). `AUTHD_MAC_SMTP_SAME_ADDRESS=false` drops the
-    address check (set in lockstep with `MAILFRONT_MAC_SMTP_SAME_ADDRESS`).
+  - **IMAP liveness write:** every successful `macos` IMAP bind with a proved
+    certificate key upserts `authd.mail_device_cert_binds` (client address as
+    `/32` or IPv6 `/64`, at most one write per row every 5 minutes) and caps
+    each device at 8 rows in a separate autocommit `DELETE`, never inside a
+    transaction that touches `authd.mail_devices`. A code-only grace IMAP bind
+    never writes a liveness row.
+  - **SMTP, `device_code`:** after the code hash matches, outside the install
+    grace authd requires a liveness row for this device under its current
+    `cert_key_sha256` within 75 minutes from the same `/32` or `/64`
+    (`device_cert_session_missing`, answered `unavailable`).
+    `AUTHD_MAC_SMTP_SAME_ADDRESS=false` drops the address check (set in lockstep
+    with `MAILFRONT_MAC_SMTP_SAME_ADDRESS`).
   - **Row upkeep:** every successful `macos` bind (IMAP or SMTP) claims first
     use if still unclaimed and touches `last_used_at` daily.
 - **Nothing is written before the hash matched.** Then, for a code never used,
@@ -997,15 +1014,17 @@ command, then sends Stalwart a command it wrote itself, from what it read:
   is answered `503` before AUTH. The front owns the entire SMTP AUTH exchange:
   it sends every `334` prompt itself (`AUTH LOGIN`'s two prompts and `AUTH
 PLAIN`'s empty one), handles `*` cancellations (`501 5.7.0`) locally, runs
-  every pre-check (login lookup; for a `macos` code, its device row and
-  `authd.mail_device_cert_binds` liveness row), and only then forwards ONE
-  `AUTH PLAIN <initial response>` to Stalwart (`AUTH LOGIN` is rewritten as
-  `PLAIN`). Our own faults answer `454 4.7.0` and forward nothing. The Mac
-  liveness `454 4.7.0` is answered only when the account row, `gate.Refusal`,
-  the device row and `gate.DeviceRefusal` (person, address, workspace, non-null
-  key) all pass and only the liveness row is missing; anything else is forwarded
-  so authd decides. The front cannot check a code's secret (it holds no
-  device-code keys), so a right device id with a wrong secret also gets this
+  every pre-check (login lookup; for a `macos` code, its device row and, outside
+  its initial 10-minute install grace, its `authd.mail_device_cert_binds`
+  liveness row), and only then forwards ONE `AUTH PLAIN <initial response>` to
+  Stalwart (`AUTH LOGIN` is rewritten as `PLAIN`). During the Mac install grace
+  (`projection.MacInstallGraceSQL`), SMTP AUTH is forwarded instead of answered
+  `454`. Our own faults answer `454 4.7.0` and forward nothing. The Mac liveness
+  `454 4.7.0` is answered only when the account row, `gate.Refusal`, the device
+  row and `gate.DeviceRefusal` (person, address, workspace, non-null key) all
+  pass, the device is not in its install grace, and only the liveness row is
+  missing; anything else is forwarded so authd decides. The front cannot check
+  a code's secret (it holds no device-code keys), so a right device id with a wrong secret also gets this
   `454` while the Mac is offline: accepted, see the design's section 11, "Found
   in the step 2 code review". At most 3 such `454`s are allowed per
   connection, after which the front closes it. `MAILFRONT_MAC_SMTP_SAME_ADDRESS` (default `true`)
@@ -1134,10 +1153,10 @@ Either closes a connection whose account:
 bind token's own parser (or resolves the `macos` row by SPKI hash for
 `EXTERNAL`) and records the device in that sign-in attempt's `Grant`
 (`DeviceID`), so it is the device the token covers. Only `external` and `macos`
-`device_code` sessions record `CertKey` on `Grant` (a `macos` SMTP session
-records the row's key at admission); password sessions and iPhone/iPad codes
-ignore any presented client certificate. ⚠ One per attempt:
-a code refused and then a password accepted on the same connection is a
+`device_code` sessions record `CertKey` on `Grant` (a `macos` SMTP session and a
+`macos` code-only install-grace session record the row's key at admission);
+password sessions and iPhone/iPad codes ignore any presented client
+certificate. ⚠ One per attempt: a code refused and then a password accepted on the same connection is a
 password session (`TestAnEarlierAttemptsDeviceIsNeverCreditedToTheSignIn`). The
 re-check reads the device rows of the connections that have one, by
 `id = ANY($2)`, in the same statement as their accounts (`projection.SweepQuery`),
@@ -1309,9 +1328,12 @@ prune while in use. **A Mac session (IMAP with a certificate, or SMTP under a
 Mac's code) ends at `cert_session_max_age`: 60 minutes, plus up to 5 minutes at
 random** (`CertSessionMaxAge`, `CertSessionMaxAgeJitter`), keeping every open
 certificate session inside authd's 75-minute liveness window and bounding Mac
-SMTP sessions without relying on Stalwart's `maxDuration`. The pass-through
-maximum age never applies to a device session, even on a managed account: the
-credential is i10's, checked by authd.
+SMTP sessions without relying on Stalwart's `maxDuration`. **A Mac code-only
+session admitted under the initial install grace (IMAP or SMTP)** uses the same
+`cert_session_max_age` mechanism with a shorter cap equal to the time remaining
+in the grace window (never more than 10 minutes), so a code-only session cannot
+outlive the grace. The pass-through maximum age never applies to a device
+session, even on a managed account: the credential is i10's, checked by authd.
 
 What it costs (measured 2026-11-22: 1.033 sign-ins per connection per max-age
 period, against the 1.026 the jitter predicts, with clients that reconnect at

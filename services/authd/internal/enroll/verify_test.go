@@ -127,6 +127,21 @@ func TestClassifySigner(t *testing.T) {
 			wantPhase: Phase2Apple,
 		},
 		{
+			name:      "phase 2 valid Mac no signedAttrs SHA1",
+			cms:       mustVerifyCMS(t, signWithoutSignedAttrs(t, appleLeafSHA1, oidDigestSHA1, oidSigRSASHA1, crypto.SHA1, []byte(samplePlist))),
+			wantPhase: Phase2Apple,
+		},
+		{
+			name:      "phase 2 valid Mac no signedAttrs SHA256",
+			cms:       mustVerifyCMS(t, signWithoutSignedAttrs(t, appleLeafSHA256, oidDigestSHA256, oidSigRSASHA256, crypto.SHA256, []byte(samplePlist))),
+			wantPhase: Phase2Apple,
+		},
+		{
+			name:    "phase 2 refuses Mac no signedAttrs SHA384WithRSA",
+			cms:     mustVerifyCMS(t, signWithoutSignedAttrs(t, appleLeafSHA256, oidDigestSHA384, oidSigRSASHA384, crypto.SHA384, []byte(samplePlist))),
+			wantErr: true,
+		},
+		{
 			name:    "phase 2 refuses SHA384WithRSA CMS signature",
 			cms:     mustVerifyCMS(t, buildCustomCMS(t, appleLeafSHA256, customCMSOpts{content: []byte(samplePlist), digestOID: oidDigestSHA384, sigOID: oidSigRSA, hashAlg: crypto.SHA384})),
 			wantErr: true,
@@ -154,6 +169,16 @@ func TestClassifySigner(t *testing.T) {
 		{
 			name:      "phase 4 valid SCEP leaf SHA1",
 			cms:       mustVerifyCMS(t, signWithPKCS7(t, scepValid, pkcs7.OIDDigestAlgorithmSHA1, []byte(samplePlist))),
+			wantPhase: Phase4DeviceCA,
+		},
+		{
+			name:      "phase 4 valid Mac SCEP leaf no signedAttrs SHA1",
+			cms:       mustVerifyCMS(t, signWithoutSignedAttrs(t, scepValid, oidDigestSHA1, oidSigRSASHA1, crypto.SHA1, []byte(samplePlist))),
+			wantPhase: Phase4DeviceCA,
+		},
+		{
+			name:      "phase 4 valid Mac SCEP leaf no signedAttrs SHA256",
+			cms:       mustVerifyCMS(t, signWithoutSignedAttrs(t, scepValid, oidDigestSHA256, oidSigRSASHA256, crypto.SHA256, []byte(samplePlist))),
 			wantPhase: Phase4DeviceCA,
 		},
 		{

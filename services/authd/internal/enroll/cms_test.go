@@ -138,6 +138,65 @@ func TestParseAndVerifyCMSBERIndefiniteLengthAndChunkedOctetString(t *testing.T)
 	}
 }
 
+func TestParseAndVerifyCMSWithoutSignedAttrs(t *testing.T) {
+	pki := newTestPKI(t)
+	appleLeaf := pki.issueAppleLeaf(t, pki.appleCA1, "mac-apple-dev", x509.SHA1WithRSA, 1024, nil)
+	scepLeaf := pki.issueSCEPLeaf(t, pki.deviceInter, "C02MACSCEP", nil)
+
+	macPlist := makeMacAttributesPlist(
+		"AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde",
+		"11111111-2222-3333-4444-555555555555",
+		"C02MACSCEP", "Mac15,6", "26C5047e", "Test MacBook Pro", "MacBook Pro", false,
+	)
+
+	cases := []struct {
+		name      string
+		id        testIdentity
+		digestOID asn1.ObjectIdentifier
+		sigOID    asn1.ObjectIdentifier
+		hashAlg   crypto.Hash
+		wantAlg   x509.SignatureAlgorithm
+		extra     []*x509.Certificate
+	}{
+		{"phase 2 Apple SHA1WithRSA", appleLeaf, oidDigestSHA1, oidSigRSASHA1, crypto.SHA1, x509.SHA1WithRSA, []*x509.Certificate{pki.appleCA1.cert}},
+		{"phase 2 Apple SHA256WithRSA", appleLeaf, oidDigestSHA256, oidSigRSASHA256, crypto.SHA256, x509.SHA256WithRSA, nil},
+		{"phase 4 SCEP SHA1WithRSA", scepLeaf, oidDigestSHA1, oidSigRSASHA1, crypto.SHA1, x509.SHA1WithRSA, nil},
+		{"phase 4 SCEP SHA256WithRSA", scepLeaf, oidDigestSHA256, oidSigRSA, crypto.SHA256, x509.SHA256WithRSA, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			der := signWithoutSignedAttrs(t, tc.id, tc.digestOID, tc.sigOID, tc.hashAlg, macPlist, tc.extra...)
+			got, err := ParseAndVerifyCMS(der)
+			if err != nil {
+				t.Fatalf("ParseAndVerifyCMS: %v", err)
+			}
+			if !bytes.Equal(got.Signer.Raw, tc.id.cert.Raw) {
+				t.Fatal("returned wrong signer certificate")
+			}
+			if !bytes.Equal(got.Content, macPlist) {
+				t.Fatalf("content mismatch: got %q", got.Content)
+			}
+			if got.SigAlg != tc.wantAlg {
+				t.Fatalf("SigAlg = %v, want %v", got.SigAlg, tc.wantAlg)
+			}
+
+			// Indefinite-length BER wrapper (as macOS sends) must verify identically.
+			var outer asn1.RawValue
+			if _, err := asn1.Unmarshal(der, &outer); err != nil {
+				t.Fatal(err)
+			}
+			indef := append(append([]byte{0x30, 0x80}, outer.Bytes...), 0x00, 0x00)
+			gotBER, err := ParseAndVerifyCMS(indef)
+			if err != nil {
+				t.Fatalf("ParseAndVerifyCMS on indefinite BER: %v", err)
+			}
+			if !bytes.Equal(gotBER.Content, macPlist) {
+				t.Fatal("BER content mismatch")
+			}
+		})
+	}
+}
+
 func TestParseAndVerifyCMSRefusals(t *testing.T) {
 	pki := newTestPKI(t)
 	leaf := pki.issueSCEPLeaf(t, pki.deviceInter, "SERIAL1", nil)
@@ -191,7 +250,26 @@ func TestParseAndVerifyCMSRefusals(t *testing.T) {
 		{"no certificates", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), certs: []*x509.Certificate{}})},
 		{"signer cert missing from set", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), certs: []*x509.Certificate{other.cert}})},
 		{"conflicting cert same issuer and serial", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), certs: []*x509.Certificate{leaf.cert, conflict.cert}})},
-		{"missing signedAttrs", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), omitSignedAttrs: true})},
+		{"empty signedAttrs tag [0]", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), emptySignedAttrs: true})},
+		{"no signedAttrs wrong encapContentType", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), omitSignedAttrs: true, encapContentType: oidSignedData})},
+		{"no signedAttrs detached content", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), omitSignedAttrs: true, detached: true})},
+		{"no signedAttrs empty content", buildCustomCMS(t, leaf, customCMSOpts{content: []byte{}, omitSignedAttrs: true})},
+		{"no signedAttrs tampered signature", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), omitSignedAttrs: true, tamperSignature: true})},
+		{"no signedAttrs SHA1 tampered signature", buildCustomCMS(t, leaf, customCMSOpts{
+			content:         []byte(samplePlist),
+			digestOID:       oidDigestSHA1,
+			sigOID:          oidSigRSASHA1,
+			hashAlg:         crypto.SHA1,
+			omitSignedAttrs: true,
+			tamperSignature: true,
+		})},
+		{"no signedAttrs mismatched digest/sig alg", buildCustomCMS(t, leaf, customCMSOpts{
+			content:         []byte(samplePlist),
+			digestOID:       oidDigestSHA1,
+			sigOID:          oidSigRSASHA256,
+			hashAlg:         crypto.SHA1,
+			omitSignedAttrs: true,
+		})},
 		{"missing content-type attr", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), omitContentType: true})},
 		{"wrong content-type attr", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), wrongContentType: oidSignedData})},
 		{"duplicate content-type attr", buildCustomCMS(t, leaf, customCMSOpts{content: []byte(samplePlist), dupContentType: true})},

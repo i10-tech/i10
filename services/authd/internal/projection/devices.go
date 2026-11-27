@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -12,9 +13,10 @@ import (
 )
 
 // The device code clock rules (#383), judged by the database's clock in the
-// statements below, never by authd's: the first-use claim, the idle limit and
-// the daily touch all compare with the same now(). Top-level constants, so the
-// scale harness (apps/api/scripts/scale/go-sql.ts) can read the statements.
+// statements below, never by authd's: the first-use claim, the idle limit,
+// the daily touch and the Mac install grace all compare with the same now().
+// Top-level constants, so the scale harness (apps/api/scripts/scale/go-sql.ts)
+// can read the statements.
 
 // DeviceFirstUseWindow is how long a minted code may wait for its first
 // sign-in. Past it, an unused code is dead (and the prune deletes it).
@@ -26,12 +28,60 @@ const DeviceIdleLimit = `interval '90 days'`
 // deviceTouchEvery bounds the `last_used_at` writes to one a day per device.
 const deviceTouchEvery = `interval '1 day'`
 
+// MacInstallGraceDuration is the length of a new Mac's code-only install grace
+// (macOS validates the mail account during profile installation before Mail is
+// configured with the client certificate). MacInstallGraceWindow and
+// macInstallGraceMaxMS express the same duration in SQL (pinned equal by test).
+const MacInstallGraceDuration = 10 * time.Minute
+
+// MacInstallGraceWindow is how long after a Mac row's UUIDv7 timestamp its
+// code works without a client certificate or liveness row, until the first
+// certificate session is recorded.
+const MacInstallGraceWindow = `interval '10 minutes'`
+
+// macInstallGraceFutureSkew bounds how far ahead of Postgres's now() a UUIDv7
+// id's timestamp may sit and still qualify for the install grace, stopping a
+// future-dated id from creating a permanent grace.
+const macInstallGraceFutureSkew = `interval '1 minute'`
+
+// macInstallGraceMaxMS is MacInstallGraceDuration in milliseconds as a SQL
+// integer literal for clamping the remaining grace window.
+const macInstallGraceMaxMS = `600000`
+
+// MacInstallGraceSQL is the single definition of the Mac install grace, shared
+// by authd (DeviceByIDQuery) and the mail front (DeviceGateQuery).
+//
+// In grace = platform is 'macos' AND cert_key_sha256 IS NOT NULL (ACME key
+// bound) AND uuid_extract_timestamp(d.id) BETWEEN now() - 10 minutes AND
+// now() + 1 minute AND NOT EXISTS any authd.mail_device_cert_binds row for the
+// device. Uses d.id's embedded UUIDv7 timestamp so mailfront needs no new
+// column grant.
+//
+// ⚠ CASE SHORT-CIRCUITS AND NEVER RETURNS NULL: non-Mac rows, unbound keys,
+// non-v7 UUIDs (where uuid_extract_timestamp returns NULL) and rows outside
+// the window skip the authd.mail_device_cert_binds probe entirely and return
+// false.
+const MacInstallGraceSQL = `(CASE WHEN d.platform = 'macos'` +
+	` AND d.cert_key_sha256 IS NOT NULL` +
+	` AND uuid_extract_timestamp(d.id) BETWEEN now() - ` + MacInstallGraceWindow + ` AND now() + ` + macInstallGraceFutureSkew +
+	` THEN NOT EXISTS (SELECT 1 FROM authd.mail_device_cert_binds b WHERE b.device_id = d.id)` +
+	` ELSE false END)`
+
+// macInstallGraceLeftSQL is the milliseconds remaining in the Mac install grace
+// window by the database clock, clamped to [0, MacInstallGraceDuration] (0 for
+// non-v7 UUIDs or past the window). Evaluated from d.id alone (no extra table
+// access).
+const macInstallGraceLeftSQL = `coalesce(greatest(0, least(` + macInstallGraceMaxMS +
+	`, floor(extract(epoch FROM (uuid_extract_timestamp(d.id) + ` + MacInstallGraceWindow + ` - now())) * 1000)))::bigint, 0)`
+
 // DeviceByIDQuery is DeviceByID's statement, exported so its cost can be
 // measured with EXPLAIN on the statement that actually runs. One primary-key
-// lookup.
+// lookup on mail_devices, plus at most one index probe on mail_device_cert_binds
+// for a newly bound Mac inside its install grace window.
 const DeviceByIDQuery = `
 	SELECT d.id::text, d.clerk_user_id, d.email, coalesce(d.tenant_id::text, ''), d.platform,
-	       d.cert_key_sha256, coalesce(d.serial, ''),
+	       d.cert_key_sha256, ` + MacInstallGraceSQL + `,
+	       coalesce(d.serial, ''),
 	       d.code_hash, d.code_kid,
 	       d.first_used_at IS NOT NULL,
 	       coalesce(d.last_used_at < now() - ` + DeviceIdleLimit + `, false),
@@ -45,7 +95,7 @@ const DeviceByIDQuery = `
 func (p *Postgres) DeviceByID(ctx context.Context, id string) (*DeviceCredential, error) {
 	var d DeviceCredential
 	err := p.pool.QueryRow(ctx, DeviceByIDQuery, id).Scan(&d.ID, &d.ClerkUserID, &d.Email, &d.TenantID, &d.Platform,
-		&d.CertKey, &d.Serial, &d.CodeHash, &d.CodeKID, &d.Used, &d.Idle, &d.TouchDue)
+		&d.CertKey, &d.MacInstallGrace, &d.Serial, &d.CodeHash, &d.CodeKID, &d.Used, &d.Idle, &d.TouchDue)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -60,8 +110,10 @@ func (p *Postgres) DeviceByID(ctx context.Context, id string) (*DeviceCredential
 // Device's order.
 const frontDeviceColumns = `d.id::text, d.clerk_user_id, d.email, coalesce(d.tenant_id::text, ''), d.platform, d.cert_key_sha256`
 
-// DeviceGateQuery is DeviceGate's statement: one primary-key lookup.
-const DeviceGateQuery = `SELECT ` + frontDeviceColumns + ` FROM authd.mail_devices d WHERE d.id = $1::uuid`
+// DeviceGateQuery is DeviceGate's statement: one primary-key lookup on
+// mail_devices, plus at most one index probe on mail_device_cert_binds for a
+// newly bound Mac inside its install grace window.
+const DeviceGateQuery = `SELECT ` + frontDeviceColumns + `, ` + MacInstallGraceSQL + `, ` + macInstallGraceLeftSQL + ` FROM authd.mail_devices d WHERE d.id = $1::uuid`
 
 // DeviceByCertKeyQuery is DeviceByCertKey's statement: one probe of the
 // partial unique index on `cert_key_sha256` (`= $1::bytea` is strict, so the
@@ -69,13 +121,29 @@ const DeviceGateQuery = `SELECT ` + frontDeviceColumns + ` FROM authd.mail_devic
 const DeviceByCertKeyQuery = `SELECT ` + frontDeviceColumns + ` FROM authd.mail_devices d WHERE d.cert_key_sha256 = $1::bytea`
 
 // DeviceGate reads a device row as the gate matches it, for the mail front:
-// whether a code's row is a Mac before a sign-in is forwarded. (nil, nil) when
-// there is no such row. An id that is not a UUID is no row.
+// whether a code's row is a Mac (and whether it is in its install grace window)
+// before a sign-in is forwarded. (nil, nil) when there is no such row. An id
+// that is not a UUID is no row.
 func (p *Postgres) DeviceGate(ctx context.Context, id string) (*Device, error) {
 	if _, ok := devicecode.ParseIDText(id); !ok {
 		return nil, nil
 	}
-	return p.frontDevice(ctx, "device gate", DeviceGateQuery, id)
+	var d Device
+	var graceLeftMS int64
+	err := p.pool.QueryRow(ctx, DeviceGateQuery, id).Scan(
+		&d.ID, &d.ClerkUserID, &d.Email, &d.TenantID, &d.Platform, &d.CertKey,
+		&d.MacInstallGrace, &graceLeftMS,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("projection: device gate: %w", err)
+	}
+	if d.MacInstallGrace && graceLeftMS > 0 {
+		d.MacInstallGraceLeft = min(time.Duration(graceLeftMS)*time.Millisecond, MacInstallGraceDuration)
+	}
+	return &d, nil
 }
 
 // DeviceByCertKey reads the device a certificate key is bound to, for the mail
@@ -102,12 +170,13 @@ func (p *Postgres) frontDevice(ctx context.Context, what, query string, arg any)
 // ── the Mac liveness rows (`authd.mail_device_cert_binds`, #383 PR 3) ───────
 //
 // A Mac sends with its code only while a certificate-verified IMAP session of
-// it lives: every successful Mac IMAP bind with a key records (device, the
-// client's /32 or /64, the key), and an SMTP bind of that Mac needs a row for
-// its current key, recent enough, from the same address. Every Stalwart pod's
-// authd shares them through Postgres, and the front reads them to answer the
-// missing row as temporary itself (Stalwart would turn authd's `unavailable`
-// into a permanent 535).
+// it lives (except during its initial MacInstallGraceWindow install grace,
+// before its first certificate session is recorded): every successful Mac IMAP
+// bind with a proved key records (device, the client's /32 or /64, the key),
+// and an SMTP bind of that Mac needs a row for its current key, recent enough,
+// from the same address. Every Stalwart pod's authd shares them through
+// Postgres, and the front reads them to answer the missing row as temporary
+// itself (Stalwart would turn authd's `unavailable` into a permanent 535).
 
 // MacLiveWindow is how recent a liveness row must be for a Mac's SMTP bind.
 // The front ends a certificate session after at most 65 minutes, and authd

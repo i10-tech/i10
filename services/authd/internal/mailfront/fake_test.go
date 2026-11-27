@@ -136,6 +136,10 @@ func (f *fakeAccounts) DeviceGate(_ context.Context, id string) (*projection.Dev
 	}
 	cp := d
 	cp.CertKey = bytes.Clone(d.CertKey)
+	if len(f.macLive[id]) > 0 {
+		cp.MacInstallGrace = false
+		cp.MacInstallGraceLeft = 0
+	}
 	return &cp, nil
 }
 

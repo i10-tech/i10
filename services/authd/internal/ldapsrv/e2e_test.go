@@ -231,6 +231,7 @@ type fixtureOptions struct {
 	devices       ldapsrv.DeviceStore
 	deviceKeys    devicecode.Keys
 	macAnyAddress bool
+	log           *slog.Logger
 }
 
 func (o fixtureOptions) tokenKeys() bindtoken.Keys {
@@ -265,6 +266,11 @@ func newFixtureOpts(t *testing.T, o fixtureOptions) string {
 		opTimeout = 2 * time.Second
 	}
 
+	logger := o.log
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
 	srv := ldap.NewServer()
 	srv.Handle(ldapsrv.New(ldapsrv.Options{
 		BaseDN:            baseDN,
@@ -275,7 +281,7 @@ func newFixtureOpts(t *testing.T, o fixtureOptions) string {
 		Budget:            o.budget,
 		Limiter:           throttle.New(o.perMinute),
 		CredCache:         o.cache,
-		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:            logger,
 		OpTimeout:         opTimeout,
 		BindTokenKeys:     o.tokenKeys(),
 		Devices:           o.devices,

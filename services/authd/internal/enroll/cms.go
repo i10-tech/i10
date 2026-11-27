@@ -48,15 +48,17 @@ var (
 )
 
 // VerifiedCMS is the result of parsing a CMS SignedData message and verifying
-// its single SignerInfo's signature over its signed attributes (Review 1 rule
-// H1). It does NOT verify the signer certificate's chain or dates; phase
-// routing does that next.
+// its single SignerInfo's signature over its signed attributes or, when
+// signedAttrs is absent (RFC 5652 section 5.4, used by macOS OTA requests),
+// directly over its encapsulated content (Review 1 rule H1). It does NOT verify
+// the signer certificate's chain or dates; phase routing does that next.
 type VerifiedCMS struct {
 	// Signer is the single certificate matched by SignerInfo.IssuerAndSerialNumber.
 	// Callers must use this exact object for CA verification, hashes, CN and DER.
 	Signer *x509.Certificate
-	// Content is the encapsulated id-data payload whose digest matched the
-	// signed messageDigest attribute.
+	// Content is the encapsulated id-data payload verified by the SignerInfo
+	// (either via its signed messageDigest attribute or by direct signature when
+	// signedAttrs is absent).
 	Content []byte
 	// SigAlg is the verified RSA signature algorithm used in SignerInfo.
 	SigAlg x509.SignatureAlgorithm
@@ -91,7 +93,7 @@ type cmsSignerInfo struct {
 	Version            int
 	SID                cmsIssuerAndSerial
 	DigestAlgorithm    pkix.AlgorithmIdentifier
-	SignedAttrs        []cmsAttribute `asn1:"optional,tag:0"`
+	SignedAttrs        asn1.RawValue `asn1:"optional,tag:0"`
 	SignatureAlgorithm pkix.AlgorithmIdentifier
 	Signature          []byte
 	UnsignedAttrs      []cmsAttribute `asn1:"optional,tag:1"`
@@ -103,11 +105,14 @@ type cmsSignerInfo struct {
 //   - exactly one SignerInfo (v1 IssuerAndSerialNumber);
 //   - signer certificate selected by IssuerAndSerialNumber from the embedded
 //     certificate set (refusing conflicting duplicates);
-//   - required signed attributes content-type (matching id-data) and
-//     messageDigest (matching hash of encapsulated content), each unique;
-//   - re-encoding of signed attributes as a DER SET OF (tag 0x31, sorted);
-//   - direct verification with Signer.CheckSignature without checking
-//     signingTime against the leaf certificate's validity dates.
+//   - when signedAttrs is present (iPhone/iPad): required signed attributes
+//     content-type (matching id-data) and messageDigest (matching hash of
+//     encapsulated content), each unique, re-encoded as a sorted DER SET OF
+//     (tag 0x31) and verified with Signer.CheckSignature;
+//   - when signedAttrs is absent (macOS OTA phase 2 and phase 4, RFC 5652
+//     section 5.4): encapsulated content is non-empty id-data and the signature
+//     is verified directly over the encapsulated content with Signer.CheckSignature;
+//   - no check of signingTime against the leaf certificate's validity dates.
 //
 // ⚠ WHY THIS DOES NOT CALL github.com/smallstep/pkcs7.Parse OR Verify:
 // In smallstep/pkcs7 v0.2.3, PKCS7.Signers exposes an unexported signerInfo
@@ -200,24 +205,30 @@ func ParseAndVerifyCMS(raw []byte) (res *VerifiedCMS, err error) {
 		return nil, err
 	}
 
-	if len(si.SignedAttrs) == 0 {
-		return nil, errors.New("enroll: missing signed attributes")
-	}
-	if len(si.SignedAttrs) > maxSignedAttrs {
-		return nil, fmt.Errorf("enroll: too many signed attributes (%d)", len(si.SignedAttrs))
-	}
-	if err := verifySignedAttrs(si.SignedAttrs, sd.EncapContentInfo.ContentType, hashAlg, content); err != nil {
-		return nil, err
-	}
-
-	signedAttrsDER, err := encodeSignedAttrsDERSet(si.SignedAttrs)
-	if err != nil {
-		return nil, err
+	var signed []byte
+	if len(si.SignedAttrs.FullBytes) == 0 {
+		// RFC 5652 section 5.4: when signedAttrs is absent, the signature is
+		// computed directly over the encapsulated content (already verified to
+		// be non-empty id-data above). macOS OTA phase 2 and phase 4 send this
+		// form.
+		signed = content
+	} else {
+		attrs, err := parseSignedAttrs(si.SignedAttrs)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifySignedAttrs(attrs, sd.EncapContentInfo.ContentType, hashAlg, content); err != nil {
+			return nil, err
+		}
+		signed, err = encodeSignedAttrsDERSet(attrs)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(si.Signature) == 0 {
 		return nil, errors.New("enroll: empty signature value")
 	}
-	if err := signer.CheckSignature(sigAlg, signedAttrsDER, si.Signature); err != nil {
+	if err := signer.CheckSignature(sigAlg, signed, si.Signature); err != nil {
 		return nil, fmt.Errorf("enroll: CMS signature verification failed: %w", err)
 	}
 
@@ -226,6 +237,27 @@ func ParseAndVerifyCMS(raw []byte) (res *VerifiedCMS, err error) {
 		Content: content,
 		SigAlg:  sigAlg,
 	}, nil
+}
+
+func parseSignedAttrs(raw asn1.RawValue) ([]cmsAttribute, error) {
+	if raw.Class != asn1.ClassContextSpecific || raw.Tag != 0 || !raw.IsCompound || len(raw.Bytes) == 0 {
+		return nil, errors.New("enroll: malformed or empty signed attributes")
+	}
+	var attrs []cmsAttribute
+	rem := raw.Bytes
+	for len(rem) > 0 {
+		if len(attrs) >= maxSignedAttrs {
+			return nil, fmt.Errorf("enroll: too many signed attributes (>%d)", maxSignedAttrs)
+		}
+		var attr cmsAttribute
+		var err error
+		rem, err = asn1.Unmarshal(rem, &attr)
+		if err != nil {
+			return nil, fmt.Errorf("enroll: parse signed attribute: %w", err)
+		}
+		attrs = append(attrs, attr)
+	}
+	return attrs, nil
 }
 
 func extractEncapData(raw asn1.RawValue) ([]byte, error) {

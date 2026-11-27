@@ -319,6 +319,7 @@ type customCMSOpts struct {
 	wrongMessageDigest []byte
 	dupMessageDigest   bool
 	omitSignedAttrs    bool
+	emptySignedAttrs   bool
 	tamperSignature    bool
 	duplicateSigner    bool
 	zeroSigners        bool
@@ -370,7 +371,7 @@ func buildCustomCMS(t *testing.T, id testIdentity, opts customCMSOpts) []byte {
 		}
 
 		var attrs []cmsAttribute
-		if !opts.omitSignedAttrs {
+		if !opts.omitSignedAttrs && !opts.emptySignedAttrs {
 			if !opts.omitContentType {
 				ct := opts.encapContentType
 				if len(opts.wrongContentType) > 0 {
@@ -398,14 +399,24 @@ func buildCustomCMS(t *testing.T, id testIdentity, opts customCMSOpts) []byte {
 			}
 		}
 
+		var signedAttrsRaw asn1.RawValue
 		var toSign []byte
-		if len(attrs) > 0 {
+		switch {
+		case opts.emptySignedAttrs:
+			signedAttrsRaw = asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, FullBytes: []byte{0xA0, 0x00}}
+			toSign = opts.content
+		case len(attrs) > 0:
 			var err error
 			toSign, err = encodeSignedAttrsDERSet(attrs)
 			if err != nil {
 				t.Fatal(err)
 			}
-		} else {
+			var attrBytes []byte
+			for _, a := range attrs {
+				attrBytes = append(attrBytes, a.Raw...)
+			}
+			signedAttrsRaw = asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: attrBytes}
+		default:
 			toSign = opts.content
 		}
 		h := opts.hashAlg.New()
@@ -422,7 +433,7 @@ func buildCustomCMS(t *testing.T, id testIdentity, opts customCMSOpts) []byte {
 			Version:            opts.signerVersion,
 			SID:                sid,
 			DigestAlgorithm:    pkix.AlgorithmIdentifier{Algorithm: opts.digestOID},
-			SignedAttrs:        attrs,
+			SignedAttrs:        signedAttrsRaw,
 			SignatureAlgorithm: pkix.AlgorithmIdentifier{Algorithm: opts.sigOID},
 			Signature:          sig,
 		}
@@ -482,4 +493,50 @@ func mustMakeAttr(t *testing.T, oid asn1.ObjectIdentifier, val any) cmsAttribute
 	}
 	a.Raw = raw
 	return a
+}
+
+// signWithoutSignedAttrs builds a macOS-style CMS SignedData with no
+// signedAttrs (RFC 5652 section 5.4: the signature is over eContent directly).
+func signWithoutSignedAttrs(t *testing.T, id testIdentity, digestOID, sigOID asn1.ObjectIdentifier, hashAlg crypto.Hash, content []byte, extraCerts ...*x509.Certificate) []byte {
+	t.Helper()
+	certs := append([]*x509.Certificate{id.cert}, extraCerts...)
+	return buildCustomCMS(t, id, customCMSOpts{
+		content:         content,
+		certs:           certs,
+		digestOID:       digestOID,
+		sigOID:          sigOID,
+		hashAlg:         hashAlg,
+		omitSignedAttrs: true,
+	})
+}
+
+// makeMacAttributesPlist synthesizes a macOS-shaped OTA attributes plist
+// matching the real Mac probe key set (including the <false/>/<true/>
+// NotOnConsole boolean). When challenge is empty (phase 4), CHALLENGE is omitted.
+func makeMacAttributesPlist(challenge, udid, serial, product, version, deviceName, model string, notOnConsole bool) []byte {
+	boolTag := "<false/>"
+	if notOnConsole {
+		boolTag = "<true/>"
+	}
+	var b []byte
+	b = append(b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n"...)
+	b = append(b, `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`+"\n"...)
+	b = append(b, "<plist version=\"1.0\">\n<dict>\n"...)
+	if challenge != "" {
+		b = append(b, "\t<key>CHALLENGE</key>\n\t<string>"+challenge+"</string>\n"...)
+	}
+	b = append(b, "\t<key>DEVICE_NAME</key>\n\t<string>"+deviceName+"</string>\n"...)
+	b = append(b, "\t<key>MODEL</key>\n\t<string>"+model+"</string>\n"...)
+	b = append(b, "\t<key>MODELNUMBER</key>\n\t<string>Z1A200001LL/A</string>\n"...)
+	b = append(b, "\t<key>NotOnConsole</key>\n\t"+boolTag+"\n"...)
+	b = append(b, "\t<key>PRODUCT</key>\n\t<string>"+product+"</string>\n"...)
+	b = append(b, "\t<key>SERIAL</key>\n\t<string>"+serial+"</string>\n"...)
+	b = append(b, "\t<key>SOFTWARE_UPDATE_DEVICE_ID</key>\n\t<string>J514AP</string>\n"...)
+	b = append(b, "\t<key>UDID</key>\n\t<string>"+udid+"</string>\n"...)
+	b = append(b, "\t<key>UserID</key>\n\t<string>11111111-2222-3333-4444-555555555555</string>\n"...)
+	b = append(b, "\t<key>UserLongName</key>\n\t<string>Test User</string>\n"...)
+	b = append(b, "\t<key>UserShortName</key>\n\t<string>testuser</string>\n"...)
+	b = append(b, "\t<key>VERSION</key>\n\t<string>"+version+"</string>\n"...)
+	b = append(b, "</dict>\n</plist>\n"...)
+	return b
 }

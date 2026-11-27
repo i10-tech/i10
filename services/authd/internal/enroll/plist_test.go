@@ -49,6 +49,34 @@ func TestParseAttributesPlistValid(t *testing.T) {
 	}
 }
 
+func TestParseAttributesPlistMacBooleans(t *testing.T) {
+	token := strings.Repeat("B", 43)
+	for _, notOnConsole := range []bool{false, true} {
+		raw := makeMacAttributesPlist(token, "11111111-2222-3333-4444-555555555555",
+			"C02MAC999999", "Mac15,6", "26C5047e", "Alice's MacBook Pro", "MacBook Pro", notOnConsole)
+		attrs, err := ParseAttributesPlist(raw)
+		if err != nil {
+			t.Fatalf("ParseAttributesPlist(notOnConsole=%v): %v", notOnConsole, err)
+		}
+		if attrs["CHALLENGE"] != token || attrs["DEVICE_NAME"] != "Alice's MacBook Pro" ||
+			attrs["MODEL"] != "MacBook Pro" || attrs["PRODUCT"] != "Mac15,6" ||
+			attrs["SERIAL"] != "C02MAC999999" || attrs["VERSION"] != "26C5047e" ||
+			attrs["UserShortName"] != "testuser" {
+			t.Fatalf("unexpected Mac attrs: %#v", attrs)
+		}
+		if _, ok := attrs["NotOnConsole"]; ok {
+			t.Fatalf("boolean NotOnConsole should be ignored, got %q", attrs["NotOnConsole"])
+		}
+	}
+
+	// Explicit empty start+end boolean form (<true></true>, <false></false>) is valid XML.
+	raw := `<plist version="1.0"><dict><key>A</key><true></true><key>B</key><false></false><key>UDID</key><string>U1</string></dict></plist>`
+	attrs, err := ParseAttributesPlist([]byte(raw))
+	if err != nil || attrs["UDID"] != "U1" || len(attrs) != 1 {
+		t.Fatalf("explicit empty booleans: (%#v, %v)", attrs, err)
+	}
+}
+
 func TestParseAttributesPlistChallengeData(t *testing.T) {
 	token := "abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE"
 	b64 := base64.StdEncoding.EncodeToString([]byte(token))
@@ -81,6 +109,13 @@ func TestParseAttributesPlistHostileInputs(t *testing.T) {
 	}
 	tooManyKeys.WriteString(`</dict></plist>`)
 
+	var tooManyBoolKeys strings.Builder
+	tooManyBoolKeys.WriteString(`<plist version="1.0"><dict>`)
+	for i := 0; i <= maxPlistKeys; i++ {
+		fmt.Fprintf(&tooManyBoolKeys, `<key>B%d</key><false/>`, i)
+	}
+	tooManyBoolKeys.WriteString(`</dict></plist>`)
+
 	cases := []struct {
 		name string
 		raw  string
@@ -100,8 +135,13 @@ func TestParseAttributesPlistHostileInputs(t *testing.T) {
 		{"nested element inside key", `<plist version="1.0"><dict><key>U<b>D</b></key><string>a</string></dict></plist>`},
 		{"integer value", `<plist version="1.0"><dict><key>VERSION</key><integer>1</integer></dict></plist>`},
 		{"real value", `<plist version="1.0"><dict><key>VERSION</key><real>1.5</real></dict></plist>`},
-		{"boolean true value", `<plist version="1.0"><dict><key>VERSION</key><true/></dict></plist>`},
-		{"boolean false value", `<plist version="1.0"><dict><key>VERSION</key><false/></dict></plist>`},
+		{"non-empty boolean true", `<plist version="1.0"><dict><key>NotOnConsole</key><true>1</true></dict></plist>`},
+		{"whitespace in boolean false", `<plist version="1.0"><dict><key>NotOnConsole</key><false> </false></dict></plist>`},
+		{"nested element in boolean true", `<plist version="1.0"><dict><key>NotOnConsole</key><true><x/></true></dict></plist>`},
+		{"attribute on boolean false", `<plist version="1.0"><dict><key>NotOnConsole</key><false id="1"/></dict></plist>`},
+		{"duplicate boolean key", `<plist version="1.0"><dict><key>NotOnConsole</key><false/><key>NotOnConsole</key><true/></dict></plist>`},
+		{"duplicate string and boolean key", `<plist version="1.0"><dict><key>UDID</key><string>U1</string><key>UDID</key><false/></dict></plist>`},
+		{"too many boolean keys", tooManyBoolKeys.String()},
 		{"date value", `<plist version="1.0"><dict><key>VERSION</key><date>2026-01-01T00:00:00Z</date></dict></plist>`},
 		{"data value for non-CHALLENGE key", `<plist version="1.0"><dict><key>SERIAL</key><data>` + validB64 + `</data></dict></plist>`},
 		{"invalid base64 in CHALLENGE data", `<plist version="1.0"><dict><key>CHALLENGE</key><data>!!!not-base64!!!</data></dict></plist>`},

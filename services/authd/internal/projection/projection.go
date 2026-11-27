@@ -144,6 +144,16 @@ type Device struct {
 	// CertKey is `cert_key_sha256`: SHA-256 of the SubjectPublicKeyInfo of the
 	// certificate key bound to a Mac (#383 PR 3), nil when none is bound.
 	CertKey []byte
+	// MacInstallGrace is true while a newly enrolled Mac's device code is
+	// inside its initial install grace window (MacInstallGraceSQL): platform is
+	// macos, cert_key_sha256 is set, the UUIDv7 id's timestamp is within
+	// [now() - 10 minutes, now() + 1 minute], and no certificate session has
+	// ever been recorded in authd.mail_device_cert_binds. Computed by Postgres.
+	MacInstallGrace bool
+	// MacInstallGraceLeft is the time remaining in the Mac install grace window
+	// by the database's clock, clamped to [0, MacInstallGraceDuration] (0 when
+	// MacInstallGrace is false or not queried).
+	MacInstallGraceLeft time.Duration
 }
 
 // DeviceCredential is a device row as authd's bind reads it: the row, the keyed
