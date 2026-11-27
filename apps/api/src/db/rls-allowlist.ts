@@ -48,6 +48,8 @@ export const NON_RLS_ALLOWLIST: Readonly<Record<string, string>> = {
     "Cross-tenant SSO-required domain mirror read by authd and mailfront.",
   "authd.required_exempt":
     "Cross-tenant SSO-requirement exemption mirror read by authd and mailfront.",
+  "authd.user_emails":
+    "Cross-tenant Clerk sign-in email projection written by webhooks; joined with tenant-scoped core.workspace_roles in core.auto_forward_allowed.",
   "authd.webhook_events":
     "Clerk webhook delivery deduplication table; keyed by global svix_id.",
 

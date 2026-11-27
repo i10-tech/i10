@@ -18,15 +18,24 @@ import { notFound, notWired } from "./http.js"
 
 const NOT_FOUND = notFound("No such mailbox in this workspace.")
 
+/** Owners and admins (`members:manage`); undefined when neither role source is wired. */
+export async function isWorkspaceAdmin(
+  d: Pick<ConsoleDeps, "roles" | "teamDomains">,
+  tenantId: string,
+  userId: string,
+): Promise<boolean | undefined> {
+  return d.roles
+    ? can(d.roles.store, tenantId, userId, "members:manage")
+    : d.teamDomains
+      ? d.teamDomains.can(tenantId, userId, "members:manage")
+      : undefined
+}
+
 export function mountMailboxes(app: Hono, d: ConsoleDeps): void {
   const viewerOf = async (c: Context) => {
     const { tenantId } = c.get("auth")
     const { userId, orgId } = c.get("user")
-    const isAdmin = d.roles
-      ? await can(d.roles.store, tenantId, userId, "members:manage")
-      : d.teamDomains
-        ? await d.teamDomains.can(tenantId, userId, "members:manage")
-        : undefined
+    const isAdmin = await isWorkspaceAdmin(d, tenantId, userId)
     return { tenantId, userId, orgId, isAdmin }
   }
 

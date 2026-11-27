@@ -1,5 +1,6 @@
 import { defineShape } from "@/lib/shapes"
 import type {
+  AutoForwardingSettings,
   IpAllowlist,
   OwnerExemption,
   SessionPolicy,
@@ -15,6 +16,7 @@ export interface SecurityData {
   siem?: SiemSettingsAnswer
   exemption?: OwnerExemption
   allowlist?: IpAllowlist
+  autoForwarding?: AutoForwardingSettings
   error?: string
 }
 

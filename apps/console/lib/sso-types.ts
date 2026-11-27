@@ -471,6 +471,14 @@ export interface SavedIpAllowlist {
   graceUntil: string | null
 }
 
+/** Per-workspace automatic forwarding policy (#526). */
+export type AutoForwardingMode =
+  "workspace" | "workspace_and_members" | "anywhere" | "off"
+
+export interface AutoForwardingSettings {
+  mode: AutoForwardingMode
+}
+
 // ── The identity audit log ──────────────────────────────────────────────────
 
 export interface IdentityEvent {

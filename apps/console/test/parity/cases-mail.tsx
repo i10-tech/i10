@@ -12,6 +12,7 @@ const { TeamInboxDetailView } = await import("@/components/team-inbox-detail")
 const { teamInboxDetailShape } = await import("@/lib/shapes/team-inbox-detail")
 
 import type { MailboxAliasList } from "@/lib/mailbox-aliases"
+import type { DevicesRead, MailDevice } from "@/lib/mail-devices"
 import type { MailboxJob, TransferSnapshot } from "@/lib/mailbox-transfer"
 import type { ConsoleMailbox, StoragePool } from "@/lib/mailbox-view"
 import type { MailboxDetailData } from "@/lib/shapes/mailbox-detail"
@@ -108,6 +109,26 @@ const aliasList = (tag: string, n: number): MailboxAliasList => ({
   })),
 })
 
+const device = (tag: string, i: number): MailDevice => ({
+  object: "mail_device",
+  id: `${tag}dev${i}`,
+  email: "a@acme.test",
+  platform: i % 3 === 0 ? "ios" : i % 3 === 1 ? "macos" : "ipados",
+  device_name: i % 2 === 0 ? `${tag}Phone ${i}` : null,
+  model: i % 2 === 0 ? null : "MacBook Air",
+  serial: i % 2 === 0 ? null : `${tag}C02X${i}`,
+  created_at: iso(3 + i),
+  first_used_at: i === 0 ? null : iso(2),
+  last_used_at: i === 0 ? null : iso(1),
+  created_by: "user_a",
+  has_certificate_key: i % 3 === 1,
+})
+
+const devices = (tag: string, n: number): DevicesRead => ({
+  state: "ok",
+  list: { data: rows(n, (i) => device(tag, i)), next_cursor: null },
+})
+
 const job = (
   type: "export" | "import",
   status: MailboxJob["status"],
@@ -141,6 +162,7 @@ function detail(over: (tag: string) => Partial<MailboxDetailData> = () => ({})) 
     aliases: aliasList(tag, 2),
     domains: ["acme.test"],
     transfer: ok(),
+    devices: devices(tag, 2),
     isAdmin: true,
     renderedAt: iso(0),
     ...over(tag),
@@ -218,6 +240,22 @@ export const MAIL_VIEWS = [
     shape: mailboxDetailShape,
     cases: [
       { name: "admin, active", fixture: detail() },
+      {
+        name: "member, own mailbox, three devices",
+        fixture: detail((tag) => ({ isAdmin: false, devices: devices(tag, 3) })),
+      },
+      {
+        name: "no devices yet",
+        fixture: detail((tag) => ({ devices: devices(tag, 0) })),
+      },
+      {
+        name: "devices could not be read",
+        fixture: detail(() => ({ devices: { state: "error" } })),
+      },
+      {
+        name: "devices not this viewer's (hidden)",
+        fixture: detail(() => ({ devices: { state: "hidden" } })),
+      },
       {
         name: "admin, suspended (resume and a note)",
         fixture: detail((tag) => ({

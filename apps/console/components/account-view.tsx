@@ -10,6 +10,7 @@ import {
 } from "@repo/ui/components/i10/page"
 import { BoneScope } from "@repo/ui/components/bone/bone"
 import { AccountPanel } from "@/components/account/account-panel"
+import { MailDevices } from "@/components/mail-devices"
 import { RememberShape, useRememberedShape } from "@/components/list/remembered-shapes"
 import { accountShape, type AccountData, type AccountShape } from "@/lib/shapes/account"
 
@@ -60,6 +61,13 @@ export function AccountView({
             </SectionContent>
           )}
         </Section>
+        {!noClerk && (
+          <MailDevices
+            on="account"
+            shape={shape}
+            data={data && { read: data.devices }}
+          />
+        )}
       </div>
       {data && <RememberShape def={accountShape} shape={shape} />}
     </BoneScope>

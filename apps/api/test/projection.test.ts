@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import { projectUser, type ClerkUser } from "../src/projection/clerk-user.js"
+import {
+  projectUser,
+  verifiedEmailsOf,
+  type ClerkUser,
+} from "../src/projection/clerk-user.js"
 
 const HOSTED = ["i10.tech", "mail.i10.tech"]
 
@@ -208,5 +212,31 @@ describe("projectUser", () => {
       "@i10.tech",
     ])
     expect(m?.email).toBe("a@i10.tech")
+  })
+})
+
+describe("verifiedEmailsOf", () => {
+  it("keeps verified external and hosted addresses, normalised and deduplicated", () => {
+    const emails = verifiedEmailsOf(
+      user({
+        email_addresses: [
+          addr("1", "  Bob@Gmail.com "),
+          addr("2", "bob@gmail.com"),
+          addr("3", "alice@i10.tech"),
+          addr("4", "unverified@gmail.com", "unverified"),
+          addr("5", "not-an-email"),
+        ],
+      }),
+    )
+    expect(emails).toEqual(["alice@i10.tech", "bob@gmail.com"])
+  })
+
+  it("returns empty when a user has no verified addresses", () => {
+    expect(verifiedEmailsOf(user({ email_addresses: [] }))).toEqual([])
+    expect(
+      verifiedEmailsOf(
+        user({ email_addresses: [addr("1", "a@gmail.com", "unverified")] }),
+      ),
+    ).toEqual([])
   })
 })

@@ -13,7 +13,9 @@ import { mountMailboxStorage } from "./console/mailbox-storage.js"
 import { mountMailboxes } from "./console/mailboxes.js"
 import { mountMailDeviceEnrollments } from "./console/mail-device-enrollments.js"
 import { mountMailboxAdmin } from "./console/mailbox-admin.js"
+import { mountAutoForwarding } from "./console/auto-forwarding.js"
 import { mountMailboxAliases } from "./console/mailbox-aliases.js"
+import { mountMailDevices } from "./console/mail-devices.js"
 import { mountAudience } from "./console/audience.js"
 import { mountCampaigns } from "./console/campaigns.js"
 import { mountTemplates } from "./console/templates.js"
@@ -81,14 +83,27 @@ const WITHOUT_WORKSPACE = new Set([
   "/workspaces/personal",
   // Deleting the account (#336): a person with no workspace can still leave.
   "/me/account",
+  // Pre-flight step-up check: reads no tenant data, and workspace-optional flows call it with no org open.
+  "/step-up",
   // Apple OTA mail device enrollment (#383 PR 4): acts on the person's own
   // mailbox (whose tenant_id may be null for an i10.tech mailbox).
   "/mail-devices/enrollments",
 ])
 
-function isWorkspaceOptional(path: string): boolean {
+const MAIL_DEVICE_ID_PATH = /^\/mail-devices\/[^/]+$/
+
+function isWorkspaceOptional(path: string, method: string): boolean {
   const sub = path.replace(/^\/console/, "")
-  return WITHOUT_WORKSPACE.has(sub) || sub.startsWith("/mail-devices/enrollments/")
+  if (WITHOUT_WORKSPACE.has(sub) || sub.startsWith("/mail-devices/enrollments/")) {
+    return true
+  }
+  // Own mail devices (#383 PR 5b): work with any workspace open or none.
+  // Workspace-admin scopes still require an active workspace inside the handler,
+  // and own-scope access runs the mailbox's workspace console policies.
+  if (method === "GET" && sub === "/mail-devices") return true
+  if (method === "POST" && sub === "/mail-devices/revoke-all") return true
+  if (method === "DELETE" && MAIL_DEVICE_ID_PATH.test(sub)) return true
+  return false
 }
 
 export function createConsole(deps?: ConsoleDeps) {
@@ -109,7 +124,7 @@ export function createConsole(deps?: ConsoleDeps) {
       sessions: d.sessions,
       tenants: d.tenants,
       ...(d.activeOrg ? { activeOrg: d.activeOrg } : {}),
-      workspaceOptional: isWorkspaceOptional(c.req.path),
+      workspaceOptional: isWorkspaceOptional(c.req.path, c.req.method),
     })
     // ⚠ SET FOR EVERY ROUTE, READ BY ALMOST NONE. `requireFreshAuth` is applied
     // per route rather than here: a step-up prompt in front of "list my
@@ -266,11 +281,13 @@ export function createConsole(deps?: ConsoleDeps) {
   mountTeamInboxes(app, d)
   mountMailboxStorage(app, d)
   mountMailboxAdmin(app, d)
+  mountAutoForwarding(app, d)
   mountMailboxAliases(app, d)
   mountMailboxes(app, d)
-  // ⚠ BEFORE any `/mail-devices/:id` route (PR 5 adds routes/console/mail-devices.ts),
+  // ⚠ BEFORE the `/mail-devices/:id` routes (routes/console/mail-devices.ts),
   // so `/mail-devices/enrollments` never matches `:id`.
   mountMailDeviceEnrollments(app, d)
+  mountMailDevices(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)

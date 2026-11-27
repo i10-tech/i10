@@ -46,8 +46,10 @@ import type { TeamInboxes } from "../../team-inboxes/service.js"
 import type { StorageAllocations } from "../../mailboxes/allocation.js"
 import type { ConsoleMailboxes } from "../../mailboxes/console.js"
 import type { MailboxAdmin } from "../../mailboxes/creation-mode.js"
+import type { AutoForwardingConsoleDeps } from "../../mailboxes/auto-forwarding.js"
 import type { MailboxAliases } from "../../mailboxes/aliases.js"
 import type { MailboxAdminLifecycle } from "../../mailboxes/lifecycle.js"
+import type { MailDeviceService } from "../../mail-devices/service.js"
 import type {
   CancelEnrollmentOutcome,
   CreateEnrollmentResult,
@@ -296,6 +298,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    */
   mailboxAdmin?: MailboxAdmin
   /**
+   * Per-workspace automatic forwarding policy (#526), for owners and admins.
+   * Optional; without it the routes answer 501.
+   */
+  autoForwarding?: AutoForwardingConsoleDeps
+  /**
    * Suspending, resuming, deleting and restoring a mailbox. Optional; without it
    * the routes answer 501.
    */
@@ -312,6 +319,11 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * without it the routes answer 501.
    */
   mailDeviceEnrollments?: MailDeviceEnrollmentsDeps
+  /**
+   * Listing and revoking mail devices (#383 PR 5): a person's own, and for an
+   * owner or admin the workspace's. Optional; without it the routes answer 501.
+   */
+  mailDevices?: MailDeviceService
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

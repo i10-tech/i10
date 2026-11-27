@@ -5,6 +5,7 @@ import { tryApi } from "@/lib/api"
 import { securityShape, type SecurityData } from "@/lib/shapes/security"
 import { ssoAbilities } from "@/lib/sso-server"
 import type {
+  AutoForwardingSettings,
   IpAllowlist,
   OwnerExemption,
   SessionPolicy,
@@ -35,13 +36,15 @@ export default async function SecuritySettingsPage() {
     )
   }
 
-  const [session, secondFactor, siem, exemption, allowlist] = await Promise.all([
-    tryApi<SessionPolicy>("/console/identity/session-policy"),
-    tryApi<{ required: boolean }>("/console/identity/second-factor-policy"),
-    tryApi<SiemSettingsAnswer>("/console/identity/siem"),
-    tryApi<OwnerExemption>("/console/identity/owner-exemption"),
-    tryApi<IpAllowlist>("/console/identity/ip-allowlist"),
-  ])
+  const [session, secondFactor, siem, exemption, allowlist, autoForwarding] =
+    await Promise.all([
+      tryApi<SessionPolicy>("/console/identity/session-policy"),
+      tryApi<{ required: boolean }>("/console/identity/second-factor-policy"),
+      tryApi<SiemSettingsAnswer>("/console/identity/siem"),
+      tryApi<OwnerExemption>("/console/identity/owner-exemption"),
+      tryApi<IpAllowlist>("/console/identity/ip-allowlist"),
+      tryApi<AutoForwardingSettings>("/console/workspace/auto-forwarding"),
+    ])
 
   if (!session.ok && session.error.statusCode === 501) {
     const unavailableData: SecurityData = {
@@ -61,6 +64,7 @@ export default async function SecuritySettingsPage() {
     siem: siem.ok ? siem.data : undefined,
     exemption: exemption.ok ? exemption.data : undefined,
     allowlist: allowlist.ok ? allowlist.data : undefined,
+    autoForwarding: autoForwarding.ok ? autoForwarding.data : undefined,
   }
 
   return <SecurityView shape={securityShape.of(data)} data={data} />

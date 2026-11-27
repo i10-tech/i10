@@ -11,8 +11,9 @@ import { MailDeviceError, mintCode, type MailDeviceCodeKeys } from "./code.js"
  *
  * Every API read or write of `authd.mail_devices` goes through this module.
  * `authd` has no row-level security (authd and the mail front read across
- * workspaces), so the tenant filter in `mint`, `list`, `revoke` and `endFor`
- * IS the tenant boundary.
+ * workspaces), so the tenant filter in `mint` and `endFor`, and the
+ * `DeviceScope` of `listDevices`, `revoke` and `revokeAllFor`, IS the tenant
+ * boundary.
  *
  * Lock order across every revocation, mint and key write:
  *   1. `authd.accounts` first
@@ -24,7 +25,13 @@ import { MailDeviceError, mintCode, type MailDeviceCodeKeys } from "./code.js"
  * and `expectedEpoch` before inserting; every revocation writes `authd.accounts`
  * in the same transaction before calling `endFor`. So a mint either commits
  * first (and its device is deleted by the revocation) or waits on the account
- * lock and sees the hold or moved epoch and refuses.
+ * lock and sees the hold or moved epoch and refuses. `revokeAllFor` raises
+ * `credential_epoch` (`raiseCredentialEpoch`) in the same transaction before
+ * its DELETE: that takes the account row lock first and moves the epoch so
+ * in-flight mints and live enrollments carrying the old epoch are refused (and
+ * authd re-checks cached mail passwords). A single `revoke` takes no account
+ * lock or write: device binds look the row up every time, and it names one
+ * existing row so no mint can race it.
  */
 
 export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
@@ -34,7 +41,10 @@ export type MailDevicePlatform = (typeof MAIL_DEVICE_PLATFORMS)[number]
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** Public columns of one device row. Never carries `codeHash` or `codeKid`. */
+/**
+ * Public columns of one device row. Never carries `codeHash`, `codeKid` or the
+ * certificate key's hash: only whether a key is bound.
+ */
 export interface MailDeviceRow {
   id: string
   clerkUserId: string
@@ -48,6 +58,7 @@ export interface MailDeviceRow {
   createdAt: Date
   firstUsedAt: Date | null
   lastUsedAt: Date | null
+  hasCertKey: boolean
 }
 
 const deviceColumns = {
@@ -63,24 +74,27 @@ const deviceColumns = {
   createdAt: mailDevices.createdAt,
   firstUsedAt: mailDevices.firstUsedAt,
   lastUsedAt: mailDevices.lastUsedAt,
+  hasCertKey: sql<boolean>`(${mailDevices.certKeySha256} is not null)`.as(
+    "has_cert_key",
+  ),
 }
 
-const toRow = (row: {
-  id: string
-  clerkUserId: string
-  email: string
-  tenantId: string | null
-  platform: string
-  deviceName: string | null
-  model: string | null
-  serial: string | null
-  createdBy: string
-  createdAt: Date
-  firstUsedAt: Date | null
-  lastUsedAt: Date | null
-}): MailDeviceRow => ({
-  ...row,
+const toRow = (
+  row: Omit<MailDeviceRow, "platform"> & { platform: string },
+): MailDeviceRow => ({
+  id: row.id,
+  clerkUserId: row.clerkUserId,
+  email: row.email,
+  tenantId: row.tenantId,
   platform: row.platform as MailDevicePlatform,
+  deviceName: row.deviceName,
+  model: row.model,
+  serial: row.serial,
+  createdBy: row.createdBy,
+  createdAt: row.createdAt,
+  firstUsedAt: row.firstUsedAt,
+  lastUsedAt: row.lastUsedAt,
+  hasCertKey: row.hasCertKey,
 })
 
 const tenantMatches = (tenantId: string | null) =>
@@ -290,7 +304,8 @@ export async function mintInTx(
               created_by as "createdBy",
               created_at as "createdAt",
               first_used_at as "firstUsedAt",
-              last_used_at as "lastUsedAt"
+              last_used_at as "lastUsedAt",
+              cert_key_sha256 is not null as "hasCertKey"
   `)) as unknown as {
     id: string
     clerkUserId: string
@@ -304,6 +319,7 @@ export async function mintInTx(
     createdAt: Date | string
     firstUsedAt: Date | string | null
     lastUsedAt: Date | string | null
+    hasCertKey: boolean
   }[]
 
   const row = inserted!
@@ -396,34 +412,190 @@ export async function lockGateAccount<Row extends MintGateAccount = MintGateAcco
     `)) as unknown as Row[]
 }
 
-/** Lists mail devices for one workspace, optionally narrowed to one person. */
-export async function list(
-  db: Pick<Database, "select">,
-  input: { tenantId: string | null; clerkUserId?: string },
-): Promise<MailDeviceRow[]> {
-  const where = input.clerkUserId
-    ? and(tenantMatches(input.tenantId), eq(mailDevices.clerkUserId, input.clerkUserId))
-    : tenantMatches(input.tenantId)
-  const rows = await db
-    .select(deviceColumns)
-    .from(mailDevices)
-    .where(where)
-    .orderBy(desc(mailDevices.createdAt), desc(mailDevices.id))
-    .limit(500)
-  return rows.map(toRow)
+/**
+ * Whose devices a read or a revoke reaches. Every caller says which, so a
+ * revoke can never forget to name the person or the workspace.
+ *
+ *   - `own`: one person's devices in their account's workspace now, which is
+ *     null for i10's own domain. What a person sees and revokes as themselves.
+ *   - `workspace`: any device of one workspace (`tenant_id` equal to it, never
+ *     null), optionally one person's. Only for the workspace's owners and admins.
+ */
+export type DeviceScope =
+  | { kind: "own"; clerkUserId: string }
+  | { kind: "workspace"; tenantId: string; clerkUserId?: string }
+
+function scopeWhere(scope: DeviceScope): SQL {
+  if (scope.kind === "own") {
+    // ⚠ THE ACCOUNT'S WORKSPACE NOW, NOT THE CONSOLE'S: a person's own devices
+    // follow their mailbox, wherever it lives. No account means no devices (FK).
+    return and(
+      eq(mailDevices.clerkUserId, scope.clerkUserId),
+      sql`${mailDevices.tenantId} is not distinct from (
+        select a.tenant_id from authd.accounts a where a.clerk_user_id = ${scope.clerkUserId}
+      )`,
+    )!
+  }
+  return and(
+    eq(mailDevices.tenantId, scope.tenantId),
+    scope.clerkUserId === undefined
+      ? undefined
+      : eq(mailDevices.clerkUserId, scope.clerkUserId),
+  )!
 }
 
-/** Revokes (deletes) one device within one workspace. Returns true when a row was deleted. */
+export const DEVICE_PAGE_MAX = 100
+
+export interface DeviceCursor {
+  /** `created_at` to the microsecond, as Postgres printed it: a `Date` would lose rows. */
+  createdAt: string
+  id: string
+}
+
+const CURSOR_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/
+
+export function encodeDeviceCursor(cursor: DeviceCursor): string {
+  return Buffer.from(`${cursor.createdAt}|${cursor.id}`, "utf8").toString("base64url")
+}
+
+/** Null for anything this module did not write. */
+export function decodeDeviceCursor(raw: string): DeviceCursor | null {
+  const [createdAt, id, extra] = Buffer.from(raw, "base64url")
+    .toString("utf8")
+    .split("|")
+  if (extra !== undefined || !createdAt || !id) return null
+  if (!CURSOR_AT.test(createdAt)) return null
+  // A date that rolls over (Feb 30) or year 0 parses here but Postgres refuses it.
+  const at = new Date(createdAt)
+  if (Number.isNaN(at.getTime()) || at.getUTCFullYear() < 1) return null
+  if (at.toISOString().slice(0, 19) !== createdAt.slice(0, 19)) return null
+  return UUID.test(id) ? { createdAt, id } : null
+}
+
+export interface DevicePage {
+  devices: MailDeviceRow[]
+  nextCursor: string | null
+}
+
+/**
+ * One page of devices in `scope`, newest first (`created_at desc, id desc`,
+ * keyset on both). `email` narrows to one mailbox address.
+ */
+export async function listDevices(
+  db: Pick<Database, "select">,
+  input: {
+    scope: DeviceScope
+    email?: string
+    cursor?: DeviceCursor | null
+    limit: number
+  },
+): Promise<DevicePage> {
+  const limit = Math.min(Math.max(Math.trunc(input.limit), 1), DEVICE_PAGE_MAX)
+  const rows = await db
+    .select({
+      ...deviceColumns,
+      cursorAt: sql<string>`to_char(${mailDevices.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
+    .from(mailDevices)
+    .where(
+      and(
+        scopeWhere(input.scope),
+        input.email === undefined
+          ? undefined
+          : eq(mailDevices.email, input.email.toLowerCase()),
+        input.cursor
+          ? sql`(${mailDevices.createdAt}, ${mailDevices.id}) < (${input.cursor.createdAt}::timestamptz, ${input.cursor.id}::uuid)`
+          : undefined,
+      ),
+    )
+    .orderBy(desc(mailDevices.createdAt), desc(mailDevices.id))
+    .limit(limit + 1)
+  const page = rows.slice(0, limit)
+  const last = page.at(-1)
+  return {
+    devices: page.map(toRow),
+    nextCursor:
+      rows.length > limit && last
+        ? encodeDeviceCursor({ createdAt: last.cursorAt, id: last.id })
+        : null,
+  }
+}
+
+/** What a revoke deleted, for its audit entry. */
+export interface RevokedDevice {
+  id: string
+  email: string
+  clerkUserId: string
+  /** The device's workspace, null for i10's own domain. */
+  tenantId: string | null
+}
+
+const revokedColumns = {
+  id: mailDevices.id,
+  email: mailDevices.email,
+  clerkUserId: mailDevices.clerkUserId,
+  tenantId: mailDevices.tenantId,
+}
+
+/**
+ * Revokes (deletes) one device in `scope`, or returns null when there is none
+ * there.
+ *
+ * The DELETE is the whole revocation: the access-change trigger names the
+ * person and the mail front closes the device's sessions within about a
+ * second. It never raises `credential_epoch`, which would sign out every other
+ * device and password session too. Its certificate permits and liveness rows
+ * go with it by cascade (device row first, then those: the store's lock order).
+ */
 export async function revoke(
   db: Pick<Database, "delete">,
-  input: { tenantId: string | null; deviceId: string },
-): Promise<boolean> {
-  if (!UUID.test(input.deviceId)) return false
-  const gone = await db
+  input: { deviceId: string; scope: DeviceScope },
+): Promise<RevokedDevice | null> {
+  if (!UUID.test(input.deviceId)) return null
+  const [gone] = await db
     .delete(mailDevices)
-    .where(and(eq(mailDevices.id, input.deviceId), tenantMatches(input.tenantId)))
-    .returning({ id: mailDevices.id })
-  return gone.length > 0
+    .where(and(eq(mailDevices.id, input.deviceId), scopeWhere(input.scope)))
+    .returning(revokedColumns)
+  return gone ?? null
+}
+
+/**
+ * "Sign out all my mail devices": raises `credential_epoch` and deletes every
+ * device of one person in `scope` in ONE transaction. Clerk sends no
+ * password-change event, so this is how a person ends them all at once.
+ *
+ * ⚠ RAISE `credential_epoch` FIRST (the lock order above). Updating the
+ * account row takes its row lock before the DELETE and moves the epoch, so any
+ * in-flight `mint` or live enrollment carrying the old epoch either commits
+ * first (and is deleted here) or waits and is refused on `epoch_mismatch`.
+ * Raising the epoch also makes authd re-check that person's cached mail
+ * passwords, which suits signing out all devices.
+ */
+export async function revokeAllFor(
+  db: Pick<Database, "transaction">,
+  scope: DeviceScope & { clerkUserId: string },
+): Promise<RevokedDevice[]> {
+  return db.transaction(async (tx) => {
+    await raiseCredentialEpoch(tx, scope.clerkUserId)
+    return tx.delete(mailDevices).where(scopeWhere(scope)).returning(revokedColumns)
+  })
+}
+
+/**
+ * ⚠ OPERATOR ONLY (scripts/mail-device.ts), NEVER FROM A ROUTE: deletes one
+ * device by id with no tenant or person filter, so it also reaches a row left
+ * behind in a workspace its account has since left.
+ */
+export async function revokeForOperator(
+  db: Pick<Database, "delete">,
+  deviceId: string,
+): Promise<RevokedDevice | null> {
+  if (!UUID.test(deviceId)) return null
+  const [gone] = await db
+    .delete(mailDevices)
+    .where(eq(mailDevices.id, deviceId))
+    .returning(revokedColumns)
+  return gone ?? null
 }
 
 const END_FOR_BATCH = 1000
@@ -821,7 +993,8 @@ async function lockOwnedDevice(tx: Pick<Database, "execute">, deviceId: string) 
 }
 
 /**
- * Looks up an account by its primary email address (for the operator script).
+ * Looks up an account by its primary email address: the operator script's, and
+ * which person a mailbox address belongs to for the device routes.
  */
 export async function accountByEmail(
   db: Pick<Database, "select">,
@@ -845,23 +1018,4 @@ export async function accountByEmail(
     .where(eq(accounts.email, email.trim().toLowerCase()))
     .limit(1)
   return row ?? null
-}
-
-/**
- * Reads a device row's `tenant_id` for the operator script's `revoke --id`.
- * Never exposed to HTTP routes: API routes always know their caller's tenant.
- */
-export async function deviceTenantForOperator(
-  db: Pick<Database, "select">,
-  deviceId: string,
-): Promise<{ exists: boolean; tenantId: string | null }> {
-  if (!UUID.test(deviceId)) return { exists: false, tenantId: null }
-  const [row] = await db
-    .select({ tenantId: mailDevices.tenantId })
-    .from(mailDevices)
-    .where(eq(mailDevices.id, deviceId))
-    .limit(1)
-  return row
-    ? { exists: true, tenantId: row.tenantId }
-    : { exists: false, tenantId: null }
 }

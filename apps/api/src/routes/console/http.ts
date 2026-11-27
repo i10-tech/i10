@@ -24,6 +24,12 @@ export const validation = (message: string) => ({
   message,
 })
 
+export const forbidden = (message: string) => ({
+  statusCode: 403 as const,
+  name: "forbidden" as const,
+  message,
+})
+
 export const notFound = (message = "Not found.") => ({
   statusCode: 404 as const,
   name: "not_found" as const,

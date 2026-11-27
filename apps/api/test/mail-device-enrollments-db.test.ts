@@ -369,7 +369,7 @@ suite("mail device enrollments against Postgres", () => {
     })
 
     it("device revoke sets device_id = null while keeping sealed; account delete cascades enrollments & permits", async () => {
-      const { person, tenantId } = await createTenantAndPerson()
+      const { person } = await createTenantAndPerson()
       const flow = await reachPhase4({ person })
       const finished = await finishEnrollment(
         db,
@@ -381,7 +381,9 @@ suite("mail device enrollments against Postgres", () => {
       if (finished.outcome !== "sealed") return
 
       const deviceId = finished.notice!.deviceId
-      expect(await revoke(db, { tenantId, deviceId })).toBe(true)
+      expect(
+        await revoke(db, { deviceId, scope: { kind: "own", clerkUserId: person } }),
+      ).not.toBeNull()
 
       const view = await getEnrollment(db, {
         id: flow.enrollmentId,

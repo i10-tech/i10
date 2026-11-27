@@ -4,6 +4,7 @@ import { MailboxDetailView } from "@/components/mailbox-detail"
 import { tryApi } from "@/lib/api"
 import type { MailboxAliasList } from "@/lib/mailbox-aliases"
 import { transferSnapshot, type MailboxJob } from "@/lib/mailbox-transfer"
+import { devicesReadOf, type MailDeviceList } from "@/lib/mail-devices"
 import type { ConsoleMailbox, StoragePool } from "@/lib/mailbox-view"
 import { mailboxDetailShape, type MailboxDetailData } from "@/lib/shapes/mailbox-detail"
 import type { DomainSummary, Me } from "@/lib/types"
@@ -66,28 +67,32 @@ export default async function MailboxPage({
   const { address: segment } = await params
   const address = addressFrom(segment)
 
-  const [result, me, list, aliases, domains, exported, imported] = await Promise.all([
-    tryApi<ConsoleMailbox>(`/console/mailboxes/${encodeURIComponent(address)}`),
-    tryApi<Me>("/console/me"),
-    // Asked of everyone because the role is not known yet; a member's answer is
-    // their own mailbox alone, and is not used.
-    tryApi<{ data: ConsoleMailbox[]; pool: StoragePool }>("/console/mailboxes", {
-      query: { limit: 200 },
-    }),
-    // ⚠ THE API ANSWERS A MEMBER FOR THEIR OWN MAILBOX ONLY, so this is safe to ask
-    // of everyone. A failure hides the list, not the page: the section says so.
-    tryApi<MailboxAliasList>(
-      `/console/mailboxes/${encodeURIComponent(address)}/aliases`,
-    ),
-    // Asked of everyone for the same reason as the list above; only an admin's is used.
-    tryApi<{ data: DomainSummary[] }>("/console/domains"),
-    // ⚠ THE LATEST EXPORT AND IMPORT, so a run in progress, a finished export's
-    // download and an import started before the person left are all there when
-    // the page opens. The API answers the mailbox's owner, the workspace's owner
-    // and admins; for anyone else the section hides (see `transferSnapshot`).
-    tryApi<MailboxJob>(`/mailboxes/${encodeURIComponent(address)}/export`),
-    tryApi<MailboxJob>(`/mailboxes/${encodeURIComponent(address)}/import`),
-  ])
+  const [result, me, list, aliases, domains, exported, imported, devices] =
+    await Promise.all([
+      tryApi<ConsoleMailbox>(`/console/mailboxes/${encodeURIComponent(address)}`),
+      tryApi<Me>("/console/me"),
+      // Asked of everyone because the role is not known yet; a member's answer is
+      // their own mailbox alone, and is not used.
+      tryApi<{ data: ConsoleMailbox[]; pool: StoragePool }>("/console/mailboxes", {
+        query: { limit: 200 },
+      }),
+      // ⚠ THE API ANSWERS A MEMBER FOR THEIR OWN MAILBOX ONLY, so this is safe to ask
+      // of everyone. A failure hides the list, not the page: the section says so.
+      tryApi<MailboxAliasList>(
+        `/console/mailboxes/${encodeURIComponent(address)}/aliases`,
+      ),
+      // Asked of everyone for the same reason as the list above; only an admin's is used.
+      tryApi<{ data: DomainSummary[] }>("/console/domains"),
+      // ⚠ THE LATEST EXPORT AND IMPORT, so a run in progress, a finished export's
+      // download and an import started before the person left are all there when
+      // the page opens. The API answers the mailbox's owner, the workspace's owner
+      // and admins; for anyone else the section hides (see `transferSnapshot`).
+      tryApi<MailboxJob>(`/mailboxes/${encodeURIComponent(address)}/export`),
+      tryApi<MailboxJob>(`/mailboxes/${encodeURIComponent(address)}/import`),
+      // ⚠ THE API ANSWERS THE MAILBOX'S OWNER AND THE WORKSPACE'S ADMINS; anyone
+      // else gets a 404, which hides the section. A failure hides only the list.
+      tryApi<MailDeviceList>("/console/mail-devices", { query: { address } }),
+    ])
 
   if (!result.ok) {
     if (result.error.statusCode === 404) notFound()
@@ -108,6 +113,7 @@ export default async function MailboxPage({
     aliases: aliases.ok ? aliases.data : null,
     domains: isAdmin && domains.ok ? hostedDomains(domains.data.data) : NO_DOMAINS,
     transfer: transferSnapshot(exported, imported),
+    devices: devicesReadOf(devices),
     isAdmin,
     renderedAt: new Date().toISOString(),
   }

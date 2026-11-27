@@ -1,9 +1,14 @@
 import { and, eq, inArray, isNull, not, or, sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
-import { accounts, aliases, webhookEvents } from "../db/schema.js"
+import { accounts, aliases, userEmails, webhookEvents } from "../db/schema.js"
 import { mailboxIdCache } from "../mail/jmap-as.js"
 import { reconcileAccountDevices } from "../mail-devices/store.js"
-import { projectUser, type ClerkUser } from "./clerk-user.js"
+import {
+  clerkUpdatedAtOf,
+  projectUser,
+  verifiedEmailsOf,
+  type ClerkUser,
+} from "./clerk-user.js"
 
 /**
  * Every domain that may host mailboxes right now, and who owns it.
@@ -81,7 +86,14 @@ export async function applyClerkEvent(
 
       case "user.deleted": {
         const { id } = (data ?? {}) as { id?: string }
-        if (id) await removeAccount(tx, id)
+        if (id) {
+          // ⚠ SERIALIZE PER USER (same lock order as `applyUser`: advisory lock
+          // first, then `accounts` and `user_emails`) so a concurrent webhook
+          // or backfill cannot interleave and write removed addresses back.
+          await lockUserEmails(tx, id)
+          await removeAccount(tx, id)
+          await tx.delete(userEmails).where(eq(userEmails.clerkUserId, id))
+        }
         return { outcome: "removed" }
       }
 
@@ -116,6 +128,15 @@ export async function projectClerkUser(
   return db.transaction(async (tx) => applyUser(tx, user, hostedDomains))
 }
 
+/**
+ * Projects one Clerk user's verified sign-in emails and nothing else, for the
+ * one-off backfill (scripts/user-emails.ts). Same guard as the webhook, so a
+ * newer webhook already applied is never rolled back.
+ */
+export async function projectUserEmails(db: Database, user: ClerkUser): Promise<void> {
+  await db.transaction(async (tx) => syncUserEmails(tx, user))
+}
+
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 /**
@@ -135,6 +156,69 @@ async function removeAccount(tx: Tx, clerkUserId: string): Promise<void> {
   for (const { email } of gone) mailboxIdCache.forget(email)
 }
 
+async function lockUserEmails(tx: Tx, clerkUserId: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`authd_user_emails:${clerkUserId}`}, 0))`,
+  )
+}
+
+/**
+ * Brings one user's verified sign-in emails in line with Clerk, regardless of
+ * whether any of them is on a hosted domain (#526).
+ *
+ * ⚠ SERIALIZE PER USER BEFORE THE STALE CHECK. Under READ COMMITTED, two
+ * concurrent deliveries (or `scripts/user-emails.ts` racing a webhook) would
+ * otherwise read the same `max(clerk_updated_at)` and interleave their DELETE
+ * and INSERT, letting an older event wipe newer addresses and write back
+ * removed ones. `_xact_` because PgBouncer pools by transaction.
+ */
+async function syncUserEmails(tx: Tx, user: ClerkUser): Promise<void> {
+  await lockUserEmails(tx, user.id)
+  const incomingAt = clerkUpdatedAtOf(user.updated_at)
+  if (incomingAt) {
+    const [latest] = await tx
+      .select({ at: sql<Date | null>`max(${userEmails.clerkUpdatedAt})` })
+      .from(userEmails)
+      .where(eq(userEmails.clerkUserId, user.id))
+    if (latest?.at && incomingAt < new Date(latest.at)) return
+  }
+
+  const verified = verifiedEmailsOf(user)
+  // ⚠ DELETING THE LAST ROW ALSO DELETES THE ORDERING GUARD. An older event
+  // delivered after this one would then write its addresses back. Accepted:
+  // it needs a user left with no verified email at all and a webhook
+  // delivered out of order, and the next event corrects it.
+  if (verified.length === 0) {
+    await tx.delete(userEmails).where(eq(userEmails.clerkUserId, user.id))
+    return
+  }
+
+  await tx
+    .delete(userEmails)
+    .where(
+      and(
+        eq(userEmails.clerkUserId, user.id),
+        not(inArray(userEmails.email, verified)),
+      ),
+    )
+  await tx
+    .insert(userEmails)
+    .values(
+      verified.map((email) => ({
+        clerkUserId: user.id,
+        email,
+        clerkUpdatedAt: incomingAt,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [userEmails.clerkUserId, userEmails.email],
+      set: {
+        clerkUpdatedAt: sql`coalesce(excluded.clerk_updated_at, ${userEmails.clerkUpdatedAt})`,
+        updatedAt: sql`now()`,
+      },
+    })
+}
+
 /**
  * Brings one user's rows in line with Clerk.
  *
@@ -149,6 +233,11 @@ async function applyUser(
   user: ClerkUser,
   hostedDomains: readonly string[],
 ): Promise<ApplyResult> {
+  // ⚠ PROJECT SIGN-IN EMAILS EVEN WHEN THE USER HAS NO HOSTED MAILBOX. A member
+  // who signed up with Gmail and manages the workspace without a hosted inbox
+  // is still a valid `workspace_and_members` forwarding target.
+  await syncUserEmails(tx, user)
+
   // ⚠ TWO SOURCES OF HOSTED DOMAINS, AND THEY MEAN DIFFERENT THINGS.
   // `MAIL_DOMAINS` is the env list - domains i10 hosts mail for regardless of
   // ownership. The table is every domain a TENANT owns, verified. A domain in

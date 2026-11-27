@@ -1211,7 +1211,7 @@ describe("console routes /console/mail-devices/enrollments[/:id]", () => {
       }),
     )
     expect(noMailbox.status).toBe(409)
-    expect(await noMailbox.json()).toEqual({ error: { code: "no_mailbox" } })
+    expect(await noMailbox.json()).toMatchObject({ name: "no_mailbox" })
   })
 
   it("maps 409, 503, 404, 409 already_sealed, and 501 when unwired", async () => {
@@ -1228,14 +1228,14 @@ describe("console routes /console/mail-devices/enrollments[/:id]", () => {
       body: "{}",
     })
     expect(cRes.status).toBe(409)
-    expect(await cRes.json()).toEqual({ error: { code: "no_mailbox" } })
+    expect(await cRes.json()).toMatchObject({ name: "no_mailbox" })
 
     const sealedDel = await conflictApp.request(
       `/console/mail-devices/enrollments/${ENROLLMENT_ID}`,
       { method: "DELETE", headers: BEARER },
     )
     expect(sealedDel.status).toBe(409)
-    expect(await sealedDel.json()).toEqual({ error: { code: "already_sealed" } })
+    expect(await sealedDel.json()).toMatchObject({ name: "already_sealed" })
 
     const keysOffApp = makeApp({
       freshAuth: fresh,
@@ -1249,7 +1249,7 @@ describe("console routes /console/mail-devices/enrollments[/:id]", () => {
       body: "{}",
     })
     expect(kRes.status).toBe(503)
-    expect(await kRes.json()).toEqual({ error: { code: "keys_not_configured" } })
+    expect(await kRes.json()).toMatchObject({ name: "keys_not_configured" })
 
     const badUuid = await conflictApp.request(
       "/console/mail-devices/enrollments/not-a-uuid",

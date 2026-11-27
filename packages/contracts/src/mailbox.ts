@@ -87,6 +87,43 @@ export const mailboxCreationSettingsSchema = z.object({
 
 export const setMailboxCreationSchema = mailboxCreationSettingsSchema
 
+/**
+ * Who a workspace's mailboxes may automatically forward mail to through Sieve
+ * rules (Outlook Rules and Alerts, JMAP mail rules, or hand-written Sieve) (#526).
+ *
+ *   - `workspace`: only addresses on this workspace's own hosted domains. The default.
+ *   - `workspace_and_members`: the above, plus current members' verified sign-in addresses.
+ *   - `anywhere`: any address (requires explicit confirmation).
+ *   - `off`: no automatic forwarding.
+ */
+export const autoForwardingModeSchema = z.enum([
+  "workspace",
+  "workspace_and_members",
+  "anywhere",
+  "off",
+])
+
+export const autoForwardingSettingsSchema = z.object({
+  mode: autoForwardingModeSchema,
+})
+
+export const setAutoForwardingSchema = z
+  .object({
+    mode: autoForwardingModeSchema,
+    /** Required and true when setting `mode` to `anywhere`. */
+    confirm_anywhere: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.mode === "anywhere" && value.confirm_anywhere !== true) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["confirm_anywhere"],
+        message: "confirm_anywhere must be true when setting mode to anywhere.",
+      })
+    }
+  })
+
 /** How long a deleted mailbox can be restored, in days. Then it is purged. */
 export const MAILBOX_DELETE_GRACE_DAYS = 30
 
@@ -316,6 +353,9 @@ export type MailboxDeletionOutcome = z.infer<typeof mailboxDeletionOutcomeSchema
 export type DeleteMailbox = z.infer<typeof deleteMailboxSchema>
 export type MailboxCreationMode = z.infer<typeof mailboxCreationModeSchema>
 export type MailboxCreationSettings = z.infer<typeof mailboxCreationSettingsSchema>
+export type AutoForwardingMode = z.infer<typeof autoForwardingModeSchema>
+export type AutoForwardingSettings = z.infer<typeof autoForwardingSettingsSchema>
+export type SetAutoForwarding = z.infer<typeof setAutoForwardingSchema>
 export type Mailbox = z.infer<typeof mailboxSchema>
 export type MailboxAliasSource = z.infer<typeof mailboxAliasSourceSchema>
 export type AddMailboxAlias = z.infer<typeof addMailboxAliasSchema>

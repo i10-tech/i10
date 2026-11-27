@@ -100,7 +100,7 @@ export function projectUser(
     email: primary.address,
     aliases: sorted.filter((e) => e.address !== primary.address).map((e) => e.address),
     displayName: [user.first_name, user.last_name].filter(Boolean).join(" ").trim(),
-    clerkUpdatedAt: toDate(user.updated_at),
+    clerkUpdatedAt: clerkUpdatedAtOf(user.updated_at),
     banned: typeof user.banned === "boolean" ? user.banned : null,
     locked: typeof user.locked === "boolean" ? user.locked : null,
     lockedUntil: lockoutEnd(user, now),
@@ -123,6 +123,22 @@ function lockoutEnd(user: ClerkUser, now: Date): Date | null {
 }
 
 /**
+ * Every verified sign-in email address on a Clerk user, lowercased and sorted,
+ * regardless of whether i10 hosts its domain (#526).
+ */
+export function verifiedEmailsOf(user: ClerkUser): string[] {
+  const seen = new Set<string>()
+  for (const e of user.email_addresses ?? []) {
+    if (e.verification?.status !== "verified") continue
+    const address = e.email_address.trim().toLowerCase()
+    const at = address.lastIndexOf("@")
+    if (at <= 0 || at === address.length - 1) continue
+    seen.add(address)
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b))
+}
+
+/**
  * Clerk timestamps are milliseconds since the epoch.
  *
  * There is no password-specific timestamp in Clerk's user object, so
@@ -131,7 +147,7 @@ function lockoutEnd(user: ClerkUser, now: Date): Date | null {
  * tokens more often than strictly needed rather than less. It doubles as the
  * ordering guard for out-of-order webhook delivery.
  */
-function toDate(ms: number | null | undefined): Date | null {
+export function clerkUpdatedAtOf(ms: number | null | undefined): Date | null {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return null
   return new Date(ms)
 }

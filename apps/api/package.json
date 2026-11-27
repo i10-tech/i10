@@ -22,6 +22,7 @@
     "rewrap-keys": "bun scripts/rewrap-keys.ts",
     "wrap-keys": "bun scripts/wrap-keys.ts",
     "workspace-roles": "bun scripts/workspace-roles.ts",
+    "user-emails": "bun scripts/user-emails.ts",
     "mail-device": "bun scripts/mail-device.ts",
     "risk-admin": "bun src/risk-admin.ts"
   },

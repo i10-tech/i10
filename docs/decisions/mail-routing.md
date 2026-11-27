@@ -620,3 +620,28 @@ all mailbox mail to `mx`, and `SES_ENABLED` remains the global kill switch.
 ⚠ **THE CLAIM NO LONGER READS THE PLAN.** `plan_id` rode along on every claimed
 row only to feed this rule, so it went with it - one correlated subquery fewer
 on the worker's hot path.
+
+---
+
+## Automatic forwards from personal i10.tech mailboxes
+
+**Decided 2026-11-27 by the owner (#526).** A mailbox with no workspace (a
+personal address on i10's own domain, `tenant_id` null) cannot forward mail
+automatically. Outlook rules, JMAP mail rules, Sieve `redirect` and `notify`
+are all refused for it, even to another i10.tech address. Vacation replies
+still go out, because they carry a null sender and never reach the check.
+
+⚠ **THIS WAS A CHOICE, NOT A LIMIT.** The policy lives in a workspace's
+settings, and these mailboxes have no workspace to hold one, so
+`core.auto_forward_allowed` fails closed for them. i10 does not need
+forwarding for its own mailboxes, and closed is the safe default for an
+account whose password may be stolen.
+
+**To allow it later**, add a migration that replaces
+`core.auto_forward_allowed` (drizzle-kit `--custom`; never edit the applied
+one). Where it now returns false for a null `v_tenant_id`, return true when
+the recipient is another tenantless mailbox
+(`EXISTS (SELECT 1 FROM authd.accounts WHERE email = v_rcpt AND tenant_id IS NULL)`).
+That keeps the forward on i10's own domain. To let them forward anywhere,
+return true there instead. Add a case to `test/auto-forwarding-db.test.ts`,
+whose "fails closed on ... tenantless" test pins the current behaviour.

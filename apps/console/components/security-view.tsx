@@ -12,6 +12,7 @@ import {
 import { BoneScope } from "@repo/ui/components/bone/bone"
 import { PanelError } from "@/components/panel-error"
 import { SettingsGroup, SettingsRow } from "@/components/sso/settings-card"
+import { AutoForwardingPanel } from "@/components/sso/auto-forwarding"
 import { IpAllowlistPanel } from "@/components/sso/ip-allowlist"
 import { OwnerExemptionPanel } from "@/components/sso/owner-exemption"
 import { SiemExportPanel } from "@/components/sso/siem-export"
@@ -92,6 +93,19 @@ export function SecurityView({
                     </Link>
                   }
                 />
+              </SettingsGroup>
+            </SectionContent>
+          </Section>
+
+          <Section>
+            <SectionTitle>Automatic forwarding</SectionTitle>
+            <SectionDescription>
+              Control where mail rules and Sieve scripts can automatically forward
+              incoming mail.
+            </SectionDescription>
+            <SectionContent>
+              <SettingsGroup>
+                <AutoForwardingPanel initial={data?.autoForwarding} />
               </SettingsGroup>
             </SectionContent>
           </Section>
