@@ -88,9 +88,20 @@ const WITHOUT_WORKSPACE = new Set([
   "/mail-devices/enrollments",
 ])
 
-function isWorkspaceOptional(path: string): boolean {
+const MAIL_DEVICE_ID_PATH = /^\/mail-devices\/[^/]+$/
+
+function isWorkspaceOptional(path: string, method: string): boolean {
   const sub = path.replace(/^\/console/, "")
-  return WITHOUT_WORKSPACE.has(sub) || sub.startsWith("/mail-devices/enrollments/")
+  if (WITHOUT_WORKSPACE.has(sub) || sub.startsWith("/mail-devices/enrollments/")) {
+    return true
+  }
+  // Own mail devices (#383 PR 5b): work with any workspace open or none.
+  // Workspace-admin scopes still require an active workspace inside the handler,
+  // and own-scope access runs the mailbox's workspace console policies.
+  if (method === "GET" && sub === "/mail-devices") return true
+  if (method === "POST" && sub === "/mail-devices/revoke-all") return true
+  if (method === "DELETE" && MAIL_DEVICE_ID_PATH.test(sub)) return true
+  return false
 }
 
 export function createConsole(deps?: ConsoleDeps) {
@@ -111,7 +122,7 @@ export function createConsole(deps?: ConsoleDeps) {
       sessions: d.sessions,
       tenants: d.tenants,
       ...(d.activeOrg ? { activeOrg: d.activeOrg } : {}),
-      workspaceOptional: isWorkspaceOptional(c.req.path),
+      workspaceOptional: isWorkspaceOptional(c.req.path, c.req.method),
     })
     // ⚠ SET FOR EVERY ROUTE, READ BY ALMOST NONE. `requireFreshAuth` is applied
     // per route rather than here: a step-up prompt in front of "list my

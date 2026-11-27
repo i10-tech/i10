@@ -1,5 +1,6 @@
 import type { MailDevice, MailDeviceList } from "@repo/contracts"
 import type { Database } from "../db/client.js"
+import { readMailboxTenant } from "./enrollments.js"
 import {
   accountByEmail,
   decodeDeviceCursor,
@@ -35,6 +36,13 @@ export interface DeviceViewer {
   tenantId: string | null
   /** `members:manage` in `tenantId`. Always false without a workspace. */
   isAdmin: boolean
+  /**
+   * Optional gate checked right before touching the caller's own scope (`own`).
+   * Returning false stops own-scope reads and revokes before hitting the store
+   * (the caller already holds the refusal to send), while leaving workspace-
+   * admin actions in `tenantId` untouched.
+   */
+  allowOwn?: () => Promise<boolean>
 }
 
 export interface DeviceListQuery {
@@ -70,6 +78,8 @@ export interface DeviceStorePort {
   accountOf(
     address: string,
   ): Promise<{ clerkUserId: string; tenantId: string | null } | null>
+  /** The workspace of one person's own mailbox, or null when they have none. */
+  mailboxTenant(clerkUserId: string): Promise<{ tenantId: string | null } | null>
 }
 
 export const dbDeviceStore = (db: Database): DeviceStorePort => ({
@@ -77,6 +87,7 @@ export const dbDeviceStore = (db: Database): DeviceStorePort => ({
   revoke: (input) => revoke(db, input),
   revokeAll: (scope) => revokeAllFor(db, scope),
   accountOf: (address) => accountByEmail(db, address),
+  mailboxTenant: (clerkUserId) => readMailboxTenant(db, clerkUserId),
 })
 
 export interface AuditLog {
@@ -120,7 +131,10 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
   ): Promise<PersonScope | null> {
     const account = await store.accountOf(address)
     if (!account) return null
-    if (account.clerkUserId === viewer.userId) return own(viewer)
+    if (account.clerkUserId === viewer.userId) {
+      if (viewer.allowOwn && !(await viewer.allowOwn())) return null
+      return own(viewer)
+    }
     if (
       viewer.isAdmin &&
       viewer.tenantId !== null &&
@@ -140,11 +154,6 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
       viewer: DeviceViewer,
       query: DeviceListQuery,
     ): Promise<DeviceListOutcome> {
-      let cursor: DeviceCursor | null = null
-      if (query.cursor !== undefined) {
-        cursor = decodeDeviceCursor(query.cursor)
-        if (!cursor) return { status: "invalid", message: "That cursor is not valid." }
-      }
       let scope: DeviceScope | null
       if (query.address !== undefined) {
         scope = await scopeForAddress(viewer, query.address)
@@ -154,9 +163,17 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
             ? { kind: "workspace", tenantId: viewer.tenantId }
             : null
       } else {
+        if (viewer.allowOwn && !(await viewer.allowOwn()))
+          return { status: "not_found" }
         scope = own(viewer)
       }
       if (!scope) return { status: "not_found" }
+
+      let cursor: DeviceCursor | null = null
+      if (query.cursor !== undefined) {
+        cursor = decodeDeviceCursor(query.cursor)
+        if (!cursor) return { status: "invalid", message: "That cursor is not valid." }
+      }
 
       const page = await store.list({
         scope,
@@ -170,19 +187,30 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
       }
     },
 
+    /** The workspace of one person's own mailbox, or null when they have none. */
+    mailboxTenant(userId: string): Promise<{ tenantId: string | null } | null> {
+      return store.mailboxTenant(userId)
+    },
+
     /** The caller's own device, or for an admin any device of the workspace. Null is a 404. */
     async revoke(
       viewer: DeviceViewer,
       deviceId: string,
     ): Promise<RevokedDevice | null> {
-      const gone =
-        (await store.revoke({ deviceId, scope: own(viewer) })) ??
-        (viewer.isAdmin && viewer.tenantId !== null
+      // Try the open workspace's admin scope first so revoking a workspace
+      // member's device never runs the admin's own mailbox workspace gate
+      // (for an admin's own device in that workspace, both scopes delete the
+      // same row).
+      let gone =
+        viewer.isAdmin && viewer.tenantId !== null
           ? await store.revoke({
               deviceId,
               scope: { kind: "workspace", tenantId: viewer.tenantId },
             })
-          : null)
+          : null
+      if (!gone && (!viewer.allowOwn || (await viewer.allowOwn()))) {
+        gone = await store.revoke({ deviceId, scope: own(viewer) })
+      }
       if (gone) {
         log.info(
           {
@@ -201,8 +229,14 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
 
     /** Every device of the caller, or for an admin of one mailbox in the workspace. */
     async revokeAll(viewer: DeviceViewer, address?: string): Promise<RevokeAllOutcome> {
-      const scope =
-        address === undefined ? own(viewer) : await scopeForAddress(viewer, address)
+      let scope: PersonScope | null
+      if (address === undefined) {
+        if (viewer.allowOwn && !(await viewer.allowOwn()))
+          return { status: "not_found" }
+        scope = own(viewer)
+      } else {
+        scope = await scopeForAddress(viewer, address)
+      }
       if (!scope) return { status: "not_found" }
       const gone = await store.revokeAll(scope)
       log.info(

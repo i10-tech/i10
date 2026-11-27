@@ -387,11 +387,11 @@ suite("mail device service against Postgres", () => {
       expect((await counted(() => service().revoke(adaInAcme, ids[0]!))).queries).toBe(
         1,
       )
-      // An admin's revoke of someone else's device tries their own scope first.
+      // An admin's revoke tries the open workspace first, so a workspace device is 1 statement.
       if (n > 1)
         expect(
           (await counted(() => service().revoke(acmeAdmin, ids[1]!))).queries,
-        ).toBe(2)
+        ).toBe(1)
       // begin, the account lock, the delete, commit: none grows with the devices.
       expect((await counted(() => service().revokeAll(adaInAcme))).queries).toBe(4)
     }
