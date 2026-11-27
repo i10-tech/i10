@@ -581,14 +581,21 @@ export async function reviewTrusted(
   if (approved.length === 0) return []
   const out: Revocation[] = []
 
-  const [abuse] = (await withTenant(db, tenantId, (tx) =>
+  // ⚠ COMPARED IN POSTGRES, NOT AS JS DATES. Both columns come from the
+  // database's `now()`, in microseconds; a JS Date keeps milliseconds, so an
+  // approval and a label in the same millisecond read as equal and the label
+  // revoked nothing (#545).
+  const labelled = (await withTenant(db, tenantId, (tx) =>
     tx.execute(sql`
-      select max(labeled_at) as at from core.risk_labels
-       where tenant_id = ${tenantId}::uuid and label = 'abuse'
-         and source in ('staff', 'hold_upheld')
+      select t.id from core.trusted_templates t
+       where t.tenant_id = ${tenantId}::uuid and t.status = 'approved'
+         and t.decided_at < (
+           select max(l.labeled_at) from core.risk_labels l
+            where l.tenant_id = ${tenantId}::uuid and l.label = 'abuse'
+              and l.source in ('staff', 'hold_upheld'))
     `),
-  )) as unknown as { at: string | null }[]
-  const abuseAt = abuse?.at ? new Date(abuse.at) : null
+  )) as unknown as { id: string }[]
+  const abusive = new Set(labelled.map((x) => String(x.id)))
 
   const floor = new Date(now.getTime() - 30 * 86_400_000)
   const ids = `{${approved.map((a) => a.id).join(",")}}`
@@ -611,7 +618,7 @@ export async function reviewTrusted(
   )) as unknown as { id: string; sends: number; hard: number; complaints: number }[]
 
   for (const a of approved) {
-    if (abuseAt && a.decidedAt && abuseAt > a.decidedAt) {
+    if (abusive.has(a.id)) {
       const r = await store.revoke(
         tenantId,
         a.id,

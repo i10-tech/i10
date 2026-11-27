@@ -1503,6 +1503,42 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(revoked.map((x) => x.category)).toEqual(["abuse"])
   })
 
+  // #545: both times come from Postgres in microseconds, so a label 100 µs
+  // after the approval, inside the same millisecond, still revokes it, and one
+  // 100 µs before does not. Compared as JS Dates, both read as equal.
+  for (const [order, labelAt, expected] of [
+    ["after", "2026-01-02T03:04:05.000200Z", ["abuse"]],
+    ["before", "2026-01-02T03:04:05.000000Z", []],
+  ] as const) {
+    it(`orders an abuse label ${order} the approval within the same millisecond`, async () => {
+      const { trustedTemplateStore, reviewTrusted } =
+        await import("../src/risk/trusted.js")
+      const t = await trustTenant(`abuse-us-${order}-${RUN}.com`)
+      const store = trustedTemplateStore(db)
+      const r = await store.submit(
+        t,
+        { name: "Receipt", html: receipt("{{name}}", "1"), text: null },
+        "user:risk-db",
+      )
+      if (!("template" in r)) throw new Error(r.error)
+      await store.decide(t, r.template.id, "approve", "staff@i10", "fine")
+      await labelStore(db).add({
+        tenantId: t,
+        label: "abuse",
+        source: "staff",
+        setBy: "staff@i10",
+      })
+      await owner`update core.trusted_templates set decided_at = '2026-01-02T03:04:05.000100Z'
+                   where id = ${r.template.id}`
+      // As text: postgres.js turns a timestamptz parameter into a JS Date first,
+      // which would drop the microseconds this test is about.
+      await owner`update core.risk_labels set labeled_at = ${labelAt}::text::timestamptz
+                   where tenant_id = ${t}`
+      const revoked = await reviewTrusted(db, store, t, new Date())
+      expect(revoked.map((x) => x.category)).toEqual([...expected])
+    })
+  }
+
   it("leaves trusted vectors out of content neighbours and reports the evidence", async () => {
     const { storeContentVectors, contentNeighbours } =
       await import("../src/content/vectors.js")
