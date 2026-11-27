@@ -86,6 +86,8 @@ export type MailDeviceErrorCode =
   | "device_key_changed"
   | "key_in_use"
   | "permit_conflict"
+  // Enrollment gate checks (#383 PR 4).
+  | "email_mismatch"
 
 export class MailDeviceError extends Error {
   constructor(

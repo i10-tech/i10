@@ -21,6 +21,7 @@ let api: ReturnType<typeof postgres>
 
 const sfx = crypto.randomUUID().slice(0, 8)
 const person = `user_mdc_${sfx}`
+const otherPerson = `user_mdc_other_${sfx}`
 
 /** A distinct 32-byte hash per label, so no two fixtures collide on a unique index. */
 function hash(label: string): Buffer {
@@ -43,19 +44,25 @@ async function broken(run: () => Promise<unknown>): Promise<string | null> {
 }
 
 let deviceId: string
+let otherDeviceId: string
+let enrollmentId: string
 
-async function acmePermit(serial: string, nonce = hash(`nonce/${serial}`)) {
+async function acmePermit(
+  serial: string,
+  nonce = hash(`nonce/${serial}`),
+  who: { clerkUserId: string; deviceId: string } = { clerkUserId: person, deviceId },
+) {
   const [row] = await api<{ id: string }[]>`
     insert into authd.mail_device_cert_permits (clerk_user_id, device_id, kind, serial, nonce_sha256, expires_at)
-    values (${person}, ${deviceId}, 'acme', ${serial}, ${nonce}, now() + interval '10 minutes')
+    values (${who.clerkUserId}, ${who.deviceId}, 'acme', ${serial}, ${nonce}, now() + interval '10 minutes')
     returning id`
   return row!.id
 }
 
 async function scepPermit(label: string) {
   const [row] = await api<{ id: string }[]>`
-    insert into authd.mail_device_cert_permits (clerk_user_id, kind, serial, challenge_hash, expires_at)
-    values (${person}, 'scep', ${`SCEP-${label}`}, ${hash(`challenge/${label}`)}, now() + interval '10 minutes')
+    insert into authd.mail_device_cert_permits (clerk_user_id, enrollment_id, kind, serial, challenge_hash, expires_at)
+    values (${person}, ${enrollmentId}, 'scep', ${`SCEP-${label}`}, ${hash(`challenge/${label}`)}, now() + interval '10 minutes')
     returning id`
   return row!.id
 }
@@ -71,17 +78,33 @@ suite("device certificate permits and liveness rows against Postgres", () => {
     owner = postgres(URL!, { max: 1, onnotice: () => {} })
     api = postgres(API_URL!, { max: 2, onnotice: () => {} })
     await owner`insert into authd.accounts (clerk_user_id, email, active)
-                values (${person}, ${`mdc-${sfx}@mdc.test`}, true)`
+                values (${person}, ${`mdc-${sfx}@mdc.test`}, true),
+                       (${otherPerson}, ${`mdc-other-${sfx}@mdc.test`}, true)`
     const [device] = await owner<{ id: string }[]>`
       insert into authd.mail_devices (clerk_user_id, email, platform, code_hash, code_kid, created_by)
       values (${person}, ${`mdc-${sfx}@mdc.test`}, 'macos', ${hash("code")}, 1, 'test')
       returning id::text`
     deviceId = device!.id
+    const [otherDevice] = await owner<{ id: string }[]>`
+      insert into authd.mail_devices (clerk_user_id, email, platform, code_hash, code_kid, created_by)
+      values (${otherPerson}, ${`mdc-other-${sfx}@mdc.test`}, 'macos', ${hash("code-other")}, 1, 'test')
+      returning id::text`
+    otherDeviceId = otherDevice!.id
+    const [enrollment] = await owner<{ id: string }[]>`
+      insert into authd.mail_device_enrollments
+             (clerk_user_id, email, expected_epoch, token_sha256, status, serial,
+              product, os_version, udid_sha256, apple_signer_sha256, platform,
+              created_by, expires_at)
+      values (${person}, ${`mdc-${sfx}@mdc.test`}, 1, ${hash("enroll-tok")}, 'attested',
+              ${`SCEP-BASE-${sfx}`}, 'Mac14,2', '24D70', ${hash("udid")},
+              ${hash("signer")}, 'macos', 'test', now() + interval '10 minutes')
+      returning id::text`
+    enrollmentId = enrollment!.id
   })
 
   afterAll(async () => {
-    // The account's delete cascades to its devices, permits and liveness rows.
-    await owner`delete from authd.accounts where clerk_user_id = ${person}`
+    // The account's delete cascades to its devices, enrollments, permits and liveness rows.
+    await owner`delete from authd.accounts where clerk_user_id in (${person}, ${otherPerson})`
     await api.end({ timeout: 5 })
     await owner.end({ timeout: 5 })
   })
@@ -155,7 +178,7 @@ suite("device certificate permits and liveness rows against Postgres", () => {
     const cases: [string, () => Promise<unknown>, string][] = [
       [
         "unknown kind",
-        set(scep, `kind = 'est', challenge_hash = null`),
+        set(scep, `kind = 'est', challenge_hash = null, enrollment_id = null`),
         "mail_device_cert_permits_kind_check",
       ],
       [
@@ -190,6 +213,16 @@ suite("device certificate permits and liveness rows against Postgres", () => {
         "SCEP naming a device",
         set(scep, `device_id = '${deviceId}'`),
         "mail_device_cert_permits_device_kind",
+      ],
+      [
+        "ACME naming an enrollment",
+        set(acme, `enrollment_id = '${enrollmentId}'`),
+        "mail_device_cert_permits_enrollment_kind",
+      ],
+      [
+        "SCEP without an enrollment",
+        set(scep, `enrollment_id = null`),
+        "mail_device_cert_permits_enrollment_kind",
       ],
       [
         "ACME without its nonce",
@@ -336,13 +369,28 @@ suite("device certificate permits and liveness rows against Postgres", () => {
     await api`delete from authd.mail_device_cert_permits where id in (${acme}, ${scep})`
   })
 
-  it("one open ACME permit per serial; nonces, keys, challenges and active SCEP transaction ids each name one permit", async () => {
+  it("one open ACME permit per (serial, person); nonces, keys, challenges and active SCEP transaction ids each name one permit", async () => {
     const serial = `ACME-D-${sfx}`
     const firstNonce = hash(`nonce/${serial}/1`)
     const first = await acmePermit(serial, firstNonce)
     expect(await broken(() => acmePermit(serial))).toBe(
       "mail_device_cert_permits_open_acme_serial",
     )
+    // Review 1 M6: another person CAN hold an open ACME permit for the exact
+    // same serial at the same time (shared Mac / no cross-person lockout).
+    const otherOpen = await acmePermit(serial, hash(`nonce/${serial}/other`), {
+      clerkUserId: otherPerson,
+      deviceId: otherDeviceId,
+    })
+    expect(await statusOf(otherOpen)).toBe("open")
+    expect(
+      await broken(() =>
+        acmePermit(serial, hash(`nonce/${serial}/other2`), {
+          clerkUserId: otherPerson,
+          deviceId: otherDeviceId,
+        }),
+      ),
+    ).toBe("mail_device_cert_permits_open_acme_serial")
     // Once the first is no longer open (authorized, or marked expired when a
     // new one is created), the serial can have a new open permit.
     await api`update authd.mail_device_cert_permits set status = 'expired' where id = ${first}`
@@ -365,12 +413,12 @@ suite("device certificate permits and liveness rows against Postgres", () => {
     ).toBe("mail_device_cert_permits_key_unique")
 
     const challenge = hash("challenge/dup")
-    await api`insert into authd.mail_device_cert_permits (clerk_user_id, kind, serial, challenge_hash, expires_at)
-              values (${person}, 'scep', 'SCEP-dup', ${challenge}, now() + interval '10 minutes')`
+    await api`insert into authd.mail_device_cert_permits (clerk_user_id, enrollment_id, kind, serial, challenge_hash, expires_at)
+              values (${person}, ${enrollmentId}, 'scep', 'SCEP-dup', ${challenge}, now() + interval '10 minutes')`
     expect(
       await broken(
-        () => api`insert into authd.mail_device_cert_permits (clerk_user_id, kind, serial, challenge_hash, expires_at)
-                  values (${person}, 'scep', 'SCEP-dup', ${challenge}, now() + interval '10 minutes')`,
+        () => api`insert into authd.mail_device_cert_permits (clerk_user_id, enrollment_id, kind, serial, challenge_hash, expires_at)
+                  values (${person}, ${enrollmentId}, 'scep', 'SCEP-dup', ${challenge}, now() + interval '10 minutes')`,
       ),
     ).toBe("mail_device_cert_permits_challenge_unique")
 

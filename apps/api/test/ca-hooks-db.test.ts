@@ -457,21 +457,39 @@ suite("device CA webhook handlers against Postgres", () => {
       expect((await permit(second.permitId)).status).toBe("open")
     })
 
-    it("expires another person's lapsed open permit, and refuses their live one", async () => {
+    it("allows two people to hold live open ACME permits for the same serial concurrently (Review 1 M6)", async () => {
       const a = await mac()
       const b = await mac({ serial: a.serial })
       const aPermit = await createAcmePermit(db, { deviceId: a.deviceId })
-      expect(await failure(() => createAcmePermit(db, { deviceId: b.deviceId }))).toBe(
-        "permit_conflict",
-      )
-      expect((await permit(aPermit.permitId)).status).toBe("open")
-
-      await owner`update authd.mail_device_cert_permits
-                     set created_at = now() - interval '20 minutes', expires_at = now() - interval '1 second'
-                   where id = ${aPermit.permitId}`
       const bPermit = await createAcmePermit(db, { deviceId: b.deviceId })
-      expect((await permit(aPermit.permitId)).status).toBe("expired")
+      expect((await permit(aPermit.permitId)).status).toBe("open")
       expect((await permit(bPermit.permitId)).status).toBe("open")
+
+      // Each person's nonce authorizes strictly their own device.
+      const aKey = freshKey()
+      const bKey = freshKey()
+      expect(
+        await acme(
+          acmeBody({
+            serial: a.serial,
+            nonce: aPermit.nonce,
+            spki: aKey.spki,
+            now: new Date(),
+          }),
+        ),
+      ).toEqual({ allow: true, outcome: "allowed" })
+      expect(
+        await acme(
+          acmeBody({
+            serial: b.serial,
+            nonce: bPermit.nonce,
+            spki: bKey.spki,
+            now: new Date(),
+          }),
+        ),
+      ).toEqual({ allow: true, outcome: "allowed" })
+      expect((await device(a.deviceId)).cert_key_sha256?.equals(aKey.sha)).toBe(true)
+      expect((await device(b.deviceId)).cert_key_sha256?.equals(bKey.sha)).toBe(true)
     })
 
     it("refuses a device with no serial, a non-Mac, a bound key, a dead code or a held account", async () => {
@@ -511,13 +529,29 @@ suite("device CA webhook handlers against Postgres", () => {
   })
 
   describe("SCEP", () => {
-    /** A person with an open SCEP permit for `serial` and its challenge. */
+    /** A person with an attested enrollment and an open SCEP permit for `serial`. */
     async function scepPermit() {
       const m = await mac()
-      const challenge = `challenge-${label()}-0123456789abcdef`
+      const tag = label()
+      const [acct] = await owner<{ credential_epoch: string | number }[]>`
+        select credential_epoch from authd.accounts where clerk_user_id = ${m.person}`
+      const [enrollRow] = await owner<{ id: string }[]>`
+        insert into authd.mail_device_enrollments
+               (clerk_user_id, email, expected_epoch, token_sha256, status, serial,
+                product, os_version, udid_sha256, apple_signer_sha256, platform,
+                created_by, expires_at)
+        values (${m.person}, ${m.email}, ${Number(acct!.credential_epoch)},
+                ${sha256(`enroll-tok/${tag}`)}, 'attested', ${m.serial},
+                'Mac14,2', '24D70', ${sha256(`udid/${tag}`)},
+                ${sha256(`signer/${tag}`)}, 'macos', 'test',
+                now() + interval '10 minutes')
+        returning id::text`
+      const challenge = `challenge-${tag}-0123456789abcdef`
       const [row] = await owner<{ id: string }[]>`
-        insert into authd.mail_device_cert_permits (clerk_user_id, kind, serial, challenge_hash, expires_at)
-        values (${m.person}, 'scep', ${m.serial}, ${sha256(challenge)}, now() + interval '10 minutes')
+        insert into authd.mail_device_cert_permits
+               (clerk_user_id, enrollment_id, kind, serial, challenge_hash, expires_at)
+        values (${m.person}, ${enrollRow!.id}, 'scep', ${m.serial}, ${sha256(challenge)},
+                now() + interval '10 minutes')
         returning id::text`
       const cert = throwawayCertificate(`/CN=${m.serial}`)
       const csrKey = new (await import("node:crypto")).X509Certificate(
@@ -528,6 +562,7 @@ suite("device CA webhook handlers against Postgres", () => {
       })
       return {
         ...m,
+        enrollmentId: enrollRow!.id,
         permitId: row!.id,
         challenge,
         cert,
@@ -656,21 +691,61 @@ suite("device CA webhook handlers against Postgres", () => {
       expect((await permit(b.permitId)).status).toBe("open")
     })
 
-    it("refuses a held account at the challenge and at authorize", async () => {
-      const s = await scepPermit()
-      await owner`update authd.accounts set suspended_at = now() where clerk_user_id = ${s.person}`
-      expect(await hooks["scep-challenge"](challengeBody(s), now())).toEqual({
+    it("refuses a held account or moved epoch at challenge, authorize and notify, marking the enrollment refused", async () => {
+      const s1 = await scepPermit()
+      await owner`update authd.accounts set suspended_at = now() where clerk_user_id = ${s1.person}`
+      expect(await hooks["scep-challenge"](challengeBody(s1), now())).toEqual({
         allow: false,
         outcome: "refused_mailbox_suspended",
       })
-      await owner`update authd.accounts set suspended_at = null where clerk_user_id = ${s.person}`
-      await hooks["scep-challenge"](challengeBody(s), now())
-      await owner`update authd.accounts set locked = true where clerk_user_id = ${s.person}`
-      expect(await hooks["scep-authorize"](authorizeBody(s), now())).toEqual({
+      const [e1] = await owner<{ status: string; refusal: string | null }[]>`
+        select status, refusal from authd.mail_device_enrollments where id = ${s1.enrollmentId}`
+      expect(e1).toEqual({ status: "refused", refusal: "mailbox_suspended" })
+      expect((await permit(s1.permitId)).status).toBe("expired")
+
+      const s2 = await scepPermit()
+      expect(await hooks["scep-challenge"](challengeBody(s2), now())).toEqual({
+        allow: true,
+        outcome: "allowed",
+      })
+      await owner`update authd.accounts set locked = true where clerk_user_id = ${s2.person}`
+      expect(await hooks["scep-authorize"](authorizeBody(s2), now())).toEqual({
         allow: false,
         outcome: "refused_account_locked",
       })
-      expect((await permit(s.permitId)).status).toBe("challenged")
+      const [e2] = await owner<{ status: string; refusal: string | null }[]>`
+        select status, refusal from authd.mail_device_enrollments where id = ${s2.enrollmentId}`
+      expect(e2).toEqual({ status: "refused", refusal: "account_locked" })
+      expect((await permit(s2.permitId)).status).toBe("expired")
+
+      // Notify (and retry) also gate on the enrollment's expected_epoch.
+      const s3 = await scepPermit()
+      await hooks["scep-challenge"](challengeBody(s3), now())
+      await hooks["scep-authorize"](authorizeBody(s3), now())
+      await owner`update authd.accounts set credential_epoch = credential_epoch + 1
+                   where clerk_user_id = ${s3.person}`
+      expect(await hooks["scep-notify"](notifyBody(s3), now())).toEqual({
+        allow: false,
+        outcome: "refused_epoch_mismatch",
+      })
+      const [e3] = await owner<{ status: string; refusal: string | null }[]>`
+        select status, refusal from authd.mail_device_enrollments where id = ${s3.enrollmentId}`
+      expect(e3).toEqual({ status: "refused", refusal: "epoch_mismatch" })
+      expect((await permit(s3.permitId)).status).toBe("expired")
+
+      // Retry after a hold placed between first notify and retry also refuses.
+      const s4 = await scepPermit()
+      await hooks["scep-challenge"](challengeBody(s4), now())
+      await hooks["scep-authorize"](authorizeBody(s4), now())
+      expect(await hooks["scep-notify"](notifyBody(s4), now())).toEqual({
+        allow: true,
+        outcome: "notified",
+      })
+      await owner`update authd.accounts set suspended_at = now() where clerk_user_id = ${s4.person}`
+      expect(await hooks["scep-notify"](notifyBody(s4), now())).toEqual({
+        allow: false,
+        outcome: "refused_mailbox_suspended",
+      })
     })
 
     it("refuses authorize before the challenge, after expiry, and notify for another transaction", async () => {
@@ -820,12 +895,19 @@ suite("device CA webhook handlers against Postgres", () => {
   describe("retention", () => {
     it("deletes permits only a day past expiry, in batches", async () => {
       const m = await mac()
+      const [enr] = await owner<{ id: string }[]>`
+        insert into authd.mail_device_enrollments
+               (clerk_user_id, email, expected_epoch, token_sha256, status,
+                created_by, expires_at)
+        values (${m.person}, ${m.email}, 1, ${sha256(`prune-enr/${label()}`)}, 'expired',
+                'test', now() + interval '10 minutes')
+        returning id::text`
       const ids: string[] = []
       for (const age of ["25 hours", "26 hours", "27 hours", "23 hours"]) {
         const [row] = await owner<{ id: string }[]>`
           insert into authd.mail_device_cert_permits
-                 (clerk_user_id, kind, status, serial, challenge_hash, created_at, expires_at)
-          values (${m.person}, 'scep', 'expired', ${m.serial}, ${sha256(`prune/${label()}`)},
+                 (clerk_user_id, enrollment_id, kind, status, serial, challenge_hash, created_at, expires_at)
+          values (${m.person}, ${enr!.id}, 'scep', 'expired', ${m.serial}, ${sha256(`prune/${label()}`)},
                   now() - ${age}::interval - interval '10 minutes', now() - ${age}::interval)
           returning id::text`
         ids.push(row!.id)

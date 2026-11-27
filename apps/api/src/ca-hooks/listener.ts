@@ -7,6 +7,12 @@ import {
 } from "../mail-devices/permits.js"
 import { bodyTimestamp } from "./body.js"
 import { CA_HOOK_KINDS, type CaHookKind } from "./config.js"
+import {
+  ENROLLD_CALLS,
+  type EnrolldCall,
+  type EnrolldHandlerResult,
+  type EnrolldHandlers,
+} from "./enrolld.js"
 import type { HookHandler } from "./handlers.js"
 
 /**
@@ -51,10 +57,21 @@ export interface HookLog {
   error(fields: Record<string, unknown>, message: string): void
 }
 
+export interface EnrolldMount {
+  tokenHashes: readonly Buffer[]
+  handlers: EnrolldHandlers
+}
+
 export interface CaHooksDeps {
   tokenHashes: readonly Buffer[]
   webhookIds: Readonly<Record<CaHookKind, string>>
   handlers: Readonly<Record<CaHookKind, HookHandler>>
+  /**
+   * Optional internal `/enrolld/{peek,attest,finish}` branch (#383 PR 4). Uses
+   * its own bearer token list (`ENROLLD_TOKEN_HASHES`); when unset, the
+   * enrolld paths answer the same bare 404 while the CA hooks keep serving.
+   */
+  enrolld?: EnrolldMount
   log: HookLog
   now?: () => Date
   timeoutMs?: number
@@ -145,6 +162,24 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 const KIND_BY_PATH = new Map<string, CaHookKind>(
   CA_HOOK_KINDS.map((kind) => [`/${kind}`, kind]),
 )
+const ENROLLD_BY_PATH = new Map<string, EnrolldCall>(
+  ENROLLD_CALLS.map((call) => [`/enrolld/${call}`, call]),
+)
+
+function classifyFailure(error: unknown): { late: boolean; sqlstate: unknown } {
+  // ⚠ NEVER THE ERROR OBJECT. A driver error can carry the query's parameters
+  // (key hashes, a serial); its SQLSTATE is all a reader needs.
+  const code = error as { code?: unknown; cause?: { code?: unknown } } | null
+  const sqlstate = typeof code?.code === "string" ? code.code : code?.cause?.code
+  // Postgres ending a statement on the deadline's budget (57014 statement,
+  // 55P03 lock) is the same late answer as the timer.
+  const late =
+    error instanceof HookTimeout ||
+    error instanceof HookDeadlineExceeded ||
+    sqlstate === "57014" ||
+    sqlstate === "55P03"
+  return { late, sqlstate }
+}
 
 /** The listener's whole request handler. Exported for tests; never mounted on the main app. */
 export function createCaHooksFetch(
@@ -154,8 +189,59 @@ export function createCaHooksFetch(
   const timeoutMs = deps.timeoutMs ?? HANDLER_TIMEOUT_MS
   const warnUnauthenticated = throttledWarn(deps.log, now)
 
+  async function handleEnrolld(request: Request, call: EnrolldCall): Promise<Response> {
+    const hook = `enrolld/${call}`
+    const mount = deps.enrolld
+    if (!mount || mount.tokenHashes.length === 0) {
+      warnUnauthenticated({ hook, outcome: "not_found" })
+      return notFound()
+    }
+    // ⚠ OWN TOKEN LIST ONLY: the CA hook token never opens `/enrolld/*`.
+    if (!tokenMatches(request.headers.get("authorization"), mount.tokenHashes)) {
+      warnUnauthenticated({ hook, outcome: "unauthenticated" })
+      return notFound()
+    }
+
+    const bytes = await readCapped(request)
+    const body = bytes ? parseJson(bytes) : undefined
+    if (body === undefined) {
+      deps.log.warn({ hook, outcome: "unreadable" }, "enrolld call")
+      return notFound()
+    }
+
+    const started = now()
+    let result: EnrolldHandlerResult
+    try {
+      const deadline = new Date(started.getTime() + HANDLER_DEADLINE_MS)
+      result = await withTimeout(
+        mount.handlers[call](body, started, deadline),
+        timeoutMs,
+      )
+    } catch (error) {
+      const { late, sqlstate } = classifyFailure(error)
+      deps.log.error(
+        { hook, outcome: late ? "timeout" : "error", sqlstate },
+        "enrolld call failed",
+      )
+      return new Response(null, { status: late ? 503 : 500 })
+    }
+
+    deps.log.info(
+      { hook, outcome: result.outcome, ...result.logFields },
+      "enrolld call",
+    )
+    return Response.json(result.body)
+  }
+
   return async (request) => {
     const url = new URL(request.url)
+    if (url.search === "" && request.method === "POST") {
+      const enrolldCall = ENROLLD_BY_PATH.get(url.pathname)
+      if (enrolldCall) {
+        return handleEnrolld(request, enrolldCall)
+      }
+    }
+
     const kind = url.search === "" ? KIND_BY_PATH.get(url.pathname) : undefined
     if (!kind || request.method !== "POST") {
       warnUnauthenticated({ hook: "unknown", outcome: "not_found" })
@@ -189,17 +275,7 @@ export function createCaHooksFetch(
         timeoutMs,
       )
     } catch (error) {
-      // ⚠ NEVER THE ERROR OBJECT. A driver error can carry the query's
-      // parameters (key hashes, a serial); its SQLSTATE is all a reader needs.
-      const code = error as { code?: unknown; cause?: { code?: unknown } } | null
-      const sqlstate = typeof code?.code === "string" ? code.code : code?.cause?.code
-      // Postgres ending a statement on the deadline's budget (57014 statement,
-      // 55P03 lock) is the same late answer as the timer.
-      const late =
-        error instanceof HookTimeout ||
-        error instanceof HookDeadlineExceeded ||
-        sqlstate === "57014" ||
-        sqlstate === "55P03"
+      const { late, sqlstate } = classifyFailure(error)
       const outcome = late ? "timeout" : "error"
       deps.log.error({ hook: kind, outcome, sqlstate }, "ca hook failed")
       // A 5xx, which step-ca retries once and then refuses: it never issues on one.
@@ -232,6 +308,7 @@ export interface CaHooksListenerConfig {
   tokenHashes: readonly Buffer[] | undefined
   webhookIds: Readonly<Record<CaHookKind, string>> | undefined
   intermediateNotAfter: Date | undefined
+  enrolldTokenHashes?: readonly Buffer[] | undefined
 }
 
 export interface CaHooksListener {
@@ -242,6 +319,8 @@ export interface CaHooksListener {
 /**
  * Starts the listener, or returns null and says why once: it is OFF until the
  * hook settings are set and both TLS files are mounted, so the code ships inert.
+ * When `enrolldTokenHashes` is unset, the listener still starts and keeps
+ * serving the CA hooks, while `/enrolld/*` paths return 404.
  *
  * ⚠ THE CERTIFICATE IS READ ONCE. `Bun.serve` cannot reload `tls`, which is why
  * the leaf is long-lived (section 11); a new one needs a restart.
@@ -250,8 +329,9 @@ export function startCaHooksListener(
   config: CaHooksListenerConfig,
   makeHandlers: (intermediateNotAfter: Date) => Record<CaHookKind, HookHandler>,
   log: HookLog,
+  makeEnrolldHandlers?: () => EnrolldHandlers,
 ): CaHooksListener | null {
-  const { tokenHashes, webhookIds, intermediateNotAfter } = config
+  const { tokenHashes, webhookIds, intermediateNotAfter, enrolldTokenHashes } = config
   if (!tokenHashes || !webhookIds || !intermediateNotAfter) {
     log.info({ hooks: "off", reason: "not_configured" }, "ca hooks listener off")
     return null
@@ -260,10 +340,15 @@ export function startCaHooksListener(
     log.info({ hooks: "off", reason: "no_certificate" }, "ca hooks listener off")
     return null
   }
+  const enrolld =
+    enrolldTokenHashes && enrolldTokenHashes.length > 0 && makeEnrolldHandlers
+      ? { tokenHashes: enrolldTokenHashes, handlers: makeEnrolldHandlers() }
+      : undefined
   const fetch = createCaHooksFetch({
     tokenHashes,
     webhookIds,
     handlers: makeHandlers(intermediateNotAfter),
+    ...(enrolld ? { enrolld } : {}),
     log,
   })
   // ⚠ A LISTENER THAT CANNOT START NEVER TAKES THE API DOWN WITH IT. A bad
@@ -292,6 +377,9 @@ export function startCaHooksListener(
     )
     return null
   }
-  log.info({ hooks: "on", port: server.port }, "ca hooks listening")
+  log.info(
+    { hooks: "on", enrolld: enrolld ? "on" : "off", port: server.port },
+    "ca hooks listening",
+  )
   return { port: server.port ?? config.port, stop: () => server.stop() }
 }

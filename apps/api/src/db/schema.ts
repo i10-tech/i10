@@ -657,6 +657,140 @@ export const mailDevices = authd.table(
 )
 
 /**
+ * One Apple over-the-air mail device enrollment session (#383 PR 4,
+ * docs/research/mail-device-binding.md section 12).
+ *
+ * Written and read by `apps/api/src/mail-devices/enrollments.ts`, locked and
+ * marked refused by `permits.ts` (the SCEP hooks), and deleted by `prune.ts`
+ * (retention). `authd` and `mailfront` have no
+ * access at all (an explicit REVOKE, asserted by grant tests). No access-change
+ * triggers: an enrollment opens no mail session.
+ *
+ * State life:
+ *   open -> attested -> sealed
+ *   open | attested -> refused | expired | cancelled
+ *
+ * ⚠ LOCK ORDER EVERYWHERE: `authd.accounts`, then `mail_device_enrollments`,
+ * then `mail_devices`, then `mail_device_cert_permits`, then
+ * `mail_device_cert_binds`. Every lookup by token or permit reads unlocked
+ * first to learn the account, then locks in this order and re-checks.
+ *
+ * ⚠ NO CHECK TIES `device_id` TO `status`: `device_id` uses ON DELETE SET NULL,
+ * so revoking a newly enrolled device clears `device_id` while the enrollment
+ * stays `sealed`.
+ */
+export const mailDeviceEnrollments = authd.table(
+  "mail_device_enrollments",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Account email at creation, lowercase; later steps require it still to match. */
+    email: text("email").notNull(),
+    /** Account workspace at creation (null for i10.tech mailboxes). */
+    tenantId: uuid("tenant_id"),
+    /** Account `credential_epoch` at creation; attest, SCEP hooks and finish refuse when moved. */
+    expectedEpoch: bigint("expected_epoch", { mode: "number" }).notNull(),
+    /** SHA-256 of the 32-byte base64url link token; the plaintext token is never stored. */
+    tokenSha256: bytea("token_sha256").notNull(),
+    status: text("status").notNull().default("open"),
+    /** Fixed machine-readable refusal word for the console when `status = 'refused'`. */
+    refusal: text("refusal"),
+    /** Attested device attributes bound at phase 2. */
+    serial: text("serial"),
+    product: text("product"),
+    osVersion: text("os_version"),
+    deviceName: text("device_name"),
+    udidSha256: bytea("udid_sha256"),
+    appleSignerSha256: bytea("apple_signer_sha256"),
+    platform: text("platform"),
+    /** Device row created at phase 4 seal; cleared if that device is later revoked. */
+    deviceId: uuid("device_id"),
+    /**
+     * Complete final `.mobileconfig` encrypted to the device's phase 4 SCEP key,
+     * retained until `expires_at` so a lost response is safely retryable (M2).
+     */
+    sealedProfile: bytea("sealed_profile"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "mail_device_enrollments_account_fk",
+      columns: [t.clerkUserId],
+      foreignColumns: [accounts.clerkUserId],
+    })
+      .onDelete("cascade")
+      .onUpdate("no action"),
+    foreignKey({
+      name: "mail_device_enrollments_device_fk",
+      columns: [t.deviceId],
+      foreignColumns: [mailDevices.id],
+    }).onDelete("set null"),
+    check(
+      "mail_device_enrollments_email_lowercase",
+      sql`${t.email} = lower(${t.email})`,
+    ),
+    check(
+      "mail_device_enrollments_status_check",
+      sql`${t.status} in ('open', 'attested', 'sealed', 'refused', 'expired', 'cancelled')`,
+    ),
+    check(
+      "mail_device_enrollments_refusal_state",
+      sql`(${t.status} = 'refused') = (${t.refusal} is not null)
+          and (${t.refusal} is null or ${t.refusal} <> '')`,
+    ),
+    check(
+      "mail_device_enrollments_platform_check",
+      sql`${t.platform} is null or ${t.platform} in ('ios', 'ipados', 'macos')`,
+    ),
+    check(
+      "mail_device_enrollments_serial_check",
+      sql`${t.serial} is null or ${t.serial} <> ''`,
+    ),
+    check(
+      "mail_device_enrollments_hash_lengths",
+      sql`octet_length(${t.tokenSha256}) = 32
+          and (${t.udidSha256} is null or octet_length(${t.udidSha256}) = 32)
+          and (${t.appleSignerSha256} is null or octet_length(${t.appleSignerSha256}) = 32)`,
+    ),
+    check(
+      "mail_device_enrollments_attested_state",
+      sql`${t.status} not in ('attested', 'sealed')
+          or (${t.serial} is not null
+              and ${t.product} is not null
+              and ${t.osVersion} is not null
+              and ${t.udidSha256} is not null
+              and ${t.appleSignerSha256} is not null
+              and ${t.platform} is not null)`,
+    ),
+    check(
+      "mail_device_enrollments_sealed_profile_state",
+      sql`(${t.status} = 'sealed') = (${t.sealedProfile} is not null)
+          and (${t.sealedProfile} is null or octet_length(${t.sealedProfile}) > 0)`,
+    ),
+    check("mail_device_enrollments_expiry_check", sql`${t.expiresAt} > ${t.createdAt}`),
+    // Phase 1 peek and phase 2 attest look enrollments up by the link token hash.
+    uniqueIndex("mail_device_enrollments_token_unique").on(t.tokenSha256),
+    // At most one live (`open` or `attested`) enrollment per person.
+    uniqueIndex("mail_device_enrollments_live_account_unique")
+      .on(t.clerkUserId)
+      .where(sql`${t.status} in ('open', 'attested')`),
+    // Full index for account FK cascades and per-person lookups.
+    index("mail_device_enrollments_account_idx").on(t.clerkUserId),
+    // Device FK ON DELETE SET NULL avoids scanning enrollments on device revoke.
+    index("mail_device_enrollments_device_idx")
+      .on(t.deviceId)
+      .where(sql`${t.deviceId} is not null`),
+    // Retention deletes enrollments a day past expiry in batches.
+    index("mail_device_enrollments_expires_idx").on(t.expiresAt),
+  ],
+)
+
+/**
  * Certificate permits (#383 PR 3): the device CA's only way to issue. step-ca asks
  * the API's webhook handlers before every issuance, and they say yes only to an
  * open, unexpired permit here (docs/research/mail-device-binding.md section 11,
@@ -674,13 +808,15 @@ export const mailDevices = authd.table(
  *
  * ⚠ THE CHECKS HOLD THE SHAPE OF EACH STATE, NOT THE ORDER OF STATES. An ACME
  * permit always names its device and its nonce and never a challenge; a SCEP
- * permit the reverse; every state past `open` holds the key it was claimed with,
- * and a SCEP one its transaction id. `expired` keeps whatever its last state
- * held. Which state may follow which is the handlers' `WHERE status = ...`.
+ * permit names its enrollment and its challenge and never a device or nonce;
+ * every state past `open` holds the key it was claimed with, and a SCEP one its
+ * transaction id. `expired` keeps whatever its last state held. Which state may
+ * follow which is the handlers' `WHERE status = ...`.
  *
- * ⚠ LOCK ORDER (the handlers, after PR 2's): read the permit unlocked, then lock
- * `authd.accounts`, then `authd.mail_devices`, then the permit, and re-check it.
- * No network call while a lock is held.
+ * ⚠ LOCK ORDER (Review 1 L3): read the permit unlocked, then lock
+ * `authd.accounts`, then `authd.mail_device_enrollments`, then
+ * `authd.mail_devices`, then the permit, and re-check it. No network call while
+ * a lock is held.
  */
 export const mailDeviceCertPermits = authd.table(
   "mail_device_cert_permits",
@@ -691,9 +827,11 @@ export const mailDeviceCertPermits = authd.table(
     clerkUserId: text("clerk_user_id").notNull(),
     /**
      * ACME only. PR 4's SCEP step runs before the device row (and its code)
-     * exists, so a SCEP permit names only the person.
+     * exists, so a SCEP permit names its enrollment instead.
      */
     deviceId: uuid("device_id"),
+    /** SCEP only: the enrollment session that opened this SCEP permit (PR 4). */
+    enrollmentId: uuid("enrollment_id"),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("open"),
     /** The serial Apple signed in enrollment phase 2 (PR 4). */
@@ -723,6 +861,11 @@ export const mailDeviceCertPermits = authd.table(
       columns: [t.deviceId],
       foreignColumns: [mailDevices.id],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "mail_device_cert_permits_enrollment_fk",
+      columns: [t.enrollmentId],
+      foreignColumns: [mailDeviceEnrollments.id],
+    }).onDelete("cascade"),
     check("mail_device_cert_permits_kind_check", sql`${t.kind} in ('acme', 'scep')`),
     check(
       "mail_device_cert_permits_status_check",
@@ -735,10 +878,14 @@ export const mailDeviceCertPermits = authd.table(
     ),
     check("mail_device_cert_permits_serial_check", sql`${t.serial} <> ''`),
     // An ACME permit binds a key to an existing device row and needs the nonce;
-    // a SCEP one runs before the row exists and is found by its challenge.
+    // a SCEP one belongs to an enrollment and is found by its challenge.
     check(
       "mail_device_cert_permits_device_kind",
       sql`(${t.kind} = 'acme') = (${t.deviceId} is not null)`,
+    ),
+    check(
+      "mail_device_cert_permits_enrollment_kind",
+      sql`(${t.kind} = 'scep') = (${t.enrollmentId} is not null)`,
     ),
     check(
       "mail_device_cert_permits_nonce_kind",
@@ -786,13 +933,11 @@ export const mailDeviceCertPermits = authd.table(
       "mail_device_cert_permits_expiry_check",
       sql`${t.expiresAt} > ${t.createdAt}`,
     ),
-    // ACME AUTHORIZING finds its permit by the attested serial (one open permit
-    // per serial tells it which row the Mac's key belongs to), then checks the
-    // certificate's `OU` nonce against `nonce_sha256`. Creating a permit first
-    // marks `expired` any open permit for the serial that has expired, and the
-    // same person's own open one, so a retried enrollment is never blocked.
+    // One open ACME permit per (serial, clerk_user_id) (Review 1 M6): the ACME
+    // hook looks permits up by nonce, so two people on a shared Mac never block
+    // each other and a forged phase 2 cannot lock out another person's serial.
     uniqueIndex("mail_device_cert_permits_open_acme_serial")
-      .on(t.serial)
+      .on(t.serial, t.clerkUserId)
       .where(sql`${t.kind} = 'acme' and ${t.status} = 'open'`),
     // ACME "different key on an authorized permit" detection finds the permit
     // by its nonce so a caller without the nonce cannot clear a bound key.
@@ -803,7 +948,7 @@ export const mailDeviceCertPermits = authd.table(
     uniqueIndex("mail_device_cert_permits_challenge_unique")
       .on(t.challengeHash)
       .where(sql`${t.challengeHash} is not null`),
-    // SCEP AUTHORIZING, and every retry, find the permit by the key.
+    // SCEP AUTHORIZING, finish, and every retry find the permit by the key.
     uniqueIndex("mail_device_cert_permits_key_unique")
       .on(t.keySha256)
       .where(sql`${t.keySha256} is not null`),
@@ -815,12 +960,14 @@ export const mailDeviceCertPermits = authd.table(
       .where(
         sql`${t.transactionId} is not null and ${t.status} in ('challenged', 'authorized')`,
       ),
-    // The cascades: an account's end and a device's delete each find their
-    // permits by index, never by scanning.
+    // The cascades and per-enrollment permit expiry find permits by index, never scanning.
     index("mail_device_cert_permits_account_idx").on(t.clerkUserId),
     index("mail_device_cert_permits_device_idx")
       .on(t.deviceId)
       .where(sql`${t.deviceId} is not null`),
+    index("mail_device_cert_permits_enrollment_idx")
+      .on(t.enrollmentId)
+      .where(sql`${t.enrollmentId} is not null`),
     // The retention job: permits a day past expiry.
     index("mail_device_cert_permits_expires_idx").on(t.expiresAt),
   ],

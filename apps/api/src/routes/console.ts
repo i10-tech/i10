@@ -11,6 +11,7 @@ import { mountTeam } from "./console/team.js"
 import { mountTeamInboxes } from "./console/team-inboxes.js"
 import { mountMailboxStorage } from "./console/mailbox-storage.js"
 import { mountMailboxes } from "./console/mailboxes.js"
+import { mountMailDeviceEnrollments } from "./console/mail-device-enrollments.js"
 import { mountMailboxAdmin } from "./console/mailbox-admin.js"
 import { mountMailboxAliases } from "./console/mailbox-aliases.js"
 import { mountAudience } from "./console/audience.js"
@@ -80,7 +81,15 @@ const WITHOUT_WORKSPACE = new Set([
   "/workspaces/personal",
   // Deleting the account (#336): a person with no workspace can still leave.
   "/me/account",
+  // Apple OTA mail device enrollment (#383 PR 4): acts on the person's own
+  // mailbox (whose tenant_id may be null for an i10.tech mailbox).
+  "/mail-devices/enrollments",
 ])
+
+function isWorkspaceOptional(path: string): boolean {
+  const sub = path.replace(/^\/console/, "")
+  return WITHOUT_WORKSPACE.has(sub) || sub.startsWith("/mail-devices/enrollments/")
+}
 
 export function createConsole(deps?: ConsoleDeps) {
   const app = new Hono()
@@ -100,7 +109,7 @@ export function createConsole(deps?: ConsoleDeps) {
       sessions: d.sessions,
       tenants: d.tenants,
       ...(d.activeOrg ? { activeOrg: d.activeOrg } : {}),
-      workspaceOptional: WITHOUT_WORKSPACE.has(c.req.path.replace(/^\/console/, "")),
+      workspaceOptional: isWorkspaceOptional(c.req.path),
     })
     // ⚠ SET FOR EVERY ROUTE, READ BY ALMOST NONE. `requireFreshAuth` is applied
     // per route rather than here: a step-up prompt in front of "list my
@@ -259,6 +268,9 @@ export function createConsole(deps?: ConsoleDeps) {
   mountMailboxAdmin(app, d)
   mountMailboxAliases(app, d)
   mountMailboxes(app, d)
+  // ⚠ BEFORE any `/mail-devices/:id` route (PR 5 adds routes/console/mail-devices.ts),
+  // so `/mail-devices/enrollments` never matches `:id`.
+  mountMailDeviceEnrollments(app, d)
   mountSending(app, d)
   mountDomains(app, d)
   mountCredentials(app, d)

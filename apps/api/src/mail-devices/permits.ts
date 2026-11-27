@@ -10,27 +10,29 @@ import {
   isUniqueViolation,
   lockDevice,
   lockGateAccount,
+  mintRefusal,
   setDeviceKey,
   type LockedDevice,
   type MintGateAccount,
 } from "./store.js"
 
 /**
- * Certificate permits (#383 PR 3): the device CA's only way to issue
- * (docs/research/mail-device-binding.md section 11, "Certificate permits" and
- * "Revision 5 rules"). Every API read or write of
- * `authd.mail_device_cert_permits` goes through this module.
+ * Certificate permits (#383 PR 3, PR 4): the device CA's only way to issue
+ * (docs/research/mail-device-binding.md sections 11 & 12). Every API read or
+ * write of `authd.mail_device_cert_permits` goes through this module (plus
+ * `enrollments.ts` for SCEP permit creation and expiry).
  *
- * ⚠ LOCK ORDER, after PR 2's (store.ts): read the permit WITHOUT a lock, then
- * lock `authd.accounts` (`FOR NO KEY UPDATE`), then `authd.mail_devices`, then
- * the permit, and re-check it under the lock. A revocation takes accounts, then
- * devices, then (by cascade) the permit, so the two can never wait on each
- * other in a cycle. Nothing here calls the network, so no lock waits on one.
+ * ⚠ LOCK ORDER (Review 1 L3): read the permit WITHOUT a lock, then lock
+ * `authd.accounts` (`FOR NO KEY UPDATE`), then `authd.mail_device_enrollments`
+ * (for SCEP), then `authd.mail_devices` (for ACME), then the permit, and
+ * re-check it under the lock. A revocation takes accounts, then devices, then
+ * (by cascade) permits, so the two can never wait on each other in a cycle.
+ * Nothing here calls the network, so no lock waits on one.
  *
  * ⚠ EVERY RETRY RE-RUNS EVERY CHECK. step-ca retries a webhook once on a 5xx or
  * a transport error, with the same body. A retry is recognised by the key the
- * first call claimed, and is allowed only when the account, the device and the
- * permit would still pass the first call's checks.
+ * first call claimed, and is allowed only when the account, the enrollment or
+ * device, and the permit would still pass the first call's checks.
  *
  * ⚠ A REFUSAL IS AN ANSWER, NOT AN ERROR. Anything we do not recognise is
  * `allow: false`; only our own faults throw, and the listener answers those
@@ -63,24 +65,27 @@ export const ACME_PERMIT_LIFETIME_MS = 10 * 60 * 1000
 
 const refuse = (outcome: HookOutcome): HookDecision => ({ allow: false, outcome })
 
-interface PermitRow {
+export interface PermitRow {
   id: string
   clerk_user_id: string
   device_id: string | null
+  enrollment_id: string | null
   kind: string
   status: string
   serial: string
   key_sha256: Buffer | null
   transaction_id: string | null
+  issued_cert_sha256: Buffer | null
   /** `expires_at > now()`, by the server's clock. */
   live: boolean
 }
 
-const PERMIT_COLUMNS = sql`
-  id::text, clerk_user_id, device_id::text as device_id, kind, status, serial,
-  key_sha256, transaction_id, (expires_at > now()) as live`
+export const PERMIT_COLUMNS = sql`
+  id::text, clerk_user_id, device_id::text as device_id,
+  enrollment_id::text as enrollment_id, kind, status, serial,
+  key_sha256, transaction_id, issued_cert_sha256, (expires_at > now()) as live`
 
-type Tx = Pick<Database, "execute">
+export type PermitTx = Pick<Database, "execute">
 
 /** The handler's deadline passed before it could commit; nothing was written. */
 export class HookDeadlineExceeded extends Error {
@@ -90,7 +95,7 @@ export class HookDeadlineExceeded extends Error {
 }
 
 /** Milliseconds left before `deadline`, or a throw when none are. */
-function timeLeft(deadline: Date): number {
+export function timeLeft(deadline: Date): number {
   const left = deadline.getTime() - Date.now()
   if (left <= 0) throw new HookDeadlineExceeded()
   return left
@@ -108,18 +113,18 @@ function timeLeft(deadline: Date): number {
  * `set_config(..., true)` is transaction-local, so PgBouncer never carries it
  * to the next client.
  */
-function budgeted(tx: Tx, deadline: Date): Tx {
-  const execute = async (query: Parameters<Tx["execute"]>[0]) => {
+export function budgeted(tx: PermitTx, deadline: Date): PermitTx {
+  const execute = async (query: Parameters<PermitTx["execute"]>[0]) => {
     const ms = String(Math.max(1, Math.floor(timeLeft(deadline))))
     await tx.execute(sql`
       select set_config('lock_timeout', ${ms}, true),
              set_config('statement_timeout', ${ms}, true)`)
     return tx.execute(query)
   }
-  return { execute } as unknown as Tx
+  return { execute } as unknown as PermitTx
 }
 
-async function lockPermit(tx: Tx, id: string): Promise<PermitRow | null> {
+export async function lockPermit(tx: PermitTx, id: string): Promise<PermitRow | null> {
   const [row] = (await tx.execute(sql`
     select ${PERMIT_COLUMNS} from authd.mail_device_cert_permits
      where id = ${id}
@@ -127,28 +132,37 @@ async function lockPermit(tx: Tx, id: string): Promise<PermitRow | null> {
   return row ?? null
 }
 
-const sameBytes = (a: Buffer | null, b: Buffer) =>
+export const sameBytes = (a: Buffer | null, b: Buffer) =>
   a !== null && a.length === b.length && timingSafeEqual(a, b)
+
+/**
+ * Runs one transaction inside `deadline` (see `budgeted`), checking the clock
+ * again before commit so a late handler rolls back instead of committing after
+ * its caller was answered. Reused by `decide` and `enrollments.ts`.
+ */
+export async function runWithDeadline<T>(
+  db: Pick<Database, "transaction">,
+  deadline: Date,
+  run: (tx: PermitTx) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    const result = await run(budgeted(tx, deadline))
+    timeLeft(deadline)
+    return result
+  })
+}
 
 /**
  * Runs one handler transaction inside `deadline` (see `budgeted`); a unique
  * violation is a refusal, never a 500.
- *
- * ⚠ THE CLOCK IS READ AGAIN BEFORE THE COMMIT. A last statement can finish
- * inside its limit and still leave the deadline behind it; throwing here
- * rolls the transaction back, so a late handler writes nothing.
  */
-async function decide(
+export async function decide(
   db: Pick<Database, "transaction">,
   deadline: Date,
-  run: (tx: Tx) => Promise<HookDecision>,
+  run: (tx: PermitTx) => Promise<HookDecision>,
 ): Promise<HookDecision> {
   try {
-    return await db.transaction(async (tx) => {
-      const decision = await run(budgeted(tx, deadline))
-      timeLeft(deadline)
-      return decision
-    })
+    return await runWithDeadline(db, deadline, run)
   } catch (error) {
     if (isUniqueViolation(error)) return refuse("duplicate")
     throw error
@@ -264,56 +278,62 @@ export async function authorizeAcme(
 }
 
 /**
- * Creates an ACME permit for a Mac (the operator script until PR 4) and returns
- * its nonce, once. Only its SHA-256 is stored.
+ * Creates an ACME permit for a Mac inside a caller-owned transaction (#383 PR 4)
+ * and returns its nonce, once. Only its SHA-256 is stored.
  *
- * Locks the account, then the device, and only then expires the serial's open
- * permits that have run out, and this person's own open one, so a retried
- * enrollment is never blocked for ten minutes. Another person's live permit for
- * the same serial is refused (`permit_conflict`), never replaced: one Mac
- * cannot be in two people's enrollments at once.
+ * Locks the account, then the device, and only then expires this person's own
+ * open ACME permit for the serial, so a retried enrollment is never blocked for
+ * ten minutes. Another person's live permit for the same serial is allowed
+ * (Review 1 M6: the unique index is per `(serial, clerk_user_id)` and the ACME
+ * hook looks up by nonce).
+ */
+export async function createAcmePermitInTx(
+  tx: PermitTx,
+  input: { deviceId: string },
+): Promise<{ permitId: string; nonce: string; expiresAt: Date }> {
+  const nonce = randomBytes(16).toString("base64url")
+  const nonceSha256 = sha256(nonce)
+  const owner = await deviceOwner(tx, input.deviceId)
+  if (!owner) {
+    throw new MailDeviceError("device_not_found", `No mail device ${input.deviceId}.`)
+  }
+  const [account] = await lockGateAccount(tx, owner)
+  const device = await lockDevice(tx, input.deviceId)
+  if (!device?.serial) {
+    throw new MailDeviceError(
+      "device_serial_missing",
+      "An ACME permit needs the device's serial (mint with --serial).",
+    )
+  }
+  const refusal = bindGate(account, device, { key: null, serial: device.serial })
+  if (refusal) throw refusal
+
+  await tx.execute(sql`
+    update authd.mail_device_cert_permits set status = 'expired', updated_at = now()
+     where kind = 'acme' and status = 'open'
+       and serial = ${device.serial} and clerk_user_id = ${owner}`)
+  const [row] = (await tx.execute(sql`
+    insert into authd.mail_device_cert_permits
+           (clerk_user_id, device_id, kind, serial, nonce_sha256, expires_at)
+    values (${owner}, ${device.id}, 'acme', ${device.serial}, ${nonceSha256},
+            now() + make_interval(secs => ${ACME_PERMIT_LIFETIME_MS / 1000}))
+    returning id::text, expires_at`)) as unknown as {
+    id: string
+    expires_at: Date
+  }[]
+  return { permitId: row!.id, nonce, expiresAt: new Date(row!.expires_at) }
+}
+
+/**
+ * Creates an ACME permit for a Mac (the operator script until PR 4) and returns
+ * its nonce, once. Thin wrapper over `createAcmePermitInTx`.
  */
 export async function createAcmePermit(
   db: Pick<Database, "transaction">,
   input: { deviceId: string },
 ): Promise<{ permitId: string; nonce: string; expiresAt: Date }> {
-  const nonce = randomBytes(16).toString("base64url")
-  const nonceSha256 = sha256(nonce)
   try {
-    return await db.transaction(async (tx) => {
-      const owner = await deviceOwner(tx, input.deviceId)
-      if (!owner) {
-        throw new MailDeviceError(
-          "device_not_found",
-          `No mail device ${input.deviceId}.`,
-        )
-      }
-      const [account] = await lockGateAccount(tx, owner)
-      const device = await lockDevice(tx, input.deviceId)
-      if (!device?.serial) {
-        throw new MailDeviceError(
-          "device_serial_missing",
-          "An ACME permit needs the device's serial (mint with --serial).",
-        )
-      }
-      const refusal = bindGate(account, device, { key: null, serial: device.serial })
-      if (refusal) throw refusal
-
-      await tx.execute(sql`
-        update authd.mail_device_cert_permits set status = 'expired', updated_at = now()
-         where kind = 'acme' and status = 'open' and serial = ${device.serial}
-           and (expires_at <= now() or clerk_user_id = ${owner})`)
-      const [row] = (await tx.execute(sql`
-        insert into authd.mail_device_cert_permits
-               (clerk_user_id, device_id, kind, serial, nonce_sha256, expires_at)
-        values (${owner}, ${device.id}, 'acme', ${device.serial}, ${nonceSha256},
-                now() + make_interval(secs => ${ACME_PERMIT_LIFETIME_MS / 1000}))
-        returning id::text, expires_at`)) as unknown as {
-        id: string
-        expires_at: Date
-      }[]
-      return { permitId: row!.id, nonce, expiresAt: new Date(row!.expires_at) }
-    })
+    return await db.transaction((tx) => createAcmePermitInTx(tx, input))
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new MailDeviceError(
@@ -339,7 +359,12 @@ export interface ScepChallengeRequest {
 }
 
 function scepChallengeMode(permit: PermitRow, req: ScepChallengeRequest) {
-  if (permit.kind !== "scep" || !permit.live || permit.serial !== req.commonName) {
+  if (
+    permit.kind !== "scep" ||
+    !permit.enrollment_id ||
+    !permit.live ||
+    permit.serial !== req.commonName
+  ) {
     return null
   }
   if (permit.status === "open") return "first" as const
@@ -353,25 +378,110 @@ function scepChallengeMode(permit: PermitRow, req: ScepChallengeRequest) {
   return null
 }
 
-/** Locks the account a SCEP permit names (it has no device), then the permit. */
-async function lockScepPermit(tx: Tx, seen: PermitRow) {
+interface EnrollmentGateRow {
+  id: string
+  clerk_user_id: string
+  email: string
+  tenant_id: string | null
+  expected_epoch: string | number
+  status: string
+  live: boolean
+}
+
+/**
+ * Locks in global order (Review 1 L3): `authd.accounts`, then
+ * `authd.mail_device_enrollments`, then `authd.mail_device_cert_permits`.
+ *
+ * Refuses unless the enrollment is `attested` and unexpired, and computes
+ * `mintRefusal` plus the account email check against the enrollment's
+ * workspace and `expected_epoch`. Callers check the permit mode first and then
+ * call `refuseScepEnrollment` when `refusal` is non-null, so a stale/mismatched
+ * hook never marks a live enrollment refused.
+ */
+async function lockScepPermit(tx: PermitTx, seen: PermitRow) {
   const [account] = await lockGateAccount(tx, seen.clerk_user_id)
+  const [enrollment] = seen.enrollment_id
+    ? ((await tx.execute(sql`
+        select id::text, clerk_user_id, email, tenant_id::text as tenant_id,
+               expected_epoch, status, (expires_at > now()) as live
+          from authd.mail_device_enrollments
+         where id = ${seen.enrollment_id}
+           for no key update`)) as unknown as EnrollmentGateRow[])
+    : []
   const permit = await lockPermit(tx, seen.id)
-  // ⚠ THE WORKSPACE CHECK IS A NO-OP HERE: it compares the account with
-  // itself, because a SCEP permit has no tenant until PR 4 stores one. The
-  // rest of the gate (active, every hold) is what this call is for.
-  const refusal = bindRefusal(account, account?.tenant_id ?? null)
-  return {
-    permit: permit?.clerk_user_id === seen.clerk_user_id ? permit : null,
-    refusal,
+  const matchedPermit =
+    permit?.clerk_user_id === seen.clerk_user_id &&
+    permit.enrollment_id === seen.enrollment_id
+      ? permit
+      : null
+  if (
+    !matchedPermit ||
+    !enrollment ||
+    enrollment.clerk_user_id !== matchedPermit.clerk_user_id ||
+    enrollment.status !== "attested" ||
+    !enrollment.live
+  ) {
+    return { permit: null, enrollmentId: null, refusal: null }
   }
+
+  let refusal = mintRefusal(account, {
+    tenantId: enrollment.tenant_id,
+    expectedEpoch: Number(enrollment.expected_epoch),
+  })
+  if (!refusal && account!.email.toLowerCase() !== enrollment.email) {
+    refusal = new MailDeviceError("email_mismatch", "Account email changed.")
+  }
+  return { permit: matchedPermit, enrollmentId: enrollment.id, refusal }
+}
+
+const ENROLLMENT_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Builds the single-statement UPDATE that expires every live permit belonging
+ * to one or more cancelled enrollments, binding the validated UUIDs as one
+ * `uuid[]` parameter (never interpolating a JS array into `sql`). Exported so
+ * tests can pin the rendered SQL with one-element and two-element cases.
+ */
+export function expirePermitsForEnrollmentsSql(enrollmentIds: readonly string[]) {
+  for (const id of enrollmentIds) {
+    if (!ENROLLMENT_UUID.test(id)) {
+      throw new Error("expirePermitsForEnrollmentsSql: invalid enrollment id")
+    }
+  }
+  const literal = `{${enrollmentIds.join(",")}}`
+  return sql`
+    update authd.mail_device_cert_permits
+       set status = 'expired', updated_at = now()
+     where enrollment_id = any(${literal}::uuid[])
+       and status in ('open', 'challenged', 'authorized', 'notified')`
+}
+
+/**
+ * Marks a live `attested` enrollment `refused` with `code` and expires its
+ * live SCEP permits in the same transaction (Review 1 smaller rules: SCEP hook
+ * refusals are shown on the console right away instead of waiting for expiry).
+ * Called only while holding `accounts -> enrollments -> permit` locks.
+ */
+async function refuseScepEnrollment(
+  tx: PermitTx,
+  enrollmentId: string,
+  code: MailDeviceError["code"],
+): Promise<HookDecision> {
+  await tx.execute(sql`
+    update authd.mail_device_enrollments
+       set status = 'refused', refusal = ${code}, updated_at = now()
+     where id = ${enrollmentId} and status = 'attested'`)
+  await tx.execute(expirePermitsForEnrollmentsSql([enrollmentId]))
+  return refuse(`refused_${code}`)
 }
 
 /**
  * SCEP `SCEPCHALLENGE`: an open permit found by the challenge's hash, for the
- * CSR's CN, whose account passes the gate, becomes `challenged` with the
- * transaction id and the CSR key. A transaction id another active enrollment
- * holds is a unique violation, answered `allow: false`.
+ * CSR's CN, whose enrollment is `attested` and unexpired and whose account passes
+ * `mintRefusal`, becomes `challenged` with the transaction id and the CSR key.
+ * A transaction id another active enrollment holds is a unique violation,
+ * answered `allow: false`.
  */
 export async function challengeScep(
   db: Pick<Database, "transaction">,
@@ -384,11 +494,11 @@ export async function challengeScep(
        where challenge_hash = ${req.challengeSha256} and kind = 'scep'`)) as unknown as PermitRow[]
     if (!seen || !scepChallengeMode(seen, req)) return refuse("no_permit")
 
-    // Decided on the locked row, as `authorizeAcme` is.
-    const { permit, refusal } = await lockScepPermit(tx, seen)
+    // Decided on the locked rows, as `authorizeAcme` is.
+    const { permit, enrollmentId, refusal } = await lockScepPermit(tx, seen)
     const mode = permit ? scepChallengeMode(permit, req) : null
-    if (!permit || !mode) return refuse("permit_changed")
-    if (refusal) return refuse(`refused_${refusal.code}`)
+    if (!permit || !enrollmentId || !mode) return refuse("permit_changed")
+    if (refusal) return refuseScepEnrollment(tx, enrollmentId, refusal.code)
     if (mode === "retry") return { allow: true, outcome: "allowed_retry" }
 
     await tx.execute(sql`
@@ -407,7 +517,12 @@ export interface ScepAuthorizeRequest {
 }
 
 function scepAuthorizeMode(permit: PermitRow, req: ScepAuthorizeRequest) {
-  if (permit.kind !== "scep" || !permit.live || permit.serial !== req.commonName) {
+  if (
+    permit.kind !== "scep" ||
+    !permit.enrollment_id ||
+    !permit.live ||
+    permit.serial !== req.commonName
+  ) {
     return null
   }
   if (permit.status === "challenged") return "first" as const
@@ -430,10 +545,10 @@ export async function authorizeScep(
        where key_sha256 = ${req.keySha256} and kind = 'scep'`)) as unknown as PermitRow[]
     if (!seen || !scepAuthorizeMode(seen, req)) return refuse("no_permit")
 
-    const { permit, refusal } = await lockScepPermit(tx, seen)
+    const { permit, enrollmentId, refusal } = await lockScepPermit(tx, seen)
     const mode = permit ? scepAuthorizeMode(permit, req) : null
-    if (!permit || !mode) return refuse("permit_changed")
-    if (refusal) return refuse(`refused_${refusal.code}`)
+    if (!permit || !enrollmentId || !mode) return refuse("permit_changed")
+    if (refusal) return refuseScepEnrollment(tx, enrollmentId, refusal.code)
     if (mode === "retry") return { allow: true, outcome: "allowed_retry" }
 
     await tx.execute(sql`
@@ -443,11 +558,34 @@ export async function authorizeScep(
   })
 }
 
+function scepNotifyMode(
+  permit: PermitRow,
+  req: { transactionId: string; keySha256: Buffer; certSha256: Buffer },
+) {
+  if (
+    permit.kind !== "scep" ||
+    !permit.enrollment_id ||
+    !permit.live ||
+    permit.transaction_id !== req.transactionId ||
+    !sameBytes(permit.key_sha256, req.keySha256)
+  ) {
+    return null
+  }
+  if (permit.status === "authorized") return "first" as const
+  if (
+    permit.status === "notified" &&
+    sameBytes(permit.issued_cert_sha256, req.certSha256)
+  ) {
+    return "retry" as const
+  }
+  return null
+}
+
 /**
  * SCEP `NOTIFYING` (success): records the issued certificate's hash on the
- * authorized permit with this transaction id and key. One indexed UPDATE that
- * locks only the permit, so it cannot join a cycle. step-ca discards the answer
- * either way (`scep/api/api.go`), so this is a record, not a gate.
+ * authorized permit with this transaction id and key, gating on the permit's
+ * enrollment (account, enrollment, permit lock order) on the first call and on
+ * every retry.
  */
 export async function notifyScep(
   db: Pick<Database, "transaction">,
@@ -455,20 +593,22 @@ export async function notifyScep(
   deadline: Date,
 ): Promise<HookDecision> {
   return decide(db, deadline, async (tx) => {
-    const updated = (await tx.execute(sql`
+    const [seen] = (await tx.execute(sql`
+      select ${PERMIT_COLUMNS} from authd.mail_device_cert_permits
+       where key_sha256 = ${req.keySha256} and kind = 'scep'`)) as unknown as PermitRow[]
+    if (!seen || !scepNotifyMode(seen, req)) return refuse("no_permit")
+
+    const { permit, enrollmentId, refusal } = await lockScepPermit(tx, seen)
+    const mode = permit ? scepNotifyMode(permit, req) : null
+    if (!permit || !enrollmentId || !mode) return refuse("permit_changed")
+    if (refusal) return refuseScepEnrollment(tx, enrollmentId, refusal.code)
+    if (mode === "retry") return { allow: true, outcome: "allowed_retry" }
+
+    await tx.execute(sql`
       update authd.mail_device_cert_permits
          set status = 'notified', issued_cert_sha256 = ${req.certSha256}, updated_at = now()
-       where key_sha256 = ${req.keySha256} and transaction_id = ${req.transactionId}
-         and kind = 'scep' and status = 'authorized' and expires_at > now()
-      returning id`)) as unknown as { id: string }[]
-    if (updated.length > 0) return { allow: true, outcome: "notified" }
-    // step-ca's retry after we committed: the same certificate, already recorded.
-    const [again] = (await tx.execute(sql`
-      select 1 as one from authd.mail_device_cert_permits
-       where key_sha256 = ${req.keySha256} and transaction_id = ${req.transactionId}
-         and kind = 'scep' and status = 'notified'
-         and issued_cert_sha256 = ${req.certSha256}`)) as unknown as unknown[]
-    return again ? { allow: true, outcome: "allowed_retry" } : refuse("no_permit")
+       where id = ${permit.id} and status = 'authorized'`)
+    return { allow: true, outcome: "notified" }
   })
 }
 

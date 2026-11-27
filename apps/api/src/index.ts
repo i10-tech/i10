@@ -13,8 +13,17 @@ import { tenantLifecycle } from "./tenants/lifecycle.js"
 import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { keyLookup, keyStore } from "./auth/store.js"
+import { createEnrolldHandlers } from "./ca-hooks/enrolld.js"
 import { createHookHandlers } from "./ca-hooks/handlers.js"
 import { startCaHooksListener } from "./ca-hooks/listener.js"
+import { createDeviceCaBundleLoader } from "./mail-devices/cms.js"
+import { parseMailDeviceCodeKeys } from "./mail-devices/code.js"
+import {
+  cancelEnrollment,
+  createEnrollment,
+  getEnrollment,
+} from "./mail-devices/enrollments.js"
+import { mailDeviceEnrolledNotifier } from "./mail-devices/notice.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { publishRoutingSettings } from "./domains/routing-settings.js"
 import { loadEnv } from "./env.js"
@@ -934,6 +943,13 @@ const systemSender = await systemSenderFor({
  * error rather than swallowed.
  */
 const consoleUrl = env.CONSOLE_ORIGINS[0]
+const mailDeviceCodeKeys = env.MAIL_DEVICE_CODE_KEYS
+  ? parseMailDeviceCodeKeys(env.MAIL_DEVICE_CODE_KEYS)
+  : null
+const mailDeviceEnrolledNotice =
+  systemSender && consoleUrl
+    ? mailDeviceEnrolledNotifier({ sender: systemSender, consoleUrl })
+    : undefined
 const transferNotice =
   systemSender && consoleUrl
     ? {
@@ -2698,6 +2714,15 @@ const app = createApp({
       pool: async (tenantId) => (await mailboxStorage.overview(tenantId)).pool,
       identity,
     }),
+    mailDeviceEnrollments: {
+      create: ({ clerkUserId }) =>
+        createEnrollment(db, {
+          clerkUserId,
+          hasCodeKeys: mailDeviceCodeKeys !== null,
+        }),
+      get: (input) => getEnrollment(db, input),
+      cancel: (input) => cancelEnrollment(db, input),
+    },
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
@@ -3015,8 +3040,10 @@ const app = createApp({
 const server = Bun.serve({ fetch: app.fetch, port: env.PORT })
 log.info({ port: server.port, env: env.NODE_ENV }, "i10 api listening")
 
-// The device CA's webhooks (#383 PR 3), on their own listener and their own
-// `fetch`: null (and logged once) until configured and its certificate mounted.
+// The device CA's webhooks (#383 PR 3) and internal enrolld branch (#383 PR 4),
+// on their own listener and their own `fetch`: null (and logged once) until
+// configured and its certificate mounted. When `ENROLLD_TOKEN_HASHES` is unset,
+// the listener still starts for CA hooks and `/enrolld/*` answers 404.
 const caHooks = startCaHooksListener(
   {
     port: env.CA_HOOKS_PORT,
@@ -3025,9 +3052,23 @@ const caHooks = startCaHooksListener(
     tokenHashes: env.CA_HOOK_TOKEN_HASHES,
     webhookIds: env.CA_HOOK_WEBHOOK_IDS,
     intermediateNotAfter: env.CA_INTERMEDIATE_NOT_AFTER,
+    enrolldTokenHashes: env.ENROLLD_TOKEN_HASHES,
   },
   (intermediateNotAfter) => createHookHandlers({ db, intermediateNotAfter }),
   log,
+  () =>
+    createEnrolldHandlers({
+      db,
+      keys: mailDeviceCodeKeys,
+      deviceCaBundle: createDeviceCaBundleLoader(env.DEVICE_CA_BUNDLE_FILE),
+      imapHost: env.MAIL_HOSTNAME,
+      imapPort: 993,
+      smtpHost: env.MAIL_HOSTNAME,
+      smtpPort: 465,
+      organization: "i10",
+      notifyEnrolled: mailDeviceEnrolledNotice,
+      log,
+    }),
 )
 
 // Kubernetes sends SIGTERM and then waits terminationGracePeriodSeconds before

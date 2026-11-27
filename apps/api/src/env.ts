@@ -872,6 +872,30 @@ const schema = z.object({
         return z.NEVER
       }
     }),
+  /**
+   * SHA-256 hex of `cmd/enrolld`'s bearer token for `/enrolld/*` on `:3443`,
+   * comma-separated for rotation (#383 PR 4). Optional on its own: when unset,
+   * the listener still starts and serves the CA hooks while `/enrolld/*` answers
+   * 404.
+   */
+  ENROLLD_TOKEN_HASHES: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      const trimmed = value?.trim()
+      if (!trimmed) return undefined
+      try {
+        return parseTokenHashes(trimmed)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message })
+        return z.NEVER
+      }
+    }),
+  /**
+   * Mounted public trust bundle (`i10-device-ca-trust` `bundle.pem`, root and
+   * intermediate) used to verify phase 4 SCEP signers in `/enrolld/finish`.
+   */
+  DEVICE_CA_BUNDLE_FILE: z.string().min(1).default("/etc/i10/device-ca/bundle.pem"),
 
   /**
    * Webhook endpoints being POSTed to at once on the ordered lane, per worker

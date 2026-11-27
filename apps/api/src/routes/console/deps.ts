@@ -48,6 +48,17 @@ import type { ConsoleMailboxes } from "../../mailboxes/console.js"
 import type { MailboxAdmin } from "../../mailboxes/creation-mode.js"
 import type { MailboxAliases } from "../../mailboxes/aliases.js"
 import type { MailboxAdminLifecycle } from "../../mailboxes/lifecycle.js"
+import type {
+  CancelEnrollmentOutcome,
+  CreateEnrollmentResult,
+  EnrollmentView,
+} from "../../mail-devices/enrollments.js"
+
+export interface MailDeviceEnrollmentsDeps {
+  create(input: { clerkUserId: string }): Promise<CreateEnrollmentResult>
+  get(input: { id: string; clerkUserId: string }): Promise<EnrollmentView | null>
+  cancel(input: { id: string; clerkUserId: string }): Promise<CancelEnrollmentOutcome>
+}
 
 export interface ConsoleDeps extends TenantAuthDeps {
   /**
@@ -288,6 +299,12 @@ export interface ConsoleDeps extends TenantAuthDeps {
    * routes answer 501.
    */
   mailboxAliases?: MailboxAliases
+  /**
+   * Apple over-the-air mail device enrollment sessions (#383 PR 4): creating,
+   * polling and cancelling the signed-in person's own enrollment. Optional;
+   * without it the routes answer 501.
+   */
+  mailDeviceEnrollments?: MailDeviceEnrollmentsDeps
   /**
    * The minute between two codes the console sends (2026-10-12). Optional;
    * without it the route answers 501 and the buttons keep a local timer.

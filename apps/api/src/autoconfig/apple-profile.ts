@@ -104,7 +104,7 @@ export function buildMobileConfig(account: MailAccount): string {
     // One email, one password - the rule the whole identity bridge exists to
     // hold. Telling Apple the two credentials are the same is what stops it
     // prompting twice and inviting the user to invent a second one.
-    OutgoingPasswordSameAsIncoming: true,
+    OutgoingPasswordSameAsIncomingPassword: true,
   }
 
   const profile: PlistDict = {
