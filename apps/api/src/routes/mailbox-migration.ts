@@ -20,7 +20,11 @@ import { LIMITS } from "../mailboxes/archive.js"
 import { importKey } from "../mailboxes/migration.js"
 import { EXPORT_KEY, openStream, plainLength } from "../mailboxes/sealed-stream.js"
 import type { MailboxJobData } from "../queue/mailbox-queue.js"
-import { freshAuthRefusal, requireUser } from "../middleware/session.js"
+import {
+  cookieOnlyRefusal,
+  freshAuthRefusal,
+  requireUser,
+} from "../middleware/session.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 
 /**
@@ -308,6 +312,9 @@ mailboxMigration.openapi(download, async (c) => {
   } else {
     const verifier = c.get("sessionAuth")
     if (!verifier) return c.json(notWired, 501)
+    // Without a token the session must ride in the header, as on every session route.
+    const cookieOnly = cookieOnlyRefusal(c)
+    if (cookieOnly) return refusal(cookieOnly)
     const session = await verifier.verify(c.req.raw)
     if (session.status !== "signed-in") {
       return c.json(

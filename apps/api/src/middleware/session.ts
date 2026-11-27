@@ -75,6 +75,11 @@ export function clerkSessions(
 
   return {
     async verify(request) {
+      // ⚠ NO BEARER HEADER IS SIGNED OUT, before Clerk is asked: Clerk would
+      // read the `__session` cookie instead, which is the CSRF `cookieOnlyRefusal`
+      // exists for. Checked here too so a route that calls the verifier
+      // directly, outside `requireUser` and `requireTenant`, is covered.
+      if (!hasBearer(request)) return { status: "signed-out" }
       try {
         const state = await clerk.authenticateRequest(request, { authorizedParties })
         if (!state.isAuthenticated) return { status: "signed-out" }
@@ -258,6 +263,11 @@ export function gateUnavailable(c: Context) {
   )
 }
 
+/** Whether the request sends its session as `Authorization: Bearer`, not a cookie alone. */
+export function hasBearer(request: Request): boolean {
+  return request.headers.get("Authorization")?.startsWith("Bearer ") === true
+}
+
 /**
  * The refusal for a request that carries its session in a cookie alone, or
  * null when it sends `Authorization: Bearer`. `requireTenant` and
@@ -284,7 +294,7 @@ export function gateUnavailable(c: Context) {
  * unauthenticated, which is what this says.
  */
 export function cookieOnlyRefusal(c: Context): Response | null {
-  if (c.req.header("Authorization")?.startsWith("Bearer ")) return null
+  if (hasBearer(c.req.raw)) return null
   return c.json(
     {
       statusCode: 401,
