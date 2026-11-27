@@ -197,7 +197,10 @@ spec:
         - { protocol: TCP, port: 5432 }
 ---
 # The device CA hooks listener (#383 PR 3): the step-ca pod, whose relay
-# sidecar calls it, and nobody else. api-internal-clients above opens 3001 only.
+# sidecar calls it, and enrolld (#383 PR 4, enrolld.yaml), which calls
+# `/enrolld/*` on it, and nobody else. api-internal-clients above opens 3001 only.
+# Each caller has its own bearer token, and neither token opens the other's
+# paths (the API refuses a token in both lists at startup).
 #
 # ⚠ ADDITIVE, LIKE EVERY RULE HERE. Traefik's and the CNPG operator's namespaces
 # reach every port of every pod in i10-prod (psl repo), so they reach 3443 too.
@@ -227,5 +230,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: i10-device-ca
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-enrolld
       ports:
         - { protocol: TCP, port: 3443 }

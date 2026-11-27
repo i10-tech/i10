@@ -37,6 +37,13 @@ trust bundle mount (`stalwart/node/statefulset.yaml`), and the DNS records
 - **SCEP encrypts its replies with AES-256-CBC** (`encryptionAlgorithmIdentifier`
   2). step-ca's default is DES-CBC. Apple's SCEP client supports AES; PR 4's
   real-device enrollment is the proof.
+- **GetCACert answers the decrypter certificate alone** (`excludeIntermediate`
+  on `apple-scep`, `includeRoot` off). ⚠ Do not add the intermediate or the
+  root back. iOS refuses a GetCACert answer in which it cannot pick a CA, and
+  it checks the CertRep against the certificate marked `digitalSignature`,
+  while step-ca 0.30.2 always signs the CertRep with the decrypter. The
+  decrypter alone was the only answer a real iPhone accepted (device probe,
+  2026-11-27, `docs/research/mail-device-binding.md` section 12).
 - **The SCEP challenge is the webhook's.** With a `SCEPCHALLENGE` webhook
   configured, step-ca asks it and never compares the static `challenge`. ⚠ Do
   not remove that webhook: without it, step-ca compares the challenge with an

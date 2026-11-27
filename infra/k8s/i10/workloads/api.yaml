@@ -207,13 +207,15 @@ spec:
             # Doppler's `api` config, and the API ignores the URL without it.
             - name: TEMPLATE_RENDERER_URL
               value: http://i10-template-renderer.i10-prod.svc.cluster.local
-            # The device CA's hooks listener. These are the defaults, written
-            # out so the port, the Service and the mount below are read in one
-            # place. Its three secrets (CA_HOOK_TOKEN_HASHES,
-            # CA_HOOK_WEBHOOK_IDS, CA_INTERMEDIATE_NOT_AFTER) come from i10-api.
+            # The device CA's hooks listener and internal enrolld branch (#383 PR 3,
+            # PR 4). These are the defaults, written out so the port, the Service
+            # and the mounts below are read in one place. The secrets
+            # (CA_HOOK_TOKEN_HASHES, CA_HOOK_WEBHOOK_IDS, CA_INTERMEDIATE_NOT_AFTER,
+            # ENROLLD_TOKEN_HASHES) come from i10-api.
             - { name: CA_HOOKS_PORT, value: "3443" }
             - { name: CA_HOOKS_TLS_CERT_FILE, value: /etc/i10/ca-hooks/tls.crt }
             - { name: CA_HOOKS_TLS_KEY_FILE, value: /etc/i10/ca-hooks/tls.key }
+            - { name: DEVICE_CA_BUNDLE_FILE, value: /etc/i10/device-ca/bundle.pem }
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 512Mi }
@@ -234,6 +236,7 @@ spec:
             periodSeconds: 30
           volumeMounts:
             - { name: ca-hooks-tls, mountPath: /etc/i10/ca-hooks, readOnly: true }
+            - { name: device-ca-trust, mountPath: /etc/i10/device-ca, readOnly: true }
       volumes:
         # ⚠ OPTIONAL, SO ITS ABSENCE TURNS THE LISTENER OFF RATHER THAN THE POD.
         # Until cert-manager has issued `i10-api-ca-hooks-tls`
@@ -250,6 +253,15 @@ spec:
             items:
               - { key: tls.crt, path: tls.crt }
               - { key: tls.key, path: tls.key }
+        # Public device CA root + intermediate bundle for `/enrolld/finish`
+        # phase 4 verification (#383 PR 4). Optional so the pod still starts
+        # when the device CA ConfigMap is not deployed yet.
+        - name: device-ca-trust
+          configMap:
+            name: i10-device-ca-trust
+            optional: true
+            items:
+              - { key: bundle.pem, path: bundle.pem }
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
