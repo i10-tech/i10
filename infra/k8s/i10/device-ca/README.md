@@ -109,6 +109,11 @@ CA Issuer `i10-hooks-tls` signs two leaves:
 | `i10-cahookrelay-tls`  | `localhost`, `IP:127.0.0.1`     | 90 days  | step-ca, through `SSL_CERT_FILE`                                              |
 | `i10-api-ca-hooks-tls` | `i10-api-ca-hooks.i10-prod.svc` | 10 years | the relay, through `CAHOOKRELAY_UPSTREAM_CA_FILE` (its own Secret's `ca.crt`) |
 
+enrolld (`workloads/enrolld.yaml`) also trusts this CA for the API's
+certificate, through `ENROLLD_API_CA_FILE`: the `ca.crt` of
+`i10-cahookrelay-tls`, mounted alone. It reads it once at start, so restart
+enrolld if the root is ever re-keyed.
+
 ⚠ **`SSL_CERT_DIR` is set as well as `SSL_CERT_FILE`.** Go's root loader reads
 `SSL_CERT_FILE` instead of the default bundle file, but it still reads every
 file in `/etc/ssl/certs` unless `SSL_CERT_DIR` names other directories
@@ -122,15 +127,19 @@ year 7.
 
 ## Who trusts the device CA
 
-Only Traefik and the mail front, from `trust.yaml`:
+Traefik, the mail front, the API and enrolld, from `trust.yaml`:
 
 - `ca.crt` (the root): Traefik's `ServersTransport` verifies step-ca's own TLS
   certificate against it for `serverName: i10-device-ca.i10-prod.svc`. step-ca
   cuts that certificate from the intermediate for `ca.json`'s `dnsNames`, the
   two names the intermediate is constrained to.
 - `bundle.pem` (root and intermediate): the front's `MAILFRONT_DEVICE_CA_BUNDLE`
-  on the edge StatefulSet only. 993's certificate request lists these subjects,
+  on the edge StatefulSet. 993's certificate request lists these subjects,
   and a Mac picks an identity whose issuer is listed (the intermediate).
+- `bundle.pem` again, for phase 4 of Apple's enrollment (#383 PR 4): the API's
+  `DEVICE_CA_BUNDLE_FILE` (re-read when the file changes) and enrolld's
+  `ENROLLD_DEVICE_CA_BUNDLE` (re-read every 30 seconds). Both mount it without
+  `subPath`, so an edit reaches them without a restart.
 
 ## The public surface
 

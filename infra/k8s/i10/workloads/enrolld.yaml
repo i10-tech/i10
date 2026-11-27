@@ -99,7 +99,12 @@ spec:
             # Above the API's own 4-second deadline per call, so the API, not
             # enrolld, decides when a call has taken too long.
             - { name: ENROLLD_API_TIMEOUT, value: "10s" }
-            - { name: ENROLLD_MAX_CONCURRENT, value: "16" }
+            # ⚠ 4 PER POD, 8 IN ALL, UNDER THE API'S 10 DATABASE CONNECTIONS. Every
+            # enrollment call is a transaction in the API's one pool (max 10,
+            # apps/api/src/db/client.ts), which the console and the CA hooks
+            # share; at 16 per pod, unauthenticated phase 1 GETs could hold all of
+            # it. A device makes three calls in a row, so 8 at once is ample.
+            - { name: ENROLLD_MAX_CONCURRENT, value: "4" }
             - { name: ENROLLD_LOG_LEVEL, value: "info" }
           securityContext:
             allowPrivilegeEscalation: false
@@ -208,6 +213,37 @@ spec:
       ipStrategy:
         ipv6Subnet: 64
 ---
+# ⚠ FOR THE WHOLE HOST, WHAT BOUNDS THE LOAD ON THE API. ca.i10.tech is
+# DNS-only, so no Cloudflare limit sits in front, and per-address limits alone
+# let many addresses spend the API's connections on made-up phase 1 tokens.
+# 60 a minute is far above any real enrollment rate.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: i10-enrolld-ratelimit-host
+  namespace: i10-prod
+spec:
+  rateLimit:
+    average: 60
+    period: 1m
+    burst: 30
+    sourceCriterion:
+      requestHost: true
+---
+# ⚠ ITS OWN, NOT THE DEVICE CA'S HOST-WIDE 16, and it runs AFTER the body
+# buffer below, so a client sending a body slowly holds Traefik's buffer, never
+# one of these 8 slots. 8 matches enrolld's own total (2 pods x 4).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: i10-enrolld-inflight-host
+  namespace: i10-prod
+spec:
+  inFlightReq:
+    amount: 8
+    sourceCriterion:
+      requestHost: true
+---
 # ⚠ BUFFERED, SO A SLOW BODY STALLS TRAEFIK, NOT enrolld. A phase 2 or phase 4
 # request is a few kilobytes; enrolld refuses anything over 64 KiB anyway.
 apiVersion: traefik.io/v1alpha1
@@ -238,7 +274,9 @@ spec:
       middlewares:
         - name: i10-enrolld-inflight-client
         - name: i10-enrolld-ratelimit-client
+        - name: i10-enrolld-ratelimit-host
         - name: i10-enrolld-body-limit
+        - name: i10-enrolld-inflight-host
       services:
         - name: i10-enrolld
           port: 80
