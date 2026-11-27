@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from "hono"
 import { sql } from "drizzle-orm"
 import type { Database } from "../db/client.js"
 import {
+  cookieOnlyRefusal,
   ssoGateRefusal,
   type ActiveOrgReader,
   type SessionVerifier,
@@ -117,40 +118,9 @@ export const requireTenant: MiddlewareHandler = async (c, next) => {
     )
   }
 
-  /*
-   * ⚠ THE BEARER HEADER IS REQUIRED, AND THIS IS THE CSRF DEFENCE FOR THE WHOLE
-   * SURFACE. `clerk.authenticateRequest` accepts a session from the
-   * `Authorization` header OR from Clerk's `__session` COOKIE, and this API has
-   * no CORS policy, no Origin check and no custom-header requirement. Without
-   * this line, a page on any other site could issue
-   * `fetch(…, { credentials: "include" })` against `/console/*` - a simple
-   * request, so no preflight - and although the attacker could not READ the
-   * response, the side effect would land: contacts deleted, a key rotated, a
-   * domain removed, a plan changed.
-   *
-   * ⚠ IT COSTS NOTHING, BECAUSE THE ONLY CLIENT ALREADY SENDS IT. The console
-   * calls this surface server-side with an explicit `Authorization: Bearer
-   * <session jwt>` - see apps/console/lib/api.ts. A browser cannot attach that
-   * header cross-origin without a preflight the API would answer with no CORS
-   * headers, so requiring it makes cookie-borne CSRF structurally impossible
-   * rather than dependent on Clerk's cookie-domain configuration.
-   *
-   * ⚠ AND IT IS A 401, NOT A 403. A request with no credential at all is
-   * unauthenticated, which is what this says.
-   */
-  const authorization = c.req.header("Authorization")
-  if (!authorization?.startsWith("Bearer ")) {
-    return c.json(
-      {
-        statusCode: 401,
-        name: "invalid_access",
-        message:
-          "Send your session as `Authorization: Bearer <token>`. A cookie alone " +
-          "is not accepted here.",
-      },
-      401,
-    )
-  }
+  // ⚠ THE BEARER HEADER IS THE CSRF DEFENCE. See `cookieOnlyRefusal`.
+  const cookieOnly = cookieOnlyRefusal(c)
+  if (cookieOnly) return cookieOnly
 
   const outcome = await deps.sessions.verify(c.req.raw)
 

@@ -1,5 +1,6 @@
 import type { ClerkClient } from "@clerk/backend"
 import { Hono } from "hono"
+import { hasBearer } from "../middleware/session.js"
 import {
   freshAfterSignUp,
   goneDevices,
@@ -63,6 +64,10 @@ export function clerkAuthAppIdentity(
   },
 ): IdentityReader {
   return async (request) => {
+    // ⚠ NO BEARER HEADER IS SIGNED OUT, before Clerk is asked: a cookie alone
+    // is the CSRF `cookieOnlyRefusal` (middleware/session.ts) refuses. Every
+    // auth-app caller forwards `Authorization: Bearer`.
+    if (!hasBearer(request)) return { status: "signed-out" }
     try {
       const state = await clerk.authenticateRequest(request, {
         authorizedParties: [...options.authorizedParties],

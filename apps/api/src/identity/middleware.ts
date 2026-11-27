@@ -1,5 +1,9 @@
 import type { ClerkClient } from "@clerk/backend"
-import type { FreshAuthReader, SsoGateReader } from "../middleware/session.js"
+import {
+  hasBearer,
+  type FreshAuthReader,
+  type SsoGateReader,
+} from "../middleware/session.js"
 import type { EnforcementGate } from "./enforcement.js"
 import type { SsoGateChecker } from "./gate.js"
 import { capabilitiesOf } from "./idp-capabilities.js"
@@ -35,6 +39,8 @@ export function clerkSessionIds(
     ? [...options.authorizedParties]
     : undefined
   return async (request) => {
+    // No Bearer header can only reach here past a guarded verifier by mistake: a contradiction, not a cookie session.
+    if (!hasBearer(request)) return { status: "unknown" }
     try {
       const state = await clerk.authenticateRequest(request, { authorizedParties })
       if (!state.isAuthenticated) return { status: "unknown" }

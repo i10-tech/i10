@@ -727,7 +727,12 @@ describe("public /mail-devices (session, about the caller only)", () => {
     method: string,
     path: string,
     user?: string,
-  ) => app.request(path, { method, headers: user ? { "x-user": user } : {} })
+  ) =>
+    // The session rides in the header (`cookieOnlyRefusal`); the fake verifier reads `x-user`.
+    app.request(path, {
+      method,
+      headers: user ? { "x-user": user, authorization: "Bearer test-session" } : {},
+    })
 
   it("401 without a session, and an API key is not a session", async () => {
     const app = createApp({ sessionAuth: sessions, mailDevices: world().service })

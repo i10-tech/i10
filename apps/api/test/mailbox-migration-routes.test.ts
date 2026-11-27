@@ -93,12 +93,13 @@ function build(
     app.request(path, {
       method,
       headers: {
-        ...(user ? { "x-user": user } : {}),
+        // The session rides in the header (`cookieOnlyRefusal`); the fake verifier reads `x-user`.
+        ...(user ? { "x-user": user, authorization: "Bearer test-session" } : {}),
         ...(body ? { "content-type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
-  return { jobs, store, queued, deps, call }
+  return { jobs, store, queued, deps, call, app }
 }
 
 const completedExport = async (t: ReturnType<typeof build>, patch = {}) => {
@@ -331,6 +332,18 @@ describe("the download link", () => {
     expect(
       (await t.call("GET", `/mailboxes/${ADDRESS}/export/download`, OWNER)).status,
     ).toBe(501)
+  })
+
+  it("refuses a session sent as a cookie alone, the CSRF a header prevents", async () => {
+    const t = build()
+    await completedExport(t)
+    const res = await t.app.request(`/mailboxes/${ADDRESS}/export/download`, {
+      headers: { "x-user": OWNER, Cookie: "__session=a-good-session" },
+    })
+    expect(res.status).toBe(401)
+    expect(((await res.json()) as { message: string }).message).toContain(
+      "cookie alone",
+    )
   })
 
   it("serves the owner by session too, and nobody else", async () => {

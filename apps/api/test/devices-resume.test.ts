@@ -229,7 +229,10 @@ describe("step-up after a resume", () => {
       }),
     }) as unknown as Parameters<typeof clerkFreshAuth>[0]
 
-  const request = new Request("https://api.test/")
+  // The reader runs behind a Bearer-checked verifier, so the request carries the header.
+  const request = new Request("https://api.test/", {
+    headers: { Authorization: "Bearer stub" },
+  })
 
   it("is stale when the first factor was the resume", async () => {
     const read = clerkFreshAuth(clerkWith([0, -1]), { resumedNear: async () => true })
