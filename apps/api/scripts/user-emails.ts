@@ -11,6 +11,10 @@
  * A user whose row is newer than Clerk's `updated_at` is left alone, so it is
  * safe to re-run and safe to run while webhooks arrive.
  *
+ * Clerk pages by offset, so a user deleted in Clerk during the run can shift a
+ * later user past a page edge; re-running is safe and idempotent, so run it
+ * twice.
+ *
  * ⚠ DRY RUN UNLESS `--apply`. The dry run reads Clerk and prints what it would
  * write; nothing else.
  *

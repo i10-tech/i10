@@ -4,6 +4,7 @@ import { mailDeviceListSchema, mailDevicesRevokedSchema } from "@repo/contracts"
 import { ownMailboxRefusal } from "../mail-devices/gate.js"
 import type { DeviceViewer, MailDeviceService } from "../mail-devices/service.js"
 import { requireUser } from "../middleware/session.js"
+import { asId } from "./console/http.js"
 import { errorResponse, notWired as notWiredFor } from "./shared.js"
 
 /**
@@ -80,6 +81,7 @@ const list = createRoute({
       content: { "application/json": { schema: MailDeviceList } },
     },
     401: errorResponse("Not signed in."),
+    403: errorResponse("Your workspace's access policy refused this session."),
     422: errorResponse("The cursor is not valid."),
     501: errorResponse("Mail devices are not configured."),
     503: errorResponse("The session could not be verified."),
@@ -125,6 +127,7 @@ const revokeAll = createRoute({
       content: { "application/json": { schema: MailDevicesRevoked } },
     },
     401: errorResponse("Not signed in."),
+    403: errorResponse("Your workspace's access policy refused this session."),
     501: errorResponse("Mail devices are not configured."),
     503: errorResponse("The session could not be verified."),
   },
@@ -162,6 +165,7 @@ const revokeOne = createRoute({
       },
     },
     401: errorResponse("Not signed in."),
+    403: errorResponse("Your workspace's access policy refused this session."),
     404: errorResponse("You have no device with that id."),
     501: errorResponse("Mail devices are not configured."),
     503: errorResponse("The session could not be verified."),
@@ -171,9 +175,14 @@ const revokeOne = createRoute({
 mailDevices.openapi(revokeOne, async (c) => {
   const service = c.get("mailDevices")
   if (!service) return c.json(notWired, 501)
-  const call = await withSelf(c, service, (viewer) =>
-    service.revoke(viewer, c.req.valid("param").id),
-  )
+  const id = asId(c.req.valid("param").id)
+  if (!id) {
+    return c.json(
+      { statusCode: 404, name: "not_found" as const, message: "No such mail device." },
+      404,
+    )
+  }
+  const call = await withSelf(c, service, (viewer) => service.revoke(viewer, id))
   if ("refused" in call) return refusal(call.refused)
   const gone = call.result
   if (gone) return c.json({ deleted: true as const, id: gone.id }, 200)

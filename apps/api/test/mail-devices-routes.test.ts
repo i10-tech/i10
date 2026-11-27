@@ -264,6 +264,39 @@ describe("console /mail-devices", () => {
       (await json(await post(consoleFor(w, ADMIN), { address: "bob@acme.test" }))).body,
     ).toEqual({ object: "mail_devices_revoked", revoked: 1 })
     expect(w.left().sort()).toEqual([ids.solo, ids.rival].sort())
+
+    // Revoking a workspace member who has zero devices left still audits the workspace tenantId.
+    expect(
+      (await json(await post(consoleFor(w, ADMIN), { address: "bob@acme.test" }))).body,
+    ).toEqual({ object: "mail_devices_revoked", revoked: 0 })
+    expect(w.audit.at(-1)).toMatchObject({
+      audit: "mail_device.revoked_all",
+      tenantId: ACME,
+      userId: BOB,
+      deviceIds: [],
+    })
+  })
+
+  it("revoke-all: refuses malformed JSON or a non-object body with 422 without revoking anything", async () => {
+    for (const raw of ["{not-json", JSON.stringify("bob@acme.test")]) {
+      const w = world()
+      const res = await json(
+        await consoleFor(w, ADA).request("/mail-devices/revoke-all", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: raw,
+        }),
+      )
+      expect(res).toEqual({
+        status: 422,
+        body: {
+          statusCode: 422,
+          name: "validation_error",
+          message: "Request body must be a JSON object.",
+        },
+      })
+      expect(w.left().sort()).toEqual([ids.ada, ids.bob, ids.solo, ids.rival].sort())
+    }
   })
 
   it("asks for no step-up: revoking works without a fresh-auth reader", async () => {
@@ -623,6 +656,63 @@ describe("console /console/mail-devices workspace-optional and mailbox gating", 
     )
     expect(delRes.status).toBe(204)
   })
+
+  it("DELETE with a non-UUID id answers 404 without calling the mailbox workspace gate", async () => {
+    const gated: (string | undefined)[] = []
+    const ssoGate: SsoGateReader = async (_req, _userId, tenantId) => {
+      gated.push(tenantId)
+      return tenantId === ACME ? { status: "mfa_required" } : { status: "pass" }
+    }
+    const w = world()
+    const app = fullConsole({
+      userId: ADA,
+      world: w,
+      activeOrg: noOrg,
+      ssoGate,
+    })
+
+    const res = await json(
+      await app.request("/console/mail-devices/not-a-uuid", {
+        method: "DELETE",
+        headers: BEARER,
+      }),
+    )
+    expect(res).toEqual({
+      status: 404,
+      body: {
+        statusCode: 404,
+        name: "not_found",
+        message: "No such mail device here.",
+      },
+    })
+    expect(gated.filter((t) => t === ACME)).toEqual([])
+    expect(w.left()).toContain(ids.ada)
+  })
+
+  it("allows GET /console/step-up with no active org (never 409 no_workspace)", async () => {
+    const freshApp = fullConsole({
+      userId: ADA,
+      world: world(),
+      activeOrg: noOrg,
+      freshAuth: fresh,
+    })
+    const okRes = await freshApp.request("/console/step-up", { headers: BEARER })
+    expect(okRes.status).toBe(204)
+
+    const staleApp = fullConsole({
+      userId: ADA,
+      world: world(),
+      activeOrg: noOrg,
+      freshAuth: async () => ({ status: "stale" }),
+    })
+    const staleRes = await json(
+      await staleApp.request("/console/step-up", { headers: BEARER }),
+    )
+    expect(staleRes.status).toBe(403)
+    expect(staleRes.body).toMatchObject({
+      clerk_error: { reason: "reverification-error" },
+    })
+  })
 })
 
 describe("public /mail-devices (session, about the caller only)", () => {
@@ -757,5 +847,31 @@ describe("public /mail-devices (session, about the caller only)", () => {
       body: { object: "mail_devices_revoked", revoked: 0 },
     })
     expect(gated.filter((t) => t !== undefined)).toEqual([])
+  })
+
+  it("DELETE with a non-UUID id answers 404 without calling the mailbox workspace gate", async () => {
+    const gated: (string | undefined)[] = []
+    const ssoGate: SsoGateReader = async (_req, _userId, tenantId) => {
+      gated.push(tenantId)
+      return tenantId === ACME ? { status: "mfa_required" } : { status: "pass" }
+    }
+    const w = world()
+    const app = createApp({
+      sessionAuth: sessions,
+      mailDevices: w.service,
+      ssoGate,
+    })
+
+    const res = await json(await call(app, "DELETE", "/mail-devices/not-a-uuid", ADA))
+    expect(res).toEqual({
+      status: 404,
+      body: {
+        statusCode: 404,
+        name: "not_found",
+        message: "No such mail device.",
+      },
+    })
+    expect(gated.filter((t) => t === ACME)).toEqual([])
+    expect(w.left()).toContain(ids.ada)
   })
 })

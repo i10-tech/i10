@@ -19,24 +19,10 @@ const people = {
 
 function world(over: { mode?: AutoForwardingMode; wired?: boolean } = {}) {
   let mode: AutoForwardingMode = over.mode ?? "workspace"
-  const audit: {
-    type: string
-    tenantId: string
-    actorUserId: string
-    before: AutoForwardingMode
-    after: AutoForwardingMode
-  }[] = []
   const set = mock(
-    async (tenantId: string, actor: string, next: AutoForwardingMode) => {
+    async (_tenantId: string, _actor: string, next: AutoForwardingMode) => {
       const before = mode
       mode = next
-      audit.push({
-        type: "workspace.auto_forwarding_changed",
-        tenantId,
-        actorUserId: actor,
-        before,
-        after: next,
-      })
       return { before, after: next }
     },
   )
@@ -48,7 +34,6 @@ function world(over: { mode?: AutoForwardingMode; wired?: boolean } = {}) {
   return {
     forwarding,
     set,
-    audit,
     mode: () => mode,
     wired: over.wired ?? true,
   }
@@ -101,7 +86,7 @@ describe("GET /workspace/auto-forwarding", () => {
 })
 
 describe("PATCH /workspace/auto-forwarding", () => {
-  it("lets an owner or admin switch between non-anywhere modes and records audit data", async () => {
+  it("lets an owner or admin switch between non-anywhere modes and passes tenant, actor and mode to the store", async () => {
     const w = world()
     const r1 = await call(appFor(w, "admin").app, "PATCH", {
       mode: "workspace_and_members",
@@ -113,21 +98,9 @@ describe("PATCH /workspace/auto-forwarding", () => {
     expect(r2.status).toBe(200)
     expect(await r2.json()).toEqual({ mode: "off" })
 
-    expect(w.audit).toEqual([
-      {
-        type: "workspace.auto_forwarding_changed",
-        tenantId: TENANT,
-        actorUserId: people.admin,
-        before: "workspace",
-        after: "workspace_and_members",
-      },
-      {
-        type: "workspace.auto_forwarding_changed",
-        tenantId: TENANT,
-        actorUserId: people.owner,
-        before: "workspace_and_members",
-        after: "off",
-      },
+    expect(w.set.mock.calls).toEqual([
+      [TENANT, people.admin, "workspace_and_members"],
+      [TENANT, people.owner, "off"],
     ])
   })
 
@@ -184,13 +157,7 @@ describe("PATCH /workspace/auto-forwarding", () => {
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ mode: "anywhere" })
-    expect(w.set).toHaveBeenCalledWith(TENANT, people.admin, "anywhere")
-    expect(w.audit).toHaveLength(1)
-    expect(w.audit[0]).toMatchObject({
-      type: "workspace.auto_forwarding_changed",
-      before: "workspace",
-      after: "anywhere",
-    })
+    expect(w.set.mock.calls).toEqual([[TENANT, people.admin, "anywhere"]])
   })
 
   it("refuses unknown modes and unexpected fields with 422", async () => {

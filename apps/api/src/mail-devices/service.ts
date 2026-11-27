@@ -200,7 +200,8 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
       // Try the open workspace's admin scope first so revoking a workspace
       // member's device never runs the admin's own mailbox workspace gate
       // (for an admin's own device in that workspace, both scopes delete the
-      // same row).
+      // same row). A valid id that the open workspace does not hold still runs
+      // the own gate, because it may be the caller's own device.
       let gone =
         viewer.isAdmin && viewer.tenantId !== null
           ? await store.revoke({
@@ -243,7 +244,8 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
         {
           audit: "mail_device.revoked_all",
           // One scope is one workspace (or none), so every row shares it.
-          tenantId: gone[0]?.tenantId ?? null,
+          tenantId:
+            gone[0]?.tenantId ?? (scope.kind === "workspace" ? scope.tenantId : null),
           actorUserId: viewer.userId,
           userId: scope.clerkUserId,
           address: address ?? null,

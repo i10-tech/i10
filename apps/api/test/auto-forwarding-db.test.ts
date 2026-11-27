@@ -51,6 +51,7 @@ const rivalUser = `user_rival_${RUN}`
 const orphanUser = `user_orphan_${RUN}`
 const projectedUser = `user_proj_${RUN}`
 const backfilledUser = `user_backfill_${RUN}`
+const racedUser = `user_race_${RUN}`
 
 const aliceMailbox = `alice@${acmeDomain}`
 const acmeTeamInbox = `support@${acmeDomain}`
@@ -173,7 +174,7 @@ suite("automatic forwarding in Postgres", () => {
   afterAll(async () => {
     if (owner) {
       await owner`delete from authd.accounts where clerk_user_id in (${aliceUser}, ${rivalUser}, ${orphanUser}, ${projectedUser})`
-      await owner`delete from authd.user_emails where clerk_user_id in (${bobUser}, ${formerUser}, ${rivalUser}, ${projectedUser}, ${backfilledUser})`
+      await owner`delete from authd.user_emails where clerk_user_id in (${bobUser}, ${formerUser}, ${rivalUser}, ${projectedUser}, ${backfilledUser}, ${racedUser})`
       await owner`delete from authd.webhook_events where event_id like ${`evt_af_${RUN}_%`}`
       await owner`delete from core.tenants where id in (${acme}, ${rival})`
       await owner.end()
@@ -182,21 +183,37 @@ suite("automatic forwarding in Postgres", () => {
     if (sqlStalwart) await sqlStalwart.end()
   })
 
-  describe("function privileges", () => {
-    it("revokes EXECUTE from PUBLIC and i10_api, and grants it to stalwart", async () => {
+  describe("function and table privileges", () => {
+    it("revokes EXECUTE on core.auto_forward_allowed from non-stalwart roles and SELECT on authd.user_emails from authd", async () => {
       const [privs] = await owner<
         {
           pub: boolean
           api: boolean
+          authd: boolean
+          mailfront: boolean
+          pdns: boolean
           stalwart: boolean
+          authd_emails: boolean
         }[]
       >`
         select
           has_function_privilege('public', 'core.auto_forward_allowed(text, text)', 'execute') as pub,
           has_function_privilege('i10_api', 'core.auto_forward_allowed(text, text)', 'execute') as api,
-          has_function_privilege('stalwart', 'core.auto_forward_allowed(text, text)', 'execute') as stalwart
+          has_function_privilege('authd', 'core.auto_forward_allowed(text, text)', 'execute') as authd,
+          has_function_privilege('mailfront', 'core.auto_forward_allowed(text, text)', 'execute') as mailfront,
+          has_function_privilege('pdns', 'core.auto_forward_allowed(text, text)', 'execute') as pdns,
+          has_function_privilege('stalwart', 'core.auto_forward_allowed(text, text)', 'execute') as stalwart,
+          has_table_privilege('authd', 'authd.user_emails', 'select') as authd_emails
       `
-      expect(privs).toEqual({ pub: false, api: false, stalwart: true })
+      expect(privs).toEqual({
+        pub: false,
+        api: false,
+        authd: false,
+        mailfront: false,
+        pdns: false,
+        stalwart: true,
+        authd_emails: false,
+      })
 
       // ⚠ Catch directly rather than `expect(...).rejects` (hangs postgres.js under bun).
       let apiErrCode: string | undefined
@@ -478,6 +495,36 @@ suite("automatic forwarding in Postgres", () => {
       await backfill(Date.UTC(2026, 10, 21), `new-${RUN}@${acmeDomain}`)
       await backfill(Date.UTC(2026, 10, 20), `old-${RUN}@gmail.com`)
       expect(await emailsOf(backfilledUser)).toEqual([`new-${RUN}@${acmeDomain}`])
+    })
+
+    it("serializes concurrent user_emails writes so an older delivery cannot overwrite a newer one", async () => {
+      const newerAt = new Date(Date.UTC(2026, 10, 22, 12, 0, 0))
+      const olderAt = Date.UTC(2026, 10, 22, 11, 0, 0)
+      const newerEmail = `newer-${RUN}@gmail.com`
+      const olderEmail = `older-${RUN}@gmail.com`
+      let finishedOlder = false
+      let older: Promise<void> | undefined
+
+      await owner.begin(async (tx) => {
+        await tx`select pg_advisory_xact_lock(hashtextextended(${`authd_user_emails:${racedUser}`}, 0))`
+        await tx`
+          insert into authd.user_emails (clerk_user_id, email, clerk_updated_at)
+          values (${racedUser}, ${newerEmail}, ${newerAt})
+        `
+        older = projectUserEmails(dbApi, {
+          id: racedUser,
+          updated_at: olderAt,
+          email_addresses: [verified(olderEmail)],
+        }).then(() => {
+          finishedOlder = true
+        })
+        await Bun.sleep(150)
+        expect(finishedOlder).toBe(false)
+      })
+
+      await older
+      expect(finishedOlder).toBe(true)
+      expect(await emailsOf(racedUser)).toEqual([newerEmail])
     })
   })
 })

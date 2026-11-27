@@ -25,10 +25,13 @@ import { MailDeviceError, mintCode, type MailDeviceCodeKeys } from "./code.js"
  * and `expectedEpoch` before inserting; every revocation writes `authd.accounts`
  * in the same transaction before calling `endFor`. So a mint either commits
  * first (and its device is deleted by the revocation) or waits on the account
- * lock and sees the hold or moved epoch and refuses. `revokeAllFor` locks the
- * account the same way before its DELETE. A single `revoke` takes no account
- * lock: it names one existing row, so no mint can race it, and it holds
- * nothing before the device row.
+ * lock and sees the hold or moved epoch and refuses. `revokeAllFor` raises
+ * `credential_epoch` (`raiseCredentialEpoch`) in the same transaction before
+ * its DELETE: that takes the account row lock first and moves the epoch so
+ * in-flight mints and live enrollments carrying the old epoch are refused (and
+ * authd re-checks cached mail passwords). A single `revoke` takes no account
+ * lock or write: device binds look the row up every time, and it names one
+ * existing row so no mint can race it.
  */
 
 export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
@@ -557,22 +560,23 @@ export async function revoke(
 }
 
 /**
- * "Sign out all my mail devices": deletes every device of one person in
- * `scope`. Clerk sends no password-change event, so this is how a person ends
- * them all at once.
+ * "Sign out all my mail devices": raises `credential_epoch` and deletes every
+ * device of one person in `scope` in ONE transaction. Clerk sends no
+ * password-change event, so this is how a person ends them all at once.
  *
- * ⚠ ACCOUNT LOCK FIRST (the lock order above). Without it a `mint` in flight
- * commits a device this DELETE's snapshot never saw, and a bulk `endFor`
- * walking the same person's rows in another order can deadlock with it.
+ * ⚠ RAISE `credential_epoch` FIRST (the lock order above). Updating the
+ * account row takes its row lock before the DELETE and moves the epoch, so any
+ * in-flight `mint` or live enrollment carrying the old epoch either commits
+ * first (and is deleted here) or waits and is refused on `epoch_mismatch`.
+ * Raising the epoch also makes authd re-check that person's cached mail
+ * passwords, which suits signing out all devices.
  */
 export async function revokeAllFor(
   db: Pick<Database, "transaction">,
   scope: DeviceScope & { clerkUserId: string },
 ): Promise<RevokedDevice[]> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`
-      select 1 from authd.accounts where clerk_user_id = ${scope.clerkUserId}
-         for no key update`)
+    await raiseCredentialEpoch(tx, scope.clerkUserId)
     return tx.delete(mailDevices).where(scopeWhere(scope)).returning(revokedColumns)
   })
 }

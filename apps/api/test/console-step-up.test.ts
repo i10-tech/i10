@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { createApp } from "../src/app.js"
 import type { ConsoleDeps } from "../src/routes/console.js"
-import type { FreshAuthReader, SessionVerifier } from "../src/middleware/session.js"
+import type {
+  ActiveOrgReader,
+  FreshAuthReader,
+  SessionVerifier,
+} from "../src/middleware/session.js"
 import type { TenantResolver } from "../src/middleware/tenant.js"
 import type { KeyStore } from "../src/auth/store.js"
 
@@ -35,11 +39,12 @@ const store = {
   revoke: async () => ({ secretHash: "HASH" }),
 } as unknown as KeyStore
 
-function appWith(freshAuth?: FreshAuthReader) {
+function appWith(freshAuth?: FreshAuthReader, activeOrg?: ActiveOrgReader) {
   return createApp({
     console: {
       sessions,
       tenants,
+      ...(activeOrg ? { activeOrg } : {}),
       ...(freshAuth ? { freshAuth } : {}),
       keys: {
         store,
@@ -95,6 +100,22 @@ describe("the step-up endpoint", () => {
     const res = await appWith(unknown).request("/console/step-up", { headers: BEARER })
     expect(res.status).toBe(503)
     expect(res.headers.get("Retry-After")).toBe("5")
+  })
+
+  it("works with no active workspace instead of answering 409 no_workspace", async () => {
+    const noOrg: ActiveOrgReader = async () => ({ status: "personal" })
+    const ok = await appWith(fresh, noOrg).request("/console/step-up", {
+      headers: BEARER,
+    })
+    expect(ok.status).toBe(204)
+
+    const refused = await appWith(stale, noOrg).request("/console/step-up", {
+      headers: BEARER,
+    })
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toMatchObject({
+      clerk_error: { reason: "reverification-error" },
+    })
   })
 })
 

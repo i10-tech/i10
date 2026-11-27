@@ -83,6 +83,8 @@ const WITHOUT_WORKSPACE = new Set([
   "/workspaces/personal",
   // Deleting the account (#336): a person with no workspace can still leave.
   "/me/account",
+  // Pre-flight step-up check: reads no tenant data, and workspace-optional flows call it with no org open.
+  "/step-up",
   // Apple OTA mail device enrollment (#383 PR 4): acts on the person's own
   // mailbox (whose tenant_id may be null for an i10.tech mailbox).
   "/mail-devices/enrollments",

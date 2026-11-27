@@ -2,12 +2,24 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { createHash, randomBytes } from "node:crypto"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
+import { createHookHandlers } from "../src/ca-hooks/handlers.js"
+import { HANDLER_DEADLINE_MS } from "../src/ca-hooks/listener.js"
 import type { Database } from "../src/db/client.js"
+import { MailDeviceError, parseMailDeviceCodeKeys } from "../src/mail-devices/code.js"
+import {
+  attestEnrollment,
+  createEnrollment,
+  finishEnrollment,
+} from "../src/mail-devices/enrollments.js"
+import { sha256 } from "../src/mail-devices/permits.js"
 import {
   dbDeviceStore,
   mailDeviceService,
   type DeviceViewer,
 } from "../src/mail-devices/service.js"
+import { mint } from "../src/mail-devices/store.js"
+import { scepAuthorizeBody, scepChallengeBody } from "./support/ca-hooks.js"
+import { createTestDeviceCa } from "./support/device-pki.js"
 
 /**
  * Who sees and revokes which mail devices (#383 PR 5), against Postgres: the
@@ -69,6 +81,18 @@ const soloInAcme: DeviceViewer = { userId: solo, tenantId: acme, isAdmin: false 
 
 const sha = (s: string) => createHash("sha256").update(s).digest()
 
+const TEST_KEYS = parseMailDeviceCodeKeys(
+  "1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=,7:gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp+goaKjpKWmp6ipqqusra6v",
+)
+
+const epochOf = async (person: string) =>
+  Number(
+    (
+      await owner<{ credential_epoch: string | number }[]>`
+        select credential_epoch from authd.accounts where clerk_user_id = ${person}`
+    )[0]!.credential_epoch,
+  )
+
 async function addDevice(
   person: string,
   opts: { createdAt?: string; platform?: string; key?: boolean } = {},
@@ -124,6 +148,13 @@ suite("mail device service against Postgres", () => {
       await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id, clerk_org_id)
                   values (${id}, ${`mds-${id.slice(0, 8)}`}, ${name}, ${`owner-${id}`}, ${`org_mds_${id.slice(0, 8)}`})`
     }
+    for (const [tenant, name] of [
+      [acme, acmeDomain],
+      [rival, rivalDomain],
+    ] as const) {
+      await owner`insert into core.domains (tenant_id, name, hosts_mailboxes, verified_at, status)
+                  values (${tenant}, ${name}, true, now(), 'verified')`
+    }
     for (const person of people) {
       await owner`insert into authd.accounts (clerk_user_id, email, active, tenant_id)
                   values (${person}, ${addressOf[person]!}, true, ${tenantOf[person]!})`
@@ -132,6 +163,7 @@ suite("mail device service against Postgres", () => {
 
   beforeEach(async () => {
     audit.length = 0
+    await owner`delete from authd.mail_device_enrollments where clerk_user_id = any(${people})`
     await owner`delete from authd.mail_devices where clerk_user_id = any(${people})`
   })
 
@@ -275,6 +307,119 @@ suite("mail device service against Postgres", () => {
     expect(await idsOf(ada)).toEqual([])
   })
 
+  it("revoke-all raises credential_epoch by exactly one", async () => {
+    const adaBefore = await epochOf(ada)
+    const bobBefore = await epochOf(bob)
+    await addDevice(ada)
+
+    expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 1 })
+    expect(await epochOf(ada)).toBe(adaBefore + 1)
+    expect(await epochOf(bob)).toBe(bobBefore)
+  })
+
+  it("refuses a mint that read the epoch before revoke-all, and inserts nothing", async () => {
+    const expectedEpoch = await epochOf(ada)
+    expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 0 })
+
+    // ⚠ Catch directly rather than `expect(...).rejects` (hangs postgres.js under bun).
+    let code: string | null = null
+    try {
+      await mint(db, TEST_KEYS, {
+        clerkUserId: ada,
+        tenantId: acme,
+        expectedEpoch,
+        platform: "ios",
+        deviceName: "Stale Phone",
+        createdBy: "test",
+      })
+    } catch (error) {
+      code = error instanceof MailDeviceError ? error.code : String(error)
+    }
+    expect(code).toBe("epoch_mismatch")
+    expect(await idsOf(ada)).toEqual([])
+  })
+
+  it("refuses a live enrollment opened before revoke-all at finish", async () => {
+    const pki = createTestDeviceCa()
+    try {
+      const hooks = createHookHandlers({
+        db,
+        intermediateNotAfter: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
+      })
+      const deadline = () => new Date(Date.now() + HANDLER_DEADLINE_MS)
+
+      const created = await createEnrollment(db, {
+        clerkUserId: ada,
+        tenantId: acme,
+        hasCodeKeys: true,
+      })
+      expect(created.ok).toBe(true)
+      if (!created.ok) return
+
+      const token = created.url.split("/").pop()!
+      const serial = `C02MDS${sfx.toUpperCase()}`
+      const udid = `UDID-MDS-${sfx}`
+      const attested = await attestEnrollment(
+        db,
+        {
+          token,
+          udid,
+          serial,
+          product: "iPhone17,2",
+          version: "22A3354",
+          deviceName: "Ada's iPhone",
+          model: "iPhone17,2",
+          appleSignerSha256: sha256(`apple-signer/${sfx}`),
+        },
+        deadline(),
+      )
+      expect(attested.outcome).toBe("scep")
+      if (attested.outcome !== "scep") return
+
+      const leaf = pki.issueLeaf({ subject: `/CN=${serial}` })
+      const now = new Date()
+      const ch = await hooks["scep-challenge"](
+        scepChallengeBody({
+          challenge: attested.challenge,
+          transactionId: `txn-mds-${sfx}`,
+          commonName: serial,
+          spki: leaf.spkiDer,
+          now,
+        }),
+        now,
+        deadline(),
+      )
+      expect(ch.allow).toBe(true)
+      const authz = await hooks["scep-authorize"](
+        scepAuthorizeBody({ commonName: serial, spki: leaf.spkiDer, now }),
+        now,
+        deadline(),
+      )
+      expect(authz.allow).toBe(true)
+
+      expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 0 })
+
+      const finished = await finishEnrollment(
+        db,
+        {
+          keys: TEST_KEYS,
+          deviceCaBundle: () => pki.bundle,
+          imapHost: "mail.i10.tech",
+          imapPort: 993,
+          smtpHost: "mail.i10.tech",
+          smtpPort: 465,
+          organization: "i10",
+        },
+        { certDer: leaf.der, udid },
+        deadline(),
+      )
+      expect(finished).toEqual({ outcome: "refused", reason: "epoch_mismatch" })
+      expect(await idsOf(ada)).toEqual([])
+    } finally {
+      pki.cleanup()
+    }
+  })
+
   it("an admin's revoke-all for an address reaches one person of their workspace only", async () => {
     await addDevice(ada)
     const bobPhone = await addDevice(bob)
@@ -392,7 +537,7 @@ suite("mail device service against Postgres", () => {
         expect(
           (await counted(() => service().revoke(acmeAdmin, ids[1]!))).queries,
         ).toBe(1)
-      // begin, the account lock, the delete, commit: none grows with the devices.
+      // begin, the credential-epoch update, the delete, commit: none grows with the devices.
       expect((await counted(() => service().revokeAll(adaInAcme))).queries).toBe(4)
     }
   })

@@ -87,6 +87,10 @@ export async function applyClerkEvent(
       case "user.deleted": {
         const { id } = (data ?? {}) as { id?: string }
         if (id) {
+          // ⚠ SERIALIZE PER USER (same lock order as `applyUser`: advisory lock
+          // first, then `accounts` and `user_emails`) so a concurrent webhook
+          // or backfill cannot interleave and write removed addresses back.
+          await lockUserEmails(tx, id)
           await removeAccount(tx, id)
           await tx.delete(userEmails).where(eq(userEmails.clerkUserId, id))
         }
@@ -152,11 +156,24 @@ async function removeAccount(tx: Tx, clerkUserId: string): Promise<void> {
   for (const { email } of gone) mailboxIdCache.forget(email)
 }
 
+async function lockUserEmails(tx: Tx, clerkUserId: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`authd_user_emails:${clerkUserId}`}, 0))`,
+  )
+}
+
 /**
  * Brings one user's verified sign-in emails in line with Clerk, regardless of
  * whether any of them is on a hosted domain (#526).
+ *
+ * ⚠ SERIALIZE PER USER BEFORE THE STALE CHECK. Under READ COMMITTED, two
+ * concurrent deliveries (or `scripts/user-emails.ts` racing a webhook) would
+ * otherwise read the same `max(clerk_updated_at)` and interleave their DELETE
+ * and INSERT, letting an older event wipe newer addresses and write back
+ * removed ones. `_xact_` because PgBouncer pools by transaction.
  */
 async function syncUserEmails(tx: Tx, user: ClerkUser): Promise<void> {
+  await lockUserEmails(tx, user.id)
   const incomingAt = clerkUpdatedAtOf(user.updated_at)
   if (incomingAt) {
     const [latest] = await tx

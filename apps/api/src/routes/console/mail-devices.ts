@@ -4,7 +4,7 @@ import { ownMailboxRefusal } from "../../mail-devices/gate.js"
 import type { DeviceViewer } from "../../mail-devices/service.js"
 import { NO_TENANT } from "../../middleware/tenant.js"
 import type { ConsoleDeps } from "./deps.js"
-import { notFound, notWired, readJson, validation } from "./http.js"
+import { asId, isRecord, notFound, notWired, validation } from "./http.js"
 import { isWorkspaceAdmin } from "./mailboxes.js"
 
 /**
@@ -81,7 +81,20 @@ export function mountMailDevices(app: Hono, d: ConsoleDeps): void {
 
   app.post("/mail-devices/revoke-all", async (c) => {
     if (!d.mailDevices) return c.json(notWired("Mail devices"), 501)
-    const body = (await readJson(c)) ?? {}
+    let body: Record<string, unknown> = {}
+    const raw = (await c.req.raw.clone().text()).trim()
+    if (raw.length > 0) {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        return c.json(validation("Request body must be a JSON object."), 422)
+      }
+      if (!isRecord(parsed)) {
+        return c.json(validation("Request body must be a JSON object."), 422)
+      }
+      body = parsed
+    }
     let address: string | undefined
     if (body.address !== undefined && body.address !== null) {
       const parsed = mailboxAddressSchema.safeParse(body.address)
@@ -99,7 +112,8 @@ export function mountMailDevices(app: Hono, d: ConsoleDeps): void {
 
   app.delete("/mail-devices/:id", async (c) => {
     if (!d.mailDevices) return c.json(notWired("Mail devices"), 501)
-    const id = c.req.param("id")
+    const id = asId(c.req.param("id"))
+    if (!id) return c.json(NOT_FOUND, 404)
     const call = await withViewer(c, (viewer) => d.mailDevices!.revoke(viewer, id))
     if ("refused" in call) return call.refused
     const gone = call.result
