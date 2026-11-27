@@ -100,7 +100,7 @@ export function projectUser(
     email: primary.address,
     aliases: sorted.filter((e) => e.address !== primary.address).map((e) => e.address),
     displayName: [user.first_name, user.last_name].filter(Boolean).join(" ").trim(),
-    clerkUpdatedAt: toDate(user.updated_at),
+    clerkUpdatedAt: clerkUpdatedAtOf(user.updated_at),
     banned: typeof user.banned === "boolean" ? user.banned : null,
     locked: typeof user.locked === "boolean" ? user.locked : null,
     lockedUntil: lockoutEnd(user, now),
@@ -148,10 +148,6 @@ export function verifiedEmailsOf(user: ClerkUser): string[] {
  * ordering guard for out-of-order webhook delivery.
  */
 export function clerkUpdatedAtOf(ms: number | null | undefined): Date | null {
-  return toDate(ms)
-}
-
-function toDate(ms: number | null | undefined): Date | null {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return null
   return new Date(ms)
 }

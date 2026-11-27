@@ -167,6 +167,10 @@ async function syncUserEmails(tx: Tx, user: ClerkUser): Promise<void> {
   }
 
   const verified = verifiedEmailsOf(user)
+  // ⚠ DELETING THE LAST ROW ALSO DELETES THE ORDERING GUARD. An older event
+  // delivered after this one would then write its addresses back. Accepted:
+  // it needs a user left with no verified email at all and a webhook
+  // delivered out of order, and the next event corrects it.
   if (verified.length === 0) {
     await tx.delete(userEmails).where(eq(userEmails.clerkUserId, user.id))
     return

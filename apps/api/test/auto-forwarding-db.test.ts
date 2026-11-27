@@ -266,6 +266,8 @@ suite("automatic forwarding in Postgres", () => {
       // Another workspace's member and another customer's hosted domain -> refused.
       expect(await allowed(aliceMailbox, rivalPersonalEmail)).toBe(false)
       expect(await allowed(aliceMailbox, `mallory@${rivalDomain}`)).toBe(false)
+      expect(await allowed(aliceMailbox, `x@${acmeDisplacedDomain}`)).toBe(false)
+      expect(await allowed(aliceMailbox, `x@${contestedDomain}`)).toBe(false)
 
       // Arbitrary external address -> refused.
       expect(await allowed(aliceMailbox, "stranger@gmail.com")).toBe(false)
@@ -318,28 +320,31 @@ suite("automatic forwarding in Postgres", () => {
   })
 
   describe("autoForwardingStore as i10_api", () => {
-    it("reads workspace without inserting a row, saves changes, audits them, and isolates tenants", async () => {
-      const store = autoForwardingStore(dbApi)
+    const auditOf = async (tenantId: string) => [
+      ...(await owner<{ actor_user_id: string; data: unknown }[]>`
+        select actor_user_id, data
+          from identity.events
+         where tenant_id = ${tenantId}
+           and type = 'workspace.auto_forwarding_changed'
+         order by id
+      `),
+    ]
 
-      // Rival has no workspace_settings row yet.
-      expect(await store.get(rival)).toBe("workspace")
-      const beforeRows =
+    it("reads workspace for a workspace with no settings row, without inserting one", async () => {
+      expect(await autoForwardingStore(dbApi).get(rival)).toBe("workspace")
+      const rows =
         await owner`select 1 from identity.workspace_settings where tenant_id = ${rival}`
-      expect(beforeRows).toHaveLength(0)
+      expect(rows).toHaveLength(0)
+    })
 
+    it("saves a change with its before and after, audits it, and keeps the other settings", async () => {
+      const store = autoForwardingStore(dbApi)
       expect(await store.set(rival, rivalUser, "workspace_and_members")).toEqual({
         before: "workspace",
         after: "workspace_and_members",
       })
       expect(await store.get(rival)).toBe("workspace_and_members")
 
-      expect(await store.set(rival, rivalUser, "anywhere")).toEqual({
-        before: "workspace_and_members",
-        after: "anywhere",
-      })
-      expect(await store.get(rival)).toBe("anywhere")
-
-      // Other workspace_settings defaults are preserved.
       const [row] = await owner`
         select deprovision, leaver_action, mailbox_creation, auto_forwarding
           from identity.workspace_settings
@@ -349,24 +354,30 @@ suite("automatic forwarding in Postgres", () => {
         deprovision: "membership",
         leaver_action: "keep",
         mailbox_creation: "admins",
-        auto_forwarding: "anywhere",
+        auto_forwarding: "workspace_and_members",
       })
-
-      // Audit events recorded in identity.events with before/after and actor.
-      const audit = await owner`
-        select actor_user_id, data
-          from identity.events
-         where tenant_id = ${rival}
-           and type = 'workspace.auto_forwarding_changed'
-         order by id
-      `
-      expect(audit.map((r) => r.data)).toEqual([
-        { before: "workspace", after: "workspace_and_members" },
-        { before: "workspace_and_members", after: "anywhere" },
+      expect(await auditOf(rival)).toEqual([
+        {
+          actor_user_id: rivalUser,
+          data: { before: "workspace", after: "workspace_and_members" },
+        },
       ])
-      expect(audit.every((r) => r.actor_user_id === rivalUser)).toBe(true)
+    })
 
-      // Tenant isolation: changing acme never leaks into rival.
+    it("writes no audit event for a save that changes nothing", async () => {
+      const store = autoForwardingStore(dbApi)
+      const before = (await auditOf(rival)).length
+      const mode = await store.get(rival)
+      expect(await store.set(rival, rivalUser, mode)).toEqual({
+        before: mode,
+        after: mode,
+      })
+      expect(await auditOf(rival)).toHaveLength(before)
+    })
+
+    it("changes only the workspace it is given", async () => {
+      const store = autoForwardingStore(dbApi)
+      await store.set(rival, rivalUser, "anywhere")
       await store.set(acme, aliceUser, "off")
       expect(await store.get(acme)).toBe("off")
       expect(await store.get(rival)).toBe("anywhere")
@@ -374,17 +385,21 @@ suite("automatic forwarding in Postgres", () => {
   })
 
   describe("authd.user_emails projection", () => {
-    it("projects verified external emails even without a hosted mailbox, ignores stale events, and deletes on user.deleted", async () => {
-      const t1 = Date.UTC(2026, 10, 20, 12, 0, 0)
-      const t2 = Date.UTC(2026, 10, 20, 13, 0, 0)
-
-      await applyClerkEvent(
+    const emailsOf = async (clerkUserId: string) =>
+      (
+        await owner<{ email: string }[]>`
+          select email from authd.user_emails where clerk_user_id = ${clerkUserId}
+        `
+      ).map((r) => r.email)
+    const created = Date.UTC(2026, 10, 20, 13, 0, 0)
+    const create = (eventId: string) =>
+      applyClerkEvent(
         dbApi,
-        `evt_af_${RUN}_1`,
+        eventId,
         "user.created",
         {
           id: projectedUser,
-          updated_at: t2,
+          updated_at: created,
           email_addresses: [
             {
               id: "e1",
@@ -401,17 +416,18 @@ suite("automatic forwarding in Postgres", () => {
         [],
       )
 
-      const afterCreate = await owner<{ email: string }[]>`
-        select email from authd.user_emails where clerk_user_id = ${projectedUser}
-      `
-      expect(afterCreate.map((r) => r.email)).toEqual([`proj-${RUN}@gmail.com`])
+    it("projects only verified emails, lowercased, for a user with no hosted mailbox", async () => {
+      await create(`evt_af_${RUN}_1`)
+      expect(await emailsOf(projectedUser)).toEqual([`proj-${RUN}@gmail.com`])
+    })
 
-      // Stale older event must not overwrite newer email list.
+    it("ignores an event older than the rows it would replace", async () => {
+      await create(`evt_af_${RUN}_2`)
       await projectClerkUser(
         dbApi,
         {
           id: projectedUser,
-          updated_at: t1,
+          updated_at: created - 3_600_000,
           email_addresses: [
             {
               id: "e3",
@@ -422,56 +438,46 @@ suite("automatic forwarding in Postgres", () => {
         },
         [],
       )
-      const afterStale = await owner<{ email: string }[]>`
-        select email from authd.user_emails where clerk_user_id = ${projectedUser}
-      `
-      expect(afterStale.map((r) => r.email)).toEqual([`proj-${RUN}@gmail.com`])
+      expect(await emailsOf(projectedUser)).toEqual([`proj-${RUN}@gmail.com`])
+    })
 
-      // user.deleted removes all sign-in email rows.
+    it("removes every sign-in email on user.deleted", async () => {
+      await create(`evt_af_${RUN}_3`)
       await applyClerkEvent(
         dbApi,
-        `evt_af_${RUN}_2`,
+        `evt_af_${RUN}_4`,
         "user.deleted",
         { id: projectedUser },
         [],
       )
-      const afterDelete = await owner<{ email: string }[]>`
-        select email from authd.user_emails where clerk_user_id = ${projectedUser}
-      `
-      expect(afterDelete).toHaveLength(0)
+      expect(await emailsOf(projectedUser)).toHaveLength(0)
     })
 
-    it("backfills sign-in emails without creating a mailbox, and never rolls back a newer row", async () => {
-      const email = (address: string) => ({
-        id: address,
-        email_address: address,
-        verification: { status: "verified" },
-      })
-      const emailsOf = async () =>
-        (
-          await owner<{ email: string }[]>`
-            select email from authd.user_emails where clerk_user_id = ${backfilledUser}
-          `
-        ).map((r) => r.email)
-
-      // A hosted address too: the backfill writes the sign-in email, not a mailbox.
-      await projectUserEmails(dbApi, {
+    const verified = (address: string) => ({
+      id: address,
+      email_address: address,
+      verification: { status: "verified" },
+    })
+    const backfill = (at: number, address: string) =>
+      projectUserEmails(dbApi, {
         id: backfilledUser,
-        updated_at: Date.UTC(2026, 10, 21),
-        email_addresses: [email(`new-${RUN}@${acmeDomain}`)],
+        updated_at: at,
+        email_addresses: [verified(address)],
       })
-      expect(await emailsOf()).toEqual([`new-${RUN}@${acmeDomain}`])
+
+    it("backfills a hosted sign-in email without creating a mailbox for it", async () => {
+      await backfill(Date.UTC(2026, 10, 21), `new-${RUN}@${acmeDomain}`)
+      expect(await emailsOf(backfilledUser)).toEqual([`new-${RUN}@${acmeDomain}`])
       const [mailboxes] = await owner<{ n: number }[]>`
         select count(*)::int as n from authd.accounts where clerk_user_id = ${backfilledUser}
       `
       expect(mailboxes?.n).toBe(0)
+    })
 
-      await projectUserEmails(dbApi, {
-        id: backfilledUser,
-        updated_at: Date.UTC(2026, 10, 20),
-        email_addresses: [email(`old-${RUN}@gmail.com`)],
-      })
-      expect(await emailsOf()).toEqual([`new-${RUN}@${acmeDomain}`])
+    it("never rolls back a row newer than the backfill's copy of the user", async () => {
+      await backfill(Date.UTC(2026, 10, 21), `new-${RUN}@${acmeDomain}`)
+      await backfill(Date.UTC(2026, 10, 20), `old-${RUN}@gmail.com`)
+      expect(await emailsOf(backfilledUser)).toEqual([`new-${RUN}@${acmeDomain}`])
     })
   })
 })

@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono"
 import { setAutoForwardingSchema } from "@repo/contracts"
 import { freshAuthRefusal } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
-import { notWired, readJson, validation } from "./http.js"
+import { forbidden, notWired, readJson, validation } from "./http.js"
 
 /**
  * Per-workspace automatic forwarding policy (#526):
@@ -14,9 +14,6 @@ import { notWired, readJson, validation } from "./http.js"
  * must receive 403 `forbidden` without being prompted for step-up, and an admin
  * with a stale session must be asked to step up before the body is inspected.
  */
-
-const forbidden = (message: string) =>
-  ({ statusCode: 403, name: "forbidden" as const, message }) as const
 
 const actorOf = (c: Context) => ({
   tenantId: c.get("auth").tenantId,

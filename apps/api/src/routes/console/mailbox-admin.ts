@@ -8,7 +8,7 @@ import {
 import type { ProvisionOutcome } from "../../mailboxes/provision.js"
 import { freshAuthRefusal } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
-import { notFound, notWired, readJson, validation } from "./http.js"
+import { forbidden, notFound, notWired, readJson, validation } from "./http.js"
 
 /**
  * An owner or admin's side of mailboxes: giving a member one, and choosing who
@@ -43,9 +43,6 @@ import { notFound, notWired, readJson, validation } from "./http.js"
  * domain, address, seat and sign-in checks are the ones a person's own request
  * meets, and `create` re-asks whether the actor administers the workspace.
  */
-
-const forbidden = (message: string) =>
-  ({ statusCode: 403, name: "forbidden" as const, message }) as const
 
 const NO_MEMBER = notFound("No such member in this workspace.")
 

@@ -1875,6 +1875,10 @@ Email address is not verified`. Only forwards of mail whose `From` is already
 an SES identity of ours get through. Internal forwards to a hosted domain are
 delivered locally and never reach SES.
 
+The Stalwart behaviour in this section (who the envelope sender is, the route
+variants, the DNS failure path, the fail-open fallback below) was read in the
+Stalwart v1.2.0 source (commit b2d3df9) on 2026-11-27, not probed on a server.
+
 **The `auto-forward-refused` route.** Stalwart 1.2.0 has no `Reject` or `Discard`
 `MtaRoute` variant (only `Mx`, `Relay`, and `Local`), and `MtaHook` runs on
 inbound SMTP only (not Sieve-generated messages). Disallowed recipients are
@@ -1908,7 +1912,7 @@ Deploy strictly in this order:
    console API serves the setting. Then fill `authd.user_emails` for users who
    existed before it: `bun run --filter @i10/api user-emails --instance prod`
    (a dry run), then again with `--apply`.
-3. Apply `plan.ndjson` with `./bootstrap.sh --dry-run` followed by `./bootstrap.sh`
-   (the plan upserts `MtaRoute` `auto-forward-refused` before updating
-   `MtaOutboundStrategy`, so the route exists before any expression names it).
-   No Stalwart pod restart is needed.
+3. Apply `plan.ndjson` from `infra/k8s/i10/stalwart` with `./bootstrap.sh --dry-run`
+   followed by `./bootstrap.sh` (the plan upserts `MtaRoute` `auto-forward-refused`
+   before updating `MtaOutboundStrategy`, so the route exists before any expression
+   names it).

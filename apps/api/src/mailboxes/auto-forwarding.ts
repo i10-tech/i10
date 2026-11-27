@@ -16,7 +16,10 @@ export const DEFAULT_AUTO_FORWARDING_MODE: AutoForwardingMode = "workspace"
 
 export interface AutoForwardingStore {
   get(tenantId: string): Promise<AutoForwardingMode>
-  /** Saves the mode and writes `workspace.auto_forwarding_changed` in one transaction. */
+  /**
+   * Saves the mode and writes `workspace.auto_forwarding_changed` in one
+   * transaction. Saving the mode already set writes neither.
+   */
   set(
     tenantId: string,
     actorUserId: string,
@@ -57,6 +60,8 @@ export function autoForwardingStore(db: Database): AutoForwardingStore {
           .for("update")
           .limit(1)
         const before = read(current?.mode)
+        // A save that changes nothing writes nothing, so the audit trail lists only changes.
+        if (before === mode) return { before, after: mode }
 
         await tx
           .update(workspaceSettings)
