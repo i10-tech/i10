@@ -1157,6 +1157,28 @@ describe("console routes /console/mail-devices/enrollments[/:id]", () => {
     expect(created).toEqual([])
     expect(gated).toContain(MAILBOX_TENANT)
 
+    // Reading or cancelling the enrollment meets the same policies.
+    let cancelled = 0
+    const refusedApp = makeApp({
+      freshAuth: fresh,
+      activeOrg: async () => ({ status: "personal" }),
+      ssoGate,
+      mailDeviceEnrollments: {
+        ...deps,
+        cancel: async () => {
+          cancelled++
+          return "cancelled"
+        },
+      },
+    })
+    const path = `/console/mail-devices/enrollments/${ENROLLMENT_ID}`
+    for (const method of ["GET", "DELETE"]) {
+      const res = await refusedApp.request(path, { method, headers: BEARER })
+      expect(res.status).toBe(403)
+      expect(await res.json()).toMatchObject({ name: "mfa_required" })
+    }
+    expect(cancelled).toBe(0)
+
     // Its own workspace open: requireTenant already ran that gate, and the
     // tenant the route read is the one create checks under the account lock.
     const own = await post(

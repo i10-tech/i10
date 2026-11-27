@@ -1,6 +1,6 @@
-import type { Hono } from "hono"
+import type { Context, Hono } from "hono"
 import { requireFreshAuth, ssoGateRefusal } from "../../middleware/session.js"
-import type { ConsoleDeps } from "./deps.js"
+import type { ConsoleDeps, MailDeviceEnrollmentsDeps } from "./deps.js"
 import { asId, isRecord, notFound, notWired, validation } from "./http.js"
 
 /**
@@ -16,6 +16,30 @@ import { asId, isRecord, notFound, notWired, validation } from "./http.js"
  * Every route acts strictly on the signed-in person's own mailbox and own
  * enrollments; another person's enrollment id always answers 404.
  */
+
+/**
+ * The person's mailbox, once its workspace's console policies have passed on
+ * this session, or the refusal to send.
+ *
+ * ⚠ THE MAILBOX'S WORKSPACE DECIDES, NOT THE ONE THE SESSION HAS OPEN. These
+ * routes run with any workspace open or none, and they start, show or cancel
+ * the enrollment of a credential for the mailbox. So that workspace's policies
+ * (SSO, second factor, IP allowlist, session age) run on this session here;
+ * `requireTenant` already ran them when it is the open workspace.
+ */
+async function gatedMailbox(
+  c: Context,
+  enrollments: MailDeviceEnrollmentsDeps,
+  userId: string,
+): Promise<{ mailbox: { tenantId: string | null } | null } | { refused: Response }> {
+  const mailbox = await enrollments.mailboxTenant({ clerkUserId: userId })
+  if (mailbox?.tenantId && mailbox.tenantId !== c.get("auth").tenantId) {
+    const refused = await ssoGateRefusal(c, userId, mailbox.tenantId)
+    if (refused) return { refused }
+  }
+  return { mailbox }
+}
+
 export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
   app.post("/mail-devices/enrollments", requireFreshAuth, async (c) => {
     const enrollments = d.mailDeviceEnrollments
@@ -38,18 +62,10 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
     }
 
     const { userId } = c.get("user")
-    const mailbox = await enrollments.mailboxTenant({ clerkUserId: userId })
+    const gated = await gatedMailbox(c, enrollments, userId)
+    if ("refused" in gated) return gated.refused
+    const { mailbox } = gated
     if (!mailbox) return c.json({ error: { code: "no_mailbox" } }, 409)
-
-    // ⚠ THE MAILBOX'S WORKSPACE DECIDES, NOT THE ONE THE SESSION HAS OPEN. This
-    // route runs with any workspace open or none, and it ends in a mail
-    // credential for the mailbox. So that workspace's console policies (SSO,
-    // second factor, IP allowlist, session age) run on this session here;
-    // `requireTenant` already ran them when it is the open workspace.
-    if (mailbox.tenantId && mailbox.tenantId !== c.get("auth").tenantId) {
-      const refused = await ssoGateRefusal(c, userId, mailbox.tenantId)
-      if (refused) return refused
-    }
 
     const result = await enrollments.create({
       clerkUserId: userId,
@@ -78,6 +94,10 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
     if (!id) return c.json(notFound("Enrollment not found."), 404)
 
     const { userId } = c.get("user")
+    // An enrollment goes with its mailbox (FK cascade), so no mailbox is no row.
+    const gated = await gatedMailbox(c, enrollments, userId)
+    if ("refused" in gated) return gated.refused
+    if (!gated.mailbox) return c.json(notFound("Enrollment not found."), 404)
     const view = await enrollments.get({ id, clerkUserId: userId })
     if (!view) return c.json(notFound("Enrollment not found."), 404)
 
@@ -102,6 +122,9 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
     if (!id) return c.json(notFound("Enrollment not found."), 404)
 
     const { userId } = c.get("user")
+    const gated = await gatedMailbox(c, enrollments, userId)
+    if ("refused" in gated) return gated.refused
+    if (!gated.mailbox) return c.json(notFound("Enrollment not found."), 404)
     const outcome = await enrollments.cancel({ id, clerkUserId: userId })
     if (outcome === "not_found") {
       return c.json(notFound("Enrollment not found."), 404)
