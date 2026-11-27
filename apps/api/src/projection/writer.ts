@@ -124,6 +124,15 @@ export async function projectClerkUser(
   return db.transaction(async (tx) => applyUser(tx, user, hostedDomains))
 }
 
+/**
+ * Projects one Clerk user's verified sign-in emails and nothing else, for the
+ * one-off backfill (scripts/user-emails.ts). Same guard as the webhook, so a
+ * newer webhook already applied is never rolled back.
+ */
+export async function projectUserEmails(db: Database, user: ClerkUser): Promise<void> {
+  await db.transaction(async (tx) => syncUserEmails(tx, user))
+}
+
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 /**

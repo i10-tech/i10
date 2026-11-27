@@ -3,7 +3,11 @@ import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import type { Database } from "../src/db/client.js"
 import { autoForwardingStore } from "../src/mailboxes/auto-forwarding.js"
-import { applyClerkEvent, projectClerkUser } from "../src/projection/writer.js"
+import {
+  applyClerkEvent,
+  projectClerkUser,
+  projectUserEmails,
+} from "../src/projection/writer.js"
 
 /**
  * Per-workspace automatic forwarding policy (#526) against a real migrated
@@ -46,6 +50,7 @@ const formerUser = `user_former_${RUN}`
 const rivalUser = `user_rival_${RUN}`
 const orphanUser = `user_orphan_${RUN}`
 const projectedUser = `user_proj_${RUN}`
+const backfilledUser = `user_backfill_${RUN}`
 
 const aliceMailbox = `alice@${acmeDomain}`
 const acmeTeamInbox = `support@${acmeDomain}`
@@ -168,7 +173,7 @@ suite("automatic forwarding in Postgres", () => {
   afterAll(async () => {
     if (owner) {
       await owner`delete from authd.accounts where clerk_user_id in (${aliceUser}, ${rivalUser}, ${orphanUser}, ${projectedUser})`
-      await owner`delete from authd.user_emails where clerk_user_id in (${bobUser}, ${formerUser}, ${rivalUser}, ${projectedUser})`
+      await owner`delete from authd.user_emails where clerk_user_id in (${bobUser}, ${formerUser}, ${rivalUser}, ${projectedUser}, ${backfilledUser})`
       await owner`delete from authd.webhook_events where event_id like ${`evt_af_${RUN}_%`}`
       await owner`delete from core.tenants where id in (${acme}, ${rival})`
       await owner.end()
@@ -434,6 +439,39 @@ suite("automatic forwarding in Postgres", () => {
         select email from authd.user_emails where clerk_user_id = ${projectedUser}
       `
       expect(afterDelete).toHaveLength(0)
+    })
+
+    it("backfills sign-in emails without creating a mailbox, and never rolls back a newer row", async () => {
+      const email = (address: string) => ({
+        id: address,
+        email_address: address,
+        verification: { status: "verified" },
+      })
+      const emailsOf = async () =>
+        (
+          await owner<{ email: string }[]>`
+            select email from authd.user_emails where clerk_user_id = ${backfilledUser}
+          `
+        ).map((r) => r.email)
+
+      // A hosted address too: the backfill writes the sign-in email, not a mailbox.
+      await projectUserEmails(dbApi, {
+        id: backfilledUser,
+        updated_at: Date.UTC(2026, 10, 21),
+        email_addresses: [email(`new-${RUN}@${acmeDomain}`)],
+      })
+      expect(await emailsOf()).toEqual([`new-${RUN}@${acmeDomain}`])
+      const [mailboxes] = await owner<{ n: number }[]>`
+        select count(*)::int as n from authd.accounts where clerk_user_id = ${backfilledUser}
+      `
+      expect(mailboxes?.n).toBe(0)
+
+      await projectUserEmails(dbApi, {
+        id: backfilledUser,
+        updated_at: Date.UTC(2026, 10, 20),
+        email_addresses: [email(`old-${RUN}@gmail.com`)],
+      })
+      expect(await emailsOf()).toEqual([`new-${RUN}@${acmeDomain}`])
     })
   })
 })
