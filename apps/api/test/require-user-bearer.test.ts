@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test"
 import { Hono } from "hono"
 import type { ClerkClient } from "@clerk/backend"
+import { clerkSessionIds } from "../src/identity/middleware.js"
 import {
+  clerkActiveOrg,
+  clerkFreshAuth,
   clerkSessions,
   requireUser,
   type SessionVerifier,
@@ -111,4 +114,28 @@ describe("the session verifiers", () => {
       sessionId: "sess_1",
     })
   })
+})
+
+/**
+ * The readers that run after a verifier (active org, fresh auth, session ids)
+ * answer `unknown`, which callers turn into a 503, rather than let Clerk read
+ * a cookie if one is ever called without a guarded verifier in front.
+ */
+describe("the readers behind the verifiers", () => {
+  const readers = {
+    clerkActiveOrg: (clerk: ClerkClient) => clerkActiveOrg(clerk),
+    clerkFreshAuth: (clerk: ClerkClient) => clerkFreshAuth(clerk),
+    clerkSessionIds: (clerk: ClerkClient) =>
+      clerkSessionIds(clerk, { authorizedParties: [] }),
+  }
+  for (const [name, make] of Object.entries(readers)) {
+    it(`${name} answers unknown to a cookie-only request without asking Clerk`, async () => {
+      const { clerk, calls } = acceptingClerk()
+      const read = make(clerk)
+      expect(await read(cookieOnly())).toEqual({ status: "unknown" })
+      expect(calls()).toBe(0)
+      await read(withBearer())
+      expect(calls()).toBe(1)
+    })
+  }
 })
