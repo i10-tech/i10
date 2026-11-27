@@ -93,7 +93,8 @@ function build(
     app.request(path, {
       method,
       headers: {
-        ...(user ? { "x-user": user } : {}),
+        // The session rides in the header (`cookieOnlyRefusal`); the fake verifier reads `x-user`.
+        ...(user ? { "x-user": user, authorization: "Bearer test-session" } : {}),
         ...(body ? { "content-type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),

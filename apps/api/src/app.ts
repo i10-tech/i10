@@ -670,20 +670,24 @@ export function createApp(deps: AppDeps = {}) {
   // dangling reference and a generator can emit a client with no way to
   // authenticate. Every name used in a `security:` block has to exist here.
   //
-  // ⚠ AND IT IS A COOKIE, NOT A BEARER TOKEN, WHICH IS THE POINT OF IT BEING A
-  // SECOND SCHEME RATHER THAN A SECOND USE OF THE FIRST. Mailbox routes take
-  // the session a browser already holds from auth.i10.tech; they deliberately
-  // do NOT accept an API key, so that a leaked sending key - whose whole
-  // advertised blast radius is "can send mail" - cannot also create mailboxes
-  // on the customer's domain.
+  // ⚠ A SECOND SCHEME, NOT A SECOND USE OF THE FIRST, EVEN THOUGH BOTH ARE
+  // BEARER TOKENS. Mailbox routes take the person's Clerk
+  // session; they deliberately do NOT accept an API key, so that a leaked
+  // sending key - whose whole advertised blast radius is "can send mail" -
+  // cannot also create mailboxes on the customer's domain.
+  //
+  // ⚠ THE SESSION GOES IN THE HEADER, NEVER A COOKIE ALONE (`cookieOnlyRefusal`
+  // in middleware/session.ts): a cookie-only request is the CSRF this API has
+  // no other defence against.
   app.openAPIRegistry.registerComponent("securitySchemes", "sessionAuth", {
-    type: "apiKey",
-    in: "cookie",
-    name: "__session",
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "JWT",
     description:
-      "The Clerk session cookie set when you sign in at auth.i10.tech. Used " +
-      "by the console for mailbox management; it is not an alternative to an " +
-      "API key, and the sending endpoints do not accept it.",
+      "Your Clerk session token from signing in at auth.i10.tech, sent as " +
+      "`Authorization: Bearer <token>`. A session cookie alone is refused. " +
+      "Used by the console for mailbox management; it is not an alternative " +
+      "to an API key, and the sending endpoints do not accept it.",
   })
 
   app.doc31("/openapi.json", {

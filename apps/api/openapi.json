@@ -25,10 +25,10 @@
         "description": "Your i10 API key. Keys are prefixed `i10_live_` or `i10_test_` so they are recognisable in your own logs and greppable in a leak scan."
       },
       "sessionAuth": {
-        "type": "apiKey",
-        "in": "cookie",
-        "name": "__session",
-        "description": "The Clerk session cookie set when you sign in at auth.i10.tech. Used by the console for mailbox management; it is not an alternative to an API key, and the sending endpoints do not accept it."
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Your Clerk session token from signing in at auth.i10.tech, sent as `Authorization: Bearer <token>`. A session cookie alone is refused. Used by the console for mailbox management; it is not an alternative to an API key, and the sending endpoints do not accept it."
       }
     },
     "schemas": {

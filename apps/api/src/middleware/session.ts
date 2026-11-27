@@ -259,6 +259,45 @@ export function gateUnavailable(c: Context) {
 }
 
 /**
+ * The refusal for a request that carries its session in a cookie alone, or
+ * null when it sends `Authorization: Bearer`. `requireTenant` and
+ * `requireUser` both run it before verifying the session.
+ *
+ * ⚠ THE BEARER HEADER IS REQUIRED, AND THIS IS THE CSRF DEFENCE FOR EVERY
+ * SESSION ROUTE. `clerk.authenticateRequest` accepts a session from the
+ * `Authorization` header OR from Clerk's `__session` COOKIE, and this API has
+ * no CORS policy, no Origin check and no custom-header requirement. Without
+ * this, a page on any other site could issue
+ * `fetch(…, { credentials: "include" })` against `/console/*` or `/mailboxes`
+ * - a simple request, so no preflight - and although the
+ * attacker could not READ the response, the side effect would land: a mailbox
+ * created, a migration started, a key rotated, a domain removed.
+ *
+ * ⚠ IT COSTS NOTHING, BECAUSE THE ONLY CLIENT ALREADY SENDS IT. The console
+ * calls the API server-side with an explicit `Authorization: Bearer
+ * <session jwt>` - see apps/console/lib/api.ts. A browser cannot attach that
+ * header cross-origin without a preflight the API would answer with no CORS
+ * headers, so requiring it makes cookie-borne CSRF structurally impossible
+ * rather than dependent on Clerk's cookie-domain configuration.
+ *
+ * ⚠ AND IT IS A 401, NOT A 403. A request with no credential at all is
+ * unauthenticated, which is what this says.
+ */
+export function cookieOnlyRefusal(c: Context): Response | null {
+  if (c.req.header("Authorization")?.startsWith("Bearer ")) return null
+  return c.json(
+    {
+      statusCode: 401,
+      name: "invalid_access",
+      message:
+        "Send your session as `Authorization: Bearer <token>`. A cookie alone " +
+        "is not accepted here.",
+    },
+    401,
+  )
+}
+
+/**
  * ⚠ THE 503 BRANCH IS THE SAME RULE `requireApiKey` FOLLOWS, and it matters
  * more here. A 401 tells someone their sign-in is bad; during a Clerk outage
  * they respond by signing out and finding they cannot sign back in. authd
@@ -277,6 +316,9 @@ export const requireUser: MiddlewareHandler = async (c, next) => {
       501,
     )
   }
+
+  const cookieOnly = cookieOnlyRefusal(c)
+  if (cookieOnly) return cookieOnly
 
   const outcome = await verifier.verify(c.req.raw)
 
