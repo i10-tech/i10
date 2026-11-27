@@ -15,11 +15,17 @@ import {
   SectionDescription,
   SectionTitle,
 } from "@repo/ui/components/i10/page"
+import {
+  AddMailDeviceDialog,
+  type AddMailDeviceAttempt,
+} from "@/components/add-mail-device-dialog"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { RowMenu } from "@/components/list/row-menu"
 import { PanelError } from "@/components/panel-error"
 import { Time } from "@/components/time"
 import { revokeAllMailDevices, revokeMailDevice } from "@/lib/actions"
+import { startMailDeviceEnrollment } from "@/lib/mail-device-enrollment-actions"
+import { startEnrollmentError } from "@/lib/mail-device-enrollments"
 import {
   deviceDetail,
   deviceTitle,
@@ -30,6 +36,7 @@ import {
   type MailDevice,
 } from "@/lib/mail-devices"
 import { useResetOnOpen } from "@/lib/react"
+import { useStepUp } from "@/lib/step-up"
 import { toastDone } from "@/lib/toast"
 
 /** What the section reads once the page has it. */
@@ -70,11 +77,24 @@ export function MailDevices({
   shape: DevicesShape
   data?: MailDevicesData
 }) {
+  const stepUp = useStepUp()
   const [revoking, setRevoking] = React.useState<{
     device: MailDevice
     open: boolean
   } | null>(null)
   const [signingOut, setSigningOut] = React.useState(false)
+  const [startingAdd, setStartingAdd] = React.useState(false)
+  const [adding, setAdding] = React.useState<{
+    open: boolean
+    attempt: AddMailDeviceAttempt
+  } | null>(null)
+
+  // Clear the one-time enrollment URL from state once the dialog's exit finishes.
+  React.useEffect(() => {
+    if (!adding || adding.open) return
+    const timer = setTimeout(() => setAdding(null), 250)
+    return () => clearTimeout(timer)
+  }, [adding])
 
   if (shape.devices === "hidden") return null
 
@@ -84,8 +104,37 @@ export function MailDevices({
     ? devices
     : Array.from({ length: shape.deviceRows }, () => undefined)
 
+  async function startAddDevice() {
+    if (!data || startingAdd) return
+    setStartingAdd(true)
+    try {
+      if (!(await stepUp())) return
+      const result = await startMailDeviceEnrollment()
+      if (result.ok) {
+        setAdding({
+          open: true,
+          attempt: {
+            kind: "enrollment",
+            started: result.data,
+            startedAt: Date.now(),
+          },
+        })
+      } else {
+        setAdding({
+          open: true,
+          attempt: { kind: "error", error: startEnrollmentError(result) },
+        })
+      }
+    } finally {
+      setStartingAdd(false)
+    }
+  }
+
   return (
-    <Section>
+    <Section
+      id={ownPage ? "mail-devices" : undefined}
+      className={ownPage ? "scroll-mt-6" : undefined}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <SectionTitle>{ownPage ? "Mail devices" : "Devices"}</SectionTitle>
@@ -95,15 +144,24 @@ export function MailDevices({
               : "The iPhones, iPads and Macs that sign in to this mailbox with their own code instead of a password."}
           </SectionDescription>
         </div>
-        {shape.devices === "list" && (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="shrink-0"
-            onClick={() => setSigningOut(true)}
-          >
-            Sign out all devices
-          </Button>
+        {(ownPage || shape.devices === "list") && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {shape.devices === "list" && (
+              <Button variant="secondary" size="sm" onClick={() => setSigningOut(true)}>
+                Sign out all devices
+              </Button>
+            )}
+            {ownPage && (
+              <Button
+                variant="primary"
+                size="sm"
+                loading={startingAdd}
+                onClick={() => void startAddDevice()}
+              >
+                Add a device
+              </Button>
+            )}
+          </div>
         )}
       </div>
       <SectionContent>
@@ -116,7 +174,7 @@ export function MailDevices({
           <div className="rounded-2xl border bg-card px-4 py-6">
             <p className="text-sm text-muted-foreground">
               {ownPage
-                ? "No mail devices yet. A device shows up here once you add it from your mailbox's page."
+                ? "No mail devices yet. Add an iPhone, iPad or Mac to sign in to Apple Mail without your password."
                 : "No devices sign in to this mailbox with their own code yet."}
             </p>
           </div>
@@ -181,6 +239,15 @@ export function MailDevices({
             address={data.address}
             open={signingOut}
             onOpenChange={setSigningOut}
+          />
+        )}
+        {ownPage && adding && (
+          <AddMailDeviceDialog
+            open={adding.open}
+            attempt={adding.attempt}
+            restarting={startingAdd}
+            onOpenChange={(open) => setAdding((a) => (a ? { ...a, open } : a))}
+            onStartAgain={() => void startAddDevice()}
           />
         )}
       </span>
