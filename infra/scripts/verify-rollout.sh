@@ -68,7 +68,13 @@ APP="${I10_APP:-i10-workloads}"
 # ⚠ i10-device-ca TOO (#383 PR 3): its relay sidecar runs the same i10-authd
 # image, so an authd build pins it as well. Without the nudge, the relay would
 # pick the new digest up only at Argo's own poll, after this check had passed.
-APPS="${I10_APPS:-$APP i10-stalwart i10-device-ca}"
+#
+# ⚠ AND THE APPS THAT HOLD WHAT A WORKLOAD MOUNTS (#544). A Deployment whose
+# `secretKeyRef` names a Secret from a new DopplerSecret (i10-doppler-secrets),
+# or whose Redis is new (i10-redis), sits in CreateContainerConfigError or
+# crashloops until that app syncs. Left to Argo's three-minute poll, §3 could
+# time out on a rollout that was only waiting for its Secret.
+APPS="${I10_APPS:-$APP i10-stalwart i10-device-ca i10-doppler-secrets i10-redis}"
 
 # ⚠ THE BUDGETS ARE SPLIT, BECAUSE THE TWO WAITS FAIL FOR DIFFERENT REASONS.
 # Argo not syncing is a control-plane problem; pods not becoming ready is an

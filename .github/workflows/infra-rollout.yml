@@ -98,8 +98,9 @@ jobs:
       # ⚠ ONCE PER APPLICATION THAT AN infra/ COMMIT CAN CHANGE ON ITS OWN. The
       # script gates on one app (`I10_APP`) and nudges the rest; i10-stalwart
       # carries the PostSync apply hook (#412), whose failure only shows on that
-      # app's operation. The second run's §3 re-waits on rollouts that are
-      # already done, which costs seconds.
+      # app's operation. i10-device-ca restarts step-ca on a ca.json edit, so a
+      # device-ca-only commit is gated on its own app too (#544). Each later
+      # run's §3 re-waits on rollouts that are already done, which costs seconds.
       - name: Verify the rollout
         if: ${{ steps.scope.outputs.only == 'true' && env.HAS_TAILSCALE == 'true' }}
         env:
@@ -107,7 +108,7 @@ jobs:
           DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER || 'i10-deploy' }}
         run: |
           set -euo pipefail
-          for app in i10-workloads i10-stalwart; do
+          for app in i10-workloads i10-stalwart i10-device-ca; do
             echo "── ${app}"
             ssh -o BatchMode=yes \
                 -o StrictHostKeyChecking=accept-new \
