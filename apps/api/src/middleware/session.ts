@@ -415,6 +415,8 @@ export function clerkActiveOrg(
     : undefined
 
   return async (request) => {
+    // No Bearer header can only reach here past a guarded verifier by mistake: a contradiction, not a cookie session.
+    if (!hasBearer(request)) return { status: "unknown" }
     try {
       const state = await clerk.authenticateRequest(request, { authorizedParties })
       /*
@@ -520,6 +522,8 @@ export function clerkFreshAuth(
     : undefined
 
   return async (request) => {
+    // No Bearer header can only reach here past a guarded verifier by mistake: a contradiction, not a cookie session.
+    if (!hasBearer(request)) return { status: "unknown" }
     try {
       const state = await clerk.authenticateRequest(request, { authorizedParties })
       /*
