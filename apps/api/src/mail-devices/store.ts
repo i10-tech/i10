@@ -25,7 +25,10 @@ import { MailDeviceError, mintCode, type MailDeviceCodeKeys } from "./code.js"
  * and `expectedEpoch` before inserting; every revocation writes `authd.accounts`
  * in the same transaction before calling `endFor`. So a mint either commits
  * first (and its device is deleted by the revocation) or waits on the account
- * lock and sees the hold or moved epoch and refuses.
+ * lock and sees the hold or moved epoch and refuses. `revokeAllFor` locks the
+ * account the same way before its DELETE. A single `revoke` takes no account
+ * lock: it names one existing row, so no mint can race it, and it holds
+ * nothing before the device row.
  */
 
 export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0]
@@ -458,7 +461,11 @@ export function decodeDeviceCursor(raw: string): DeviceCursor | null {
     .toString("utf8")
     .split("|")
   if (extra !== undefined || !createdAt || !id) return null
-  if (!CURSOR_AT.test(createdAt) || Number.isNaN(Date.parse(createdAt))) return null
+  if (!CURSOR_AT.test(createdAt)) return null
+  // A date that rolls over (Feb 30) or year 0 parses here but Postgres refuses it.
+  const at = new Date(createdAt)
+  if (Number.isNaN(at.getTime()) || at.getUTCFullYear() < 1) return null
+  if (at.toISOString().slice(0, 19) !== createdAt.slice(0, 19)) return null
   return UUID.test(id) ? { createdAt, id } : null
 }
 
@@ -516,12 +523,15 @@ export interface RevokedDevice {
   id: string
   email: string
   clerkUserId: string
+  /** The device's workspace, null for i10's own domain. */
+  tenantId: string | null
 }
 
 const revokedColumns = {
   id: mailDevices.id,
   email: mailDevices.email,
   clerkUserId: mailDevices.clerkUserId,
+  tenantId: mailDevices.tenantId,
 }
 
 /**
@@ -548,14 +558,40 @@ export async function revoke(
 
 /**
  * "Sign out all my mail devices": deletes every device of one person in
- * `scope`, in one statement on the person's index. Clerk sends no
- * password-change event, so this is how a person ends them all at once.
+ * `scope`. Clerk sends no password-change event, so this is how a person ends
+ * them all at once.
+ *
+ * ⚠ ACCOUNT LOCK FIRST (the lock order above). Without it a `mint` in flight
+ * commits a device this DELETE's snapshot never saw, and a bulk `endFor`
+ * walking the same person's rows in another order can deadlock with it.
  */
 export async function revokeAllFor(
-  db: Pick<Database, "delete">,
+  db: Pick<Database, "transaction">,
   scope: DeviceScope & { clerkUserId: string },
 ): Promise<RevokedDevice[]> {
-  return db.delete(mailDevices).where(scopeWhere(scope)).returning(revokedColumns)
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select 1 from authd.accounts where clerk_user_id = ${scope.clerkUserId}
+         for no key update`)
+    return tx.delete(mailDevices).where(scopeWhere(scope)).returning(revokedColumns)
+  })
+}
+
+/**
+ * ⚠ OPERATOR ONLY (scripts/mail-device.ts), NEVER FROM A ROUTE: deletes one
+ * device by id with no tenant or person filter, so it also reaches a row left
+ * behind in a workspace its account has since left.
+ */
+export async function revokeForOperator(
+  db: Pick<Database, "delete">,
+  deviceId: string,
+): Promise<RevokedDevice | null> {
+  if (!UUID.test(deviceId)) return null
+  const [gone] = await db
+    .delete(mailDevices)
+    .where(eq(mailDevices.id, deviceId))
+    .returning(revokedColumns)
+  return gone ?? null
 }
 
 const END_FOR_BATCH = 1000

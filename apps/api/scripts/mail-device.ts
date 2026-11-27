@@ -42,10 +42,9 @@ import {
   accountByEmail,
   decodeDeviceCursor,
   bindKey,
-  deviceOwner,
   listDevices,
   mint,
-  revoke,
+  revokeForOperator,
   unbindKey,
   type DeviceCursor,
   type MailDevicePlatform,
@@ -346,17 +345,8 @@ async function main() {
     }
 
     if (command.action === "revoke") {
-      const owner = await deviceOwner(db, command.id)
-      if (!owner) {
+      if (!(await revokeForOperator(db, command.id))) {
         console.error(`No mail device found with id ${command.id}`)
-        process.exit(1)
-      }
-      const deleted = await revoke(db, {
-        deviceId: command.id,
-        scope: { kind: "own", clerkUserId: owner },
-      })
-      if (!deleted) {
-        console.error(`Mail device ${command.id} was already revoked`)
         process.exit(1)
       }
       console.log(`Revoked mail device ${command.id}`)

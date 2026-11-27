@@ -187,7 +187,7 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
         log.info(
           {
             audit: "mail_device.revoked",
-            tenantId: viewer.tenantId,
+            tenantId: gone.tenantId,
             actorUserId: viewer.userId,
             userId: gone.clerkUserId,
             deviceId: gone.id,
@@ -208,7 +208,8 @@ export function mailDeviceService(deps: { store: DeviceStorePort; log: AuditLog 
       log.info(
         {
           audit: "mail_device.revoked_all",
-          tenantId: viewer.tenantId,
+          // One scope is one workspace (or none), so every row shares it.
+          tenantId: gone[0]?.tenantId ?? null,
           actorUserId: viewer.userId,
           userId: scope.clerkUserId,
           address: address ?? null,

@@ -74,12 +74,22 @@ function world() {
       const hit = rows.find((r) => r.id === deviceId && inScope(r, scope))
       if (!hit) return null
       rows = rows.filter((r) => r !== hit)
-      return { id: hit.id, email: hit.email, clerkUserId: hit.clerkUserId }
+      return {
+        id: hit.id,
+        email: hit.email,
+        clerkUserId: hit.clerkUserId,
+        tenantId: hit.tenantId,
+      }
     },
     revokeAll: async (scope) => {
       const hit = rows.filter((r) => inScope(r, scope))
       rows = rows.filter((r) => !hit.includes(r))
-      return hit.map((r) => ({ id: r.id, email: r.email, clerkUserId: r.clerkUserId }))
+      return hit.map((r) => ({
+        id: r.id,
+        email: r.email,
+        clerkUserId: r.clerkUserId,
+        tenantId: r.tenantId,
+      }))
     },
     accountOf: async (address) => {
       const found = Object.entries(accounts).find(([, a]) => a.email === address)
@@ -158,7 +168,15 @@ describe("console /mail-devices", () => {
 
   it("refuses a bad scope or cursor with 422", async () => {
     const app = consoleFor(world(), ADA)
-    for (const query of ["scope=everyone", "cursor=bad"]) {
+    // Well formed, but dates Postgres refuses: they must be a 422, not a 500.
+    const cursorOf = (at: string) =>
+      Buffer.from(`${at}|${ids.ada}`, "utf8").toString("base64url")
+    for (const query of [
+      "scope=everyone",
+      "cursor=bad",
+      `cursor=${cursorOf("2026-02-30T10:00:00.000000Z")}`,
+      `cursor=${cursorOf("0000-01-01T00:00:00.000000Z")}`,
+    ]) {
       expect((await app.request(`/mail-devices?${query}`)).status).toBe(422)
     }
   })

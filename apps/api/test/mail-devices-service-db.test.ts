@@ -215,6 +215,8 @@ suite("mail device service against Postgres", () => {
 
     expect((await service().revoke(soloInAcme, soloPhone))?.id).toBe(soloPhone)
     expect(await idsOf(solo)).toEqual([])
+    // The audit names the device's workspace (none), not the console's.
+    expect(audit.at(-1)).toMatchObject({ audit: "mail_device.revoked", tenantId: null })
   })
 
   it("own scope follows the account's workspace now: a device left from an old one is not listed", async () => {
@@ -251,6 +253,26 @@ suite("mail device service against Postgres", () => {
       status: "not_found",
     })
     expect(await idsOf(bob)).toEqual([bobPhone])
+  })
+
+  it("revoke-all waits for a mint holding the account lock, and ends its device too", async () => {
+    let minted = ""
+    let revoking: Promise<unknown> | undefined
+    await owner.begin(async (tx) => {
+      // What mint does: account lock first, then the insert.
+      await tx`select 1 from authd.accounts where clerk_user_id = ${ada} for no key update`
+      const [row] = await tx`
+        insert into authd.mail_devices
+          (clerk_user_id, email, tenant_id, platform, code_hash, code_kid, created_by)
+        values (${ada}, ${addressOf[ada]!}, ${tenantOf[ada]!}, 'ios', ${randomBytes(32)}, 1, 'test')
+        returning id::text as id`
+      minted = row!.id as string
+      revoking = service().revokeAll(adaInAcme)
+      await Bun.sleep(150)
+    })
+    expect(await revoking).toEqual({ status: "ok", revoked: 1 })
+    expect(minted).not.toBe("")
+    expect(await idsOf(ada)).toEqual([])
   })
 
   it("an admin's revoke-all for an address reaches one person of their workspace only", async () => {
@@ -370,7 +392,8 @@ suite("mail device service against Postgres", () => {
         expect(
           (await counted(() => service().revoke(acmeAdmin, ids[1]!))).queries,
         ).toBe(2)
-      expect((await counted(() => service().revokeAll(adaInAcme))).queries).toBe(1)
+      // begin, the account lock, the delete, commit: none grows with the devices.
+      expect((await counted(() => service().revokeAll(adaInAcme))).queries).toBe(4)
     }
   })
 })
