@@ -1,5 +1,5 @@
 import type { Hono } from "hono"
-import { requireFreshAuth } from "../../middleware/session.js"
+import { requireFreshAuth, ssoGateRefusal } from "../../middleware/session.js"
 import type { ConsoleDeps } from "./deps.js"
 import { asId, isRecord, notFound, notWired, validation } from "./http.js"
 
@@ -38,7 +38,23 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
     }
 
     const { userId } = c.get("user")
-    const result = await enrollments.create({ clerkUserId: userId })
+    const mailbox = await enrollments.mailboxTenant({ clerkUserId: userId })
+    if (!mailbox) return c.json({ error: { code: "no_mailbox" } }, 409)
+
+    // ⚠ THE MAILBOX'S WORKSPACE DECIDES, NOT THE ONE THE SESSION HAS OPEN. This
+    // route runs with any workspace open or none, and it ends in a mail
+    // credential for the mailbox. So that workspace's console policies (SSO,
+    // second factor, IP allowlist, session age) run on this session here;
+    // `requireTenant` already ran them when it is the open workspace.
+    if (mailbox.tenantId && mailbox.tenantId !== c.get("auth").tenantId) {
+      const refused = await ssoGateRefusal(c, userId, mailbox.tenantId)
+      if (refused) return refused
+    }
+
+    const result = await enrollments.create({
+      clerkUserId: userId,
+      tenantId: mailbox.tenantId,
+    })
     if (!result.ok) {
       return c.json({ error: { code: result.code } }, result.status)
     }

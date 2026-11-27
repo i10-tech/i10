@@ -22,6 +22,7 @@ import {
   cancelEnrollment,
   createEnrollment,
   getEnrollment,
+  readMailboxTenant,
 } from "./mail-devices/enrollments.js"
 import { mailDeviceEnrolledNotifier } from "./mail-devices/notice.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
@@ -950,6 +951,14 @@ const mailDeviceEnrolledNotice =
   systemSender && consoleUrl
     ? mailDeviceEnrolledNotifier({ sender: systemSender, consoleUrl })
     : undefined
+// The design leans on this email to tell a person a device was added (Review 1
+// H2), so a deployment without it says so once rather than staying quiet.
+if (env.ENROLLD_TOKEN_HASHES && !mailDeviceEnrolledNotice) {
+  log.warn(
+    { systemSender: Boolean(systemSender), consoleUrl: Boolean(consoleUrl) },
+    "mail device enrollment is on but its notice email is off",
+  )
+}
 const transferNotice =
   systemSender && consoleUrl
     ? {
@@ -2715,9 +2724,11 @@ const app = createApp({
       identity,
     }),
     mailDeviceEnrollments: {
-      create: ({ clerkUserId }) =>
+      mailboxTenant: ({ clerkUserId }) => readMailboxTenant(db, clerkUserId),
+      create: ({ clerkUserId, tenantId }) =>
         createEnrollment(db, {
           clerkUserId,
+          tenantId,
           hasCodeKeys: mailDeviceCodeKeys !== null,
         }),
       get: (input) => getEnrollment(db, input),

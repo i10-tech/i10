@@ -65,16 +65,23 @@ const asciiClaim = (max: number) =>
     .transform((v) => v.trim())
     .pipe(z.string().min(1).max(max).regex(PRINTABLE_ASCII))
 
-/** An optional free-text claim (a device name can be any language), trimmed. */
+/**
+ * An optional free-text claim (a device name can be any language), trimmed and
+ * cut to `max` characters rather than refused: a long name is the person's own
+ * choice, and refusing it would leave their enrollment open with no reason
+ * shown. enrolld already caps every value at 512 bytes.
+ */
 const textClaim = (max: number) =>
   z
     .string()
-    .max(max)
     .regex(NO_CONTROL)
     .nullish()
     .transform((v) => {
-      const trimmed = v?.trim()
-      return trimmed ? trimmed : null
+      const cut = Array.from(v?.trim() ?? "")
+        .slice(0, max)
+        .join("")
+        .trimEnd()
+      return cut ? cut : null
     })
 
 const peekBody = z.object({

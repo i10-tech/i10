@@ -153,12 +153,33 @@ async function lockEnrollment(
 }
 
 /**
+ * The workspace of the person's own mailbox, read before an enrollment starts
+ * so the route can run that workspace's console policies on the session; null
+ * when the person has no mailbox. `tenantId` is null for an i10.tech mailbox.
+ */
+export async function readMailboxTenant(
+  db: Pick<Database, "execute">,
+  clerkUserId: string,
+): Promise<{ tenantId: string | null } | null> {
+  const [row] = (await db.execute(sql`
+    select tenant_id::text as tenant_id
+      from authd.accounts
+     where clerk_user_id = ${clerkUserId}`)) as unknown as {
+    tenant_id: string | null
+  }[]
+  return row ? { tenantId: row.tenant_id } : null
+}
+
+/**
  * Starts a new enrollment for the signed-in person's own mailbox
  * (`POST /console/mail-devices/enrollments`).
  *
- * Workspace-optional (Review 1): uses `account.tenant_id` (null for an i10.tech
- * mailbox) whatever workspace the console session has open. Locks the account,
- * checks `mintRefusal`, cancels any existing `open`/`attested` enrollment (and
+ * Workspace-optional (Review 1): the console session may have any workspace
+ * open, or none. ⚠ `tenantId` IS THE MAILBOX'S WORKSPACE WHOSE POLICIES THE
+ * ROUTE ALREADY RAN ON THE SESSION (`readMailboxTenant`, null for an i10.tech
+ * mailbox). The gate can call Clerk, so it runs before this transaction, and
+ * `mintRefusal` refuses `tenant_mismatch` when the mailbox moved in between.
+ * Locks the account, cancels any existing `open`/`attested` enrollment (and
  * expires its SCEP permits), and inserts the new row with a 15-minute attest
  * window.
  */
@@ -166,6 +187,7 @@ export async function createEnrollment(
   db: Pick<Database, "transaction">,
   input: {
     clerkUserId: string
+    tenantId: string | null
     createdBy?: string
     hasCodeKeys: boolean
     enrollBaseUrl?: string
@@ -186,7 +208,7 @@ export async function createEnrollment(
     }
     const expectedEpoch = Number(account.credential_epoch)
     const refusal = mintRefusal(account, {
-      tenantId: account.tenant_id,
+      tenantId: input.tenantId,
       expectedEpoch,
     })
     if (refusal) {

@@ -55,7 +55,14 @@ import type {
 } from "../../mail-devices/enrollments.js"
 
 export interface MailDeviceEnrollmentsDeps {
-  create(input: { clerkUserId: string }): Promise<CreateEnrollmentResult>
+  /** The workspace of the person's own mailbox (`readMailboxTenant`). */
+  mailboxTenant(input: {
+    clerkUserId: string
+  }): Promise<{ tenantId: string | null } | null>
+  create(input: {
+    clerkUserId: string
+    tenantId: string | null
+  }): Promise<CreateEnrollmentResult>
   get(input: { id: string; clerkUserId: string }): Promise<EnrollmentView | null>
   cancel(input: { id: string; clerkUserId: string }): Promise<CancelEnrollmentOutcome>
 }

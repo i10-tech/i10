@@ -50,6 +50,7 @@ import type {
   ActiveOrgReader,
   FreshAuthReader,
   SessionVerifier,
+  SsoGateReader,
 } from "../src/middleware/session.js"
 import type { TenantResolver } from "../src/middleware/tenant.js"
 import type { ConsoleDeps } from "../src/routes/console.js"
@@ -593,6 +594,27 @@ describe("ENROLLD_TOKEN_HASHES env and :3443 listener branch", () => {
     expect(message).not.toContain(secretish)
   })
 
+  it("refuses an ENROLLD_TOKEN_HASHES entry that is also a CA hook token", () => {
+    const hooks = {
+      ...baseEnv,
+      CA_HOOK_TOKEN_HASHES: hex(CA_TOKEN),
+      CA_HOOK_WEBHOOK_IDS: Object.entries(IDS)
+        .map(([kind, id]) => `${kind}=${id}`)
+        .join(","),
+      CA_INTERMEDIATE_NOT_AFTER: "2027-11-26T00:00:00Z",
+    }
+    expect(() =>
+      loadEnv({
+        ...hooks,
+        ENROLLD_TOKEN_HASHES: `${hex(ENROLLD_TOKEN)},${hex(CA_TOKEN)}`,
+      }),
+    ).toThrow("must share no entry with CA_HOOK_TOKEN_HASHES")
+    expect(
+      loadEnv({ ...hooks, ENROLLD_TOKEN_HASHES: hex(ENROLLD_TOKEN) })
+        .ENROLLD_TOKEN_HASHES,
+    ).toHaveLength(1)
+  })
+
   function buildFetch(options: {
     withEnrolld?: boolean
     enrolldHandlers?: Partial<EnrolldHandlers>
@@ -934,8 +956,10 @@ describe("console routes /console/mail-devices/enrollments[/:id]", () => {
     activeOrg?: ActiveOrgReader
     tenants?: TenantResolver
     mailDeviceEnrollments?: MailDeviceEnrollmentsDeps
+    ssoGate?: SsoGateReader
   }) {
     return createApp({
+      ...(options.ssoGate ? { ssoGate: options.ssoGate } : {}),
       console: {
         sessions,
         tenants: options.tenants ?? tenants,
@@ -957,6 +981,7 @@ describe("console routes /console/mail-devices/enrollments[/:id]", () => {
   const stubDeps = (
     overrides: Partial<MailDeviceEnrollmentsDeps> = {},
   ): MailDeviceEnrollmentsDeps => ({
+    mailboxTenant: async () => ({ tenantId: TENANT }),
     create: async () => ({
       ok: true,
       id: ENROLLMENT_ID,
@@ -1089,6 +1114,82 @@ describe("console routes /console/mail-devices/enrollments[/:id]", () => {
       },
     )
     expect(delRes.status).toBe(204)
+  })
+
+  it("runs the mailbox workspace's console policies when another workspace or none is open", async () => {
+    const MAILBOX_TENANT = "22222222-2222-4222-8222-222222222222"
+    const gated: (string | undefined)[] = []
+    const ssoGate: SsoGateReader = async (_req, _userId, tenantId) => {
+      gated.push(tenantId)
+      return tenantId === MAILBOX_TENANT
+        ? { status: "mfa_required" }
+        : { status: "pass" }
+    }
+    const created: { tenantId: string | null }[] = []
+    const deps = stubDeps({
+      mailboxTenant: async () => ({ tenantId: MAILBOX_TENANT }),
+      create: async (input) => {
+        created.push({ tenantId: input.tenantId })
+        return {
+          ok: true,
+          id: ENROLLMENT_ID,
+          url: "https://ca.i10.tech/enroll/apple/t",
+          expiresAt: EXPIRES,
+        }
+      },
+    })
+    const post = (app: ReturnType<typeof makeApp>) =>
+      app.request("/console/mail-devices/enrollments", {
+        method: "POST",
+        headers: BEARER,
+      })
+
+    for (const activeOrg of [
+      async () => ({ status: "personal" }) as const,
+      async () => ({ status: "org", orgId: "org_other" }) as const,
+    ] satisfies ActiveOrgReader[]) {
+      const res = await post(
+        makeApp({ freshAuth: fresh, activeOrg, ssoGate, mailDeviceEnrollments: deps }),
+      )
+      expect(res.status).toBe(403)
+      expect(await res.json()).toMatchObject({ name: "mfa_required" })
+    }
+    expect(created).toEqual([])
+    expect(gated).toContain(MAILBOX_TENANT)
+
+    // Its own workspace open: requireTenant already ran that gate, and the
+    // tenant the route read is the one create checks under the account lock.
+    const own = await post(
+      makeApp({
+        freshAuth: fresh,
+        tenants: { resolve: async () => MAILBOX_TENANT },
+        ssoGate: async () => ({ status: "pass" }),
+        mailDeviceEnrollments: deps,
+      }),
+    )
+    expect(own.status).toBe(201)
+    expect(created).toEqual([{ tenantId: MAILBOX_TENANT }])
+
+    // An i10.tech mailbox has no workspace whose policies could apply.
+    const none = await post(
+      makeApp({
+        freshAuth: fresh,
+        ssoGate,
+        mailDeviceEnrollments: stubDeps({
+          mailboxTenant: async () => ({ tenantId: null }),
+        }),
+      }),
+    )
+    expect(none.status).toBe(201)
+
+    const noMailbox = await post(
+      makeApp({
+        freshAuth: fresh,
+        mailDeviceEnrollments: stubDeps({ mailboxTenant: async () => null }),
+      }),
+    )
+    expect(noMailbox.status).toBe(409)
+    expect(await noMailbox.json()).toEqual({ error: { code: "no_mailbox" } })
   })
 
   it("maps 409, 503, 404, 409 already_sealed, and 501 when unwired", async () => {

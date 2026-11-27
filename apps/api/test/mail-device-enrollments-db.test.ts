@@ -15,6 +15,7 @@ import {
   finishEnrollment,
   getEnrollment,
   peekEnrollment,
+  readMailboxTenant,
 } from "../src/mail-devices/enrollments.js"
 import { HookDeadlineExceeded, sha256 } from "../src/mail-devices/permits.js"
 import { pruneMailDeviceEnrollments } from "../src/mail-devices/prune.js"
@@ -116,6 +117,16 @@ async function createTenantAndPerson(options: { nullTenant?: boolean } = {}) {
   return { person, email, tenantId, domain }
 }
 
+/** What the console route does: read the mailbox's workspace, then create under it. */
+async function createFor(on: Database, clerkUserId: string, hasCodeKeys: boolean) {
+  const mailbox = await readMailboxTenant(on, clerkUserId)
+  return createEnrollment(on, {
+    clerkUserId,
+    tenantId: mailbox?.tenantId ?? null,
+    hasCodeKeys,
+  })
+}
+
 function tokenFromUrl(url: string): string {
   const parts = url.split("/")
   return parts[parts.length - 1]!
@@ -151,10 +162,7 @@ async function reachPhase4(options: {
   deviceName?: string | null
   runNotify?: boolean
 }) {
-  const created = await createEnrollment(db, {
-    clerkUserId: options.person,
-    hasCodeKeys: true,
-  })
+  const created = await createFor(db, options.person, true)
   if (!created.ok) throw new Error(`create failed: ${created.code}`)
   const token = tokenFromUrl(created.url)
   const serial = options.serial ?? `C02${tag().toUpperCase()}`
@@ -400,23 +408,34 @@ suite("mail device enrollments against Postgres", () => {
       const i10User = await createTenantAndPerson({ nullTenant: true })
 
       // keys_not_configured -> 503
-      expect(
-        await createEnrollment(db, { clerkUserId: a.person, hasCodeKeys: false }),
-      ).toEqual({ ok: false, status: 503, code: "keys_not_configured" })
+      expect(await createFor(db, a.person, false)).toEqual({
+        ok: false,
+        status: 503,
+        code: "keys_not_configured",
+      })
 
       // no_mailbox -> 409
-      expect(
-        await createEnrollment(db, {
-          clerkUserId: "user_nonexistent_xyz",
-          hasCodeKeys: true,
-        }),
-      ).toEqual({ ok: false, status: 409, code: "no_mailbox" })
+      expect(await createFor(db, "user_nonexistent_xyz", true)).toEqual({
+        ok: false,
+        status: 409,
+        code: "no_mailbox",
+      })
 
-      // Null-tenant (i10.tech) user can enroll and poll.
-      const sys = await createEnrollment(db, {
-        clerkUserId: i10User.person,
+      // The mailbox moved workspace after the route ran the old one's policies:
+      // refused under the account lock, and nothing is created.
+      const moved = await createEnrollment(db, {
+        clerkUserId: a.person,
+        tenantId: null,
         hasCodeKeys: true,
       })
+      expect(moved).toEqual({ ok: false, status: 409, code: "tenant_mismatch" })
+      const [left] =
+        await owner`select count(*)::int as n from authd.mail_device_enrollments
+                                 where clerk_user_id = ${a.person}`
+      expect(left).toEqual({ n: 0 })
+
+      // Null-tenant (i10.tech) user can enroll and poll.
+      const sys = await createFor(db, i10User.person, true)
       expect(sys.ok).toBe(true)
       if (sys.ok) {
         expect(
@@ -429,10 +448,7 @@ suite("mail device enrollments against Postgres", () => {
       }
 
       // Create & attest first enrollment for `a`, opening a SCEP permit.
-      const first = await createEnrollment(db, {
-        clerkUserId: a.person,
-        hasCodeKeys: true,
-      })
+      const first = await createFor(db, a.person, true)
       expect(first.ok).toBe(true)
       if (!first.ok) return
       const tok1 = tokenFromUrl(first.url)
@@ -464,10 +480,7 @@ suite("mail device enrollments against Postgres", () => {
       )
 
       // Creating a second enrollment cancels the first AND expires its SCEP permit.
-      const second = await createEnrollment(db, {
-        clerkUserId: a.person,
-        hasCodeKeys: true,
-      })
+      const second = await createFor(db, a.person, true)
       expect(second.ok).toBe(true)
       if (!second.ok) return
       expect(
@@ -493,10 +506,7 @@ suite("mail device enrollments against Postgres", () => {
       })
 
       // Expired open enrollment reads as `expired` on GET and `live: false` on peek.
-      const third = await createEnrollment(db, {
-        clerkUserId: a.person,
-        hasCodeKeys: true,
-      })
+      const third = await createFor(db, a.person, true)
       expect(third.ok).toBe(true)
       if (!third.ok) return
       await owner`update authd.mail_device_enrollments
@@ -517,10 +527,7 @@ suite("mail device enrollments against Postgres", () => {
 
     it("handles attest retries (expiring old SCEP permit, capping at 30m), mismatch refusals, and platform refusals", async () => {
       const { person } = await createTenantAndPerson()
-      const created = await createEnrollment(db, {
-        clerkUserId: person,
-        hasCodeKeys: true,
-      })
+      const created = await createFor(db, person, true)
       if (!created.ok) throw new Error(created.code)
       const token = tokenFromUrl(created.url)
       const serial = `C02${tag().toUpperCase()}`
@@ -573,10 +580,7 @@ suite("mail device enrollments against Postgres", () => {
       expect(permits[1]!.secs_left).toBeGreaterThan(240)
 
       // Platform refusal marks enrollment `refused` with the refusal word.
-      const intel = await createEnrollment(db, {
-        clerkUserId: person,
-        hasCodeKeys: true,
-      })
+      const intel = await createFor(db, person, true)
       if (!intel.ok) throw new Error(intel.code)
       expect(
         await attestEnrollment(
@@ -811,6 +815,43 @@ suite("mail device enrollments against Postgres", () => {
       expect(stale).toEqual({ outcome: "refused", reason: "no_permit" })
     })
 
+    it("enrolld/attest cuts a long device name to 128 characters instead of refusing it", async () => {
+      const { person } = await createTenantAndPerson()
+      const created = await createFor(db, person, true)
+      if (!created.ok) throw new Error(created.code)
+      const handlers = createEnrolldHandlers({
+        db,
+        keys: TEST_KEYS,
+        deviceCaBundle: () => pki.bundle,
+        imapHost: "mail.i10.tech",
+        imapPort: 993,
+        smtpHost: "mail.i10.tech",
+        smtpPort: 465,
+        organization: "i10",
+        log: { info: () => {}, warn: () => {}, error: () => {} },
+      })
+      const serial = `C02L${tag().toUpperCase()}`
+      const res = await handlers.attest(
+        {
+          token: tokenFromUrl(created.url),
+          udid: `UDID-${tag()}`,
+          serial,
+          product: "iPhone17,2",
+          version: "22A3354",
+          deviceName: "Ada's iPhone ".repeat(4) + "é".repeat(150),
+          model: null,
+          appleSignerSha256: signerHash(serial).toString("hex"),
+        },
+        new Date(),
+        deadlineFromNow(),
+      )
+      expect(res.body.outcome).toBe("scep")
+      const [row] = await owner`select device_name from authd.mail_device_enrollments
+                                where id = ${created.id}`
+      expect(Array.from(row!.device_name as string)).toHaveLength(128)
+      expect(row!.device_name).toStartWith("Ada's iPhone Ada's")
+    })
+
     it("enrolld/finish handler sends notice after commit and still returns sealed if notice throws", async () => {
       const { person, email } = await createTenantAndPerson()
       const flow = await reachPhase4({ person })
@@ -947,10 +988,7 @@ suite("mail device enrollments against Postgres", () => {
     it("revocation racing attest and SCEP hooks: zero deadlocks, consistent state", async () => {
       for (let i = 0; i < ROUNDS; i++) {
         const { person, tenantId } = await createTenantAndPerson()
-        const created = await createEnrollment(db, {
-          clerkUserId: person,
-          hasCodeKeys: true,
-        })
+        const created = await createFor(db, person, true)
         if (!created.ok) throw new Error(created.code)
         const token = tokenFromUrl(created.url)
         const serial = `C02R${tag().toUpperCase()}`
@@ -994,10 +1032,7 @@ suite("mail device enrollments against Postgres", () => {
       // Revocation racing SCEP authorize directly.
       for (let i = 0; i < ROUNDS; i++) {
         const { person, tenantId } = await createTenantAndPerson()
-        const created = await createEnrollment(db, {
-          clerkUserId: person,
-          hasCodeKeys: true,
-        })
+        const created = await createFor(db, person, true)
         if (!created.ok) throw new Error(created.code)
         const serial = `C02S${tag().toUpperCase()}`
         const att = await attestEnrollment(
@@ -1058,8 +1093,8 @@ suite("mail device enrollments against Postgres", () => {
     it("concurrent attest retries and concurrent createEnrollment: zero deadlocks, single live row", async () => {
       const { person } = await createTenantAndPerson()
       const created = await Promise.all([
-        createEnrollment(db, { clerkUserId: person, hasCodeKeys: true }),
-        createEnrollment(db, { clerkUserId: person, hasCodeKeys: true }),
+        createFor(db, person, true),
+        createFor(db, person, true),
       ])
       expect(created.every((c) => c.ok)).toBe(true)
       const [liveCount] = await owner<{ n: number }[]>`
@@ -1189,13 +1224,12 @@ suite("mail device enrollments against Postgres", () => {
         }
 
         const { person } = await createTenantAndPerson()
-        const c1 = await measure(() =>
-          createEnrollment(countedDb, { clerkUserId: person, hasCodeKeys: true }),
-        )
+        const c1 = await measure(() => createFor(countedDb, person, true))
         const c1Val = c1.value
         if (!c1Val.ok) throw new Error(c1Val.code)
-        // Fresh create: lockGateAccount, update(cancel 0 rows), insert = 3 SQL statements.
-        expect(c1.queries).toBe(3)
+        // Fresh create: readMailboxTenant, then lockGateAccount, update(cancel 0
+        // rows), insert = 4 SQL statements.
+        expect(c1.queries).toBe(4)
 
         const g1 = await measure(() =>
           getEnrollment(countedDb, { id: c1Val.id, clerkUserId: person }),
@@ -1229,13 +1263,11 @@ suite("mail device enrollments against Postgres", () => {
         // expire old permits, insert scep permit = 6 SQL statements.
         expect(a1.queries).toBe(6)
 
-        // Superseding create cancels prior live enrollment and expires its permits = 4 SQL statements.
-        const c2 = await measure(() =>
-          createEnrollment(countedDb, { clerkUserId: person, hasCodeKeys: true }),
-        )
+        // Superseding create also expires the prior enrollment's permits = 5 SQL statements.
+        const c2 = await measure(() => createFor(countedDb, person, true))
         const c2Val = c2.value
         if (!c2Val.ok) throw new Error(c2Val.code)
-        expect(c2.queries).toBe(4)
+        expect(c2.queries).toBe(5)
 
         const d1 = await measure(() =>
           cancelEnrollment(countedDb, { id: c2Val.id, clerkUserId: person }),

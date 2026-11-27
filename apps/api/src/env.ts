@@ -1587,6 +1587,18 @@ const validated = schema.superRefine((env, ctx) => {
       })
     }
   }
+  // ⚠ ONE TOKEN NEVER OPENS BOTH SURFACES: the CA relay's token must not reach
+  // `/enrolld/*`, nor enrolld's a CA hook, so the two lists share no entry.
+  const hookTokens = new Set(
+    env.CA_HOOK_TOKEN_HASHES?.map((hash) => hash.toString("hex")),
+  )
+  if (env.ENROLLD_TOKEN_HASHES?.some((hash) => hookTokens.has(hash.toString("hex")))) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["ENROLLD_TOKEN_HASHES"],
+      message: "must share no entry with CA_HOOK_TOKEN_HASHES",
+    })
+  }
   if (env.CA_HOOKS_PORT === env.PORT) {
     ctx.addIssue({
       code: "custom",
