@@ -211,10 +211,10 @@ suite("mailbox sign-in failures against Postgres, as i10_api", () => {
   // ⚠ THE FUNCTION IS GLOBAL: it deletes across every workspace, which is the
   // point. So these tests run on a clock decades in the past: every row they
   // seed, and every cutoff they pass, is older than anything another test
-  // writes, and only this file's rows can cross the cutoff. The bounds test is
-  // the exception: it purges at the real floor (now - 90 days) and asserts on
-  // its own rows only. Run them while no other suite calls the purge on the
-  // same database.
+  // writes, and only this file's rows can cross the cutoff. The floor test is
+  // the exception: it purges at the real floor (now - 90 days), so it runs in
+  // a transaction that is rolled back and never commits a delete of another
+  // suite's rows.
   const DAY = 86_400_000
   const purgeAccount = `purge-${RUN}@${DOMAIN}`
 
@@ -292,21 +292,63 @@ suite("mailbox sign-in failures against Postgres, as i10_api", () => {
     expect(await ourRows()).toEqual([])
   })
 
-  it("never deletes a failure younger than 90 days, nor more than its clamped batch", async () => {
+  it("deletes nothing without a cutoff or a positive batch", async () => {
     const ancient = await seedFailure(tenantA, new Date("1990-01-01T00:00:00Z"), 31)
-    const recent = await seedFailure(tenantB, new Date(Date.now() - 30 * DAY), 32)
     const cutoff = new Date("2000-01-01T00:00:00Z")
 
-    // No cutoff, no batch, a zero or negative batch: nothing goes, nothing throws.
     expect(await purge(null, 10)).toBe(0)
     expect(await purge(cutoff, null)).toBe(0)
     expect(await purge(cutoff, 0)).toBe(0)
     expect(await purge(cutoff, -1)).toBe(0)
-    expect(await ourRows()).toEqual([ancient, recent])
+    expect(await ourRows()).toEqual([ancient])
+  })
 
-    // A cutoff in the future is held at now - 90 days: the 30-day-old row stays.
-    await purge("infinity", 2_000_000_000)
-    expect(await ourRows()).toEqual([recent])
+  it("deletes at most 10,000 rows a call, and never one younger than 90 days", async () => {
+    const ROLLBACK = new Error("roll back")
+    try {
+      await owner.begin(async (tx) => {
+        const seed = async (occurredAt: Date) => {
+          const [row] = await tx`
+            insert into core.mailbox_auth_failures
+              (tenant_id, clerk_user_id, account, ip, subnet, listener, occurred_at)
+            values (${tenantB}, ${USER}, ${purgeAccount}, ${`${SUBNET}.42`}, ${SUBNET},
+                    'imap', ${occurredAt})
+            returning id`
+          return row!.id as string
+        }
+        const purgeHere = async (before: string, limit: number) => {
+          // ::text first: the owner client prepares statements, and would read
+          // a timestamptz parameter as a JS Date, which 'infinity' is not.
+          const [row] = await tx`
+            select core.mailbox_auth_failures_purge(${before}::text::timestamptz, ${limit}::integer) as n`
+          return row!.n as number
+        }
+
+        // 10,001 rows older than anything else, so the clamped batch is all ours.
+        await tx`
+          insert into core.mailbox_auth_failures
+            (tenant_id, clerk_user_id, account, ip, subnet, listener, occurred_at)
+          select ${tenantA}::uuid, ${USER}, ${purgeAccount}, ${`${SUBNET}.41`}, ${SUBNET},
+                 'imap', '1980-01-01T00:00:00Z'::timestamptz + g * interval '1 second'
+            from generate_series(1, 10001) g`
+        const pastFloor = await seed(new Date(Date.now() - 91 * DAY))
+        const insideFloor = await seed(new Date(Date.now() - 89 * DAY))
+
+        // A huge batch is clamped to 10,000.
+        expect(await purgeHere("infinity", 2_000_000_000)).toBe(10_000)
+
+        // A cutoff in the future is held at now - 90 days: the 89-day-old row stays.
+        await purgeHere("infinity", 10_000)
+        const left = await tx`
+          select id from core.mailbox_auth_failures where account = ${purgeAccount}`
+        expect(left.map((r) => r.id as string)).toEqual([insideFloor])
+        expect(left.map((r) => r.id as string)).not.toContain(pastFloor)
+
+        throw ROLLBACK
+      })
+    } catch (error) {
+      if (error !== ROLLBACK) throw error
+    }
   })
 
   it("lets i10_api run the purge, and nobody else", async () => {
