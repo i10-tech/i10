@@ -228,6 +228,57 @@ func TestAnUnavailableUpstreamReturnsTheOrderToReady(t *testing.T) {
 	}
 }
 
+// TestASlowFinalizeStillCompletesTheOrder: an enrollctl call that takes
+// longer than the completion timeout does not spend it. The completion gets
+// its own timeout once enrollctl answers, so an issued certificate makes the
+// order valid, an unavailable upstream returns it to ready, and a refusal
+// marks it invalid.
+func TestASlowFinalizeStillCompletesTheOrder(t *testing.T) {
+	const complete = 100 * time.Millisecond
+	for _, tc := range []struct {
+		name     string
+		forged   bool // a permit enrollctl refuses
+		fail     bool // enrollctl unavailable
+		wantCode int
+		want     string
+	}{
+		{name: "issued", wantCode: 200, want: "valid"},
+		{name: "upstream unavailable", fail: true, wantCode: 503, want: "ready"},
+		{name: "refused", forged: true, wantCode: 403, want: "invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newTestACMEWorld(t)
+			w.handler.deps.CompleteTimeout = complete
+			d := w.mac("C02SLOWFIN")
+			key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			kid, orderURL, chal, cp, attKey := w.openChallenge(d, key)
+			cj, _ := SignFlattenedJWS(key, ProtectedHeader{Nonce: w.getNonce(), URL: chal.URL, KID: kid}, cp)
+			if rec := w.postJWS(chal.URL, cj, ""); rec.Code != 200 {
+				t.Fatalf("challenge = (%d, %s)", rec.Code, rec.Body.String())
+			}
+			payload := w.finalizePayload(d, attKey, "")
+			if tc.forged {
+				payload = w.finalizePayload(d, attKey, strings.Repeat("A", 50))
+			}
+			w.finalizer.delay, w.finalizer.fail = complete+50*time.Millisecond, tc.fail
+
+			j, _ := SignFlattenedJWS(key, ProtectedHeader{Nonce: w.getNonce(), URL: orderURL + "/finalize", KID: kid}, payload)
+			if rec := w.postJWS(orderURL+"/finalize", j, ""); rec.Code != tc.wantCode {
+				t.Fatalf("finalize = (%d, %s), want %d", rec.Code, rec.Body.String(), tc.wantCode)
+			}
+			o, _ := w.store.GetACMEOrder(context.Background(), orderURL[strings.LastIndex(orderURL, "/")+1:])
+			if o == nil || o.Status != tc.want || (o.CertID != "") != (tc.want == "valid") {
+				t.Fatalf("order = %+v, want %s", o, tc.want)
+			}
+			if tc.want == "valid" {
+				if c, _ := w.store.GetACMECert(context.Background(), o.CertID); c == nil || c.DeviceID != d.id {
+					t.Fatalf("the order's certificate = %+v", c)
+				}
+			}
+		})
+	}
+}
+
 // TestConcurrentChallengeAnswersMoveOnce: N answers to one pending challenge,
 // each with its own nonce, at once: all are answered 200 valid, exactly one
 // nonce is spent, and the authz is valid and the order ready.

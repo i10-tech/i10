@@ -199,6 +199,13 @@ func (c config) validate() error {
 	return nil
 }
 
+// writeTimeout is the HTTP server's WriteTimeout: 15 s, or longer when
+// CallTimeout lets a finish run past it, so a device that has minted and
+// sealed still gets its profile.
+func (c config) writeTimeout() time.Duration {
+	return max(15*time.Second, enrollctl.MaxHandlerDuration(c.CallTimeout)+500*time.Millisecond)
+}
+
 func envOr(name, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v

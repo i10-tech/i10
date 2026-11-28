@@ -547,6 +547,15 @@ var sealRetryBackoff = []time.Duration{50 * time.Millisecond, 150 * time.Millise
 // SealingTTLSec ends, or a second attempt could acquire it and mint again.
 const MaxCallTimeout = enrollredis.SealingTTLSec*time.Second - DefaultBatchDeadline - takenGrace - postCommitTimeout - noticeTimeout
 
+// MaxHandlerDuration is the longest one call can run with callTimeout
+// (HandlerDeps.CallTimeout): a finish's marker holder lives CallTimeout plus
+// the mint, seal and notice (as in MaxCallTimeout), and then releases the
+// marker under its own postCommitTimeout before the handler returns and the
+// response's last bytes go out. The server's WriteTimeout must exceed it.
+func MaxHandlerDuration(callTimeout time.Duration) time.Duration {
+	return callTimeout + DefaultBatchDeadline + takenGrace + postCommitTimeout + noticeTimeout + postCommitTimeout
+}
+
 func (h *Handler) handleFinish(ctx context.Context, w http.ResponseWriter, body []byte) {
 	r := finishReply{h: h, w: w, start: time.Now()}
 	var req finishRequest

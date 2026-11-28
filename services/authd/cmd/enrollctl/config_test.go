@@ -90,6 +90,31 @@ func TestLoadConfigValidationAndTokenOverlapRefusal(t *testing.T) {
 		}
 	})
 
+	// A finish runs CallTimeout + mint (4s + 1s) + seal (2s) + notice (0.5s)
+	// + the marker's release (2s).
+	t.Run("write timeout outlasts the longest finish", func(t *testing.T) {
+		highest := enrollctl.MaxCallTimeout - time.Millisecond
+		for _, tc := range []struct {
+			call, worst, write time.Duration
+		}{
+			{call: 0, worst: 14500 * time.Millisecond, write: 15 * time.Second}, // the default 5s
+			{call: highest, worst: highest + 9500*time.Millisecond, write: highest + 10*time.Second},
+		} {
+			setBase(t)
+			if tc.call > 0 {
+				t.Setenv("ENROLLCTL_CALL_TIMEOUT", tc.call.String())
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			worst := enrollctl.MaxHandlerDuration(cfg.CallTimeout)
+			if worst != tc.worst || cfg.writeTimeout() != tc.write || cfg.writeTimeout() <= worst {
+				t.Fatalf("call timeout %s: longest finish %s, WriteTimeout %s; want %s and %s", cfg.CallTimeout, worst, cfg.writeTimeout(), tc.worst, tc.write)
+			}
+		}
+	})
+
 	t.Run("non-https profile URL refused", func(t *testing.T) {
 		setBase(t)
 		t.Setenv("ENROLLCTL_PROFILE_URL", "http://ca.i10.tech/enroll/apple/profile")

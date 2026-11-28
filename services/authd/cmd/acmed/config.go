@@ -118,6 +118,19 @@ func (c acmedConfig) validate() error {
 	return nil
 }
 
+// requestTimeout bounds one request: the enrollctl call plus 2 s for the
+// Redis work around it.
+func (c acmedConfig) requestTimeout() time.Duration {
+	return c.UpstreamTimeout + 2*time.Second
+}
+
+// writeTimeout is the HTTP server's WriteTimeout: 15 s, or longer when
+// ACMED_UPSTREAM_TIMEOUT lets a finalize run past it, so a Mac whose
+// certificate was issued still gets its order.
+func (c acmedConfig) writeTimeout() time.Duration {
+	return max(15*time.Second, acmed.MaxHandlerDuration(c.requestTimeout())+500*time.Millisecond)
+}
+
 func envOr(name, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v

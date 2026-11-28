@@ -93,6 +93,7 @@ type HandlerDeps struct {
 	StateLifetime      time.Duration
 	MaxOrdersPerDevice int // ACMED_MAX_ORDERS_PER_DEVICE
 	RequestTimeout     time.Duration
+	CompleteTimeout    time.Duration // 0 means completeTimeout; tests shorten it
 	Now                func() time.Time
 	Log                *slog.Logger
 }
@@ -122,6 +123,9 @@ func NewHandler(deps HandlerDeps) *Handler {
 	}
 	if deps.RequestTimeout <= 0 {
 		deps.RequestTimeout = defaultRequestTimeout
+	}
+	if deps.CompleteTimeout <= 0 {
+		deps.CompleteTimeout = completeTimeout
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
@@ -849,10 +853,11 @@ func (h *Handler) handleFinalize(ctx context.Context, x exchange, body []byte, o
 	}
 
 	// The order is this request's until it completes it, from processing
-	// only, even if the client has gone.
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), completeTimeout)
-	defer cancel()
+	// only, even if the client has gone. The completion's clock starts once
+	// enrollctl has answered, so a slow enrollctl call cannot spend it.
 	complete := func(m enrollredis.ACMEOrderMove) (enrollredis.ACMEResult, error) {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), h.deps.CompleteTimeout)
+		defer cancel()
 		m.From = "processing"
 		return h.deps.Store.MoveACMEOrder(cctx, m)
 	}
@@ -909,8 +914,17 @@ func (h *Handler) handleFinalize(ctx context.Context, x exchange, body []byte, o
 
 // completeTimeout bounds the write that completes a claimed order (valid,
 // invalid, or back to ready), which runs even after the client has gone so
-// the order does not stay processing until it expires.
+// the order does not stay processing until it expires. It starts when
+// enrollctl answers.
 const completeTimeout = 2 * time.Second
+
+// MaxHandlerDuration is the longest one request can run with requestTimeout
+// (HandlerDeps.RequestTimeout): a finalize spends up to requestTimeout up to
+// and including the enrollctl call, then completeTimeout on the one write that
+// completes the order. The server's WriteTimeout must exceed it.
+func MaxHandlerDuration(requestTimeout time.Duration) time.Duration {
+	return requestTimeout + completeTimeout
+}
 
 // orderRetryAfter is the Retry-After (seconds) on an order that is
 // processing: enrollctl answers well within it.

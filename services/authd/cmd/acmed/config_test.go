@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/i10-tech/i10/services/authd/internal/acmed"
+)
 
 func TestLoadAcmedConfig(t *testing.T) {
 	setBase := func(t *testing.T) {
@@ -61,6 +66,29 @@ func TestLoadAcmedConfig(t *testing.T) {
 		t.Setenv("ACMED_ENROLLCTL_TOKEN", "short")
 		if _, err := loadConfig(); err == nil {
 			t.Fatal("expected error for short bearer token")
+		}
+	})
+
+	// A finalize runs the upstream timeout + 2 s, then the 2 s completion.
+	t.Run("write timeout outlasts the longest finalize", func(t *testing.T) {
+		for _, tc := range []struct {
+			upstream, worst, write time.Duration
+		}{
+			{upstream: 0, worst: 14 * time.Second, write: 15 * time.Second}, // the default 10s
+			{upstream: 30 * time.Second, worst: 34 * time.Second, write: 34500 * time.Millisecond},
+		} {
+			setBase(t)
+			if tc.upstream > 0 {
+				t.Setenv("ACMED_UPSTREAM_TIMEOUT", tc.upstream.String())
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			worst := acmed.MaxHandlerDuration(cfg.requestTimeout())
+			if worst != tc.worst || cfg.writeTimeout() != tc.write || cfg.writeTimeout() <= worst {
+				t.Fatalf("upstream %s: longest finalize %s, WriteTimeout %s; want %s and %s", cfg.UpstreamTimeout, worst, cfg.writeTimeout(), tc.worst, tc.write)
+			}
 		}
 	})
 }
