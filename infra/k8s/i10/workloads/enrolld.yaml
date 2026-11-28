@@ -56,7 +56,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: enrolld
-          image: ghcr.io/i10-tech/i10-authd:prod-1ddb76e42470202eaabe4e172b3fa4168a4b890c@sha256:15d41c0d58bf43a9bf9238fdba30ea88d9c5ccd5c02855d56b11bcc031404896
+          image: ghcr.io/i10-tech/i10-authd:prod-6da6d3a1cce6dd28ed4d76a4122714d1262a4db2@sha256:ded6779d545de3e6b544de20c12120695ef084ecae3ab9ff7f445c823f27f1bc
           command: ["/usr/local/bin/enrolld"]
           ports:
             - { name: http, containerPort: 8080, protocol: TCP }
