@@ -1,0 +1,12 @@
+{
+  "id": "019ac4c2-8f00-7a31-9c55-6a7d1e2f3b4c",
+  "clerk_user_id": "user_fixture",
+  "email": "ada@acme.test",
+  "tenant_id": "5d7e9c1a-3b2f-4a6d-8e0c-1f2a3b4c5d6e",
+  "expected_epoch": 4,
+  "created_by": "user_fixture",
+  "status": "open",
+  "created_at_ms": 1764300000000,
+  "expires_at_ms": 1764300900000,
+  "updated_at_ms": 1764300000000
+}

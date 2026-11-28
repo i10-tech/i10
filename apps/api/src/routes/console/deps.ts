@@ -54,7 +54,7 @@ import type {
   CancelEnrollmentOutcome,
   CreateEnrollmentResult,
   EnrollmentView,
-} from "../../mail-devices/enrollments.js"
+} from "../../mail-devices/enroll-redis.js"
 
 export interface MailDeviceEnrollmentsDeps {
   /** The workspace of the person's own mailbox (`readMailboxTenant`). */

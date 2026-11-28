@@ -1,0 +1,278 @@
+# enrollctl: internal enrollment control service (I10-62,
+# docs/research/enrollment-at-scale.md).
+#
+# NO INTERNET INGRESS. Reached ONLY over internal HTTPS (:3443, hooks transport
+# CA) by enrolld (/enrolld/{peek,attest,finish}) and acmed (/acme/finalize),
+# each with its own bearer token SHA-256 hash list.
+#
+# The SOLE runtime holder of:
+#   - i10-profile-signing-tls (profiles.i10.tech ECDSA P-256 signing key)
+#   - MAIL_DEVICE_CODE_KEYS (for minting; authd also holds them for IMAP/SMTP verify)
+#   - ENROLLCTL_ACME_PERMIT_KEYS (self-certifying 50-char Mac ACME OU permits)
+# It also signs, with ENROLL_ACME_PATH_KEYS (shared with acmed, which verifies),
+# the path token in each Mac's ACME DirectoryURL.
+#   - device intermediate key for signing Mac ACME client certificates
+#   - enroll_writer Postgres role (2 connections/replica through i10-platform-pooler)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-enrollctl
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-enrollctl
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: i10-enrollctl
+  ports:
+    - { name: https, port: 3443, targetPort: https, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-enrollctl
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-enrollctl
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-enrollctl
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-enrollctl
+        app.kubernetes.io/part-of: i10-enroll
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: enrollctl
+          image: ghcr.io/i10-tech/i10-authd:prod-4eb1ccf4537c3a953664c530f25d7230aeba31df@sha256:c9e4b89b95f6a37e9fcdedf40ecf412e865c98801c8bb8ab58fbb5a08fae40e1
+          command: ["/usr/local/bin/enrollctl"]
+          ports:
+            - { name: https, containerPort: 3443, protocol: TCP }
+          env:
+            - { name: ENROLLCTL_LISTEN, value: ":3443" }
+            - { name: ENROLLCTL_TLS_CERT_FILE, value: /etc/enrollctl/tls/tls.crt }
+            - { name: ENROLLCTL_TLS_KEY_FILE, value: /etc/enrollctl/tls/tls.key }
+            - {
+                name: ENROLLCTL_PROFILE_SIGNING_CERT_FILE,
+                value: /etc/enrollctl/profile-signing/tls.crt,
+              }
+            - {
+                name: ENROLLCTL_PROFILE_SIGNING_KEY_FILE,
+                value: /etc/enrollctl/profile-signing/tls.key,
+              }
+            - {
+                name: ENROLLCTL_DEVICE_CA_CERT_FILE,
+                value: /etc/enrollctl/device-ca-issuer/intermediate.crt,
+              }
+            - {
+                name: ENROLLCTL_DEVICE_CA_KEY_FILE,
+                value: /etc/enrollctl/device-ca-issuer/intermediate.key,
+              }
+            - {
+                name: ENROLLCTL_DEVICE_CA_BUNDLE,
+                value: /etc/enrollctl/device-ca-trust/bundle.pem,
+              }
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-writer-db-role
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-writer-db-role
+                  key: password
+            - name: ENROLLCTL_DATABASE_URL
+              value: postgres://$(PGUSER):$(PGPASSWORD)@i10-platform-pooler.i10-prod.svc.cluster.local:5432/i10
+            - {
+                name: ENROLL_REDIS_URL,
+                value: "redis://i10-enroll-redis.i10-prod.svc:6379",
+              }
+            - { name: ENROLL_REDIS_USER, value: "enrollctl" }
+            - name: ENROLL_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrollctl
+                  key: ENROLL_REDIS_PASSWORD
+            - name: ENROLL_EDGE_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrollctl
+                  key: ENROLL_EDGE_HMAC_KEY
+            - name: ENROLLCTL_ACME_PERMIT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrollctl
+                  key: ENROLLCTL_ACME_PERMIT_KEYS
+            # Signs each Mac's ACME directory path token (same ring as acmed's).
+            - name: ENROLL_ACME_PATH_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrollctl
+                  key: ENROLL_ACME_PATH_KEYS
+            - name: MAIL_DEVICE_CODE_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrollctl
+                  key: MAIL_DEVICE_CODE_KEYS
+            - name: ENROLLCTL_ENROLLD_TOKEN_HASHES
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrollctl
+                  key: ENROLLCTL_ENROLLD_TOKEN_HASHES
+            - name: ENROLLCTL_ACMED_TOKEN_HASHES
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrollctl
+                  key: ENROLLCTL_ACMED_TOKEN_HASHES
+            - {
+                name: ENROLLCTL_PROFILE_URL,
+                value: "https://ca.i10.tech/enroll/apple/profile",
+              }
+            - { name: ENROLLCTL_SCEP_URL, value: "https://ca.i10.tech/scep/apple-scep" }
+            - {
+                name: ENROLLCTL_ACME_DIRECTORY_URL,
+                value: "https://ca.i10.tech/acme/apple/directory",
+              }
+            - { name: ENROLLCTL_IMAP_HOST, value: "mail.i10.tech" }
+            - { name: ENROLLCTL_IMAP_PORT, value: "993" }
+            - { name: ENROLLCTL_SMTP_HOST, value: "mail.i10.tech" }
+            - { name: ENROLLCTL_SMTP_PORT, value: "465" }
+            - { name: ENROLLCTL_ORGANIZATION, value: "i10" }
+            - { name: ENROLLCTL_BATCH_MAX_SIZE, value: "200" }
+            - { name: ENROLLCTL_BATCH_MAX_WAIT, value: "5ms" }
+            - { name: ENROLLCTL_CALL_TIMEOUT, value: "5s" }
+            - { name: ENROLLCTL_LOG_LEVEL, value: "info" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 25m, memory: 48Mi }
+            limits: { memory: 256Mi }
+          readinessProbe:
+            tcpSocket: { port: https }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: https }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - { name: enrollctl-tls, mountPath: /etc/enrollctl/tls, readOnly: true }
+            - {
+                name: profile-signing,
+                mountPath: /etc/enrollctl/profile-signing,
+                readOnly: true,
+              }
+            - {
+                name: device-ca-issuer,
+                mountPath: /etc/enrollctl/device-ca-issuer,
+                readOnly: true,
+              }
+            - {
+                name: device-ca-trust,
+                mountPath: /etc/enrollctl/device-ca-trust,
+                readOnly: true,
+              }
+      volumes:
+        - name: enrollctl-tls
+          secret:
+            secretName: i10-enrollctl-tls
+            defaultMode: 0440
+            items:
+              - { key: tls.crt, path: tls.crt }
+              - { key: tls.key, path: tls.key }
+        - name: profile-signing
+          secret:
+            secretName: i10-profile-signing-tls
+            defaultMode: 0440
+            items:
+              - { key: tls.crt, path: tls.crt }
+              - { key: tls.key, path: tls.key }
+        # Mount ONLY intermediate.crt and intermediate.key (never root or SCEP decrypter key).
+        - name: device-ca-issuer
+          secret:
+            secretName: i10-device-ca
+            defaultMode: 0440
+            items:
+              - { key: DEVICE_CA_INTERMEDIATE_CRT, path: intermediate.crt }
+              - { key: DEVICE_CA_INTERMEDIATE_KEY, path: intermediate.key }
+        - name: device-ca-trust
+          configMap:
+            name: i10-device-ca-trust
+            items:
+              - { key: bundle.pem, path: bundle.pem }
+---
+# Ingress ONLY from enrolld and acmed on 3443.
+# Egress ONLY to i10-platform-pooler (5432), i10-enroll-redis (6379), and DNS (53).
+#
+# ⚠ ADDITIVE, LIKE EVERY RULE IN i10-prod. Traefik's and the CNPG operator's
+# namespaces reach every port of every pod here (psl repo `allow-traefik`,
+# `allow-cnpg-operator`), so they reach 3443 too. enrollctl does not rely on
+# this policy: every path needs its caller's bearer token (a bare 404 otherwise).
+#
+# ⚠ AND TRAEFIK ALREADY HOLDS WHAT THIS POD HOLDS. The Traefik chart's
+# cluster-wide RBAC lets it get/list/watch every Secret, and its CRD provider
+# keeps an informer of them, so the internet-facing proxy has
+# i10-profile-signing-tls, the device intermediate key (i10-device-ca) and the
+# bearer tokens in memory. A Traefik compromise is in the design's "anyone who
+# can read Secrets in i10-prod" set (device-ca/README.md). Narrowing Traefik's
+# RBAC to its TLS Secrets is a psl-repo follow-up.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: i10-enrollctl
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-enrollctl
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-enrolld
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-acmed
+      ports:
+        - { protocol: TCP, port: 3443 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/poolerName: i10-platform-pooler
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-enroll-redis
+      ports:
+        - { protocol: TCP, port: 6379 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }

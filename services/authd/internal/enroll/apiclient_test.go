@@ -119,25 +119,27 @@ func TestAPIClientContractShapes(t *testing.T) {
 		t.Fatalf("NewAPIClient: %v", err)
 	}
 
-	// 1. peek
+	// 1. peek with signed Phase 1 profile
+	p1Bytes := []byte("SIGNED-PHASE-1-DER")
 	replyStatus = http.StatusOK
-	replyBody = `{"live":true}`
-	live, err := client.Peek(context.Background(), "tok43")
-	if err != nil || !live {
-		t.Fatalf("Peek = (%v, %v), want (true, nil)", live, err)
+	replyBody = `{"live":true,"profile":"` + base64.StdEncoding.EncodeToString(p1Bytes) + `"}`
+	peekResp, err := client.Peek(context.Background(), "v1.tok")
+	if err != nil || !peekResp.Live || string(peekResp.ProfileBytes) != string(p1Bytes) {
+		t.Fatalf("Peek = (%+v, %v), want live with %q", peekResp, err, p1Bytes)
 	}
 	if gotPath != "/enrolld/peek" || gotAuth != "Bearer "+secretTok || gotCT != "application/json" {
 		t.Fatalf("peek request headers/path mismatch: %q %q %q", gotPath, gotAuth, gotCT)
 	}
-	if string(gotBody) != `{"token":"tok43"}` {
+	if string(gotBody) != `{"token":"v1.tok"}` {
 		t.Fatalf("peek body = %s", gotBody)
 	}
 
-	// 2. attest with null optional fields
+	// 2. attest with null optional fields and signed SCEP profile
+	p2Bytes := []byte("SIGNED-PHASE-2-SCEP-DER")
 	replyStatus = http.StatusOK
-	replyBody = `{"outcome":"scep","serial":"SER1","challenge":"CHAL1"}`
+	replyBody = `{"outcome":"scep","profile":"` + base64.StdEncoding.EncodeToString(p2Bytes) + `"}`
 	attResp, err := client.Attest(context.Background(), AttestRequest{
-		Token:             "tok43",
+		Token:             "v1.tok",
 		UDID:              "U1",
 		Serial:            "SER1",
 		Product:           "iPhone17,2",
@@ -149,7 +151,7 @@ func TestAPIClientContractShapes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Attest: %v", err)
 	}
-	if attResp.Outcome != "scep" || attResp.Serial != "SER1" || attResp.Challenge != "CHAL1" {
+	if attResp.Outcome != "scep" || string(attResp.ProfileBytes) != string(p2Bytes) {
 		t.Fatalf("Attest response = %+v", attResp)
 	}
 	var rawMap map[string]any
@@ -163,8 +165,8 @@ func TestAPIClientContractShapes(t *testing.T) {
 		t.Fatalf("expected model: null in JSON, got %s", gotBody)
 	}
 
-	// 3. finish with sealed profile
-	finalBytes := []byte("<?xml version=\"1.0\"?><plist>sealed-opaque-bytes</plist>")
+	// 3. finish with signed sealed profile
+	finalBytes := []byte("SIGNED-SEALED-PROFILE-DER")
 	replyStatus = http.StatusOK
 	replyBody = `{"outcome":"sealed","profile":"` + base64.StdEncoding.EncodeToString(finalBytes) + `"}`
 	finResp, err := client.Finish(context.Background(), FinishRequest{
@@ -188,7 +190,7 @@ func TestAPIClientHardeningAndErrors(t *testing.T) {
 	t.Run("rejects wrong CA", func(t *testing.T) {
 		srv := newLoopbackHTTPS(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"live":true}`))
+			_, _ = w.Write([]byte(`{"live":false}`))
 		}))
 		other := newLoopbackHTTPS(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 		client, err := NewAPIClient(srv.server.URL, other.caFile, secretTok, 5*time.Second)
@@ -220,7 +222,7 @@ func TestAPIClientHardeningAndErrors(t *testing.T) {
 	t.Run("caps oversized responses", func(t *testing.T) {
 		srv := newLoopbackHTTPS(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"outcome":"sealed","profile":"` + strings.Repeat("A", maxAPIFinishRespBytes+16) + `"}`))
+			_, _ = w.Write([]byte(`{"outcome":"sealed","profile":"` + strings.Repeat("A", maxAPIProfileRespBytes+16) + `"}`))
 		}))
 		client, err := NewAPIClient(srv.server.URL, srv.caFile, secretTok, 5*time.Second)
 		if err != nil {
@@ -255,13 +257,21 @@ func TestAPIClientHardeningAndErrors(t *testing.T) {
 		if _, err := client.Peek(context.Background(), "t"); err == nil {
 			t.Error("peek missing live field succeeded")
 		}
-		status, body = http.StatusOK, `{"live":true}{"extra":1}`
+		status, body = http.StatusOK, `{"live":true}`
+		if _, err := client.Peek(context.Background(), "t"); err == nil {
+			t.Error("peek live missing profile succeeded")
+		}
+		status, body = http.StatusOK, `{"live":false}{"extra":1}`
 		if _, err := client.Peek(context.Background(), "t"); err == nil {
 			t.Error("peek trailing JSON succeeded")
 		}
-		status, body = http.StatusOK, `{"outcome":"scep","serial":"S"}`
+		status, body = http.StatusOK, `{"outcome":"scep"}`
 		if _, err := client.Attest(context.Background(), AttestRequest{}); err == nil {
-			t.Error("attest missing challenge succeeded")
+			t.Error("attest missing profile succeeded")
+		}
+		status, body = http.StatusOK, `{"outcome":"scep","profile":"!!!bad!!!"}`
+		if _, err := client.Attest(context.Background(), AttestRequest{}); err == nil {
+			t.Error("attest invalid base64 succeeded")
 		}
 		status, body = http.StatusOK, `{"outcome":"unknown"}`
 		if _, err := client.Attest(context.Background(), AttestRequest{}); err == nil {
@@ -270,6 +280,18 @@ func TestAPIClientHardeningAndErrors(t *testing.T) {
 		status, body = http.StatusOK, `{"outcome":"sealed","profile":"!!!bad-b64!!!"}`
 		if _, err := client.Finish(context.Background(), FinishRequest{}); err == nil {
 			t.Error("finish invalid base64 succeeded")
+		}
+	})
+
+	// 35 s lets enrolld outlast enrollctl's longest finish at the highest
+	// ENROLLCTL_CALL_TIMEOUT.
+	t.Run("timeout range", func(t *testing.T) {
+		srv := newLoopbackHTTPS(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		if _, err := NewAPIClient(srv.server.URL, srv.caFile, secretTok, 35*time.Second); err != nil {
+			t.Fatalf("35s timeout refused: %v", err)
+		}
+		if _, err := NewAPIClient(srv.server.URL, srv.caFile, secretTok, 35*time.Second+time.Millisecond); err == nil {
+			t.Fatal("timeout above 35s accepted")
 		}
 	})
 

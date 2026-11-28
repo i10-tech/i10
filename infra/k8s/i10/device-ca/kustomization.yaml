@@ -23,5 +23,4 @@ configMapGenerator:
   - name: i10-device-ca-config
     files:
       - config/ca.json
-      - config/apple.tpl
       - config/apple-scep.tpl

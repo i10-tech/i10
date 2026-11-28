@@ -162,6 +162,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/part-of: i10-stalwart
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-enrollctl
       ports:
         - { protocol: TCP, port: 5432 }
 ---
@@ -195,43 +198,3 @@ spec:
               cnpg.io/cluster: i10-platform
       ports:
         - { protocol: TCP, port: 5432 }
----
-# The device CA hooks listener (#383 PR 3): the step-ca pod, whose relay
-# sidecar calls it, and enrolld (#383 PR 4, enrolld.yaml), which calls
-# `/enrolld/*` on it, and nobody else. api-internal-clients above opens 3001 only.
-# Each caller has its own bearer token, and neither token opens the other's
-# paths (the API refuses a token in both lists at startup).
-#
-# ⚠ ADDITIVE, LIKE EVERY RULE HERE. Traefik's and the CNPG operator's namespaces
-# reach every port of every pod in i10-prod (psl repo), so they reach 3443 too.
-# The listener does not rely on this file: it answers anything without the
-# relay's bearer token, the right webhook id and a fresh timestamp with a bare
-# 404, and no IngressRoute names its Service.
-#
-# ⚠ AND TRAEFIK ALREADY HOLDS THE TOKEN. The Traefik chart's cluster-wide RBAC lets it
-# get/list/watch every Secret, and its CRD provider keeps an informer of them, so the
-# internet-facing proxy has CA_HOOK_TOKEN and the device intermediate key in memory, and
-# it terminates TLS for ca.i10.tech, so it sees the permit nonce in a CSR. A Traefik
-# compromise is therefore in the design's "anyone who can read Secrets in i10-prod" set
-# (section 11), as it already is for every database password. The token keeps every
-# OTHER pod out. Narrowing Traefik's RBAC to its TLS Secrets is a psl-repo follow-up.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: api-ca-hooks-clients
-  namespace: i10-prod
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: i10-api
-  policyTypes: [Ingress]
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: i10-device-ca
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: i10-enrolld
-      ports:
-        - { protocol: TCP, port: 3443 }

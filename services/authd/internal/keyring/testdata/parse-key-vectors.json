@@ -1,0 +1,138 @@
+[
+  {
+    "name": "std padded",
+    "input": "1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "id": 1,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "raw base64url",
+    "input": "2:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "id": 2,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "std alphabet with + and /",
+    "input": "3:+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+//v8=",
+    "id": 3,
+    "secret_hex": "fbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffeff"
+  },
+  {
+    "name": "url alphabet with - and _",
+    "input": "4:-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-__v8",
+    "id": 4,
+    "secret_hex": "fbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffbffeff"
+  },
+  {
+    "name": "std unpadded without + or / reads as raw url",
+    "input": "5:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "id": 5,
+    "secret_hex": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "name": "leading zeros in the id",
+    "input": "007:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "id": 7,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "id 0",
+    "input": "0:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "id": 0,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "id 255",
+    "input": "255:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "id": 255,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "surrounding whitespace",
+    "input": "  9:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=\t ",
+    "id": 9,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "a newline inside the secret",
+    "input": "10:AAECAwQFBgcICQoLDA0O\nDxAREhMUFRYXGBkaGxwdHh8=",
+    "id": 10,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "non-canonical trailing bits",
+    "input": "11:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9=",
+    "id": 11,
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  {
+    "name": "id 256",
+    "input": "256:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  },
+  {
+    "name": "negative id",
+    "input": "-1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  },
+  {
+    "name": "signed id",
+    "input": "+1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  },
+  {
+    "name": "empty id",
+    "input": ":AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  },
+  {
+    "name": "hex id",
+    "input": "0x1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  },
+  {
+    "name": "no colon",
+    "input": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  },
+  {
+    "name": "colon inside the secret",
+    "input": "1:AAECAwQFBg:cICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  },
+  {
+    "name": "31-byte key",
+    "input": "1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==",
+    "error": true
+  },
+  {
+    "name": "empty secret",
+    "input": "1:",
+    "error": true
+  },
+  {
+    "name": "std unpadded with + or /",
+    "input": "1:+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+//v8",
+    "error": true
+  },
+  {
+    "name": "mixed alphabets",
+    "input": "1:-/-/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+/+//v8=",
+    "error": true
+  },
+  {
+    "name": "padding in raw url",
+    "input": "1:-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-__v8==",
+    "error": true
+  },
+  {
+    "name": "too much padding",
+    "input": "1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8===",
+    "error": true
+  },
+  {
+    "name": "space inside the secret",
+    "input": "1:AAECAwQFBgcICQoLDA0O DxAREhMUFRYXGBkaGxwdHh8=",
+    "error": true
+  }
+]

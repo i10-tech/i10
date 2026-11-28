@@ -1,13 +1,21 @@
-// Command cahookrelay is the loopback TLS webhook relay sidecar in the step-ca
-// pod (#383 PR 3).
+// Command cahookrelay is the loopback TLS SCEP webhook handler sidecar in the
+// step-ca pod.
 //
-// step-ca exposes its webhook URLs in its unauthenticated GET /provisioners
-// response and logs them on transport errors, and drops Webhook.Secret and
-// BearerToken written in ca.json when no admin database is enabled. So step-ca
-// calls this relay on https://127.0.0.1:<port>/<hook> (with no secret in the
-// URL), and this relay forwards only the four known webhook paths to the API's
-// :3443 hooks listener with Authorization: Bearer <token> read from its own
-// mounted Secret file.
+// step-ca calls this sidecar on https://127.0.0.1:9443/scep-challenge and
+// https://127.0.0.1:9443/scep-authorize. cahookrelay validates the Smallstep
+// webhook ID, body timestamp, and strict x509util SCEP template rules locally,
+// and coordinates SCEP permits atomically against i10-enroll-redis under the
+// `cahookrelay` Redis ACL: read and write enroll:scep:*, read-only
+// enroll:sess:*, and only the commands its scripts run (see scepHookHandler).
+// ACME issuance moved to acmed + enrollctl, and scep-notify was removed.
+//
+// ⚠ A COMPROMISED cahookrelay CAN HIJACK AN ENROLLMENT IN SCEP. step-ca sends
+// it every in-flight challenge in plaintext, so it can bind a victim's
+// enrollment to its own key, and enrollctl cannot tell that binding apart; the
+// same holds for step-ca itself. That is inherent to SCEP. What the ACL and
+// the plaintext-in-binding rule bound: a party who can only write Redis cannot
+// bind anything, and the relay cannot write a session, touch one that is not
+// in SCEP, or reach a sealed profile or a minted device.
 package main
 
 import (
@@ -24,6 +32,7 @@ import (
 	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/config"
+	"github.com/i10-tech/i10/services/authd/internal/enrollredis"
 	"github.com/i10-tech/i10/services/authd/internal/mailfront"
 )
 
@@ -55,30 +64,33 @@ func run() error {
 	}
 	go certs.Watch(ctx, 30*time.Second)
 
-	token := &tokenFile{File: cfg.TokenFile, Log: log}
-	if err := token.Load(); err != nil {
-		return err
-	}
-	go token.Watch(ctx, 30*time.Second)
-
-	client, err := newUpstreamClient(cfg.UpstreamCAFile, cfg.UpstreamTimeout)
+	rc, err := enrollredis.NewClient(enrollredis.Config{
+		URL:          cfg.RedisURL,
+		Username:     cfg.RedisUser,
+		Password:     cfg.RedisPassword,
+		ReadTimeout:  cfg.RedisTimeout,
+		WriteTimeout: cfg.RedisTimeout,
+		PoolSize:     8,
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("cahookrelay: redis client: %w", err)
 	}
+	defer rc.Close()
 
-	relay := &hookRelay{
-		upstreamBase: cfg.UpstreamURL,
-		token:        token.Get,
-		client:       client,
-		log:          log,
+	handler := &scepHookHandler{
+		store:                enrollredis.NewRedisStore(rc),
+		webhookIDs:           cfg.WebhookIDs,
+		intermediateNotAfter: cfg.IntermediateNotAfter,
+		timeout:              cfg.RedisTimeout,
+		log:                  log,
 	}
 
 	srv := &http.Server{
-		Handler:           relay,
+		Handler:           handler,
 		TLSConfig:         mailfront.TLSConfig(certs),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      cfg.UpstreamTimeout + 5*time.Second,
+		WriteTimeout:      cfg.RedisTimeout + 5*time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
@@ -87,7 +99,7 @@ func run() error {
 		return fmt.Errorf("cahookrelay: listen on %s: %w", cfg.Listen, err)
 	}
 	tlsLn := tls.NewListener(ln, srv.TLSConfig)
-	log.Info("listening", "addr", ln.Addr().String(), "upstream", cfg.UpstreamURL)
+	log.Info("listening", "addr", ln.Addr().String())
 
 	errc := make(chan error, 1)
 	go func() {

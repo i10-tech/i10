@@ -1,32 +1,19 @@
-# ca.i10.tech: the two enrollment endpoints of the device CA, and nothing else
-# (#383 PR 3, README.md, "The public surface").
+# ca.i10.tech SCEP route for step-ca, and nothing else (I10-62).
 #
-# ⚠ EXACTLY TWO PATH RULES, AND THE LIST OF WHAT IS LEFT OUT IS THE POINT.
-# step-ca serves far more than enrollment on the same port: `/provisioners`
-# (every provisioner, webhook URLs included, to anyone), `/roots`, `/root/*`,
-# `/1.0/*` (signing and SSH), `/sign`, `/renew`, `/rekey`, `/revoke`,
+# ACME (`PathPrefix(/acme/apple/)`) moved to `workloads/acmed.yaml`.
+#
+# EXACTLY ONE PATH RULE, AND THE LIST OF WHAT IS LEFT OUT IS THE POINT.
+# step-ca serves far more than SCEP on the same port: `/provisioners`,
+# `/roots`, `/root/*`, `/1.0/*`, `/sign`, `/renew`, `/rekey`, `/revoke`,
 # `/health`, `/version`, `/crl`. None of them is routed. A request for any of
-# them matches no router and gets Traefik's plain 404, like any unknown path.
+# them matches no router and gets Traefik's plain 404.
 #
-#   PathPrefix(`/acme/apple/`)                               ACME, `apple` only
 #   Path(`/scep/apple-scep`) || PathPrefix(`/scep/apple-scep/`)  SCEP, `apple-scep` only
 #
-# ⚠ AND NO OTHER PROVISIONER NAME. step-ca serves `/acme/<name>/` and
-# `/scep/<name>` for whatever provisioners ca.json holds; the prefixes above
-# name the two that exist, so a third added later is not published by accident.
-#
-# ⚠ DNS-ONLY (GREY CLOUD), NOT PROXIED. The record is in infra/tofu/stacks/dns.
-# Apple's enrollment clients must never meet Cloudflare's bot rules, and the
-# rate limits below need the real client address, which Traefik sees because it
-# holds :443 by hostPort (infra/k8s/argo-ui.md, "Source address"). ⚠ UNTIL THAT
-# RECORD EXISTS, the proxied `*.i10.tech` wildcard already sends ca.i10.tech to
-# Traefik through Cloudflare, so this route answers the moment it syncs, with
-# Cloudflare's addresses as the source. That is the same two paths either way.
+# DNS-ONLY (GREY CLOUD), NOT PROXIED. The record is in infra/tofu/stacks/dns.
 ---
-# Per client address. An Apple enrollment is about ten requests (directory,
-# nonce, account, order, authorization, challenge, finalize, certificate, and the
-# SCEP exchange), so 30 a minute with a burst of 30 never meets a real device,
-# and a NAT full of them shares 30 a minute.
+# Per client address. Host-wide caps were removed now that ACME moved to acmed
+# (no unauthenticated badgerv2 growth) and SCEP hooks run locally against Redis.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -37,33 +24,10 @@ spec:
     average: 30
     period: 1m
     burst: 30
-    # One IPv6 subscriber is a /64 (the mail front counts the same way), so a
-    # single host cannot become 2^64 clients and spend the host-wide budget.
     sourceCriterion:
       ipStrategy:
         ipv6Subnet: 64
 ---
-# ⚠ FOR THE WHOLE HOST, WHICH IS WHAT BOUNDS THE VOLUME. A per-address limit
-# alone lets many addresses fill badger: every new-nonce, new-account and
-# new-order is a row that never expires. Keyed by the request host, so every
-# client shares one budget: 120 a minute is at most about 170,000 rows a day,
-# tens of megabytes, against a 1 GiB volume that may simply be wiped
-# (deployment.yaml).
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: i10-device-ca-ratelimit-host
-  namespace: i10-prod
-spec:
-  rateLimit:
-    average: 120
-    period: 1m
-    burst: 60
-    sourceCriterion:
-      requestHost: true
----
-# A device sends its requests one after another, so four at once from one
-# address is already unusual.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -76,21 +40,7 @@ spec:
       ipStrategy:
         ipv6Subnet: 64
 ---
-# Every hook can hold a request for up to the API's 4-second deadline (twice,
-# with step-ca's retry), so slow requests are what would pile up.
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: i10-device-ca-inflight-host
-  namespace: i10-prod
-spec:
-  inFlightReq:
-    amount: 16
-    sourceCriterion:
-      requestHost: true
----
-# ACME and SCEP bodies are a few kilobytes (a CSR, an attestation statement,
-# a PKCS#7 envelope). Anything near a megabyte is not an enrollment.
+# SCEP bodies are a few kilobytes (a CSR wrapped in a PKCS#7 envelope).
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -102,7 +52,7 @@ spec:
 ---
 # How Traefik reaches step-ca: HTTPS, verified.
 #
-# ⚠ NEVER insecureSkipVerify. step-ca's TLS certificate is cut from the device
+# NEVER insecureSkipVerify. step-ca's TLS certificate is cut from the device
 # intermediate for its service name, so Traefik checks it against the device
 # ROOT (`ca.crt` in trust.yaml) for `serverName` below. The intermediate's name
 # constraint is what makes that check mean "this is step-ca": no other name can
@@ -129,20 +79,15 @@ spec:
   entryPoints: [websecure]
   routes:
     - match: >-
-        Host(`ca.i10.tech`) && (PathPrefix(`/acme/apple/`)
-        || Path(`/scep/apple-scep`) || PathPrefix(`/scep/apple-scep/`))
+        Host(`ca.i10.tech`) && (Path(`/scep/apple-scep`)
+        || PathPrefix(`/scep/apple-scep/`))
       kind: Rule
       priority: 100
       middlewares:
         - name: i10-device-ca-inflight-client
         - name: i10-device-ca-ratelimit-client
-        - name: i10-device-ca-ratelimit-host
-        - name: i10-device-ca-inflight-host
         - name: i10-device-ca-body-limit
       services:
-        # ⚠ Host IS KEPT (passHostHeader, the default). step-ca builds its ACME
-        # directory and checks every JWS `url` against `https://<Host>/...`, so
-        # a rewritten Host would break every ACME request.
         - name: i10-device-ca
           port: 443
           scheme: https

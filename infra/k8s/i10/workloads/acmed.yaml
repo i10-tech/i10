@@ -1,0 +1,238 @@
+# acmed: keyless Mac device-attest-01 ACME server (I10-62,
+# docs/research/enrollment-at-scale.md).
+#
+# Holds NO CA key and NO permit key. Its two keys mint nothing:
+# ACMED_NONCE_KEYS MACs its own stateless Replay-Nonces and account URLs, and
+# ENROLL_ACME_PATH_KEYS verifies the path token in each Mac's directory URL
+# (/acme/apple/d/<token>/directory, carried only in the Mac's encrypted sealed
+# profile). A forged path token only opens order creation for one serial;
+# finalize still needs Apple's attestation of that serial and the OU permit only
+# enrollctl signs. It speaks the RFC 8555 subset used by macOS
+# com.apple.security.acme, keeps bounded-TTL ACME state (written only under a
+# valid path token) in i10-enroll-redis under the `acmed` ACL (`enroll:acme:*`
+# only), and delegates final issuance to
+# enrollctl POST /acme/finalize (which independently re-verifies Apple's x5c
+# attestation chain, the CSR key/CN, and the Mac's 50-char OU permit).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-acmed
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-acmed
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: i10-acmed
+  ports:
+    - { name: http, port: 80, targetPort: http, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-acmed
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-acmed
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-acmed
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-acmed
+        app.kubernetes.io/part-of: i10-enroll
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: acmed
+          image: ghcr.io/i10-tech/i10-authd:prod-4eb1ccf4537c3a953664c530f25d7230aeba31df@sha256:c9e4b89b95f6a37e9fcdedf40ecf412e865c98801c8bb8ab58fbb5a08fae40e1
+          command: ["/usr/local/bin/acmed"]
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+          env:
+            - { name: ACMED_LISTEN, value: ":8080" }
+            - { name: ACMED_BASE_URL, value: "https://ca.i10.tech" }
+            - { name: ACMED_PREFIX, value: "/acme/apple" }
+            - {
+                name: ENROLL_REDIS_URL,
+                value: "redis://i10-enroll-redis.i10-prod.svc:6379",
+              }
+            - { name: ENROLL_REDIS_USER, value: "acmed" }
+            - name: ENROLL_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-acmed
+                  key: ENROLL_REDIS_PASSWORD
+            - {
+                name: ACMED_ENROLLCTL_URL,
+                value: "https://i10-enrollctl.i10-prod.svc:3443",
+              }
+            - { name: ACMED_ENROLLCTL_CA_FILE, value: /etc/acmed/hooks-ca/ca.crt }
+            - name: ACMED_ENROLLCTL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: i10-acmed
+                  key: ACMED_ENROLLCTL_TOKEN
+            # MACs the stateless Replay-Nonces (internal/acmed/nonce.go) and
+            # account URLs (account.go): issuing either writes nothing to Redis.
+            - name: ACMED_NONCE_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-acmed
+                  key: ACMED_NONCE_KEYS
+            # Verifies the Mac path tokens enrollctl signs into each sealed
+            # profile's ACME DirectoryURL (enrolltoken/acmepath.go). Same ring
+            # as enrollctl's; it mints nothing.
+            - name: ENROLL_ACME_PATH_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: i10-acmed
+                  key: ENROLL_ACME_PATH_KEYS
+            - { name: ACMED_UPSTREAM_TIMEOUT, value: "15s" }
+            - { name: ACMED_MAX_ORDERS_PER_DEVICE, value: "20" }
+            - { name: ACMED_LOG_LEVEL, value: "info" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 15m, memory: 24Mi }
+            limits: { memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          volumeMounts:
+            - { name: hooks-ca, mountPath: /etc/acmed/hooks-ca, readOnly: true }
+      volumes:
+        # Public hooks transport CA certificate only; never any tls.key.
+        - name: hooks-ca
+          secret:
+            secretName: i10-cahookrelay-tls
+            defaultMode: 0440
+            items:
+              - { key: ca.crt, path: ca.crt }
+---
+# Ingress from Traefik only. Egress to enroll-redis (6379), enrollctl (3443), and DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: i10-acmed
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-acmed
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - { protocol: TCP, port: 8080 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-enroll-redis
+      ports:
+        - { protocol: TCP, port: 6379 }
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-enrollctl
+      ports:
+        - { protocol: TCP, port: 3443 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Per-address rate and in-flight limits plus body cap. No host-wide cap:
+# acmed scales horizontally, and a request without a valid path token is a 404
+# that never reaches Redis.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: i10-acmed-ratelimit-client
+  namespace: i10-prod
+spec:
+  rateLimit:
+    average: 60
+    period: 1m
+    burst: 30
+    sourceCriterion:
+      ipStrategy:
+        ipv6Subnet: 64
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: i10-acmed-inflight-client
+  namespace: i10-prod
+spec:
+  inFlightReq:
+    amount: 8
+    sourceCriterion:
+      ipStrategy:
+        ipv6Subnet: 64
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: i10-acmed-body-limit
+  namespace: i10-prod
+spec:
+  buffering:
+    maxRequestBodyBytes: 65536
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: i10-acmed
+  namespace: i10-prod
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`ca.i10.tech`) && PathPrefix(`/acme/apple/`)
+      kind: Rule
+      priority: 100
+      observability:
+        accessLogs: false
+      middlewares:
+        - name: i10-acmed-inflight-client
+        - name: i10-acmed-ratelimit-client
+        - name: i10-acmed-body-limit
+      services:
+        # Host header preserved (passHostHeader default); acmed verifies JWS url
+        # against its configured ACMED_BASE_URL (https://ca.i10.tech).
+        - name: i10-acmed
+          port: 80
+  tls:
+    secretName: i10-tech-tls

@@ -56,7 +56,7 @@ import { SignJWT } from "jose"
  *   - every revocation path in section 10's table
  *   - holds keeping device rows intact
  *   - FK cascade on account deletion
- *   - hourly `pruneMailDevices` (unused > 10m, idle > 90d, batched loop)
+ *   - hourly `pruneMailDevices` (unused > 10m, including never-used enrollment devices; idle > 90d; batched loop)
  *
  *   TEMPLATES_TEST_DATABASE_URL=postgres://i10:i10@localhost:5433/i10 bun test test/mail-devices-db.test.ts
  */
@@ -1000,6 +1000,38 @@ suite("mail device store and revocation paths against Postgres", () => {
       idle: 0,
       batches: 0,
     })
+  })
+
+  // The orphan a lost seal leaves (enrollctl's answerMintConflict): a device
+  // minted through an enrollment whose code was never delivered, so it is never
+  // used. Rows inserted as enrollctl's batcher writes them.
+  it("pruneMailDevices deletes never-used enrollment devices (an iOS one and a Mac that never bound) after 10 minutes", async () => {
+    await seedAccounts()
+    const enrolled = async (
+      platform: "ios" | "macos",
+      serial: string | null,
+      age: string,
+      used = false,
+    ) => {
+      const usedAt = used ? new Date(Date.now() - 60_000) : null
+      const [row] = await owner`
+        insert into authd.mail_devices
+          (clerk_user_id, email, tenant_id, platform, model, serial, code_hash, code_kid,
+           created_by, enrollment_id, created_at, first_used_at, last_used_at)
+        values (${ada}, ${`ada@${acmeDomain}`}, ${acme}, ${platform}, ${platform === "ios" ? "iPhone17,2" : "Mac16,1"},
+                ${serial}, ${Buffer.from(crypto.getRandomValues(new Uint8Array(32)))}, 7,
+                ${`user_md_admin_${sfx}`}, ${crypto.randomUUID()}, now() - ${age}::interval,
+                ${usedAt}, ${usedAt})
+        returning id::text as id`
+      return row!.id as string
+    }
+    await enrolled("ios", null, "15 minutes")
+    await enrolled("macos", `C02ORPHAN${sfx}`, "15 minutes")
+    const fresh = await enrolled("ios", null, "5 minutes")
+    const used = await enrolled("macos", `C02USED${sfx}`, "15 minutes", true)
+
+    expect(await pruneMailDevices(db)).toEqual({ unused: 2, idle: 0, batches: 1 })
+    expect((await deviceIds(ada)).sort()).toEqual([fresh, used].sort())
   })
 
   it("mint enforces SSO route gate (sso_required, sso_exempt, managed_no_connection, connection_inactive)", async () => {

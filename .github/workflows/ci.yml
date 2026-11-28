@@ -145,6 +145,18 @@ jobs:
           --health-interval 2s
           --health-timeout 5s
           --health-retries 30
+      # i10-enroll-redis's Lua scripts and ACL are only proven against a real
+      # Redis (the same major as infra/k8s/i10/redis/enroll-redis.yaml). No
+      # password and no ACL file: each test loads the ACL users it needs.
+      redis:
+        image: redis:8.10-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bun-toolchain
@@ -177,17 +189,25 @@ jobs:
         env:
           AUTHD_TEST_DATABASE_URL: postgres://authd@127.0.0.1:5432/i10
           AUTHD_TEST_MAILFRONT_DATABASE_URL: postgres://mailfront@127.0.0.1:5432/i10
+          AUTHD_TEST_ENROLL_WRITER_DATABASE_URL: postgres://enroll_writer@127.0.0.1:5432/i10
           AUTHD_TEST_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/i10
+          # An enrollment database test that cannot reach Postgres fails here
+          # instead of skipping.
+          AUTHD_TEST_DB_REQUIRED: "1"
+          ENROLL_TEST_REDIS_URL: redis://127.0.0.1:6379
+          # A Redis test that cannot reach Redis fails here instead of skipping.
+          ENROLL_TEST_REDIS_REQUIRED: "1"
         # mailfront too: its access-change poll and every gate input's path
-        # (paths_db_test.go) are only proven against Postgres.
-        # ⚠ -p 1: ONE PACKAGE AT A TIME. All four share this one database and
+        # (paths_db_test.go) are only proven against Postgres. The enrollment
+        # packages need Redis as well (the Lua, the rendered ACL, acmed's state).
+        # ⚠ -p 1: ONE PACKAGE AT A TIME. The database packages share this one database and
         # were not written to run beside each other: mailfront's gate-path test
         # writes the shared access-change log (and truncates gate tables) while
         # projection's reads it with exact limits (#534), and locking around
         # that from a test only moved the problem into deadlocks (#533). Tests
         # inside a package already run one at a time (none calls t.Parallel);
         # a DB test that ever does brings the same races back.
-        run: go test -race -count=1 -p 1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/ ./internal/mailfront/
+        run: go test -race -count=1 -p 1 ./internal/projection/ ./internal/budgetstore/ ./internal/ldapsrv/ ./internal/mailfront/ ./internal/enrollctl/ ./internal/enrollredis/ ./internal/acmed/ ./cmd/cahookrelay/
       # ⚠ AND SO DO THE API's. Every apps/api/test/*-db.test.ts skips itself
       # when its variable is unset, so in the `test` matrix job they all skip,
       # and eleven of them sat broken on main unnoticed (#514). The script sets
@@ -200,6 +220,12 @@ jobs:
         env:
           DB_TESTS_DATABASE_URL: postgres://i10@127.0.0.1:5432/i10
         run: bun run test:db
+      - name: API's enrollment Redis tests
+        working-directory: apps/api
+        env:
+          ENROLL_TEST_REDIS_URL: redis://127.0.0.1:6379
+          ENROLL_TEST_REDIS_REQUIRED: "1"
+        run: bun test test/enroll-redis-redis.test.ts
 
   authd:
     name: authd (Go)

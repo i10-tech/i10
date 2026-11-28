@@ -1,10 +1,10 @@
 import type { MailDevice, MailDeviceList } from "@repo/contracts"
 import type { Database } from "../db/client.js"
-import { readMailboxTenant } from "./enrollments.js"
 import {
   accountByEmail,
   decodeDeviceCursor,
   listDevices,
+  readMailboxTenant,
   revoke,
   revokeAllFor,
   type DeviceCursor,

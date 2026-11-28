@@ -2,88 +2,27 @@ package main
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"context"
 	"crypto/rand"
-	"crypto/tls"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/i10-tech/i10/services/authd/internal/mailfront"
+	"github.com/i10-tech/i10/services/authd/internal/enrollredis"
+	"github.com/i10-tech/i10/services/authd/internal/enrollredis/redistest"
 )
-
-type testPKI struct {
-	caPEM   []byte
-	certPEM []byte
-	keyPEM  []byte
-	tlsCert tls.Certificate
-}
-
-func makeLoopbackPKI(t *testing.T, cn string) testPKI {
-	t.Helper()
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	caTmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: cn + " CA"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(24 * time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign,
-	}
-	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	caCert, _ := x509.ParseCertificate(caDER)
-
-	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	leafTmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject:      pkix.Name{CommonName: cn},
-		DNSNames:     []string{"localhost"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	keyDER, err := x509.MarshalECPrivateKey(leafKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	tc, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return testPKI{caPEM: caPEM, certPEM: certPEM, keyPEM: keyPEM, tlsCert: tc}
-}
 
 type lockedLog struct {
 	mu  sync.Mutex
@@ -102,283 +41,411 @@ func (l *lockedLog) String() string {
 	return l.buf.String()
 }
 
-func newHTTPSUpstream(t *testing.T, pki testPKI, handler http.Handler) *httptest.Server {
+func generateTestSPKI(t *testing.T) (string, string) {
 	t.Helper()
-	srv := httptest.NewUnstartedServer(handler)
-	srv.TLS = &tls.Config{Certificates: []tls.Certificate{pki.tlsCert}, MinVersion: tls.VersionTLS12}
-	srv.StartTLS()
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-func TestRelayForwardsFourPathsWithAuthAndHeadersAndLogsNoSecrets(t *testing.T) {
-	upstreamPKI := makeLoopbackPKI(t, "i10-api-ca-hooks")
-	const (
-		secretToken = "super-secret-bearer-token-9999"
-		sigValue    = "deadbeefcafebabe1234567890"
-		webhookID   = "wh-unique-id-42"
-		reqSecret   = `{"serial":"SECRET-SERIAL-XYZ"}`
-		respSecret  = `{"allow":true,"note":"SECRET-RESPONSE-ABC"}`
-	)
-
-	var (
-		mu       sync.Mutex
-		gotPath  string
-		gotAuth  string
-		gotSig   string
-		gotWID   string
-		gotExtra string
-		gotBody  string
-		calls    int
-	)
-	upstream := newHTTPSUpstream(t, upstreamPKI, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		calls++
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		gotSig = r.Header.Get(headerSmallstepSig)
-		gotWID = r.Header.Get(headerSmallstepID)
-		gotExtra = r.Header.Get("X-Client-Cookie")
-		gotBody = string(b)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(respSecret))
-	}))
-
-	dir := t.TempDir()
-	caPath := filepath.Join(dir, "upstream-ca.pem")
-	if err := os.WriteFile(caPath, upstreamPKI.caPEM, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	tokPath := filepath.Join(dir, "token")
-	if err := os.WriteFile(tokPath, []byte("  "+secretToken+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	tf := &tokenFile{File: tokPath}
-	if err := tf.Load(); err != nil {
-		t.Fatal(err)
-	}
-	client, err := newUpstreamClient(caPath, 5*time.Second)
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
+	der, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(der)
+	return base64.StdEncoding.EncodeToString(der), hex.EncodeToString(sum[:])
+}
 
+// seedAttestedSession creates and attests a session as the API and enrollctl
+// would, on the test Redis.
+func seedAttestedSession(t *testing.T, store enrollredis.Store, now time.Time, eid, serial, challenge string) {
+	t.Helper()
+	chalHex := enrollredis.HashChallenge(challenge)
+	sess := enrollredis.Session{
+		ID:            eid,
+		ClerkUserID:   "user_" + eid,
+		Email:         "u@example.com",
+		ExpectedEpoch: 1,
+		CreatedBy:     "user_" + eid,
+		Status:        "open",
+		CreatedAtMs:   now.UnixMilli(),
+		ExpiresAtMs:   now.Add(15 * time.Minute).UnixMilli(),
+		UpdatedAtMs:   now.UnixMilli(),
+	}
+	if err := store.CreateSession(context.Background(), sess, now); err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.AttestSession(context.Background(), enrollredis.AttestInput{
+		EID:               eid,
+		Now:               now,
+		Serial:            serial,
+		UDIDSha256:        strings.Repeat("1", 64),
+		AppleSignerSha256: strings.Repeat("2", 64),
+		Product:           "iPhone17,2",
+		OSVersion:         "22A3354",
+		Platform:          "ios",
+		NewChalHash:       chalHex,
+	})
+	if err != nil || res.Outcome != "scep" {
+		t.Fatalf("AttestSession = (%+v, %v)", res, err)
+	}
+}
+
+func validSCEPAuthorizePayload(now time.Time, cn, spkiB64 string) map[string]any {
+	return map[string]any{
+		"timestamp": now.UTC().Format(time.RFC3339Nano),
+		"x509Certificate": map[string]any{
+			"version": 3,
+			"subject": map[string]any{
+				"commonName": cn,
+			},
+			"keyUsage":           []string{"digitalSignature", "keyEncipherment"},
+			"extKeyUsage":        []string{"emailProtection"},
+			"publicKey":          spkiB64,
+			"publicKeyAlgorithm": "RSA",
+			"notBefore":          now.UTC().Format(time.RFC3339Nano),
+			"notAfter":           now.UTC().Add(7 * 24 * time.Hour).Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func postHook(h http.Handler, path, wid string, payload any) *httptest.ResponseRecorder {
+	var body []byte
+	switch v := payload.(type) {
+	case string:
+		body = []byte(v)
+	case []byte:
+		body = v
+	default:
+		body, _ = json.Marshal(v)
+	}
+	req := httptest.NewRequest(http.MethodPost, "https://127.0.0.1:9443"+path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if wid != "" {
+		req.Header.Set(headerSmallstepID, wid)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeAllow(t *testing.T, rec *httptest.ResponseRecorder) bool {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%q)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Allow bool `json:"allow"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode allow JSON: %v (%q)", err, rec.Body.String())
+	}
+	return out.Allow
+}
+
+func TestSCEPChallengeAndAuthorizeHappyPathRetryConflictAndNoSecretLogs(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	store, _ := redistest.Open(t)
 	logs := &lockedLog{}
-	relay := &hookRelay{
-		upstreamBase: upstream.URL,
-		token:        tf.Get,
-		client:       client,
-		log:          slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+
+	const (
+		chalWID = "wh-scep-chal-secret-id"
+		authWID = "wh-scep-auth-secret-id"
+	)
+	id := redistest.ID(t)
+	secretCh := "one-time-scep-challenge-secret-" + id
+	secretSer := "C02SECRET" + id[:6]
+	txID := "tx-unique-" + id
+	eid := "eid-" + id
+	seedAttestedSession(t, store, now, eid, secretSer, secretCh)
+
+	h := &scepHookHandler{
+		store: store,
+		webhookIDs: map[string]string{
+			"scep-challenge": chalWID,
+			"scep-authorize": authWID,
+		},
+		intermediateNotAfter: now.Add(365 * 24 * time.Hour),
+		timeout:              2 * time.Second,
+		now:                  func() time.Time { return now },
+		log:                  slog.New(slog.NewJSONHandler(logs, nil)),
 	}
 
-	// Serve over real TLS with cert carrying IP:127.0.0.1 and DNS:localhost.
-	relayPKI := makeLoopbackPKI(t, "cahookrelay")
-	certPath := filepath.Join(dir, "tls.crt")
-	keyPath := filepath.Join(dir, "tls.key")
-	if err := os.WriteFile(certPath, relayPKI.certPEM, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(keyPath, relayPKI.keyPEM, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cf := &mailfront.CertFiles{CertFile: certPath, KeyFile: keyPath}
-	if err := cf.Load(); err != nil {
-		t.Fatal(err)
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tlsLn := tls.NewListener(ln, mailfront.TLSConfig(cf))
-	relaySrv := &http.Server{Handler: relay}
-	go func() { _ = relaySrv.Serve(tlsLn) }()
-	t.Cleanup(func() { _ = relaySrv.Close() })
-	relayURL := "https://" + ln.Addr().String()
+	spkiB64, firstKeyHex := generateTestSPKI(t)
+	spki2B64, _ := generateTestSPKI(t)
 
-	relayRoots := x509.NewCertPool()
-	relayRoots.AppendCertsFromPEM(relayPKI.caPEM)
-	stepClient := &http.Client{
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: relayRoots, MinVersion: tls.VersionTLS12}},
+	chalReq := map[string]any{
+		"timestamp":         now.Format(time.RFC3339Nano),
+		"scepChallenge":     secretCh,
+		"scepTransactionID": txID,
+		"x509CertificateRequest": map[string]any{
+			"subject":   map[string]any{"commonName": secretSer},
+			"publicKey": spkiB64,
+		},
 	}
 
-	for _, path := range []string{"/acme-authorize", "/scep-challenge", "/scep-authorize", "/scep-notify"} {
-		req, _ := http.NewRequest(http.MethodPost, relayURL+path, strings.NewReader(reqSecret))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set(headerSmallstepSig, sigValue)
-		req.Header.Set(headerSmallstepID, webhookID)
-		req.Header.Set("Authorization", "Bearer client-forged")
-		req.Header.Set("X-Client-Cookie", "drop-me")
-		resp, err := stepClient.Do(req)
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		out, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusCreated || string(out) != respSecret {
-			t.Fatalf("%s: status=%d body=%q", path, resp.StatusCode, string(out))
-		}
-		mu.Lock()
-		if gotPath != path || gotAuth != "Bearer "+secretToken || gotSig != sigValue ||
-			gotWID != webhookID || gotExtra != "" || gotBody != reqSecret {
-			t.Fatalf("%s upstream saw path=%q auth=%q sig=%q wid=%q extra=%q body=%q",
-				path, gotPath, gotAuth, gotSig, gotWID, gotExtra, gotBody)
-		}
-		mu.Unlock()
+	// 1. First SCEPCHALLENGE succeeds.
+	if !decodeAllow(t, postHook(h, "/scep-challenge", chalWID, chalReq)) {
+		t.Fatal("first /scep-challenge refused")
 	}
 
-	// Token rotation via file reload.
-	const rotatedToken = "rotated-token-5555"
-	if err := os.WriteFile(tokPath, []byte(rotatedToken+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	// 2. Identical retry succeeds.
+	if !decodeAllow(t, postHook(h, "/scep-challenge", chalWID, chalReq)) {
+		t.Fatal("idempotent /scep-challenge retry refused")
 	}
-	if err := tf.Load(); err != nil {
-		t.Fatal(err)
-	}
-	resp, err := stepClient.Post(relayURL+"/acme-authorize", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	mu.Lock()
-	if gotAuth != "Bearer "+rotatedToken {
-		t.Fatalf("after reload auth=%q, want rotated token", gotAuth)
-	}
-	mu.Unlock()
 
-	// Logs must never contain tokens, bodies, or Smallstep headers.
+	// 3. SCEP AUTHORIZING with valid template succeeds + retry succeeds.
+	authReq := validSCEPAuthorizePayload(now, secretSer, spkiB64)
+	if !decodeAllow(t, postHook(h, "/scep-authorize", authWID, authReq)) {
+		t.Fatal("first /scep-authorize refused")
+	}
+	if !decodeAllow(t, postHook(h, "/scep-authorize", authWID, authReq)) {
+		t.Fatal("retry /scep-authorize refused")
+	}
+
+	// 4. Different key replaying same challenge is refused, and the refusal is
+	// recorded for the console WITHOUT writing the session (read-only to the relay).
+	conflictReq := map[string]any{
+		"timestamp":         now.Format(time.RFC3339Nano),
+		"scepChallenge":     secretCh,
+		"scepTransactionID": txID,
+		"x509CertificateRequest": map[string]any{
+			"subject":   map[string]any{"commonName": secretSer},
+			"publicKey": spki2B64,
+		},
+	}
+	if decodeAllow(t, postHook(h, "/scep-challenge", chalWID, conflictReq)) {
+		t.Fatal("conflicting key /scep-challenge was allowed")
+	}
+	if code, err := store.GetSCEPRefusal(context.Background(), eid); err != nil || code != "scep_key_conflict" {
+		t.Fatalf("SCEP refusal after key conflict = (%q, %v)", code, err)
+	}
+	sess, err := store.GetSession(context.Background(), eid)
+	if err != nil || sess == nil || sess.Status != "attested" {
+		t.Fatalf("session after key conflict = %+v, err=%v (the relay must not write it)", sess, err)
+	}
+	kb, err := store.GetSCEPKeyBinding(context.Background(), firstKeyHex)
+	if err != nil || kb == nil || kb.Challenge != secretCh || kb.EID != eid {
+		t.Fatalf("key binding = (%+v, %v), want the challenge plaintext and the session id", kb, err)
+	}
+
+	// 5. Logs must never contain webhook IDs, challenge, serial, or SPKI.
 	logText := logs.String()
-	for _, sensitive := range []string{secretToken, rotatedToken, sigValue, webhookID, "SECRET-SERIAL-XYZ", "SECRET-RESPONSE-ABC"} {
-		if strings.Contains(logText, sensitive) {
-			t.Fatalf("log leaked sensitive value %q:\n%s", sensitive, logText)
+	for _, secret := range []string{chalWID, authWID, secretCh, secretSer, spkiB64, txID} {
+		if strings.Contains(logText, secret) {
+			t.Fatalf("logs leaked %q:\n%s", secret, logText)
 		}
 	}
 }
 
-func TestRelayRejectsUnknownPathsMethodsQueriesAndOversizedBodies(t *testing.T) {
-	upstreamPKI := makeLoopbackPKI(t, "upstream")
-	calls := 0
-	upstream := newHTTPSUpstream(t, upstreamPKI, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusOK)
-	}))
-	caPath := filepath.Join(t.TempDir(), "ca.pem")
-	_ = os.WriteFile(caPath, upstreamPKI.caPEM, 0o600)
-	client, err := newUpstreamClient(caPath, 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
+func TestSCEPTemplateRefusalsAreRecordedForTheConsole(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	interExpiry := now.Add(30 * 24 * time.Hour)
+
+	// want is the refusal recorded for the console: bad_template for a
+	// template rule; nothing for a body no x509util template produces
+	// (bad_body), which names no key the relay can trust.
+	subject := func(extra map[string]any) map[string]any {
+		s := map[string]any{"commonName": "SER1"}
+		for k, v := range extra {
+			s[k] = v
+		}
+		return s
 	}
-	relay := &hookRelay{
-		upstreamBase: upstream.URL,
-		token:        func() string { return "tok" },
-		client:       client,
-		log:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+	cases := []struct {
+		name   string
+		mutate func(cert map[string]any)
+		want   string
+	}{
+		{"unknown JSON field rejected", func(c map[string]any) { c["unknownEvilField"] = true }, ""},
+		{"rawSubject set", func(c map[string]any) { c["rawSubject"] = "AA==" }, "bad_template"},
+		{"clientAuth EKU refused", func(c map[string]any) { c["extKeyUsage"] = []string{"clientAuth"} }, "bad_template"},
+		{"empty EKU refused", func(c map[string]any) { c["extKeyUsage"] = []string{} }, "bad_template"},
+		{"emailProtection + clientAuth refused", func(c map[string]any) { c["extKeyUsage"] = []string{"emailProtection", "clientAuth"} }, "bad_template"},
+		{"unknown EKU refused", func(c map[string]any) { c["unknownExtKeyUsage"] = []string{"1.2.3.4"} }, "bad_template"},
+		{"wrong keyUsage", func(c map[string]any) { c["keyUsage"] = []string{"digitalSignature"} }, "bad_template"},
+		{"dnsNames set", func(c map[string]any) { c["dnsNames"] = []string{"evil.example"} }, "bad_template"},
+		{"sans set", func(c map[string]any) { c["sans"] = []map[string]any{{"type": "permanentIdentifier", "value": "SER1"}} }, "bad_template"},
+		{"extensions set", func(c map[string]any) {
+			c["extensions"] = []map[string]any{{"id": "2.5.29.17", "critical": false, "value": "AA=="}}
+		}, "bad_template"},
+		{"isCA true", func(c map[string]any) { c["basicConstraints"] = map[string]any{"isCA": true} }, "bad_template"},
+		{"notBefore stale", func(c map[string]any) { c["notBefore"] = now.Add(-10 * time.Minute).Format(time.RFC3339Nano) }, "bad_template"},
+		{"notAfter exceeds 7d+5m", func(c map[string]any) { c["notAfter"] = now.Add(8 * 24 * time.Hour).Format(time.RFC3339Nano) }, "bad_template"},
+		{"notAfter exceeds intermediate", func(c map[string]any) { c["notAfter"] = interExpiry.Add(time.Hour).Format(time.RFC3339Nano) }, "bad_template"},
+		{"extraNames in subject", func(c map[string]any) {
+			c["subject"] = subject(map[string]any{"extraNames": []any{map[string]any{"type": "2.5.4.3", "value": "X"}}})
+		}, "bad_template"},
+		{"OU in subject", func(c map[string]any) {
+			c["subject"] = subject(map[string]any{"organizationalUnit": []string{"Sales"}})
+		}, "bad_template"},
+		{"O in subject", func(c map[string]any) { c["subject"] = subject(map[string]any{"organization": []string{"Evil Inc"}}) }, "bad_template"},
+		{"C in subject", func(c map[string]any) { c["subject"] = subject(map[string]any{"country": []string{"US"}}) }, "bad_template"},
+		{"L in subject", func(c map[string]any) { c["subject"] = subject(map[string]any{"locality": []string{"Cairo"}}) }, "bad_template"},
+		{"ST in subject", func(c map[string]any) { c["subject"] = subject(map[string]any{"province": []string{"X"}}) }, "bad_template"},
+		{"street in subject", func(c map[string]any) { c["subject"] = subject(map[string]any{"streetAddress": []string{"1 Main"}}) }, "bad_template"},
+		{"postal code in subject", func(c map[string]any) { c["subject"] = subject(map[string]any{"postalCode": []string{"12345"}}) }, "bad_template"},
+		{"serialNumber in subject", func(c map[string]any) { c["subject"] = subject(map[string]any{"serialNumber": "123"}) }, "bad_template"},
+		{"unknown subject attribute", func(c map[string]any) { c["subject"] = subject(map[string]any{"evil": "x"}) }, ""},
+		{"serialNumber set", func(c map[string]any) { c["serialNumber"] = "12345" }, ""},
+		{"raw set", func(c map[string]any) { c["raw"] = "AA==" }, ""},
 	}
 
-	// Unknown paths and query strings get 404.
-	for _, p := range []string{"/", "/provisioners", "/health", "/acme-authorize/extra", "/acme-authorize?x=1", "/scep-notify/"} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "https://127.0.0.1:9443"+p, strings.NewReader("{}"))
-		relay.ServeHTTP(rec, req)
+	store, _ := redistest.Open(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eid := "eid-" + redistest.ID(t)
+			spkiB64, _ := generateTestSPKI(t) // one key per session: a key binds one challenge
+			seedAttestedSession(t, store, now, eid, "SER1", "chal-"+eid)
+			h := &scepHookHandler{
+				store:                store,
+				webhookIDs:           map[string]string{"scep-challenge": "w1", "scep-authorize": "w2"},
+				intermediateNotAfter: interExpiry,
+				now:                  func() time.Time { return now },
+				log:                  slog.New(slog.NewTextHandler(io.Discard, nil)),
+			}
+			chalReq := map[string]any{
+				"timestamp":         now.Format(time.RFC3339Nano),
+				"scepChallenge":     "chal-" + eid,
+				"scepTransactionID": "tx-" + eid,
+				"x509CertificateRequest": map[string]any{
+					"subject":   map[string]any{"commonName": "SER1"},
+					"publicKey": spkiB64,
+				},
+			}
+			if !decodeAllow(t, postHook(h, "/scep-challenge", "w1", chalReq)) {
+				t.Fatal("challenge setup failed")
+			}
+
+			payload := validSCEPAuthorizePayload(now, "SER1", spkiB64)
+			tc.mutate(payload["x509Certificate"].(map[string]any))
+
+			if decodeAllow(t, postHook(h, "/scep-authorize", "w2", payload)) {
+				t.Fatalf("%s: allowed", tc.name)
+			}
+			if code, err := store.GetSCEPRefusal(context.Background(), eid); err != nil || code != tc.want {
+				t.Fatalf("%s: recorded refusal = (%q, %v), want %q", tc.name, code, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestWebhookAuthPathsTimestampAndOversize(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	h := &scepHookHandler{
+		store:                failingStore{},
+		webhookIDs:           map[string]string{"scep-challenge": "id-chal", "scep-authorize": "id-auth"},
+		intermediateNotAfter: now.Add(365 * 24 * time.Hour),
+		now:                  func() time.Time { return now },
+		log:                  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	// Removed & unknown paths return 404.
+	for _, p := range []string{"/", "/acme-authorize", "/scep-notify", "/health", "/scep-challenge?x=1", "/scep-authorize/extra"} {
+		rec := postHook(h, p, "id-chal", `{"timestamp":"2026-11-27T12:00:00Z"}`)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("POST %s = %d, want 404", p, rec.Code)
 		}
 	}
 
-	// Non-POST methods on allowed path get 405.
-	for _, m := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(m, "https://127.0.0.1:9443/acme-authorize", nil)
-		relay.ServeHTTP(rec, req)
-		if rec.Code != http.StatusMethodNotAllowed {
-			t.Errorf("%s /acme-authorize = %d, want 405", m, rec.Code)
+	// Non-POST returns 404.
+	req := httptest.NewRequest(http.MethodGet, "https://127.0.0.1:9443/scep-challenge", nil)
+	req.Header.Set(headerSmallstepID, "id-chal")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /scep-challenge = %d, want 404", rec.Code)
+	}
+
+	// Wrong or missing webhook ID returns 404 (cannot replay authorize ID at challenge).
+	for _, wid := range []string{"", "wrong", "id-auth"} {
+		rec := postHook(h, "/scep-challenge", wid, `{"timestamp":"2026-11-27T12:00:00Z"}`)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("wid %q = %d, want 404", wid, rec.Code)
 		}
 	}
 
-	// Body > 64 KiB gets 413 and forwards nothing.
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "https://127.0.0.1:9443/acme-authorize", bytes.NewReader(make([]byte, maxBodyBytes+1)))
-	relay.ServeHTTP(rec, req)
-	if rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("64KiB+1 body = %d, want 413", rec.Code)
-	}
-	if calls != 0 {
-		t.Fatalf("upstream received %d calls from rejected requests", calls)
+	// Stale timestamp (>60s) returns 404.
+	stale := `{"timestamp":"` + now.Add(-61*time.Second).Format(time.RFC3339) + `"}`
+	if rec := postHook(h, "/scep-challenge", "id-chal", stale); rec.Code != http.StatusNotFound {
+		t.Errorf("stale timestamp = %d, want 404", rec.Code)
 	}
 
-	// Exactly 64 KiB succeeds.
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "https://127.0.0.1:9443/acme-authorize", bytes.NewReader(make([]byte, maxBodyBytes)))
-	relay.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || calls != 1 {
-		t.Fatalf("64KiB body = %d (calls=%d), want 200 and 1 call", rec.Code, calls)
+	// Oversized body > 64 KiB returns 413.
+	if rec := postHook(h, "/scep-challenge", "id-chal", make([]byte, maxBodyBytes+1)); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body = %d, want 413", rec.Code)
 	}
 }
 
-func TestRelayVerifiesUpstreamTLSAgainstCA(t *testing.T) {
-	upstreamPKI := makeLoopbackPKI(t, "upstream")
-	wrongPKI := makeLoopbackPKI(t, "wrong-ca")
-	upstream := newHTTPSUpstream(t, upstreamPKI, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	caPath := filepath.Join(t.TempDir(), "wrong.pem")
-	_ = os.WriteFile(caPath, wrongPKI.caPEM, 0o600)
-	client, err := newUpstreamClient(caPath, 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	logs := &lockedLog{}
-	relay := &hookRelay{
-		upstreamBase: upstream.URL,
-		token:        func() string { return "secret-never-log" },
-		client:       client,
-		log:          slog.New(slog.NewTextHandler(logs, nil)),
-	}
+type failingStore struct {
+	enrollredis.Store
+}
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "https://127.0.0.1:9443/scep-authorize", strings.NewReader(`{"body":"secret-body"}`))
-	req.Header.Set(headerSmallstepSig, "secret-sig")
-	relay.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("wrong upstream CA = %d, want 502", rec.Code)
+func (failingStore) SCEPClaim(context.Context, string, string, string, string, time.Time) (enrollredis.SCEPDecision, error) {
+	return enrollredis.SCEPDecision{}, errors.New("redis down")
+}
+
+func TestRedisErrorFailsClosed503(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	spkiB64, _ := generateTestSPKI(t)
+	h := &scepHookHandler{
+		store:                failingStore{},
+		webhookIDs:           map[string]string{"scep-challenge": "id-chal", "scep-authorize": "id-auth"},
+		intermediateNotAfter: now.Add(365 * 24 * time.Hour),
+		now:                  func() time.Time { return now },
+		log:                  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	for _, s := range []string{"secret-never-log", "secret-body", "secret-sig"} {
-		if strings.Contains(logs.String(), s) {
-			t.Fatalf("error log leaked %q:\n%s", s, logs.String())
-		}
+	chalReq := map[string]any{
+		"timestamp":         now.Format(time.RFC3339Nano),
+		"scepChallenge":     "chal-1",
+		"scepTransactionID": "tx-1",
+		"x509CertificateRequest": map[string]any{
+			"subject":   map[string]any{"commonName": "SER1"},
+			"publicKey": spkiB64,
+		},
+	}
+	rec := postHook(h, "/scep-challenge", "id-chal", chalReq)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("redis error status = %d, want 503", rec.Code)
 	}
 }
 
-func TestRelayConfigValidation(t *testing.T) {
-	valid := func() relayConfig {
-		return relayConfig{
+func TestConfigValidation(t *testing.T) {
+	valid := func() scepConfig {
+		return scepConfig{
 			Listen:          "127.0.0.1:9443",
 			CertFile:        "/etc/cahookrelay/tls/tls.crt",
 			KeyFile:         "/etc/cahookrelay/tls/tls.key",
-			UpstreamURL:     "https://i10-api-ca-hooks.i10-prod.svc:3443",
-			UpstreamCAFile:  "/etc/cahookrelay/ca/ca.crt",
-			TokenFile:       "/etc/cahookrelay/token/token",
-			UpstreamTimeout: 10 * time.Second,
+			WebhookIDsRaw:   "scep-challenge=wh1,scep-authorize=wh2",
+			IntermediateRaw: "2036-11-26T00:00:00Z",
+			RedisURL:        "redis://i10-enroll-redis.i10-prod.svc:6379",
+			RedisUser:       "cahookrelay",
+			RedisPassword:   "redis-password",
+			RedisTimeout:    4 * time.Second,
 		}
 	}
-	if err := valid().validate(); err != nil {
+	c0 := valid()
+	if err := c0.validate(); err != nil {
 		t.Fatalf("valid config refused: %v", err)
 	}
-	for name, mutate := range map[string]func(*relayConfig){
-		"wildcard listen":     func(c *relayConfig) { c.Listen = "0.0.0.0:9443" },
-		"non-loopback listen": func(c *relayConfig) { c.Listen = "10.0.0.5:9443" },
-		"http upstream":       func(c *relayConfig) { c.UpstreamURL = "http://i10-api:3443" },
-		"upstream with query": func(c *relayConfig) { c.UpstreamURL = "https://i10-api:3443?x=1" },
-		"missing CA file":     func(c *relayConfig) { c.UpstreamCAFile = "" },
-		"missing token file":  func(c *relayConfig) { c.TokenFile = "" },
-		"timeout too short":   func(c *relayConfig) { c.UpstreamTimeout = 100 * time.Millisecond },
-		"timeout too long":    func(c *relayConfig) { c.UpstreamTimeout = time.Minute },
+	for name, mutate := range map[string]func(*scepConfig){
+		"wildcard listen":      func(c *scepConfig) { c.Listen = "0.0.0.0:9443" },
+		"non-loopback listen":  func(c *scepConfig) { c.Listen = "10.0.0.5:9443" },
+		"missing cert":         func(c *scepConfig) { c.CertFile = "" },
+		"missing webhook IDs":  func(c *scepConfig) { c.WebhookIDsRaw = "" },
+		"duplicate webhook ID": func(c *scepConfig) { c.WebhookIDsRaw = "scep-challenge=same,scep-authorize=same" },
+		"unknown webhook kind": func(c *scepConfig) { c.WebhookIDsRaw = "acme-authorize=a,scep-challenge=b,scep-authorize=c" },
+		"bad intermediate ts":  func(c *scepConfig) { c.IntermediateRaw = "2036-11-26" },
+		"missing redis url":    func(c *scepConfig) { c.RedisURL = "" },
+		"missing redis pass":   func(c *scepConfig) { c.RedisPassword = "" },
+		"timeout too short":    func(c *scepConfig) { c.RedisTimeout = 100 * time.Millisecond },
+		"timeout too long":     func(c *scepConfig) { c.RedisTimeout = time.Minute },
 	} {
-		c := valid()
-		mutate(&c)
-		if err := c.validate(); err == nil {
-			t.Errorf("%s: accepted", name)
-		}
+		t.Run(name, func(t *testing.T) {
+			c := valid()
+			mutate(&c)
+			if err := c.validate(); err == nil {
+				t.Errorf("%s: accepted", name)
+			}
+		})
 	}
 }

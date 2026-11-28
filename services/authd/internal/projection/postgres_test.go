@@ -608,7 +608,6 @@ func TestTheMailFrontRoleReadsTheGateAndWritesNothing(t *testing.T) {
 		`UPDATE authd.mail_devices SET cert_key_sha256 = NULL`,
 		`DELETE FROM authd.mail_device_cert_binds`,
 		`UPDATE authd.mail_device_cert_binds SET bound_at = now()`,
-		`SELECT 1 FROM authd.mail_device_cert_permits LIMIT 1`,
 	} {
 		if _, err := store.Pool().Exec(ctx, q); err == nil {
 			t.Errorf("the mailfront role may run %q", q)

@@ -20,7 +20,7 @@ COPY . .
 # CGO off gives a genuinely static binary. -trimpath keeps build paths out of
 # the artifact so the same source produces the same bytes anywhere.
 #
-# ⚠ THE ARG NAME MUST MATCH THE ONE build.yml PASSES. A build-arg the Dockerfile
+# THE ARG NAME MUST MATCH THE ONE build.yml PASSES. A build-arg the Dockerfile
 # does not declare is silently ignored, and `-X` against a symbol that does not
 # exist is silently ignored too - so a mismatch here produces an image that
 # builds, runs, and reports its version as "dev" forever.
@@ -28,20 +28,24 @@ ARG GIT_SHA=dev
 RUN CGO_ENABLED=0 go build \
         -trimpath \
         -ldflags="-s -w -X main.version=${GIT_SHA}" \
-        -o /out/ ./cmd/authd ./cmd/mailfront ./cmd/cahookrelay ./cmd/enrolld
+        -o /out/ ./cmd/authd ./cmd/mailfront ./cmd/cahookrelay ./cmd/enrolld ./cmd/enrollctl ./cmd/acmed
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /out/authd /usr/local/bin/authd
-# ⚠ THE MAIL FRONT IS A SECOND BINARY IN THIS IMAGE, NOT A SECOND IMAGE, so the
+# THE MAIL FRONT IS A SECOND BINARY IN THIS IMAGE, NOT A SECOND IMAGE, so the
 # two always come from the same commit and the deploy pins one digest. It runs
 # as its own container with `command: [/usr/local/bin/mailfront]` and none of
 # authd's secrets (services/authd/README.md, "Mail front").
 COPY --from=build /out/mailfront /usr/local/bin/mailfront
-# Loopback TLS webhook relay sidecar for step-ca (#383 PR 3).
+# Loopback TLS SCEP webhook sidecar for step-ca (handles SCEP hooks against i10-enroll-redis).
 COPY --from=build /out/cahookrelay /usr/local/bin/cahookrelay
-# Apple over-the-air enrollment HTTP service (#383 PR 4).
+# Apple over-the-air enrollment HTTP service (keyless edge parser; relays signed profiles from enrollctl).
 COPY --from=build /out/enrolld /usr/local/bin/enrolld
+# Internal enrollment control service (profile signer, micro-batcher, Mac ACME issuer).
+COPY --from=build /out/enrollctl /usr/local/bin/enrollctl
+# Keyless Mac device-attest-01 ACME server (delegates issuance to enrollctl /acme/finalize).
+COPY --from=build /out/acmed /usr/local/bin/acmed
 
 # Loopback only. The pod spec must not publish this port, and the Service must
 # not select it - Stalwart reaches authd over localhost inside the same pod.

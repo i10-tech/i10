@@ -1,10 +1,6 @@
 /**
  * Operator CLI for `authd.mail_devices` (#383).
  *
- * FOR THROWAWAY-ACCOUNT PROBES ON PRODUCTION ONLY until PR 4/5 ship the
- * user-facing enrollment and management routes. Never mint a device code for a
- * customer account through this script.
- *
  * Required environment variables:
  *   DATABASE_URL           Postgres connection string (application role `i10_api`)
  *   MAIL_DEVICE_CODE_KEYS  `<id>:<base64 >= 32 bytes>`, comma-separated (`mint` only)
@@ -15,27 +11,16 @@
  *   bun scripts/mail-device.ts revoke --id <uuid>
  *   bun scripts/mail-device.ts bind-key <device id> <certificate.pem> [--replace]
  *   bun scripts/mail-device.ts unbind-key <device id>
- *   bun scripts/mail-device.ts acme-permit <device id>
  *
- * `mint` writes ONLY the device code to stdout, and `acme-permit` ONLY the
- * permit's nonce (metadata goes to stderr); neither is logged anywhere.
- *
- * `bind-key` and `unbind-key` (#383 PR 3) set or clear a Mac's certificate key
- * (SHA-256 of the leaf's SubjectPublicKeyInfo), claim the first use (bind only)
- * and delete the device's liveness rows, in one transaction, accounts first.
- * `bind-key` runs the account and device gate the hooks run, and refuses a
- * leaf the front or authd would never sign in: no `clientAuth` EKU, a name
- * other than the permanent identifier, a CN that is not the row's serial. It
- * does not check the issuer, key usage or validity (README, "Operator
- * commands"), and replaces a key the row already has only with `--replace`.
- * `acme-permit` opens the permit step-ca's ACME `AUTHORIZING` hook needs; the
- * nonce goes in the certificate's `OU`.
+ * `mint` writes ONLY the device code to stdout (metadata goes to stderr); never
+ * logged anywhere. `bind-key` and `unbind-key` set or clear a Mac's certificate
+ * key (SHA-256 of the leaf's SubjectPublicKeyInfo), claim first use (bind only),
+ * and delete the device's liveness rows in one transaction, accounts first.
  */
-import { X509Certificate } from "node:crypto"
+import { createHash, X509Certificate } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createDb } from "../src/db/client.js"
 import { MailDeviceError, parseMailDeviceCodeKeys } from "../src/mail-devices/code.js"
-import { createAcmePermit, sha256 } from "../src/mail-devices/permits.js"
 import {
   DEVICE_PAGE_MAX,
   MAIL_DEVICE_PLATFORMS,
@@ -64,15 +49,13 @@ export type MailDeviceCommand =
   | { action: "revoke"; id: string }
   | { action: "bind-key"; id: string; certificatePath: string; replace: boolean }
   | { action: "unbind-key"; id: string }
-  | { action: "acme-permit"; id: string }
 
 const USAGE = `Usage:
   bun scripts/mail-device.ts mint --email <addr> --platform <ios|ipados|macos> --name <n> [--model <m>] [--serial <s>]
   bun scripts/mail-device.ts list --email <addr>
   bun scripts/mail-device.ts revoke --id <uuid>
   bun scripts/mail-device.ts bind-key <device id> <certificate.pem> [--replace]
-  bun scripts/mail-device.ts unbind-key <device id>
-  bun scripts/mail-device.ts acme-permit <device id>`
+  bun scripts/mail-device.ts unbind-key <device id>`
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -95,10 +78,6 @@ const CLIENT_AUTH = "1.3.6.1.5.5.7.3.2"
 /**
  * The FIRST certificate in a PEM file (the leaf, which is how a chain file is
  * ordered): the SHA-256 of its SubjectPublicKeyInfo DER and its subject CN.
- *
- * ⚠ REFUSES A LEAF NO HOOK WOULD SIGN: one without a `clientAuth` EKU, which
- * the front's TLS check needs, or with a DNS or IP SAN, which a server
- * certificate has and an ACME leaf never does.
  */
 export function readLeaf(pem: string): {
   keySha256: Buffer
@@ -110,8 +89,6 @@ export function readLeaf(pem: string): {
   if (!(leaf.keyUsage ?? []).includes(CLIENT_AUTH)) {
     throw new Error("the certificate has no clientAuth extended key usage")
   }
-  // An ACME leaf's only name is its permanent identifier, an otherName. Any
-  // other kind (DNS, IP, email, URI, directory, registered id) is not ours.
   const names = (leaf.subjectAltName ?? "").split(", ").filter(Boolean)
   const foreign = names.find((name) => !/^othername:/i.test(name))
   if (foreign) {
@@ -123,8 +100,9 @@ export function readLeaf(pem: string): {
     .split("\n")
     .find((part) => part.startsWith("CN="))
     ?.slice("CN=".length)
+  const spki = leaf.publicKey.export({ type: "spki", format: "der" })
   return {
-    keySha256: sha256(leaf.publicKey.export({ type: "spki", format: "der" })),
+    keySha256: createHash("sha256").update(spki).digest(),
     commonName: cn ?? null,
   }
 }
@@ -161,9 +139,12 @@ export function parseMailDeviceArgs(argv: readonly string[]): MailDeviceCommand 
     )
     return { action, id: id!.toLowerCase(), certificatePath: certificatePath!, replace }
   }
-  if (action === "unbind-key" || action === "acme-permit") {
+  if (action === "unbind-key") {
     const [id] = positional(action, rest, ["device id"])
     return { action, id: id!.toLowerCase() }
+  }
+  if (action !== "mint" && action !== "list" && action !== "revoke") {
+    throw new Error(`Unknown command "${action}".\n${USAGE}`)
   }
   const flags = takeFlags(rest)
 
@@ -198,15 +179,11 @@ export function parseMailDeviceArgs(argv: readonly string[]): MailDeviceCommand 
     return { action: "list", email }
   }
 
-  if (action === "revoke") {
-    const id = flags.id?.trim()
-    if (!id) {
-      throw new Error("revoke requires --id <uuid>")
-    }
-    return { action: "revoke", id }
+  const id = flags.id?.trim()
+  if (!id) {
+    throw new Error("revoke requires --id <uuid>")
   }
-
-  throw new Error(`Unknown command "${action}".\n${USAGE}`)
+  return { action: "revoke", id }
 }
 
 /** The database url every command needs. */
@@ -271,16 +248,6 @@ async function main() {
       return
     }
 
-    if (command.action === "acme-permit") {
-      const permit = await createAcmePermit(db, { deviceId: command.id })
-      console.error(
-        `Opened ACME permit ${permit.permitId} for mail device ${command.id}, until ${permit.expiresAt.toISOString()}`,
-      )
-      // Print ONLY the nonce to stdout, once: it goes in the certificate's OU.
-      process.stdout.write(`${permit.nonce}\n`)
-      return
-    }
-
     if (command.action === "mint") {
       const account = await accountByEmail(db, command.email)
       if (!account) {
@@ -300,7 +267,6 @@ async function main() {
       console.error(
         `Minted mail device ${device.id} for ${device.email} (${device.platform}, ${device.deviceName ?? "unnamed"})`,
       )
-      // Print ONLY the code to stdout, never to logs.
       process.stdout.write(`${code}\n`)
       return
     }

@@ -1,12 +1,9 @@
 import { z } from "zod"
-import {
-  parseIntermediateNotAfter,
-  parseTokenHashes,
-  parseWebhookIds,
-} from "./ca-hooks/config.js"
 import { isWrapped, KEY_VARIABLES, type Wrappable } from "./crypto/unlock.js"
 import { parseGoogleServiceAccount } from "./identity/google-directory.js"
 import { parseMailDeviceCodeKeys } from "./mail-devices/code.js"
+import { DEFAULT_ENROLL_LINK_BASE_URL } from "./mail-devices/enroll-constants.js"
+import { parseEdgeLinkKeys } from "./mail-devices/link-token.js"
 import { JUDGE_PROVIDERS, judgeSettingsProblems } from "./risk/judge/config.js"
 import { LINK_PROVIDER_CHOICES, type LinkProviderChoice } from "./risk/link-verdict.js"
 import { RULES } from "./risk/rules.js"
@@ -820,82 +817,65 @@ const schema = z.object({
     }),
 
   /**
-   * The device CA's webhook listener (#383 PR 3, `ca-hooks/listener.ts`): a
-   * second `Bun.serve` that only step-ca's relay sidecar calls.
-   *
-   * ⚠ OFF UNLESS ALL THREE OF THE HOOK SETTINGS BELOW ARE SET AND BOTH TLS FILES
-   * ARE MOUNTED. The code ships inert: with none of them, nothing listens.
+   * Dedicated, diskless enrollment Redis (`i10-enroll-redis`, I10-62).
+   * When set (with `ENROLL_REDIS_PASSWORD` and `ENROLL_EDGE_HMAC_KEY`, both
+   * then required), the API serves the console enrollment routes backed by
+   * Redis and consumes `enroll:notice` to send post-seal notification emails.
    */
-  CA_HOOKS_PORT: z.coerce.number().int().min(1).max(65535).default(3443),
-  /** Server certificate for `i10-api-ca-hooks.i10-prod.svc`, from the namespace CA. */
-  CA_HOOKS_TLS_CERT_FILE: z.string().min(1).default("/etc/i10/ca-hooks/tls.crt"),
-  CA_HOOKS_TLS_KEY_FILE: z.string().min(1).default("/etc/i10/ca-hooks/tls.key"),
-  /** SHA-256 hex of the relay's bearer token, comma-separated for rotation. */
-  CA_HOOK_TOKEN_HASHES: z
+  ENROLL_REDIS_URL: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const trimmed = v?.trim()
+      return trimmed ? trimmed : undefined
+    })
+    .refine(
+      (v) => v === undefined || /^rediss?:\/\/.+/.test(v),
+      "ENROLL_REDIS_URL must be a redis:// or rediss:// URL",
+    ),
+  ENROLL_REDIS_USER: z.string().min(1).default("api"),
+  ENROLL_REDIS_PASSWORD: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
+  /**
+   * Shared HMAC key ring for signed edge enrollment links (`<id>:<base64 >= 32 bytes>`,
+   * comma-separated; first key signs, all keys verify). Shared with `enrolld`
+   * and `enrollctl`. Never quoted in validation errors.
+   */
+  ENROLL_EDGE_HMAC_KEY: z
     .string()
     .optional()
     .transform((value, ctx) => {
       const trimmed = value?.trim()
       if (!trimmed) return undefined
       try {
-        return parseTokenHashes(trimmed)
+        return parseEdgeLinkKeys(trimmed)
       } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message })
-        return z.NEVER
-      }
-    }),
-  /** `<kind>=<step-ca webhook id>` for each of the four hooks. */
-  CA_HOOK_WEBHOOK_IDS: z
-    .string()
-    .optional()
-    .transform((value, ctx) => {
-      const trimmed = value?.trim()
-      if (!trimmed) return undefined
-      try {
-        return parseWebhookIds(trimmed)
-      } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message })
-        return z.NEVER
-      }
-    }),
-  /** The device intermediate's `notAfter`, RFC 3339; no leaf may outlive it. */
-  CA_INTERMEDIATE_NOT_AFTER: z
-    .string()
-    .optional()
-    .transform((value, ctx) => {
-      const trimmed = value?.trim()
-      if (!trimmed) return undefined
-      try {
-        return parseIntermediateNotAfter(trimmed)
-      } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message })
+        ctx.addIssue({
+          code: "custom",
+          message:
+            error instanceof Error ? error.message : "invalid ENROLL_EDGE_HMAC_KEY",
+        })
         return z.NEVER
       }
     }),
   /**
-   * SHA-256 hex of `cmd/enrolld`'s bearer token for `/enrolld/*` on `:3443`,
-   * comma-separated for rotation (#383 PR 4). Optional on its own: when unset,
-   * the listener still starts and serves the CA hooks while `/enrolld/*` answers
-   * 404.
+   * Base URL prepended to signed edge link tokens returned by POST
+   * /console/mail-devices/enrollments. The same rule as enrolld's own URLs
+   * (services/authd/cmd/enrolld/config.go): https, a host, no query, no
+   * fragment; and no trailing slash, since the token follows one.
    */
-  ENROLLD_TOKEN_HASHES: z
-    .string()
-    .optional()
-    .transform((value, ctx) => {
-      const trimmed = value?.trim()
-      if (!trimmed) return undefined
-      try {
-        return parseTokenHashes(trimmed)
-      } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message })
-        return z.NEVER
-      }
-    }),
-  /**
-   * Mounted public trust bundle (`i10-device-ca-trust` `bundle.pem`, root and
-   * intermediate) used to verify phase 4 SCEP signers in `/enrolld/finish`.
-   */
-  DEVICE_CA_BUNDLE_FILE: z.string().min(1).default("/etc/i10/device-ca/bundle.pem"),
+  ENROLL_LINK_BASE_URL: z
+    .url()
+    .refine((v) => {
+      const u = new URL(v)
+      return (
+        u.protocol === "https:" && u.host !== "" && !v.includes("?") && !v.includes("#")
+      )
+    }, "ENROLL_LINK_BASE_URL must be an https URL without query or fragment.")
+    .refine((v) => !v.endsWith("/"), "ENROLL_LINK_BASE_URL must not end with a slash.")
+    .default(DEFAULT_ENROLL_LINK_BASE_URL),
 
   /**
    * Webhook endpoints being POSTed to at once on the ordered lane, per worker
@@ -1570,41 +1550,21 @@ export function intervalToMs(value: string): number | null {
  * report the mistake.
  */
 const validated = schema.superRefine((env, ctx) => {
-  // ⚠ ALL OR NOTHING. A listener with some of its settings would either never
-  // start without saying why, or start with no way to authenticate its caller.
-  const hookSettings = {
-    CA_HOOK_TOKEN_HASHES: env.CA_HOOK_TOKEN_HASHES,
-    CA_HOOK_WEBHOOK_IDS: env.CA_HOOK_WEBHOOK_IDS,
-    CA_INTERMEDIATE_NOT_AFTER: env.CA_INTERMEDIATE_NOT_AFTER,
-  }
-  const unset = Object.entries(hookSettings).filter(([, value]) => value === undefined)
-  if (unset.length > 0 && unset.length < Object.keys(hookSettings).length) {
-    for (const [name] of unset) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: "the CA hook settings are set together or not at all",
-      })
+  // Enrollment is on exactly when ENROLL_REDIS_URL is set (the API Deployment
+  // only; its two secrets come from i10-api-enroll by named secretKeyRef, never
+  // from the i10-api Secret the worker and CronJobs mount). Then the ACL
+  // password and the edge HMAC key are both required: a half-configured
+  // enrollment plane fails at start, not on the first enrollment.
+  if (env.ENROLL_REDIS_URL !== undefined) {
+    for (const name of ["ENROLL_REDIS_PASSWORD", "ENROLL_EDGE_HMAC_KEY"] as const) {
+      if (env[name] === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: `${name} is required when ENROLL_REDIS_URL is set`,
+        })
+      }
     }
-  }
-  // ⚠ ONE TOKEN NEVER OPENS BOTH SURFACES: the CA relay's token must not reach
-  // `/enrolld/*`, nor enrolld's a CA hook, so the two lists share no entry.
-  const hookTokens = new Set(
-    env.CA_HOOK_TOKEN_HASHES?.map((hash) => hash.toString("hex")),
-  )
-  if (env.ENROLLD_TOKEN_HASHES?.some((hash) => hookTokens.has(hash.toString("hex")))) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["ENROLLD_TOKEN_HASHES"],
-      message: "must share no entry with CA_HOOK_TOKEN_HASHES",
-    })
-  }
-  if (env.CA_HOOKS_PORT === env.PORT) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["CA_HOOKS_PORT"],
-      message: "must differ from PORT: the hooks never share the main listener",
-    })
   }
 
   const staleAfterMs = intervalToMs(env.WORKER_CLAIM_STALE_AFTER)

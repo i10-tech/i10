@@ -184,6 +184,24 @@ spec:
         passwordSecret:
           name: i10-pdns-db-role
 
+      # What enrollctl connects as (I10-62).
+      #
+      # Least-privilege role scoped to enrollment commits only: SELECT on the
+      # authd gate tables, INSERT/UPDATE/SELECT on authd.mail_devices, narrow
+      # SELECT (device_id) + DELETE on authd.mail_device_cert_binds, and EXECUTE
+      # on core.mailbox_domain_refused. No access to core.* tables, identity.*,
+      # or authd.bind_failure_budget. Grants live in
+      # apps/api/drizzle/*_enroll_writer_grants_and_triggers/migration.sql and
+      # fail loudly if this role does not exist yet: reconcile this role first.
+      - name: enroll_writer
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: i10-enroll-writer-db-role
+
       # ⚠ THE `autumn` ROLE AND ITS DATABASE ARE GONE FROM HERE BUT STILL EXIST,
       # AND THAT IS DELIBERATE. Autumn was retired; its 13 MB database is the
       # only surviving record of what it counted before the swap, and dropping

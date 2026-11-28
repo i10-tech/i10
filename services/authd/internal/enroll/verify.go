@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"slices"
 	"sync/atomic"
 	"time"
 )
@@ -119,6 +118,18 @@ func (b *DeviceCABundle) Current() *DeviceTrust {
 	return b.cur.Load()
 }
 
+// NewStaticDeviceCABundle wraps an already-parsed DeviceTrust (for tests and enrollload).
+func NewStaticDeviceCABundle(dt *DeviceTrust) *DeviceCABundle {
+	b := &DeviceCABundle{}
+	b.cur.Store(dt)
+	return b
+}
+
+// VerifyPhase4Leaf checks Review 1 rule L1 directly against a parsed leaf certificate.
+func (dt *DeviceTrust) VerifyPhase4Leaf(leaf *x509.Certificate, now time.Time) error {
+	return verifyPhase4Signer(leaf, dt, now)
+}
+
 // Watch re-reads File every interval until ctx ends. A broken or partial file
 // keeps the previous bundle and retries on the next tick.
 func (b *DeviceCABundle) Watch(ctx context.Context, every time.Duration) {
@@ -195,9 +206,10 @@ func verifyPhase4Signer(leaf *x509.Certificate, trust *DeviceTrust, now time.Tim
 		return errors.New("enroll: phase 4 signer must not be a CA certificate")
 	}
 	// Go's x509.Verify accepts certificates with an empty EKU list; L1 requires
-	// emailProtection to be listed explicitly.
-	if !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageEmailProtection) {
-		return errors.New("enroll: phase 4 signer lacks explicit emailProtection EKU")
+	// emailProtection, listed explicitly and ALONE, as enrollctl's finish does
+	// (verifyPhase4SCEPLeaf): no second EKU and none Go cannot name.
+	if len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageEmailProtection || len(leaf.UnknownExtKeyUsage) != 0 {
+		return errors.New("enroll: phase 4 signer must carry exactly the emailProtection EKU")
 	}
 	// ⚠ CHECK RAW EXTENSIONS FOR OID 2.5.29.17, NOT ONLY PARSED SAN SLICES.
 	// ACME certificates carry an otherName (permanentIdentifier) SAN that Go's

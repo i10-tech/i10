@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { parseKeyEntry, ringEntries } from "./keyring.js"
 
 /**
  * Mail device codes (#383): the secret one enrolled device signs in to IMAP
@@ -26,13 +27,10 @@ export const DEVICE_CODE_LEN =
 export const DEVICE_CODE_HASH_LABEL = Buffer.from("i10/mail-device-code/v1\x00", "utf8")
 
 /** Shortest HMAC-SHA256 secret accepted (matches Go `keyring.MinLen`). */
-export const MIN_KEY_LEN = 32
+export { MIN_KEY_LEN } from "./keyring.js"
 
 const LOWER_HEX_32 = /^[0-9a-f]{32}$/
 const BASE64URL_43 = /^[A-Za-z0-9_-]{43}$/
-const STD_BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
-const RAW_BASE64URL = /^[A-Za-z0-9_-]+$/
-const DECIMAL_UINT = /^\d+$/
 
 export interface MailDeviceCodeKeys {
   /** Every key in `MAIL_DEVICE_CODE_KEYS`, keyed by numeric id (0 to 255). */
@@ -99,20 +97,6 @@ export class MailDeviceError extends Error {
   }
 }
 
-/** Strict base64 (standard padded) or raw base64url decoder matching Go `keyring.ParseKey`. */
-function decodeKeySecret(raw: string): Buffer | null {
-  if (!raw) return null
-  if (raw.length % 4 === 0 && STD_BASE64.test(raw)) {
-    const buf = Buffer.from(raw, "base64")
-    if (buf.toString("base64") === raw) return buf
-  }
-  if (RAW_BASE64URL.test(raw)) {
-    const buf = Buffer.from(raw, "base64url")
-    if (buf.toString("base64url") === raw) return buf
-  }
-  return null
-}
-
 /**
  * Parses `MAIL_DEVICE_CODE_KEYS`: `<id>:<base64 >= 32 bytes>`, comma-separated.
  *
@@ -126,31 +110,8 @@ export function parseMailDeviceCodeKeys(
   const keys = new Map<number, Buffer>()
   let highest = -1
 
-  for (const part of raw.split(",")) {
-    const entry = part.trim()
-    if (!entry) continue
-    const colon = entry.indexOf(":")
-    if (colon < 0) {
-      throw new Error(`${name}: a key is <id>:<base64 secret>`)
-    }
-    const idText = entry.slice(0, colon)
-    const secretText = entry.slice(colon + 1)
-    if (!DECIMAL_UINT.test(idText)) {
-      throw new Error(`${name}: the key id (${idText.length} bytes) is not 0 to 255`)
-    }
-    const kid = Number(idText)
-    if (!Number.isInteger(kid) || kid < 0 || kid > 255) {
-      throw new Error(`${name}: the key id (${idText.length} bytes) is not 0 to 255`)
-    }
-    const secret = decodeKeySecret(secretText)
-    if (!secret) {
-      throw new Error(`${name}: key ${kid} is not base64`)
-    }
-    if (secret.byteLength < MIN_KEY_LEN) {
-      throw new Error(
-        `${name}: key ${kid} is ${secret.byteLength} bytes, need at least ${MIN_KEY_LEN}`,
-      )
-    }
+  for (const entry of ringEntries(raw)) {
+    const { id: kid, secret } = parseKeyEntry(name, entry)
     if (keys.has(kid)) {
       throw new Error(`${name}: key id ${kid} appears twice`)
     }

@@ -1,6 +1,6 @@
 # TLS for every i10 web surface.
 #
-# ⚠ BOTH NAMES. A `*.i10.tech` wildcard covers exactly ONE label, so it matches
+# BOTH NAMES. A `*.i10.tech` wildcard covers exactly ONE label, so it matches
 # app.i10.tech and does NOT match the apex i10.tech - nor a two-label name like
 # pr-42.preview.i10.tech. DNS wildcards match one or more labels (RFC 4592) and
 # TLS wildcards match exactly one; that asymmetry is the trap.
@@ -23,31 +23,25 @@ spec:
     - i10.tech
     - "*.i10.tech"
 ---
-# The device CA hooks listener's server certificate (#383 PR 3), for the name
-# the relay dials (`i10-api-ca-hooks.i10-prod.svc`, the Service in api.yaml).
+# enrollctl's internal server certificate (I10-62), for the name enrolld and
+# acmed dial (`i10-enrollctl.i10-prod.svc`, Service in enrollctl.yaml).
 #
-# ⚠ FROM THE HOOKS TRANSPORT CA, NOT LET'S ENCRYPT AND NOT THE DEVICE CA. The
-# Issuer is defined in device-ca/hooks-tls.yaml, beside the relay certificate it
-# also signs; the relay trusts that CA and nothing else for this hop. Until the
-# Issuer exists this Certificate waits, the Secret is absent, and the API's
-# optional mount leaves the listener off.
-#
-# ⚠ TEN YEARS, BECAUSE `Bun.serve` CANNOT RELOAD `tls`. The API reads these
-# files once at start. A short leaf would expire inside a long-running pod, and
-# every renewal would need a restart anyway. cert-manager reissues at two
-# thirds of the life (about year 7); restart the API then.
+# Issued by the namespace hooks transport CA (`i10-hooks-tls` in
+# device-ca/hooks-tls.yaml). enrollctl hot-reloads tls.crt and tls.key every
+# 30 seconds via mailfront.CertFiles, so the 90-day leaf renews with no restart.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: i10-api-ca-hooks-tls
+  name: i10-enrollctl-tls
   namespace: i10-prod
 spec:
-  secretName: i10-api-ca-hooks-tls
-  commonName: i10-api-ca-hooks.i10-prod.svc
+  secretName: i10-enrollctl-tls
+  commonName: i10-enrollctl.i10-prod.svc
   dnsNames:
-    - i10-api-ca-hooks.i10-prod.svc
+    - i10-enrollctl.i10-prod.svc
   usages: [server auth]
-  duration: 87600h
+  duration: 2160h
+  renewBefore: 720h
   privateKey:
     algorithm: ECDSA
     size: 256
@@ -55,3 +49,30 @@ spec:
   issuerRef:
     name: i10-hooks-tls
     kind: Issuer
+---
+# Apple .mobileconfig CMS profile-signing certificate (docs/research/enrollment-at-scale.md
+# section 3.1 & 3.4, verified on iOS 27.2 and macOS 27.3).
+#
+# No DNS A/AAAA record and no IngressRoute exist for `profiles.i10.tech`;
+# Cloudflare DNS-01 issues the certificate and enrollctl alone mounts it
+# read-only (0440) with 30-second atomic.Pointer hot reload.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: i10-profile-signing
+  namespace: i10-prod
+spec:
+  secretName: i10-profile-signing-tls
+  dnsNames:
+    - profiles.i10.tech
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  renewBefore: 720h
+  usages:
+    - digital signature
+    - server auth

@@ -6,8 +6,8 @@
   CN only and NO SANs: step-ca's default SCEP template copies the CN into a DNS
   SAN. digitalSignature and keyEncipherment, and an explicit EKU of
   emailProtection, never clientAuth: a certificate with no EKU at all would pass
-  Go's clientAuth check. The API's AUTHORIZING hook refuses anything else
-  (apps/api/src/ca-hooks/body.ts).
+  Go's clientAuth check. cahookrelay's AUTHORIZING hook refuses anything else
+  (services/authd/cmd/cahookrelay/body.go).
 */ -}}
 {{- if not .Insecure.CR.Subject.CommonName -}}
   {{- fail "apple-scep: the certificate request must carry a CN" -}}

@@ -1,21 +1,16 @@
-# enrolld: Apple's over-the-air enrollment for mail device codes (#383 PR 4,
+# enrolld: Apple's over-the-air enrollment edge parser (I10-62,
 # services/authd/README.md, "Enrollment service", and
-# docs/research/mail-device-binding.md section 12).
+# docs/research/enrollment-at-scale.md).
 #
-# ⚠ ITS OWN POD, NEVER INSIDE authd OR THE API. It parses untrusted CMS and XML
-# from the internet, so it holds nothing worth taking:
+# ITS OWN POD, NEVER INSIDE authd OR enrollctl. It parses untrusted CMS and XML
+# from the internet, so it holds only:
+#   - ENROLL_EDGE_HMAC_KEY (to drop forged/expired links locally with 0 upstream calls)
+#   - ENROLLD_API_TOKEN (its bearer token for enrollctl /enrolld/{peek,attest,finish})
+#   - public CA certificates (hooks transport CA + device CA trust bundle)
 #
-#   - no database credential and no device-code key: the API mints, builds and
-#     seals the profile, and enrolld only relays the sealed bytes;
-#   - one secret, its bearer token for the API's `/enrolld/*`, from one named
-#     key (the API holds only the token's SHA-256, ENROLLD_TOKEN_HASHES);
-#   - public certificates only otherwise: the hooks transport CA and the device
-#     CA trust bundle;
-#   - egress to the API's 3443 and cluster DNS, and nowhere else;
-#   - no service account token.
-#
-# ⚠ THE i10-authd IMAGE, ON authd's PIN. pin-image.py rewrites every i10-authd
-# reference under infra/k8s on each authd build, this one included.
+# It holds no database credential, no Redis credential, no device-code keys, no
+# profile-signing key, and zero profile rendering or encryption code: enrollctl
+# builds and signs every profile and enrolld relays the signed bytes verbatim.
 ---
 apiVersion: v1
 kind: Service
@@ -39,8 +34,6 @@ metadata:
   labels:
     app.kubernetes.io/name: i10-enrolld
 spec:
-  # Stateless: every enrollment's state is in the API's database, so two
-  # replicas and a rolling update keep enrollment up through a rollout.
   replicas: 2
   selector:
     matchLabels:
@@ -49,13 +42,11 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: i10-enrolld
-        app.kubernetes.io/part-of: i10-device-ca
+        app.kubernetes.io/part-of: i10-enroll
     spec:
-      # Nothing here talks to the Kubernetes API.
       automountServiceAccountToken: false
       enableServiceLinks: false
       securityContext:
-        # The distroless image's `nonroot`.
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
@@ -69,42 +60,30 @@ spec:
           command: ["/usr/local/bin/enrolld"]
           ports:
             - { name: http, containerPort: 8080, protocol: TCP }
-          # services/authd/README.md, "Configuration (enrolld)". Every variable is
-          # set, defaults included, so this file says what runs.
           env:
             - { name: ENROLLD_LISTEN, value: ":8080" }
-            # The API's hooks listener (workloads/api.yaml), verified against the
-            # hooks transport CA only, never the system roots.
             - {
                 name: ENROLLD_API_URL,
-                value: "https://i10-api-ca-hooks.i10-prod.svc:3443",
+                value: "https://i10-enrollctl.i10-prod.svc:3443",
               }
             - { name: ENROLLD_API_CA_FILE, value: /etc/enrolld/hooks-ca/ca.crt }
-            # ⚠ ONE NAMED KEY, NEVER `envFrom`: a key added to the config later
-            # must not reach a pod that parses internet input.
+            # Named secretKeyRef ONLY, never envFrom.
             - name: ENROLLD_API_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: i10-enrolld
                   key: ENROLLD_API_TOKEN
+            - name: ENROLL_EDGE_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enrolld
+                  key: ENROLL_EDGE_HMAC_KEY
             - {
                 name: ENROLLD_DEVICE_CA_BUNDLE,
                 value: /etc/enrolld/device-ca/bundle.pem,
               }
-            - {
-                name: ENROLLD_PROFILE_URL,
-                value: "https://ca.i10.tech/enroll/apple/profile",
-              }
-            - { name: ENROLLD_SCEP_URL, value: "https://ca.i10.tech/scep/apple-scep" }
-            # Above the API's own 4-second deadline per call, so the API, not
-            # enrolld, decides when a call has taken too long.
-            - { name: ENROLLD_API_TIMEOUT, value: "10s" }
-            # ⚠ 4 PER POD, 8 IN ALL, UNDER THE API'S 10 DATABASE CONNECTIONS. Every
-            # enrollment call is a transaction in the API's one pool (max 10,
-            # apps/api/src/db/client.ts), which the console and the CA hooks
-            # share; at 16 per pod, unauthenticated phase 1 GETs could hold all of
-            # it. A device makes three calls in a row, so 8 at once is ample.
-            - { name: ENROLLD_MAX_CONCURRENT, value: "4" }
+            - { name: ENROLLD_API_TIMEOUT, value: "15s" }
+            - { name: ENROLLD_MAX_CONCURRENT, value: "64" }
             - { name: ENROLLD_LOG_LEVEL, value: "info" }
           securityContext:
             allowPrivilegeEscalation: false
@@ -113,8 +92,6 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 24Mi }
             limits: { memory: 128Mi }
-          # /healthz answers 200 without taking an enrollment slot and without
-          # calling the API, so a slow API never restarts enrolld.
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
@@ -126,25 +103,19 @@ spec:
             - { name: hooks-ca, mountPath: /etc/enrolld/hooks-ca, readOnly: true }
             - { name: device-ca, mountPath: /etc/enrolld/device-ca, readOnly: true }
       volumes:
-        # The hooks transport CA's certificate only, from the relay's certificate
-        # Secret (device-ca/hooks-tls.yaml): never its `tls.key`.
         - name: hooks-ca
           secret:
             secretName: i10-cahookrelay-tls
             defaultMode: 0440
             items:
               - { key: ca.crt, path: ca.crt }
-        # The device root and intermediate, for phase 4 (device-ca/trust.yaml).
-        # enrolld re-reads it every 30 seconds.
         - name: device-ca
           configMap:
             name: i10-device-ca-trust
             items:
               - { key: bundle.pem, path: bundle.pem }
 ---
-# ⚠ THE EGRESS HALF IS WHAT MATTERS: the API's hooks listener and DNS, nothing
-# else. No internet, no Postgres, no Kubernetes API, no Stalwart. Ingress is
-# Traefik's only; the psl repo's namespace-wide allow-traefik already admits it.
+# Egress to enrollctl:3443 and DNS only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -169,7 +140,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: i10-api
+              app.kubernetes.io/name: i10-enrollctl
       ports:
         - { protocol: TCP, port: 3443 }
     - to:
@@ -183,8 +154,9 @@ spec:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
 ---
-# A device's enrollment is three requests (the phase 1 GET, then two POSTs), so
-# 20 a minute per address with a burst of 10 never meets a real device.
+# Per-address rate/in-flight limits and body buffer only. Host-wide caps were
+# removed now that forged links are dropped locally with HMAC verification and
+# valid enrollments micro-batch in enrollctl.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -199,8 +171,6 @@ spec:
       ipStrategy:
         ipv6Subnet: 64
 ---
-# Two at once from one address is already unusual: a device sends one request
-# after another.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -208,44 +178,11 @@ metadata:
   namespace: i10-prod
 spec:
   inFlightReq:
-    amount: 2
+    amount: 4
     sourceCriterion:
       ipStrategy:
         ipv6Subnet: 64
 ---
-# ⚠ FOR THE WHOLE HOST, WHAT BOUNDS THE LOAD ON THE API. ca.i10.tech is
-# DNS-only, so no Cloudflare limit sits in front, and per-address limits alone
-# let many addresses spend the API's connections on made-up phase 1 tokens.
-# 60 a minute is far above any real enrollment rate.
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: i10-enrolld-ratelimit-host
-  namespace: i10-prod
-spec:
-  rateLimit:
-    average: 60
-    period: 1m
-    burst: 30
-    sourceCriterion:
-      requestHost: true
----
-# ⚠ ITS OWN, NOT THE DEVICE CA'S HOST-WIDE 16, and it runs AFTER the body
-# buffer below, so a client sending a body slowly holds Traefik's buffer, never
-# one of these 8 slots. 8 matches enrolld's own total (2 pods x 4).
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: i10-enrolld-inflight-host
-  namespace: i10-prod
-spec:
-  inFlightReq:
-    amount: 8
-    sourceCriterion:
-      requestHost: true
----
-# ⚠ BUFFERED, SO A SLOW BODY STALLS TRAEFIK, NOT enrolld. A phase 2 or phase 4
-# request is a few kilobytes; enrolld refuses anything over 64 KiB anyway.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -266,20 +203,15 @@ spec:
     - match: Host(`ca.i10.tech`) && PathPrefix(`/enroll/apple/`)
       kind: Rule
       priority: 100
-      # ⚠ NO ACCESS LOG. The phase 1 URL is `/enroll/apple/<token>`, and the
-      # token is what lets a device start the person's enrollment. Traefik
-      # logs every request's path in JSON otherwise (psl repo, traefik.yaml).
+      # NO ACCESS LOG: the phase 1 URL carries the signed link token.
       observability:
         accessLogs: false
       middlewares:
         - name: i10-enrolld-inflight-client
         - name: i10-enrolld-ratelimit-client
-        - name: i10-enrolld-ratelimit-host
         - name: i10-enrolld-body-limit
-        - name: i10-enrolld-inflight-host
       services:
         - name: i10-enrolld
           port: 80
-  # The existing wildcard, which covers ca.i10.tech (one label).
   tls:
     secretName: i10-tech-tls

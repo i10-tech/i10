@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/smallstep/pkcs7"
+
+	"github.com/i10-tech/i10/services/authd/internal/enrolltoken"
 )
 
 type lockedBuffer struct {
@@ -62,16 +64,43 @@ type fakeAPIState struct {
 	gate  chan struct{}
 }
 
-func newHandlerFixture(t *testing.T, maxConcurrent int) (*Handler, *testPKI, *fakeAPIState, *lockedBuffer) {
+func testEdgeKeyRing(t *testing.T) *enrolltoken.Ring {
+	t.Helper()
+	k := make([]byte, 32)
+	for i := range k {
+		k[i] = byte(0x41 + i)
+	}
+	ring, err := enrolltoken.ParseRing("ENROLL_EDGE_HMAC_KEY", "1:"+base64.StdEncoding.EncodeToString(k))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ring
+}
+
+func testSignLink(t *testing.T, ring *enrolltoken.Ring, exp time.Time) string {
+	t.Helper()
+	eid, err := enrolltoken.NewUUIDv7At(exp.Add(-15 * time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := enrolltoken.SignLink(ring, eid, exp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tok
+}
+
+func newHandlerFixture(t *testing.T, maxConcurrent int) (*Handler, *testPKI, *fakeAPIState, *lockedBuffer, *enrolltoken.Ring) {
 	t.Helper()
 	pki := newTestPKI(t)
 	withFakeAppleCAs(t, pki.appleCA1.cert)
+	ring := testEdgeKeyRing(t)
 
 	state := &fakeAPIState{
 		peekStatus:   http.StatusOK,
-		peekBody:     `{"live":true}`,
+		peekBody:     `{"live":true,"profile":"` + base64.StdEncoding.EncodeToString([]byte("SIGNED-PHASE-1-PROFILE-BYTES")) + `"}`,
 		attestStatus: http.StatusOK,
-		attestBody:   `{"outcome":"scep","serial":"C02SECRET999","challenge":"scep-one-time-secret-chal"}`,
+		attestBody:   `{"outcome":"scep","profile":"` + base64.StdEncoding.EncodeToString([]byte("SIGNED-PHASE-2-SCEP-PROFILE-BYTES")) + `"}`,
 		finishStatus: http.StatusOK,
 		finishBody:   `{"outcome":"sealed","profile":"` + base64.StdEncoding.EncodeToString([]byte("OPAQUE-SEALED-PROFILE-CODE-SECRET-XYZ")) + `"}`,
 	}
@@ -132,8 +161,7 @@ func newHandlerFixture(t *testing.T, maxConcurrent int) (*Handler, *testPKI, *fa
 	h, err := NewHandler(HandlerConfig{
 		API:           client,
 		Trust:         func() *DeviceTrust { return pki.trust },
-		ProfileURL:    "https://ca.i10.tech/enroll/apple/profile",
-		SCEPURL:       "https://ca.i10.tech/scep/apple-scep",
+		EdgeLinkKeys:  ring,
 		MaxConcurrent: maxConcurrent,
 		Log:           slog.New(slog.NewJSONHandler(logs, nil)),
 		Now:           func() time.Time { return pki.now },
@@ -141,7 +169,7 @@ func newHandlerFixture(t *testing.T, maxConcurrent int) (*Handler, *testPKI, *fa
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h, pki, state, logs
+	return h, pki, state, logs, ring
 }
 
 func makePhase2Plist(challengeTag, challengeVal, udid, serial, product, version, deviceName, model string) []byte {
@@ -178,9 +206,14 @@ func makePhase2Plist(challengeTag, challengeVal, udid, serial, product, version,
 	return []byte(b.String())
 }
 
-func TestHandlerRoutingAndHealthz(t *testing.T) {
-	h, _, state, _ := newHandlerFixture(t, 4)
-	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+func TestHandlerRoutingAndLocalLinkTokenVerification(t *testing.T) {
+	h, pki, state, _, ring := newHandlerFixture(t, 4)
+	validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
+	expiredTok := testSignLink(t, ring, pki.now.Add(-time.Second))
+	forgedTok := validTok[:len(validTok)-1] + "X"
+	if forgedTok == validTok {
+		forgedTok = validTok[:len(validTok)-1] + "Y"
+	}
 
 	// /healthz returns bare 200 and leaks nothing.
 	rec := httptest.NewRecorder()
@@ -199,17 +232,18 @@ func TestHandlerRoutingAndHealthz(t *testing.T) {
 		{http.MethodGet, "/enroll"},
 		{http.MethodGet, "/enroll/apple"},
 		{http.MethodGet, "/enroll/apple/"},
-		{http.MethodGet, "/enroll/apple/profile"}, // 7 chars != 43
+		{http.MethodGet, "/enroll/apple/profile"},
 		{http.MethodGet, "/enroll/apple/short"},
-		{http.MethodGet, "/enroll/apple/" + validTok + "X"},          // 44 chars
-		{http.MethodGet, "/enroll/apple/" + strings.Repeat("+", 43)}, // '+' is not base64url
-		{http.MethodGet, "/enroll/apple/" + validTok + "/extra"},     // extra path segment
-		{http.MethodGet, "/enroll/apple/" + validTok + "?q=1"},       // query string
-		{http.MethodPost, "/enroll/apple/" + validTok},               // wrong method
-		{http.MethodPut, "/enroll/apple/profile"},                    // wrong method
-		{http.MethodPost, "/enroll/apple/profile?q=1"},               // query string
-		{http.MethodGet, "/enroll/apple/%2e%2e/secret"},              // percent-encoded traversal
-		{http.MethodPost, "/enrolld/peek"},                           // internal API path
+		{http.MethodGet, "/enroll/apple/" + forgedTok},
+		{http.MethodGet, "/enroll/apple/" + expiredTok},
+		{http.MethodGet, "/enroll/apple/" + validTok + "X"},
+		{http.MethodGet, "/enroll/apple/" + validTok + "/extra"},
+		{http.MethodGet, "/enroll/apple/" + validTok + "?q=1"},
+		{http.MethodPost, "/enroll/apple/" + validTok},
+		{http.MethodPut, "/enroll/apple/profile"},
+		{http.MethodPost, "/enroll/apple/profile?q=1"},
+		{http.MethodGet, "/enroll/apple/%2e%2e/secret"},
+		{http.MethodPost, "/enrolld/peek"},
 	}
 	for _, tc := range notFoundCases {
 		t.Run(tc.method+" "+tc.target, func(t *testing.T) {
@@ -222,15 +256,14 @@ func TestHandlerRoutingAndHealthz(t *testing.T) {
 		})
 	}
 	if state.peekCalls != 0 || state.attestCalls != 0 || state.finishCalls != 0 {
-		t.Fatalf("invalid routes called API: peek=%d attest=%d finish=%d", state.peekCalls, state.attestCalls, state.finishCalls)
+		t.Fatalf("forged/expired/invalid routes called enrollctl: peek=%d attest=%d finish=%d", state.peekCalls, state.attestCalls, state.finishCalls)
 	}
 }
 
 func TestHandlerPhase1(t *testing.T) {
-	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
-
-	t.Run("live returns phase 1 mobileconfig", func(t *testing.T) {
-		h, _, state, _ := newHandlerFixture(t, 4)
+	t.Run("live relays signed phase 1 profile verbatim", func(t *testing.T) {
+		h, pki, state, _, ring := newHandlerFixture(t, 4)
+		validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/enroll/apple/"+validTok, nil))
 		if rec.Code != http.StatusOK {
@@ -242,8 +275,8 @@ func TestHandlerPhase1(t *testing.T) {
 		if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 			t.Fatalf("Cache-Control = %q, want no-store", cc)
 		}
-		if !strings.Contains(rec.Body.String(), "<key>Challenge</key>\n    <string>"+validTok+"</string>") {
-			t.Fatalf("missing challenge in profile:\n%s", rec.Body.String())
+		if rec.Body.String() != "SIGNED-PHASE-1-PROFILE-BYTES" {
+			t.Fatalf("body = %q, want signed profile bytes verbatim", rec.Body.String())
 		}
 		if state.peekCalls != 1 {
 			t.Fatalf("peekCalls = %d, want 1", state.peekCalls)
@@ -251,7 +284,8 @@ func TestHandlerPhase1(t *testing.T) {
 	})
 
 	t.Run("not live returns 404", func(t *testing.T) {
-		h, _, state, _ := newHandlerFixture(t, 4)
+		h, pki, state, _, ring := newHandlerFixture(t, 4)
+		validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 		state.peekBody = `{"live":false}`
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/enroll/apple/"+validTok, nil))
@@ -265,12 +299,14 @@ func TestHandlerPhase1(t *testing.T) {
 		status int
 		body   string
 	}{
-		{"API 404 auth failure", http.StatusNotFound, ""},
-		{"API 500 fault", http.StatusInternalServerError, `{"error":"db"}`},
-		{"API malformed JSON", http.StatusOK, `{`},
+		{"enrollctl 404 auth failure", http.StatusNotFound, ""},
+		{"enrollctl 500 fault", http.StatusInternalServerError, `{"error":"db"}`},
+		{"enrollctl 503 signer unavailable", http.StatusServiceUnavailable, ""},
+		{"enrollctl malformed JSON", http.StatusOK, `{`},
 	} {
 		t.Run(tc.name+" returns 503", func(t *testing.T) {
-			h, _, state, _ := newHandlerFixture(t, 4)
+			h, pki, state, _, ring := newHandlerFixture(t, 4)
+			validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 			state.peekStatus = tc.status
 			state.peekBody = tc.body
 			rec := httptest.NewRecorder()
@@ -283,8 +319,8 @@ func TestHandlerPhase1(t *testing.T) {
 }
 
 func TestHandlerPhase2AndPhase4EndToEndAndLogRedaction(t *testing.T) {
-	h, pki, state, logs := newHandlerFixture(t, 4)
-	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+	h, pki, state, logs, ring := newHandlerFixture(t, 4)
+	validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 	const (
 		secretUDID       = "00008140-SECRET-UDID-9999"
 		secretSerial     = "C02SECRET999"
@@ -296,8 +332,8 @@ func TestHandlerPhase2AndPhase4EndToEndAndLogRedaction(t *testing.T) {
 	// 1. Phase 1 GET.
 	rec1 := httptest.NewRecorder()
 	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/enroll/apple/"+validTok, nil))
-	if rec1.Code != http.StatusOK {
-		t.Fatalf("phase 1 = %d", rec1.Code)
+	if rec1.Code != http.StatusOK || rec1.Body.String() != "SIGNED-PHASE-1-PROFILE-BYTES" {
+		t.Fatalf("phase 1 = (%d, %q)", rec1.Code, rec1.Body.String())
 	}
 
 	// 2. Phase 2 POST with CHALLENGE as <string> and all optional attributes.
@@ -313,11 +349,8 @@ func TestHandlerPhase2AndPhase4EndToEndAndLogRedaction(t *testing.T) {
 	if ct := rec2.Header().Get("Content-Type"); ct != ContentTypeMobileConfig {
 		t.Fatalf("phase 2 Content-Type = %q", ct)
 	}
-	if !strings.Contains(rec2.Body.String(), "<key>KeyIsExtractable</key>\n        <false/>") {
-		t.Fatalf("phase 2 missing KeyIsExtractable false:\n%s", rec2.Body.String())
-	}
-	if !strings.Contains(rec2.Body.String(), "scep-one-time-secret-chal") {
-		t.Fatalf("phase 2 missing SCEP challenge")
+	if rec2.Body.String() != "SIGNED-PHASE-2-SCEP-PROFILE-BYTES" {
+		t.Fatalf("phase 2 did not relay signed SCEP profile verbatim: %q", rec2.Body.String())
 	}
 	wantSignerHash := sha256.Sum256(appleLeaf.cert.Raw)
 	if state.lastAttest.AppleSignerSHA256 != hex.EncodeToString(wantSignerHash[:]) {
@@ -383,20 +416,19 @@ func TestHandlerPhase2AndPhase4EndToEndAndLogRedaction(t *testing.T) {
 	for _, forbidden := range []string{
 		"enrolld-secret-bearer-token-value",
 		validTok,
-		"scep-one-time-secret-chal",
 		secretUDID,
 		secretSerial,
 		secretDeviceName,
 		secretModel,
 		secretVersion,
+		"SIGNED-PHASE-1-PROFILE-BYTES",
+		"SIGNED-PHASE-2-SCEP-PROFILE-BYTES",
 		"OPAQUE-SEALED-PROFILE-CODE-SECRET-XYZ",
 	} {
 		if strings.Contains(logText, forbidden) {
 			t.Fatalf("logs leaked %q:\n%s", forbidden, logText)
 		}
 	}
-	// Keyed serial HMAC must appear and be identical for phase 2 and phase 4 in
-	// this process, and distinct in another Handler instance.
 	wantHMAC := h.hashSerial(secretSerial)
 	if len(wantHMAC) != serialHMACBytes*2 {
 		t.Fatalf("serial HMAC length = %d, want %d", len(wantHMAC), serialHMACBytes*2)
@@ -407,15 +439,15 @@ func TestHandlerPhase2AndPhase4EndToEndAndLogRedaction(t *testing.T) {
 	if !strings.Contains(logText, `"product":"MacBookPro18,3"`) {
 		t.Fatalf("expected product in phase 2 logs:\n%s", logText)
 	}
-	h2, _, _, _ := newHandlerFixture(t, 2)
+	h2, _, _, _, _ := newHandlerFixture(t, 2)
 	if h2.hashSerial(secretSerial) == wantHMAC {
 		t.Fatal("two handlers produced identical serial HMAC (per-process random key failed)")
 	}
 }
 
 func TestHandlerMacNoSignedAttrsEndToEnd(t *testing.T) {
-	h, pki, state, _ := newHandlerFixture(t, 4)
-	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+	h, pki, state, _, ring := newHandlerFixture(t, 4)
+	validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 	const (
 		udid       = "11111111-2222-3333-4444-555555555555"
 		serial     = "C02SECRET999"
@@ -481,9 +513,14 @@ func TestHandlerMacNoSignedAttrsEndToEnd(t *testing.T) {
 }
 
 func TestHandlerRefusalsAndFaults(t *testing.T) {
-	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+	h, pki, state, _, ring := newHandlerFixture(t, 4)
+	validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
+	expiredTok := testSignLink(t, ring, pki.now.Add(-time.Second))
+	forgedTok := validTok[:len(validTok)-1] + "X"
+	if forgedTok == validTok {
+		forgedTok = validTok[:len(validTok)-1] + "Y"
+	}
 
-	h, pki, state, _ := newHandlerFixture(t, 4)
 	appleLeaf := pki.issueAppleLeaf(t, pki.appleCA1, "apple-dev", x509.SHA256WithRSA, 2048, nil)
 	scepLeaf := pki.issueSCEPLeaf(t, pki.deviceInter, "C02SER", nil)
 	decrypter := pki.issueSCEPLeaf(t, pki.deviceRoot, "decrypter", func(c *x509.Certificate) { c.ExtKeyUsage = nil })
@@ -496,7 +533,7 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 	p4Valid := signWithPKCS7(t, scepLeaf, pkcs7.OIDDigestAlgorithmSHA256,
 		[]byte(`<plist version="1.0"><dict><key>UDID</key><string>U1</string></dict></plist>`))
 
-	// Table of 400 / 413 refusals (no API call needed for local validation failures).
+	// Table of 400 / 413 refusals (no enrollctl call needed for local validation failures).
 	localCases := []struct {
 		name     string
 		body     []byte
@@ -510,6 +547,8 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 		{"phase 2 bad plist", signWithPKCS7(t, appleLeaf, pkcs7.OIDDigestAlgorithmSHA256, []byte(`<plist version="1.0"><dict><key>A</key><integer>1</integer></dict></plist>`)), http.StatusBadRequest},
 		{"phase 2 missing SERIAL", signWithPKCS7(t, appleLeaf, pkcs7.OIDDigestAlgorithmSHA256, makePhase2Plist("string", validTok, "U1", "", "iPhone17,2", "22A3354", "", "")), http.StatusBadRequest},
 		{"phase 2 malformed token", signWithPKCS7(t, appleLeaf, pkcs7.OIDDigestAlgorithmSHA256, makePhase2Plist("string", "too-short", "U1", "C02SER", "iPhone17,2", "22A3354", "", "")), http.StatusBadRequest},
+		{"phase 2 forged token", signWithPKCS7(t, appleLeaf, pkcs7.OIDDigestAlgorithmSHA256, makePhase2Plist("string", forgedTok, "U1", "C02SER", "iPhone17,2", "22A3354", "", "")), http.StatusBadRequest},
+		{"phase 2 expired token", signWithPKCS7(t, appleLeaf, pkcs7.OIDDigestAlgorithmSHA256, makePhase2Plist("string", expiredTok, "U1", "C02SER", "iPhone17,2", "22A3354", "", "")), http.StatusBadRequest},
 		{"phase 4 bad plist", signWithPKCS7(t, scepLeaf, pkcs7.OIDDigestAlgorithmSHA256, []byte(`<notplist/>`)), http.StatusBadRequest},
 	}
 	for _, tc := range localCases {
@@ -522,10 +561,10 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 		})
 	}
 	if state.attestCalls != 0 || state.finishCalls != 0 {
-		t.Fatalf("local refusals called API: attest=%d finish=%d", state.attestCalls, state.finishCalls)
+		t.Fatalf("local refusals called enrollctl: attest=%d finish=%d", state.attestCalls, state.finishCalls)
 	}
 
-	// API refusal (200 outcome=refused) -> 400; API 404/500/timeout -> 503.
+	// enrollctl refusal (200 outcome=refused) -> 400; 404/500/503/timeout -> 503.
 	apiCases := []struct {
 		name     string
 		body     []byte
@@ -533,7 +572,7 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 		wantCode int
 	}{
 		{
-			name: "phase 2 API refused -> 400",
+			name: "phase 2 enrollctl refused -> 400",
 			body: p2Valid,
 			setup: func(s *fakeAPIState) {
 				s.attestStatus = 200
@@ -542,19 +581,19 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 			wantCode: http.StatusBadRequest,
 		},
 		{
-			name:     "phase 2 API 404 -> 503",
+			name:     "phase 2 enrollctl 404 -> 503",
 			body:     p2Valid,
 			setup:    func(s *fakeAPIState) { s.attestStatus = 404; s.attestBody = "" },
 			wantCode: http.StatusServiceUnavailable,
 		},
 		{
-			name:     "phase 2 API 500 -> 503",
+			name:     "phase 2 enrollctl 500 -> 503",
 			body:     p2Valid,
 			setup:    func(s *fakeAPIState) { s.attestStatus = 500; s.attestBody = "" },
 			wantCode: http.StatusServiceUnavailable,
 		},
 		{
-			name: "phase 4 API refused -> 400",
+			name: "phase 4 enrollctl refused -> 400",
 			body: p4Valid,
 			setup: func(s *fakeAPIState) {
 				s.finishStatus = 200
@@ -563,15 +602,15 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 			wantCode: http.StatusBadRequest,
 		},
 		{
-			name:     "phase 4 API 404 -> 503",
+			name:     "phase 4 enrollctl 404 -> 503",
 			body:     p4Valid,
 			setup:    func(s *fakeAPIState) { s.finishStatus = 404; s.finishBody = "" },
 			wantCode: http.StatusServiceUnavailable,
 		},
 		{
-			name:     "phase 4 API 502 -> 503",
+			name:     "phase 4 enrollctl 503 -> 503",
 			body:     p4Valid,
-			setup:    func(s *fakeAPIState) { s.finishStatus = 502; s.finishBody = "" },
+			setup:    func(s *fakeAPIState) { s.finishStatus = 503; s.finishBody = "" },
 			wantCode: http.StatusServiceUnavailable,
 		},
 	}
@@ -590,7 +629,8 @@ func TestHandlerRefusalsAndFaults(t *testing.T) {
 }
 
 func TestASlowBodyNeverHoldsAConcurrencySlot(t *testing.T) {
-	h, _, _, _ := newHandlerFixture(t, 1)
+	h, pki, _, _, ring := newHandlerFixture(t, 1)
+	validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 	body, sender := io.Pipe()
 	done := make(chan int, 1)
 	go func() {
@@ -598,8 +638,6 @@ func TestASlowBodyNeverHoldsAConcurrencySlot(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/enroll/apple/profile", body))
 		done <- rec.Code
 	}()
-	// A pipe write returns only once the handler has read it, so the POST is
-	// now mid-body, the way a client that stalls after one byte leaves it.
 	if _, err := sender.Write([]byte{0x30}); err != nil {
 		t.Fatal(err)
 	}
@@ -608,7 +646,7 @@ func TestASlowBodyNeverHoldsAConcurrencySlot(t *testing.T) {
 		t.Fatalf("a POST still reading its body holds %d slots, want 0", n)
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/enroll/apple/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/enroll/apple/"+validTok, nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("phase 1 GET beside a stalled POST = %d, want 200", rec.Code)
 	}
@@ -620,8 +658,8 @@ func TestASlowBodyNeverHoldsAConcurrencySlot(t *testing.T) {
 }
 
 func TestHandlerConcurrencyLimitAndHealthzBypass(t *testing.T) {
-	h, _, state, _ := newHandlerFixture(t, 1)
-	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+	h, pki, state, _, ring := newHandlerFixture(t, 1)
+	validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 
 	gate := make(chan struct{})
 	state.mu.Lock()
@@ -635,7 +673,6 @@ func TestHandlerConcurrencyLimitAndHealthzBypass(t *testing.T) {
 		done <- rec.Code
 	}()
 
-	// Wait until the first request holds the single semaphore slot.
 	deadline := time.Now().Add(2 * time.Second)
 	for len(h.sem) == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
@@ -645,7 +682,6 @@ func TestHandlerConcurrencyLimitAndHealthzBypass(t *testing.T) {
 		t.Fatal("first request did not acquire concurrency slot")
 	}
 
-	// Second enrollment request is rejected immediately with 503.
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/enroll/apple/"+validTok, nil))
 	if rec2.Code != http.StatusServiceUnavailable {
@@ -653,7 +689,6 @@ func TestHandlerConcurrencyLimitAndHealthzBypass(t *testing.T) {
 		t.Fatalf("concurrent overflow = %d, want 503", rec2.Code)
 	}
 
-	// /healthz still returns 200 while enrollment slots are full.
 	recH := httptest.NewRecorder()
 	h.ServeHTTP(recH, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if recH.Code != http.StatusOK {
@@ -668,8 +703,8 @@ func TestHandlerConcurrencyLimitAndHealthzBypass(t *testing.T) {
 }
 
 func TestHandlerAPITimeoutReturns503(t *testing.T) {
-	h, pki, state, _ := newHandlerFixture(t, 4)
-	validTok := "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
+	h, pki, state, _, ring := newHandlerFixture(t, 4)
+	validTok := testSignLink(t, ring, pki.now.Add(15*time.Minute))
 	state.delay = 500 * time.Millisecond
 
 	appleLeaf := pki.issueAppleLeaf(t, pki.appleCA1, "apple-dev", x509.SHA256WithRSA, 2048, nil)

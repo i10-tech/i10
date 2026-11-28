@@ -101,11 +101,15 @@ jobs:
             #   ui        → console, web, auth
             #   api       → docs   (docs generates its API reference from it)
             #   templates → api, docs, template-renderer
+            # and one file set outside the workspaces:
+            #   services/authd/internal/enrollredis/lua → api (the enrollment
+            #   Lua the API bundles; Go embeds the same files)
             api:
               - 'apps/api/**'
               - 'packages/contracts/**'
               - 'packages/emails/**'
               - 'packages/templates/**'
+              - 'services/authd/internal/enrollredis/lua/**'
             console:
               - 'apps/console/**'
               - 'packages/ui/**'

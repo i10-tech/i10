@@ -1,0 +1,17 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // ⚠ THE API BUNDLES LUA FROM services/authd (src/mail-devices/enroll-redis.ts
+    // imports the scripts Go embeds), which turbo's default inputs for this
+    // package do not cover: without this, an edited script could be served
+    // from a cached dist/.
+    "build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/services/authd/internal/enrollredis/lua/*.lua"
+      ]
+    }
+  }
+}

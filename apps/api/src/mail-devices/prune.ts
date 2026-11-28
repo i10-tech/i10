@@ -2,21 +2,17 @@ import { sql, type SQL } from "drizzle-orm"
 import { ts, type Database } from "../db/client.js"
 
 /**
- * Prunes expired `authd.mail_devices` rows from the hourly retention job
- * (`apps/api/src/retention.ts`):
+ * Prunes expired `authd.mail_devices` and `authd.mail_device_cert_binds` rows
+ * from the hourly retention job (`apps/api/src/retention.ts`):
  *
- *   - unused codes older than 10 minutes (`first_used_at IS NULL`, using the
- *     partial index `mail_devices_unused_idx`),
- *   - used codes idle for more than 90 days (`last_used_at IS NOT NULL`, using
- *     the partial index `mail_devices_last_used_idx`).
+ *   - unused device codes older than 10 minutes (`first_used_at IS NULL`, using
+ *     the partial index `mail_devices_unused_idx`),
+ *   - used device codes idle for more than 90 days (`last_used_at IS NOT NULL`,
+ *     using the partial index `mail_devices_last_used_idx`),
+ *   - Mac liveness rows (`authd.mail_device_cert_binds`) older than a day.
  *
- * Deletes at most `batchSize` (default 1,000) rows per transaction, looping
- * until a batch is short, so one run never logs more than the mail front's
- * per-poll limit (10,000) in a single commit and never holds long locks.
- *
- * Each DELETE picks ids via the partial index with `FOR UPDATE SKIP LOCKED`
- * and re-checks the predicate on the outer DELETE so a concurrent first-use
- * claim or daily touch from authd can never be wiped.
+ * Enrollment sessions and SCEP/ACME state live in `i10-enroll-redis` with
+ * bounded TTLs and need no Postgres pruning.
  */
 
 export const UNUSED_DEVICE_TTL_MS = 10 * 60 * 1000
@@ -100,87 +96,17 @@ export async function pruneMailDevices(
   return { unused, idle, batches }
 }
 
-/** How long a permit and a liveness row outlive what they record. */
+/** How long a Mac liveness row outlives its active window. */
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 /** Upper bound on transactions per run, so a stuck DELETE never loops forever. */
 const MAX_PRUNE_BATCHES = 1000
-
-/**
- * Deletes mail device enrollments a day past `expires_at` (#383 PR 4,
- * docs/research/mail-device-binding.md section 12, Review 1 M2 & L3),
- * including `sealed_profile`, through `mail_device_enrollments_expires_idx`,
- * `batchSize` rows per transaction.
- *
- * The FK cascade removes any remaining SCEP permits of the enrollment in the
- * global lock order (enrollment before permit). `SKIP LOCKED` leaves any row a
- * handler holds for the next run, and the outer DELETE re-checks `expires_at`.
- */
-export async function pruneMailDeviceEnrollments(
-  db: Pick<Database, "transaction">,
-  options: { batchSize?: number; now?: Date } = {},
-): Promise<number> {
-  const cutoff = options.now
-    ? ts(new Date(options.now.getTime() - ONE_DAY_MS))
-    : sql`now() - interval '1 day'`
-  return pruneInBatches(
-    db,
-    options.batchSize,
-    (limit) => sql`
-    with picked as (
-      select id from authd.mail_device_enrollments
-       where expires_at < ${cutoff}
-       order by expires_at
-       limit ${limit}
-         for update skip locked
-    )
-    delete from authd.mail_device_enrollments e
-     using picked
-     where e.id = picked.id
-       and e.expires_at < ${cutoff}
-    returning e.id`,
-  )
-}
-
-/**
- * Deletes certificate permits a day past `expires_at` (#383 PR 3), through
- * `mail_device_cert_permits_expires_idx`, `batchSize` rows per transaction.
- * A permit only matters during an enrollment; the day keeps it for the
- * operator to read after one.
- *
- * Locks only the permit rows it deletes (`SKIP LOCKED`: one a handler holds is
- * left for the next run), so it never joins the handlers' lock order.
- */
-export async function pruneCertPermits(
-  db: Pick<Database, "transaction">,
-  options: { batchSize?: number; now?: Date } = {},
-): Promise<number> {
-  const cutoff = options.now
-    ? ts(new Date(options.now.getTime() - ONE_DAY_MS))
-    : sql`now() - interval '1 day'`
-  return pruneInBatches(
-    db,
-    options.batchSize,
-    (limit) => sql`
-    with picked as (
-      select id from authd.mail_device_cert_permits
-       where expires_at < ${cutoff}
-       order by expires_at
-       limit ${limit}
-         for update skip locked
-    )
-    delete from authd.mail_device_cert_permits p
-     using picked
-     where p.id = picked.id
-    returning p.id`,
-  )
-}
 
 /**
  * Deletes "the Mac is online" rows (`authd.mail_device_cert_binds`) older than a
  * day, through `mail_device_cert_binds_bound_at_idx`. authd reads a row only
  * within 75 minutes of `bound_at`, so an older one opens nothing.
  *
- * ⚠ THE OUTER DELETE RE-CHECKS `bound_at`. authd refreshes a row in place
+ * THE OUTER DELETE RE-CHECKS `bound_at`. authd refreshes a row in place
  * (autocommit upsert), and a refreshed row must survive.
  */
 export async function pruneCertBinds(

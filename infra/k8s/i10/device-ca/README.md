@@ -1,71 +1,65 @@
 # The device CA (`i10-device-ca`)
 
-step-ca 0.30.2 with the CA webhook relay as a sidecar, the hooks transport CA,
-and the `ca.i10.tech` route. It signs the certificates that sign Macs in to
-their mail (#383 PR 3). The design is
-`docs/research/mail-device-binding.md` section 11. This file covers the deploy:
-what each manifest is, the order things come up in, and how to check them.
+step-ca 0.30.2 (SCEP-only) with the `cahookrelay` sidecar, the hooks transport
+CA, and the `ca.i10.tech/scep/apple-scep` route. Mac ACME (`device-attest-01`)
+moved to `i10-acmed` + `i10-enrollctl` in I10-62; see
+`docs/research/enrollment-at-scale.md` section 6 for the full enrollment plane
+architecture and `docs/research/mail-device-binding.md` section 11 for the CA
+design. This file covers the deploy: what each manifest is, the order things
+come up in, and how to check them.
 
 | File                    | What it holds                                                                       |
 | ----------------------- | ----------------------------------------------------------------------------------- |
-| `config/ca.json`        | step-ca's configuration: two provisioners, four webhooks, no secret                 |
-| `config/apple.tpl`      | the ACME `apple` certificate template                                               |
+| `config/ca.json`        | step-ca's configuration: `apple-scep` provisioner, two SCEP webhooks, no secret     |
 | `config/apple-scep.tpl` | the SCEP `apple-scep` certificate template                                          |
 | `deployment.yaml`       | the badger volume, the `i10-device-ca` Service, the pod (step-ca and `cahookrelay`) |
 | `hooks-tls.yaml`        | the hooks transport CA (cert-manager) and the relay's `localhost` certificate       |
-| `trust.yaml`            | the device CA's public certificates, for Traefik and the mail front                 |
-| `networkpolicy.yaml`    | Traefik in, the API's 3443 and DNS out                                              |
-| `ingressroute.yaml`     | `ca.i10.tech`: two path rules, the rate limits, the verified hop to step-ca         |
+| `trust.yaml`            | the device CA's public certificates, for Traefik, mailfront, enrolld, and enrollctl |
+| `networkpolicy.yaml`    | Traefik in on 9000, `i10-enroll-redis` (6379) and DNS out                           |
+| `ingressroute.yaml`     | `ca.i10.tech`: SCEP path rule, per-client rate limits, verified hop to step-ca      |
 
-Outside this directory: the two DopplerSecrets (`doppler/dopplersecrets.yaml`),
-the API's hooks Service, certificate mount, listener certificate and policy
-(`workloads/api.yaml`, `certificate.yaml`, `networkpolicy.yaml`), the front's
-trust bundle mount (`stalwart/node/statefulset.yaml`), and the DNS records
+Outside this directory: the DopplerSecrets (`doppler/dopplersecrets.yaml`), the
+dedicated enrollment Redis (`redis/enroll-redis.yaml`), `enrollctl`, `acmed`,
+`enrolld`, and their certificates/policies (`workloads/enrollctl.yaml`,
+`workloads/acmed.yaml`, `workloads/enrolld.yaml`, `workloads/certificate.yaml`,
+`workloads/networkpolicy.yaml`), the front's trust bundle mount
+(`stalwart/node/statefulset.yaml`), and the DNS records
 (`infra/tofu/stacks/dns`).
 
 ## The CA
 
-- **Two provisioners and nothing else.** `apple`: ACME, `device-attest-01`
-  only, attestation format `apple`. `apple-scep`: SCEP with the RSA decrypter.
-  No JWK, OIDC, X5C or admin provisioner, `enableAdmin` off, so no remote
-  management. Both have `disableRenewal`; `disableSmallstepExtensions` is never
-  set, so step-ca's `/renew` and `/rekey` refuse these certificates (and
-  neither path is routed anyway).
-- **Lifetimes:** ACME 26280 h (1095 days, under the API's three calendar years),
-  SCEP 168 h (7 days). Both end well inside the intermediate's 2036-11-26; the
-  API refuses any leaf that would not (`CA_INTERMEDIATE_NOT_AFTER`).
+- **One provisioner (`apple-scep`) and nothing else.** SCEP with the RSA
+  decrypter. ACME (`apple`) moved to `i10-acmed` + `i10-enrollctl` in I10-62,
+  and the unused `scep-notify` webhook was removed. No JWK, OIDC, X5C or admin
+  provisioner, `enableAdmin` off, so no remote management. `disableRenewal` is
+  set; `disableSmallstepExtensions` is never set, so step-ca's `/renew` and
+  `/rekey` refuse these certificates (and neither path is routed anyway).
+- **Lifetime:** SCEP 168 h (7 days), well inside the intermediate's 2036-11-26;
+  `cahookrelay` refuses any leaf that would extend past
+  `CAHOOKRELAY_INTERMEDIATE_NOT_AFTER`. (Mac ACME leaves are signed for 1095
+  days directly by `enrollctl` using the same intermediate.)
 - **SCEP encrypts its replies with AES-256-CBC** (`encryptionAlgorithmIdentifier`
-  2). step-ca's default is DES-CBC. Apple's SCEP client supports AES; PR 4's
-  real-device enrollment is the proof.
+  2). step-ca's default is DES-CBC. Apple's SCEP client supports AES; real-device
+  enrollment is the proof.
 - **GetCACert answers the decrypter certificate alone** (`excludeIntermediate`
-  on `apple-scep`, `includeRoot` off). ⚠ Do not add the intermediate or the
-  root back. iOS refuses a GetCACert answer in which it cannot pick a CA, and
-  it checks the CertRep against the certificate marked `digitalSignature`,
-  while step-ca 0.30.2 always signs the CertRep with the decrypter. The
-  decrypter alone was the only answer a real iPhone accepted (device probe,
-  2026-11-27, `docs/research/mail-device-binding.md` section 12).
+  on `apple-scep`, `includeRoot` off). Do not add the intermediate or the root
+  back. iOS refuses a GetCACert answer in which it cannot pick a CA, and it
+  checks the CertRep against the certificate marked `digitalSignature`, while
+  step-ca 0.30.2 always signs the CertRep with the decrypter. The decrypter alone
+  was the only answer a real iPhone accepted (device probe, 2026-11-27,
+  `docs/research/mail-device-binding.md` section 12).
 - **The SCEP challenge is the webhook's.** With a `SCEPCHALLENGE` webhook
-  configured, step-ca asks it and never compares the static `challenge`. ⚠ Do
-  not remove that webhook: without it, step-ca compares the challenge with an
-  empty password, so an empty challenge would pass (the `AUTHORIZING` hook would
-  still refuse, but that is the only gate left).
+  configured, step-ca asks `cahookrelay` and never compares the static
+  `challenge`. Do not remove that webhook: without it, step-ca compares the
+  challenge with an empty password, so an empty challenge would pass.
 
-### The two templates
+### The SCEP template
 
-Both were rendered with go.step.sm/crypto v0.77.1 (step-ca 0.30.2's version)
-exactly as step-ca builds their data, and the output was fed to the API's own
-parse and `templateRefusal` (`apps/api/src/ca-hooks/body.ts`): both pass, and the
-ACME template's subjectAltName extension matches the API's encoding byte for
-byte.
-
-- `apple.tpl`: CN is the order's one permanent identifier (the attested
-  serial), the CSR's one OU (the permit's nonce) is copied, the permanent
-  identifier is the only SAN, `digitalSignature`, EKU `clientAuth` only. An
-  order without exactly one permanent identifier, or a CSR without exactly one
-  OU, fails at render. The CSR's DNS names are never copied.
-- `apple-scep.tpl`: CN only, no SANs, `digitalSignature` and `keyEncipherment`,
-  EKU `emailProtection` only. A CSR without a CN fails at render. The CSR's DNS
-  names and OUs are never copied.
+`apple-scep.tpl` renders CN only, no SANs, `digitalSignature` and
+`keyEncipherment`, EKU `emailProtection` only. A CSR without a CN fails at
+render. The CSR's DNS names and OUs are never copied. `cahookrelay`
+(`services/authd/cmd/cahookrelay/body.go`) enforces these template invariants
+locally before authorizing issuance.
 
 ### The image
 
@@ -75,9 +69,9 @@ the multi-arch index digest, read with
 nothing was pushed). Its user `step` is uid and gid 1000, from the image's own
 build history.
 
-⚠ **The binary carries a file capability** (`setcap CAP_NET_BIND_SERVICE=+eip`
-in step-ca's Dockerfile). With every capability dropped, Linux refuses to exec
-it: `exec /usr/local/bin/step-ca: operation not permitted`. The init container
+**The binary carries a file capability** (`setcap CAP_NET_BIND_SERVICE=+eip` in
+step-ca's Dockerfile). With every capability dropped, Linux refuses to exec it:
+`exec /usr/local/bin/step-ca: operation not permitted`. The init container
 copies it into an `emptyDir` (a copy has no file capability) and step-ca runs
 the copy, mounted read-only. It listens on 9000 and needs no capability.
 
@@ -87,131 +81,125 @@ the copy, mounted read-only. It listens on 9000 and needs no capability.
   (token Secret `doppler-token-i10-device-ca`): the root and intermediate
   certificates, the intermediate key (PKCS#8, unencrypted, so step-ca runs with
   no `--password-file`), and the SCEP decrypter's certificate and key.
-- Mounted into the step-ca container only, by named `items`. The decrypter's
-  certificate is also in `ca.json` (public; step-ca has no file option for it).
-  If it ever disagrees with the key, step-ca refuses to start
-  (`mismatch between decrypter certificate and decrypter public keys`).
-- ⚠ The Doppler config inherits the root `prod` config's keys, shadowed today
-  with empty values. The DopplerSecret's `secrets:` list and the `items:` mount
-  both keep a later root key out of this pod.
+- Mounted into `step-ca` by named `items` (4 keys: root, intermediate cert/key,
+  decrypter key). `enrollctl` (`workloads/enrollctl.yaml`) mounts ONLY
+  `intermediate.crt` and `intermediate.key` to sign Mac ACME leaves (never the
+  root or SCEP decrypter key). The decrypter's certificate is also in `ca.json`
+  (public; step-ca has no file option for it).
+- The DopplerSecret's `secrets:` list and the `items:` mounts both keep any
+  inherited root key out of both pods.
 - `prod_device_ca_hooks`, synced to `i10-device-ca-hooks` (token Secret
-  `doppler-token-i10-device-ca-hooks`): `CA_HOOK_TOKEN`, mounted into the relay
-  only. step-ca never holds it.
+  `doppler-token-i10-device-ca-hooks`): `ENROLL_REDIS_PASSWORD` (for the
+  `cahookrelay` ACL user on `i10-enroll-redis`), passed to the `cahookrelay`
+  sidecar only. `step-ca` never holds it.
 
 ## The hooks transport CA
 
 A namespace-local cert-manager CA used for nothing else: `i10-hooks-tls-bootstrap`
 (self-signed) signs `i10-hooks-tls-root` (20 years, key never rotated), and the
-CA Issuer `i10-hooks-tls` signs two leaves:
+CA Issuer `i10-hooks-tls` signs two 90-day server leaves (both hot-reloaded
+every 30 seconds):
 
-| Certificate            | Names                           | Life     | Trusted by                                                                    |
-| ---------------------- | ------------------------------- | -------- | ----------------------------------------------------------------------------- |
-| `i10-cahookrelay-tls`  | `localhost`, `IP:127.0.0.1`     | 90 days  | step-ca, through `SSL_CERT_FILE`                                              |
-| `i10-api-ca-hooks-tls` | `i10-api-ca-hooks.i10-prod.svc` | 10 years | the relay, through `CAHOOKRELAY_UPSTREAM_CA_FILE` (its own Secret's `ca.crt`) |
+| Certificate           | Names                        | Life    | Trusted by                                                             |
+| --------------------- | ---------------------------- | ------- | ---------------------------------------------------------------------- |
+| `i10-cahookrelay-tls` | `localhost`, `IP:127.0.0.1`  | 90 days | `step-ca`, through `SSL_CERT_FILE` + `SSL_CERT_DIR`                    |
+| `i10-enrollctl-tls`   | `i10-enrollctl.i10-prod.svc` | 90 days | `enrolld` (`ENROLLD_API_CA_FILE`), `acmed` (`ACMED_ENROLLCTL_CA_FILE`) |
 
-enrolld (`workloads/enrolld.yaml`) also trusts this CA for the API's
-certificate, through `ENROLLD_API_CA_FILE`: the `ca.crt` of
-`i10-cahookrelay-tls`, mounted alone. It reads it once at start, so restart
-enrolld if the root is ever re-keyed.
+`i10-api` no longer runs a `:3443` hooks listener and no longer mounts a hooks
+TLS certificate.
 
-⚠ **`SSL_CERT_DIR` is set as well as `SSL_CERT_FILE`.** Go's root loader reads
+**`SSL_CERT_DIR` is set as well as `SSL_CERT_FILE`.** Go's root loader reads
 `SSL_CERT_FILE` instead of the default bundle file, but it still reads every
 file in `/etc/ssl/certs` unless `SSL_CERT_DIR` names other directories
 (`crypto/x509/root.go`, `loadOnDiskRoots`). With only `SSL_CERT_FILE`, step-ca's
 webhook client would also trust the image's public CA bundle.
 
-The relay re-reads its certificate every 30 seconds, so its 90-day renewal
-needs nothing. The API reads its certificate once (`Bun.serve` cannot reload
-`tls`): restart the API after the first issue and after the reissue around
-year 7.
-
 ## Who trusts the device CA
 
-Traefik, the mail front, the API and enrolld, from `trust.yaml`:
+Traefik, the mail front, `enrolld`, and `enrollctl`, from `trust.yaml`:
 
 - `ca.crt` (the root): Traefik's `ServersTransport` verifies step-ca's own TLS
   certificate against it for `serverName: i10-device-ca.i10-prod.svc`. step-ca
   cuts that certificate from the intermediate for `ca.json`'s `dnsNames`, the
   two names the intermediate is constrained to.
 - `bundle.pem` (root and intermediate): the front's `MAILFRONT_DEVICE_CA_BUNDLE`
-  on the edge StatefulSet. 993's certificate request lists these subjects,
-  and a Mac picks an identity whose issuer is listed (the intermediate).
-- `bundle.pem` again, for phase 4 of Apple's enrollment (#383 PR 4): the API's
-  `DEVICE_CA_BUNDLE_FILE` (re-read when the file changes) and enrolld's
-  `ENROLLD_DEVICE_CA_BUNDLE` (re-read every 30 seconds). Both mount it without
-  `subPath`, so an edit reaches them without a restart.
+  on the edge StatefulSet (993 client certificate requests list these subjects),
+  `enrolld`'s `ENROLLD_DEVICE_CA_BUNDLE`, and `enrollctl`'s
+  `ENROLLCTL_DEVICE_CA_BUNDLE` (Phase 4 SCEP identity verification, reloaded
+  every 30 seconds). All mount without `subPath` so edits reach them without a
+  restart.
 
 ## The public surface
 
 `ca.i10.tech`, DNS-only (grey cloud), through Traefik with the existing
-wildcard certificate, path-scoped to `PathPrefix(/acme/apple/)` and
-`Path(/scep/apple-scep) || PathPrefix(/scep/apple-scep/)`. Everything else on the
-host (`/provisioners`, `/roots`, `/root/*`, `/1.0/*`, `/sign`, `/renew`,
-`/rekey`, `/revoke`, `/health`, `/version`, `/crl`) matches no router and gets
-Traefik's plain 404.
+wildcard certificate, path-scoped to three prefixes across three backends:
 
-Rate limits, per client address and for the whole host: 30 and 120 requests a
-minute, 4 and 16 in flight, bodies at most 1 MiB. The host-wide limit is what
-bounds the badger volume: every new nonce, account and order is a row step-ca
-never expires.
+- `Path(/scep/apple-scep) || PathPrefix(/scep/apple-scep/)` -> `i10-device-ca` (`ingressroute.yaml`, SCEP only)
+- `PathPrefix(/acme/apple/)` -> `i10-acmed` (`workloads/acmed.yaml`, stateless keyless Mac ACME)
+- `PathPrefix(/enroll/apple/)` -> `i10-enrolld` (`workloads/enrolld.yaml`, Apple OTA Profile Service)
+
+Everything else on `ca.i10.tech` (`/provisioners`, `/roots`, `/root/*`, `/1.0/*`,
+`/sign`, `/renew`, `/rekey`, `/revoke`, `/health`, `/version`, `/crl`, unknown
+prefixes) matches no router and gets Traefik's plain 404.
+
+All three IngressRoutes use per-client IPv4/IPv6 `/64` rate and in-flight
+limits plus body size limits; host-wide caps were removed now that ACME no
+longer writes unexpiring rows to `step-ca`'s badger volume and forged OTA links
+are rejected locally in `enrolld`.
 
 ## Network policies, and what they do not do
 
-`i10-device-ca` admits Traefik on 9000 and lets the pod out to the API's 3443
-and CoreDNS only. `api-ca-hooks-clients` (workloads) admits the step-ca pod to
-the API's 3443. ⚠ Policies only add: the psl repo's `allow-traefik` and
-`allow-cnpg-operator` let every pod in `traefik` and `cnpg-system` reach every
-port here, so step-ca's 9000 and the API's 3443 are reachable from those two
-namespaces whatever these files say. Neither is useful there: step-ca has no
-admin surface and every issuance asks the API; the API's listener answers
-anything without the relay's token with a bare 404. The egress half is real:
-this pod reaches nothing else.
+`i10-device-ca` admits Traefik on 9000 and lets the pod out ONLY to
+`i10-enroll-redis` on 6379 and CoreDNS on 53 (no Postgres, no API, no
+`enrollctl`, no internet).
 
-⚠ **Traefik is not kept out by the token.** The Traefik chart's cluster-wide RBAC
-lets it read every Secret, and its CRD provider caches them, so the public proxy
-holds `CA_HOOK_TOKEN` and the device intermediate key in memory. It also
-terminates TLS for `ca.i10.tech`, so it sees the permit nonce in a CSR, and so
-does Cloudflare while `ca.i10.tech` is still served by the proxied wildcard.
-A Traefik compromise can therefore bind a key to a Mac that is enrolling at that
-moment, exactly like the design's "anyone who can read Secrets in `i10-prod`"
-(it already has every database password). The token keeps every other pod out.
+⚠ **NetworkPolicy alone keeps two namespaces in.** Policies only add, and the
+psl repo's `allow-traefik` and `allow-cnpg-operator` let every pod in `traefik`
+and `cnpg-system` reach EVERY port of every pod in `i10-prod`. So step-ca's 9000,
+`enrollctl`'s 3443 and `i10-enroll-redis`'s 6379 are all reachable from those
+namespaces, whatever the policies in this repo say. What keeps them out is not
+the network: `enrollctl` answers only a valid bearer token
+(`ENROLLCTL_{ENROLLD,ACMED}_TOKEN_HASHES`, a bare 404 otherwise), and Redis
+answers only an ACL user with its password (the `default` user is off).
+
+⚠ **Traefik can read every Secret in `i10-prod`.** The Traefik chart's
+cluster-wide RBAC lets it read every Secret, and its CRD provider caches them.
+That now includes `i10-profile-signing-tls` (the profile-signing key) and
+`i10-device-ca` (the device intermediate key, mounted into `step-ca` and
+`enrollctl`), the bearer tokens, and every enrollment Redis password. It also
+terminates TLS for `ca.i10.tech`, so it sees every link token, SCEP challenge
+and Mac OU permit in flight, and so does Cloudflare while `ca.i10.tech` is
+still served by the proxied wildcard. A Traefik compromise is therefore a
+compromise of the enrollment plane: it can sign profiles, issue device
+certificates, and act as any enrollment client.
+
 The fix is on the psl side: namespaced RBAC for Traefik with
 `rbac.secretResourceNames` limited to its TLS Secrets, and a port-scoped
-`allow-traefik` for `i10-prod`.
+`allow-traefik` for `i10-prod` (`docs/research/enrollment-at-scale.md`
+section 4).
 
 ## Rollout
 
-The manifests are safe in any order Argo syncs them; the list below is the
-order they become useful in. Everything except DNS arrives with the merge.
-
-1. **DopplerSecrets** (`i10-doppler-secrets`): `i10-device-ca` and
-   `i10-device-ca-hooks`. Until they exist the step-ca pod waits in
-   `ContainerCreating`.
-2. **The hooks transport CA and its certificates** (cert-manager, from
-   `i10-device-ca` and `i10-workloads`). Until the relay's certificate exists
-   the pod keeps waiting; until the API's exists, the API's optional mount is
-   empty and its listener stays off (`no_certificate`).
-3. **step-ca with the relay** (`i10-device-ca`).
-4. **The API's Service, mount and policy** (`i10-workloads`). The pod template
-   changes (fsGroup, port, env, mount), so the API rolls by itself. If it rolled
-   before `i10-api-ca-hooks-tls` existed, restart it once the Secret is there:
-   `kubectl -n i10-prod rollout restart deploy/i10-api`.
-5. **The front's bundle** (`i10-stalwart`). Optional mount, read every 30
-   seconds. ⚠ The pod template changes (the mount and the two
-   `*_MAC_SMTP_SAME_ADDRESS` settings), so **both Stalwart nodes roll**: a short
-   mail restart, as for any Stalwart manifest change.
-6. **Traefik** (`i10-device-ca`). ⚠ The route answers as soon as it syncs:
-   before the DNS record, the proxied `*.i10.tech` wildcard already sends
-   `ca.i10.tech` to Traefik through Cloudflare. Same two paths either way; with
-   step-ca not ready it answers 503.
-7. **DNS, by hand, last:** `infra/tofu/stacks/dns`, two new records `ca_v4` and
-   `ca_v6`. The plan must show exactly those two additions and nothing else.
-   Apply only after the first-run checks below pass.
-
-No Doppler value changes in this deploy: the API already has its three
-`CA_HOOK_*` settings, and the relay's token and the CA's keys are new Secrets
-that no running pod reads. The one restart that may be needed is the API's,
-in step 4.
+1. **Doppler configs and token Secrets** (`doppler/dopplersecrets.yaml`):
+   create `prod_enrollctl`, `prod_acmed` (with `ACMED_NONCE_KEYS`),
+   `prod_enroll_redis`, `prod_enroll_writer_db` and `prod_api_enroll`, update
+   `prod_enrolld` and `prod_device_ca_hooks`, and create the matching
+   `doppler-token-*` Secrets in `i10-prod`. The two API enrollment keys go in
+   `prod_api_enroll`, NOT `prod_api` (whose Secret the worker and CronJobs
+   mount).
+2. **CNPG managed role** (`platform-db/cluster.yaml`): reconcile `enroll_writer`
+   before running database migrations so `*_enroll_writer_grants_and_triggers`
+   succeeds.
+3. **Enrollment Redis** (`redis/enroll-redis.yaml`): bring up `i10-enroll-redis`
+   and confirm all 5 ACL users (`health`, `api`, `enrollctl`, `cahookrelay`,
+   `acmed`) are loaded.
+4. **Certificates** (`device-ca/hooks-tls.yaml`, `workloads/certificate.yaml`):
+   wait for `i10-cahookrelay-tls`, `i10-enrollctl-tls`, and
+   `i10-profile-signing` (`i10-profile-signing-tls`, Let's Encrypt DNS-01 for
+   `profiles.i10.tech`) to report Ready.
+5. **Workloads**: roll `i10-enrollctl`, `i10-acmed`, `i10-enrolld`,
+   `i10-device-ca` (now SCEP-only), and `i10-api` (now with `ENROLL_REDIS_*`
+   from `i10-api-enroll` and no `:3443` listener).
 
 ## First-run checks
 
@@ -220,29 +208,36 @@ Run in order; each one assumes the one before it passed.
 ```bash
 NS=i10-prod
 # 1. The Secrets carry their keys (never print values).
-kubectl -n $NS get secret i10-device-ca -o go-template='{{range $k, $v := .data}}{{$k}} {{end}}{{"\n"}}'
-kubectl -n $NS get secret i10-device-ca-hooks -o go-template='{{range $k, $v := .data}}{{$k}} {{end}}{{"\n"}}'
-# 2. The three certificates are Ready.
-kubectl -n $NS get certificate i10-hooks-tls-root i10-cahookrelay-tls i10-api-ca-hooks-tls
-# 3. step-ca and the relay are up.
-kubectl -n $NS rollout status deploy/i10-device-ca
+for s in i10-device-ca i10-device-ca-hooks i10-enrolld i10-enrollctl i10-acmed i10-enroll-redis-acl i10-enroll-writer-db-role; do
+  printf '%s: ' "$s"
+  kubectl -n $NS get secret "$s" -o go-template='{{range $k, $v := .data}}{{$k}} {{end}}{{"\n"}}'
+done
+# 2. The certificates are Ready.
+kubectl -n $NS get certificate i10-hooks-tls-root i10-cahookrelay-tls i10-enrollctl-tls i10-profile-signing
+# 3. Enrollment pods are up.
+kubectl -n $NS rollout status deploy/i10-enroll-redis deploy/i10-enrollctl deploy/i10-acmed deploy/i10-enrolld deploy/i10-device-ca deploy/i10-api
 kubectl -n $NS logs deploy/i10-device-ca -c step-ca | grep -E 'Serving HTTPS|error'
 kubectl -n $NS logs deploy/i10-device-ca -c cahookrelay | grep listening
-# 4. The API's listener is on (restart it first if this finds nothing).
-kubectl -n $NS logs deploy/i10-api | grep 'ca hooks'          # expect "ca hooks listening"
-# 5. The relay reaches it. A body without attestation data is refused before
-#    any database work: expect {"allow":false} and 200. A wrong id: 404.
+# 4. SCEP webhook sidecar checks webhook IDs and fails closed locally.
 kubectl -n $NS exec deploy/i10-device-ca -c step-ca -- sh -c '
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  for id in e39699ea-6eab-4326-a1ef-fd8c6899a7ef 00000000-0000-0000-0000-000000000000; do
-    curl -sS --cacert /etc/step-ca/hooks-ca/ca.crt -X POST https://127.0.0.1:9443/acme-authorize \
+  for id in d4185e32-67aa-4d2c-bf83-7463fa45eaa5 00000000-0000-0000-0000-000000000000; do
+    curl -sS --cacert /etc/step-ca/hooks-ca/ca.crt -X POST https://127.0.0.1:9443/scep-challenge \
       -H "Content-Type: application/json" -H "X-Smallstep-Webhook-ID: $id" \
       -d "{\"timestamp\":\"$ts\"}" -w " %{http_code}\n"
   done'
-kubectl -n $NS logs deploy/i10-device-ca -c cahookrelay | grep 'webhook relayed'
-# 6. ca.i10.tech serves only the two prefixes (through Cloudflare until step 7
-#    of the rollout, then direct). Expect 200, 200, then 404 for every other.
-curl -sS -o /dev/null -w '%{http_code} directory\n' https://ca.i10.tech/acme/apple/directory
+# 5. ca.i10.tech serves ACME (from acmed), SCEP (from step-ca), and 404 for everything else.
+#    The untokened ACME directory is a 404 BY DESIGN: every acmed URL sits under a Mac's
+#    path token (/acme/apple/d/<token>/directory, only in that Mac's sealed profile), and
+#    acmed answers anything else with a bare 404 before touching Redis. Expect 404 here.
+curl -sS -o /dev/null -w '%{http_code} untokened directory (want 404)\n' https://ca.i10.tech/acme/apple/directory
+#    acmed itself is checked on its health endpoint, which is not routed publicly:
+kubectl -n $NS port-forward deploy/i10-acmed 18080:8080 >/dev/null & pf=$!; sleep 2
+curl -sS -o /dev/null -w '%{http_code} acmed healthz (want 200)\n' http://127.0.0.1:18080/healthz
+kill $pf
+#    A full ACME check needs a tokened URL: enroll a test Mac (or run cmd/enrollload's Mac
+#    path) and fetch the DirectoryURL from its sealed profile; its JSON names URLs under the
+#    same https://ca.i10.tech/acme/apple/d/<token>/ base.
 curl -sS -o /dev/null -w '%{http_code} GetCACaps\n' 'https://ca.i10.tech/scep/apple-scep?operation=GetCACaps'
 for p in /provisioners /roots /roots.pem /root/x /1.0/sign /sign /renew /rekey /revoke /health /version /crl \
          /acme/other/directory /scep/apple-scepx /scep/other; do
@@ -250,40 +245,32 @@ for p in /provisioners /roots /roots.pem /root/x /1.0/sign /sign /renew /rekey /
 done
 curl -sS --path-as-is -o /dev/null -w '%{http_code} dot-dot\n' https://ca.i10.tech/acme/apple/../../provisioners
 curl -sS --path-as-is -o /dev/null -w '%{http_code} encoded dot-dot\n' 'https://ca.i10.tech/acme/apple/%2e%2e/%2e%2e/provisioners'
-# The directory's links must name https://ca.i10.tech/acme/apple/ (Host kept).
-curl -sS https://ca.i10.tech/acme/apple/directory
-# 7. The front's 993 asks for a client certificate naming the device CA; 465 does not.
+# 6. The front's 993 asks for a client certificate naming the device CA; 465 does not.
 openssl s_client -connect mail.i10.tech:993 -servername mail.i10.tech </dev/null 2>/dev/null \
   | sed -n '/Acceptable client certificate CA names/,/Requested Signature/p'
 openssl s_client -connect mail.i10.tech:465 -servername mail.i10.tech </dev/null 2>/dev/null \
   | grep -c 'Acceptable client certificate CA names'   # expect 0
-# 8. After the DNS apply: grey cloud on both families, then repeat check 6 with -4 and -6.
-dig +short A ca.i10.tech; dig +short AAAA ca.i10.tech     # the box, not Cloudflare
 ```
 
 ## Disk usage
 
-⚠ **There is no alerting path in the cluster to attach a disk alert to.**
-Neither repo runs Prometheus, Alertmanager, kube-state-metrics or a node
-exporter (Stalwart's exporter was deferred for the same reason, see
-`stalwart/config/README.md`), and OneUptime is the hosted service, with nothing
-in-cluster reporting to it. Proposed, not built: a CronJob here that mounts the
-`i10-device-ca-db` volume read-only (ReadWriteOnce allows a second pod on the
-same node), and when usage passes 70 percent calls a OneUptime incoming-request
-monitor whose URL lives in Doppler, so the alert lands where the rest of i10's
-monitoring does. Until then, check by hand:
-`kubectl -n i10-prod exec deploy/i10-device-ca -c step-ca -- df -h /home/step/db`.
-A full volume is recovered by wiping it (`deployment.yaml`, the PVC's comment).
+With ACME moved to `i10-acmed` + `i10-enroll-redis` (bounded TTLs), `step-ca`'s
+badger volume no longer accumulates unexpiring ACME nonces, accounts, or orders.
+Check disk usage with
+`kubectl -n i10-prod exec deploy/i10-device-ca -c step-ca -- df -h /home/step/db`;
+a full volume can still be recovered by scaling `i10-device-ca` to 0 and wiping
+the PVC (`deployment.yaml`).
 
 ## Rotation (year 7)
 
 A new root and intermediate are made the same way, name-constrained the same
 way. First add the new root to `ca.crt` and the new root and intermediate to
-`bundle.pem`, beside the old ones, so Traefik and the front accept both. Then
-put the new keys in `prod_device_ca`, restart step-ca, and set
-`CA_INTERMEDIATE_NOT_AFTER` in `prod_api` to the new intermediate's (restart the
-API). Remove the old root from `ca.crt` once step-ca serves the new chain, and
-the old pair from `bundle.pem` at year 10.
+`bundle.pem`, beside the old ones, so Traefik, the front, `enrolld`, and
+`enrollctl` accept both. Then put the new keys in `prod_device_ca`, restart
+`i10-device-ca` and `i10-enrollctl`, and update
+`CAHOOKRELAY_INTERMEDIATE_NOT_AFTER` in `device-ca/deployment.yaml` to the new
+intermediate's expiry. Remove the old root from `ca.crt` once `step-ca` serves
+the new chain, and the old pair from `bundle.pem` at year 10.
 
 ## What was run locally (2026-11-26)
 

@@ -2,24 +2,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { createHash, randomBytes } from "node:crypto"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
-import { createHookHandlers } from "../src/ca-hooks/handlers.js"
-import { HANDLER_DEADLINE_MS } from "../src/ca-hooks/listener.js"
 import type { Database } from "../src/db/client.js"
 import { MailDeviceError, parseMailDeviceCodeKeys } from "../src/mail-devices/code.js"
 import {
-  attestEnrollment,
-  createEnrollment,
-  finishEnrollment,
-} from "../src/mail-devices/enrollments.js"
-import { sha256 } from "../src/mail-devices/permits.js"
+  createEnrollRedisStore,
+  type EnrollRedisLike,
+  type RedisSessionRecord,
+} from "../src/mail-devices/enroll-redis.js"
+import { parseEdgeLinkKeys } from "../src/mail-devices/link-token.js"
 import {
   dbDeviceStore,
   mailDeviceService,
   type DeviceViewer,
 } from "../src/mail-devices/service.js"
 import { mint } from "../src/mail-devices/store.js"
-import { scepAuthorizeBody, scepChallengeBody } from "./support/ca-hooks.js"
-import { createTestDeviceCa } from "./support/device-pki.js"
 
 /**
  * Who sees and revokes which mail devices (#383 PR 5), against Postgres: the
@@ -95,16 +91,37 @@ const epochOf = async (person: string) =>
 
 async function addDevice(
   person: string,
-  opts: { createdAt?: string; platform?: string; key?: boolean } = {},
+  opts: {
+    createdAt?: string
+    platform?: string
+    key?: boolean
+    /** Set as enrollctl's mint sets it, for a device that came from an enrollment. */
+    enrollmentId?: string
+  } = {},
 ): Promise<string> {
   const [row] = await owner`
     insert into authd.mail_devices
       (clerk_user_id, email, tenant_id, platform, device_name, code_hash, code_kid,
-       created_by, created_at, cert_key_sha256)
+       created_by, created_at, cert_key_sha256, enrollment_id)
     values (${person}, ${addressOf[person]!}, ${tenantOf[person]!}, ${opts.platform ?? "ios"},
             ${`${person} phone`}, ${randomBytes(32)}, 1, 'test',
             ${opts.createdAt ?? new Date().toISOString()}::timestamptz,
-            ${opts.key ? randomBytes(32) : null})
+            ${opts.key ? randomBytes(32) : null}, ${opts.enrollmentId ?? null}::uuid)
+    returning id::text as id`
+  return row!.id as string
+}
+
+/** An enrollment-minted device, inserted inside the caller's transaction. */
+async function addDeviceIn(
+  tx: postgres.TransactionSql,
+  person: string,
+  enrollmentId: string,
+): Promise<string> {
+  const [row] = await tx`
+    insert into authd.mail_devices
+      (clerk_user_id, email, tenant_id, platform, code_hash, code_kid, created_by, enrollment_id)
+    values (${person}, ${addressOf[person]!}, ${tenantOf[person]!}, 'ios', ${randomBytes(32)}, 1,
+            ${person}, ${enrollmentId}::uuid)
     returning id::text as id`
   return row!.id as string
 }
@@ -163,7 +180,6 @@ suite("mail device service against Postgres", () => {
 
   beforeEach(async () => {
     audit.length = 0
-    await owner`delete from authd.mail_device_enrollments where clerk_user_id = any(${people})`
     await owner`delete from authd.mail_devices where clerk_user_id = any(${people})`
   })
 
@@ -339,85 +355,60 @@ suite("mail device service against Postgres", () => {
     expect(await idsOf(ada)).toEqual([])
   })
 
-  it("refuses a live enrollment opened before revoke-all at finish", async () => {
-    const pki = createTestDeviceCa()
-    try {
-      const hooks = createHookHandlers({
-        db,
-        intermediateNotAfter: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
-      })
-      const deadline = () => new Date(Date.now() + HANDLER_DEADLINE_MS)
-
-      const created = await createEnrollment(db, {
-        clerkUserId: ada,
-        tenantId: acme,
-        hasCodeKeys: true,
-      })
-      expect(created.ok).toBe(true)
-      if (!created.ok) return
-
-      const token = created.url.split("/").pop()!
-      const serial = `C02MDS${sfx.toUpperCase()}`
-      const udid = `UDID-MDS-${sfx}`
-      const attested = await attestEnrollment(
-        db,
-        {
-          token,
-          udid,
-          serial,
-          product: "iPhone17,2",
-          version: "22A3354",
-          deviceName: "Ada's iPhone",
-          model: "iPhone17,2",
-          appleSignerSha256: sha256(`apple-signer/${sfx}`),
-        },
-        deadline(),
-      )
-      expect(attested.outcome).toBe("scep")
-      if (attested.outcome !== "scep") return
-
-      const leaf = pki.issueLeaf({ subject: `/CN=${serial}` })
-      const now = new Date()
-      const ch = await hooks["scep-challenge"](
-        scepChallengeBody({
-          challenge: attested.challenge,
-          transactionId: `txn-mds-${sfx}`,
-          commonName: serial,
-          spki: leaf.spkiDer,
-          now,
-        }),
-        now,
-        deadline(),
-      )
-      expect(ch.allow).toBe(true)
-      const authz = await hooks["scep-authorize"](
-        scepAuthorizeBody({ commonName: serial, spki: leaf.spkiDer, now }),
-        now,
-        deadline(),
-      )
-      expect(authz.allow).toBe(true)
-
-      expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 0 })
-
-      const finished = await finishEnrollment(
-        db,
-        {
-          keys: TEST_KEYS,
-          deviceCaBundle: () => pki.bundle,
-          imapHost: "mail.i10.tech",
-          imapPort: 993,
-          smtpHost: "mail.i10.tech",
-          smtpPort: 465,
-          organization: "i10",
-        },
-        { certDer: leaf.der, udid },
-        deadline(),
-      )
-      expect(finished).toEqual({ outcome: "refused", reason: "epoch_mismatch" })
-      expect(await idsOf(ada)).toEqual([])
-    } finally {
-      pki.cleanup()
+  it("a live enrollment opened before revoke-all carries the old epoch, which enrollctl's locked read no longer has", async () => {
+    // The enrollment is a session in the enrollment Redis (I10-62). This port
+    // records the create script's arguments and answers OK; it keeps no state.
+    const written: RedisSessionRecord[] = []
+    const redis: EnrollRedisLike = {
+      get: async () => null,
+      call: async (command, ...args) => {
+        if (command === "SCRIPT") return "sha-create"
+        // EVALSHA sha numkeys ...keys eid recordJson ...
+        const numKeys = Number(args[1])
+        written.push(JSON.parse(String(args[2 + numKeys + 1])) as RedisSessionRecord)
+        return "OK"
+      },
     }
+    const enrollments = createEnrollRedisStore({
+      db,
+      redis,
+      edgeLinkKeys: parseEdgeLinkKeys("1:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="),
+      log: { warn: () => {}, error: () => {} },
+    })
+
+    const before = await epochOf(ada)
+    const created = await enrollments.create({ clerkUserId: ada, tenantId: acme })
+    expect(created.ok).toBe(true)
+    expect(written.map((r) => r.expected_epoch)).toEqual([before])
+
+    expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 0 })
+
+    // What enrollctl's batcher reads under the account lock before it mints
+    // (services/authd/internal/enrollctl/batcher.go, lockAndLoadAccounts): the
+    // raised epoch, which its mint gate refuses as epoch_mismatch
+    // (batcher_test.go, "epoch moved").
+    const locked = await owner.begin(
+      (tx) => tx<{ credential_epoch: string | number }[]>`
+        select credential_epoch from authd.enroll_lock_gate_accounts(array[${ada}]::text[])`,
+    )
+    expect(locked.map((r) => Number(r.credential_epoch))).toEqual([before + 1])
+    expect(await idsOf(ada)).toEqual([])
+  })
+
+  it("revoke-all waits for enrollctl's account lock, and ends the device it minted", async () => {
+    let minted = ""
+    let revoking: Promise<unknown> | undefined
+    await owner.begin(async (tx) => {
+      // What enrollctl's batcher does: the gate function locks the account
+      // FOR SHARE, then it inserts the device.
+      await tx`select 1 from authd.enroll_lock_gate_accounts(array[${ada}]::text[])`
+      minted = await addDeviceIn(tx, ada, crypto.randomUUID())
+      revoking = service().revokeAll(adaInAcme)
+      await Bun.sleep(150)
+    })
+    expect(await revoking).toEqual({ status: "ok", revoked: 1 })
+    expect(minted).not.toBe("")
+    expect(await idsOf(ada)).toEqual([])
   })
 
   it("an admin's revoke-all for an address reaches one person of their workspace only", async () => {
@@ -441,20 +432,24 @@ suite("mail device service against Postgres", () => {
     expect(await idsOf(rivalAdmin)).toEqual([rivalPhone])
   })
 
-  it("a revoke takes the device's certificate permits and liveness rows with it", async () => {
-    const mac = await addDevice(ada, { platform: "macos", key: true })
-    await owner`insert into authd.mail_device_cert_permits
-                  (clerk_user_id, device_id, kind, serial, nonce_sha256, expires_at)
-                values (${ada}, ${mac}, 'acme', ${`SER${sfx}`}, ${sha(`nonce/${mac}`)},
-                        now() + interval '10 minutes')`
+  it("revokes an enrolled device in its owner's scope, and takes its liveness rows with it", async () => {
+    const mac = await addDevice(ada, {
+      platform: "macos",
+      key: true,
+      enrollmentId: crypto.randomUUID(),
+    })
     await owner`insert into authd.mail_device_cert_binds (device_id, addr, key_sha256)
                 values (${mac}, '192.0.2.1/32', ${sha(`bind/${mac}`)})`
 
-    expect((await service().revoke(adaInAcme, mac))?.id).toBe(mac)
+    expect(await service().revoke(adaInAcme, mac)).toMatchObject({
+      id: mac,
+      clerkUserId: ada,
+      tenantId: acme,
+    })
     const [left] = await owner`
-      select (select count(*)::int from authd.mail_device_cert_permits where device_id = ${mac}) as permits,
+      select (select count(*)::int from authd.mail_devices where id = ${mac}) as devices,
              (select count(*)::int from authd.mail_device_cert_binds where device_id = ${mac}) as binds`
-    expect(left).toEqual({ permits: 0, binds: 0 })
+    expect(left).toEqual({ devices: 0, binds: 0 })
   })
 
   it("never returns a code hash or a key hash, only whether a key is bound", async () => {
