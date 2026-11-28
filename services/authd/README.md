@@ -1683,10 +1683,20 @@ HMAC-SHA256(K, "i10/acme-path/v1\0" || kid || device_id || serial || exp)[:16])`
   nonce, and a `kid` whose MAC does not verify is `accountDoesNotExist`. A
   Replay-Nonce is sent only on `new-nonce`, on `badNonce` problems and on
   answers to JWS-authenticated requests.
+- **The account object is RFC 8555 7.1.2's.** `new-account` (201, or 200 for
+  `onlyReturnExisting`) and POST-as-GET on the account answer
+  `{"status":"valid","contact":[],"orders":"<account URL>/orders"}` with
+  `Location`, `Replay-Nonce` and `Link: rel="index"`. `orders` is required,
+  and a real Mac (macOS 27.3) refused an account without it ("failed to
+  establish account"). POST-as-GET on `<account URL>/orders`, signed by that
+  account under the same path token, answers `{"orders":[]}`: accounts are
+  stateless and nothing indexes orders by account, so the list is always
+  empty. It spends no nonce and writes nothing, and another account's `kid`
+  is `unauthorized`.
 - **Nonce spend rule.** Every JWS request checks its nonce statelessly. A
-  read-only request (POST-as-GET on an account, order, authorization,
-  challenge or certificate, and a challenge response when the challenge and
-  its order are already done) spends no nonce and writes nothing. A state
+  read-only request (POST-as-GET on an account, its orders list, an order,
+  authorization, challenge or certificate, and a challenge response when the
+  challenge and its order are already done) spends no nonce and writes nothing. A state
   change spends its nonce (`SET enroll:acme:used:<nonce> NX`, its remaining
   life plus 60 s for clock skew) inside the one script that makes the change,
   after every check that can refuse it: `new-order` in

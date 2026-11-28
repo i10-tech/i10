@@ -56,10 +56,11 @@ const (
 //
 // Nonce spend rule, for every JWS handler:
 //   - The nonce is always checked statelessly first (its own MAC and expiry).
-//   - A read-only request (POST-as-GET on an account, order, authorization,
-//     challenge or certificate, and a challenge response that changes nothing
-//     because the challenge and its order are already done) spends NO nonce,
-//     like newAccount. A replay of it changes nothing.
+//   - A read-only request (POST-as-GET on an account, its orders list, an
+//     order, authorization, challenge or certificate, and a challenge
+//     response that changes nothing because the challenge and its order are
+//     already done) spends NO nonce, like newAccount. A replay of it changes
+//     nothing.
 //   - A request that changes state spends its nonce inside the one script
 //     that makes the change, after every check that can refuse it and before
 //     its first write: new-order in acme_create_order.lua (after the device's
@@ -239,6 +240,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case sub == "/new-account":
 		h.handleNewAccount(x, body)
+	case strings.HasPrefix(sub, accountPath) && strings.HasSuffix(sub, accountOrdersSuffix):
+		h.handleAccountOrders(x, body, sub)
 	case strings.HasPrefix(sub, accountPath):
 		h.handleAccount(x, body, sub)
 	case sub == "/new-order":
@@ -431,26 +434,59 @@ func (h *Handler) handleNewAccount(x exchange, body []byte) {
 	if pay.OnlyReturnExisting {
 		status = http.StatusOK
 	}
-	h.writeACMEJSON(x, status, acctURL, "", map[string]any{"status": "valid"})
+	h.writeACMEJSON(x, status, acctURL, "", renderAccount(acctURL))
+}
+
+// renderAccount is the RFC 8555 7.1.2 account object. `orders` is required
+// (macOS refuses an account without it: "failed to establish account"), and
+// `contact` is always empty because acmed keeps none.
+func renderAccount(acctURL string) map[string]any {
+	return map[string]any{
+		"status":  "valid",
+		"contact": []string{},
+		"orders":  acctURL + accountOrdersSuffix,
+	}
 }
 
 // handleAccount answers POST-as-GET on an account URL. Like newAccount it
 // writes nothing and spends no nonce: a replay of it changes nothing.
 func (h *Handler) handleAccount(x exchange, body []byte, sub string) {
+	a, ok := h.authenticateAccountRead(x, body, sub, sub)
+	if !ok {
+		return
+	}
+	h.writeACMEJSON(x, http.StatusOK, a.acct.URL, "", renderAccount(a.acct.URL))
+}
+
+// handleAccountOrders answers POST-as-GET on an account's orders URL (RFC
+// 8555 7.1.2.1). ⚠ THE LIST IS ALWAYS EMPTY: an account is stateless and
+// nothing indexes orders by account, so there is nothing to list without a
+// scan. Like the account endpoint it writes nothing and spends no nonce.
+func (h *Handler) handleAccountOrders(x exchange, body []byte, sub string) {
+	if _, ok := h.authenticateAccountRead(x, body, sub, strings.TrimSuffix(sub, accountOrdersSuffix)); !ok {
+		return
+	}
+	h.writeACMEJSON(x, http.StatusOK, "", "", map[string]any{"orders": []string{}})
+}
+
+// authenticateAccountRead verifies a POST-as-GET on sub, an account URL or a
+// resource under one: its `kid` must be the account at acctSub under this
+// request's path token. On a refusal it has answered the request.
+func (h *Handler) authenticateAccountRead(x exchange, body []byte, sub, acctSub string) (*authed, bool) {
 	a, prob := h.authenticate(x, body, sub)
 	if prob != nil {
 		h.writeProblem(x, prob)
-		return
+		return nil, false
 	}
-	if a.acct.URL != x.rt.url(sub) {
+	if a.acct.URL != x.rt.url(acctSub) {
 		h.writeAuthedProblem(x, newProblem(http.StatusUnauthorized, ProblemUnauthorized, "account mismatch"))
-		return
+		return nil, false
 	}
 	if len(a.jws.Payload) != 0 {
 		h.writeAuthedProblem(x, newProblem(http.StatusBadRequest, ProblemMalformed, "account endpoint supports POST-as-GET only"))
-		return
+		return nil, false
 	}
-	h.writeACMEJSON(x, http.StatusOK, a.acct.URL, "", map[string]any{"status": "valid"})
+	return a, true
 }
 
 type acmeIdentifier struct {
