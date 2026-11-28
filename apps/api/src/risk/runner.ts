@@ -359,6 +359,8 @@ export interface RunSummary {
   tor: number | null
   enriched: number
   purged: number
+  /** Mailbox sign-in failures older than 90 days, deleted this run (#388). */
+  authFailuresPurged: number
   /** Fact snapshots older than SNAPSHOT_RETENTION_DAYS, deleted this run. */
   snapshotsPurged: number
   /** Content judgements older than JUDGEMENT_RETENTION_DAYS, deleted this run. */
@@ -440,6 +442,7 @@ export async function runAll(
     tor: null,
     enriched: 0,
     purged: 0,
+    authFailuresPurged: 0,
     snapshotsPurged: 0,
     judgementsPurged: 0,
     rdap: 0,
@@ -469,6 +472,13 @@ export async function runAll(
   if (deps.ipinfoToken)
     summary.enriched = await enrichIdentities(deps, deps.ipinfoToken)
   summary.purged = await purgeIdentities(deps, now)
+  summary.authFailuresPurged = await purgeMailboxAuthFailures(deps, now).catch(
+    (error: unknown) => {
+      deps.log?.error?.({ err: error }, "could not purge mailbox sign-in failures")
+      deps.report?.(error, { phase: "risk-auth-failure-purge" })
+      return 0
+    },
+  )
   summary.snapshotsPurged = await deps.snapshots
     .purge(new Date(now.getTime() - SNAPSHOT_RETENTION_DAYS * 86_400_000))
     .catch((error: unknown) => {
@@ -623,6 +633,23 @@ async function purgeIdentities(deps: RiskDeps, now: Date): Promise<number> {
   const before = new Date(now.getTime() - 90 * 86_400_000).toISOString()
   const rows = (await deps.db.execute(
     sql`select core.identity_purge(${before}::timestamptz) as n`,
+  )) as unknown as { n: number }[]
+  return Number(rows[0]?.n ?? 0)
+}
+
+/** Rows one hourly run may delete from `core.mailbox_auth_failures`. */
+const AUTH_FAILURE_PURGE_BATCH = 10_000
+
+/**
+ * Deletes mailbox sign-in failures older than 90 days, raw IP and all (#388).
+ *
+ * ⚠ BOUNDED PER RUN, OLDEST FIRST. A backlog drains over several hourly runs
+ * instead of one long delete holding locks and writing WAL in one go.
+ */
+async function purgeMailboxAuthFailures(deps: RiskDeps, now: Date): Promise<number> {
+  const before = new Date(now.getTime() - 90 * 86_400_000).toISOString()
+  const rows = (await deps.db.execute(
+    sql`select core.mailbox_auth_failures_purge(${before}::timestamptz, ${AUTH_FAILURE_PURGE_BATCH}::integer) as n`,
   )) as unknown as { n: number }[]
   return Number(rows[0]?.n ?? 0)
 }
