@@ -637,21 +637,34 @@ async function purgeIdentities(deps: RiskDeps, now: Date): Promise<number> {
   return Number(rows[0]?.n ?? 0)
 }
 
-/** Rows one hourly run may delete from `core.mailbox_auth_failures`. */
-const AUTH_FAILURE_PURGE_BATCH = 10_000
+/** Rows one statement deletes from `core.mailbox_auth_failures`. */
+const AUTH_FAILURE_PURGE_BATCH = 1_000
+/** Statements one hourly run may spend on it: 50,000 rows an hour at most. */
+const AUTH_FAILURE_PURGE_MAX_BATCHES = 50
 
 /**
  * Deletes mailbox sign-in failures older than 90 days, raw IP and all (#388).
  *
- * ⚠ BOUNDED PER RUN, OLDEST FIRST. A backlog drains over several hourly runs
- * instead of one long delete holding locks and writing WAL in one go.
+ * ⚠ SMALL BATCHES, EACH ITS OWN STATEMENT, OLDEST FIRST, until one comes back
+ * short. A brute-force storm can record more than a run may delete, so hitting
+ * the per-run cap is logged: the backlog then drains over the next runs.
  */
 async function purgeMailboxAuthFailures(deps: RiskDeps, now: Date): Promise<number> {
   const before = new Date(now.getTime() - 90 * 86_400_000).toISOString()
-  const rows = (await deps.db.execute(
-    sql`select core.mailbox_auth_failures_purge(${before}::timestamptz, ${AUTH_FAILURE_PURGE_BATCH}::integer) as n`,
-  )) as unknown as { n: number }[]
-  return Number(rows[0]?.n ?? 0)
+  let total = 0
+  for (let batch = 0; batch < AUTH_FAILURE_PURGE_MAX_BATCHES; batch++) {
+    const rows = (await deps.db.execute(
+      sql`select core.mailbox_auth_failures_purge(${before}::timestamptz, ${AUTH_FAILURE_PURGE_BATCH}::integer) as n`,
+    )) as unknown as { n: number }[]
+    const n = Number(rows[0]?.n ?? 0)
+    total += n
+    if (n < AUTH_FAILURE_PURGE_BATCH) return total
+  }
+  deps.log?.warn?.(
+    { purged: total },
+    "mailbox sign-in failures past 90 days outran this run's purge cap",
+  )
+  return total
 }
 
 /**

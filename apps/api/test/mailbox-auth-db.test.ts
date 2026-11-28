@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { assertRlsSubject, type Database } from "../src/db/client.js"
@@ -211,8 +211,10 @@ suite("mailbox sign-in failures against Postgres, as i10_api", () => {
   // ⚠ THE FUNCTION IS GLOBAL: it deletes across every workspace, which is the
   // point. So these tests run on a clock decades in the past: every row they
   // seed, and every cutoff they pass, is older than anything another test
-  // writes, and only this file's rows can cross the cutoff. Run them while no
-  // other suite calls the purge on the same database.
+  // writes, and only this file's rows can cross the cutoff. The bounds test is
+  // the exception: it purges at the real floor (now - 90 days) and asserts on
+  // its own rows only. Run them while no other suite calls the purge on the
+  // same database.
   const DAY = 86_400_000
   const purgeAccount = `purge-${RUN}@${DOMAIN}`
 
@@ -226,12 +228,17 @@ suite("mailbox sign-in failures against Postgres, as i10_api", () => {
     return row!.id as string
   }
 
-  const purge = async (before: Date, limit: number) => {
+  const purge = async (before: Date | string | null, limit: number | null) => {
     // As i10_api with no workspace set: only SECURITY DEFINER gets past RLS.
     const [row] = await app`
       select core.mailbox_auth_failures_purge(${before}::timestamptz, ${limit}::integer) as n`
     return row!.n as number
   }
+
+  // Even when a test fails halfway, its rows must not cross the next one's cutoff.
+  afterEach(async () => {
+    await owner`delete from core.mailbox_auth_failures where account = ${purgeAccount}`
+  })
 
   const ourRows = async () =>
     (
@@ -266,7 +273,6 @@ suite("mailbox sign-in failures against Postgres, as i10_api", () => {
 
     // Nothing else is due, so a second run deletes nothing.
     expect(await purge(cutoff, 10_000)).toBe(0)
-    await owner`delete from core.mailbox_auth_failures where account = ${purgeAccount}`
   })
 
   it("deletes at most p_limit rows a call, oldest first", async () => {
@@ -284,6 +290,23 @@ suite("mailbox sign-in failures against Postgres, as i10_api", () => {
 
     expect(await purge(cutoff, 2)).toBe(1)
     expect(await ourRows()).toEqual([])
+  })
+
+  it("never deletes a failure younger than 90 days, nor more than its clamped batch", async () => {
+    const ancient = await seedFailure(tenantA, new Date("1990-01-01T00:00:00Z"), 31)
+    const recent = await seedFailure(tenantB, new Date(Date.now() - 30 * DAY), 32)
+    const cutoff = new Date("2000-01-01T00:00:00Z")
+
+    // No cutoff, no batch, a zero or negative batch: nothing goes, nothing throws.
+    expect(await purge(null, 10)).toBe(0)
+    expect(await purge(cutoff, null)).toBe(0)
+    expect(await purge(cutoff, 0)).toBe(0)
+    expect(await purge(cutoff, -1)).toBe(0)
+    expect(await ourRows()).toEqual([ancient, recent])
+
+    // A cutoff in the future is held at now - 90 days: the 30-day-old row stays.
+    await purge("infinity", 2_000_000_000)
+    expect(await ourRows()).toEqual([recent])
   })
 
   it("lets i10_api run the purge, and nobody else", async () => {
