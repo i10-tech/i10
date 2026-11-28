@@ -224,6 +224,8 @@ jobs:
         working-directory: apps/api
         env:
           ENROLL_TEST_REDIS_URL: redis://127.0.0.1:6379
+          # The real credential_epoch test reads its account from Postgres.
+          ENROLL_TEST_DATABASE_URL: postgres://i10@127.0.0.1:5432/i10
           ENROLL_TEST_REDIS_REQUIRED: "1"
         run: bun test test/enroll-redis-redis.test.ts
 

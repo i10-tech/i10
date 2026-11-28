@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,9 +49,13 @@ func testEID(t *testing.T) string {
 	return "019ab100-" + h[0:4] + "-7" + h[4:7] + "-8" + h[7:10] + "-" + h[10:16] + "000000"
 }
 
+// testEpoch is a realistic authd.accounts.credential_epoch: microseconds since
+// 1970, 16 digits, two more than cjson writes a number with.
+const testEpoch int64 = 1795872953432402
+
 func openSession(uid, eid string, now time.Time) Session {
 	return Session{
-		ID: eid, ClerkUserID: uid, Email: "ada@acme.test", ExpectedEpoch: 1, CreatedBy: uid,
+		ID: eid, ClerkUserID: uid, Email: "ada@acme.test", ExpectedEpoch: testEpoch, CreatedBy: uid,
 		Status: "open", CreatedAtMs: now.UnixMilli(),
 		ExpiresAtMs: now.Add(15 * time.Minute).UnixMilli(), UpdatedAtMs: now.UnixMilli(),
 	}
@@ -175,6 +180,78 @@ func TestEnrollmentLifecycleOnRedis(t *testing.T) {
 	}
 }
 
+// TestARealEpochSurvivesEveryScriptThatRewritesTheSession runs a 16-digit
+// epoch through each script that decodes and re-encodes enroll:sess:<eid>
+// (create's M5 cancel, attest, mark refused, cancel, seal) and through the
+// SCEP hooks that read it. After each, the stored JSON carries the epoch as
+// the same decimal string and GetSession reads it back exactly.
+func TestARealEpochSurvivesEveryScriptThatRewritesTheSession(t *testing.T) {
+	store, c := openStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	want := `"expected_epoch":"1795872953432402"`
+	exact := func(step, eid string) {
+		t.Helper()
+		raw, err := c.Get(ctx, SessionKey(eid)).Result()
+		if err != nil || !strings.Contains(raw, want) {
+			t.Fatalf("%s: stored session = (%s, %v), want it to carry %s", step, raw, err, want)
+		}
+		got, err := store.GetSession(ctx, eid)
+		if err != nil || got == nil || got.ExpectedEpoch != testEpoch {
+			t.Fatalf("%s: GetSession = (%+v, %v), want expected epoch %d", step, got, err, testEpoch)
+		}
+	}
+
+	uid := "user_epoch_" + randHex(t)
+	first, second := testEID(t), testEID(t)
+	if err := store.CreateSession(ctx, openSession(uid, first, now), now); err != nil {
+		t.Fatal(err)
+	}
+	exact("create", first)
+	if err := store.CreateSession(ctx, openSession(uid, second, now), now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	exact("create's M5 cancel of the earlier session", first)
+
+	serial := "C02EPOCH" + randHex(t)[:4]
+	chal := "epoch-chal-" + uid
+	if att, err := store.AttestSession(ctx, attestInput(second, serial, now.Add(2*time.Second), chal)); err != nil || att.Outcome != "scep" {
+		t.Fatalf("attest = (%+v, %v)", att, err)
+	}
+	exact("attest", second)
+	key := HashChallenge("epoch-key-" + uid)
+	if d, err := store.SCEPClaim(ctx, chal, key, "epoch-tx-"+uid, serial, now.Add(3*time.Second)); err != nil || !d.Allow {
+		t.Fatalf("SCEP claim = (%+v, %v)", d, err)
+	}
+	if d, err := store.SCEPAuthorize(ctx, key, serial, now.Add(4*time.Second)); err != nil || !d.Allow {
+		t.Fatalf("SCEP authorize = (%+v, %v)", d, err)
+	}
+	exact("the SCEP hooks", second)
+	sess, _ := store.GetSession(ctx, second)
+	if err := store.SealSession(ctx, sess, SealedCache{KeySha256: key, DeviceID: testEID(t), ProfileB64: "QQ=="}, now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	exact("seal", second)
+
+	refused := openSession("user_epoch_refused_"+randHex(t), testEID(t), now)
+	if err := store.CreateSession(ctx, refused, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkSessionRefused(ctx, refused.ID, "enrollment_conflict", now); err != nil {
+		t.Fatal(err)
+	}
+	exact("mark refused", refused.ID)
+
+	cancelled := openSession("user_epoch_cancel_"+randHex(t), testEID(t), now)
+	if err := store.CreateSession(ctx, cancelled, now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := store.CancelSession(ctx, cancelled.ID, cancelled.ClerkUserID, now); err != nil || res != "cancelled" {
+		t.Fatalf("cancel = (%q, %v)", res, err)
+	}
+	exact("cancel", cancelled.ID)
+}
+
 // TestAttestRetriesWhenAClaimLandsBetweenReadAndScript is the M4 race: attest
 // read the session and the old challenge, then a claim bound a key to that
 // challenge before the script ran. The script must answer retry rather than
@@ -235,7 +312,7 @@ func TestSessionJSONMatchesTheAPIFixtures(t *testing.T) {
 	}
 	if open.ID != "019ac4c2-8f00-7a31-9c55-6a7d1e2f3b4c" || open.ClerkUserID != "user_fixture" ||
 		open.Email != "ada@acme.test" || open.TenantID == nil || *open.TenantID != "5d7e9c1a-3b2f-4a6d-8e0c-1f2a3b4c5d6e" ||
-		open.ExpectedEpoch != 4 || open.CreatedBy != "user_fixture" || open.Status != "open" ||
+		open.ExpectedEpoch != testEpoch || open.CreatedBy != "user_fixture" || open.Status != "open" ||
 		open.CreatedAtMs != 1764300000000 || open.ExpiresAtMs != 1764300900000 || open.UpdatedAtMs != 1764300000000 {
 		t.Fatalf("open fixture decoded as %+v", open)
 	}
@@ -243,7 +320,7 @@ func TestSessionJSONMatchesTheAPIFixtures(t *testing.T) {
 	tenant := "5d7e9c1a-3b2f-4a6d-8e0c-1f2a3b4c5d6e"
 	sealed := Session{
 		ID: open.ID, ClerkUserID: "user_fixture", Email: "ada@acme.test", TenantID: &tenant,
-		ExpectedEpoch: 4, CreatedBy: "user_fixture", Status: "sealed", Serial: "C02FIXTURE",
+		ExpectedEpoch: testEpoch, CreatedBy: "user_fixture", Status: "sealed", Serial: "C02FIXTURE",
 		Product: "Mac15,6", OSVersion: "24D70", DeviceName: "Ada's Mac",
 		UDIDSha256:        "1111111111111111111111111111111111111111111111111111111111111111",
 		AppleSignerSha256: "2222222222222222222222222222222222222222222222222222222222222222",

@@ -105,7 +105,12 @@ export interface RedisSessionRecord {
   clerk_user_id: string
   email: string
   tenant_id?: string | null
-  expected_epoch: number
+  /**
+   * `authd.accounts.credential_epoch` as a decimal string. ⚠ NEVER A NUMBER:
+   * the Lua scripts re-encode the session with cjson, which keeps 14
+   * significant digits, and the epoch has 16 (microseconds since 1970).
+   */
+  expected_epoch: string
   created_by: string
   status: EnrollmentStatus
   refusal?: string
@@ -208,7 +213,7 @@ export async function readGateAccount(
            a.email,
            a.active,
            a.tenant_id::text as tenant_id,
-           a.credential_epoch,
+           a.credential_epoch::text as credential_epoch,
            (a.suspended_at is not null) as suspended,
            (a.payment_hold_at is not null) as payment_hold,
            (a.deleting_at is not null) as deleting,
@@ -273,7 +278,7 @@ export function createEnrollRedisStore(deps: {
       if (!account) {
         return { ok: false, status: 409, code: "no_mailbox" }
       }
-      const expectedEpoch = Number(account.credential_epoch)
+      const expectedEpoch = String(account.credential_epoch)
       const refusal = mintRefusal(account, { tenantId, expectedEpoch })
       if (refusal) {
         return { ok: false, status: 409, code: refusal.code }

@@ -108,7 +108,8 @@ const tenantMatches = (tenantId: string | null) =>
 export interface MintInput {
   clerkUserId: string
   tenantId: string | null
-  expectedEpoch: number
+  /** `credential_epoch` as a decimal string, compared as one (never a Number). */
+  expectedEpoch: string
   platform: MailDevicePlatform
   deviceName?: string | null
   model?: string | null
@@ -127,7 +128,8 @@ export interface MintGateAccount {
   email: string
   active: boolean
   tenant_id: string | null
-  credential_epoch: string | number
+  /** Decimal text (`::text` in every reader), compared as a string. */
+  credential_epoch: string
   suspended: boolean
   payment_hold: boolean
   deleting: boolean
@@ -168,7 +170,7 @@ export function mintRefusal(
   if (!account.active) {
     return new MailDeviceError("account_inactive", "Mailbox account is not active.")
   }
-  if (Number(account.credential_epoch) !== input.expectedEpoch) {
+  if (String(account.credential_epoch) !== input.expectedEpoch) {
     return new MailDeviceError(
       "epoch_mismatch",
       "Account credential epoch changed; re-authenticate and retry.",
@@ -384,7 +386,7 @@ export async function lockGateAccount<Row extends MintGateAccount = MintGateAcco
              a.email,
              a.active,
              a.tenant_id::text as tenant_id,
-             a.credential_epoch,
+             a.credential_epoch::text as credential_epoch,
              (a.suspended_at is not null) as suspended,
              (a.payment_hold_at is not null) as payment_hold,
              (a.deleting_at is not null) as deleting,
@@ -1009,7 +1011,8 @@ export async function accountByEmail(
   clerkUserId: string
   email: string
   tenantId: string | null
-  credentialEpoch: number
+  /** Decimal text, `MintInput.expectedEpoch`'s form. */
+  credentialEpoch: string
   active: boolean
 } | null> {
   const [row] = await db
@@ -1017,7 +1020,7 @@ export async function accountByEmail(
       clerkUserId: accounts.clerkUserId,
       email: accounts.email,
       tenantId: accounts.tenantId,
-      credentialEpoch: accounts.credentialEpoch,
+      credentialEpoch: sql<string>`${accounts.credentialEpoch}::text`,
       active: accounts.active,
     })
     .from(accounts)

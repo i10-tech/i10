@@ -132,8 +132,9 @@ suite("mail device store and revocation paths against Postgres", () => {
     }
   })
 
+  /** Exact: a bigint, never a Number. */
   const epochOf = async (userId: string) =>
-    Number(
+    BigInt(
       (
         await owner`select credential_epoch from authd.accounts where clerk_user_id = ${userId}`
       )[0]!.credential_epoch,
@@ -188,7 +189,7 @@ suite("mail device store and revocation paths against Postgres", () => {
     mint(db, TEST_KEYS, {
       clerkUserId: userId,
       tenantId,
-      expectedEpoch: await epochOf(userId),
+      expectedEpoch: String(await epochOf(userId)),
       platform: "ios",
       deviceName: name,
       createdBy: "test",
@@ -244,7 +245,7 @@ suite("mail device store and revocation paths against Postgres", () => {
         mint(db, null, {
           clerkUserId: ada,
           tenantId: acme,
-          expectedEpoch: 1,
+          expectedEpoch: "1",
           platform: "ios",
           createdBy: "test",
         }),
@@ -255,7 +256,7 @@ suite("mail device store and revocation paths against Postgres", () => {
         mint(db, TEST_KEYS, {
           clerkUserId: "user_missing_xxx",
           tenantId: acme,
-          expectedEpoch: 0,
+          expectedEpoch: "0",
           platform: "ios",
           createdBy: "test",
         }),
@@ -268,7 +269,7 @@ suite("mail device store and revocation paths against Postgres", () => {
         mint(db, TEST_KEYS, {
           clerkUserId: ada,
           tenantId: acme,
-          expectedEpoch: 0,
+          expectedEpoch: "0",
           platform: "ios",
           createdBy: "test",
         }),

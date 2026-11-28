@@ -64,7 +64,7 @@ func seedAttestedSession(t *testing.T, store enrollredis.Store, now time.Time, e
 		ID:            eid,
 		ClerkUserID:   "user_" + eid,
 		Email:         "u@example.com",
-		ExpectedEpoch: 1,
+		ExpectedEpoch: 1795872953432402, // 16 digits, as a real credential_epoch
 		CreatedBy:     "user_" + eid,
 		Status:        "open",
 		CreatedAtMs:   now.UnixMilli(),

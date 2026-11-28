@@ -201,6 +201,10 @@ func doReq(h http.Handler, method, path, token string, body any) *httptest.Respo
 	return rec
 }
 
+// realisticEpoch is a credential_epoch as authd.accounts seeds it:
+// microseconds since 1970, 16 digits, more than cjson keeps in a number.
+const realisticEpoch int64 = 1795872953432402
+
 // newSession stores an open session as the API's POST does (link token signed
 // for creation + 30 minutes, the session's own first-attest window 15) and
 // returns its id and link token.
@@ -213,7 +217,7 @@ func (env *handlerEnv) newSession(t *testing.T, platformUID string) (string, str
 		t.Fatal(err)
 	}
 	if err := env.store.CreateSession(context.Background(), enrollredis.Session{
-		ID: eid, ClerkUserID: platformUID, Email: "ada@acme.test", ExpectedEpoch: 3,
+		ID: eid, ClerkUserID: platformUID, Email: "ada@acme.test", ExpectedEpoch: realisticEpoch,
 		CreatedBy: platformUID, Status: "open", CreatedAtMs: env.now.UnixMilli(),
 		ExpiresAtMs: env.now.Add(15 * time.Minute).UnixMilli(), UpdatedAtMs: env.now.UnixMilli(),
 	}, env.now); err != nil {
@@ -527,6 +531,99 @@ func TestHandlerFullMacFlowAndACMEFinalizeRefusals(t *testing.T) {
 		if strings.Contains(logs, secret) {
 			t.Errorf("enrollctl log leaked secret %q", secret)
 		}
+	}
+}
+
+// TestARealEpochSurvivesTheFlowAndMints is the first prod iPhone enrollment
+// (2026-11-28): the account's real credential_epoch, 16 digits, through the
+// session create (Go writes the API's JSON, TestSessionJSONMatchesTheAPIFixtures
+// pins that), attest, cahookrelay's SCEP claim and authorize, then finish with
+// the real batcher on Postgres. The session reads the epoch back exactly after
+// each step, and the mint commits the device. Before the fix attest's cjson
+// re-encode stored 1.7958729534324e+15, and finish answered 503 redis_error.
+func TestARealEpochSurvivesTheFlowAndMints(t *testing.T) {
+	w, admin := openBatchTestDBs(t)
+	env := newHandlerEnv(t, true)
+	ctx := context.Background()
+
+	runID := newUUIDStr(t)[:8]
+	tenantID := newUUIDStr(t)
+	domain := "epoch-" + runID + ".test"
+	uid := "user_epoch_flow_" + runID
+	email := "ada@" + domain
+	cleanup := func() {
+		_, _ = admin.Exec(ctx, `DELETE FROM authd.accounts WHERE clerk_user_id = $1`, uid)
+		_, _ = admin.Exec(ctx, `DELETE FROM core.tenants WHERE id = $1::uuid`, tenantID)
+		_, _ = admin.Exec(ctx, `DELETE FROM core.retention_horizons WHERE tenant_id = $1::uuid`, tenantID)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := admin.Exec(ctx, `INSERT INTO core.tenants (id, slug, name, owner_clerk_user_id) VALUES ($1::uuid, $2, 'Epoch Test', $3)`,
+		tenantID, "epoch-"+runID, uid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, `INSERT INTO core.domains (tenant_id, name, status, hosts_mailboxes, verified_at, identity_registered_at)
+		VALUES ($1::uuid, $2, 'verified', true, now(), now())`, tenantID, domain); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id) VALUES ($1, $2, true, $3::uuid)`,
+		uid, email, tenantID); err != nil {
+		t.Fatal(err)
+	}
+	// Raised once by raiseCredentialEpoch's statement (apps/api
+	// src/projection/credential-epoch.ts), as a revocation leaves it.
+	if _, err := admin.Exec(ctx, `UPDATE authd.accounts SET credential_epoch = credential_epoch + 1, updated_at = now() WHERE clerk_user_id = $1`, uid); err != nil {
+		t.Fatal(err)
+	}
+	epoch := realEpoch(t, admin, uid)
+
+	batcher := NewBatcher(w, BatcherConfig{MaxBatch: 10, MaxWait: time.Millisecond})
+	defer batcher.Close()
+	env.h.deps.Batcher = batcher
+
+	epochAfter := func(step, eid string) {
+		t.Helper()
+		sess, err := env.store.GetSession(ctx, eid)
+		if err != nil || sess == nil || sess.ExpectedEpoch != epoch {
+			t.Fatalf("after %s: GetSession = (%+v, %v), want expected epoch %d", step, sess, err, epoch)
+		}
+	}
+
+	eidBytes, _ := enrolltoken.NewUUIDv7At(env.now)
+	eid := enrolltoken.FormatUUID(eidBytes)
+	link, err := enrolltoken.SignLink(env.edgeRing, eidBytes, env.now.Add(30*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.store.CreateSession(ctx, enrollredis.Session{
+		ID: eid, ClerkUserID: uid, Email: email, TenantID: &tenantID, ExpectedEpoch: epoch,
+		CreatedBy: uid, Status: "open", CreatedAtMs: env.now.UnixMilli(),
+		ExpiresAtMs: env.now.Add(15 * time.Minute).UnixMilli(), UpdatedAtMs: env.now.UnixMilli(),
+	}, env.now); err != nil {
+		t.Fatal(err)
+	}
+	epochAfter("create", eid)
+
+	serial := "C02EPOCH" + strings.ToUpper(runID[:4])
+	ar, challenge := env.attest(t, link, serial, "udid-epoch-"+runID, "iPhone17,2", "22A3354")
+	if ar.Outcome != "scep" {
+		t.Fatalf("attest = %+v, want scep", ar)
+	}
+	epochAfter("attest", eid)
+
+	der, keyHex := env.scepCert(t, serial)
+	env.scep(t, challenge, keyHex, serial)
+	epochAfter("the SCEP hooks", eid)
+
+	if code, fr := env.finish(t, der, nil); code != 200 || fr.Outcome != "sealed" {
+		t.Fatalf("finish = (%d, %s %s), want 200 sealed", code, fr.Outcome, fr.Reason)
+	}
+	epochAfter("finish", eid)
+	sess, _ := env.store.GetSession(ctx, eid)
+	var minted int
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM authd.mail_devices WHERE id = $1::uuid AND enrollment_id = $2::uuid AND clerk_user_id = $3`,
+		sess.DeviceID, eid, uid).Scan(&minted); err != nil || minted != 1 {
+		t.Fatalf("device rows for the sealed enrollment = (%d, %v), want 1", minted, err)
 	}
 }
 
