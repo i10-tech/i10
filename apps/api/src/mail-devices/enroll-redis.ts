@@ -213,7 +213,7 @@ export async function readGateAccount(
            a.email,
            a.active,
            a.tenant_id::text as tenant_id,
-           a.credential_epoch,
+           a.credential_epoch::text as credential_epoch,
            (a.suspended_at is not null) as suspended,
            (a.payment_hold_at is not null) as payment_hold,
            (a.deleting_at is not null) as deleting,

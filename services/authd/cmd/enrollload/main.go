@@ -917,6 +917,11 @@ func loadEpochs(ctx context.Context, pool *pgxpool.Pool, prefix string, n int) (
 		if !ok {
 			return nil, fmt.Errorf("no authd.accounts row for %s (seed with -admin-postgres)", uid)
 		}
+		// A real epoch is microseconds since 1970 (16 digits). Older runs
+		// seeded 1, and seedAccounts keeps an existing row's epoch.
+		if epoch < 1_000_000_000_000_000 {
+			return nil, fmt.Errorf("%s has credential_epoch %d, not a real microsecond epoch: delete the load accounts and reseed", uid, epoch)
+		}
 		epochs[i] = epoch
 	}
 	return epochs, nil

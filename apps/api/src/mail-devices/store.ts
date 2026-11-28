@@ -128,7 +128,8 @@ export interface MintGateAccount {
   email: string
   active: boolean
   tenant_id: string | null
-  credential_epoch: string | number
+  /** Decimal text (`::text` in every reader), compared as a string. */
+  credential_epoch: string
   suspended: boolean
   payment_hold: boolean
   deleting: boolean
@@ -385,7 +386,7 @@ export async function lockGateAccount<Row extends MintGateAccount = MintGateAcco
              a.email,
              a.active,
              a.tenant_id::text as tenant_id,
-             a.credential_epoch,
+             a.credential_epoch::text as credential_epoch,
              (a.suspended_at is not null) as suspended,
              (a.payment_hold_at is not null) as payment_hold,
              (a.deleting_at is not null) as deleting,
