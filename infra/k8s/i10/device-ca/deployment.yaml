@@ -184,7 +184,7 @@ spec:
           # THE i10-authd IMAGE, ON authd's PIN. pin-image.py rewrites every
           # i10-authd reference under infra/k8s on each authd build, this one
           # included.
-          image: ghcr.io/i10-tech/i10-authd:prod-79c49b52736817580cea7a53d21f359d9cca6595@sha256:5c9935c80d1ff395512765dae91376aa07fa1bb45b73a13258602280e30c970a
+          image: ghcr.io/i10-tech/i10-authd:prod-c88783d2f1e79abbe2b3e9098d1812bc66928e77@sha256:9a7111b09ba8161cd60aafbb93f09945149c14d517c88b5727c06f36445c9245
           command: ["/usr/local/bin/cahookrelay"]
           # services/authd/README.md, "Configuration (cahookrelay)".
           env:
