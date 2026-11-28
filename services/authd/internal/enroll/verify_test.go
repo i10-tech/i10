@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"math/big"
 	"net"
 	"testing"
@@ -52,6 +53,14 @@ func TestClassifySigner(t *testing.T) {
 	// 4. Issued by intermediate, only clientAuth EKU.
 	scepClientAuthOnly := pki.issueSCEPLeaf(t, pki.deviceInter, "C02CLIENTAUTH", func(c *x509.Certificate) {
 		c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	})
+	// 4b. emailProtection plus a second EKU, and plus one Go cannot name: the
+	// edge requires exactly [emailProtection], as enrollctl does.
+	scepTwoEKUs := pki.issueSCEPLeaf(t, pki.deviceInter, "C02TWOEKU", func(c *x509.Certificate) {
+		c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection, x509.ExtKeyUsageClientAuth}
+	})
+	scepUnknownEKU := pki.issueSCEPLeaf(t, pki.deviceInter, "C02UNKEKU", func(c *x509.Certificate) {
+		c.UnknownExtKeyUsage = []asn1.ObjectIdentifier{{1, 3, 6, 1, 4, 1, 99999, 1}}
 	})
 	// 5. Issued by intermediate, carries unparsed otherName SAN (permanentIdentifier, like ACME).
 	scepOtherNameSAN := pki.issueSCEPLeaf(t, pki.deviceInter, "C02OTHERNAME", func(c *x509.Certificate) {
@@ -199,6 +208,16 @@ func TestClassifySigner(t *testing.T) {
 		{
 			name:    "phase 4 refuses leaf with only clientAuth EKU",
 			cms:     mustVerifyCMS(t, signWithPKCS7(t, scepClientAuthOnly, pkcs7.OIDDigestAlgorithmSHA256, []byte(samplePlist))),
+			wantErr: true,
+		},
+		{
+			name:    "phase 4 refuses emailProtection plus clientAuth",
+			cms:     mustVerifyCMS(t, signWithPKCS7(t, scepTwoEKUs, pkcs7.OIDDigestAlgorithmSHA256, []byte(samplePlist))),
+			wantErr: true,
+		},
+		{
+			name:    "phase 4 refuses emailProtection plus an unknown EKU",
+			cms:     mustVerifyCMS(t, signWithPKCS7(t, scepUnknownEKU, pkcs7.OIDDigestAlgorithmSHA256, []byte(samplePlist))),
 			wantErr: true,
 		},
 		{

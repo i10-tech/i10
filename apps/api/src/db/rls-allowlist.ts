@@ -34,12 +34,8 @@ export const NON_RLS_ALLOWLIST: Readonly<Record<string, string>> = {
     "Cross-tenant mailing list projection read by authd; API writes scope by tenant.",
   "authd.mail_device_cert_binds":
     "Cross-tenant Mac liveness rows keyed by device id, written by authd and read by mailfront; no tenant column.",
-  "authd.mail_device_cert_permits":
-    "Read only by the API's CA webhook handlers, which look permits up by serial, nonce, key or challenge; PR 4's enrollment scopes writes by tenant.",
-  "authd.mail_device_enrollments":
-    "Apple OTA enrollment sessions; API reads and writes go through apps/api/src/mail-devices/enrollments.ts (and the SCEP hooks in permits.ts, retention in prune.ts), scoped to the signed-in person.",
   "authd.mail_devices":
-    "Read across workspaces by authd and mailfront; apps/api/src/mail-devices/ is the tenant boundary.",
+    "Read across workspaces by authd and mailfront; apps/api/src/mail-devices/ and enrollctl enforce the tenant boundary.",
   "authd.managed_accounts":
     "Cross-tenant SSO-managed account mirror read by authd; API writes scope by tenant.",
   "authd.passthrough_versions":

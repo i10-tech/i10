@@ -1,20 +1,24 @@
 import type { Context, Hono } from "hono"
+import { EnrollRedisUnavailableError } from "../../mail-devices/enroll-redis.js"
 import { requireFreshAuth, ssoGateRefusal } from "../../middleware/session.js"
 import type { ConsoleDeps, MailDeviceEnrollmentsDeps } from "./deps.js"
 import { asId, isRecord, notFound, notWired, validation } from "./http.js"
 
 /**
- * Console routes for Apple OTA mail device enrollment (#383 PR 4,
- * docs/research/mail-device-binding.md section 12 + Review 1 rules).
- *
- * Mounted in its own module beside PR 5's `routes/console/mail-devices.ts`:
+ * Console routes for Apple OTA mail device enrollment (I10-62,
+ * docs/research/enrollment-at-scale.md):
  *   - `POST /console/mail-devices/enrollments` (behind `requireFreshAuth`,
- *     workspace-optional, `Cache-Control: no-store`)
- *   - `GET /console/mail-devices/enrollments/:id` (polled every 2s by console)
- *   - `DELETE /console/mail-devices/enrollments/:id` (204 cancel, 409 already_sealed, 404 other/missing)
+ *     workspace-optional, `Cache-Control: no-store`, 1 read-only account SELECT
+ *     + 1 Lua script on `i10-enroll-redis`, 0 Postgres writes)
+ *   - `GET /console/mail-devices/enrollments/:id` (polled every 2s by console;
+ *     reads `i10-enroll-redis`, 0 Postgres beyond `gatedMailbox`)
+ *   - `DELETE /console/mail-devices/enrollments/:id` (204 cancel, 409
+ *     already_sealed, 404 other/missing)
  *
  * Every route acts strictly on the signed-in person's own mailbox and own
- * enrollments; another person's enrollment id always answers 404.
+ * enrollments; another person's enrollment id always answers 404. Redis errors
+ * fail closed with 503 `enrollment_unavailable`. Every refusal and unavailable
+ * answer uses the console's usual error envelope (`refused` below).
  */
 
 /**
@@ -25,7 +29,10 @@ import { asId, isRecord, notFound, notWired, validation } from "./http.js"
  * routes run with any workspace open or none, and they start, show or cancel
  * the enrollment of a credential for the mailbox. So that workspace's policies
  * (SSO, second factor, IP allowlist, session age) run on this session here;
- * `requireTenant` already ran them when it is the open workspace.
+ * `requireTenant` already ran them when it is the open workspace. They are
+ * checked here, on the request, and nowhere else: enrollctl re-checks only the
+ * account's own gate (holds, epoch, address, workspace) under the account lock
+ * before it mints.
  */
 async function gatedMailbox(
   c: Context,
@@ -54,10 +61,13 @@ const MESSAGES: Record<string, string> = {
   no_mailbox: "This account has no mailbox to add a device to.",
   already_sealed:
     "That device is already set up. Revoke it from the device list instead.",
-  keys_not_configured: "Device setup is not available right now.",
+  enrollment_unavailable: "Device setup is not available right now.",
 }
 const messageFor = (code: string) =>
   MESSAGES[code] ?? "This mailbox cannot add a device right now."
+
+const unavailable = () =>
+  refused(503, "enrollment_unavailable", messageFor("enrollment_unavailable"))
 
 export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
   app.post("/mail-devices/enrollments", requireFreshAuth, async (c) => {
@@ -117,11 +127,19 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
     if (!id) return c.json(notFound("Enrollment not found."), 404)
 
     const { userId } = c.get("user")
-    // An enrollment goes with its mailbox (FK cascade), so no mailbox is no row.
     const gated = await gatedMailbox(c, enrollments, userId)
     if ("refused" in gated) return gated.refused
     if (!gated.mailbox) return c.json(notFound("Enrollment not found."), 404)
-    const view = await enrollments.get({ id, clerkUserId: userId })
+
+    let view
+    try {
+      view = await enrollments.get({ id, clerkUserId: userId })
+    } catch (err) {
+      if (err instanceof EnrollRedisUnavailableError) {
+        return c.json(unavailable(), 503)
+      }
+      throw err
+    }
     if (!view) return c.json(notFound("Enrollment not found."), 404)
 
     return c.json({
@@ -148,7 +166,16 @@ export function mountMailDeviceEnrollments(app: Hono, d: ConsoleDeps): void {
     const gated = await gatedMailbox(c, enrollments, userId)
     if ("refused" in gated) return gated.refused
     if (!gated.mailbox) return c.json(notFound("Enrollment not found."), 404)
-    const outcome = await enrollments.cancel({ id, clerkUserId: userId })
+
+    let outcome
+    try {
+      outcome = await enrollments.cancel({ id, clerkUserId: userId })
+    } catch (err) {
+      if (err instanceof EnrollRedisUnavailableError) {
+        return c.json(unavailable(), 503)
+      }
+      throw err
+    }
     if (outcome === "not_found") {
       return c.json(notFound("Enrollment not found."), 404)
     }

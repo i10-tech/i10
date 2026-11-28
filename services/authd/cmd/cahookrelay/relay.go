@@ -1,9 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,63 +12,62 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
+	"regexp"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/config"
-	"github.com/i10-tech/i10/services/authd/internal/mailfront"
+	"github.com/i10-tech/i10/services/authd/internal/enrollredis"
 )
 
 const (
-	// maxBodyBytes caps incoming step-ca webhook bodies (and upstream responses)
-	// at 64 KiB, matching the API's :3443 hooks listener (revision 5).
+	// maxBodyBytes caps incoming step-ca webhook bodies at 64 KiB.
 	maxBodyBytes = 64 << 10
 
-	headerSmallstepSig = "X-Smallstep-Signature"
-	headerSmallstepID  = "X-Smallstep-Webhook-ID"
+	// timestampWindow rejects stale or future-dated step-ca webhook payloads.
+	timestampWindow = 60 * time.Second
+
+	headerSmallstepID = "X-Smallstep-Webhook-ID"
 )
 
-// allowedPaths is the exact set of webhook paths the relay forwards to the API.
-// Anything else receives 404 without reaching the upstream.
-var allowedPaths = map[string]bool{
-	"/acme-authorize": true,
-	"/scep-challenge": true,
-	"/scep-authorize": true,
-	"/scep-notify":    true,
+var webhookIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
+type scepConfig struct {
+	Listen               string
+	CertFile             string
+	KeyFile              string
+	WebhookIDsRaw        string
+	WebhookIDs           map[string]string
+	IntermediateNotAfter time.Time
+	IntermediateRaw      string
+	RedisURL             string
+	RedisUser            string
+	RedisPassword        string
+	RedisTimeout         time.Duration
+	LogLevel             string
 }
 
-type relayConfig struct {
-	Listen          string
-	CertFile        string
-	KeyFile         string
-	UpstreamURL     string
-	UpstreamCAFile  string
-	TokenFile       string
-	UpstreamTimeout time.Duration
-	LogLevel        string
-}
-
-func loadConfig() (relayConfig, error) {
-	c := relayConfig{
-		Listen:         config.Env("CAHOOKRELAY_LISTEN", "127.0.0.1:9443"),
-		CertFile:       config.Env("CAHOOKRELAY_TLS_CERT_FILE", "/etc/cahookrelay/tls/tls.crt"),
-		KeyFile:        config.Env("CAHOOKRELAY_TLS_KEY_FILE", "/etc/cahookrelay/tls/tls.key"),
-		UpstreamURL:    strings.TrimRight(config.Env("CAHOOKRELAY_UPSTREAM_URL", ""), "/"),
-		UpstreamCAFile: config.Env("CAHOOKRELAY_UPSTREAM_CA_FILE", ""),
-		TokenFile:      config.Env("CAHOOKRELAY_TOKEN_FILE", ""),
-		LogLevel:       config.Env("CAHOOKRELAY_LOG_LEVEL", "info"),
+func loadConfig() (scepConfig, error) {
+	c := scepConfig{
+		Listen:          config.Env("CAHOOKRELAY_LISTEN", "127.0.0.1:9443"),
+		CertFile:        config.Env("CAHOOKRELAY_TLS_CERT_FILE", "/etc/cahookrelay/tls/tls.crt"),
+		KeyFile:         config.Env("CAHOOKRELAY_TLS_KEY_FILE", "/etc/cahookrelay/tls/tls.key"),
+		WebhookIDsRaw:   config.Env("CAHOOKRELAY_WEBHOOK_IDS", ""),
+		IntermediateRaw: config.Env("CAHOOKRELAY_INTERMEDIATE_NOT_AFTER", ""),
+		RedisURL:        strings.TrimSpace(os.Getenv("ENROLL_REDIS_URL")),
+		RedisUser:       config.Env("ENROLL_REDIS_USER", "cahookrelay"),
+		RedisPassword:   os.Getenv("ENROLL_REDIS_PASSWORD"),
+		LogLevel:        config.Env("CAHOOKRELAY_LOG_LEVEL", "info"),
 	}
 	var err error
-	if c.UpstreamTimeout, err = config.EnvDuration("CAHOOKRELAY_UPSTREAM_TIMEOUT", 10*time.Second); err != nil {
+	if c.RedisTimeout, err = config.EnvDuration("CAHOOKRELAY_REDIS_TIMEOUT", 4*time.Second); err != nil {
 		return c, err
 	}
 	return c, c.validate()
 }
 
-func (c relayConfig) validate() error {
+func (c *scepConfig) validate() error {
 	var errs []error
 	host, port, err := net.SplitHostPort(c.Listen)
 	if err != nil || port == "" {
@@ -81,124 +81,140 @@ func (c relayConfig) validate() error {
 	if c.CertFile == "" || c.KeyFile == "" {
 		errs = append(errs, errors.New("CAHOOKRELAY_TLS_CERT_FILE and CAHOOKRELAY_TLS_KEY_FILE are required"))
 	}
-	if c.UpstreamURL == "" {
-		errs = append(errs, errors.New("CAHOOKRELAY_UPSTREAM_URL is required"))
-	} else if u, err := url.Parse(c.UpstreamURL); err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
-		errs = append(errs, fmt.Errorf("CAHOOKRELAY_UPSTREAM_URL must be an https URL without query or fragment, got %q", c.UpstreamURL))
+	if ids, err := parseWebhookIDs(c.WebhookIDsRaw); err != nil {
+		errs = append(errs, fmt.Errorf("CAHOOKRELAY_WEBHOOK_IDS: %w", err))
+	} else {
+		c.WebhookIDs = ids
 	}
-	if c.UpstreamCAFile == "" {
-		errs = append(errs, errors.New("CAHOOKRELAY_UPSTREAM_CA_FILE is required"))
+	if at, ok := parseGoTime(strings.TrimSpace(c.IntermediateRaw)); !ok {
+		errs = append(errs, errors.New("CAHOOKRELAY_INTERMEDIATE_NOT_AFTER must be an RFC 3339 timestamp with explicit timezone"))
+	} else {
+		c.IntermediateNotAfter = at
 	}
-	if c.TokenFile == "" {
-		errs = append(errs, errors.New("CAHOOKRELAY_TOKEN_FILE is required"))
+	if c.RedisURL == "" {
+		errs = append(errs, errors.New("ENROLL_REDIS_URL is required"))
 	}
-	if c.UpstreamTimeout < time.Second || c.UpstreamTimeout > 30*time.Second {
-		errs = append(errs, fmt.Errorf("CAHOOKRELAY_UPSTREAM_TIMEOUT is %s: keep it between 1s and 30s", c.UpstreamTimeout))
+	if c.RedisPassword == "" {
+		errs = append(errs, errors.New("ENROLL_REDIS_PASSWORD is required"))
+	}
+	if c.RedisTimeout < 500*time.Millisecond || c.RedisTimeout > 15*time.Second {
+		errs = append(errs, fmt.Errorf("CAHOOKRELAY_REDIS_TIMEOUT is %s: keep it between 500ms and 15s", c.RedisTimeout))
 	}
 	return errors.Join(errs...)
 }
 
-// tokenFile holds the bearer token read from a mounted Secret file and reloaded
-// periodically so token rotation needs no restart.
-type tokenFile struct {
-	File string
-	Log  *slog.Logger
-
-	cur atomic.Pointer[string]
-}
-
-func (t *tokenFile) Load() error {
-	raw, err := os.ReadFile(t.File)
-	if err != nil {
-		return fmt.Errorf("cahookrelay: read token file: %w", err)
+func parseWebhookIDs(raw string) (map[string]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, errors.New("required (scep-challenge=<id>,scep-authorize=<id>)")
 	}
-	tok := strings.TrimSpace(string(raw))
-	if tok == "" || strings.ContainsAny(tok, "\r\n") {
-		return errors.New("cahookrelay: token file is empty or contains a line break")
+	required := map[string]bool{
+		"scep-challenge": true,
+		"scep-authorize": true,
 	}
-	t.cur.Store(&tok)
-	return nil
-}
-
-func (t *tokenFile) Get() string {
-	p := t.cur.Load()
-	if p == nil {
-		return ""
+	ids := make(map[string]string, 2)
+	seenVal := make(map[string]bool, 2)
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		kind, id, ok := strings.Cut(entry, "=")
+		if !ok || strings.Contains(id, "=") || kind == "" || id == "" {
+			return nil, errors.New("each entry must be <kind>=<id>")
+		}
+		if !required[kind] {
+			return nil, fmt.Errorf("unknown hook kind %q (only scep-challenge, scep-authorize allowed)", kind)
+		}
+		if !webhookIDPattern.MatchString(id) {
+			return nil, fmt.Errorf("invalid webhook id for %s", kind)
+		}
+		if _, dup := ids[kind]; dup {
+			return nil, fmt.Errorf("%s listed twice", kind)
+		}
+		if seenVal[id] {
+			return nil, errors.New("each hook kind must have its own distinct webhook id")
+		}
+		ids[kind] = id
+		seenVal[id] = true
 	}
-	return *p
-}
-
-func (t *tokenFile) Watch(ctx context.Context, every time.Duration) {
-	tick := time.NewTicker(every)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			if err := t.Load(); err != nil && t.Log != nil {
-				// Never log token contents.
-				t.Log.Warn("token file reload failed, keeping the current token", slog.Any("err", err))
-			}
+	for k := range required {
+		if _, ok := ids[k]; !ok {
+			return nil, fmt.Errorf("missing %s", k)
 		}
 	}
+	return ids, nil
 }
 
-func newUpstreamClient(caFile string, timeout time.Duration) (*http.Client, error) {
-	raw, err := os.ReadFile(caFile)
-	if err != nil {
-		return nil, fmt.Errorf("cahookrelay: read upstream CA file: %w", err)
-	}
-	pool, _, err := mailfront.ParseCertPool(raw)
-	if err != nil {
-		return nil, fmt.Errorf("cahookrelay: upstream CA file: %w", err)
-	}
-
-	transport := &http.Transport{
-		Proxy: nil, // Never follow environment proxies with the bearer token.
-		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		TLSClientConfig: &tls.Config{
-			RootCAs:    pool,
-			MinVersion: tls.VersionTLS12,
-		},
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: timeout,
-		MaxIdleConns:          16,
-		IdleConnTimeout:       60 * time.Second,
-	}
-	return &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			// Never follow redirects with the bearer token.
-			return http.ErrUseLastResponse
-		},
-	}, nil
-}
-
-// hookRelay forwards POST requests for allowedPaths to upstreamBase with the
-// configured bearer token and the two Smallstep webhook headers.
+// scepHookHandler handles step-ca's SCEPCHALLENGE and AUTHORIZING webhooks
+// locally against i10-enroll-redis as the `cahookrelay` ACL user: read and
+// write enroll:scep:*, read enroll:sess:*, nothing else.
 //
-// ⚠ NEVER LOGS THE TOKEN, BODIES OR HEADERS.
-type hookRelay struct {
-	upstreamBase string
-	token        func() string
-	client       *http.Client
-	log          *slog.Logger
+// ⚠ WHAT A COMPROMISED RELAY CAN DO (main.go, design doc 6.5). It parses
+// step-ca's webhook bodies, so treat it as able to send any command its ACL
+// allows. IT CAN TAKE OVER AN ENROLLMENT THAT IS IN SCEP: step-ca sends it
+// every in-flight challenge in plaintext, so it can bind a victim's enrollment
+// to its own key, and enrollctl cannot tell that binding from the device's (a
+// compromised step-ca can do the same). That is inherent to SCEP. What it
+// cannot do: write a session (so it cannot attest one, change its challenge,
+// serial or person, or touch one that is not in SCEP), bind a challenge whose
+// plaintext it was never sent, or reach a sealed profile or a minted device.
+// Beyond the takeover it can refuse or stall enrollments.
+//
+// NEVER LOGS WEBHOOK IDS, CHALLENGES, SERIALS, KEYS, OR REQUEST BODIES.
+type scepHookHandler struct {
+	store                enrollredis.Store
+	webhookIDs           map[string]string
+	intermediateNotAfter time.Time
+	timeout              time.Duration
+	now                  func() time.Time
+	log                  *slog.Logger
 }
 
-func (h *hookRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !allowedPaths[r.URL.Path] || r.URL.RawQuery != "" {
-		http.NotFound(w, r)
+func (h *scepHookHandler) currentNow() time.Time {
+	if h.now != nil {
+		return h.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func sameTextConstTime(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ha := sha256.Sum256([]byte(a))
+	hb := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
+}
+
+func (h *scepHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			if h.log != nil {
+				h.log.Error("scep hook panic recovered", "path", r.URL.Path)
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}()
+
+	if r.URL.RawQuery != "" || r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	path := r.URL.Path
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
+	var kind string
+	switch r.URL.Path {
+	case "/scep-challenge":
+		kind = "scep-challenge"
+	case "/scep-authorize":
+		kind = "scep-authorize"
+	default:
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	wantID := h.webhookIDs[kind]
+	if !sameTextConstTime(r.Header.Get(headerSmallstepID), wantID) {
+		if h.log != nil {
+			h.log.Warn("scep hook rejected", "hook", kind, "outcome", "unauthenticated")
+		}
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
@@ -207,61 +223,100 @@ func (h *hookRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	tok := h.token()
-	if tok == "" {
-		h.log.Error("webhook relay has no token configured", "path", path)
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+	now := h.currentNow()
+	ts, ok := parseBodyTimestamp(body)
+	if !ok {
+		if h.log != nil {
+			h.log.Warn("scep hook rejected", "hook", kind, "outcome", "stale_or_unreadable")
+		}
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	delta := now.Sub(ts)
+	if delta < -timestampWindow || delta > timestampWindow {
+		if h.log != nil {
+			h.log.Warn("scep hook rejected", "hook", kind, "outcome", "stale_or_unreadable")
+		}
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	timeout := h.timeout
+	if timeout <= 0 {
+		timeout = 4 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 
 	start := time.Now()
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, h.upstreamBase+path, bytes.NewReader(body))
+	var decision enrollredis.SCEPDecision
+	switch kind {
+	case "scep-challenge":
+		decision, err = h.handleSCEPChallenge(ctx, body, now)
+	case "scep-authorize":
+		decision, err = h.handleSCEPAuthorize(ctx, body, now)
+	}
 	if err != nil {
-		h.log.Error("webhook relay could not build upstream request", "path", path)
-		http.Error(w, "bad gateway", http.StatusBadGateway)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	ct := r.Header.Get("Content-Type")
-	if ct == "" {
-		ct = "application/json"
-	}
-	req.Header.Set("Content-Type", ct)
-	if sig := r.Header.Get(headerSmallstepSig); sig != "" {
-		req.Header.Set(headerSmallstepSig, sig)
-	}
-	if wid := r.Header.Get(headerSmallstepID); wid != "" {
-		req.Header.Set(headerSmallstepID, wid)
-	}
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		h.log.Warn("webhook upstream call failed", "path", path,
-			"duration", time.Since(start).Round(time.Millisecond).String(), slog.Any("err", err))
-		http.Error(w, "bad gateway", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
-	if err != nil || len(respBody) > maxBodyBytes {
-		h.log.Warn("webhook upstream response unreadable or too large", "path", path, "status", resp.StatusCode)
-		http.Error(w, "bad gateway", http.StatusBadGateway)
+		if h.log != nil {
+			h.log.Error("scep hook failed", "hook", kind, "outcome", "redis_error",
+				"duration", time.Since(start).Round(time.Millisecond).String())
+		}
+		// Fail closed on Redis errors; step-ca refuses issuance on 5xx.
+		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 
-	if respCT := resp.Header.Get("Content-Type"); respCT != "" {
-		w.Header().Set("Content-Type", respCT)
+	if h.log != nil {
+		h.log.Info("scep hook handled", "hook", kind, "outcome", decision.Outcome,
+			"allow", decision.Allow, "duration", time.Since(start).Round(time.Millisecond).String())
 	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(respBody)
-	h.log.Info("webhook relayed", "path", path, "status", resp.StatusCode,
-		"duration", time.Since(start).Round(time.Millisecond).String())
+	writeAllowJSON(w, decision.Allow)
+}
+
+// handleSCEPChallenge claims the challenge for the CSR's key. A template
+// refusal against a real challenge is recorded as the session's SCEP refusal
+// (enroll:scep:refusal:<eid>) so the console shows it: cahookrelay may read
+// sessions, never write them.
+func (h *scepHookHandler) handleSCEPChallenge(ctx context.Context, body []byte, now time.Time) (enrollredis.SCEPDecision, error) {
+	parsed, chalHex, refusal := parseSCEPChallengeBody(body)
+	if refusal != "" {
+		if refusal == "bad_template" && chalHex != "" {
+			if chal, err := h.store.GetSCEPChallenge(ctx, chalHex); err == nil && chal != nil && chal.EID != "" {
+				_ = h.store.MarkSCEPRefused(ctx, chal.EID, refusal)
+			}
+		}
+		return enrollredis.SCEPDecision{Allow: false, Outcome: refusal}, nil
+	}
+	return h.store.SCEPClaim(ctx, parsed.Challenge, parsed.KeySHA256, parsed.TransactionID, parsed.CommonName, now)
+}
+
+// handleSCEPAuthorize allows issuance for a bound key; a template refusal is
+// recorded the same way.
+func (h *scepHookHandler) handleSCEPAuthorize(ctx context.Context, body []byte, now time.Time) (enrollredis.SCEPDecision, error) {
+	parsed, keyHexHint, refusal := parseAndCheckSCEPAuthorize(body, now, h.intermediateNotAfter)
+	if refusal != "" {
+		if refusal == "bad_template" && keyHexHint != "" {
+			if kb, err := h.store.GetSCEPKeyBinding(ctx, keyHexHint); err == nil && kb != nil && kb.EID != "" {
+				_ = h.store.MarkSCEPRefused(ctx, kb.EID, refusal)
+			}
+		}
+		return enrollredis.SCEPDecision{Allow: false, Outcome: refusal}, nil
+	}
+	return h.store.SCEPAuthorize(ctx, parsed.KeySHA256, parsed.CommonName, now)
+}
+
+func writeAllowJSON(w http.ResponseWriter, allow bool) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(struct {
+		Allow bool `json:"allow"`
+	}{Allow: allow})
 }

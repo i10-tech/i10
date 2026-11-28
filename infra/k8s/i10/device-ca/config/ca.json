@@ -19,34 +19,6 @@
     "enableAdmin": false,
     "provisioners": [
       {
-        "type": "ACME",
-        "name": "apple",
-        "challenges": ["device-attest-01"],
-        "attestationFormats": ["apple"],
-        "claims": {
-          "minTLSCertDuration": "5m",
-          "maxTLSCertDuration": "26280h",
-          "defaultTLSCertDuration": "26280h",
-          "disableRenewal": true,
-          "allowRenewalAfterExpiry": false,
-          "enableSSHCA": false
-        },
-        "options": {
-          "x509": {
-            "templateFile": "/home/step/config/apple.tpl"
-          },
-          "webhooks": [
-            {
-              "id": "e39699ea-6eab-4326-a1ef-fd8c6899a7ef",
-              "name": "acme-authorize",
-              "url": "https://127.0.0.1:9443/acme-authorize",
-              "kind": "AUTHORIZING",
-              "certType": "X509"
-            }
-          ]
-        }
-      },
-      {
         "type": "SCEP",
         "name": "apple-scep",
         "excludeIntermediate": true,
@@ -79,13 +51,6 @@
               "name": "scep-authorize",
               "url": "https://127.0.0.1:9443/scep-authorize",
               "kind": "AUTHORIZING",
-              "certType": "X509"
-            },
-            {
-              "id": "4ad0dee7-ae86-4589-a60c-a2616ad17aa5",
-              "name": "scep-notify",
-              "url": "https://127.0.0.1:9443/scep-notify",
-              "kind": "NOTIFYING",
               "certType": "X509"
             }
           ]

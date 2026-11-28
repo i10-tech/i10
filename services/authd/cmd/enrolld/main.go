@@ -1,11 +1,12 @@
-// Command enrolld is the Apple over-the-air enrollment HTTP service (#383 PR 4).
+// Command enrolld is the Apple over-the-air enrollment HTTP service.
 //
 // It sits behind Traefik (which terminates TLS for ca.i10.tech and routes only
-// /enroll/apple/) and talks to the API's internal :3443 hooks listener over
-// HTTPS pinned to the namespace hooks CA. It holds no database credentials, no
-// device-code keys and no CMS encryption code: every account/platform/mint
-// decision and profile sealing lives in the API. See "Enrollment service" in
-// services/authd/README.md.
+// /enroll/apple/) and talks to enrollctl's internal :3443 listener over HTTPS
+// pinned to the namespace hooks CA. It holds ONLY ENROLL_EDGE_HMAC_KEY (to
+// reject forged or expired link tokens locally with zero upstream traffic) and
+// its enrollctl bearer token. It holds no database credentials, no Redis
+// credentials, no device-code keys, no profile signing key, and no profile
+// rendering or CMS encryption code: every signed profile comes from enrollctl.
 package main
 
 import (
@@ -63,8 +64,7 @@ func run() error {
 	handler, err := enroll.NewHandler(enroll.HandlerConfig{
 		API:           apiClient,
 		Trust:         deviceBundle.Current,
-		ProfileURL:    cfg.ProfileURL,
-		SCEPURL:       cfg.SCEPURL,
+		EdgeLinkKeys:  cfg.EdgeLinkKeys,
 		MaxConcurrent: cfg.MaxConcurrent,
 		Log:           log,
 	})
@@ -86,7 +86,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("enrolld: listen on %s: %w", cfg.Listen, err)
 	}
-	log.Info("listening", "addr", ln.Addr().String(), "api", cfg.APIURL)
+	log.Info("listening", "addr", ln.Addr().String(), "enrollctl", cfg.APIURL)
 
 	errc := make(chan error, 1)
 	go func() {

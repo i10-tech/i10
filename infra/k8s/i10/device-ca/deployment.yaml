@@ -11,11 +11,10 @@
 # is cut from it for `ca.json`'s `dnsNames`. Under any other name Traefik cannot
 # verify step-ca, and nothing on ca.i10.tech answers.
 ---
-# ACME accounts, orders and unredeemed nonces, which step-ca keeps with no
-# expiry (Apple's payload has no external account binding). Nothing in here is
-# needed once an enrollment ends, so the volume may be wiped: scale the
-# Deployment to 0, delete the PVC, and let Argo recreate both. The Traefik
-# middlewares in ingressroute.yaml are what stop an outsider filling it.
+# Badger database required by step-ca (now SCEP-only after ACME moved to acmed
+# + i10-enroll-redis in I10-62). Nothing in here is needed once an enrollment
+# ends, so the volume may be wiped: scale the Deployment to 0, delete the PVC,
+# and let Argo recreate both.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -172,7 +171,7 @@ spec:
             limits: { memory: 256Mi }
           volumeMounts:
             - { name: bin, mountPath: /opt/step-ca, readOnly: true }
-            # ca.json and the two templates, from the hashed ConfigMap
+            # ca.json and apple-scep.tpl, from the hashed ConfigMap
             # (kustomization.yaml), so an edit rolls the pod.
             - { name: config, mountPath: /home/step/config, readOnly: true }
             - { name: keys, mountPath: /home/step/secrets, readOnly: true }
@@ -180,31 +179,37 @@ spec:
             - { name: db, mountPath: /home/step/db }
             - { name: tmp, mountPath: /tmp }
 
-        # ── the webhook relay ────────────────────────────────────────────────
+        # -- the SCEP webhook sidecar (handles /scep-challenge and /scep-authorize locally against i10-enroll-redis) --
         - name: cahookrelay
-          # ⚠ THE i10-authd IMAGE, ON authd's PIN. pin-image.py rewrites every
+          # THE i10-authd IMAGE, ON authd's PIN. pin-image.py rewrites every
           # i10-authd reference under infra/k8s on each authd build, this one
-          # included. A digest older than #535 has no /usr/local/bin/cahookrelay.
+          # included.
           image: ghcr.io/i10-tech/i10-authd:prod-4eb1ccf4537c3a953664c530f25d7230aeba31df@sha256:c9e4b89b95f6a37e9fcdedf40ecf412e865c98801c8bb8ab58fbb5a08fae40e1
           command: ["/usr/local/bin/cahookrelay"]
-          # services/authd/README.md, "Configuration (cahookrelay)". Every
-          # variable is set, defaults included, so this file says what runs.
+          # services/authd/README.md, "Configuration (cahookrelay)".
           env:
-            # ⚠ LOOPBACK ONLY. The relay refuses any other address, and the
+            # LOOPBACK ONLY. The sidecar refuses any other address, and the
             # webhook URLs in ca.json name this one.
             - { name: CAHOOKRELAY_LISTEN, value: "127.0.0.1:9443" }
             - { name: CAHOOKRELAY_TLS_CERT_FILE, value: /etc/cahookrelay/tls/tls.crt }
             - { name: CAHOOKRELAY_TLS_KEY_FILE, value: /etc/cahookrelay/tls/tls.key }
-            # The API's hooks listener (workloads/api.yaml), verified against the
-            # namespace CA that signed it, which is also the `ca.crt` of the
-            # relay's own certificate Secret.
-            - name: CAHOOKRELAY_UPSTREAM_URL
-              value: https://i10-api-ca-hooks.i10-prod.svc:3443
-            - { name: CAHOOKRELAY_UPSTREAM_CA_FILE, value: /etc/cahookrelay/tls/ca.crt }
-            - { name: CAHOOKRELAY_TOKEN_FILE, value: /etc/cahookrelay/token/token }
-            # Above the API's own 4-second deadline per hook, so the API, not
-            # the relay, decides when a hook has taken too long.
-            - { name: CAHOOKRELAY_UPSTREAM_TIMEOUT, value: "10s" }
+            - name: CAHOOKRELAY_WEBHOOK_IDS
+              value: "scep-challenge=d4185e32-67aa-4d2c-bf83-7463fa45eaa5,scep-authorize=ef66dda6-0712-49e1-8084-f8b392991b01"
+            - {
+                name: CAHOOKRELAY_INTERMEDIATE_NOT_AFTER,
+                value: "2036-11-26T00:00:00Z",
+              }
+            - {
+                name: ENROLL_REDIS_URL,
+                value: "redis://i10-enroll-redis.i10-prod.svc:6379",
+              }
+            - { name: ENROLL_REDIS_USER, value: "cahookrelay" }
+            - name: ENROLL_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-device-ca-hooks
+                  key: ENROLL_REDIS_PASSWORD
+            - { name: CAHOOKRELAY_REDIS_TIMEOUT, value: "4s" }
             - { name: CAHOOKRELAY_LOG_LEVEL, value: "info" }
           securityContext:
             # The distroless image's `nonroot`.
@@ -218,9 +223,8 @@ spec:
             limits: { memory: 64Mi }
           volumeMounts:
             - { name: relay-tls, mountPath: /etc/cahookrelay/tls, readOnly: true }
-            - { name: relay-token, mountPath: /etc/cahookrelay/token, readOnly: true }
-          # ⚠ NO PROBES, for the reason authd has none (stalwart/node/
-          # statefulset.yaml): the relay binds 127.0.0.1 only and the kubelet
+          # NO PROBES, for the reason authd has none (stalwart/node/
+          # statefulset.yaml): the sidecar binds 127.0.0.1 only and the kubelet
           # probes the pod IP. If it exits, the pod goes NotReady and the
           # kubelet restarts it; step-ca meanwhile meets a transport error on
           # every hook and refuses the device. It never issues on an error.
@@ -229,7 +233,7 @@ spec:
         - name: config
           configMap:
             name: i10-device-ca-config
-        # ⚠ ONLY THE FOUR NAMED KEYS, NEVER THE WHOLE SECRET. The Doppler config
+        # ONLY THE FOUR NAMED KEYS, NEVER THE WHOLE SECRET. The Doppler config
         # shadows the root `prod` config's five inherited keys with empty values
         # (README.md, "Where the keys are"), but a key added to root `prod`
         # later would inherit again. `items` keeps anything not named here out
@@ -259,15 +263,6 @@ spec:
             items:
               - { key: tls.crt, path: tls.crt }
               - { key: tls.key, path: tls.key }
-              - { key: ca.crt, path: ca.crt }
-        # ⚠ THE BEARER TOKEN, MOUNTED ONLY INTO THE RELAY. step-ca never sees
-        # it, so neither `GET /provisioners` nor step-ca's logs can carry it.
-        - name: relay-token
-          secret:
-            secretName: i10-device-ca-hooks
-            defaultMode: 0440
-            items:
-              - { key: CA_HOOK_TOKEN, path: token }
         - name: db
           persistentVolumeClaim:
             claimName: i10-device-ca-db

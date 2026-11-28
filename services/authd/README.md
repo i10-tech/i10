@@ -1482,96 +1482,255 @@ the reconnects.
 | `MAILFRONT_MAC_SMTP_SAME_ADDRESS` | `true`                       | Mirror of `AUTHD_MAC_SMTP_SAME_ADDRESS`.                |
 | `MAILFRONT_LOG_LEVEL`             | `info`                       | `debug` logs every sweep's timings.                     |
 
-## CA webhook relay (`cmd/cahookrelay`, #383 PR 3)
+## CA webhook relay (`cmd/cahookrelay`, I10-62)
 
-`cmd/cahookrelay` is the third binary in this image, run as a loopback TLS
-sidecar in the step-ca pod. step-ca serves its webhook URLs on the
-unauthenticated `GET /provisioners` endpoint, logs full webhook URLs on
-transport errors, and drops `Webhook.Secret` and `BearerToken` written in
-`ca.json` when no admin database is enabled. Putting the bearer token in this
-relay keeps every secret out of step-ca's config.
+`cmd/cahookrelay` runs as a loopback TLS sidecar in the `i10-device-ca` pod.
+`step-ca` now serves SCEP (`apple-scep`) only; ACME moved to `cmd/acmed` +
+`cmd/enrollctl`, and `scep-notify` was removed. Instead of relaying webhooks to
+`i10-api`, `cahookrelay` validates and authorizes SCEP webhooks locally against
+`i10-enroll-redis` under the `cahookrelay` Redis ACL: read and write
+`enroll:scep:*`, **read-only** `enroll:sess:*`, and only the commands its
+scripts run.
 
+- **What a compromised relay can do:** step-ca sends it every in-flight
+  challenge in plaintext, so it (or a compromised step-ca, in the same pod)
+  CAN bind a victim's enrollment that is in SCEP to its own key, and the finish
+  would return the victim's device code encrypted to that key. That is
+  inherent to SCEP and was true before I10-62. What the design bounds: a key
+  binding carries the challenge plaintext, and `enrollctl` mints only when
+  `sha256(challenge)` is the session's current `scep_chal_hash` and the binding
+  names that session and the Phase 4 certificate's key, so a party who can
+  only write Redis cannot bind anything. The relay cannot write a session (so
+  it cannot attest one, change its challenge, serial or person, or touch a
+  session not in SCEP) and cannot reach a sealed profile or a minted device.
+  It can also refuse (`enroll:scep:refusal:<eid>`, terminal) or stall an
+  enrollment. See docs/research/enrollment-at-scale.md section 6.5.
 - **Loopback TLS only:** listens on `127.0.0.1:<port>` (default `9443`) with a
   certificate carrying `IP:127.0.0.1` and `DNS:localhost`, reloaded every 30
   seconds from mounted files.
-- **Exact four paths:** `POST` to `/acme-authorize`, `/scep-challenge`,
-  `/scep-authorize`, `/scep-notify` with no query string; anything else gets
-  `404` (non-`POST` gets `405`).
-- **Bounded and verified:** caps request and response bodies at 64 KiB, adds
-  `Authorization: Bearer <token>` from a mounted file reloaded every 30 seconds,
-  preserves only `X-Smallstep-Signature`, `X-Smallstep-Webhook-ID` and
-  `Content-Type`, and verifies the upstream API `:3443` listener's TLS strictly
-  against the configured CA file (no redirects, no environment proxy).
-- **No secret logging:** logs only the fixed path, status code, duration and
-  transport errors; never the token, request/response bodies or headers.
+- **Exact two paths:** `POST` to `/scep-challenge` and `/scep-authorize` with
+  no query string; anything else, a non-`POST` included, gets `404`.
+- **Strict validation:** verifies `X-Smallstep-Webhook-ID` against
+  `CAHOOKRELAY_WEBHOOK_IDS`, enforces a 60-second body timestamp window, checks
+  strict x509util SCEP template invariants (a CN that is the device serial and
+  no other subject attribute, no SANs, only the `emailProtection` EKU,
+  `digitalSignature` + `keyEncipherment`,
+  <= 7 days, ending before `CAHOOKRELAY_INTERMEDIATE_NOT_AFTER`), and fails
+  closed (`503`) on any Redis error.
+- **No secret logging:** logs only the fixed path, outcome, status code, and
+  duration; never challenges, CSRs, or Redis passwords.
 
 ### Configuration (`cahookrelay`)
 
-| Variable                       | Default                        |                                                |
-| ------------------------------ | ------------------------------ | ---------------------------------------------- |
-| `CAHOOKRELAY_LISTEN`           | `127.0.0.1:9443`               | Must be loopback.                              |
-| `CAHOOKRELAY_TLS_CERT_FILE`    | `/etc/cahookrelay/tls/tls.crt` | Re-read every 30 s. `IP:127.0.0.1, localhost`. |
-| `CAHOOKRELAY_TLS_KEY_FILE`     | `/etc/cahookrelay/tls/tls.key` |                                                |
-| `CAHOOKRELAY_UPSTREAM_URL`     | -                              | Required `https://` base URL (API `:3443`).    |
-| `CAHOOKRELAY_UPSTREAM_CA_FILE` | -                              | Required PEM CA file to verify upstream TLS.   |
-| `CAHOOKRELAY_TOKEN_FILE`       | -                              | Required bearer token file. Re-read every 30s. |
-| `CAHOOKRELAY_UPSTREAM_TIMEOUT` | `10s`                          | 1 s to 30 s.                                   |
-| `CAHOOKRELAY_LOG_LEVEL`        | `info`                         |                                                |
+| Variable                             | Default                        |                                                     |
+| ------------------------------------ | ------------------------------ | --------------------------------------------------- |
+| `CAHOOKRELAY_LISTEN`                 | `127.0.0.1:9443`               | Must be loopback.                                   |
+| `CAHOOKRELAY_TLS_CERT_FILE`          | `/etc/cahookrelay/tls/tls.crt` | Re-read every 30 s. `IP:127.0.0.1, localhost`.      |
+| `CAHOOKRELAY_TLS_KEY_FILE`           | `/etc/cahookrelay/tls/tls.key` |                                                     |
+| `CAHOOKRELAY_WEBHOOK_IDS`            | -                              | Required `scep-challenge=<id>,scep-authorize=<id>`. |
+| `CAHOOKRELAY_INTERMEDIATE_NOT_AFTER` | -                              | Required RFC 3339 intermediate expiry ceiling.      |
+| `ENROLL_REDIS_URL`                   | -                              | Required `redis://` URL for `i10-enroll-redis`.     |
+| `ENROLL_REDIS_USER`                  | `cahookrelay`                  | ACL user (`enroll:scep:*`, read-only sessions).     |
+| `ENROLL_REDIS_PASSWORD`              | -                              | Password for the `cahookrelay` ACL user.            |
+| `CAHOOKRELAY_REDIS_TIMEOUT`          | `4s`                           | 500 ms to 15 s.                                     |
+| `CAHOOKRELAY_LOG_LEVEL`              | `info`                         |                                                     |
 
-## Enrollment service (`cmd/enrolld`, #383 PR 4)
+## Enrollment service (`cmd/enrolld`, I10-62)
 
-`cmd/enrolld` is the fourth binary in this image, run in its own Deployment
-behind Traefik (which terminates TLS for `ca.i10.tech` and routes only
-`/enroll/apple/`). It implements Apple's over-the-air Profile Service flow
-(`docs/research/mail-device-binding.md` section 12): serving the phase 1
-profile, verifying phase 2 and phase 4 CMS `SignedData` requests and their
-attributes plists, serving the phase 2 SCEP-only profile, and relaying the
-API's sealed phase 4 profile unchanged.
+`cmd/enrolld` runs behind Traefik on `ca.i10.tech/enroll/apple/` (2 replicas).
+It implements Apple's over-the-air Profile Service edge: verifying signed edge
+link tokens locally, verifying Phase 2 and Phase 4 CMS `SignedData` requests
+and attribute plists, calling `enrollctl /enrolld/{peek,attest,finish}`, and
+relaying `enrollctl`'s signed Phase 1, Phase 2, and Phase 4 `.mobileconfig`
+bytes verbatim.
 
-- **What it holds:** no database credentials, no device-code keys, and no CMS
-  encryption or signing keys. Its only secret is `ENROLLD_API_TOKEN` (from one
-  named Secret key) for calling the API's `:3443` listener, plus public CA
-  certificates on disk.
+- **What it holds:** `ENROLL_EDGE_HMAC_KEY` (to reject forged or expired link
+  tokens before taking a concurrency slot or making any upstream call),
+  `ENROLLD_API_TOKEN` (bearer token for `enrollctl`), and public CA files. No
+  database credentials, no Redis credentials, no device-code keys, no ACME permit
+  keys, and no profile-signing or encryption keys.
 - **What it trusts:**
   - Phase 2: the embedded pinned `Apple iPhone Device CA` certificate (checked
     by issuer bytes and `Certificate.CheckSignature` for `SHA1WithRSA` and
-    `SHA256WithRSA` only, ignoring dates on this chain only). SignerInfo
-    verification is performed directly without `pkcs7.Verify*` so `signingTime`
-    is never compared against expired leaf dates.
+    `SHA256WithRSA` only, ignoring expired cert dates on this chain only).
   - Phase 4: the mounted device CA public trust bundle
-    (`ENROLLD_DEVICE_CA_BUNDLE`, reloaded every 30 s). Leaves must verify via
-    `x509.Verify` to a mounted root through a mounted intermediate (refusing
-    root-issued certificates such as the SCEP decrypter), carry explicit
-    `emailProtection` EKU, and carry no SAN extension at all (including unparsed
-    `otherName` SANs).
-  - API calls: HTTPS to `ENROLLD_API_URL` pinned strictly to
-    `ENROLLD_API_CA_FILE` (never the system root pool, no redirects, no proxy).
-- **What it logs:** structured JSON carrying phase, outcome, `product`, API
-  refusal reason, duration, and a truncated HMAC-SHA256 of the serial under a
-  random per-process key. Never logs tokens, challenges, other attributes,
-  inner plists, sealed profiles, or device codes.
-- **Threat model:** `enrolld` parses untrusted bytes from the internet (capped
-  at 64 KiB, concurrency-bounded, panic-guarded, strict flat XML parser). A
-  compromise gives an attacker only what any device on the internet can reach
-  on `/enrolld/{peek,attest,finish}` plus unencrypted phase 2 attributes and
-  already-encrypted phase 4 profiles passing through. It cannot mint a code for
-  someone who did not start an enrollment, and it never sees a plaintext device
-  code (the API seals the final profile).
+    (`ENROLLD_DEVICE_CA_BUNDLE`, reloaded every 30 s). Leaves must verify to a
+    mounted root through a mounted intermediate, carry explicit
+    `emailProtection` EKU, and carry no SAN extension at all.
+  - Upstream calls: HTTPS to `ENROLLD_API_URL` (`i10-enrollctl:3443`) pinned
+    strictly to `ENROLLD_API_CA_FILE` (never the system root pool, no
+    redirects, no proxy).
+- **What it logs:** structured JSON carrying phase, outcome, `product`, refusal
+  reason, duration, and a truncated per-process HMAC of the serial. Never logs
+  tokens, challenges, inner plists, sealed profiles, or device codes.
 
 ### Configuration (`enrolld`)
 
-| Variable                   | Default                                      |                                                       |
-| -------------------------- | -------------------------------------------- | ----------------------------------------------------- |
-| `ENROLLD_LISTEN`           | `:8080`                                      | Plain HTTP on one port; Traefik terminates TLS.       |
-| `ENROLLD_API_URL`          | `https://i10-api-ca-hooks.i10-prod.svc:3443` | Required `https://` base URL for `/enrolld/*`.        |
-| `ENROLLD_API_CA_FILE`      | -                                            | Required PEM CA file (only trusted root for API TLS). |
-| `ENROLLD_API_TOKEN`        | -                                            | Required bearer token (single named Secret key).      |
-| `ENROLLD_DEVICE_CA_BUNDLE` | -                                            | Required device CA root + intermediate PEM bundle.    |
-| `ENROLLD_PROFILE_URL`      | `https://ca.i10.tech/enroll/apple/profile`   | Phase 1 `Profile Service` POST URL.                   |
-| `ENROLLD_SCEP_URL`         | `https://ca.i10.tech/scep/apple-scep`        | Phase 2 SCEP payload URL.                             |
-| `ENROLLD_API_TIMEOUT`      | `10s`                                        | 1 s to 30 s.                                          |
-| `ENROLLD_MAX_CONCURRENT`   | `16`                                         | 1 to 256 concurrent enrollment requests.              |
-| `ENROLLD_LOG_LEVEL`        | `info`                                       |                                                       |
+| Variable                   | Default                                   |                                                             |
+| -------------------------- | ----------------------------------------- | ----------------------------------------------------------- |
+| `ENROLLD_LISTEN`           | `:8080`                                   | Plain HTTP on one port; Traefik terminates TLS.             |
+| `ENROLLD_API_URL`          | `https://i10-enrollctl.i10-prod.svc:3443` | Required `https://` base URL for `enrollctl`.               |
+| `ENROLLD_API_CA_FILE`      | -                                         | Required PEM CA file (only trusted root for enrollctl TLS). |
+| `ENROLLD_API_TOKEN`        | -                                         | Required bearer token (single named Secret key).            |
+| `ENROLL_EDGE_HMAC_KEY`     | -                                         | Required `<kid>:<base64>` HMAC ring for edge link tokens.   |
+| `ENROLLD_DEVICE_CA_BUNDLE` | -                                         | Required device CA root + intermediate PEM bundle.          |
+| `ENROLLD_API_TIMEOUT`      | `10s`                                     | 1 s to 30 s.                                                |
+| `ENROLLD_MAX_CONCURRENT`   | `64`                                      | 1 to 256 concurrent enrollment requests.                    |
+| `ENROLLD_LOG_LEVEL`        | `info`                                    |                                                             |
+
+## Enrollment control service (`cmd/enrollctl`, I10-62)
+
+`cmd/enrollctl` is the internal enrollment control plane (2 replicas, HTTPS on
+`:3443` under the hooks transport CA, no internet ingress). It owns all
+enrollment state transitions, profile rendering and signing, Postgres
+micro-batched commits, and Mac ACME certificate issuance:
+
+- **`/enrolld/{peek,attest,finish}`** (authenticated by
+  `ENROLLCTL_ENROLLD_TOKEN_HASHES`): advances `i10-enroll-redis` sessions,
+  renders and CMS-signs Phase 1 (Profile Service), Phase 2 (SCEP), and Phase 4
+  (CMS-encrypted Mail + Mac ACME) `.mobileconfig` payloads with the hot-reloaded
+  `profiles.i10.tech` ECDSA P-256 Let's Encrypt certificate, commits
+  `authd.mail_devices` via the micro-batcher (up to 200 items or 5 ms,
+  `enroll_writer` Postgres role, 2 connections/replica through PgBouncer,
+  `transaction_timeout` 4 s with `lock_timeout` 2 s and `statement_timeout`
+  3.5 s, strict lock order `authd.accounts FOR SHARE` ->
+  `authd.mail_devices` -> `authd.mail_device_cert_binds`), caches the sealed
+  Phase 4 profile in `enroll:sealed:<eid>` (120 s TTL) for iOS retry
+  idempotency, and emits a notification entry onto the `enroll:notice` Redis
+  stream for `i10-api` to deliver.
+- **`/acme/finalize`** (authenticated by `ENROLLCTL_ACMED_TOKEN_HASHES`,
+  strictly disjoint from `ENROLLCTL_ENROLLD_TOKEN_HASHES`): receives
+  `{serial, ou, csrDer, attestationX5c}`, independently re-verifies Apple's
+  `x5c` attestation chain against the pinned Apple Enterprise Attestation Root
+  CA, checks the Apple serial extension and the CSR's key and subject against
+  the attested leaf (the ACME challenge nonce is checked in `acmed` only),
+  validates the 50-char Mac ACME OU permit
+  (`ENROLLCTL_ACME_PERMIT_KEYS`), binds `cert_key_sha256` via the micro-batcher
+  (enforcing `device_id` + `serial`), and signs the 1095-day client certificate
+  using `DEVICE_CA_INTERMEDIATE_KEY`.
+
+### Configuration (`enrollctl`)
+
+| Variable                              | Default                                            |                                                               |
+| ------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------- |
+| `ENROLLCTL_LISTEN`                    | `:3443`                                            | Internal HTTPS listener (hooks transport CA).                 |
+| `ENROLLCTL_TLS_CERT_FILE`             | `/etc/enrollctl/tls/tls.crt`                       | Re-read every 30 s (`i10-enrollctl-tls`).                     |
+| `ENROLLCTL_TLS_KEY_FILE`              | `/etc/enrollctl/tls/tls.key`                       |                                                               |
+| `ENROLLCTL_PROFILE_SIGNING_CERT_FILE` | `/etc/enrollctl/profile-signing/tls.crt`           | Re-read every 30 s (`i10-profile-signing-tls`).               |
+| `ENROLLCTL_PROFILE_SIGNING_KEY_FILE`  | `/etc/enrollctl/profile-signing/tls.key`           |                                                               |
+| `ENROLLCTL_DEVICE_CA_CERT_FILE`       | `/etc/enrollctl/device-ca-issuer/intermediate.crt` | Device CA intermediate certificate (for Mac ACME signing).    |
+| `ENROLLCTL_DEVICE_CA_KEY_FILE`        | `/etc/enrollctl/device-ca-issuer/intermediate.key` | Device CA intermediate private key (never root or decrypter). |
+| `ENROLLCTL_DEVICE_CA_BUNDLE`          | `/etc/enrollctl/device-ca-trust/bundle.pem`        | Public root + intermediate bundle (Phase 4 SCEP verify).      |
+| `ENROLLCTL_DATABASE_URL`              | -                                                  | Required `enroll_writer` Postgres DSN via PgBouncer.          |
+| `ENROLL_REDIS_URL`                    | -                                                  | Required `redis://` URL for `i10-enroll-redis`.               |
+| `ENROLL_REDIS_USER`                   | `enrollctl`                                        | Redis ACL user (`enroll:*`).                                  |
+| `ENROLL_REDIS_PASSWORD`               | -                                                  | Password for `enrollctl` ACL user.                            |
+| `ENROLL_EDGE_HMAC_KEY`                | -                                                  | Required edge link HMAC key ring.                             |
+| `ENROLLCTL_ACME_PERMIT_KEYS`          | -                                                  | Required Mac ACME OU permit HMAC key ring (sole holder).      |
+| `ENROLL_ACME_PATH_KEYS`               | -                                                  | Required Mac ACME path token key ring (signs; same as acmed). |
+| `MAIL_DEVICE_CODE_KEYS`               | -                                                  | Required device-code HMAC key ring (matches `authd`).         |
+| `ENROLLCTL_ENROLLD_TOKEN_HASHES`      | -                                                  | Required comma-separated SHA-256 hex hashes for `enrolld`.    |
+| `ENROLLCTL_ACMED_TOKEN_HASHES`        | -                                                  | Required comma-separated SHA-256 hex hashes for `acmed`.      |
+| `ENROLLCTL_PROFILE_URL`               | `https://ca.i10.tech/enroll/apple/profile`         | Phase 1 `Profile Service` POST URL.                           |
+| `ENROLLCTL_SCEP_URL`                  | `https://ca.i10.tech/scep/apple-scep`              | Phase 2 SCEP payload URL.                                     |
+| `ENROLLCTL_ACME_DIRECTORY_URL`        | `https://ca.i10.tech/acme/apple/directory`         | Base each Mac's `.../d/<token>/directory` URL is made from.   |
+| `ENROLLCTL_IMAP_HOST` / `_PORT`       | `mail.i10.tech` / `993`                            | IMAP settings embedded in sealed Mail profiles.               |
+| `ENROLLCTL_SMTP_HOST` / `_PORT`       | `mail.i10.tech` / `465`                            | SMTP settings embedded in sealed Mail profiles.               |
+| `ENROLLCTL_ORGANIZATION`              | `i10`                                              | `PayloadOrganization` on rendered profiles.                   |
+| `ENROLLCTL_BATCH_MAX_SIZE`            | `200`                                              | 1 to 1000 commits per Postgres micro-batch.                   |
+| `ENROLLCTL_BATCH_MAX_WAIT`            | `5ms`                                              | 1 ms to 500 ms micro-batch flush delay.                       |
+| `ENROLLCTL_CALL_TIMEOUT`              | `5s`                                               | 1 s to 30 s per handler request.                              |
+| `ENROLLCTL_LOG_LEVEL`                 | `info`                                             |                                                               |
+
+## ACME server (`cmd/acmed`, I10-62)
+
+`cmd/acmed` is our stateless, keyless RFC 8555 `device-attest-01` ACME server
+for macOS (`ca.i10.tech/acme/apple/`, 2 replicas behind Traefik).
+
+- **Keyless security boundary:** `acmed` holds **no** CA private key, **no**
+  permit key, **no** device-code key, and **no** database access. Its two keys
+  mint nothing: `ACMED_NONCE_KEYS` MACs its own Replay-Nonces and account URLs,
+  and `ENROLL_ACME_PATH_KEYS` (shared with `enrollctl`, which signs) verifies
+  Mac path tokens. A forged path token only opens order creation for one
+  serial; finalize still needs Apple's attestation of that serial and the OU
+  permit only `enrollctl` signs.
+- **Every URL is under a Mac's path token.** The sealed Phase 4 profile, which
+  is CMS-encrypted to the Mac's SCEP key, names
+  `https://ca.i10.tech/acme/apple/d/<token>/directory`, with
+  `token = base64url(kid || device_id(16) || exp_be32 || serial ||
+HMAC-SHA256(K, "i10/acme-path/v1\0" || kid || device_id || serial || exp)[:16])`
+  and an expiry 10 minutes after the seal. `acmed` verifies the token (key id,
+  MAC, expiry) before anything else, with no Redis call: a missing or bad token
+  is a bare 404 with no Replay-Nonce. The directory and every link it returns
+  stay under the same token, and the JWS `url` is checked against that
+  per-request base. `new-order` must name the token's serial, and every order,
+  authorization and certificate records the token's device id and refuses a
+  request under another device's token (as well as another account's). The
+  token replaces the old `enroll:acme:serial:<serial>` gate: a serial is not a
+  secret, so the gate let anyone who knew one create orders.
+- **Nothing an unauthenticated client sends writes Redis.** A Replay-Nonce is
+  `base64url(kid || random16 || exp || HMAC-SHA256[:16])` (50 characters,
+  5-minute life) and issuing one writes nothing. An account is its key: its URL
+  is `<base>/acct/<base64url(canonical JWK)>.<base64url(kid || MAC[:16])>`
+  (label `i10/acme-account/v1`), so `new-account` writes nothing and spends no
+  nonce, and a `kid` whose MAC does not verify is `accountDoesNotExist`. A
+  Replay-Nonce is sent only on `new-nonce`, on `badNonce` problems and on
+  answers to JWS-authenticated requests.
+- **Nonce spend rule.** Every JWS request checks its nonce statelessly. A
+  read-only request (POST-as-GET on an account, order, authorization,
+  challenge or certificate, and a challenge response when the challenge and
+  its order are already done) spends no nonce and writes nothing. A state
+  change spends its nonce (`SET enroll:acme:used:<nonce> NX`, its remaining
+  life plus 60 s for clock skew) inside the one script that makes the change,
+  after every check that can refuse it: `new-order` in
+  `acme_create_order.lua` after the device's order cap; a challenge response in
+  `acme_answer_challenge.lua` after payload validation and the attestation
+  check (in Go, no state) and the pending check (in the script); finalize in
+  `acme_move_order.lua`, which claims the order after the CSR, subject and key
+  checks. A refusal writes nothing.
+- **One compare-and-set per transition.** Of N concurrent requests on one
+  object exactly one moves it and spends. Finalize claims the order
+  (`ready` -> `processing`) before it calls `enrollctl`, and completes it from
+  `processing` only: `valid` with the certificate (written by the same
+  script), `invalid` on a refusal, or back to `ready` when `enrollctl` is
+  unavailable. A finalize that finds the order `processing` gets
+  `orderNotReady` with `Retry-After`, spends nothing and writes nothing; a poll
+  shows `processing` with `Retry-After`.
+- **Bounded state:** orders, authorizations and issued chains live 10 minutes
+  in `i10-enroll-redis` under the `acmed` ACL (`enroll:acme:*` only), each write
+  keeping the object's remaining lifetime and never outliving the path token,
+  at most `ACMED_MAX_ORDERS_PER_DEVICE` orders per device id
+  (`enroll:acme:dev_orders:<device_id>`), so a re-enrollment (a new device id)
+  gets a fresh cap. With a valid path token Redis holds at most (devices sealed
+  in the last 10 minutes) x (cap) orders plus their spent nonces, and nothing
+  without one. An expired order or authorization is refused, an issued chain is
+  served only to the account and device that finalized it, and a challenge
+  answered again finishes an order still pending under a valid authorization
+  (one compare-and-set).
+- **Delegated finalization:** `acmed` parses the CBOR attestation statement and
+  CSR, then calls `enrollctl POST /acme/finalize` over pinned internal HTTPS.
+  `enrollctl` re-verifies the Apple attestation chain, the serial, the CSR's key
+  and subject, and the OU permit before binding the key and signing the
+  certificate. The ACME challenge nonce is checked in `acmed` only.
+
+### Configuration (`acmed`)
+
+| Variable                      | Default                                   |                                                                    |
+| ----------------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
+| `ACMED_LISTEN`                | `:8080`                                   | Plain HTTP; Traefik terminates TLS.                                |
+| `ACMED_BASE_URL`              | `https://ca.i10.tech`                     | Public origin used in directory URLs and JWS `url` checks.         |
+| `ACMED_PREFIX`                | `/acme/apple`                             | Route prefix under `ACMED_BASE_URL`.                               |
+| `ENROLL_REDIS_URL`            | -                                         | Required `redis://` URL for `i10-enroll-redis`.                    |
+| `ENROLL_REDIS_USER`           | `acmed`                                   | Redis ACL user (`enroll:acme:*` only).                             |
+| `ENROLL_REDIS_PASSWORD`       | -                                         | Password for `acmed` ACL user.                                     |
+| `ACMED_ENROLLCTL_URL`         | `https://i10-enrollctl.i10-prod.svc:3443` | Required `https://` base URL for `enrollctl`.                      |
+| `ACMED_ENROLLCTL_CA_FILE`     | -                                         | Required PEM CA file (only trusted root for enrollctl TLS).        |
+| `ACMED_ENROLLCTL_TOKEN`       | -                                         | Required bearer token for `POST /acme/finalize`.                   |
+| `ACMED_NONCE_KEYS`            | -                                         | Required `<kid>:<base64>` ring: Replay-Nonce and account URL MACs. |
+| `ENROLL_ACME_PATH_KEYS`       | -                                         | Required `<kid>:<base64>` ring: verifies Mac path tokens.          |
+| `ACMED_UPSTREAM_TIMEOUT`      | `10s`                                     | 1 s to 30 s.                                                       |
+| `ACMED_MAX_ORDERS_PER_DEVICE` | `20`                                      | 1 to 1000 orders per sealed Mac device id (10 minute window).      |
+| `ACMED_LOG_LEVEL`             | `info`                                    |                                                                    |
 
 ## The one rule you must not break
 
@@ -1669,8 +1828,11 @@ Worth reporting upstream.
 ```
 cmd/authd            entrypoint, signal handling, readiness
 cmd/mailfront        the mail front's entrypoint: listeners, the sweep, shutdown
-cmd/cahookrelay      loopback TLS webhook relay sidecar for step-ca
-cmd/enrolld          Apple over-the-air enrollment HTTP service
+cmd/cahookrelay      loopback TLS SCEP webhook sidecar for step-ca (talks to i10-enroll-redis)
+cmd/enrolld          Apple over-the-air enrollment edge HTTP service
+cmd/enrollctl        internal enrollment control plane: profile signing, micro-batcher, ACME finalizer
+cmd/acmed            stateless keyless Mac device-attest-01 ACME server
+cmd/enrollload       enrollment load harness (build-tagged: -tags enrollload; never shipped)
 internal/config      env loading, the loopback guard, the shared logger
 internal/gate        whether an account's row lets it sign in, and who answers;
                      shared by the bind, the resolver and the mail front
@@ -1680,6 +1842,11 @@ internal/devicecode  the mail device code: the strict parser, the keyed hash, th
                      key ring, test vectors shared with the API's minter
 internal/keyring     "<id>:<base64>" key lists (bind token and device code keys)
 internal/bindtoken   the front's bind token: the MAC over the person and device
+internal/enrolltoken signed edge link tokens and Mac ACME OU permits (shared vectors with apps/api)
+internal/enrollredis i10-enroll-redis client, atomic Lua scripts, and Redis/in-memory store
+internal/appleattest Apple Enterprise Attestation x5c chain + nonce/OID verifier
+internal/enrollctl   profile renderer, CMS signer/encrypter, Postgres micro-batcher, internal API
+internal/acmed       RFC 8555 device-attest-01 JWS/CBOR handlers and enrollctl client
 internal/directory   the LDAP view: entries, DNs, filter evaluation
 internal/verify      the Verifier / Resolver / BudgetStore seam, Outcome
 internal/clerkauth   the Clerk verifier: verify_password and its status mapping
@@ -1689,7 +1856,7 @@ internal/oidc        the OIDC password grant: the preset table, validation, the
                      vetted dial, the answer mapping (oidctest is its fake
                      endpoint, with one fixture per preset)
 internal/egress      which addresses authd may connect to for a tenant
-internal/enroll      OTA CMS verification, phase routing, plist parser, profiles, API client
+internal/enroll      OTA CMS verification, phase routing, plist parser, enrollctl client
 internal/credcache   verified-password cache and the remembered refusals
 internal/inflight    one verification for concurrent identical binds
 internal/budgetstore the shared failure budget in Postgres

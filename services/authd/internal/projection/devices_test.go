@@ -273,6 +273,8 @@ func TestTheDeviceTableGrants(t *testing.T) {
 		`SELECT model FROM authd.mail_devices`,
 		`SELECT created_by FROM authd.mail_devices`,
 		`SELECT first_used_at FROM authd.mail_devices`,
+		`SELECT enrollment_id FROM authd.mail_devices`,
+		`SELECT acme_bound_at FROM authd.mail_devices`,
 		`SELECT * FROM authd.mail_devices`,
 		`UPDATE authd.mail_devices SET first_used_at = now(), last_used_at = now() WHERE id = '` + id + `'`,
 		`UPDATE authd.mail_devices SET email = email WHERE id = '` + id + `'`,
@@ -284,8 +286,6 @@ func TestTheDeviceTableGrants(t *testing.T) {
 		 VALUES ('` + id + `', '192.0.2.1/32', '` + key32 + `')`,
 		`UPDATE authd.mail_device_cert_binds SET bound_at = now()`,
 		`DELETE FROM authd.mail_device_cert_binds`,
-		`SELECT id FROM authd.mail_device_cert_permits`,
-		`DELETE FROM authd.mail_device_cert_permits`,
 	} {
 		if _, err := front.Pool().Exec(dw.ctx, q); err == nil {
 			t.Errorf("the mailfront role may run %q", q)
@@ -299,7 +299,7 @@ func TestTheDeviceTableGrants(t *testing.T) {
 		t.Fatalf("authd cannot write the clock stamps: %v", err)
 	}
 	for _, col := range []string{"clerk_user_id", "email", "tenant_id", "platform", "device_name", "model", "serial",
-		"cert_key_sha256", "code_hash", "code_kid", "created_by", "created_at", "id"} {
+		"cert_key_sha256", "enrollment_id", "acme_bound_at", "code_hash", "code_kid", "created_by", "created_at", "id"} {
 		q := `UPDATE authd.mail_devices SET ` + col + ` = ` + col + ` WHERE id = '` + id + `'`
 		if _, err := authd.Pool().Exec(dw.ctx, q); err == nil {
 			t.Errorf("the authd role may run %q", q)
@@ -310,11 +310,6 @@ func TestTheDeviceTableGrants(t *testing.T) {
 		`INSERT INTO authd.mail_devices (clerk_user_id, email, platform, code_hash, code_kid, created_by)
 		 VALUES ('` + devicePrefix + `dave', 'dave@dev.test', 'ios', '\x00', 1, 'authd')`,
 		`TRUNCATE authd.mail_devices`,
-		`SELECT id FROM authd.mail_device_cert_permits`,
-		`INSERT INTO authd.mail_device_cert_permits (clerk_user_id, kind, serial, challenge_hash, expires_at)
-		 VALUES ('` + devicePrefix + `dave', 'scep', 'S', '` + key32 + `', now() + interval '10 minutes')`,
-		`UPDATE authd.mail_device_cert_permits SET status = 'expired'`,
-		`DELETE FROM authd.mail_device_cert_permits`,
 		`TRUNCATE authd.mail_device_cert_binds`,
 	} {
 		if _, err := authd.Pool().Exec(dw.ctx, q); err == nil {
@@ -359,27 +354,12 @@ func TestTheDeviceTableConstraints(t *testing.T) {
 	}
 	dw.exec(`UPDATE authd.mail_devices SET cert_key_sha256 = $2::bytea WHERE id = $1::uuid`, id, key32)
 
-	// A device takes its liveness rows and permits with it, and an account its
-	// SCEP permits, which name no device.
+	// A device takes its liveness rows with it, and an account takes its devices
+	// and liveness rows by cascade.
 	other := dw.device("erin", "erin@dev.test", "", "macos")
-	for i, dev := range []string{id, other} {
-		nonce := key32
-		if i == 1 {
-			nonce = key32b
-		}
+	for _, dev := range []string{id, other} {
 		dw.exec(`INSERT INTO authd.mail_device_cert_binds (device_id, addr, key_sha256) VALUES ($1::uuid, '2001:db8::/64', $2::bytea)`, dev, key32)
-		dw.exec(`INSERT INTO authd.mail_device_cert_permits (clerk_user_id, device_id, kind, serial, nonce_sha256, expires_at)
-			VALUES ($1, $2::uuid, 'acme', $3, $4::bytea, now() + interval '10 minutes')`, devicePrefix+"erin", dev, "SER-"+dev, nonce)
 	}
-	var enrollID string
-	if err := dw.admin.QueryRow(dw.ctx, `INSERT INTO authd.mail_device_enrollments
-		(clerk_user_id, email, expected_epoch, token_sha256, created_by, expires_at)
-		VALUES ($1, 'erin@dev.test', 0, $2::bytea, 'test', now() + interval '10 minutes')
-		RETURNING id::text`, devicePrefix+"erin", key32).Scan(&enrollID); err != nil {
-		t.Fatal(err)
-	}
-	dw.exec(`INSERT INTO authd.mail_device_cert_permits (clerk_user_id, enrollment_id, kind, serial, challenge_hash, expires_at)
-		VALUES ($1, $2::uuid, 'scep', 'S', $3::bytea, now() + interval '10 minutes')`, devicePrefix+"erin", enrollID, key32)
 	count := func(q string, args ...any) int {
 		t.Helper()
 		var n int
@@ -392,9 +372,6 @@ func TestTheDeviceTableConstraints(t *testing.T) {
 	if n := count(`SELECT count(*) FROM authd.mail_device_cert_binds WHERE device_id = $1::uuid`, other); n != 0 {
 		t.Fatalf("the device's delete left %d liveness rows", n)
 	}
-	if n := count(`SELECT count(*) FROM authd.mail_device_cert_permits WHERE device_id = $1::uuid`, other); n != 0 {
-		t.Fatalf("the device's delete left %d permits", n)
-	}
 
 	dw.exec(`DELETE FROM authd.accounts WHERE clerk_user_id = $1`, devicePrefix+"erin")
 	if n := count(`SELECT count(*) FROM authd.mail_devices WHERE id = $1::uuid`, id); n != 0 {
@@ -402,9 +379,6 @@ func TestTheDeviceTableConstraints(t *testing.T) {
 	}
 	if n := count(`SELECT count(*) FROM authd.mail_device_cert_binds WHERE device_id = $1::uuid`, id); n != 0 {
 		t.Fatalf("the account's delete left %d liveness rows", n)
-	}
-	if n := count(`SELECT count(*) FROM authd.mail_device_cert_permits WHERE clerk_user_id = $1`, devicePrefix+"erin"); n != 0 {
-		t.Fatalf("the account's delete left %d permits", n)
 	}
 }
 

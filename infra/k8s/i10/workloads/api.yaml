@@ -97,25 +97,6 @@ spec:
   ports:
     - { name: http, port: 80, targetPort: http }
 ---
-# The device CA's hooks listener (#383 PR 3, apps/api/README.md, "The hooks
-# listener"): the relay in the step-ca pod calls it, nothing else does.
-#
-# ⚠ A SERVICE OF ITS OWN, BECAUSE ITS NAME IS IN A CERTIFICATE. The listener's
-# TLS certificate is for `i10-api-ca-hooks.i10-prod.svc` (certificate.yaml), and
-# the relay's upstream URL names it. Never routed by Traefik: no IngressRoute
-# names this Service, and the listener's own `fetch` serves the four hook paths
-# and nothing of the main API.
-apiVersion: v1
-kind: Service
-metadata:
-  name: i10-api-ca-hooks
-  namespace: i10-prod
-spec:
-  selector:
-    app.kubernetes.io/name: i10-api
-  ports:
-    - { name: ca-hooks, port: 3443, targetPort: ca-hooks, protocol: TCP }
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -132,11 +113,6 @@ spec:
         app.kubernetes.io/name: i10-api
         app.kubernetes.io/part-of: i10-api
     spec:
-      # The group of the hooks listener's certificate files (mode 0440, the
-      # `ca-hooks-tls` volume below), so uid 1001 can read its key while the
-      # files stay unreadable to any other uid.
-      securityContext:
-        fsGroup: 1001
       containers:
         - name: api
           # ⚠ THE TAG IS UPDATED BY A COMMIT, NOT BY A DEPLOY COMMAND. That is
@@ -160,9 +136,6 @@ spec:
           imagePullPolicy: Always
           ports:
             - { name: http, containerPort: 3001 }
-            # The device CA's hooks listener, off until its certificate is
-            # mounted below (apps/api/README.md, "The hooks listener").
-            - { name: ca-hooks, containerPort: 3443 }
           # ⚠ envFrom AND env ARE COPIED INTO THE `api` CONTAINER OF
           # check-env.yaml, which validates exactly this environment before a
           # deploy. Change one, change the other: `bun run check-images` fails
@@ -207,15 +180,27 @@ spec:
             # Doppler's `api` config, and the API ignores the URL without it.
             - name: TEMPLATE_RENDERER_URL
               value: http://i10-template-renderer.i10-prod.svc.cluster.local
-            # The device CA's hooks listener and internal enrolld branch (#383 PR 3,
-            # PR 4). These are the defaults, written out so the port, the Service
-            # and the mounts below are read in one place. The secrets
-            # (CA_HOOK_TOKEN_HASHES, CA_HOOK_WEBHOOK_IDS, CA_INTERMEDIATE_NOT_AFTER,
-            # ENROLLD_TOKEN_HASHES) come from i10-api.
-            - { name: CA_HOOKS_PORT, value: "3443" }
-            - { name: CA_HOOKS_TLS_CERT_FILE, value: /etc/i10/ca-hooks/tls.crt }
-            - { name: CA_HOOKS_TLS_KEY_FILE, value: /etc/i10/ca-hooks/tls.key }
-            - { name: DEVICE_CA_BUNDLE_FILE, value: /etc/i10/device-ca/bundle.pem }
+            # Dedicated, diskless enrollment Redis (I10-62) and signed edge link
+            # key for POST/GET/DELETE /console/mail-devices/enrollments and the
+            # enroll:notice stream consumer. The two secrets live in
+            # `i10-api-enroll` (Doppler `prod_api_enroll`), never in `i10-api`,
+            # which the worker and every CronJob mount with envFrom.
+            - name: ENROLL_REDIS_URL
+              value: redis://i10-enroll-redis.i10-prod.svc:6379
+            - name: ENROLL_REDIS_USER
+              value: api
+            - name: ENROLL_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-api-enroll
+                  key: ENROLL_REDIS_PASSWORD
+            - name: ENROLL_EDGE_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: i10-api-enroll
+                  key: ENROLL_EDGE_HMAC_KEY
+            - name: ENROLL_LINK_BASE_URL
+              value: https://ca.i10.tech/enroll/apple
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 512Mi }
@@ -234,34 +219,6 @@ spec:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 20
             periodSeconds: 30
-          volumeMounts:
-            - { name: ca-hooks-tls, mountPath: /etc/i10/ca-hooks, readOnly: true }
-            - { name: device-ca-trust, mountPath: /etc/i10/device-ca, readOnly: true }
-      volumes:
-        # ⚠ OPTIONAL, SO ITS ABSENCE TURNS THE LISTENER OFF RATHER THAN THE POD.
-        # Until cert-manager has issued `i10-api-ca-hooks-tls`
-        # (certificate.yaml), the directory is empty, the listener logs
-        # `no_certificate` once and nothing listens on 3443, while the API
-        # starts as before. ⚠ THE FILES ARE READ ONCE AT START (`Bun.serve`
-        # cannot reload `tls`): after the Secret first appears, and after any
-        # reissue, restart the API.
-        - name: ca-hooks-tls
-          secret:
-            secretName: i10-api-ca-hooks-tls
-            optional: true
-            defaultMode: 0440
-            items:
-              - { key: tls.crt, path: tls.crt }
-              - { key: tls.key, path: tls.key }
-        # Public device CA root + intermediate bundle for `/enrolld/finish`
-        # phase 4 verification (#383 PR 4). Optional so the pod still starts
-        # when the device CA ConfigMap is not deployed yet.
-        - name: device-ca-trust
-          configMap:
-            name: i10-device-ca-trust
-            optional: true
-            items:
-              - { key: bundle.pem, path: bundle.pem }
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute

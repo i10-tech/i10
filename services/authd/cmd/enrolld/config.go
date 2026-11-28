@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/i10-tech/i10/services/authd/internal/config"
+	"github.com/i10-tech/i10/services/authd/internal/enrolltoken"
 )
 
 const (
 	defaultListen        = ":8080"
-	defaultAPIURL        = "https://i10-api-ca-hooks.i10-prod.svc:3443"
-	defaultProfileURL    = "https://ca.i10.tech/enroll/apple/profile"
-	defaultSCEPURL       = "https://ca.i10.tech/scep/apple-scep"
+	defaultAPIURL        = "https://i10-enrollctl.i10-prod.svc:3443"
 	defaultAPITimeout    = 10 * time.Second
 	defaultMaxConcurrent = 16
 )
@@ -26,8 +25,8 @@ type enrollConfig struct {
 	APICAFile      string
 	APIToken       string
 	DeviceCABundle string
-	ProfileURL     string
-	SCEPURL        string
+	EdgeHMACKey    string
+	EdgeLinkKeys   *enrolltoken.Ring
 	APITimeout     time.Duration
 	MaxConcurrent  int
 	LogLevel       string
@@ -40,8 +39,7 @@ func loadConfig() (enrollConfig, error) {
 		APICAFile:      config.Env("ENROLLD_API_CA_FILE", ""),
 		APIToken:       config.Env("ENROLLD_API_TOKEN", ""),
 		DeviceCABundle: config.Env("ENROLLD_DEVICE_CA_BUNDLE", ""),
-		ProfileURL:     config.Env("ENROLLD_PROFILE_URL", defaultProfileURL),
-		SCEPURL:        config.Env("ENROLLD_SCEP_URL", defaultSCEPURL),
+		EdgeHMACKey:    config.Env("ENROLL_EDGE_HMAC_KEY", ""),
 		LogLevel:       config.Env("ENROLLD_LOG_LEVEL", "info"),
 	}
 	var err error
@@ -51,10 +49,13 @@ func loadConfig() (enrollConfig, error) {
 	if c.MaxConcurrent, err = config.EnvInt("ENROLLD_MAX_CONCURRENT", defaultMaxConcurrent); err != nil {
 		return c, err
 	}
-	return c, c.validate()
+	if err := c.validate(); err != nil {
+		return c, err
+	}
+	return c, nil
 }
 
-func (c enrollConfig) validate() error {
+func (c *enrollConfig) validate() error {
 	var errs []error
 	if _, port, err := net.SplitHostPort(c.Listen); err != nil || port == "" {
 		errs = append(errs, fmt.Errorf("ENROLLD_LISTEN must be host:port or :port, got %q", c.Listen))
@@ -71,11 +72,15 @@ func (c enrollConfig) validate() error {
 	if c.DeviceCABundle == "" {
 		errs = append(errs, errors.New("ENROLLD_DEVICE_CA_BUNDLE is required"))
 	}
-	if err := validateHTTPSURL("ENROLLD_PROFILE_URL", c.ProfileURL); err != nil {
-		errs = append(errs, err)
-	}
-	if err := validateHTTPSURL("ENROLLD_SCEP_URL", c.SCEPURL); err != nil {
-		errs = append(errs, err)
+	if c.EdgeHMACKey == "" {
+		errs = append(errs, errors.New("ENROLL_EDGE_HMAC_KEY is required"))
+	} else {
+		ring, err := enrolltoken.ParseNonEmptyRing("ENROLL_EDGE_HMAC_KEY", c.EdgeHMACKey)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("ENROLL_EDGE_HMAC_KEY: %w", err))
+		} else {
+			c.EdgeLinkKeys = ring
+		}
 	}
 	if c.APITimeout < time.Second || c.APITimeout > 30*time.Second {
 		errs = append(errs, fmt.Errorf("ENROLLD_API_TIMEOUT is %s: keep it between 1s and 30s", c.APITimeout))

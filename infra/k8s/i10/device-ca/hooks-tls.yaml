@@ -1,24 +1,23 @@
-# The hooks transport CA: TLS for the two INTERNAL hops of a CA webhook, and
-# for nothing else (#383 PR 3, README.md, "The hooks transport CA").
+# The hooks transport CA: TLS for internal enrollment hops, and nothing else
+# (I10-62, README.md, "The hooks transport CA").
 #
-#   step-ca  --https-->  relay 127.0.0.1:9443     (`localhost`, IP:127.0.0.1)
-#   relay    --https-->  API i10-api-ca-hooks:3443 (`i10-api-ca-hooks.i10-prod.svc`)
+#   step-ca          --https-->  cahookrelay 127.0.0.1:9443         (`localhost`, IP:127.0.0.1)
+#   enrolld / acmed  --https-->  enrollctl i10-enrollctl:3443       (`i10-enrollctl.i10-prod.svc`)
 #
-# ⚠ THIS IS NOT THE DEVICE CA, AND THE NAMES SAY SO. The device CA (step-ca's
-# intermediate, from Doppler) signs Mac certificates and is trusted only by the
-# mail front and Traefik. This one is made by cert-manager in this namespace,
-# signs two server certificates, and is trusted only by step-ca (SSL_CERT_FILE)
-# and the relay (CAHOOKRELAY_UPSTREAM_CA_FILE). Neither CA can stand in for the
-# other: the device intermediate is name-constrained to step-ca's own service
-# name with every IP excluded, so it can sign neither `localhost`, 127.0.0.1 nor
-# `i10-api-ca-hooks.i10-prod.svc`.
+# THIS IS NOT THE DEVICE CA, AND THE NAMES SAY SO. The device CA (step-ca's
+# and enrollctl's intermediate, from Doppler) signs Mac/SCEP certificates and
+# is trusted by the mail front, Traefik, enrolld, and enrollctl. This CA is
+# managed by cert-manager in this namespace, signs the two internal server
+# certificates (`i10-cahookrelay-tls` here and `i10-enrollctl-tls` in
+# `workloads/certificate.yaml`), and is trusted only by step-ca (SSL_CERT_FILE),
+# enrolld (`ENROLLD_API_CA_FILE`), and acmed (`ACMED_ENROLLCTL_CA_FILE`).
+# Neither CA can stand in for the other: the device intermediate is
+# name-constrained to step-ca's own service name with every IP excluded.
 #
-# ⚠ ANY Certificate IN i10-prod CAN NAME THE Issuer BELOW. Whoever can create
-# one could mint a `localhost` or `i10-api-ca-hooks` certificate. That is no new
-# power: whoever can write Certificates here can already read every Secret in
-# the namespace, the relay's bearer token and the device intermediate's key
-# among them (mail-device-binding.md section 11, "What step-ca is trusted with").
-# Even so, no other Certificate may ever use it.
+# ANY Certificate IN i10-prod CAN NAME THE Issuer BELOW. Whoever can create
+# one could mint a `localhost` or `i10-enrollctl` certificate; anyone with that
+# RBAC can already read every Secret in i10-prod. Even so, no other Certificate
+# may ever use it.
 ---
 # Bootstrap only: signs the CA certificate below, once.
 apiVersion: cert-manager.io/v1
@@ -38,12 +37,9 @@ spec:
   isCA: true
   commonName: i10 CA hooks transport root
   secretName: i10-hooks-tls-root
-  # ⚠ 20 YEARS, AND ITS KEY NEVER ROTATES. Both trusting processes read this
-  # certificate once at start (step-ca through SSL_CERT_FILE, the relay through
-  # its leaf Secret's `ca.crt`), and the API's 10-year leaf below is signed by
-  # it. A re-keyed root would leave the API's leaf, which `Bun.serve` cannot
-  # reload, chaining to a root nobody trusts. Renewal at two thirds of the life
-  # (year 13) keeps the key and changes nothing that verifies.
+  # 20 YEARS, AND ITS KEY NEVER ROTATES. Trusting processes (step-ca, enrolld,
+  # acmed) read `ca.crt` once at start, while both server leaves (cahookrelay
+  # and enrollctl) are 90-day certs hot-reloaded every 30 seconds.
   duration: 175200h
   privateKey:
     algorithm: ECDSA

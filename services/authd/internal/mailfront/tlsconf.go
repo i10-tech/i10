@@ -303,3 +303,14 @@ func verifyClientCert(state tls.ConnectionState, roots *x509.CertPool, now time.
 	sum := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
 	return &verifiedCert{key: sum[:], cn: cn}, nil
 }
+
+// VerifyClientCert exposes the front's exact 993 client-certificate verification
+// rules so tests in other packages (such as enrollctl's Mac ACME issuer tests)
+// prove issued certificates are accepted verbatim by the mail front.
+func VerifyClientCert(state tls.ConnectionState, roots *x509.CertPool, now time.Time) (keySHA256 []byte, cn string, err error) {
+	vc, err := verifyClientCert(state, roots, now)
+	if err != nil || vc == nil {
+		return nil, "", err
+	}
+	return vc.key, vc.cn, nil
+}

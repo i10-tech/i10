@@ -18,8 +18,13 @@ import { MailDeviceError, mintCode, type MailDeviceCodeKeys } from "./code.js"
  * Lock order across every revocation, mint and key write:
  *   1. `authd.accounts` first
  *   2. `authd.mail_devices` second
- *   3. then `authd.mail_device_cert_permits` (permits.ts) and
- *      `authd.mail_device_cert_binds`, the rows that hang off a device
+ *   3. then `authd.mail_device_cert_binds`, the rows that hang off a device
+ *
+ * enrollctl's micro-batcher (services/authd/internal/enrollctl/batcher.go)
+ * keeps the same order: `authd.enroll_lock_gate_accounts` locks the accounts
+ * `FOR SHARE`, then it inserts or updates `authd.mail_devices`, then deletes
+ * stale binds. The enrollment itself lives in the enrollment Redis, never in a
+ * table, and carries the `credential_epoch` read when it was created.
  *
  * `mint` locks the account row (`FOR NO KEY UPDATE OF a`) and checks the gate
  * and `expectedEpoch` before inserting; every revocation writes `authd.accounts`
@@ -544,8 +549,9 @@ const revokedColumns = {
  * The DELETE is the whole revocation: the access-change trigger names the
  * person and the mail front closes the device's sessions within about a
  * second. It never raises `credential_epoch`, which would sign out every other
- * device and password session too. Its certificate permits and liveness rows
- * go with it by cascade (device row first, then those: the store's lock order).
+ * device and password session too. Its certificate liveness rows
+ * (`authd.mail_device_cert_binds`) go with it by cascade (device row first,
+ * then those: the store's lock order).
  */
 export async function revoke(
   db: Pick<Database, "delete">,
@@ -1018,4 +1024,23 @@ export async function accountByEmail(
     .where(eq(accounts.email, email.trim().toLowerCase()))
     .limit(1)
   return row ?? null
+}
+
+/**
+ * The workspace of the person's own mailbox, read before an enrollment starts
+ * or an own-device route runs, so the route can run that workspace's console
+ * policies on the session; null when the person has no mailbox. `tenantId` is
+ * null for an i10.tech mailbox.
+ */
+export async function readMailboxTenant(
+  db: Pick<Database, "execute">,
+  clerkUserId: string,
+): Promise<{ tenantId: string | null } | null> {
+  const [row] = (await db.execute(sql`
+    select tenant_id::text as tenant_id
+      from authd.accounts
+     where clerk_user_id = ${clerkUserId}`)) as unknown as {
+    tenant_id: string | null
+  }[]
+  return row ? { tenantId: row.tenant_id } : null
 }

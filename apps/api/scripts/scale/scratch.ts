@@ -31,8 +31,15 @@ import { applyMigrations } from "../../src/migrate-run.js"
 export const PG_IMAGE = "ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookworm"
 export const POOLER_IMAGE = "ghcr.io/cloudnative-pg/pgbouncer:1.25.1"
 
-/** The four roles the migrations grant to (CNPG makes them in prod). */
-export const ROLES = ["authd", "i10_api", "pdns", "stalwart", "mailfront"] as const
+/** The roles the migrations grant to (CNPG makes them in prod). */
+export const ROLES = [
+  "authd",
+  "i10_api",
+  "pdns",
+  "stalwart",
+  "mailfront",
+  "enroll_writer",
+] as const
 /**
  * `i10` owns the database and is NOT a superuser, as in production (CNPG makes it
  * the owner; check-migrations proves the migrations run without superuser).
@@ -202,7 +209,7 @@ export async function reset(s: Scratch): Promise<void> {
   try {
     await admin`drop database if exists i10 with (force)`
     await admin`create database i10 owner i10 template ${admin(TEMPLATE)}`
-    await admin`grant connect on database i10 to authd, i10_api, stalwart, mailfront`
+    await admin`grant connect on database i10 to authd, i10_api, stalwart, mailfront, enroll_writer`
   } finally {
     await admin.end()
   }

@@ -44,7 +44,15 @@ if (!adminUrl) {
 const DATABASE = "i10"
 const OWNER = "i10"
 // Everything cluster.yaml creates, because migrations grant to them by name.
-const ROLES = [OWNER, "authd", "i10_api", "pdns", "stalwart", "mailfront"]
+const ROLES = [
+  OWNER,
+  "authd",
+  "i10_api",
+  "pdns",
+  "stalwart",
+  "mailfront",
+  "enroll_writer",
+]
 
 const drizzleFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle")
 

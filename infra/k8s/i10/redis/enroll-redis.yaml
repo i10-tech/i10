@@ -1,0 +1,233 @@
+# Dedicated, diskless enrollment Redis (`i10-enroll-redis`, I10-62).
+#
+# Holds ONLY short-lived enrollment state with explicit positive TTLs:
+#   - enroll:sess:<eid>      (1h)   session state + H2 first-attest lock
+#   - enroll:user:<uid>      (30m)  one live enrollment per user (M5)
+#   - enroll:scep:*          (10m)  SCEP challenge, key binding, tx uniqueness; refusal (1h)
+#   - enroll:sealed:<eid>    (120s) Phase 4 signed sealed profile retry cache (M2)
+#   - enroll:sealing:<eid>   (30s)  the finish attempt about to mint an enrollment
+#   - enroll:acme:*          (10m)  Mac ACME spent nonces (6m), per-device order caps, orders,
+#                                   certs (no accounts: an ACME account is its key; acmed
+#                                   touches Redis only under a path token that only a sealed
+#                                   Mac's encrypted profile carries)
+#   - enroll:notice          (MAXLEN ~10000) post-seal email notification stream
+#
+# SEPARATE FROM i10-redis (queues): diskless (save "", appendonly no),
+# no PVC, maxmemory-policy noeviction so memory exhaustion fails closed (503)
+# rather than silently evicting live enrollment or SCEP state.
+#
+# Per-client Redis ACLs (default user off), in `users.acl.rules` below. Every
+# user starts from -@all and is allowed only the commands its code sends:
+#   - api:         read/write enroll:sess:*, enroll:user:*, enroll:notice;
+#                  read-only enroll:scep:refusal:*
+#   - enrollctl:   enroll:*
+#   - cahookrelay: read/write enroll:scep:*, READ-ONLY enroll:sess:*. It can
+#                  never write a session, so it cannot attest one or change its
+#                  challenge, serial or person. It CAN bind an enrollment that
+#                  is in SCEP to its own key, because step-ca sends it the
+#                  challenge plaintext (inherent to SCEP); what the ACL stops is
+#                  a party that can only write Redis doing the same.
+#   - acmed:       enroll:acme:*
+#   - health:      PING only (kubelet probes)
+# services/authd/internal/enrollredis/acl_redis_test.go loads these exact rules
+# into a real Redis and proves each user can run its code and nothing on the
+# dangerous list (KEYS, SCAN, FLUSH*, DEBUG, CONFIG, ACL, MODULE, SCRIPT
+# FLUSH/KILL, FUNCTION, EVAL, RESTORE, SORT, MIGRATE, INFO).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: i10-enroll-redis-config
+  namespace: i10-prod
+data:
+  redis.conf: |
+    save ""
+    appendonly no
+    maxmemory 128mb
+    maxmemory-policy noeviction
+    aclfile /var/run/redis/users.acl
+    dir /tmp
+  # One user per line: `<name> <rules>`. The init container prefixes each with
+  # `user <name> on ><password>`, the password from the named Doppler key
+  # ENROLL_REDIS_<NAME>_PASSWORD. No password is in this file.
+  users.acl.rules: |
+    health resetkeys resetchannels -@all +ping
+    api resetkeys resetchannels -@all ~enroll:sess:* ~enroll:user:* ~enroll:notice %R~enroll:scep:refusal:* +get +set +del +evalsha +script|load +xgroup|create +xreadgroup +xack +xautoclaim +xpending
+    enrollctl resetkeys resetchannels -@all ~enroll:* +ping +get +set +del +evalsha +script|load +xadd
+    cahookrelay resetkeys resetchannels -@all ~enroll:scep:* %R~enroll:sess:* +ping +get +set +evalsha +script|load
+    acmed resetkeys resetchannels -@all ~enroll:acme:* +ping +get +set +incr +expire +evalsha +script|load
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: i10-enroll-redis
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-enroll-redis
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: i10-enroll-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: i10-enroll-redis
+  namespace: i10-prod
+  labels:
+    app.kubernetes.io/name: i10-enroll-redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: i10-enroll-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: i10-enroll-redis
+        app.kubernetes.io/part-of: i10-enroll
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Renders the runtime ACL file from users.acl.rules and the five named
+        # Doppler keys, so no password sits in a ConfigMap or in git. `read -r`
+        # and quoted printf keep the rules and passwords from shell splitting,
+        # globbing or escape interpretation; a missing password fails the pod.
+        - name: build-acl
+          image: redis:8.10-alpine
+          command:
+            - sh
+            - -ec
+            - |
+              umask 077
+              {
+                printf 'user default off\n'
+                while read -r name rules; do
+                  [ -n "$name" ] || continue
+                  var="ENROLL_REDIS_$(printf '%s' "$name" | tr a-z A-Z)_PASSWORD"
+                  eval "pw=\${$var:?$var is not set}"
+                  printf 'user %s on >%s %s\n' "$name" "$pw" "$rules"
+                done < /etc/redis/users.acl.rules
+              } > /var/run/redis/users.acl
+          env:
+            - name: ENROLL_REDIS_HEALTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-redis-acl
+                  key: ENROLL_REDIS_HEALTH_PASSWORD
+            - name: ENROLL_REDIS_API_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-redis-acl
+                  key: ENROLL_REDIS_API_PASSWORD
+            - name: ENROLL_REDIS_ENROLLCTL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-redis-acl
+                  key: ENROLL_REDIS_ENROLLCTL_PASSWORD
+            - name: ENROLL_REDIS_CAHOOKRELAY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-redis-acl
+                  key: ENROLL_REDIS_CAHOOKRELAY_PASSWORD
+            - name: ENROLL_REDIS_ACMED_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-redis-acl
+                  key: ENROLL_REDIS_ACMED_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/redis, readOnly: true }
+            - { name: acl, mountPath: /var/run/redis }
+      containers:
+        - name: redis
+          image: redis:8.10-alpine
+          args: ["/etc/redis/redis.conf"]
+          env:
+            # Used exclusively by the probes below via `--user health`.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: i10-enroll-redis-acl
+                  key: ENROLL_REDIS_HEALTH_PASSWORD
+          ports:
+            - { name: redis, containerPort: 6379, protocol: TCP }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/redis, readOnly: true }
+            - { name: acl, mountPath: /var/run/redis, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli --user health ping | grep -q PONG"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli --user health ping | grep -q PONG"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: i10-enroll-redis-config
+        - name: acl
+          emptyDir: { medium: Memory, sizeLimit: 1Mi }
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+---
+# Admits ONLY the four enrollment-plane clients on 6379. No egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: i10-enroll-redis
+  namespace: i10-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: i10-enroll-redis
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-enrollctl
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-acmed
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: i10-device-ca
+      ports:
+        - { protocol: TCP, port: 6379 }
+  egress: []

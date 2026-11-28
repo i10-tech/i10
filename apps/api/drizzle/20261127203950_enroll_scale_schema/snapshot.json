@@ -1,0 +1,508 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "ed0ea798-6181-4add-8221-d98ae3917c5e",
+  "prevIds": [
+    "dc85ddae-ea87-4e50-be7e-bb5b40f66b2e"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_cert_permits"
+      ],
+      "writes": [
+        "s|fk|authd.mail_device_cert_permits.mail_device_cert_permits_enrollment_fk",
+        "n|fk|authd.mail_device_cert_permits.mail_device_cert_permits_enrollment_fk",
+        "e|fk|authd.mail_device_cert_permits.mail_device_cert_permits_enrollment_fk",
+        "n|con|authd.mail_device_cert_permits.mail_device_cert_permits_enrollment_fk"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_device_cert_permits",
+        "n|sch|authd",
+        "e|col|authd.mail_device_cert_permits.enrollment_id"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_cert_permits"
+      ],
+      "writes": [
+        "s|tbl|authd.mail_device_cert_permits",
+        "n|tbl|authd.mail_device_cert_permits",
+        "e|tbl|authd.mail_device_cert_permits",
+        "n|rel|authd.mail_device_cert_permits",
+        "n|type|authd.mail_device_cert_permits"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "authd",
+        "mail_device_enrollments"
+      ],
+      "writes": [
+        "s|tbl|authd.mail_device_enrollments",
+        "n|tbl|authd.mail_device_enrollments",
+        "e|tbl|authd.mail_device_enrollments",
+        "n|rel|authd.mail_device_enrollments",
+        "n|type|authd.mail_device_enrollments"
+      ],
+      "reads": [
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "mail_devices",
+        "enrollment_id"
+      ],
+      "writes": [
+        "s|col|authd.mail_devices.enrollment_id",
+        "n|col|authd.mail_devices.enrollment_id",
+        "e|col|authd.mail_devices.enrollment_id"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "authd",
+        "mail_devices",
+        "acme_bound_at"
+      ],
+      "writes": [
+        "s|col|authd.mail_devices.acme_bound_at",
+        "n|col|authd.mail_devices.acme_bound_at",
+        "e|col|authd.mail_devices.acme_bound_at"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "authd",
+        "mail_devices",
+        "mail_devices_enrollment_id_unique"
+      ],
+      "writes": [
+        "s|idx|authd.mail_devices_enrollment_id_unique",
+        "n|idx|authd.mail_devices_enrollment_id_unique",
+        "e|idx|authd.mail_devices_enrollment_id_unique",
+        "n|rel|authd.mail_devices_enrollment_id_unique"
+      ],
+      "reads": [
+        "n|tbl|authd.mail_devices",
+        "n|sch|authd",
+        "n|col|authd.mail_devices.enrollment_id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_devices",
+        "name": "enrollment_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_devices",
+        "name": "acme_bound_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "authd",
+        "table": "mail_devices",
+        "name": "mail_devices_enrollment_id_unique",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "enrollment_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"enrollment_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"authd\",\"mail_device_cert_permits\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"authd\",\"mail_device_enrollments\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"clerk_user_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"device_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"status\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"serial\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"nonce_sha256\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"challenge_hash\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"key_sha256\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"transaction_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"issued_cert_sha256\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"expires_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_cert_permits\",\"enrollment_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"clerk_user_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"email\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"tenant_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"expected_epoch\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"token_sha256\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"status\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"refusal\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"serial\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"product\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"os_version\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"device_name\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"udid_sha256\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"apple_signer_sha256\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"platform\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"device_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"sealed_profile\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"created_by\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"expires_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"authd\",\"mail_device_enrollments\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_open_acme_serial\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_nonce_unique\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_challenge_unique\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_key_unique\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_transaction_unique\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_account_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_device_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_expires_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_cert_permits_enrollment_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_enrollments_token_unique\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_enrollments_live_account_unique\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_enrollments_account_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_enrollments_device_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"authd\",\"mail_device_enrollments_expires_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_account_fk\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_device_fk\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_enrollment_fk\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_account_fk\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_device_fk\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_kind_check\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_status_check\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_status_kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_serial_check\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_device_kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_nonce_kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_challenge_kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_key_state\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_transaction_state\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_issued_state\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_hash_lengths\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_transaction_length\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_expiry_check\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_cert_permits\",\"mail_device_cert_permits_enrollment_kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_email_lowercase\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_status_check\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_refusal_state\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_platform_check\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_serial_check\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_hash_lengths\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_attested_state\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_sealed_profile_state\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"authd\",\"mail_device_enrollments\",\"mail_device_enrollments_expiry_check\"]"
+    }
+  ]
+}

@@ -13,20 +13,23 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/i10-tech/i10/services/authd/internal/enrolltoken"
 )
 
 const (
-	// enrollTokenLen is the exact unpadded base64url length of a 32-byte token.
-	enrollTokenLen = 43
+	// ContentTypeMobileConfig is the MIME type Apple devices recognize as an
+	// installable configuration profile.
+	ContentTypeMobileConfig = "application/x-apple-aspen-config"
 
 	defaultMaxConcurrent = 16
 	serialHMACBytes      = 8 // 16 hex chars, keyed per process
 )
 
-// APICaller is the narrow interface Handler uses to reach the internal API.
+// APICaller is the narrow interface Handler uses to reach enrollctl.
 // *APIClient implements it.
 type APICaller interface {
-	Peek(ctx context.Context, token string) (bool, error)
+	Peek(ctx context.Context, token string) (*PeekResponse, error)
 	Attest(ctx context.Context, req AttestRequest) (*AttestResponse, error)
 	Finish(ctx context.Context, req FinishRequest) (*FinishResponse, error)
 }
@@ -35,8 +38,7 @@ type APICaller interface {
 type HandlerConfig struct {
 	API           APICaller
 	Trust         func() *DeviceTrust
-	ProfileURL    string
-	SCEPURL       string
+	EdgeLinkKeys  *enrolltoken.Ring
 	MaxConcurrent int
 	Log           *slog.Logger
 	Now           func() time.Time
@@ -44,22 +46,26 @@ type HandlerConfig struct {
 
 // Handler serves the Apple over-the-air enrollment HTTP surface:
 //   - GET  /healthz               (bare 200, leaks nothing)
-//   - GET  /enroll/apple/<token>  (phase 1 Profile Service profile)
-//   - POST /enroll/apple/profile  (phase 2 SCEP profile, phase 4 sealed profile)
+//   - GET  /enroll/apple/<token>  (phase 1 signed Profile Service profile)
+//   - POST /enroll/apple/profile  (phase 2 signed SCEP profile, phase 4 signed sealed profile)
 //   - everything else: 404
 //
-// ⚠ LOG REDACTION: never logs a token, a challenge, attributes beyond product,
+// enrolld holds ONLY ENROLL_EDGE_HMAC_KEY (to drop forged or expired links
+// before any upstream call) and its enrollctl bearer token. It never renders,
+// encrypts, or signs profiles; every profile byte comes from enrollctl and is
+// relayed verbatim.
+//
+// LOG REDACTION: never logs a token, a challenge, attributes beyond product,
 // the inner plist or a device code. Serials appear only as a truncated
 // HMAC-SHA256 under a random per-process key.
 type Handler struct {
-	api        APICaller
-	trust      func() *DeviceTrust
-	profileURL string
-	scepURL    string
-	sem        chan struct{}
-	serialKey  [32]byte
-	log        *slog.Logger
-	now        func() time.Time
+	api          APICaller
+	trust        func() *DeviceTrust
+	edgeLinkKeys *enrolltoken.Ring
+	sem          chan struct{}
+	serialKey    [32]byte
+	log          *slog.Logger
+	now          func() time.Time
 }
 
 // NewHandler constructs a hardened OTA enrollment HTTP handler.
@@ -70,8 +76,8 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if cfg.Trust == nil {
 		return nil, errors.New("enroll: device CA trust provider is required")
 	}
-	if cfg.ProfileURL == "" || cfg.SCEPURL == "" {
-		return nil, errors.New("enroll: ProfileURL and SCEPURL are required")
+	if cfg.EdgeLinkKeys == nil {
+		return nil, errors.New("enroll: edge link key ring is required")
 	}
 	maxConc := cfg.MaxConcurrent
 	if maxConc <= 0 {
@@ -87,13 +93,12 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	}
 
 	h := &Handler{
-		api:        cfg.API,
-		trust:      cfg.Trust,
-		profileURL: cfg.ProfileURL,
-		scepURL:    cfg.SCEPURL,
-		sem:        make(chan struct{}, maxConc),
-		log:        log,
-		now:        now,
+		api:          cfg.API,
+		trust:        cfg.Trust,
+		edgeLinkKeys: cfg.EdgeLinkKeys,
+		sem:          make(chan struct{}, maxConc),
+		log:          log,
+		now:          now,
 	}
 	if _, err := rand.Read(h.serialKey[:]); err != nil {
 		return nil, errors.New("enroll: failed to initialize serial HMAC key")
@@ -132,7 +137,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeBareError(w, http.StatusNotFound)
 			return
 		}
-		// ⚠ THE BODY IS READ BEFORE THE REQUEST TAKES A CONCURRENCY SLOT. A
+		// THE BODY IS READ BEFORE THE REQUEST TAKES A CONCURRENCY SLOT. A
 		// client that sends its body slowly then holds only its own connection
 		// (until the server's ReadTimeout), never a slot a real device needs.
 		start := h.now()
@@ -147,7 +152,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if token, ok := strings.CutPrefix(r.URL.Path, "/enroll/apple/"); ok {
-		if r.Method != http.MethodGet || !isValidToken(token) {
+		if r.Method != http.MethodGet || strings.Contains(token, "/") {
+			writeBareError(w, http.StatusNotFound)
+			return
+		}
+		// Verify signed edge link MAC + exp locally BEFORE taking a concurrency
+		// slot or making any upstream call to enrollctl.
+		if _, err := enrolltoken.VerifyLink(h.edgeLinkKeys, token, h.now()); err != nil {
 			writeBareError(w, http.StatusNotFound)
 			return
 		}
@@ -173,25 +184,19 @@ func (h *Handler) withConcurrency(w http.ResponseWriter, r *http.Request, next f
 
 func (h *Handler) handlePhase1Get(w http.ResponseWriter, r *http.Request, token string) {
 	start := h.now()
-	live, err := h.api.Peek(r.Context(), token)
+	resp, err := h.api.Peek(r.Context(), token)
 	dur := h.now().Sub(start).Round(time.Millisecond).String()
 	if err != nil {
 		h.log.Warn("enrollment request failed", "phase", 1, "outcome", "api_error", "duration", dur)
 		writeBareError(w, http.StatusServiceUnavailable)
 		return
 	}
-	if !live {
+	if !resp.Live {
 		h.log.Info("enrollment request handled", "phase", 1, "outcome", "not_live", "duration", dur)
 		writeBareError(w, http.StatusNotFound)
 		return
 	}
-	profile, err := RenderPhase1Profile(h.profileURL, token)
-	if err != nil {
-		h.log.Error("phase 1 profile render failed", "phase", 1, "outcome", "render_error")
-		writeBareError(w, http.StatusServiceUnavailable)
-		return
-	}
-	writeMobileConfig(w, profile)
+	writeMobileConfig(w, resp.ProfileBytes)
 	h.log.Info("enrollment request handled", "phase", 1, "outcome", "ok", "duration", dur)
 }
 
@@ -253,8 +258,20 @@ func (h *Handler) handlePhase2(w http.ResponseWriter, r *http.Request, cms *Veri
 	product := attrs["PRODUCT"]
 	osVersion := attrs["VERSION"]
 
-	if !isValidToken(token) || udid == "" || serial == "" || product == "" || osVersion == "" {
+	if token == "" || udid == "" || serial == "" || product == "" || osVersion == "" {
 		h.log.Info("enrollment request rejected", "phase", 2, "outcome", "missing_attributes",
+			"product", clampLog(product, 64))
+		writeBareError(w, http.StatusBadRequest)
+		return
+	}
+
+	// Verify signed edge link MAC + exp locally before calling enrollctl.
+	if _, err := enrolltoken.VerifyLink(h.edgeLinkKeys, token, h.now()); err != nil {
+		outcome := "invalid_token"
+		if errors.Is(err, enrolltoken.ErrExpired) {
+			outcome = "expired_token"
+		}
+		h.log.Info("enrollment request rejected", "phase", 2, "outcome", outcome,
 			"product", clampLog(product, 64))
 		writeBareError(w, http.StatusBadRequest)
 		return
@@ -289,22 +306,15 @@ func (h *Handler) handlePhase2(w http.ResponseWriter, r *http.Request, cms *Veri
 		return
 	}
 
-	profile, err := RenderSCEPProfile(h.scepURL, resp.Serial, resp.Challenge)
-	if err != nil {
-		h.log.Error("phase 2 SCEP profile render failed", "phase", 2, "outcome", "render_error",
-			"product", safeProduct, "serial_hmac", serialHash)
-		writeBareError(w, http.StatusServiceUnavailable)
-		return
-	}
-	writeMobileConfig(w, profile)
+	writeMobileConfig(w, resp.ProfileBytes)
 	h.log.Info("enrollment request handled", "phase", 2, "outcome", "scep",
-		"product", safeProduct, "serial_hmac", h.hashSerial(resp.Serial), "duration", dur)
+		"product", safeProduct, "serial_hmac", serialHash, "duration", dur)
 }
 
 func (h *Handler) handlePhase4(w http.ResponseWriter, r *http.Request, cms *VerifiedCMS, attrs map[string]string, start time.Time) {
-	// ⚠ NO ENCRYPTION IN ENROLLD (Review 1 rule M1). Forward the verified phase
-	// 4 signer DER to the API and relay the complete sealed profile bytes
-	// unchanged; enrolld never sees a device code.
+	// NO ENCRYPTION OR SIGNING IN ENROLLD (Review 1 rule M1). Forward the
+	// verified phase 4 signer DER to enrollctl and relay the complete signed
+	// sealed profile bytes unchanged; enrolld never sees a device code.
 	serialHash := h.hashSerial(cms.Signer.Subject.CommonName)
 	resp, err := h.api.Finish(r.Context(), FinishRequest{
 		CertDER: base64.StdEncoding.EncodeToString(cms.Signer.Raw),
@@ -337,23 +347,6 @@ func (h *Handler) hashSerial(serial string) string {
 	_, _ = mac.Write([]byte(serial))
 	sum := mac.Sum(nil)
 	return hex.EncodeToString(sum[:serialHMACBytes])
-}
-
-func isValidToken(s string) bool {
-	if len(s) != enrollTokenLen {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'A' && c <= 'Z') ||
-			(c >= 'a' && c <= 'z') ||
-			(c >= '0' && c <= '9') ||
-			c == '-' || c == '_' {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func optionalAttr(s string) *string {

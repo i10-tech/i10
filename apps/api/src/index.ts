@@ -13,17 +13,11 @@ import { tenantLifecycle } from "./tenants/lifecycle.js"
 import { tenantProvisioning } from "./tenants/provision.js"
 import { createCacheClient, createQueueClient, redisKeyCache } from "./cache/redis.js"
 import { keyLookup, keyStore } from "./auth/store.js"
-import { createEnrolldHandlers } from "./ca-hooks/enrolld.js"
-import { createHookHandlers } from "./ca-hooks/handlers.js"
-import { startCaHooksListener } from "./ca-hooks/listener.js"
-import { createDeviceCaBundleLoader } from "./mail-devices/cms.js"
-import { parseMailDeviceCodeKeys } from "./mail-devices/code.js"
 import {
-  cancelEnrollment,
-  createEnrollment,
-  getEnrollment,
-  readMailboxTenant,
-} from "./mail-devices/enrollments.js"
+  createEnrollRedisClient,
+  createEnrollRedisStore,
+  startEnrollNoticeConsumer,
+} from "./mail-devices/enroll-redis.js"
 import { mailDeviceEnrolledNotifier } from "./mail-devices/notice.js"
 import { assertRlsSubject, createDb } from "./db/client.js"
 import { publishRoutingSettings } from "./domains/routing-settings.js"
@@ -946,19 +940,49 @@ const systemSender = await systemSenderFor({
  * error rather than swallowed.
  */
 const consoleUrl = env.CONSOLE_ORIGINS[0]
-const mailDeviceCodeKeys = env.MAIL_DEVICE_CODE_KEYS
-  ? parseMailDeviceCodeKeys(env.MAIL_DEVICE_CODE_KEYS)
-  : null
 const mailDeviceEnrolledNotice =
   systemSender && consoleUrl
     ? mailDeviceEnrolledNotifier({ sender: systemSender, consoleUrl })
     : undefined
-// The design leans on this email to tell a person a device was added (Review 1
-// H2), so a deployment without it says so once rather than staying quiet.
-if (env.ENROLLD_TOKEN_HASHES && !mailDeviceEnrolledNotice) {
+
+// Dedicated, diskless enrollment Redis (I10-62). Fail closed on errors; never
+// shared with the API key cache or Bull/groupmq queues.
+const enrollRedis =
+  env.ENROLL_REDIS_URL && env.ENROLL_EDGE_HMAC_KEY
+    ? createEnrollRedisClient({
+        url: env.ENROLL_REDIS_URL,
+        username: env.ENROLL_REDIS_USER,
+        ...(env.ENROLL_REDIS_PASSWORD ? { password: env.ENROLL_REDIS_PASSWORD } : {}),
+      })
+    : null
+enrollRedis?.on("error", (err: Error) =>
+  log.warn({ err: err.message }, "enroll redis unavailable"),
+)
+
+const enrollNoticeConsumer =
+  env.ENROLL_REDIS_URL && env.ENROLL_EDGE_HMAC_KEY && mailDeviceEnrolledNotice
+    ? (() => {
+        const blockingClient = createEnrollRedisClient({
+          url: env.ENROLL_REDIS_URL!,
+          username: env.ENROLL_REDIS_USER,
+          ...(env.ENROLL_REDIS_PASSWORD ? { password: env.ENROLL_REDIS_PASSWORD } : {}),
+          blocking: true,
+        })
+        blockingClient.on("error", (err: Error) =>
+          log.warn({ err: err.message }, "enroll notice stream redis unavailable"),
+        )
+        return startEnrollNoticeConsumer({
+          redis: blockingClient,
+          notify: mailDeviceEnrolledNotice,
+          log,
+        })
+      })()
+    : null
+
+if (enrollRedis && !mailDeviceEnrolledNotice) {
   log.warn(
     { systemSender: Boolean(systemSender), consoleUrl: Boolean(consoleUrl) },
-    "mail device enrollment is on but its notice email is off",
+    "mail device enrollment is on but its notice email consumer is off",
   )
 }
 const transferNotice =
@@ -2736,17 +2760,17 @@ const app = createApp({
       pool: async (tenantId) => (await mailboxStorage.overview(tenantId)).pool,
       identity,
     }),
-    mailDeviceEnrollments: {
-      mailboxTenant: ({ clerkUserId }) => readMailboxTenant(db, clerkUserId),
-      create: ({ clerkUserId, tenantId }) =>
-        createEnrollment(db, {
-          clerkUserId,
-          tenantId,
-          hasCodeKeys: mailDeviceCodeKeys !== null,
-        }),
-      get: (input) => getEnrollment(db, input),
-      cancel: (input) => cancelEnrollment(db, input),
-    },
+    ...(enrollRedis && env.ENROLL_EDGE_HMAC_KEY
+      ? {
+          mailDeviceEnrollments: createEnrollRedisStore({
+            db,
+            redis: enrollRedis,
+            edgeLinkKeys: env.ENROLL_EDGE_HMAC_KEY,
+            linkBaseUrl: env.ENROLL_LINK_BASE_URL,
+            log,
+          }),
+        }
+      : {}),
     transfers: domainTransferStore({ db, capacity: postgresMeter(db), log }),
     transferNotice,
     people: {
@@ -3065,37 +3089,6 @@ const app = createApp({
 const server = Bun.serve({ fetch: app.fetch, port: env.PORT })
 log.info({ port: server.port, env: env.NODE_ENV }, "i10 api listening")
 
-// The device CA's webhooks (#383 PR 3) and internal enrolld branch (#383 PR 4),
-// on their own listener and their own `fetch`: null (and logged once) until
-// configured and its certificate mounted. When `ENROLLD_TOKEN_HASHES` is unset,
-// the listener still starts for CA hooks and `/enrolld/*` answers 404.
-const caHooks = startCaHooksListener(
-  {
-    port: env.CA_HOOKS_PORT,
-    certFile: env.CA_HOOKS_TLS_CERT_FILE,
-    keyFile: env.CA_HOOKS_TLS_KEY_FILE,
-    tokenHashes: env.CA_HOOK_TOKEN_HASHES,
-    webhookIds: env.CA_HOOK_WEBHOOK_IDS,
-    intermediateNotAfter: env.CA_INTERMEDIATE_NOT_AFTER,
-    enrolldTokenHashes: env.ENROLLD_TOKEN_HASHES,
-  },
-  (intermediateNotAfter) => createHookHandlers({ db, intermediateNotAfter }),
-  log,
-  () =>
-    createEnrolldHandlers({
-      db,
-      keys: mailDeviceCodeKeys,
-      deviceCaBundle: createDeviceCaBundleLoader(env.DEVICE_CA_BUNDLE_FILE),
-      imapHost: env.MAIL_HOSTNAME,
-      imapPort: 993,
-      smtpHost: env.MAIL_HOSTNAME,
-      smtpPort: 465,
-      organization: "i10",
-      notifyEnrolled: mailDeviceEnrolledNotice,
-      log,
-    }),
-)
-
 // Kubernetes sends SIGTERM and then waits terminationGracePeriodSeconds before
 // SIGKILL. Closing the listener lets in-flight sends finish; without this a
 // rolling deploy drops requests that were already accepted.
@@ -3148,13 +3141,16 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
           ),
         ),
     ])
-      // Both listeners, the CA hooks' included: a hook in flight finishes its
-      // transaction before the pool goes.
-      .then(() => Promise.all([server.stop(), caHooks?.stop()]))
+      .then(() => Promise.all([server.stop(), enrollNoticeConsumer?.stop()]))
       // Close the pool after the listener, so in-flight requests can finish
       // their queries rather than failing on a pool that vanished under them.
       .then(() =>
-        Promise.allSettled([sql.end({ timeout: 5 }), cache.quit(), queueRedis.quit()]),
+        Promise.allSettled([
+          sql.end({ timeout: 5 }),
+          cache.quit(),
+          queueRedis.quit(),
+          enrollRedis?.quit(),
+        ]),
       )
       // ⚠ FLUSHED BEFORE THE EXIT, AS ON THE BOOT PATH. `captureException`
       // queues and the transport sends on a timer, so a 500 raised in the

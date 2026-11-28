@@ -19,11 +19,19 @@ import (
 )
 
 const (
-	maxAPIControlRespBytes = 64 << 10
-	// maxAPIFinishRespBytes caps the /enrolld/finish JSON response, which
-	// carries the base64-encoded complete final .mobileconfig (typically ~8 KiB).
-	maxAPIFinishRespBytes = 256 << 10
+	// maxAPIProfileRespBytes caps every /enrolld/{peek,attest,finish} JSON
+	// response from enrollctl, each of which carries a base64-encoded CMS-signed
+	// .mobileconfig (typically ~4 to 12 KiB).
+	maxAPIProfileRespBytes = 256 << 10
 )
+
+// PeekResponse is the parsed /enrolld/peek 200 payload. When Live is true,
+// ProfileBytes holds the decoded signed Phase 1 Profile Service .mobileconfig.
+type PeekResponse struct {
+	Live         bool   `json:"live"`
+	Profile      string `json:"profile"`
+	ProfileBytes []byte `json:"-"`
+}
 
 // AttestRequest matches the internal /enrolld/attest contract verbatim.
 type AttestRequest struct {
@@ -37,12 +45,14 @@ type AttestRequest struct {
 	AppleSignerSHA256 string  `json:"appleSignerSha256"`
 }
 
-// AttestResponse is the parsed /enrolld/attest 200 payload.
+// AttestResponse is the parsed /enrolld/attest 200 payload. When Outcome is
+// "scep", ProfileBytes holds the decoded signed SCEP-only .mobileconfig bytes
+// ready to relay unchanged to the device.
 type AttestResponse struct {
-	Outcome   string `json:"outcome"`
-	Serial    string `json:"serial"`
-	Challenge string `json:"challenge"`
-	Reason    string `json:"reason"`
+	Outcome      string `json:"outcome"`
+	Profile      string `json:"profile"`
+	Reason       string `json:"reason"`
+	ProfileBytes []byte `json:"-"`
 }
 
 // FinishRequest matches the internal /enrolld/finish contract verbatim.
@@ -52,8 +62,8 @@ type FinishRequest struct {
 }
 
 // FinishResponse is the parsed /enrolld/finish 200 payload. When Outcome is
-// "sealed", ProfileBytes holds the decoded final .mobileconfig bytes ready to
-// relay unchanged to the device.
+// "sealed", ProfileBytes holds the decoded signed final .mobileconfig bytes
+// ready to relay unchanged to the device.
 type FinishResponse struct {
 	Outcome      string `json:"outcome"`
 	Profile      string `json:"profile"`
@@ -61,11 +71,11 @@ type FinishResponse struct {
 	ProfileBytes []byte `json:"-"`
 }
 
-// APIClient calls the API's internal :3443 /enrolld/{peek,attest,finish}
+// APIClient calls enrollctl's internal :3443 /enrolld/{peek,attest,finish}
 // routes over HTTPS, trusting ONLY the mounted hooks CA file (never the system
 // trust store).
 //
-// ⚠ NO REDIRECTS, NO ENVIRONMENT PROXY, NO SECRET LOGGING. Errors returned by
+// NO REDIRECTS, NO ENVIRONMENT PROXY, NO SECRET LOGGING. Errors returned by
 // APIClient never include the bearer token or request/response bodies.
 type APIClient struct {
 	baseURL string
@@ -130,29 +140,42 @@ func NewAPIClient(baseURL, caFile, token string, timeout time.Duration) (*APICli
 	}, nil
 }
 
-// Peek calls POST /enrolld/peek and reports whether the enrollment token is live.
-func (c *APIClient) Peek(ctx context.Context, token string) (bool, error) {
+// Peek calls POST /enrolld/peek and returns whether the enrollment token is
+// live along with the signed Phase 1 profile bytes.
+func (c *APIClient) Peek(ctx context.Context, token string) (*PeekResponse, error) {
 	body, err := c.postJSON(ctx, "/enrolld/peek", struct {
 		Token string `json:"token"`
-	}{Token: token}, maxAPIControlRespBytes)
+	}{Token: token}, maxAPIProfileRespBytes)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	var resp struct {
-		Live *bool `json:"live"`
+	var raw struct {
+		Live    *bool  `json:"live"`
+		Profile string `json:"profile"`
 	}
-	if err := decodeSingleJSON(body, &resp); err != nil {
-		return false, fmt.Errorf("enroll: decode peek response: %w", err)
+	if err := decodeSingleJSON(body, &raw); err != nil {
+		return nil, fmt.Errorf("enroll: decode peek response: %w", err)
 	}
-	if resp.Live == nil {
-		return false, errors.New("enroll: peek response missing live field")
+	if raw.Live == nil {
+		return nil, errors.New("enroll: peek response missing live field")
 	}
-	return *resp.Live, nil
+	resp := &PeekResponse{Live: *raw.Live, Profile: raw.Profile}
+	if resp.Live {
+		if resp.Profile == "" {
+			return nil, errors.New("enroll: peek live response missing profile")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(resp.Profile)
+		if err != nil || len(decoded) == 0 {
+			return nil, errors.New("enroll: peek live response has invalid base64 profile")
+		}
+		resp.ProfileBytes = decoded
+	}
+	return resp, nil
 }
 
-// Attest calls POST /enrolld/attest and validates the response shape.
+// Attest calls POST /enrolld/attest and validates/decodes the signed SCEP profile.
 func (c *APIClient) Attest(ctx context.Context, req AttestRequest) (*AttestResponse, error) {
-	body, err := c.postJSON(ctx, "/enrolld/attest", req, maxAPIControlRespBytes)
+	body, err := c.postJSON(ctx, "/enrolld/attest", req, maxAPIProfileRespBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -162,9 +185,14 @@ func (c *APIClient) Attest(ctx context.Context, req AttestRequest) (*AttestRespo
 	}
 	switch resp.Outcome {
 	case "scep":
-		if resp.Serial == "" || resp.Challenge == "" {
-			return nil, errors.New("enroll: attest scep response missing serial or challenge")
+		if resp.Profile == "" {
+			return nil, errors.New("enroll: attest scep response missing profile")
 		}
+		decoded, err := base64.StdEncoding.DecodeString(resp.Profile)
+		if err != nil || len(decoded) == 0 {
+			return nil, errors.New("enroll: attest scep response has invalid base64 profile")
+		}
+		resp.ProfileBytes = decoded
 		return &resp, nil
 	case "refused":
 		return &resp, nil
@@ -173,9 +201,9 @@ func (c *APIClient) Attest(ctx context.Context, req AttestRequest) (*AttestRespo
 	}
 }
 
-// Finish calls POST /enrolld/finish and validates/decodes the sealed profile.
+// Finish calls POST /enrolld/finish and validates/decodes the signed sealed profile.
 func (c *APIClient) Finish(ctx context.Context, req FinishRequest) (*FinishResponse, error) {
-	body, err := c.postJSON(ctx, "/enrolld/finish", req, maxAPIFinishRespBytes)
+	body, err := c.postJSON(ctx, "/enrolld/finish", req, maxAPIProfileRespBytes)
 	if err != nil {
 		return nil, err
 	}

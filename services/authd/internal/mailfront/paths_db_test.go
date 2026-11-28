@@ -227,7 +227,8 @@ var gatePaths = []gatePath{
 			VALUES (:alice, 'alice@path.test', :A, 'ipados', '\x03', 1, 'path')`), rechecks},
 	{"authd.mail_devices", "the clock stamps and the descriptive columns (ignored)", one(mintDevice),
 		one(upDevice + `first_used_at = now(), last_used_at = now(), device_name = 'Phone', model = 'iPhone17,1',
-			serial = 'S', created_by = 'someone'` + whDevice), ignored},
+			serial = 'S', created_by = 'someone', enrollment_id = '00000000-0000-7000-8000-000000000042',
+			acme_bound_at = now()` + whDevice), ignored},
 	// The bound key is an access input since PR 3: binding, changing or clearing
 	// it is logged. On an iPhone row it re-checks and keeps it; on a Mac session
 	// changing or clearing it closes the open session at the next poll.
@@ -250,11 +251,9 @@ var gatePaths = []gatePath{
 		// #533). The other DB packages never run beside this one: CI runs them
 		// one package at a time (`-p 1`, .github/workflows/ci.yml).
 		`CREATE TEMP TABLE md_keep ON COMMIT DROP AS SELECT * FROM authd.mail_devices`,
-		`CREATE TEMP TABLE mp_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_permits`,
 		`CREATE TEMP TABLE mb_keep ON COMMIT DROP AS SELECT * FROM authd.mail_device_cert_binds`,
 		`TRUNCATE authd.mail_devices CASCADE`,
 		`INSERT INTO authd.mail_devices SELECT * FROM md_keep`,
-		`INSERT INTO authd.mail_device_cert_permits SELECT * FROM mp_keep`,
 		`INSERT INTO authd.mail_device_cert_binds SELECT * FROM mb_keep`,
 	}, sweepsAll},
 

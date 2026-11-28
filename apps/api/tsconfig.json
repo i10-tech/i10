@@ -8,6 +8,8 @@
   // kind that hides: a script full of type errors passes `check-types` because
   // nothing ever looks at it, and the first person to learn otherwise is
   // whoever runs it against production.
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  // `types/` holds ambient declarations (the `*.lua` text imports); it is
+  // outside src/ because the root .gitignore drops apps/*/src/**/*.d.ts.
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "types/**/*.d.ts"],
   "exclude": ["node_modules", "dist"]
 }
