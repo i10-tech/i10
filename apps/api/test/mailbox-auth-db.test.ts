@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { assertRlsSubject, type Database } from "../src/db/client.js"
@@ -204,5 +204,162 @@ suite("mailbox sign-in failures against Postgres, as i10_api", () => {
 
     expect(await ops.claimQuota(event)).toBe("recorded")
     expect(await ops.claimQuota(event)).toBe("duplicate")
+  })
+
+  // ─── The 90-day purge (#388) ──────────────────────────────────────────────
+  //
+  // ⚠ THE FUNCTION IS GLOBAL: it deletes across every workspace, which is the
+  // point. So these tests run on a clock decades in the past: every row they
+  // seed, and every cutoff they pass, is older than anything another test
+  // writes, and only this file's rows can cross the cutoff. The floor test is
+  // the exception: it purges at the real floor (now - 90 days), so it runs in
+  // a transaction that is rolled back and never commits a delete of another
+  // suite's rows.
+  const DAY = 86_400_000
+  const purgeAccount = `purge-${RUN}@${DOMAIN}`
+
+  const seedFailure = async (tenantId: string, occurredAt: Date, n: number) => {
+    const [row] = await owner`
+      insert into core.mailbox_auth_failures
+        (tenant_id, clerk_user_id, account, ip, subnet, listener, occurred_at)
+      values (${tenantId}, ${USER}, ${purgeAccount}, ${`${SUBNET}.${n}`}, ${SUBNET},
+              'imap', ${occurredAt})
+      returning id`
+    return row!.id as string
+  }
+
+  const purge = async (before: Date | string | null, limit: number | null) => {
+    // As i10_api with no workspace set: only SECURITY DEFINER gets past RLS.
+    const [row] = await app`
+      select core.mailbox_auth_failures_purge(${before}::timestamptz, ${limit}::integer) as n`
+    return row!.n as number
+  }
+
+  // Even when a test fails halfway, its rows must not cross the next one's cutoff.
+  afterEach(async () => {
+    await owner`delete from core.mailbox_auth_failures where account = ${purgeAccount}`
+  })
+
+  const ourRows = async () =>
+    (
+      await owner`
+      select id from core.mailbox_auth_failures
+       where account = ${purgeAccount} order by occurred_at`
+    ).map((r) => r.id as string)
+
+  it("deletes failures past 90 days in every workspace, and keeps the rest", async () => {
+    const now = new Date("2000-01-01T00:00:00Z")
+    const old = new Date(now.getTime() - 91 * DAY)
+    const recent = new Date(now.getTime() - 89 * DAY)
+    const cutoff = new Date(now.getTime() - 90 * DAY)
+
+    const oldA = await seedFailure(tenantA, old, 11)
+    const oldB = await seedFailure(tenantB, old, 12)
+    const recentA = await seedFailure(tenantA, recent, 13)
+    const recentB = await seedFailure(tenantB, recent, 14)
+
+    const [due] = await owner`
+      select count(*)::int as n from core.mailbox_auth_failures
+       where occurred_at < ${cutoff}`
+    const deleted = await purge(cutoff, 10_000)
+
+    expect(deleted).toBe(due!.n as number)
+    expect(deleted).toBe(2)
+    const left = await ourRows()
+    expect(left).toHaveLength(2)
+    expect(left).toEqual(expect.arrayContaining([recentA, recentB]))
+    expect(left).not.toContain(oldA)
+    expect(left).not.toContain(oldB)
+
+    // Nothing else is due, so a second run deletes nothing.
+    expect(await purge(cutoff, 10_000)).toBe(0)
+  })
+
+  it("deletes at most p_limit rows a call, oldest first", async () => {
+    const now = new Date("1990-01-01T00:00:00Z")
+    const cutoff = new Date(now.getTime() - 90 * DAY)
+    const oldest = await seedFailure(tenantA, new Date(now.getTime() - 120 * DAY), 21)
+    const older = await seedFailure(tenantB, new Date(now.getTime() - 110 * DAY), 22)
+    const old = await seedFailure(tenantA, new Date(now.getTime() - 100 * DAY), 23)
+
+    expect(await purge(cutoff, 2)).toBe(2)
+    const left = await ourRows()
+    expect(left).toEqual([old])
+    expect(left).not.toContain(oldest)
+    expect(left).not.toContain(older)
+
+    expect(await purge(cutoff, 2)).toBe(1)
+    expect(await ourRows()).toEqual([])
+  })
+
+  it("deletes nothing without a cutoff or a positive batch", async () => {
+    const ancient = await seedFailure(tenantA, new Date("1990-01-01T00:00:00Z"), 31)
+    const cutoff = new Date("2000-01-01T00:00:00Z")
+
+    expect(await purge(null, 10)).toBe(0)
+    expect(await purge(cutoff, null)).toBe(0)
+    expect(await purge(cutoff, 0)).toBe(0)
+    expect(await purge(cutoff, -1)).toBe(0)
+    expect(await ourRows()).toEqual([ancient])
+  })
+
+  it("deletes at most 10,000 rows a call, and never one younger than 90 days", async () => {
+    const ROLLBACK = new Error("roll back")
+    try {
+      await owner.begin(async (tx) => {
+        const seed = async (occurredAt: Date) => {
+          const [row] = await tx`
+            insert into core.mailbox_auth_failures
+              (tenant_id, clerk_user_id, account, ip, subnet, listener, occurred_at)
+            values (${tenantB}, ${USER}, ${purgeAccount}, ${`${SUBNET}.42`}, ${SUBNET},
+                    'imap', ${occurredAt})
+            returning id`
+          return row!.id as string
+        }
+        const purgeHere = async (before: string, limit: number) => {
+          // ::text first: the owner client prepares statements, and would read
+          // a timestamptz parameter as a JS Date, which 'infinity' is not.
+          const [row] = await tx`
+            select core.mailbox_auth_failures_purge(${before}::text::timestamptz, ${limit}::integer) as n`
+          return row!.n as number
+        }
+
+        // 10,001 rows older than anything else, so the clamped batch is all ours.
+        await tx`
+          insert into core.mailbox_auth_failures
+            (tenant_id, clerk_user_id, account, ip, subnet, listener, occurred_at)
+          select ${tenantA}::uuid, ${USER}, ${purgeAccount}, ${`${SUBNET}.41`}, ${SUBNET},
+                 'imap', '1980-01-01T00:00:00Z'::timestamptz + g * interval '1 second'
+            from generate_series(1, 10001) g`
+        const pastFloor = await seed(new Date(Date.now() - 91 * DAY))
+        const insideFloor = await seed(new Date(Date.now() - 89 * DAY))
+
+        // A huge batch is clamped to 10,000.
+        expect(await purgeHere("infinity", 2_000_000_000)).toBe(10_000)
+
+        // A cutoff in the future is held at now - 90 days: the 89-day-old row stays.
+        await purgeHere("infinity", 10_000)
+        const left = await tx`
+          select id from core.mailbox_auth_failures where account = ${purgeAccount}`
+        expect(left.map((r) => r.id as string)).toEqual([insideFloor])
+        expect(left.map((r) => r.id as string)).not.toContain(pastFloor)
+
+        throw ROLLBACK
+      })
+    } catch (error) {
+      if (error !== ROLLBACK) throw error
+    }
+  })
+
+  it("lets i10_api run the purge, and nobody else", async () => {
+    const fn = "core.mailbox_auth_failures_purge(timestamptz, integer)"
+    const [row] = await owner`
+      select has_function_privilege('i10_api', ${fn}, 'EXECUTE') as api,
+             has_function_privilege('public', ${fn}, 'EXECUTE') as everyone,
+             has_function_privilege('authd', ${fn}, 'EXECUTE') as authd,
+             p.prosecdef as definer
+        from pg_proc p
+       where p.oid = ${fn}::regprocedure`
+    expect(row).toEqual({ api: true, everyone: false, authd: false, definer: true })
   })
 })

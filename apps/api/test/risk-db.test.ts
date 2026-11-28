@@ -822,6 +822,27 @@ suite("the risk engine against Postgres, as i10_api", () => {
     expect(left.map((r) => new Date(r.taken_at).getTime())).toEqual([recent.getTime()])
   })
 
+  it("deletes mailbox sign-in failures past 90 days in the hourly run (#388)", async () => {
+    const id = crypto.randomUUID()
+    extra.push(id)
+    await seedTenant(id)
+    const old = new Date(Date.now() - 91 * 86_400_000)
+    const recent = new Date(Date.now() - 89 * 86_400_000)
+    for (const at of [old, recent])
+      await owner`insert into core.mailbox_auth_failures
+                    (tenant_id, clerk_user_id, account, ip, subnet, listener, occurred_at)
+                  values (${id}, ${`risk-test-${RUN}-mba`}, ${`mba-${RUN}@x.example`},
+                          '198.51.100.7', '198.51.100', 'imap', ${at})`
+
+    const summary = await runAll(riskDeps(), { concurrency: 2 })
+    expect(summary.authFailuresPurged).toBeGreaterThanOrEqual(1)
+    const left =
+      await owner`select occurred_at from core.mailbox_auth_failures where tenant_id = ${id}`
+    expect(left.map((r) => new Date(r.occurred_at).getTime())).toEqual([
+      recent.getTime(),
+    ])
+  })
+
   it("records shadow contributions with the assessment and its event, and lets them move nothing", async () => {
     const loud: Rule = {
       id: "test.shadow_critical",

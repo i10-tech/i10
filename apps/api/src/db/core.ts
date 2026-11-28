@@ -4723,8 +4723,12 @@ export const identityEvents = core.table(
  * workspace like the rest of what the score reads, since the mailbox belongs
  * to one.
  *
- * ⚠ THE RAW IP IS KEPT AS RECEIVED AND NOTHING NULLS IT YET. The hourly run
- * that clears `identity_events.ip` after 90 days does not know this table.
+ * ⚠ ROWS ARE DELETED AFTER 90 DAYS, RAW IP AND ALL (#388). The hourly risk
+ * run calls `core.mailbox_auth_failures_purge`, which deletes whole rows older
+ * than that in bounded batches, oldest first, across every workspace. Nothing
+ * reads past a short window, so deleting also bounds the table's growth.
+ * `mailbox_auth_failures_occurred_idx` is what keeps that delete an index
+ * range instead of a scan of the table.
  */
 export const mailboxAuthFailures = core.table(
   "mailbox_auth_failures",
@@ -4747,6 +4751,7 @@ export const mailboxAuthFailures = core.table(
   },
   (t) => [
     index("mailbox_auth_failures_account_idx").on(t.tenantId, t.account, t.occurredAt),
+    index("mailbox_auth_failures_occurred_idx").on(t.occurredAt),
     check("mailbox_auth_failures_account_lowercase", sql`"account" = lower("account")`),
     tenantPolicy("mailbox_auth_failures_tenant", t.tenantId),
   ],

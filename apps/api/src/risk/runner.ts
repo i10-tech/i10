@@ -359,6 +359,8 @@ export interface RunSummary {
   tor: number | null
   enriched: number
   purged: number
+  /** Mailbox sign-in failures older than 90 days, deleted this run (#388). */
+  authFailuresPurged: number
   /** Fact snapshots older than SNAPSHOT_RETENTION_DAYS, deleted this run. */
   snapshotsPurged: number
   /** Content judgements older than JUDGEMENT_RETENTION_DAYS, deleted this run. */
@@ -440,6 +442,7 @@ export async function runAll(
     tor: null,
     enriched: 0,
     purged: 0,
+    authFailuresPurged: 0,
     snapshotsPurged: 0,
     judgementsPurged: 0,
     rdap: 0,
@@ -469,6 +472,13 @@ export async function runAll(
   if (deps.ipinfoToken)
     summary.enriched = await enrichIdentities(deps, deps.ipinfoToken)
   summary.purged = await purgeIdentities(deps, now)
+  summary.authFailuresPurged = await purgeMailboxAuthFailures(deps, now).catch(
+    (error: unknown) => {
+      deps.log?.error?.({ err: error }, "could not purge mailbox sign-in failures")
+      deps.report?.(error, { phase: "risk-auth-failure-purge" })
+      return 0
+    },
+  )
   summary.snapshotsPurged = await deps.snapshots
     .purge(new Date(now.getTime() - SNAPSHOT_RETENTION_DAYS * 86_400_000))
     .catch((error: unknown) => {
@@ -625,6 +635,36 @@ async function purgeIdentities(deps: RiskDeps, now: Date): Promise<number> {
     sql`select core.identity_purge(${before}::timestamptz) as n`,
   )) as unknown as { n: number }[]
   return Number(rows[0]?.n ?? 0)
+}
+
+/** Rows one statement deletes from `core.mailbox_auth_failures`. */
+const AUTH_FAILURE_PURGE_BATCH = 1_000
+/** Statements one hourly run may spend on it: 50,000 rows an hour at most. */
+const AUTH_FAILURE_PURGE_MAX_BATCHES = 50
+
+/**
+ * Deletes mailbox sign-in failures older than 90 days, raw IP and all (#388).
+ *
+ * ⚠ SMALL BATCHES, EACH ITS OWN STATEMENT, OLDEST FIRST, until one comes back
+ * short. A brute-force storm can record more than a run may delete, so hitting
+ * the per-run cap is logged: the backlog then drains over the next runs.
+ */
+async function purgeMailboxAuthFailures(deps: RiskDeps, now: Date): Promise<number> {
+  const before = new Date(now.getTime() - 90 * 86_400_000).toISOString()
+  let total = 0
+  for (let batch = 0; batch < AUTH_FAILURE_PURGE_MAX_BATCHES; batch++) {
+    const rows = (await deps.db.execute(
+      sql`select core.mailbox_auth_failures_purge(${before}::timestamptz, ${AUTH_FAILURE_PURGE_BATCH}::integer) as n`,
+    )) as unknown as { n: number }[]
+    const n = Number(rows[0]?.n ?? 0)
+    total += n
+    if (n < AUTH_FAILURE_PURGE_BATCH) return total
+  }
+  deps.log?.warn?.(
+    { purged: total },
+    "mailbox sign-in failures past 90 days outran this run's purge cap",
+  )
+  return total
 }
 
 /**
