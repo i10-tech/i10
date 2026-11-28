@@ -27,14 +27,16 @@ import (
 // write: at most (devices sealed in the last 10 minutes) x MaxOrdersPerDevice
 // orders plus their spent nonces (handler.go). Everywhere else
 // (who owns an order, an authorization, a certificate) the account is the
-// key's RFC 7638 thumbprint. Its status is always valid; there is no contact
-// and no orders list (RFC 8555 section 7.1.2 makes `orders` optional, and the
-// macOS client does not read it).
+// key's RFC 7638 thumbprint. Its object is always status valid, an empty
+// contact and the `orders` URL <account URL>/orders, which RFC 8555 section
+// 7.1.2 makes required and the macOS client refuses an account without. The
+// list it answers is always empty: nothing indexes orders by account.
 const (
-	accountLabel     = "i10/acme-account/v1\x00"
-	accountMACLen    = 16
-	accountPath      = "/acct/"
-	maxAccountURLLen = 640
+	accountLabel        = "i10/acme-account/v1\x00"
+	accountMACLen       = 16
+	accountPath         = "/acct/"
+	accountOrdersSuffix = "/orders"
+	maxAccountURLLen    = 640
 )
 
 // account is a verified account URL: the key it names and that key's

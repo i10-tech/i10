@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +70,136 @@ func TestNewAccountAndAccountFetchWriteNothing(t *testing.T) {
 	j, _ := SignFlattenedJWS(key, ProtectedHeader{Nonce: nonce(), URL: kid, KID: kid}, nil)
 	if rec := post(kid, j); rec.Code != 200 || rec.Header().Get("Location") != kid {
 		t.Fatalf("POST-as-GET account = (%d, %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// statelessACME is a handler on a Store every call of which fails the test,
+// with a helper to post under one path token.
+type statelessACME struct {
+	t    *testing.T
+	h    *Handler
+	base string // https://ca.i10.tech/acme/apple/d/<token>
+}
+
+func newStatelessACME(t *testing.T, serial string) *statelessACME {
+	t.Helper()
+	h := NewHandler(HandlerDeps{Store: noRedis{t: t}, NonceKeys: nonceRing(t, ringKey("3", 3)), PathKeys: testPathRing(t)})
+	return &statelessACME{t: t, h: h, base: "https://ca.i10.tech" + pathBase(t, testPathRing(t), serial, time.Now())}
+}
+
+func (s *statelessACME) post(url string, key *ecdsa.PrivateKey, hdr ProtectedHeader, payload []byte) *httptest.ResponseRecorder {
+	s.t.Helper()
+	n, err := s.h.issueNonce()
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	if hdr.Nonce == "" {
+		hdr.Nonce = n
+	}
+	hdr.URL = url
+	j, err := SignFlattenedJWS(key, hdr, payload)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, strings.TrimPrefix(url, "https://ca.i10.tech"), strings.NewReader(string(j)))
+	req.Header.Set("Content-Type", "application/jose+json")
+	rec := httptest.NewRecorder()
+	s.h.ServeHTTP(rec, req)
+	return rec
+}
+
+// newAccount answers new-account for key with payload.
+func (s *statelessACME) newAccount(key *ecdsa.PrivateKey, payload string) *httptest.ResponseRecorder {
+	s.t.Helper()
+	jwk, _ := EncodePublicECJWK(&key.PublicKey)
+	return s.post(s.base+"/new-account", key, ProtectedHeader{JWK: jwk}, []byte(payload))
+}
+
+// assertACMEHeaders checks what RFC 8555 makes every answer to a POST carry:
+// a Replay-Nonce (6.5), the directory as Link rel="index" (7.1), and the
+// content type.
+func (s *statelessACME) assertACMEHeaders(name string, rec *httptest.ResponseRecorder, contentType string) {
+	s.t.Helper()
+	if rec.Header().Get("Replay-Nonce") == "" {
+		s.t.Errorf("%s: no Replay-Nonce", name)
+	}
+	if got := rec.Header().Get("Content-Type"); got != contentType {
+		s.t.Errorf("%s: Content-Type = %q, want %q", name, got, contentType)
+	}
+	index := `<` + s.base + `/directory>;rel="index"`
+	if links := rec.Header().Values("Link"); !slices.Contains(links, index) {
+		s.t.Errorf("%s: Link = %v, want %s", name, links, index)
+	}
+}
+
+// TestTheAccountObjectHasEveryRequiredField: new-account (201 and 200) and
+// POST-as-GET on the account answer RFC 8555 7.1.2's object, with `orders`
+// (required; macOS 27.3 fails "failed to establish account" without it) at
+// <account URL>/orders and an empty `contact`, plus Location.
+func TestTheAccountObjectHasEveryRequiredField(t *testing.T) {
+	s := newStatelessACME(t, "C02SHAPE")
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	created := s.newAccount(key, `{"termsOfServiceAgreed":true}`)
+	kid := created.Header().Get("Location")
+	if created.Code != 201 || kid == "" {
+		t.Fatalf("new-account = (%d, %q, %s)", created.Code, kid, created.Body.String())
+	}
+
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"new-account":                    created,
+		"new-account onlyReturnExisting": s.newAccount(key, `{"onlyReturnExisting":true}`),
+		"POST-as-GET account":            s.post(kid, key, ProtectedHeader{KID: kid}, nil),
+	} {
+		s.assertACMEHeaders(name, rec, "application/json")
+		if got := rec.Header().Get("Location"); got != kid {
+			t.Errorf("%s: Location = %q, want %q", name, got, kid)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: body %s: %v", name, rec.Body.String(), err)
+		}
+		want := map[string]string{"status": `"valid"`, "contact": `[]`, "orders": `"` + kid + `/orders"`}
+		for field, v := range want {
+			if string(body[field]) != v {
+				t.Errorf("%s: %s = %s, want %s (body %s)", name, field, body[field], v, rec.Body.String())
+			}
+		}
+		if len(body) != len(want) {
+			t.Errorf("%s: body %s does not have exactly the fields of %v", name, rec.Body.String(), want)
+		}
+	}
+}
+
+// TestTheOrdersListIsEmptyOwnedAndWritesNothing: POST-as-GET on
+// <account URL>/orders answers {"orders":[]} to its own account, twice with
+// one nonce (it spends none and writes nothing), and refuses another
+// account's kid, a payload, and an account URL from another path token.
+func TestTheOrdersListIsEmptyOwnedAndWritesNothing(t *testing.T) {
+	s := newStatelessACME(t, "C02ORDERS")
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	kid := s.newAccount(key, `{}`).Header().Get("Location")
+	otherKID := s.newAccount(other, `{}`).Header().Get("Location")
+	orders := kid + "/orders"
+
+	nonce, _ := s.h.issueNonce()
+	for try := 1; try <= 2; try++ {
+		rec := s.post(orders, key, ProtectedHeader{KID: kid, Nonce: nonce}, nil)
+		if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"orders":[]}` {
+			t.Fatalf("orders list (try %d) = (%d, %s), want 200 {\"orders\":[]}", try, rec.Code, rec.Body.String())
+		}
+		s.assertACMEHeaders("orders list", rec, "application/json")
+	}
+
+	if rec := s.post(orders, other, ProtectedHeader{KID: otherKID}, nil); rec.Code != 401 || problemType(t, rec) != ProblemUnauthorized {
+		t.Errorf("another account's kid = (%d, %s), want 401 unauthorized", rec.Code, rec.Body.String())
+	}
+	if rec := s.post(orders, key, ProtectedHeader{KID: kid}, []byte(`{}`)); rec.Code != 400 || problemType(t, rec) != ProblemMalformed {
+		t.Errorf("a payload = (%d, %s), want 400 malformed", rec.Code, rec.Body.String())
+	}
+	elsewhere := newStatelessACME(t, "C02ORDERS")
+	if rec := elsewhere.post(elsewhere.base+strings.TrimPrefix(orders, s.base), key, ProtectedHeader{KID: kid}, nil); rec.Code != 400 || problemType(t, rec) != ProblemAccountDoesNotExist {
+		t.Errorf("under another path token = (%d, %s), want 400 accountDoesNotExist", rec.Code, rec.Body.String())
 	}
 }
 

@@ -179,6 +179,7 @@ func TestReadOnlyRequestsWriteNothing(t *testing.T) {
 		payload []byte
 	}{
 		"account":                  {kid, nil},
+		"account orders list":      {kid + "/orders", nil},
 		"order":                    {orderURL, nil},
 		"authz":                    {fin.Authorizations[0], nil},
 		"challenge poll":           {chal.URL, nil},

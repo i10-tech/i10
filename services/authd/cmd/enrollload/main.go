@@ -38,6 +38,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -767,25 +768,53 @@ func runMacACME(d deviceRunner, serial, udid, permitOU, directoryURL string) err
 		return resp, rb, nil
 	}
 
-	// 3. new-account
-	resp, _, err := postJWS(dir["newAccount"], "", map[string]any{"termsOfServiceAgreed": true})
+	// 3. new-account: RFC 8555 7.1.2's object (macOS refuses one without
+	// `orders`), then POST-as-GET on its orders list.
+	resp, body, err := postJWS(dir["newAccount"], "", map[string]any{"termsOfServiceAgreed": true})
 	if err != nil || (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
 		return fmt.Errorf("new-account status=%d err=%v", statusOf(resp), err)
 	}
 	acctURL := resp.Header.Get("Location")
+	var acct struct {
+		Status  string   `json:"status"`
+		Contact []string `json:"contact"`
+		Orders  string   `json:"orders"`
+	}
+	if err := checkACMEJSON("new-account", resp, body, &acct, "status", "contact", "orders"); err != nil {
+		return err
+	}
+	if acctURL == "" || acct.Status != "valid" || acct.Orders != acctURL+"/orders" {
+		return fmt.Errorf("new-account Location=%q body=%s", acctURL, body)
+	}
+	resp, body, err = postJWS(acct.Orders, acctURL, nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("orders list status=%d err=%v body=%s", statusOf(resp), err, body)
+	}
+	var ordersList struct {
+		Orders []string `json:"orders"`
+	}
+	if err := checkACMEJSON("orders list", resp, body, &ordersList, "orders"); err != nil {
+		return err
+	}
 
 	// 4. new-order
-	resp, body, err := postJWS(dir["newOrder"], acctURL, map[string]any{
+	resp, body, err = postJWS(dir["newOrder"], acctURL, map[string]any{
 		"identifiers": []map[string]string{{"type": "permanent-identifier", "value": serial}},
 	})
 	if err != nil || resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("new-order status=%d err=%v body=%s", statusOf(resp), err, body)
 	}
 	var order struct {
+		Expires        string   `json:"expires"`
 		Authorizations []string `json:"authorizations"`
 		Finalize       string   `json:"finalize"`
 	}
-	_ = json.Unmarshal(body, &order)
+	if err := checkACMEJSON("new-order", resp, body, &order, orderFields...); err != nil {
+		return err
+	}
+	if resp.Header.Get("Location") == "" || len(order.Authorizations) != 1 || !isRFC3339(order.Expires) {
+		return fmt.Errorf("new-order Location=%q body=%s", resp.Header.Get("Location"), body)
+	}
 
 	// 5. authz POST-as-GET
 	resp, body, err = postJWS(order.Authorizations[0], acctURL, nil)
@@ -793,13 +822,22 @@ func runMacACME(d deviceRunner, serial, udid, permitOU, directoryURL string) err
 		return fmt.Errorf("authz status=%d err=%v", statusOf(resp), err)
 	}
 	var authz struct {
-		Challenges []struct {
-			URL   string `json:"url"`
-			Token string `json:"token"`
-		} `json:"challenges"`
+		Expires    string            `json:"expires"`
+		Challenges []json.RawMessage `json:"challenges"`
 	}
-	_ = json.Unmarshal(body, &authz)
-	chal := authz.Challenges[0]
+	if err := checkACMEJSON("authz", resp, body, &authz, "identifier", "status", "expires", "challenges"); err != nil {
+		return err
+	}
+	if len(authz.Challenges) != 1 || !isRFC3339(authz.Expires) {
+		return fmt.Errorf("authz body=%s", body)
+	}
+	var chal struct {
+		URL   string `json:"url"`
+		Token string `json:"token"`
+	}
+	if err := checkACMEFields("authz challenge", authz.Challenges[0], &chal, "type", "url", "status", "token"); err != nil {
+		return err
+	}
 
 	// 6. Apple device-attest-01 challenge
 	macKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
@@ -817,6 +855,17 @@ func runMacACME(d deviceRunner, serial, udid, permitOU, directoryURL string) err
 	})
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("challenge status=%d err=%v body=%s", statusOf(resp), err, body)
+	}
+	var answered struct {
+		Status    string `json:"status"`
+		Validated string `json:"validated"`
+	}
+	if err := checkACMEJSON("challenge", resp, body, &answered, "type", "url", "status", "token", "validated"); err != nil {
+		return err
+	}
+	upLink := `<` + order.Authorizations[0] + `>;rel="up"`
+	if answered.Status != "valid" || !isRFC3339(answered.Validated) || !slices.Contains(resp.Header.Values("Link"), upLink) {
+		return fmt.Errorf("challenge Link=%v body=%s", resp.Header.Values("Link"), body)
 	}
 
 	// 7. finalize with P-384 CSR
@@ -839,17 +888,66 @@ func runMacACME(d deviceRunner, serial, udid, permitOU, directoryURL string) err
 		Status      string `json:"status"`
 		Certificate string `json:"certificate"`
 	}
-	_ = json.Unmarshal(body, &finOrder)
-	if finOrder.Status != "valid" || finOrder.Certificate == "" {
+	if err := checkACMEJSON("finalize", resp, body, &finOrder, slices.Concat(orderFields, []string{"certificate"})...); err != nil {
+		return err
+	}
+	if finOrder.Status != "valid" || finOrder.Certificate == "" || resp.Header.Get("Location") == "" {
 		return fmt.Errorf("finalize order not valid: %s", body)
 	}
 
 	// 8. fetch certificate
 	resp, body, err = postJWS(finOrder.Certificate, acctURL, nil)
-	if err != nil || resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("BEGIN CERTIFICATE")) {
-		return fmt.Errorf("cert fetch status=%d err=%v", statusOf(resp), err)
+	if err != nil || resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("BEGIN CERTIFICATE")) ||
+		resp.Header.Get("Content-Type") != "application/pem-certificate-chain" || resp.Header.Get("Replay-Nonce") == "" {
+		return fmt.Errorf("cert fetch status=%d content-type=%q err=%v", statusOf(resp), resp.Header.Get("Content-Type"), err)
 	}
 	return nil
+}
+
+// orderFields are the fields RFC 8555 7.1.3 requires of an order (`expires`
+// for a pending or valid one, the only states this flow sees).
+var orderFields = []string{"status", "expires", "identifiers", "authorizations", "finalize"}
+
+// checkACMEJSON checks an ACME JSON answer as Apple's client reads it: an
+// application/json body carrying each required field, with a Replay-Nonce
+// (RFC 8555 6.5) and the directory as Link rel="index" (7.1). It decodes the
+// body into v.
+func checkACMEJSON(step string, resp *http.Response, body []byte, v any, required ...string) error {
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		return fmt.Errorf("%s: Content-Type=%q", step, ct)
+	}
+	if resp.Header.Get("Replay-Nonce") == "" {
+		return fmt.Errorf("%s: no Replay-Nonce", step)
+	}
+	if !slices.ContainsFunc(resp.Header.Values("Link"), func(l string) bool { return strings.HasSuffix(l, `/directory>;rel="index"`) }) {
+		return fmt.Errorf("%s: no Link rel=index: %v", step, resp.Header.Values("Link"))
+	}
+	return checkACMEFields(step, body, v, required...)
+}
+
+// checkACMEFields decodes a JSON object into v and checks that it carries
+// each required field, none of them null.
+func checkACMEFields(step string, raw []byte, v any, required ...string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("%s: body %s: %w", step, raw, err)
+	}
+	for _, f := range required {
+		if val, ok := fields[f]; !ok || string(val) == "null" {
+			return fmt.Errorf("%s: required field %q missing in %s", step, f, raw)
+		}
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return fmt.Errorf("%s: body %s: %w", step, raw, err)
+	}
+	return nil
+}
+
+// isRFC3339 reports whether s is an RFC 3339 timestamp, as RFC 8555 requires
+// of `expires` and `validated`.
+func isRFC3339(s string) bool {
+	_, err := time.Parse(time.RFC3339, s)
+	return err == nil
 }
 
 func statusOf(r *http.Response) int {
