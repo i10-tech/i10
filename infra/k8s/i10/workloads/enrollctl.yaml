@@ -58,7 +58,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: enrollctl
-          image: ghcr.io/i10-tech/i10-authd:prod-4eb1ccf4537c3a953664c530f25d7230aeba31df@sha256:c9e4b89b95f6a37e9fcdedf40ecf412e865c98801c8bb8ab58fbb5a08fae40e1
+          image: ghcr.io/i10-tech/i10-authd:prod-1ddb76e42470202eaabe4e172b3fa4168a4b890c@sha256:15d41c0d58bf43a9bf9238fdba30ea88d9c5ccd5c02855d56b11bcc031404896
           command: ["/usr/local/bin/enrollctl"]
           ports:
             - { name: https, containerPort: 3443, protocol: TCP }
