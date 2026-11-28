@@ -101,7 +101,7 @@ spec:
                 secretKeyRef:
                   name: i10-acmed
                   key: ENROLL_ACME_PATH_KEYS
-            - { name: ACMED_UPSTREAM_TIMEOUT, value: "10s" }
+            - { name: ACMED_UPSTREAM_TIMEOUT, value: "15s" }
             - { name: ACMED_MAX_ORDERS_PER_DEVICE, value: "20" }
             - { name: ACMED_LOG_LEVEL, value: "info" }
           securityContext:

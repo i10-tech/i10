@@ -1574,7 +1574,7 @@ bytes verbatim.
 | `ENROLLD_API_TOKEN`        | -                                         | Required bearer token (single named Secret key).            |
 | `ENROLL_EDGE_HMAC_KEY`     | -                                         | Required `<kid>:<base64>` HMAC ring for edge link tokens.   |
 | `ENROLLD_DEVICE_CA_BUNDLE` | -                                         | Required device CA root + intermediate PEM bundle.          |
-| `ENROLLD_API_TIMEOUT`      | `10s`                                     | 1 s to 30 s.                                                |
+| `ENROLLD_API_TIMEOUT`      | `15s`                                     | 1 s to 35 s. Must exceed enrollctl's `MaxHandlerDuration`.  |
 | `ENROLLD_MAX_CONCURRENT`   | `64`                                      | 1 to 256 concurrent enrollment requests.                    |
 | `ENROLLD_LOG_LEVEL`        | `info`                                    |                                                             |
 
@@ -1639,8 +1639,15 @@ micro-batched commits, and Mac ACME certificate issuance:
 | `ENROLLCTL_ORGANIZATION`              | `i10`                                              | `PayloadOrganization` on rendered profiles.                   |
 | `ENROLLCTL_BATCH_MAX_SIZE`            | `200`                                              | 1 to 1000 commits per Postgres micro-batch.                   |
 | `ENROLLCTL_BATCH_MAX_WAIT`            | `5ms`                                              | 1 ms to 500 ms micro-batch flush delay.                       |
-| `ENROLLCTL_CALL_TIMEOUT`              | `5s`                                               | 1 s to 30 s per handler request.                              |
+| `ENROLLCTL_CALL_TIMEOUT`              | `5s`                                               | 1 s to under 22.5 s (`MaxCallTimeout`) per handler request.   |
 | `ENROLLCTL_LOG_LEVEL`                 | `info`                                             |                                                               |
+
+Each caller's timeout must exceed `enrollctl.MaxHandlerDuration` at the
+configured `ENROLLCTL_CALL_TIMEOUT`: the call timeout + 9.5 s, which is 14.5 s
+at the default `5s`. A finish that runs past the caller's timeout has sealed,
+but the caller answers 503 and the device must retry. The manifests set
+`ENROLLD_API_TIMEOUT` and `ACMED_UPSTREAM_TIMEOUT` to `15s`. Raise both with
+`ENROLLCTL_CALL_TIMEOUT`; each accepts up to 35 s.
 
 ## ACME server (`cmd/acmed`, I10-62)
 
@@ -1728,7 +1735,7 @@ HMAC-SHA256(K, "i10/acme-path/v1\0" || kid || device_id || serial || exp)[:16])`
 | `ACMED_ENROLLCTL_TOKEN`       | -                                         | Required bearer token for `POST /acme/finalize`.                   |
 | `ACMED_NONCE_KEYS`            | -                                         | Required `<kid>:<base64>` ring: Replay-Nonce and account URL MACs. |
 | `ENROLL_ACME_PATH_KEYS`       | -                                         | Required `<kid>:<base64>` ring: verifies Mac path tokens.          |
-| `ACMED_UPSTREAM_TIMEOUT`      | `10s`                                     | 1 s to 30 s.                                                       |
+| `ACMED_UPSTREAM_TIMEOUT`      | `15s`                                     | 1 s to 35 s. Must exceed enrollctl's `MaxHandlerDuration`.         |
 | `ACMED_MAX_ORDERS_PER_DEVICE` | `20`                                      | 1 to 1000 orders per sealed Mac device id (10 minute window).      |
 | `ACMED_LOG_LEVEL`             | `info`                                    |                                                                    |
 

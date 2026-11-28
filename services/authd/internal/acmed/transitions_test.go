@@ -248,7 +248,7 @@ func TestASlowFinalizeStillCompletesTheOrder(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newTestACMEWorld(t)
-			w.handler.deps.CompleteTimeout = complete
+			w.handler.completeTimeout = complete
 			d := w.mac("C02SLOWFIN")
 			key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			kid, orderURL, chal, cp, attKey := w.openChallenge(d, key)

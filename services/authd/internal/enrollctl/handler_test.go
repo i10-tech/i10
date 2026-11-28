@@ -358,6 +358,56 @@ func TestHandlerAuthIsolationAndBounds(t *testing.T) {
 	}
 }
 
+// slowBody holds its first Read for delay, then serves the body.
+type slowBody struct {
+	delay time.Duration
+	r     *bytes.Reader
+	slept bool
+}
+
+func (s *slowBody) Read(p []byte) (int, error) {
+	if !s.slept {
+		s.slept = true
+		time.Sleep(s.delay)
+	}
+	return s.r.Read(p)
+}
+
+// ctxAtGetSession records whether the call's context had already ended when
+// the handler first reached Redis.
+type ctxAtGetSession struct {
+	*enrollredis.RedisStore
+	err error
+}
+
+func (c *ctxAtGetSession) GetSession(ctx context.Context, eid string) (*enrollredis.Session, error) {
+	c.err = ctx.Err()
+	return c.RedisStore.GetSession(ctx, eid)
+}
+
+// TestCallTimeoutCoversTheBodyRead: a body that arrives after CallTimeout has
+// spent the call's budget, so the handler reaches Redis with its context
+// already done instead of starting a fresh CallTimeout after the read.
+func TestCallTimeoutCoversTheBodyRead(t *testing.T) {
+	const callTimeout = 100 * time.Millisecond
+	env := newHandlerEnv(t, true)
+	env.h.deps.CallTimeout = callTimeout
+	seen := &ctxAtGetSession{RedisStore: env.store}
+	env.h.deps.Store = seen
+	_, link := env.newSession(t, "user_slowbody")
+	raw, _ := json.Marshal(peekRequest{Token: link})
+	req := httptest.NewRequest("POST", "/enrolld/peek", &slowBody{delay: callTimeout + 50*time.Millisecond, r: bytes.NewReader(raw)})
+	req.Header.Set("Authorization", "Bearer "+enrolldToken)
+	rec := httptest.NewRecorder()
+	env.h.ServeHTTP(rec, req)
+	if !errors.Is(seen.err, context.DeadlineExceeded) {
+		t.Fatalf("context at GetSession after a %s body = %v, want DeadlineExceeded (status %d)", callTimeout+50*time.Millisecond, seen.err, rec.Code)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("peek after a body slower than CallTimeout = %d, want 503", rec.Code)
+	}
+}
+
 func TestHandlerFullMacFlowAndACMEFinalizeRefusals(t *testing.T) {
 	env := newHandlerEnv(t, true)
 	h, store, batch, now := env.h, env.store, env.batch, env.now

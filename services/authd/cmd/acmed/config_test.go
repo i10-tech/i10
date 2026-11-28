@@ -74,8 +74,8 @@ func TestLoadAcmedConfig(t *testing.T) {
 		for _, tc := range []struct {
 			upstream, worst, write time.Duration
 		}{
-			{upstream: 0, worst: 14 * time.Second, write: 15 * time.Second}, // the default 10s
-			{upstream: 30 * time.Second, worst: 34 * time.Second, write: 34500 * time.Millisecond},
+			{upstream: 0, worst: 19 * time.Second, write: 19500 * time.Millisecond}, // the default 15s
+			{upstream: 35 * time.Second, worst: 39 * time.Second, write: 39500 * time.Millisecond},
 		} {
 			setBase(t)
 			if tc.upstream > 0 {

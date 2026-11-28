@@ -19,7 +19,7 @@ const (
 	defaultPrefix          = acmed.DefaultPrefix
 	defaultEnrollctlURL    = "https://i10-enrollctl.i10-prod.svc:3443"
 	defaultRedisUser       = "acmed"
-	defaultUpstreamTimeout = 10 * time.Second
+	defaultUpstreamTimeout = 15 * time.Second
 	defaultMaxOrders       = 20
 )
 
@@ -64,8 +64,8 @@ func loadConfig() (acmedConfig, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("ACMED_UPSTREAM_TIMEOUT")); v != "" {
 		d, err := time.ParseDuration(v)
-		if err != nil || d < time.Second || d > 30*time.Second {
-			return c, errors.New("ACMED_UPSTREAM_TIMEOUT must be 1s..30s")
+		if err != nil || d < time.Second || d > 35*time.Second {
+			return c, errors.New("ACMED_UPSTREAM_TIMEOUT must be 1s..35s")
 		}
 		c.UpstreamTimeout = d
 	}

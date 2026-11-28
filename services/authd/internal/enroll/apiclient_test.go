@@ -283,6 +283,18 @@ func TestAPIClientHardeningAndErrors(t *testing.T) {
 		}
 	})
 
+	// 35 s lets enrolld outlast enrollctl's longest finish at the highest
+	// ENROLLCTL_CALL_TIMEOUT.
+	t.Run("timeout range", func(t *testing.T) {
+		srv := newLoopbackHTTPS(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		if _, err := NewAPIClient(srv.server.URL, srv.caFile, secretTok, 35*time.Second); err != nil {
+			t.Fatalf("35s timeout refused: %v", err)
+		}
+		if _, err := NewAPIClient(srv.server.URL, srv.caFile, secretTok, 35*time.Second+time.Millisecond); err == nil {
+			t.Fatal("timeout above 35s accepted")
+		}
+	})
+
 	t.Run("timeout", func(t *testing.T) {
 		block := make(chan struct{})
 		srv := newLoopbackHTTPS(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

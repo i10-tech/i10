@@ -93,18 +93,18 @@ type HandlerDeps struct {
 	StateLifetime      time.Duration
 	MaxOrdersPerDevice int // ACMED_MAX_ORDERS_PER_DEVICE
 	RequestTimeout     time.Duration
-	CompleteTimeout    time.Duration // 0 means completeTimeout; tests shorten it
 	Now                func() time.Time
 	Log                *slog.Logger
 }
 
 // Handler serves the RFC 8555 ACME subset used by macOS com.apple.security.acme.
 type Handler struct {
-	deps      HandlerDeps
-	nonces    nonceMinter
-	baseURL   string
-	prefix    string
-	serialKey [32]byte
+	deps            HandlerDeps
+	nonces          nonceMinter
+	baseURL         string
+	prefix          string
+	serialKey       [32]byte
+	completeTimeout time.Duration // always completeTimeout; only white-box tests shorten it
 }
 
 // NewHandler creates an ACME HTTP handler.
@@ -124,9 +124,6 @@ func NewHandler(deps HandlerDeps) *Handler {
 	if deps.RequestTimeout <= 0 {
 		deps.RequestTimeout = defaultRequestTimeout
 	}
-	if deps.CompleteTimeout <= 0 {
-		deps.CompleteTimeout = completeTimeout
-	}
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
@@ -134,10 +131,11 @@ func NewHandler(deps HandlerDeps) *Handler {
 		deps.AppleAttest = appleattest.NewProductionVerifier()
 	}
 	h := &Handler{
-		deps:    deps,
-		nonces:  nonceMinter{ring: deps.NonceKeys},
-		baseURL: strings.TrimRight(deps.BaseURL, "/"),
-		prefix:  "/" + strings.Trim(deps.Prefix, "/"),
+		deps:            deps,
+		nonces:          nonceMinter{ring: deps.NonceKeys},
+		baseURL:         strings.TrimRight(deps.BaseURL, "/"),
+		prefix:          "/" + strings.Trim(deps.Prefix, "/"),
+		completeTimeout: completeTimeout,
 	}
 	_, _ = rand.Read(h.serialKey[:])
 	return h
@@ -856,7 +854,7 @@ func (h *Handler) handleFinalize(ctx context.Context, x exchange, body []byte, o
 	// only, even if the client has gone. The completion's clock starts once
 	// enrollctl has answered, so a slow enrollctl call cannot spend it.
 	complete := func(m enrollredis.ACMEOrderMove) (enrollredis.ACMEResult, error) {
-		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), h.deps.CompleteTimeout)
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), h.completeTimeout)
 		defer cancel()
 		m.From = "processing"
 		return h.deps.Store.MoveACMEOrder(cctx, m)

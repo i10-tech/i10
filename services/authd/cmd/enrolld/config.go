@@ -15,7 +15,7 @@ import (
 const (
 	defaultListen        = ":8080"
 	defaultAPIURL        = "https://i10-enrollctl.i10-prod.svc:3443"
-	defaultAPITimeout    = 10 * time.Second
+	defaultAPITimeout    = 15 * time.Second
 	defaultMaxConcurrent = 16
 )
 
@@ -82,8 +82,8 @@ func (c *enrollConfig) validate() error {
 			c.EdgeLinkKeys = ring
 		}
 	}
-	if c.APITimeout < time.Second || c.APITimeout > 30*time.Second {
-		errs = append(errs, fmt.Errorf("ENROLLD_API_TIMEOUT is %s: keep it between 1s and 30s", c.APITimeout))
+	if c.APITimeout < time.Second || c.APITimeout > 35*time.Second {
+		errs = append(errs, fmt.Errorf("ENROLLD_API_TIMEOUT is %s: keep it between 1s and 35s", c.APITimeout))
 	}
 	if c.MaxConcurrent < 1 || c.MaxConcurrent > 256 {
 		errs = append(errs, fmt.Errorf("ENROLLD_MAX_CONCURRENT is %d: keep it between 1 and 256", c.MaxConcurrent))

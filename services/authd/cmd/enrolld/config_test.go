@@ -35,6 +35,13 @@ func TestEnrollConfigValidation(t *testing.T) {
 	if c0.EdgeLinkKeys == nil {
 		t.Fatal("EdgeLinkKeys not parsed on valid config")
 	}
+	// 35 s lets enrolld outlast enrollctl's longest finish at the highest
+	// ENROLLCTL_CALL_TIMEOUT.
+	longest := valid()
+	longest.APITimeout = 35 * time.Second
+	if err := longest.validate(); err != nil {
+		t.Fatalf("ENROLLD_API_TIMEOUT=35s refused: %v", err)
+	}
 
 	for name, mutate := range map[string]func(*enrollConfig){
 		"bad listen":           func(c *enrollConfig) { c.Listen = "8080" },

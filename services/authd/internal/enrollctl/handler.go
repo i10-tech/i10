@@ -159,14 +159,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The call's clock starts before the body read, so a slow body spends
+	// CallTimeout instead of adding to MaxHandlerDuration.
+	ctx, cancel := context.WithTimeout(r.Context(), h.deps.CallTimeout)
+	defer cancel()
+
 	body, ok := readBoundedBody(r.Body, MaxBodyBytes)
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), h.deps.CallTimeout)
-	defer cancel()
 
 	switch r.URL.Path {
 	case "/enrolld/peek":

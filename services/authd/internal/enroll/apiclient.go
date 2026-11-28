@@ -94,8 +94,8 @@ func NewAPIClient(baseURL, caFile, token string, timeout time.Duration) (*APICli
 	if token == "" || strings.ContainsAny(token, "\r\n") {
 		return nil, errors.New("enroll: API bearer token is empty or contains a line break")
 	}
-	if timeout < time.Second || timeout > 30*time.Second {
-		return nil, fmt.Errorf("enroll: API timeout %s out of range (1s..30s)", timeout)
+	if timeout < time.Second || timeout > 35*time.Second {
+		return nil, fmt.Errorf("enroll: API timeout %s out of range (1s..35s)", timeout)
 	}
 	rawCA, err := os.ReadFile(caFile)
 	if err != nil {

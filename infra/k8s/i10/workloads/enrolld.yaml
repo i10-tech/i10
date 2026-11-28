@@ -82,7 +82,7 @@ spec:
                 name: ENROLLD_DEVICE_CA_BUNDLE,
                 value: /etc/enrolld/device-ca/bundle.pem,
               }
-            - { name: ENROLLD_API_TIMEOUT, value: "10s" }
+            - { name: ENROLLD_API_TIMEOUT, value: "15s" }
             - { name: ENROLLD_MAX_CONCURRENT, value: "64" }
             - { name: ENROLLD_LOG_LEVEL, value: "info" }
           securityContext:
