@@ -899,7 +899,7 @@ func runMacACME(d deviceRunner, serial, udid, permitOU, directoryURL string) err
 	resp, body, err = postJWS(finOrder.Certificate, acctURL, nil)
 	if err != nil || resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("BEGIN CERTIFICATE")) ||
 		resp.Header.Get("Content-Type") != "application/pem-certificate-chain" || resp.Header.Get("Replay-Nonce") == "" {
-		return fmt.Errorf("cert fetch status=%d content-type=%q err=%v", statusOf(resp), resp.Header.Get("Content-Type"), err)
+		return fmt.Errorf("cert fetch status=%d content-type=%q err=%v", statusOf(resp), contentTypeOf(resp), err)
 	}
 	return nil
 }
@@ -955,6 +955,15 @@ func statusOf(r *http.Response) int {
 		return 0
 	}
 	return r.StatusCode
+}
+
+// contentTypeOf is statusOf for the Content-Type: "" when the request failed
+// before any response.
+func contentTypeOf(r *http.Response) string {
+	if r == nil {
+		return ""
+	}
+	return r.Header.Get("Content-Type")
 }
 
 // loadEmail is synthetic account i's address: unique per -user-prefix, since
