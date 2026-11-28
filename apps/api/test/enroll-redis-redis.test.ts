@@ -2,7 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { drizzle } from "drizzle-orm/postgres-js"
 import { Redis } from "ioredis"
+import postgres from "postgres"
+import type { Database } from "../src/db/client.js"
 import {
   createEnrollRedisClient,
   createEnrollRedisStore,
@@ -13,6 +16,7 @@ import {
 } from "../src/mail-devices/enroll-redis.js"
 import { parseEdgeLinkKeys } from "../src/mail-devices/link-token.js"
 import type { MintGateAccount } from "../src/mail-devices/store.js"
+import { raiseCredentialEpoch } from "../src/projection/credential-epoch.js"
 
 /**
  * enroll-redis.ts against a real Redis, as the `api` ACL user rendered from
@@ -26,16 +30,23 @@ import type { MintGateAccount } from "../src/mail-devices/store.js"
  *   - the notice group starts at 0, so a notice written first is still sent;
  *   - a notice a dead consumer read is reclaimed after the idle time and sent
  *     once; an entry at the delivery cap is acked and logged, unsent, even with
- *     this consumer's own non-idle entry pending between two reclaimed ones.
+ *     this consumer's own non-idle entry pending between two reclaimed ones;
+ *   - with a migrated Postgres too, an account's real 16-digit credential_epoch
+ *     comes back from Redis exactly after every script the API runs.
  *
- *   ENROLL_TEST_REDIS_URL=redis://127.0.0.1:6379 bun test test/enroll-redis-redis.test.ts
+ *   ENROLL_TEST_REDIS_URL=redis://127.0.0.1:6379 \
+ *   ENROLL_TEST_DATABASE_URL=postgres://i10:i10@127.0.0.1:5432/i10 \
+ *     bun test test/enroll-redis-redis.test.ts
  *
- * With ENROLL_TEST_REDIS_REQUIRED set (CI), a missing URL fails instead of skipping.
+ * ENROLL_TEST_DATABASE_URL is the owner's url; the test logs in as `i10_api`
+ * itself. With ENROLL_TEST_REDIS_REQUIRED set (CI), a missing URL fails instead
+ * of skipping.
  */
 const url = process.env.ENROLL_TEST_REDIS_URL
-if (!url && process.env.ENROLL_TEST_REDIS_REQUIRED) {
+const dbUrl = process.env.ENROLL_TEST_DATABASE_URL
+if (process.env.ENROLL_TEST_REDIS_REQUIRED && (!url || !dbUrl)) {
   throw new Error(
-    "ENROLL_TEST_REDIS_URL is required (ENROLL_TEST_REDIS_REQUIRED is set)",
+    "ENROLL_TEST_REDIS_URL and ENROLL_TEST_DATABASE_URL are required (ENROLL_TEST_REDIS_REQUIRED is set)",
   )
 }
 const testdata = resolve(
@@ -69,7 +80,7 @@ describe.skipIf(!url)("enroll-redis.ts on a real Redis as the api ACL user", () 
     email: "Ada@Acme.test",
     active: true,
     tenant_id: TENANT,
-    credential_epoch: 4,
+    credential_epoch: "1795872953432402",
     suspended: false,
     payment_hold: false,
     deleting: false,
@@ -160,6 +171,83 @@ describe.skipIf(!url)("enroll-redis.ts on a real Redis as the api ACL user", () 
       "already_sealed",
     )
   })
+
+  describe.skipIf(!dbUrl)(
+    "with the account's real credential_epoch from Postgres",
+    () => {
+      let owner: ReturnType<typeof postgres>
+      let sqlApi: ReturnType<typeof postgres>
+      let db: Database
+      const tenant = crypto.randomUUID()
+      const sfx = tenant.slice(0, 8)
+      const uid = `user_ts_epoch_${sfx}`
+
+      beforeAll(async () => {
+        owner = postgres(dbUrl!, { max: 1, onnotice: () => {} })
+        sqlApi = postgres(dbUrl!.replace(/\/\/[^@]+@/, "//i10_api:i10_api@"), {
+          max: 1,
+          onnotice: () => {},
+        })
+        db = drizzle({ client: sqlApi }) as unknown as Database
+        await owner`insert into core.tenants (id, slug, name, owner_clerk_user_id, clerk_org_id)
+                  values (${tenant}, ${`er-${sfx}`}, 'Epoch', ${uid}, ${`org_er_${sfx}`})`
+        await owner`insert into core.domains (tenant_id, name, hosts_mailboxes, verified_at, status)
+                  values (${tenant}, ${`epoch-${sfx}.test`}, true, now(), 'verified')`
+        // The column's default seeds the epoch from the clock, in microseconds.
+        await owner`insert into authd.accounts (clerk_user_id, email, active, tenant_id)
+                  values (${uid}, ${`ada@epoch-${sfx}.test`}, true, ${tenant})`
+        await raiseCredentialEpoch(db, uid)
+      })
+      afterAll(async () => {
+        try {
+          await owner`delete from authd.accounts where clerk_user_id = ${uid}`
+          await owner`delete from core.tenants where id = ${tenant}`
+        } finally {
+          await owner.end()
+          await sqlApi.end()
+        }
+      })
+
+      it("stores it as the same decimal string through create, the M5 cancel and cancel", async () => {
+        const [row] = await owner<{ epoch: string }[]>`
+        select credential_epoch::text as epoch from authd.accounts where clerk_user_id = ${uid}`
+        const epoch = row!.epoch
+        expect(epoch).toMatch(/^\d{16}$/)
+        const stored = async (id: string) =>
+          JSON.parse((await admin.get(`enroll:sess:${id}`))!) as RedisSessionRecord
+        const store = createEnrollRedisStore({
+          db,
+          redis: api,
+          edgeLinkKeys: ring,
+          log,
+        })
+
+        const first = await store.create({ clerkUserId: uid, tenantId: tenant })
+        if (!first.ok) throw new Error(`create failed: ${JSON.stringify(first)}`)
+        expect(await stored(first.id)).toMatchObject({
+          status: "open",
+          expected_epoch: epoch,
+        })
+
+        // create_session.lua decodes and re-encodes the earlier session to cancel it.
+        const second = await store.create({ clerkUserId: uid, tenantId: tenant })
+        if (!second.ok)
+          throw new Error(`second create failed: ${JSON.stringify(second)}`)
+        expect(await stored(first.id)).toMatchObject({
+          status: "cancelled",
+          expected_epoch: epoch,
+        })
+
+        expect(await store.cancel({ id: second.id, clerkUserId: uid })).toBe(
+          "cancelled",
+        )
+        expect(await stored(second.id)).toMatchObject({
+          status: "cancelled",
+          expected_epoch: epoch,
+        })
+      })
+    },
+  )
 
   it("starts the notice group at 0, so a notice written before the group exists is sent", async () => {
     const reader = createEnrollRedisClient({

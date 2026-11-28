@@ -201,7 +201,7 @@ describe("mintRefusal gate decision and endFor runtime guard", () => {
     ...over,
   })
 
-  const baseInput = { tenantId: TENANT, expectedEpoch: 42 }
+  const baseInput = { tenantId: TENANT, expectedEpoch: "42" }
 
   it("allows an eligible unmanaged, sso-exempt, managed-active, or null-tenant account", () => {
     expect(mintRefusal(baseAccount(), baseInput)).toBeNull()
@@ -222,7 +222,7 @@ describe("mintRefusal gate decision and endFor runtime guard", () => {
     expect(
       mintRefusal(baseAccount({ tenant_id: null, credential_epoch: "42" }), {
         tenantId: null,
-        expectedEpoch: 42,
+        expectedEpoch: "42",
       }),
     ).toBeNull()
   })
@@ -231,12 +231,16 @@ describe("mintRefusal gate decision and endFor runtime guard", () => {
     const cases: [
       MailDeviceErrorCode,
       MintGateAccount | null | undefined,
-      { tenantId: string | null; expectedEpoch: number },
+      { tenantId: string | null; expectedEpoch: string },
     ][] = [
       ["account_not_found", undefined, baseInput],
       ["account_not_found", null, baseInput],
-      ["tenant_mismatch", baseAccount(), { tenantId: OTHER_TENANT, expectedEpoch: 42 }],
-      ["tenant_mismatch", baseAccount(), { tenantId: null, expectedEpoch: 42 }],
+      [
+        "tenant_mismatch",
+        baseAccount(),
+        { tenantId: OTHER_TENANT, expectedEpoch: "42" },
+      ],
+      ["tenant_mismatch", baseAccount(), { tenantId: null, expectedEpoch: "42" }],
       ["tenant_mismatch", baseAccount({ tenant_id: null }), baseInput],
       ["account_inactive", baseAccount({ active: false }), baseInput],
       ["epoch_mismatch", baseAccount({ credential_epoch: 43 }), baseInput],
@@ -278,7 +282,7 @@ describe("mintRefusal gate decision and endFor runtime guard", () => {
         suspended: true,
         banned: true,
       }),
-      { tenantId: OTHER_TENANT, expectedEpoch: 1 },
+      { tenantId: OTHER_TENANT, expectedEpoch: "1" },
     )
     expect(err?.code).toBe("tenant_mismatch")
   })

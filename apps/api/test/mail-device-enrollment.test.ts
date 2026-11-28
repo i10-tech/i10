@@ -217,7 +217,8 @@ describe("createEnrollRedisStore (console sessions on i10-enroll-redis)", () => 
     email: "ada@acme.com",
     active: true,
     tenant_id: TENANT,
-    credential_epoch: 3,
+    // As postgres.js reads a bigint: text, 16 digits.
+    credential_epoch: "1795872953432402",
     suspended: false,
     payment_hold: false,
     deleting: false,
@@ -254,6 +255,21 @@ describe("createEnrollRedisStore (console sessions on i10-enroll-redis)", () => 
     const evalsha = redis.calls.find((call) => call[0] === "EVALSHA")!
     const record = JSON.parse(String(evalsha[6])) as RedisSessionRecord
     expect(record.expires_at_ms).toBe(at(15).getTime())
+  })
+
+  it("writes the account's credential_epoch as the same decimal string", async () => {
+    const redis = new RecordingEnrollRedis()
+    const store = createEnrollRedisStore({
+      db: { execute: async () => [activeAccount] } as never,
+      redis,
+      edgeLinkKeys: ring,
+      log: recordingLog().log,
+    })
+    expect((await store.create({ clerkUserId: "user_ada", tenantId: TENANT })).ok).toBe(
+      true,
+    )
+    const evalsha = redis.calls.find((call) => call[0] === "EVALSHA")!
+    expect(String(evalsha[6])).toContain('"expected_epoch":"1795872953432402"')
   })
 
   it("refuses at the gate without touching Redis and fails closed 503 when Redis does", async () => {

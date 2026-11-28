@@ -101,6 +101,21 @@ func newUUIDStr(t *testing.T) string {
 	return enrolltoken.FormatUUID(u)
 }
 
+// realEpoch reads uid's credential_epoch as the column's default seeded it:
+// microseconds since 1970, 16 digits, as every real account has. Tests take
+// the epoch from here, never from a constant.
+func realEpoch(t *testing.T, pool *pgxpool.Pool, uid string) int64 {
+	t.Helper()
+	var epoch int64
+	if err := pool.QueryRow(context.Background(), `SELECT credential_epoch FROM authd.accounts WHERE clerk_user_id = $1`, uid).Scan(&epoch); err != nil {
+		t.Fatalf("read %s's credential_epoch: %v", uid, err)
+	}
+	if epoch < 1_000_000_000_000_000 {
+		t.Fatalf("%s's credential_epoch = %d, want a 16-digit microsecond seed", uid, epoch)
+	}
+	return epoch
+}
+
 // TestEnrollWriterGrants asserts that `enroll_writer` has EXACTLY the
 // least-privilege grants specified in the design and is refused everywhere else.
 func TestEnrollWriterGrants(t *testing.T) {
@@ -209,9 +224,10 @@ func TestEnrollLockGateAccountsHoldsTheLock(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	if _, err := admin.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active, credential_epoch) VALUES ($1, $2, true, 7)`, uid, uid+"@ew.test"); err != nil {
+	if _, err := admin.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active) VALUES ($1, $2, true)`, uid, uid+"@ew.test"); err != nil {
 		t.Fatal(err)
 	}
+	epoch := realEpoch(t, admin, uid)
 
 	tx, err := w.Begin(ctx)
 	if err != nil {
@@ -222,7 +238,7 @@ func TestEnrollLockGateAccountsHoldsTheLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lockAndLoadAccounts as enroll_writer: %v", err)
 	}
-	if a := accounts[uid]; a == nil || a.CredentialEpoch != 7 || a.MailDomain != "ew.test" || !a.Active {
+	if a := accounts[uid]; a == nil || a.CredentialEpoch != epoch || a.MailDomain != "ew.test" || !a.Active {
 		t.Fatalf("locked row = %+v", a)
 	}
 
@@ -285,18 +301,22 @@ func TestBatcherMintPartialBadRowConflictTimeoutAndCaps(t *testing.T) {
 	for i, u := range uids {
 		suspended := i == 1 // user 1 is suspended -> gate refusal
 		if suspended {
-			_, err := admin.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id, credential_epoch, suspended_at)
-				VALUES ($1, $2, true, $3::uuid, 1, now())`, u, fmt.Sprintf("u%d@%s", i, domain), tenantID)
+			_, err := admin.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id, suspended_at)
+				VALUES ($1, $2, true, $3::uuid, now())`, u, fmt.Sprintf("u%d@%s", i, domain), tenantID)
 			if err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			_, err := admin.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id, credential_epoch)
-				VALUES ($1, $2, true, $3::uuid, 1)`, u, fmt.Sprintf("u%d@%s", i, domain), tenantID)
+			_, err := admin.Exec(ctx, `INSERT INTO authd.accounts (clerk_user_id, email, active, tenant_id)
+				VALUES ($1, $2, true, $3::uuid)`, u, fmt.Sprintf("u%d@%s", i, domain), tenantID)
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
+	}
+	epochOf := make(map[string]int64, len(uids))
+	for _, u := range uids {
+		epochOf[u] = realEpoch(t, admin, u)
 	}
 
 	// 1. Idle single request dispatches immediately with 0ms wait even when maxWait=200ms.
@@ -310,7 +330,7 @@ func TestBatcherMintPartialBadRowConflictTimeoutAndCaps(t *testing.T) {
 		ClerkUserID:   uids[0],
 		Email:         fmt.Sprintf("u0@%s", domain),
 		TenantID:      &tenantID,
-		ExpectedEpoch: 1,
+		ExpectedEpoch: epochOf[uids[0]],
 		Platform:      "ios",
 		CodeHash:      testHash32("idle-" + runID),
 		CodeKid:       1,
@@ -344,18 +364,18 @@ func TestBatcherMintPartialBadRowConflictTimeoutAndCaps(t *testing.T) {
 
 	reqs := []MintRequest{
 		// Accepted
-		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[2], Email: fmt.Sprintf("u2@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "ios", CodeHash: testHash32("ok2-" + runID), CodeKid: 1, CreatedBy: uids[2]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[2], Email: fmt.Sprintf("u2@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[2]], Platform: "ios", CodeHash: testHash32("ok2-" + runID), CodeKid: 1, CreatedBy: uids[2]},
 		// Suspended -> gate refusal
-		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[1], Email: fmt.Sprintf("u1@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "ios", CodeHash: testHash32("susp-" + runID), CodeKid: 1, CreatedBy: uids[1]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[1], Email: fmt.Sprintf("u1@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[1]], Platform: "ios", CodeHash: testHash32("susp-" + runID), CodeKid: 1, CreatedBy: uids[1]},
 		// Duplicate enrollment_id -> ON CONFLICT DO NOTHING -> enrollment_conflict
-		{DeviceID: newUUIDStr(t), EnrollmentID: enrDup, ClerkUserID: uids[0], Email: fmt.Sprintf("u0@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "ios", CodeHash: testHash32("dup-" + runID), CodeKid: 1, CreatedBy: uids[0]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: enrDup, ClerkUserID: uids[0], Email: fmt.Sprintf("u0@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[0]], Platform: "ios", CodeHash: testHash32("dup-" + runID), CodeKid: 1, CreatedBy: uids[0]},
 		// Bad row (violates mail_devices_platform_check) -> isolated via splitting, MUST NOT fail siblings!
-		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[3], Email: fmt.Sprintf("u3@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "android", CodeHash: testHash32("bad-" + runID), CodeKid: 1, CreatedBy: uids[3]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[3], Email: fmt.Sprintf("u3@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[3]], Platform: "android", CodeHash: testHash32("bad-" + runID), CodeKid: 1, CreatedBy: uids[3]},
 		// More accepted rows (also exercises MaxBatch=4 cap under concurrent load)
-		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[4], Email: fmt.Sprintf("u4@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "ipados", CodeHash: testHash32("ok4-" + runID), CodeKid: 1, CreatedBy: uids[4]},
-		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[5], Email: fmt.Sprintf("u5@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "macos", CodeHash: testHash32("ok5-" + runID), CodeKid: 1, CreatedBy: uids[5]},
-		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[6], Email: fmt.Sprintf("u6@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "ios", CodeHash: testHash32("ok6-" + runID), CodeKid: 1, CreatedBy: uids[6]},
-		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[7], Email: fmt.Sprintf("u7@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1, Platform: "ios", CodeHash: testHash32("ok7-" + runID), CodeKid: 1, CreatedBy: uids[7]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[4], Email: fmt.Sprintf("u4@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[4]], Platform: "ipados", CodeHash: testHash32("ok4-" + runID), CodeKid: 1, CreatedBy: uids[4]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[5], Email: fmt.Sprintf("u5@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[5]], Platform: "macos", CodeHash: testHash32("ok5-" + runID), CodeKid: 1, CreatedBy: uids[5]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[6], Email: fmt.Sprintf("u6@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[6]], Platform: "ios", CodeHash: testHash32("ok6-" + runID), CodeKid: 1, CreatedBy: uids[6]},
+		{DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[7], Email: fmt.Sprintf("u7@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[7]], Platform: "ios", CodeHash: testHash32("ok7-" + runID), CodeKid: 1, CreatedBy: uids[7]},
 	}
 
 	got := make([]MintResult, len(reqs))
@@ -397,7 +417,7 @@ func TestBatcherMintPartialBadRowConflictTimeoutAndCaps(t *testing.T) {
 	lockedDevID := newUUIDStr(t)
 	resTimeout := b.Mint(ctx, MintRequest{
 		DeviceID: lockedDevID, EnrollmentID: newUUIDStr(t), ClerkUserID: uids[8],
-		Email: fmt.Sprintf("u8@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1,
+		Email: fmt.Sprintf("u8@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[8]],
 		Platform: "ios", CodeHash: testHash32("locked-" + runID), CodeKid: 1, CreatedBy: uids[8],
 	})
 	_ = blocker.Rollback(ctx)
@@ -428,7 +448,7 @@ func TestBatcherMintPartialBadRowConflictTimeoutAndCaps(t *testing.T) {
 		defer dlWG.Done()
 		dlRes[0] = b.Mint(ctx, MintRequest{
 			DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[9],
-			Email: fmt.Sprintf("u9@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1,
+			Email: fmt.Sprintf("u9@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[9]],
 			Platform: "ios", CodeHash: testHash32("dl9-" + runID), CodeKid: 1, CreatedBy: uids[9],
 		})
 	}()
@@ -436,7 +456,7 @@ func TestBatcherMintPartialBadRowConflictTimeoutAndCaps(t *testing.T) {
 		defer dlWG.Done()
 		dlRes[1] = b.Mint(ctx, MintRequest{
 			DeviceID: newUUIDStr(t), EnrollmentID: newUUIDStr(t), ClerkUserID: uids[10],
-			Email: fmt.Sprintf("u10@%s", domain), TenantID: &tenantID, ExpectedEpoch: 1,
+			Email: fmt.Sprintf("u10@%s", domain), TenantID: &tenantID, ExpectedEpoch: epochOf[uids[10]],
 			Platform: "ios", CodeHash: testHash32("dl10-" + runID), CodeKid: 1, CreatedBy: uids[10],
 		})
 	}()
@@ -462,7 +482,7 @@ func TestBatcherMintPartialBadRowConflictTimeoutAndCaps(t *testing.T) {
 		s := m.ser
 		r := b.Mint(ctx, MintRequest{
 			DeviceID: m.id, EnrollmentID: newUUIDStr(t), ClerkUserID: m.uid, Email: m.email,
-			TenantID: &tenantID, ExpectedEpoch: 1, Platform: "macos", Serial: &s,
+			TenantID: &tenantID, ExpectedEpoch: epochOf[m.uid], Platform: "macos", Serial: &s,
 			CodeHash: testHash32("mac-" + m.id), CodeKid: 1, CreatedBy: m.uid,
 		})
 		if !r.OK {

@@ -198,6 +198,10 @@ func run() error {
 			return fmt.Errorf("seed accounts: %w", err)
 		}
 	}
+	epochs, err := loadEpochs(ctx, statsPool, *userPrefix, *numUsers)
+	if err != nil {
+		return fmt.Errorf("read account epochs: %w", err)
+	}
 
 	// Build synthetic PKIs (ONLY inside enrollload process).
 	pki, err := newLoadPKI()
@@ -399,6 +403,7 @@ func run() error {
 					isMac:      isMac,
 					uid:        uid,
 					email:      email,
+					epoch:      epochs[userIdx],
 					store:      store,
 					edgeRing:   edgeRing,
 					pki:        pki,
@@ -489,6 +494,7 @@ type deviceRunner struct {
 	isMac      bool
 	uid        string
 	email      string
+	epoch      int64 // the account's credential_epoch, as the API reads it
 	store      enrollredis.Store
 	edgeRing   *enrolltoken.Ring
 	pki        *loadPKI
@@ -520,7 +526,7 @@ func runOneDevice(ctx context.Context, d deviceRunner) error {
 		ID:            eidStr,
 		ClerkUserID:   d.uid,
 		Email:         d.email,
-		ExpectedEpoch: 1,
+		ExpectedEpoch: d.epoch,
 		CreatedBy:     d.uid,
 		Status:        "open",
 		CreatedAtMs:   now.UnixMilli(),
@@ -859,21 +865,61 @@ func loadEmail(prefix string, i int) string {
 	return fmt.Sprintf("%s%d@load.i10.invalid", strings.ToLower(prefix), i)
 }
 
+// seedAccounts upserts the synthetic accounts. A new row takes the column's
+// default credential_epoch (microseconds since 1970, 16 digits), as a real
+// account does, and an existing row keeps its own: the sessions carry
+// whatever loadEpochs reads.
 func seedAccounts(ctx context.Context, pool *pgxpool.Pool, prefix string, n int) error {
 	for i := 0; i < n; i++ {
 		uid := fmt.Sprintf("%s%d", prefix, i)
 		email := loadEmail(prefix, i)
 		_, err := pool.Exec(ctx, `
-			INSERT INTO authd.accounts (clerk_user_id, email, active, credential_epoch)
-			VALUES ($1, $2, true, 1)
+			INSERT INTO authd.accounts (clerk_user_id, email, active)
+			VALUES ($1, $2, true)
 			ON CONFLICT (clerk_user_id) DO UPDATE
-			   SET email = EXCLUDED.email, active = true, credential_epoch = 1`,
+			   SET email = EXCLUDED.email, active = true`,
 			uid, email)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// loadEpochs reads synthetic account i's credential_epoch into element i, so
+// each session carries its account's real epoch, as the API's create does.
+func loadEpochs(ctx context.Context, pool *pgxpool.Pool, prefix string, n int) ([]int64, error) {
+	uids := make([]string, n)
+	for i := range uids {
+		uids[i] = fmt.Sprintf("%s%d", prefix, i)
+	}
+	rows, err := pool.Query(ctx,
+		`SELECT clerk_user_id, credential_epoch FROM authd.accounts WHERE clerk_user_id = ANY($1)`, uids)
+	if err != nil {
+		return nil, err
+	}
+	byUID := make(map[string]int64, n)
+	for rows.Next() {
+		var uid string
+		var epoch int64
+		if err := rows.Scan(&uid, &epoch); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		byUID[uid] = epoch
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	epochs := make([]int64, n)
+	for i, uid := range uids {
+		epoch, ok := byUID[uid]
+		if !ok {
+			return nil, fmt.Errorf("no authd.accounts row for %s (seed with -admin-postgres)", uid)
+		}
+		epochs[i] = epoch
+	}
+	return epochs, nil
 }
 
 // ── Synthetic PKI & CMS/CBOR helpers (enrollload only) ──────────────────────

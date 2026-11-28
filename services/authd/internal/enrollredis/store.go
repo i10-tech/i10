@@ -23,12 +23,19 @@ import (
 // ⚠ ONLY THE API (create, cancel) AND enrollctl (attest, refuse, seal) WRITE
 // IT. cahookrelay may only read it, so nothing the SCEP hooks parse can change
 // a session's challenge, serial or person.
+//
+// ⚠ expected_epoch IS A DECIMAL STRING. The Lua scripts decode and re-encode
+// the session with Redis's cjson, which writes numbers with 14 significant
+// digits: a 16-digit microsecond epoch came back as 1.7958729534324e+15, a
+// float that no longer decodes into an int64 and has lost its last digits.
+// A string passes through cjson untouched. The *_ms fields have 13 digits and
+// survive as numbers.
 type Session struct {
 	ID                string  `json:"id"`
 	ClerkUserID       string  `json:"clerk_user_id"`
 	Email             string  `json:"email"`
 	TenantID          *string `json:"tenant_id,omitempty"`
-	ExpectedEpoch     int64   `json:"expected_epoch"`
+	ExpectedEpoch     int64   `json:"expected_epoch,string"`
 	CreatedBy         string  `json:"created_by"`
 	Status            string  `json:"status"` // open | attested | sealed | refused | expired | cancelled
 	Refusal           string  `json:"refusal,omitempty"`

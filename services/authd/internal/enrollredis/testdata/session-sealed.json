@@ -3,7 +3,7 @@
   "clerk_user_id": "user_fixture",
   "email": "ada@acme.test",
   "tenant_id": "5d7e9c1a-3b2f-4a6d-8e0c-1f2a3b4c5d6e",
-  "expected_epoch": 4,
+  "expected_epoch": "1795872953432402",
   "created_by": "user_fixture",
   "status": "sealed",
   "serial": "C02FIXTURE",

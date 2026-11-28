@@ -81,8 +81,9 @@ const TEST_KEYS = parseMailDeviceCodeKeys(
   "1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=,7:gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp+goaKjpKWmp6ipqqusra6v",
 )
 
+/** Exact: a bigint, never a Number. */
 const epochOf = async (person: string) =>
-  Number(
+  BigInt(
     (
       await owner<{ credential_epoch: string | number }[]>`
         select credential_epoch from authd.accounts where clerk_user_id = ${person}`
@@ -329,12 +330,12 @@ suite("mail device service against Postgres", () => {
     await addDevice(ada)
 
     expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 1 })
-    expect(await epochOf(ada)).toBe(adaBefore + 1)
+    expect(await epochOf(ada)).toBe(adaBefore + 1n)
     expect(await epochOf(bob)).toBe(bobBefore)
   })
 
   it("refuses a mint that read the epoch before revoke-all, and inserts nothing", async () => {
-    const expectedEpoch = await epochOf(ada)
+    const expectedEpoch = String(await epochOf(ada))
     expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 0 })
 
     // ⚠ Catch directly rather than `expect(...).rejects` (hangs postgres.js under bun).
@@ -379,7 +380,7 @@ suite("mail device service against Postgres", () => {
     const before = await epochOf(ada)
     const created = await enrollments.create({ clerkUserId: ada, tenantId: acme })
     expect(created.ok).toBe(true)
-    expect(written.map((r) => r.expected_epoch)).toEqual([before])
+    expect(written.map((r) => r.expected_epoch)).toEqual([String(before)])
 
     expect(await service().revokeAll(adaInAcme)).toEqual({ status: "ok", revoked: 0 })
 
@@ -391,7 +392,7 @@ suite("mail device service against Postgres", () => {
       (tx) => tx<{ credential_epoch: string | number }[]>`
         select credential_epoch from authd.enroll_lock_gate_accounts(array[${ada}]::text[])`,
     )
-    expect(locked.map((r) => Number(r.credential_epoch))).toEqual([before + 1])
+    expect(locked.map((r) => BigInt(r.credential_epoch))).toEqual([before + 1n])
     expect(await idsOf(ada)).toEqual([])
   })
 
